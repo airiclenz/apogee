@@ -338,12 +338,20 @@
 // /clear closes every one and a restore that replays the same spawn id keeps its own). It also holds
 // what the box needs to ADDRESS the run on screen: the head that answers for it ([Model.viewedChild]),
 // that run's life as the box needs it ([childPhase], [childPhaseOf]) and the legend derivation the
-// paint reads ([Model.legend], with [Model.legendFor] as its view-aware half). Because the
-// claimant swallows esc, the double-tap stop is unreachable from inside a view — the status line
-// says "esc back" where it would otherwise offer the stop, and backing out first is the way to it.
-// The status line's gauge inside a view is the VIEWED run's own fill, never the parent's
-// ([Model.contextGauge], ADR 0063 D4 as amended 2026-09-24); until that run has reported usage the
-// slot is empty of a gauge and the "esc back" hint holds it.
+// paint reads ([Model.legend], with [Model.legendFor] as its view-aware half). Two gestures end
+// work and they reach different things (ADR 0086 D5). `^x` stops ONE sub-agent's run: inside a view
+// the run on screen, and on the block cursor the delegation whose row it stands on — a member row
+// of a ✦ Sub-Agent umbrella, or a nested row inside a view, which takes the key over the view's
+// own run ([Model.runViewKey] steps aside for [Model.blockCursorKey]); both reach the engine through
+// [Model.stopRun], which does nothing for a run that is not [stoppable] (over, or without a run
+// id), and the row says `stopped by you` once the run reports. esc×2 CANCELS the whole Turn, and
+// because the claimant swallows esc that cancel is unreachable from inside a view — the status line
+// says "esc back · ^x stop" ([Model.backHint]; "esc back" once the viewed run can no longer be
+// stopped, or where the slot cannot hold the long form, [fitBreadcrumbHint]) where it would
+// otherwise offer "esc×2 cancel", and backing out first is the way to it. The status line's gauge
+// inside a view is the VIEWED run's own fill, never the parent's ([Model.contextGauge], ADR 0063 D4
+// as amended 2026-09-24); until that run has reported usage the slot is empty of a gauge and the
+// back hint holds it.
 //
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // loose input-side concerns the architecture review called one coherent concept — the textarea, the
@@ -408,7 +416,7 @@
 // mailbox first, and giving up if the worker already took it, so a message cannot be sent twice),
 // the delivery report moves exactly the rows that LANDED into the transcript as ⧖ blocks, and a
 // terminal boundary rules on whatever is left: flushed as ONE joined message on a natural
-// completion, HELD under a note after Esc or a fault, because Esc means stop everything. A stop
+// completion, HELD under a note after Esc or a fault, because esc×2 cancels everything. A cancel
 // holds only what was never DELIVERED — the worker skips a drain whose ctx is already cancelled,
 // and a row it did deliver is history: kept with the finished Turns the cancel fold's
 // SettleExchange leaves in the conversation, or dropped with a lone opening, never re-staged (sent

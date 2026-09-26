@@ -304,7 +304,10 @@ Folded guard: the line grep misses wrapped sites, so the rule is to read the who
 - `grep -l '0086' docs/adr/0013-*.md docs/adr/0022-*.md docs/adr/0039-*.md docs/adr/0063-*.md` lists all four
 **Commit:** `docs(context): retained delegations and the stop have shipped`
 
-## 13. Layout spec and TUI package prose
+## 13. Layout spec and TUI package prose — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): layout.md's bound-verdict note deliberately avoids quoting the engine's `[delegate stopped at its …]` head, since the acceptance gate counts every `stopped at its` except "stopped at its last"; it says the engine's head "keeps its own wording" instead.
+NOTES (2026-09-26): beyond the listed sites, the whole-Turn "stop" prose in layout.md's click-outside rule, queue band ("held over at idle after a cancel", "a cancel or a fault holds messages") and doc.go's staging paragraph ("esc×2 cancels everything") now says cancel, matching item 5's renamed labels; tool-layout.md's sub_agent table row gains the capped/stopped-by-you verdicts.
 
 **What:** Depends on items 5 and 6.
 **Goal:** `layout.md`, `docs/layout/tool-layout.md` and `internal/tui/doc.go` describe `^x` (run view and member row), the `esc back · ^x stop` hint while running, the `stopped by you` verdict, the stopped undelivered note and "capped" for bounds; the "`esc` means back before it means stop" section is restated so `^x` stops one run and `esc×2` the whole Turn.

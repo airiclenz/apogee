@@ -133,8 +133,8 @@ is the one that is not answering a question: a click there selects a key row out
 has, and `⏎` is still what opens the value.)
 
 **What a click OUTSIDE a box means is one rule for the whole frame**, and no version of it ever
-cancels a question, dismisses a pane where `esc` would stop a run, or stops the run: those meanings
-are `esc`'s, and a stray of the pointer never carries them. What is left is whether the pane closes
+cancels a question, dismisses a pane where `esc` would cancel the Turn, cancels the Turn, or stops a
+sub-agent's run: those meanings are `esc`'s and `^x`'s, and a stray of the pointer never carries them. What is left is whether the pane closes
 and whether the click is spent on closing it:
 
 | Pane | A click outside it |
@@ -970,9 +970,9 @@ second is the `success` green of a **finished delegation's `done`** — the same
 wears, so a run says it finished once in two places rather than twice in two colours. That
 exception is anchored on the **delegation vocabulary** and reaches nothing else: it is the engine's
 word for a run it drove to its own boundary, where a tool's `clean`, `PASS` or `exit 0` is that
-tool's reading of its own work and stays in the marker tone, as does a run `stopped at its step
-cap`, which did not finish, and one that `ended without a report`, which reached its boundary with
-nothing to hand back. Where both verdicts stand the red wins. Every other kind of summary,
+tool's reading of its own work and stays in the marker tone, as does a run `capped at its step
+cap`, which did not finish, one `stopped by you`, which did not finish either, and one that `ended
+without a report`, which reached its boundary with nothing to hand back. Where both verdicts stand the red wins. Every other kind of summary,
 promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder
 marker, and a `Diff Preview` deliberately drawn open so the shape of a full body appears too — a
@@ -1069,19 +1069,25 @@ and only while the run works: a finished row ends on its gist, the bound being h
 child has reported. Once the report arrives the slot
 carries the **report's first line**, or `· done` where the report was long enough to become a
 body — unless the engine wrapped that report in an **outcome envelope**, which takes the slot
-instead: `· stopped at its step cap` where the step cap stopped the run mid-task (`· stopped at
-its token budget` / `· stopped at its time limit` where one of its sibling bounds did),
+instead: `· capped at its step cap` where the step cap cut the run off mid-task (`· capped at
+its token budget` / `· capped at its time limit` where one of its sibling bounds did — "capped",
+because on screen "stopped" is the human's word alone, although the result head the engine hands
+the parent model keeps its own wording), `· stopped by you` where the human stopped the run with `^x`
+(ADR 0086 D4; the run view, below) — including a pooled run stopped while still queued, whose
+result says the user stopped it before it started —
 `· ended without a report` where the child reached its own boundary but handed back no report —
 narration of a next step, a pasted file or dump, or the engine's `[delegate returned no report]`
 marker, read with the same classifier the capped path judges a report by — and
 `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child
 while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its
 cause. A capped run still closes with a wrap-up report; the envelope takes the slot ahead of that
-report's first line deliberately (ADR 0063), so the row says why the run stopped rather than what
+report's first line deliberately (ADR 0063), so the row says why the run ended rather than what
 it managed to say last, and the capped child's closing report is read one level down, inside the
-run view. The no-report verdict is the row's reading alone: it is neither a failure nor a success,
-so it takes no red and no green and reads in the step cap's marker tone, the row wears **no done ✓**
-beside it, and the parent model receives the result exactly as the engine wrote it. The ✓ itself is
+run view. A stopped run is folded the same way: the engine hands the parent what the run had done
+as a partial result, which is not an error, and the row's `stopped by you` stands in the step cap's
+marker tone with **no done ✓** beside it — the run did not finish, and nothing failed. The
+no-report verdict is the row's reading alone: it is neither a failure nor a success, so it takes no
+red and no green and reads in the step cap's marker tone, the row wears **no done ✓** beside it, and the parent model receives the result exactly as the engine wrote it. The ✓ itself is
 earned per run — by that run's own child handing back a report, matched to its row by the run id
 rather than the call id, so a sibling finishing first never ticks another row. The collapsed row is
 the only place in the parent's conversation any of that can be read,
@@ -1093,7 +1099,7 @@ the two readings on screen are read in one language, and placed between the coun
 the gist — the one part with no bound on its length — is the one cell a narrow row gives up. Where
 the width leaves the row too little of its target to be worth reading, the promote-guard swaps that
 gist for the **engine's verdict** and the row reads the same line without it — `1 tool call · done`,
-`2 tool calls · 12k/32k · stopped at its step cap` — so the count and the fill survive every width
+`2 tool calls · 12k/32k · capped at its step cap` — so the count and the fill survive every width
 and nothing lands in a body, the report staying one click away in the run's own view (ADR 0063). It appears
 **only once a reading exists**: a run whose child has not reported usage yet keeps the count alone
 rather than trailing an empty separator, which is the gauge's own rule about a number with no scale
@@ -1209,7 +1215,7 @@ those rows is a collapsed run, and opening one opens its view.
 
 ```text
 ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
-  ← main › scout                                                             esc back
+  ← main › scout                                                   esc back · ^x stop
 ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 
 ❯ Take the second half of the survey
@@ -1222,7 +1228,7 @@ those rows is a collapsed run, and opening one opens its view.
 ✦ So far a.txt, and it says hello.
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-  ⠉⠹ scout · reading · 3s                                                    esc back
+  ⠉⠹ scout · reading · 3s                                          esc back · ^x stop
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Message scout…  ⏎ send · ↑ recall · esc back                                        │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
@@ -1248,8 +1254,10 @@ tall (`▒` in the sketch marks its two blank rows, which are painted, not empty
 names the trail
 from the human's own conversation down to the run on screen — `← main › planner › repo-scout`, one
 crumb per level, each run named the way every other surface names it (the delegation's name, else
-its task's first line, else the generic word) — with `esc back` held `bodyIndent` off the right
-edge, in the same column the status line's right slot ends in, so the two rows on screen
+its task's first line, else the generic word) — with its key hint held `bodyIndent` off the right
+edge: `esc back · ^x stop` while the run on screen is still running (or still queued for a pooled
+worker) and a stop can reach it, and `esc back` alone once it is over or never learned the run id a
+stop addresses it by, in the same column the status line's right slot ends in, so the two rows on screen
 advertising a key end together. It is the **one sticky header a view has**: a rooted paint collects
 no `❯` block to stick, so the breadcrumb holds the top row for as long as the view is open, and it
 is squared out to the full width so the terminal's own background never shows through beside it. It
@@ -1265,7 +1273,8 @@ header and a row of the run beneath it, the trail alone is frozen: the band and 
 breathing room, and a header covering every row the view has would leave the reader looking at
 nothing. The block cursor's stop on the band is the trail row, the one row of the three that says
 where `⏎` goes.
-Where the width cannot pay for both, the hint gives way whole rather than truncating — a key hint
+Where the width cannot pay for both, the stop hint first gives way to the plain `esc back` — a key
+the view still has — and only then does the hint give way whole rather than truncating — a key hint
 nobody can read advertises nothing, and the trail is what the header is for. It gives way for a
 second reason too: while a child's ask or approval pane stands inside the view, `esc` answers the
 pane and no longer walks up, so the header drops the hint exactly where the status line's right slot
@@ -1274,13 +1283,23 @@ trail itself stays, because where the reader is is still true. A motionless clic
 anywhere on the band — any of its three rows — goes **one** level up, and `esc` does the same: the trail is a sign rather than
 a set of jump targets, so leaving a run two deep is two presses.
 
-**`esc` means back before it means stop.** While a view is open the status line's right slot reads
-`esc back` where it would otherwise offer `esc×2 stop` — unless the viewed run has reported usage,
-when the slot states that run's own context gauge instead (never the parent's: "Where it ends",
-below) — and the stop is deliberately not reachable
-from inside: stopping is whole-run and belongs to the top level — a child cannot outlive the Turn
-it runs inside — so a reader one level down stops the run in three presses, one to walk out and the
-double-tap there. Each level remembers where the level **below** it was parked, so backing out
+**`esc` means back, `^x` stops one run, and `esc×2` cancels the Turn.** Two gestures end work and
+they reach different things. `^x` **stops one sub-agent's run** and nothing else (ADR 0086 D5):
+inside a view it stops the run on screen, and on the block cursor it stops the delegation whose row
+the cursor stands on — a member row of a `✦ Sub-Agent (N)` umbrella, or a nested delegation's row
+inside a view, which takes the key over the view's own run because that is the run the human is
+pointing at. It asks for no confirmation, since all it discards is the rest of one delegation's
+work: the engine folds what the run had done into the partial result its parent reads, the
+parent's Turn goes on, and the row reports `stopped by you` once the run has. On a run that is over,
+or one that never learned a run id, `^x` does nothing, and a standing ask or approval pane owns its
+keys first. `esc×2` **cancels the whole Turn** — the session's agent and every child running inside
+it, since a child cannot outlive the Turn it runs inside — and it belongs to the top level: while a
+view is open the status line's right slot reads `esc back · ^x stop` (or `esc back`, once the viewed
+run can no longer be stopped, and the short form where the slot cannot hold the long one) where it
+would otherwise offer `esc×2 cancel` — unless the viewed run has reported usage, when the slot
+states that run's own context gauge instead (never the parent's: "Where it ends", below) — and the
+cancel is deliberately not reachable from inside, so a reader one level down cancels the Turn in
+three presses, one to walk out and the double-tap there. Each level remembers where the level **below** it was parked, so backing out
 lands the reader on the row they opened the run from rather than at the tail of a conversation they
 had scrolled up in; a level that was following the tail gets the tail, which is where the
 conversation has grown to in the meantime. The view is the display's state and nothing else's: it
@@ -1296,7 +1315,7 @@ to report while it waits: exactly one live delegate keeps its own phrase under i
 child's clock, so the number a reader is watching never restarts when a sibling emits. The merged
 row says only that delegates are working, because with a fan-out running it cannot honestly say
 *what* without picking one of them, which is the flicker the merge exists to end. A **stopping**
-top-level slot outranks every one of them, whatever view is open.
+top-level slot — the whole-Turn cancel settling — outranks every one of them, whatever view is open.
 
 **The prompt box addresses the child.** In the view of a **running** delegation the box's legend
 reads `Message <name>…  ⏎ send · ↑ recall · esc back`, and `⏎` sends that message to that child
@@ -1311,8 +1330,8 @@ one is refused with a note at the top level and the draft left standing exactly 
 carried back up and sent there. While an `ask_user` question or an approval pane stands, the box is
 that pane's and says so: it wears the conversation's own legend again for as long as the question
 does, because `esc` there cancels the question rather than leaving the view — the child's invitation
-comes back the moment the question is away, whether it was answered or died with the Exchange a stop
-or a fault ended. (Since 2026-09-15 — plan 2026-09-14 - 03, item 5 — the question in that sentence
+comes back the moment the question is away, whether it was answered or died with the Exchange a
+cancel or a fault ended. (Since 2026-09-15 — plan 2026-09-14 - 03, item 5 — the question in that sentence
 can only be the top-level agent's: `ask_user` is withheld from every child, so a child Run view
 sees the ask box take the input only when the session's own agent is asking; a child's approval
 pane still does.)
@@ -1327,8 +1346,10 @@ band on the child's own delivery report, whatever that report says: a message th
 becomes the child's own `❯` block inside its run, at the boundary it actually reached, and one that
 did not becomes a note at the top level, where the reader finds it on the way out, worded by why it
 did not land — `<name> finished before your message landed` (the child completed first),
-`<name> stopped at its cap before your message landed`, `<name> failed before your message landed`,
-`<name> was cancelled before your message landed`, or `<name> could not take your message` (the
+`<name> was capped before your message landed` (a bound cut the run off),
+`<name> was stopped by you before your message landed` (the human's `^x` did),
+`<name> failed before your message landed`,
+`<name> was cancelled before your message landed` (the whole Turn was), or `<name> could not take your message` (the
 child, still running, refused it at the boundary). A reason this build does not know, or a record
 written before the reason existed, reads as the first.
 
@@ -1488,17 +1509,19 @@ is tight, dropped whole rather than truncated.
 the context-usage gauge (`16k/32k 50% █████░░░░░` in the sketch above — the tokens used out of the
 window they are measured against, because a fill only means something beside the limit it fills,
 and where `░` draws the empty half of the ten-cell track: on screen those cells are a painted
-dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 stop`
-while a turn runs, `esc back` while a run view is open and its run has reported no usage yet,
+dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 cancel`
+while a turn runs, `esc back · ^x stop` while a run view is open on a run that can still be stopped
+and has reported no usage yet — falling back to `esc back` where the slot cannot hold it — and
+`esc back` alone once that run is over,
 `enter dismiss` after an error, the
 primed-`ctrl+c` and armed-`esc` lines), and
 the mouse-copy flash. The gauge is the fill of the run the reader is looking at: at the top level the
 session's own agent, inside a run view the viewed run's — its latest reading against the window that
 run filled — and never the parent's there, since a parent's fill above a child's transcript is a
-number about someone else. The armed-`esc` line reads `press esc again to stop`, and while a pooled
+number about someone else. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
 sub-agent group is in flight in the open Turn it says what the second press would cost: `press esc
-again to stop — drops 3 finished delegations; ⏎ a message keeps them` where members have already
-reported (`1 finished delegation` for one), or `press esc again to stop — ⏎ a message instead skips
+again to cancel — drops 3 finished delegations; ⏎ a message keeps them` where members have already
+reported (`1 finished delegation` for one), or `press esc again to cancel — ⏎ a message instead skips
 the 5 queued` where none has and members are still queued behind the cap. Either long form is
 composed only where the row has room for the whole sentence — a row too tight for it falls back to
 the plain line, never to a clipped one — and a delegation the engine settled before it started (its
@@ -1735,7 +1758,7 @@ one row in a band sitting directly above the input box — the slot closest to t
 status line. A **command** that needs a quiet engine, typed or accepted from the menu while the
 agent works, is *queued* the same way and shows in the same band (its row is described below). The
 band exists only while something is queued, in whichever state holds it: a live queue draining as
-the agent runs, or a queue held over at idle after a stop. An empty queue paints nothing at all —
+the agent runs, or a queue held over at idle after a cancel. An empty queue paints nothing at all —
 no rows, and no frame either.
 
 **One group, framed.** The rows are one contiguous block, never interleaved with other chrome, and
@@ -1763,7 +1786,7 @@ place on screen that says the line is waiting to **run** rather than to be sent.
 paint **below** every staged message, oldest to newest among themselves, so a queued command is
 always the row nearest the box — the one Backspace takes back first. They count in the band's row
 budget, its cap and the status line's `N queued` readout exactly as message rows do; what they do
-not share is the hold: a stop or a fault holds messages only, and the queued commands run at that
+not share is the hold: a cancel or a fault holds messages only, and the queued commands run at that
 very idle, so the `N queued messages held` note counts messages alone.
 
 **Order and cap.** Rows are in delivery order, oldest first — so the row nearest the input box is
@@ -2465,7 +2488,7 @@ dismisses the suggestion pane rather than re-deriving it, because that pane clai
 ever sees them — the walk would otherwise be stolen by its own first entry. The pane comes back the
 moment the human acts, which is the same moment the arrows do. The empty box advertises the gesture
 in its own legend, in both states: `Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit`
-at idle, `queue a message…  ⏎ queue · ↑ recall · esc×2 stop` while the model works — a placeholder is
+at idle, `queue a message…  ⏎ queue · ↑ recall · esc×2 cancel` while the model works — a placeholder is
 only ever painted on an empty box, which is exactly the box where ↑ starts a walk. **The idle legend
 names ⇧⏎ only on a terminal that negotiated the enhanced keyboard protocol**, which is what makes
 that chord arrive as a key of its own rather than as a plain ⏎ — a send. Until the terminal answers
