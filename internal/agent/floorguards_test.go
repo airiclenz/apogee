@@ -962,8 +962,8 @@ func TestFloorGuard_ToolCallSalvageRunsAFencedCallWrittenInText(t *testing.T) {
 	if !hasGuardFire(sink.events, guardToolCallSalvage, guardActionSalvage) {
 		t.Errorf("no ReactionFiredEvent{Reaction: %q, Action: %q}", guardToolCallSalvage, guardActionSalvage)
 	}
-	if detail := guardDetailFor(sink.events, guardToolCallSalvage); detail != "salvaged read_file from content" {
-		t.Errorf("Detail = %q, want %q", detail, "salvaged read_file from content")
+	if detail := guardDetailFor(sink.events, guardToolCallSalvage); detail != "read_file" {
+		t.Errorf("Detail = %q, want %q", detail, "read_file")
 	}
 }
 

@@ -123,7 +123,11 @@ NOTES (2026-09-26): "whitespace-collapsed" is implemented as all whitespace remo
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/floor/ && go test -race -count=1 ./internal/agent/ && go test -race -count=1 ./internal/probe/`
 **Commit:** `fix(floor): salvage refuses tool-call JSON reproduced from a prior tool result`
 
-## 6. Salvaged calls are announced outside debug view
+## 6. Salvaged calls are announced outside debug view — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): re-derived from the assumption that addReaction can branch on `guardActionSalvage` — it is unexported in internal/agent and the TUI does not import that package, so transcript.go spells the label as its own `reactionActionSalvage = "salvage"` constant, as advicepane.go already does for the advise labels.
+NOTES (2026-09-26): re-derived from the assumption that docs/manual/commands.md describes salvage's rendering — it only lists the `/settings` row; the Floor-guard behaviour is described in docs/manual/configuration.md, which gained the announcement sentence instead. layout.md lists no debug-only reaction lines and was left unchanged.
+NOTES (2026-09-26): consequential edit — cmd/apogee/testdata/eventlines/identity-salvage.txt: made necessary by the salvage Detail change in internal/agent/builtins.go (now the bare tool names, `detail=read_file`); this plan's ratified Detail change supersedes the golden's frozen `salvaged read_file from content` wording.
 
 **What:** Depends on item 5.
 **Regression guard.** `addReaction` branches on `e.Action == guardActionSalvage` before the generic template and renders `"tool call salvaged from reply text: " + <tool names>`, since the generic `reaction %s @ %s: %s (%s)` template cannot produce the Goal's pinned wording. `(*Agent).salvageToolCall`'s Detail (`internal/agent/builtins.go:271`) becomes `strings.Join(names, ", ")` so the branch has a clean value; `internal/agent/builtins.go` is added to Files — item 6 alone owns this Detail-wording change, item 5 does not touch it — and the existing wording pin at `internal/agent/floorguards_test.go:965-966` (`"salvaged read_file from content"`) is updated to `"read_file"`.

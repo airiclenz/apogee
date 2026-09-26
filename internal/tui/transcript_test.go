@@ -1137,6 +1137,40 @@ func TestTranscriptReactionGatedByDebug(t *testing.T) {
 	})
 }
 
+// A salvaged tool call is the one reaction the default view announces: the guard dispatched a call
+// the model only wrote as text, so the user is told which tools ran. The line is the same in the
+// debug view — one announcement, never the generic reaction line beside it.
+func TestTranscriptSalvageAnnouncedOutsideDebug(t *testing.T) {
+	t.Parallel()
+	salvaged := domain.ReactionFiredEvent{
+		Reaction: "tool-call-salvage",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentPostResponse,
+		Action:   "salvage",
+		Detail:   "read_file, grep",
+	}
+	const want = "tool call salvaged from reply text: read_file, grep"
+
+	for _, debug := range []bool{false, true} {
+		t.Run(fmt.Sprintf("debug=%t", debug), func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{debug: debug}
+			tr.apply(salvaged)
+
+			if n := len(tr.entries); n != 1 {
+				t.Fatalf("entries = %d, want exactly the one salvage announcement", n)
+			}
+			got := plainRender(tr)
+			if !strings.Contains(got, want) {
+				t.Errorf("salvage not announced as %q:\n%s", want, got)
+			}
+			if strings.Contains(got, "reaction tool-call-salvage") {
+				t.Errorf("salvage also rendered the generic reaction line:\n%s", got)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Rendering sub-agent depth (Phase 3, P3.14 — "tolerate" → "render")
 // ----------------------------------------------------------------------------

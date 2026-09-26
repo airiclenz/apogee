@@ -84,6 +84,11 @@ spells them as `Disable…` fields, so an embedder handing `New` a bare `Config`
 [ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) records
 why they are behaviour rather than catalogued rows.
 
+A guard's work stays out of the transcript — with one exception. When `tool-call-salvage` runs a
+call the model only wrote in its text, the transcript says so in every view, as `tool call salvaged
+from reply text: <tool names>`, so a tool never runs without your seeing that the reply asked for
+it. The call still meets your mode's approval like any other.
+
 What runs *above* the floor is the **Reaction** core
 ([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)) — the
 [`reactions:`](#reactions--reactions) list, and one built-in reaction of the engine's own, the

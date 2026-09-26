@@ -251,8 +251,9 @@ func classedBuiltin(id, action string, class domain.Class, on domain.Moment, han
 //
 // Each salvaged call is given a deterministic Turn-derived ID in the loop's own synthesized
 // style (loop.go's text_call_<turn>), extended with the call's position because one Turn's text
-// may hold several: snapshot, resume and tests stay stable across runs. The Detail names what
-// was read back out of the text, the one fact the reaction's id cannot carry.
+// may hold several: snapshot, resume and tests stay stable across runs. The Detail is the
+// salvaged tools' names, comma-joined and nothing else — the one fact the reaction's id cannot
+// carry, and the value the TUI announces verbatim in every view (transcript.go's addReaction).
 func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domain.Outcome, error) {
 	if (a.turns.wrappingUp() && a.wrapUpOutput() == "") || !processing.IsNative(a.textParser) {
 		return domain.Outcome{}, nil
@@ -273,7 +274,7 @@ func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domai
 	}
 	return domain.Outcome{
 		Edited: true,
-		Detail: fmt.Sprintf("salvaged %s from content", strings.Join(names, ", ")),
+		Detail: strings.Join(names, ", "),
 	}, nil
 }
 

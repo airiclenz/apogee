@@ -239,8 +239,11 @@ and the rest do not run. Salvage does not correct a response — it **completes*
 **first in the post-response chain and does not short-circuit**: it returns no retry, and the four
 correcting guards below it then judge the response the model *meant*, rather than answering a Turn
 that only looked empty or narrating. A firing surfaces as an ordinary `FloorGuardEvent` keyed by
-`tool-call-salvage` with `Detail` naming the salvaged tools; under Decision 4's rendering rule the
-notice is debug-view only.
+`tool-call-salvage` with `Detail` naming the salvaged tools. Unlike every other firing it is **not**
+debug-view only (2026-09-26): the TUI announces it in the default view as `tool call salvaged from
+reply text: <tool names>`, because a call the reply only described was dispatched and the user is
+owed that fact (`docs/reviews/code-audit-2026-09-26.md`). It forces no approval — the call meets
+the mode's gate like any other.
 
 **It is a new guard, not a promoted catalogue row.** Decision 3's per-row verdicts stand unchanged
 and the catalogue stays empty and frozen. The archived catalogue's finding that the campaign rig

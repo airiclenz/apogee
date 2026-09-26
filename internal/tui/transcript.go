@@ -2382,11 +2382,25 @@ func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.App
 	t.place(inRun(entry{kind: entryNote, text: text}, run))
 }
 
+// reactionActionSalvage is the ReactionFiredEvent.Action tool-call salvage books its firings under —
+// internal/agent/floorguards.go's guardActionSalvage, spelled here because the TUI does not depend
+// on the agent package (as advicepane.go spells the advise labels). No armed reaction is ever
+// labelled with it: reactionAction's vocabulary is retry, defer, intercept, advise and fired.
+const reactionActionSalvage = "salvage"
+
+// salvageNotePrefix opens the transcript line a salvaged call is announced by; the salvaged tools'
+// names, as the guard's Detail carries them, follow it.
+const salvageNotePrefix = "tool call salvaged from reply text: "
+
 // addReaction records a fired Reaction — the ONE firing event of the Reaction core (ADR 0076 D1) —
 // and only in the debug view (off by default). A firing is the engine repairing the model's own
 // failure, shaping what it sees, or a reaction armed beside the builtins acting: observability, not
 // the conversation, so it stays out of the product UI even though a PruneEvent (which changes what
 // the conversation still holds) does not.
+//
+// Tool-call salvage is the one exception, in every view: it dispatches a call the model wrote as
+// text rather than on the wire, so the user is told a tool ran that the reply only described
+// (docs/reviews/code-audit-2026-09-26.md). Its Detail is the salvaged tools' names.
 //
 // The wording names the reaction's ID — for a builtin, the same config key that turns the behaviour
 // off — and the Moment it fired at, so a human reading the debug view never has to map an internal
@@ -2394,6 +2408,11 @@ func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.App
 // text a reaction may fill from what it acted on, so the whole note is escape-stripped as
 // addApproval strips the tool name it prints.
 func (t *transcript) addReaction(e domain.ReactionFiredEvent) {
+	run := runOf(e.EventBase)
+	if e.Action == reactionActionSalvage {
+		t.place(inRun(entry{kind: entryNote, text: stripEscapes(salvageNotePrefix + e.Detail)}, run))
+		return
+	}
 	if !t.debug {
 		return
 	}
@@ -2401,7 +2420,6 @@ func (t *transcript) addReaction(e domain.ReactionFiredEvent) {
 	if e.Detail != "" {
 		text += " (" + e.Detail + ")"
 	}
-	run := runOf(e.EventBase)
 	t.place(inRun(entry{kind: entryNote, text: stripEscapes(text)}, run))
 }
 
