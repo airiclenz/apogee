@@ -106,6 +106,23 @@ seatbelt-confined run that writes to a genuinely read-only mount (a squashfs, a 
 now stopped as a denial too — intended, since inside a confined run that write was never
 going to land either.
 
+*Amended (2026-09-26, code audit):* the 2026-09-16 amendment's **(1)** gains one exception;
+this amendment narrows it and reverses none of it. A line that **merges its own streams** —
+`2>&1`, `>&2`, `&>` or `|&` — sends its denials to stdout, where the stderr-only watch never sees
+them, so `mkdir /outside 2>&1 && cd /outside && …` ran its later lines on exactly as the
+2026-08-22 incident did. For such a line the `terminal` tool arms a **second, stricter watch on
+stdout** (`SubprocessSpec.WatchMergedStdout`, `platform.NewAnchoredDenialKillWriter`): it kills
+only on the **line-anchored** half of the signature (2)/(2026-09-17) defines, never on the bare
+`EACCES` / `EPERM` / `EROFS` half, because that stdout is still the command's data and a data line
+names an errno far more often than it reports one. A kill by either watch renders the same
+stopped-by-confinement label. The merge is detected on the **model's own line**, before the
+fail-fast preamble joins it — the preamble's bash ERR trap itself writes `>&2`, and a check over
+the prefixed script would arm the stdout watch on every POSIX call and bring back the
+`fc413fb5` false positive (1) closed. A line without a merge redirect keeps the stderr-only watch;
+the PTY Console and payload stdout (`SplitStdout`, a streamed `RunSubprocessTo`) are unchanged.
+The escape battery gains `merged_stream_clobber_denied`, which wires both watches that way and
+asserts the stdout one stopped the script.
+
 **3. Every session gets a scratch dir inside the confinement box.** A new dotdir root
 `~/.apogee/scratch/<session-id>/` (sibling of `sessions/`, `library/`, …), created `0700`
 when the session id is minted and **following the active session** across rotation;

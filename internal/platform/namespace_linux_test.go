@@ -263,7 +263,7 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 // answers — the journey test for the announced fence.
 func TestNamespaceProbe(t *testing.T) {
 	// Not parallel: the confined children are real subprocesses.
-	confinetest.Probe(t, NewNamespaceConfiner(), Current(), FailFastPreamble(), newProbeDenialKiller)
+	confinetest.Probe(t, NewNamespaceConfiner(), Current(), FailFastPreamble(), newProbeDenialKiller, newProbeMergedDenialKiller)
 }
 
 // TestNamespaceProbeNetwork drives the network arm (rows #7–#8 and #13): `--unshare-net` on a

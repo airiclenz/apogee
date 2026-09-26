@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +34,15 @@ var terminalSpec = toolSpec{
 		int(subprocess.MaxSubprocessTimeout.Seconds()),
 	)),
 }
+
+// mergedStreamsPattern matches a shell redirect that sends a command's stderr into its stdout:
+// `2>&1`, `>&2` (`1>&2` included), `&>` (`&>>` included) and bash's `|&`. A line carrying one
+// hands its denials to stdout, where the stderr-only denial watch never sees them, so Execute
+// arms the merged-stdout watch for it (subprocess.SubprocessSpec.WatchMergedStdout). It is a
+// substring match over the model's own line, quoting unparsed: a merge spelled inside a quoted
+// string arms the watch too, which costs only the stricter, anchored-only scan of that call's
+// stdout (platform.NewAnchoredDenialKillWriter), never a missed merge.
+var mergedStreamsPattern = regexp.MustCompile(`2>&1|>&2|&>|\|&`)
 
 type terminalArgs struct {
 	Command        string `json:"command"`
@@ -65,7 +75,12 @@ type terminalArgs struct {
 // `mkdir d && cd d && …` chain still falls through to the lines after it — the 2026-08-22
 // incident's shape; that gap is closed by the live kill-on-denial watch every CONFINED
 // run is wired through (platform.DenialKillWriter in runSubprocess), which kills the
-// process group at the first OS-denial signature. Windows is asymmetric by necessity:
+// process group at the first OS-denial signature. That watch reads stderr alone — stdout is
+// the command's data (ADR 0056 D2) — so a line that merges its own streams (`2>&1`, `>&2`,
+// `&>`, `|&`; mergedStreamsPattern) would hand its denials to an unwatched stream: for such a
+// line Execute also arms the stricter, anchored-only watch on stdout (WatchMergedStdout). The
+// merge is detected on the model's own line, never on the preamble-prefixed script, whose ERR
+// trap itself writes `>&2`. Windows is asymmetric by necessity:
 // cmd.exe has no `set -e` analogue (`if errorlevel` is per-line, not a mode), so cmd
 // lines pass through verbatim with no fail-fast floor — and no denial watch either (its
 // denials print "Access is denied.", which the POSIX signature set deliberately skips).
@@ -145,6 +160,12 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// on): the preamble goes in AFTER the pre-flight parsed the model's own line, so a
 	// parse verdict is about what the model wrote, and cmd.exe — which has no `set -e`
 	// analogue — gets the line verbatim.
+	//
+	// The merge check reads args.Command — the model's own line — for the same reason, and must
+	// run before the preamble joins it: the preamble's bash ERR trap writes `>&2`, so a check
+	// over the prefixed script would arm the stdout watch on every POSIX call and bring back the
+	// stdout false positives ADR 0056 D2 (2026-09-16 amendment) closed.
+	watchMergedStdout := mergedStreamsPattern.MatchString(args.Command)
 	command := args.Command
 	failFast := cmdline == ""
 	if failFast {
@@ -167,6 +188,9 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		Dir:      dir,
 		Timeout:  time.Duration(args.TimeoutSeconds) * time.Second,
 		FailFast: failFast,
+		// A line that merged its own streams sends its denials to stdout, so that stream is
+		// watched too (anchored signature only); every other line keeps the stderr-only watch.
+		WatchMergedStdout: watchMergedStdout,
 		// The command line runs in the operator's own environment — minus the credential
 		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,8 +39,9 @@ type Shell interface {
 
 // DenialKiller is the harness's live kill-on-denial output watch as the battery drives
 // it: an io.Writer the chained-script probe wires as the confined script's STDERR (stdout
-// is unwatched, as on the terminal tool's pipe path), plus Detected reporting whether it
-// matched a line-anchored OS-denial signature (and so issued its kill).
+// is unwatched, as on the terminal tool's pipe path) and the merged-stream probe wires on
+// STDOUT too (as the terminal tool does for a line that merges its streams), plus Detected
+// reporting whether it matched a line-anchored OS-denial signature (and so issued its kill).
 // platform.DenialKillWriter satisfies it.
 type DenialKiller interface {
 	io.Writer
@@ -54,13 +56,15 @@ type DenialKiller interface {
 type DenialKillerFactory func(next io.Writer, kill func()) DenialKiller
 
 // Probe drives c through the filesystem escape battery (confinement-execution-contract
-// §6.2 rows #1–#6 plus the chained-script clobber probe and the truncate-residual probe)
+// §6.2 rows #1–#6 plus the chained-script and merged-stream clobber probes and the
+// truncate-residual probe)
 // under a box rooted at fresh temp dirs. The caller passes the OS-specific backend (any
 // domain.Confiner), the platform shell (platform.Current()), and the two pieces of the
-// terminal tool's own hardening the chained-script probe reproduces exactly as that tool
-// composes them: the fail-fast prefix (platform.FailFastPreamble()) and the
-// kill-on-denial watch factory (platform.NewDenialKillWriter) — handed in rather than
-// imported for the same import-cycle reason Shell is redeclared above. The battery and
+// terminal tool's own hardening the clobber probes reproduce exactly as that tool
+// composes them: the fail-fast prefix (platform.FailFastPreamble()), the stderr
+// kill-on-denial watch factory (platform.NewDenialKillWriter) and the merged-stdout watch
+// factory (platform.NewAnchoredDenialKillWriter) — handed in rather than imported for the
+// same import-cycle reason Shell is redeclared above. The battery and
 // its assertions are identical across backends, so "confined" means the same thing on
 // landlock, namespace, seatbelt and the Windows token backend.
 //
@@ -68,7 +72,14 @@ type DenialKillerFactory func(next io.Writer, kill func()) DenialKiller
 // exercised on this host, so Probe skips — the backend is still constructed and Capabilities
 // is still honest; only the OS-denial assertions are unrunnable. This is the standard
 // capability-gated test idiom; the denials run for real on a confinement-capable runner.
-func Probe(t *testing.T, c domain.Confiner, sh Shell, failFastPreamble string, newDenialKiller DenialKillerFactory) {
+func Probe(
+	t *testing.T,
+	c domain.Confiner,
+	sh Shell,
+	failFastPreamble string,
+	newDenialKiller DenialKillerFactory,
+	newMergedDenialKiller DenialKillerFactory,
+) {
 	t.Helper()
 	if !c.Capabilities().FSWrite {
 		t.Skip("confinetest: backend reports FSWrite==false (confinement unenforceable on this host); skipping enforcement battery")
@@ -227,6 +238,48 @@ func Probe(t *testing.T, c domain.Confiner, sh Shell, failFastPreamble string, n
 			t.Fatalf("stat %q: %v", clobber, statErr)
 		}
 	})
+
+	t.Run("merged_stream_clobber_denied", func(t *testing.T) {
+		// The chained probe's incident shape with the denied mkdir's stderr merged into its
+		// STDOUT (`2>&1`), the code audit's 2026-09-26 High: the stderr watch sees nothing,
+		// so only the stricter stdout watch the terminal tool arms for a stream-merging line
+		// (anchored signature only) can stop the script before its later unguarded relative
+		// write lands in the workspace. The probe wires both watches as the terminal tool's
+		// runSubprocess does and asserts the STDOUT one matched the streamed denial, the
+		// script died non-zero, and no merged.txt reached the workspace. The sleep plays the
+		// same part it plays in the chained probe.
+		line, ok := mergedClobberLine(sh, outside)
+		if !ok {
+			t.Skip("confinetest: platform shell has no fail-fast analogue and its denials are not EPERM-shaped (cmd.exe); merged-stream probe is POSIX-only")
+		}
+		stdoutKiller, output, err := runMergedClobber(t, c, sh, box, ws, failFastPreamble+line, newDenialKiller, newMergedDenialKiller)
+		if !stdoutKiller.Detected() {
+			t.Fatalf("merged-stdout denial watch did not match the OS denial (err=%v); output:\n%s", err, output)
+		}
+		if err == nil {
+			t.Fatalf("merged-stream script exited 0 despite a denied out-of-box write, want the stdout watch to kill it; output:\n%s", output)
+		}
+		clobber := filepath.Join(ws, "merged.txt")
+		if _, statErr := os.Stat(clobber); statErr == nil {
+			t.Fatalf("merged-stream script created %q despite exit error %v; the stdout watch did not stop the unguarded relative write", clobber, err)
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("stat %q: %v", clobber, statErr)
+		}
+	})
+}
+
+// mergedClobberLine returns the merged-stream clobber script: the chained probe's
+// mkdir-and-cd into an out-of-box directory with the mkdir's stderr merged into stdout, then,
+// after a pause, an unguarded relative write. It declines wherever chainedClobberLine does
+// (cmd.exe), for the same reasons.
+func mergedClobberLine(sh Shell, outside string) (string, bool) {
+	if _, ok := chainedClobberLine(sh, outside); !ok {
+		return "", false
+	}
+	dir := sh.Quote(filepath.Join(outside, "merged"))
+	return "mkdir -p " + dir + " 2>&1 && cd " + dir + " && touch clobber\n" +
+		"sleep 2\n" +
+		"echo clobbered > merged.txt\n", true
 }
 
 // udpProbeWait bounds row #13's listener read. A datagram that escapes at all is already on
@@ -469,6 +522,63 @@ func runChainedClobber(
 	}
 	err := cmd.Run()
 	return killer, output.String(), err
+}
+
+// runMergedClobber runs the merged-stream clobber script confined to box with cwd = dir, wired
+// the way the terminal tool's runSubprocess wires a line that merges its streams: STDERR
+// through the stderr watch (newKiller) and STDOUT through the anchored-only stdout watch
+// (newMergedKiller), both forwarding into one capture and both killing through the
+// CommandContext cancel. It returns the STDOUT watch (for its Detected verdict — the merged
+// denial never reaches stderr), the captured output and the run error; WaitDelay bounds the
+// drain as in runChainedClobber.
+func runMergedClobber(
+	t *testing.T,
+	c domain.Confiner,
+	sh Shell,
+	box domain.ConfinementBox,
+	dir string,
+	line string,
+	newKiller DenialKillerFactory,
+	newMergedKiller DenialKillerFactory,
+) (DenialKiller, string, error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	argv := sh.Command(line)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	var output lockedBuffer
+	stdoutKiller := newMergedKiller(&output, cancel)
+	cmd.Stdout = stdoutKiller
+	cmd.Stderr = newKiller(&output, cancel)
+	cmd.WaitDelay = time.Second
+	setRawCommandLine(cmd, sh.CommandLine(line))
+	if err := c.Confine(ctx, box, cmd); err != nil {
+		t.Fatalf("Confine(%v): %v", argv, err)
+	}
+	err := cmd.Run()
+	return stdoutKiller, output.String(), err
+}
+
+// lockedBuffer is a bytes.Buffer safe for the two os/exec copiers runMergedClobber points at
+// it (one per watched stream).
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+// Write appends p under the lock.
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// String returns everything written so far.
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // assertDenied fails the test unless err is a non-nil run error and target was not

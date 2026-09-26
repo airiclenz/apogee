@@ -63,7 +63,7 @@ func newTestConfiner(t *testing.T) *landlockConfiner {
 
 func TestLandlockProbe(t *testing.T) {
 	// Not parallel: the confined children are real subprocesses of this binary.
-	confinetest.Probe(t, newTestConfiner(t), Current(), FailFastPreamble(), newProbeDenialKiller)
+	confinetest.Probe(t, newTestConfiner(t), Current(), FailFastPreamble(), newProbeDenialKiller, newProbeMergedDenialKiller)
 }
 
 // requireLandlockNetEnv, set to 1, makes TestLandlockProbeNetwork fail wherever it would skip:

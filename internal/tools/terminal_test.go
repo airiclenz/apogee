@@ -622,6 +622,81 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 	}
 }
 
+// TestTerminal_ArmsMergedStdoutWatchOnlyForAStreamMergingLine pins which lines get the
+// merged-stdout denial watch: a line that merges its own streams — `2>&1`, `>&2`, `&>`, `|&` —
+// arms it, and a line without one keeps the stderr-only watch. The `cat build.log` row is the
+// ADR 0056 D2 guard: the fail-fast preamble prepended to that POSIX line itself carries `>&2`
+// (its bash ERR trap), so a check run over the prefixed script instead of the model's own line
+// would arm the watch on every call and bring back the 2026-09-16 stdout false positive.
+func TestTerminal_ArmsMergedStdoutWatchOnlyForAStreamMergingLine(t *testing.T) {
+	t.Parallel()
+	if hostShellIsPOSIX() && !strings.Contains(platform.FailFastPreamble(), ">&2") {
+		t.Fatalf("fail-fast preamble %q no longer carries `>&2`; the no-merge rows below have lost the guard they pin",
+			platform.FailFastPreamble())
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{name: "plain line", command: "cat build.log", want: false},
+		{name: "stderr to a file", command: "make 2> build.err", want: false},
+		{name: "stderr into stdout", command: "make 2>&1 | tail -n 20", want: true},
+		{name: "stdout into stderr", command: "echo oops >&2", want: true},
+		{name: "both streams to a file", command: "make &> build.log", want: true},
+		{name: "both streams through a pipe", command: "make |& tee build.log", want: true},
+		{name: "the audit's chain", command: "mkdir /outside 2>&1 && cd /outside && touch clobber", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h, captured := capturedRunHost(t)
+			if _, err := newTerminal(t.TempDir(), nil, h).Execute(context.Background(), terminalCall("c1", tc.command)); err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if captured.WatchMergedStdout != tc.want {
+				t.Errorf("WatchMergedStdout = %v for %q, want %v", captured.WatchMergedStdout, tc.command, tc.want)
+			}
+		})
+	}
+}
+
+// TestTerminal_MergedStreamDenialStopsTheScript drives the audit's shape end to end through
+// the real subprocess funnel on a confined run: a line whose denial is merged into STDOUT, then
+// an unguarded write after a pause standing in for the script's later lines. The denial is
+// printed rather than provoked (the fake confiner fences nothing), in the exact form a denied
+// mkdir prints it. The stdout watch must match it and kill the script before the write runs,
+// and the stop must render the stopped-by-confinement label a stderr kill renders.
+func TestTerminal_MergedStreamDenialStopsTheScript(t *testing.T) {
+	if !hostShellIsPOSIX() {
+		t.Skip("POSIX shell script; the arming decision it rides on is pinned platform-independently above")
+	}
+	t.Parallel()
+	root := t.TempDir()
+	term := NewTerminal(root, nil)
+	script := `printf '%s\n' "mkdir: cannot create directory '/outside': Permission denied" 2>&1` + "\n" +
+		"sleep 2\n" +
+		"touch clobber\n"
+
+	box := domain.ConfinementBox{WorkspaceRoot: root, WritablePaths: []string{t.TempDir()}}
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      box,
+	})
+	res, err := term.Execute(ctx, terminalCall("c1", script))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, confinementDenialStopLabel(box)) {
+		t.Errorf("merged-stream denial result = %q (IsError=%v), want the stopped-by-confinement label naming %v",
+			res.Content, res.IsError, box)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "clobber")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("stat clobber = %v, want not-exist: the stdout watch did not stop the script before its later write", statErr)
+	}
+}
+
 // TestTerminal_DescriptionDisclosesFailFast pins the first half of the disclosure: the tool's
 // own description tells the model the POSIX line runs fail-fast and how to guard a command whose
 // non-zero exit is expected. Static, and scoped "On POSIX" so it stays true on a Windows host.

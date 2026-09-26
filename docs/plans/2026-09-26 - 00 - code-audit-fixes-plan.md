@@ -154,7 +154,16 @@ NOTES (2026-09-26): no CHANGELOG entry for this item — the flag has no caller 
 **Acceptance:** `go test -race -count=1 ./internal/platform/ && go test -race -count=1 ./internal/subprocess/`
 **Commit:** `feat(subprocess): opt-in anchored denial watch on merged stdout`
 
-## 8. terminal arms the stdout watch for a stream-merging line
+## 8. terminal arms the stdout watch for a stream-merging line — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): `confinetest.Probe` gains a second `DenialKillerFactory` parameter (the anchored stdout watch) — confinetest cannot import `internal/platform` (the documented import cycle), so the merged-stream probe can only run the real anchored writer if the drivers hand it in; `denialkill_test.go` gains `newProbeMergedDenialKiller` beside `newProbeDenialKiller`.
+NOTES (2026-09-26): consequential edit — internal/platform/denialkill_test.go: made necessary by the new `Probe` factory parameter (adapter for `NewAnchoredDenialKillWriter`).
+NOTES (2026-09-26): consequential edit — internal/platform/landlock_linux_test.go: made necessary by the new `Probe` factory parameter (call site passes the adapter).
+NOTES (2026-09-26): consequential edit — internal/platform/namespace_linux_test.go: made necessary by the new `Probe` factory parameter (call site passes the adapter).
+NOTES (2026-09-26): consequential edit — internal/platform/seatbelt_darwin_test.go: made necessary by the new `Probe` factory parameter (call site passes the adapter).
+NOTES (2026-09-26): consequential edit — internal/platform/confiner_windows_test.go: made necessary by the new `Probe` factory parameter (call site passes the adapter).
+NOTES (2026-09-26): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the new battery case (§6.2 table row #14 plus a dated amendment note).
+NOTES (2026-09-26): the merge check arms on every platform, not POSIX alone — the confined run's stderr watch is wired on Windows too, and `2>&1` / `1>&2` are cmd syntax; the check is a substring match over the unparsed line, so a merge spelled inside quotes also arms (stricter scan only). The merged-stream battery row ran for real under the namespace backend here (landlock/seatbelt/Windows drivers vetted by cross-GOOS `go vet`).
 
 **What:** Depends on item 7. Fixes the audit's High "Merged stdout hides the OS denial message".
 **Regression guard.** The merge-redirect regex runs on `args.Command` (the model's original line) before `platform.FailFastPreamble()` is prepended — never on the preamble-prefixed string, whose ERR trap contains `>&2` (which would otherwise arm the stdout watch on every confined POSIX call, reintroducing the 2026-09-16 stdout-false-positive incident ADR 0056 decision 2 closed). This item yields to that ADR 0056 decision rather than reversing it. A test asserts a POSIX terminal call without a merge redirect leaves `WatchMergedStdout` false.

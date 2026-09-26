@@ -15,6 +15,13 @@ func newProbeDenialKiller(next io.Writer, kill func()) confinetest.DenialKiller 
 	return NewDenialKillWriter(next, kill)
 }
 
+// newProbeMergedDenialKiller adapts NewAnchoredDenialKillWriter to the same seam: the
+// merged-stream clobber probe wires it on the script's stdout, as the terminal tool arms it
+// for a line that merges its own streams.
+func newProbeMergedDenialKiller(next io.Writer, kill func()) confinetest.DenialKiller {
+	return NewAnchoredDenialKillWriter(next, kill)
+}
+
 // TestLooksLikeConfinementDenial pins the line-anchored signature match the confined-run
 // watch and the terminal's result label share: every documented denial spelling — EPERM's,
 // EACCES's and, since 2026-09-17, EROFS's — matches at a line's end — with each toolchain's
