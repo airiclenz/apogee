@@ -396,7 +396,10 @@ NOTES (2026-09-27): both `onlyFileIn` assertions now require exactly `config.yam
 **Acceptance:** `go test -race -count=1 ./internal/config/`
 **Commit:** `fix(config): serialise config.yaml writers on a sidecar lock`
 
-## 23. Whole-number YAML type for top-level count keys
+## 23. Whole-number YAML type for top-level count keys — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): consequential edit — internal/config/configedit_test.go: made necessary by retyping top-level `working-window:` to WholeCount — its two tests used `working-window: lots` as the key the plain decoder refuses (asserting `cannot unmarshal`); the fixtures now use `bypass: lots` (still a plain decoder refusal) and the fixture comment says why, so they keep pinning the decoder's own error.
+NOTES (2026-09-27): the unused `intptr` test helper in config_test.go was removed (its every caller now takes the new `countptr`); WholeCount's refusal names the value and line but not the key, since yaml.v3 hands a scalar Unmarshaler the value node alone (TokenCount's same constraint).
 
 **What:** Fixes part of the audit's High "A numeric-truncation guard built for one config key was never extended".
 **Goal:** `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-tokens`, `delegate-max-depth`, `re-stream-budget`, top-level `working-window`, `sessions.max-count` and `ui.tools-fold-over` refuse a non-`!!int` scalar (e.g. `2.5`, `32000.0`) at load with an error naming the value; each key's existing negative/zero handling is unchanged.

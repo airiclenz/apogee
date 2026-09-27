@@ -705,6 +705,60 @@ func tokenCountRefusal(node *yaml.Node) error {
 		written, node.Line)
 }
 
+// WholeCount is a count-valued key as the decoder is allowed to read it: a whole number, or a load
+// error. It is TokenCount's guard carried to the other count keys (`delegate-max-steps`,
+// `re-stream-budget`, `sessions.max-count`, …), for TokenCount's reason: yaml.v3 decodes
+// `delegate-max-steps: 2.5` into a plain `int` as 2, inside the decoder, so a bound nobody wrote
+// would reach the engine with nothing left downstream to notice it.
+//
+// Unlike TokenCount it judges no SIGN. The keys it serves disagree on their floor — 0 is
+// "unbounded" for one, "never" for another, below the floor for a third — and each already refuses
+// or ignores what lies under it in its own sentence (its registry row's validator, or the block's
+// Validate), so a negative whole number decodes here and meets that judgement unchanged.
+//
+// It is exported because the composition root reads the server-entry fields that adopt it.
+type WholeCount int
+
+// UnmarshalYAML accepts exactly a `!!int` node and refuses everything else, TokenCount's tag check
+// for TokenCount's reason: `!!float` covers `2.5` and `32000.0` alike, and a count that has to be
+// rounded to become one is not a count. The value is decoded through the node, so every spelling
+// yaml.v3 tags `!!int` (`0x10`, `1_000`, `+5`) keeps loading; one that overflows an int is refused.
+// An absent key or an explicit `null` never reaches here, so the field keeps its zero value.
+func (w *WholeCount) UnmarshalYAML(node *yaml.Node) error {
+	if node.Tag != "!!int" {
+		return wholeCountRefusal(node)
+	}
+	var n int
+	if err := node.Decode(&n); err != nil {
+		return wholeCountRefusal(node)
+	}
+	*w = WholeCount(n)
+	return nil
+}
+
+// wholeCountRefusal is the one refusal every non-whole count scalar gets. It names the value as
+// written and the line it sits on — the only locator a scalar Unmarshaler has, since yaml.v3 hands
+// it the value node alone and never the key it hangs under (tokenCountRefusal's constraint).
+func wholeCountRefusal(node *yaml.Node) error {
+	written := node.Value
+	if node.Kind != yaml.ScalarNode {
+		written = node.Tag
+	}
+	return fmt.Errorf("%q (line %d) is not a whole number — a count is written as one; a fractional "+
+		"value is refused rather than truncated to a count nobody wrote, and a whole number written "+
+		"with a decimal point or an exponent (32000.0, 1e3) is refused with it, so write 32000",
+		written, node.Line)
+}
+
+// countPtr reads an optional count as the plain *int the resolution rows take: absent stays nil.
+func countPtr(w *WholeCount) *int {
+	if w == nil {
+		return nil
+	}
+	n := int(*w)
+	return &n
+}
+
 // fileConfig is the on-disk config schema. It mirrors the settable flags so a user can
 // fix their servers/autonomy once instead of passing them every invocation.
 // Bypass is a pointer so an explicit `bypass: false` is distinguishable from an absent
@@ -836,24 +890,24 @@ type fileConfig struct {
 	// and a plain int could not tell it from an absent key, which resolves to the built-in 80.
 	// It feeds domain.Config.Delegation.MaxSteps; the `sub_agent` tool can lower it for one
 	// delegation but never raise it.
-	DelegateMaxSteps *int `yaml:"delegate-max-steps"`
+	DelegateMaxSteps *WholeCount `yaml:"delegate-max-steps"`
 	// DelegateFanOutRounds bounds how many delegations ONE reply may fan out, in rounds of the
 	// server's parallel-agents width: the calls past rounds × width are refused and must be
 	// delegated again. File-only (no flag/env), and a pointer for DelegateMaxSteps's reason: an
 	// explicit `delegate-fanout-rounds: 0` is the documented spelling of "no ceiling", which a
 	// plain int could not tell from an absent key (the built-in 2). It feeds
 	// domain.Config.Delegation.FanOutRounds.
-	DelegateFanOutRounds *int `yaml:"delegate-fanout-rounds"`
+	DelegateFanOutRounds *WholeCount `yaml:"delegate-fanout-rounds"`
 	// DelegateMaxDepth bounds how deep delegation may NEST: the session (depth 0) delegates, and a
 	// delegate at this depth is never offered `sub_agent`. File-only (no flag/env), and a plain
-	// int rather than a pointer because 0 is not a value here — the bound is at least 1, so an
+	// count rather than a pointer because 0 is not a value here — the bound is at least 1, so an
 	// absent key and a 0 both resolve to the built-in 1. It feeds domain.Config.Delegation.MaxDepth.
-	DelegateMaxDepth int `yaml:"delegate-max-depth"`
+	DelegateMaxDepth WholeCount `yaml:"delegate-max-depth"`
 	// DelegateMaxTokens bounds what a CHILD agent's one Exchange may SPEND, in cumulative prompt
 	// tokens (default 20000000). File-only (no flag/env), and a pointer for DelegateMaxSteps's
 	// reason: an explicit `0` is the documented spelling of "unbounded". It feeds
 	// domain.Config.Delegation.MaxTokens.
-	DelegateMaxTokens *int `yaml:"delegate-max-tokens"`
+	DelegateMaxTokens *WholeCount `yaml:"delegate-max-tokens"`
 	// DelegateTimeout bounds how long a CHILD agent's one Exchange may run on the wall clock, from
 	// its first request, as time.ParseDuration spells one (`2h`, `30m`; default 2h; `0` = unbounded).
 	// File-only (no flag/env), and a string pointer for `ui.stall-after`'s reason: the text is
@@ -874,7 +928,7 @@ type fileConfig struct {
 	// fails. File-only (no flag/env), and a pointer for DelegateFanOutRounds's reason: an explicit
 	// `re-stream-budget: 0` is the documented spelling of "never re-stream", which a plain int could
 	// not tell from an absent key (the built-in 3). It feeds domain.Config.RestreamBudget.
-	RestreamBudget *int `yaml:"re-stream-budget"`
+	RestreamBudget *WholeCount `yaml:"re-stream-budget"`
 	// ServerStats gates the per-server stats store (ADR 0085): with it on, the Drivers append one
 	// line per upstream HTTP attempt to ~/.apogee/server-stats.jsonl and the server pickers read a
 	// summary back; off, the file is neither written nor read, while the UpstreamAttemptEvents
@@ -915,14 +969,14 @@ type fileConfig struct {
 	ContextWindow TokenCount `yaml:"context-window"`
 	// WorkingWindow BOUNDS the room the Budget hands its reducers, in tokens — a soft ceiling INSIDE
 	// the window above rather than a second pin of it. File-only (no flag/env), like context-window
-	// beside it, and a plain int for that key's reason: presence IS the positive value, so absent or
+	// beside it, and a plain count for that key's reason: presence IS the positive value, so absent or
 	// ≤ 0 ⇒ the advertised window is the whole working room, exactly today's behaviour. It earns its
 	// keep on a model that advertises a very large window, where every guard that scales with the
 	// window — the allocation, the tool-result cap, the compaction trigger — becomes expensive at
 	// once; bounding the working room here is how such a model is run affordably without lying to
 	// overflow detection, which still measures against the ADVERTISED window. It feeds
 	// ContextConfig.WorkingWindow.
-	WorkingWindow int `yaml:"working-window"`
+	WorkingWindow WholeCount `yaml:"working-window"`
 	// ResponseReserve is how much of that window is held back for the model's REPLY, as a FRACTION
 	// of it (`response-reserve: 0.2` ⇒ a fifth). File-only (no flag/env), like context-window:
 	// beside it. Absent or 0 ⇒ unset, so apogee's built-in 0.20 share stands; a value in the open
@@ -1987,10 +2041,10 @@ type uiConfig struct {
 	ToolsOpen *bool `yaml:"tools-open"`
 	// ToolsFoldOver is how many type rows a Tools umbrella may show before it is large. A pointer
 	// because the explicit `0` — the documented spelling of "never folds" — must be distinguishable
-	// from an absent key, which keeps the default of 5. An int rather than a raw string, unlike
-	// stall-after: yaml's own parse is the only one there is, and the one judgement (below zero) is
-	// UIPrefs.Validate's.
-	ToolsFoldOver *int `yaml:"tools-fold-over"`
+	// from an absent key, which keeps the default of 5. A WholeCount rather than a raw string, unlike
+	// stall-after: yaml's own whole-number parse is the only one there is, and the one judgement
+	// (below zero) is UIPrefs.Validate's.
+	ToolsFoldOver *WholeCount `yaml:"tools-fold-over"`
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with
@@ -2006,7 +2060,7 @@ type sessionsConfig struct {
 	MaxAge *string `yaml:"max-age"`
 	// MaxCount is how many session records a sweep may leave standing, or `0` to turn the count rule
 	// off. A pointer for MaxAge's reason above.
-	MaxCount *int `yaml:"max-count"`
+	MaxCount *WholeCount `yaml:"max-count"`
 }
 
 // toSessionSettings maps the on-disk sessions block onto the resolved value, applying the defaults
@@ -2028,7 +2082,7 @@ func (c sessionsConfig) toSessionSettings() SessionSettings {
 		}
 	}
 	if c.MaxCount != nil {
-		s.MaxCount = *c.MaxCount // a negative count is refused by SessionSettings.Validate, not here
+		s.MaxCount = int(*c.MaxCount) // a negative count is refused by SessionSettings.Validate, not here
 	}
 	return s
 }

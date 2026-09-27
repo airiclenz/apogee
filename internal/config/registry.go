@@ -598,7 +598,7 @@ var KeyRegistry = bindRows([]Key{
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
 		// absence of one; a negative one resolves to the default.
 		field: intField(func(o *Options) *int { return &o.DelegateMaxSteps },
-			func(fc fileConfig) *int { return atLeast(0, fc.DelegateMaxSteps) }),
+			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.DelegateMaxSteps)) }),
 	},
 	{
 		Path: "delegate-fanout-rounds", Kind: KindInt, Default: strconv.Itoa(defaultDelegateFanOutRounds),
@@ -609,7 +609,7 @@ var KeyRegistry = bindRows([]Key{
 			"takes effect at the next start.",
 		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no ceiling").
 		field: intField(func(o *Options) *int { return &o.DelegateFanOutRounds },
-			func(fc fileConfig) *int { return atLeast(0, fc.DelegateFanOutRounds) }),
+			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.DelegateFanOutRounds)) }),
 	},
 	{
 		Path: "delegate-max-depth", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxDepth),
@@ -620,7 +620,7 @@ var KeyRegistry = bindRows([]Key{
 		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
 		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
 		field: intField(func(o *Options) *int { return &o.DelegateMaxDepth },
-			func(fc fileConfig) *int { return atLeast(1, &fc.DelegateMaxDepth) }),
+			func(fc fileConfig) *int { return atLeast(1, countPtr(&fc.DelegateMaxDepth)) }),
 	},
 	{
 		Path: "delegate-max-tokens", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxTokens),
@@ -630,7 +630,7 @@ var KeyRegistry = bindRows([]Key{
 			"it run unbounded; takes effect at the next start.",
 		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound").
 		field: intField(func(o *Options) *int { return &o.DelegateMaxTokens },
-			func(fc fileConfig) *int { return atLeast(0, fc.DelegateMaxTokens) }),
+			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.DelegateMaxTokens)) }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -683,7 +683,7 @@ var KeyRegistry = bindRows([]Key{
 				if fc.RestreamBudget == nil {
 					return nil
 				}
-				text := strconv.Itoa(*fc.RestreamBudget)
+				text := strconv.Itoa(int(*fc.RestreamBudget))
 				return &text
 			}),
 	},
@@ -750,7 +750,7 @@ var KeyRegistry = bindRows([]Key{
 		// Presence is the positive value here too, for context-window's reason: 0 and absent both
 		// mean "this run bounds nothing of its own".
 		field: intField(func(o *Options) *int { return &o.WorkingWindow },
-			func(fc fileConfig) *int { return atLeast(1, &fc.WorkingWindow) }),
+			func(fc fileConfig) *int { return atLeast(1, countPtr(&fc.WorkingWindow)) }),
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
@@ -932,7 +932,7 @@ var KeyRegistry = bindRows([]Key{
 		// default; a negative count is UIPrefs.Validate's to refuse, not the load's.
 		field: uiField(domain.UIKeyToolsFoldOver, strconv.Atoi, strconv.Itoa,
 			func(u *domain.UIPrefs) *int { return &u.ToolsFoldOver },
-			func(u *uiConfig) *int { return u.ToolsFoldOver }),
+			func(u *uiConfig) *int { return countPtr(u.ToolsFoldOver) }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s

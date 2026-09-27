@@ -366,10 +366,10 @@ func TestVerifiedEditHoldsTheDecoderErrorUntilTheSpliceHasSpoken(t *testing.T) {
 	// splice's own check names.
 	const notSettings = "- server\n- mode\n"
 	// A file that IS settings-shaped but holds a value the schema's type cannot take. The key is
-	// `working-window:` rather than the pin beside it because `context-window:` decodes through
-	// TokenCount, whose refusal is apogee's own sentence — and what this pins is that the DECODER's
-	// error is the one that survives a splice.
-	const typeError = "working-window: lots\nmode: auto\n"
+	// `bypass:` rather than a count because the count keys decode through TokenCount or WholeCount,
+	// whose refusals are apogee's own sentences — and what this pins is that the DECODER's error is
+	// the one that survives a splice.
+	const typeError = "bypass: lots\nmode: auto\n"
 
 	for _, tt := range []struct {
 		name    string
@@ -386,7 +386,7 @@ func TestVerifiedEditHoldsTheDecoderErrorUntilTheSpliceHasSpoken(t *testing.T) {
 		{
 			name:    "a splice that did its work still meets the decoder's error",
 			data:    typeError,
-			splice:  splicedTo("working-window: lots\nmode: plan\n"),
+			splice:  splicedTo("bypass: lots\nmode: plan\n"),
 			wantMsg: "cannot unmarshal",
 		},
 		{
@@ -419,7 +419,7 @@ func TestVerifiedEditHoldsTheDecoderErrorUntilTheSpliceHasSpoken(t *testing.T) {
 // into settings — the file is refused, named, and left exactly as it was.
 func TestEditRefusesAConfigTheParserCannotRead(t *testing.T) {
 	t.Parallel()
-	const content = "working-window: lots\nmode: auto\n"
+	const content = "bypass: lots\nmode: auto\n"
 	path := writeTestConfig(t, content)
 
 	err := edit(path, spliceNothing, acceptEdit)

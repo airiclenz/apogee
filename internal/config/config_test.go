@@ -20,9 +20,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func strptr(s string) *string { return &s }
-func boolptr(b bool) *bool    { return &b }
-func intptr(n int) *int       { return &n }
+func strptr(s string) *string    { return &s }
+func boolptr(b bool) *bool       { return &b }
+func countptr(n int) *WholeCount { w := WholeCount(n); return &w }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
@@ -135,24 +135,24 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name: "delegate-max-steps is file-only and defaults 80",
-			file: fileConfig{DelegateMaxSteps: intptr(12)},
+			file: fileConfig{DelegateMaxSteps: countptr(12)},
 			want: func(o *Options) { o.DelegateMaxSteps = 12 },
 		},
 		{
 			// The one value a plain int could not carry: 0 is "unbounded", not "absent", so an
 			// explicit zero has to survive resolution instead of resolving back to the default.
 			name: "an explicit delegate-max-steps: 0 stays 0 — the documented spelling of unbounded",
-			file: fileConfig{DelegateMaxSteps: intptr(0)},
+			file: fileConfig{DelegateMaxSteps: countptr(0)},
 			want: func(o *Options) { o.DelegateMaxSteps = 0 },
 		},
 		{
 			name: "delegate-fanout-rounds is file-only and defaults 2",
-			file: fileConfig{DelegateFanOutRounds: intptr(3)},
+			file: fileConfig{DelegateFanOutRounds: countptr(3)},
 			want: func(o *Options) { o.DelegateFanOutRounds = 3 },
 		},
 		{
 			name: "an explicit delegate-fanout-rounds: 0 stays 0 — the documented spelling of no ceiling",
-			file: fileConfig{DelegateFanOutRounds: intptr(0)},
+			file: fileConfig{DelegateFanOutRounds: countptr(0)},
 			want: func(o *Options) { o.DelegateFanOutRounds = 0 },
 		},
 		{
@@ -162,12 +162,12 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name: "delegate-max-tokens is file-only and defaults 20000000",
-			file: fileConfig{DelegateMaxTokens: intptr(5_000_000)},
+			file: fileConfig{DelegateMaxTokens: countptr(5_000_000)},
 			want: func(o *Options) { o.DelegateMaxTokens = 5_000_000 },
 		},
 		{
 			name: "an explicit delegate-max-tokens: 0 stays 0 — the documented spelling of unbounded",
-			file: fileConfig{DelegateMaxTokens: intptr(0)},
+			file: fileConfig{DelegateMaxTokens: countptr(0)},
 			want: func(o *Options) { o.DelegateMaxTokens = 0 },
 		},
 		{
@@ -192,12 +192,12 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name: "re-stream-budget is file-only and defaults 3",
-			file: fileConfig{RestreamBudget: intptr(1)},
+			file: fileConfig{RestreamBudget: countptr(1)},
 			want: func(o *Options) { o.RestreamBudget = 1 },
 		},
 		{
 			name: "an explicit re-stream-budget: 0 stays 0 — the documented spelling of never",
-			file: fileConfig{RestreamBudget: intptr(0)},
+			file: fileConfig{RestreamBudget: countptr(0)},
 			want: func(o *Options) { o.RestreamBudget = 0 },
 		},
 		{
@@ -325,7 +325,7 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name: "ui with tools-fold-over: 0 → no umbrella is ever large and nothing else moves",
-			file: fileConfig{UI: &uiConfig{ToolsFoldOver: intptr(0)}},
+			file: fileConfig{UI: &uiConfig{ToolsFoldOver: countptr(0)}},
 			want: func(o *Options) { o.UI.ToolsFoldOver = 0 },
 		},
 		{
@@ -642,13 +642,13 @@ func everyKeyFileConfig() fileConfig {
 		UndoSnapshots:        boolptr(false),
 		UseShippedSkills:     boolptr(false),
 		UseDefaultPrompt:     boolptr(false),
-		DelegateMaxSteps:     intptr(12),
-		DelegateFanOutRounds: intptr(3),
+		DelegateMaxSteps:     countptr(12),
+		DelegateFanOutRounds: countptr(3),
 		DelegateMaxDepth:     2,
-		DelegateMaxTokens:    intptr(5_000_000),
+		DelegateMaxTokens:    countptr(5_000_000),
 		DelegateTimeout:      strptr("30m"),
 		StreamIdleTimeout:    strptr("30s"),
-		RestreamBudget:       intptr(1),
+		RestreamBudget:       countptr(1),
 		ServerStats:          boolptr(false),
 		RememberModel:        boolptr(false),
 		ContextWindow:        64000, WorkingWindow: 32000, ResponseReserve: 0.3,
@@ -668,8 +668,8 @@ func everyKeyFileConfig() fileConfig {
 		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
 			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true),
 			SkillSuggestions: boolptr(false), TaskListOpen: boolptr(false), ToolsOpen: boolptr(true),
-			ToolsFoldOver: intptr(8)},
-		Sessions: &sessionsConfig{MaxAge: strptr("720h"), MaxCount: intptr(50)},
+			ToolsFoldOver: countptr(8)},
+		Sessions: &sessionsConfig{MaxAge: strptr("720h"), MaxCount: countptr(50)},
 	}
 }
 
@@ -2059,6 +2059,129 @@ func TestApplyConfigContextWindowRefusesAFractionOrANegative(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Every other top-level count key gets context-window's decode guard through WholeCount: a value
+// yaml.v3 would truncate into the int — a fraction, or a whole number written as a float — is a
+// load error naming the value, never a bound nobody wrote. Every `!!int` spelling still loads, and
+// the sign is not WholeCount's to judge (each key's own validator keeps that, pinned elsewhere).
+func TestApplyConfigCountKeysRefuseAFraction(t *testing.T) {
+	t.Parallel()
+	keys := []struct {
+		key  string
+		file func(value string) string
+		got  func(o Options) int
+	}{
+		{"delegate-max-steps", topLevelKey("delegate-max-steps"), func(o Options) int { return o.DelegateMaxSteps }},
+		{"delegate-fanout-rounds", topLevelKey("delegate-fanout-rounds"),
+			func(o Options) int { return o.DelegateFanOutRounds }},
+		{"delegate-max-tokens", topLevelKey("delegate-max-tokens"), func(o Options) int { return o.DelegateMaxTokens }},
+		{"delegate-max-depth", topLevelKey("delegate-max-depth"), func(o Options) int { return o.DelegateMaxDepth }},
+		{"re-stream-budget", topLevelKey("re-stream-budget"), func(o Options) int { return o.RestreamBudget }},
+		{"working-window", topLevelKey("working-window"), func(o Options) int { return o.WorkingWindow }},
+		{
+			"sessions.max-count",
+			func(value string) string { return "sessions:\n  max-count: " + value + "\n" },
+			func(o Options) int { return o.Sessions.MaxCount },
+		},
+		{
+			"ui.tools-fold-over",
+			func(value string) string { return "ui:\n  tools-fold-over: " + value + "\n" },
+			func(o Options) int { return o.UI.ToolsFoldOver },
+		},
+	}
+	tests := []struct {
+		name  string
+		value string
+		want  int  // the count the key resolves to when the file loads
+		fails bool // the load is refused, naming the value as written
+	}{
+		{name: "a whole count loads", value: "7", want: 7},
+		{name: "hex is a whole count too", value: "0x10", want: 16},
+		{name: "a fraction is refused rather than truncated", value: "2.5", fails: true},
+		{name: "a whole number written with a decimal point is refused", value: "32000.0", fails: true},
+		{name: "a whole number written with an exponent is refused", value: "1e3", fails: true},
+		{name: "a word that is no count at all is refused", value: "lots", fails: true},
+	}
+	for _, k := range keys {
+		for _, tt := range tests {
+			t.Run(k.key+" — "+tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				home := testConfigHome(t, "")
+				writeConfigHome(t, home, k.file(tt.value))
+				opts := Options{ConfigDir: home}
+
+				err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+					os.ReadFile, noNotify)
+
+				if !tt.fails {
+					if err != nil {
+						t.Fatalf("ApplyConfig: %v; want %s: %s accepted", err, k.key, tt.value)
+					}
+					if got := k.got(opts); got != tt.want {
+						t.Errorf("%s = %d; want the file's %s read as %d", k.key, got, tt.value, tt.want)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatalf("ApplyConfig = nil error (%s = %d); want %s: %s refused at load",
+						k.key, k.got(opts), k.key, tt.value)
+				}
+				for _, want := range []string{fmt.Sprintf("%q", tt.value), "whole number"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %q; want it to contain %q", err, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// topLevelKey is the file text that sets one top-level key to a value, as written.
+func topLevelKey(key string) func(value string) string {
+	return func(value string) string { return key + ": " + value + "\n" }
+}
+
+// WholeCount judges the tag and nothing else: every `!!int` spelling decodes, a negative one
+// included (the sign is each key's own validator's), and every other scalar or node is refused.
+func TestWholeCountDecodesOnlyAWholeNumber(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		text    string
+		want    WholeCount
+		refused bool
+	}{
+		{text: "12", want: 12},
+		{text: "-3", want: -3},
+		{text: "1_000", want: 1000},
+		{text: "+5", want: 5},
+		{text: "2.5", refused: true},
+		{text: "32000.0", refused: true},
+		{text: "1e3", refused: true},
+		{text: `"12"`, refused: true},
+		{text: "true", refused: true},
+		{text: "99999999999999999999", refused: true},
+		{text: "[1, 2]", refused: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			t.Parallel()
+			var got struct {
+				N WholeCount `yaml:"n"`
+			}
+			err := yaml.Unmarshal([]byte("n: "+tt.text+"\n"), &got)
+			if tt.refused {
+				if err == nil || !strings.Contains(err.Error(), "whole number") {
+					t.Errorf("decode of n: %s = (%d, %v); want the whole-number refusal", tt.text, got.N, err)
+				}
+				return
+			}
+			if err != nil || got.N != tt.want {
+				t.Errorf("decode of n: %s = (%d, %v); want %d", tt.text, got.N, err, tt.want)
+			}
+		})
 	}
 }
 

@@ -268,7 +268,7 @@ func sessionsMaxCount() scalarField[int] {
 			if fc.Sessions == nil {
 				return nil
 			}
-			return fc.Sessions.MaxCount
+			return countPtr(fc.Sessions.MaxCount)
 		},
 		parse: strconv.Atoi, format: strconv.Itoa,
 		land: landIn(sessionsOf, SessionSettings.Validate, strconv.Atoi, at),
