@@ -79,8 +79,13 @@ const (
 // stays part of the stage; so is a backslash-escaped metacharacter, which the normalized text
 // spells with a `/` (`\&` arrives as `/&`, normalize folds `\` to `/`). Outside those, a
 // stage's `&` counts only as a redirection (`2>&1`, `<&0`, `&>f`); any other `;`, `&` or `|`
-// ends the stage.
+// ends the stage — except where it opens the next stage's pipeJoin.
 const pipeStageAtom = `(?:"[^"]*"|'[^']*'|[\\/][|;&]|[^|;&]|[<>]&|&>)`
+
+// pipeJoin is what joins two stages of one pipeline for remote-pipe-to-shell: a plain `|`,
+// or bash's `|&`, which pipes stderr along with stdout and so still feeds the next stage
+// the download. `||` is no join (the `&?` never takes a second `|`), so it still ends a stage.
+const pipeJoin = `\|&?`
 
 func DefaultDangerousRules() []Rule {
 	return []Rule{
@@ -238,13 +243,14 @@ func DefaultDangerousRules() []Rule {
 		// install-script idiom. Legitimate often enough to be a speed-bump (force the
 		// Approver even in Auto), not a hard block. The shell may sit at any later stage of
 		// the same pipeline (`curl … | tee i.sh | bash` still runs the download), so the
-		// match crosses later `|` stages, but a later stage never crosses a command
-		// separator: `;`, `&&`, a background `&` or `||` each start a new command whose
-		// shell reads no download. What a later stage may hold is pipeStageAtom: a quoted or
-		// escaped metacharacter is part of it. The download's own stage keeps `[^|]*`, which
-		// crosses separators, so every command the first-stage-only rule caught is still
-		// caught — `curl -o f u; cat f | bash` runs the download all the same. A newline is
-		// no separator here: normalize has already folded it to a space.
+		// match crosses later stages joined by `|` or bash's `|&` (pipeJoin), but a later
+		// stage never crosses a command separator: `;`, `&&`, a background `&` or `||` each
+		// start a new command whose shell reads no download. What a later stage may hold is
+		// pipeStageAtom: a quoted or escaped metacharacter is part of it. The download's own
+		// stage keeps `[^|]*`, which crosses separators, so every command the
+		// first-stage-only rule caught is still caught — `curl -o f u; cat f | bash` runs
+		// the download all the same. A newline is no separator here: normalize has already
+		// folded it to a space.
 		// The optional absolute directory before the shell name is there because the idiom
 		// is written with a path as often as without one; the trailing `\b` is what keeps
 		// `shellcheck` out.
@@ -252,8 +258,8 @@ func DefaultDangerousRules() []Rule {
 			ID:     "remote-pipe-to-shell",
 			Tier:   TierForceApproval,
 			Reason: "download piped directly into a shell (curl|bash-class)",
-			Pattern: `\b(?:curl|wget|fetch)\b[^|]*(?:\|` + pipeStageAtom + `+)*` +
-				`\|\s*(?:sudo\s+)?(?:/[a-z0-9_./-]*/)?(?:ba|z|d|fi|k|a)?sh\b`,
+			Pattern: `\b(?:curl|wget|fetch)\b[^|]*(?:` + pipeJoin + pipeStageAtom + `+)*` +
+				pipeJoin + `\s*(?:sudo\s+)?(?:/[a-z0-9_./-]*/)?(?:ba|z|d|fi|k|a)?sh\b`,
 		},
 		// `sudo` of an arbitrary command — a privilege escalation the human should see.
 		{
