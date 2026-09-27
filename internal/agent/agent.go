@@ -412,8 +412,8 @@ type Agent struct {
 	// runSubAgent after a capped, faulted, stopped, continued or named completed child's result is
 	// read; it survives later Exchanges and rides the session snapshot, is emptied by /clear
 	// (ClearContext), replaced by a restore with the restored snapshot's set (restoreState), cut
-	// by a fork (CutSession), and put back as it stood by a cancel — a rolled-back Turn to its
-	// start (turnRolledBack), an aborted Exchange to its opening (exchangeAborted).
+	// by a fork (CutSession), and put back as its Exchange opened by an abort (exchangeAborted). A
+	// cancelled Turn leaves it standing: the cancel settles the delegations, it never drops them.
 	retained retainedDelegates
 	// delegations is the ledger of every delegation THIS Agent spawned in its current Exchange —
 	// spawn order, outcome, cause and resolved output target (children.go, apogee-clb): what the
@@ -460,12 +460,17 @@ type Agent struct {
 	// (engineFoldUnavailableFormat) when the summary call faulted, or was never made because the
 	// faulted delegate had completed no Turn.
 	capFold string
-	// stoppedByUser marks a delegate the human stopped singly (Agent.StopChild, ADR 0086 D4) and
-	// whose run the stop cut short; stopUndelivered is what its mailbox still held at the stop. Both
+	// stoppedByUser marks a delegate the human stopped singly (Agent.StopChild, ADR 0086 D4), or
+	// that the cancel of its parent's Turn found running (ADR 0088 D2), and whose run the stop cut
+	// short; stopUndelivered is what its mailbox still held at the stop. Both
 	// are set by the spawning parent's runSubAgent on the CHILD, after the stopped fold, and read by
 	// delegationResult alone: the stopped branch and the undelivered notes of its result.
 	stoppedByUser   bool
 	stopUndelivered []domain.UserInput
+	// cancelFoldBound is the longest the fold of each running child a cancel of this Agent's Turn
+	// stops may take (foldStoppedChild); 0 reads as defaultCancelFoldBound. A child inherits it at
+	// spawn, so one value bounds the whole tree's cancel folds.
+	cancelFoldBound time.Duration
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
@@ -911,7 +916,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 // decided:
 //
 //   - CANCELLED — returned as a cancel, exactly as a cancel inside any other child Turn: the
-//     parent Turn rolls back wholesale and no partial result surfaces (delegationResult).
+//     parent's runSubAgent stops the child and folds its work as the human's stop does (ADR 0088).
 //   - COMPLETED — the wrap-up's own boundary is returned with StepCapped forced true, so the
 //     parent still reads the partial marker rather than a finish that did not happen.
 //   - FAULTED or errored with the Exchange left OPEN — close it on the exit table's endStepCapped
@@ -1001,24 +1006,24 @@ func (a *Agent) finishAtFault(ctx context.Context, res domain.StepResult) {
 const zeroTurnFoldCause = "the delegate completed no Turn"
 
 // finishAtStop is the STOPPED delegate's counterpart to finishAtFault (ADR 0086 D4), run by the
-// spawning parent's runSubAgent once a human's stop (StopChild) cut the child's Run short: it
-// writes the engine fold of the conversation as it stands at the stop into capFold, so the
-// stopped result carries it and the retention a continuation reads keeps it. No wrap-up Turn is
-// spent — the human asked for the work to end — and the fold runs under the one
-// Config.StreamIdleTimeout bound finishAtFault's does.
+// spawning parent (foldStoppedChild) once a human's stop (StopChild) or the cancel of the parent's
+// whole Turn (ADR 0088 D2) cut the child's Run short: it writes the engine fold of the conversation
+// as it stands at the stop into capFold, so the stopped result carries it and the retention a
+// continuation reads keeps it. No wrap-up Turn is spent — the human asked for the work to end —
+// and the fold runs under bound (0 = none): the caller's choice, since a stop and a cancel are
+// held to different ones.
 //
-// ctx is the fold's own context, derived from the parent's and armed as the run's stop handle for
-// the fold's duration: a SECOND stop cancels it, which skips the fold and leaves the unavailable
-// marker naming that stop (secondStopFoldCause). A cancel of the parent's own context leaves
-// capFold empty — that is the whole Turn's cancel, which the caller reads off its own context.
-// A delegate that completed no Turn is given the zero-Turn marker without a summary call, as
+// ctx is the fold's own context, armed as the run's stop handle for the fold's duration: a SECOND
+// stop cancels it, which skips the fold and leaves the unavailable marker naming that stop
+// (secondStopFoldCause). Any other cancel of ctx leaves capFold empty for the caller to name. A
+// delegate that completed no Turn is given the zero-Turn marker without a summary call, as
 // finishAtFault gives it.
-func (a *Agent) finishAtStop(ctx context.Context) {
+func (a *Agent) finishAtStop(ctx context.Context, bound time.Duration) {
 	if a.turns.exchangeTurns == 0 {
 		a.capFold = fmt.Sprintf(engineFoldUnavailableFormat, zeroTurnFoldCause)
 		return
 	}
-	a.capFold = a.foldForParent(ctx, a.cfg.StreamIdleTimeout)
+	a.capFold = a.foldForParent(ctx, bound)
 	if a.capFold == "" && errors.Is(context.Cause(ctx), errDelegationStopped) {
 		a.capFold = fmt.Sprintf(engineFoldUnavailableFormat, secondStopFoldCause)
 	}

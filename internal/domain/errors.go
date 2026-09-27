@@ -43,6 +43,14 @@ var (
 	// never queued, so no ChildInterjectionEvent will ever account for it, and a stop changed nothing.
 	ErrNoSuchChild = errors.New("apogee: no running sub-agent with that run id")
 
+	// ErrShuttingDown is the context CAUSE a Driver cancels a run with when the cancel is the
+	// program leaving rather than a human's stop: a TUI quit, a daemon's Scheduler closing (ADR
+	// 0088). The engine reads it through context.Cause and skips the stop-summary a cancel
+	// otherwise gives each running delegation, so the exit never waits on a summary call; each such
+	// delegation still settles, on the unavailable marker in the summary's place. A plain cancel
+	// (context.Canceled) is the human's stop and keeps those summaries.
+	ErrShuttingDown = errors.New("apogee: shutting down")
+
 	// ErrDuplicateTool is returned by ToolRegistry.Register when a tool with the same
 	// Name is already registered — the name is the model's stable handle, so a
 	// collision is a configuration error, not a silent overwrite.

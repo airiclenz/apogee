@@ -153,7 +153,7 @@ func TestCancelledStepFlushesCoalescedTokens(t *testing.T) {
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()
 
-	cancel()
+	cancel(nil)
 
 	select {
 	case msg := <-out:
@@ -226,7 +226,7 @@ func TestStartResumeCancelYieldsCancelledMsg(t *testing.T) {
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()
 
-	cancel()
+	cancel(nil)
 
 	select {
 	case msg := <-out:
@@ -308,7 +308,7 @@ func TestStartExchangeCancelYieldsCancelledMsg(t *testing.T) {
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()
 
-	cancel()
+	cancel(nil)
 
 	select {
 	case msg := <-out:
@@ -341,7 +341,7 @@ func TestStartCompactCancelYieldsCancelledMsg(t *testing.T) {
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()
 
-	cancel()
+	cancel(nil)
 
 	select {
 	case msg := <-out:
@@ -368,7 +368,7 @@ func TestStartCompactLateCancelStillReportsCompacted(t *testing.T) {
 	}
 
 	cmd, cancel := startCompact(context.Background(), eng)
-	cancel() // the late Esc — the ctx is now cancelled, but Compact already returned nil
+	cancel(nil) // the late Esc — the ctx is now cancelled, but Compact already returned nil
 
 	msg := cmd()
 

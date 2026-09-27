@@ -318,13 +318,14 @@ func TestDeferredAction_AbortExchangeMidFanOutExpiresDirective(t *testing.T) {
 	}
 }
 
-// TestDeferredAction_CancelDuringDelegationRestoresSingleDirective proves the cancel half of
-// F6: a cancel while a follow-through Turn's delegation child is mid-stream rolls the Turn back and
-// leaves EXACTLY ONE directive queued — the drained (2 left) one restored, not doubled with the
-// (1 left) directive the cancelled Turn's own post-response hook had re-derived. The snapshot taken
-// at the cancelled boundary round-trips that single directive, and the resumed first request carries
-// it exactly once. Without the truncate-before-restore the queue would hold both copies.
-func TestDeferredAction_CancelDuringDelegationRestoresSingleDirective(t *testing.T) {
+// TestDeferredAction_CancelDuringDelegationKeepsOneDirective proves the cancel half of F6 under
+// the settle rule (ADR 0088 D2): a cancel while a follow-through Turn's delegation child is
+// mid-stream no longer rolls the Turn back — the child is stopped and the Turn settled, a completed
+// Turn as far as the queue is concerned — so the drained (2 left) directive stays spent and EXACTLY
+// ONE directive is queued: the (1 left) one the Turn's own post-response hook re-derived. The
+// snapshot taken at the cancelled boundary round-trips that single directive, and the resumed first
+// request carries it exactly once.
+func TestDeferredAction_CancelDuringDelegationKeepsOneDirective(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := deferConfig(t, sink)
 	responder := &blockAtResponder{
@@ -353,7 +354,8 @@ func TestDeferredAction_CancelDuringDelegationRestoresSingleDirective(t *testing
 	}
 
 	// Step 1: the follow-through Turn drains (2 left), delegates subtask 2, re-derives (1 left), then
-	// the child blocks — a cancel there rolls the Turn back after its own hook re-deferred.
+	// the child blocks — a cancel there stops the child and settles the Turn after its own hook
+	// re-deferred.
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-responder.started // child B's Turn is in flight, post-response has already re-deferred (1 left)
@@ -364,28 +366,27 @@ func TestDeferredAction_CancelDuringDelegationRestoresSingleDirective(t *testing
 		t.Fatalf("Step (cancel during delegation): %v", err)
 	}
 	if res.Status != domain.StatusCancelled {
-		t.Fatalf("Step status = %q, want %q (the delegation child was cancelled)", res.Status, domain.StatusCancelled)
+		t.Fatalf("Step status = %q, want %q (the delegation child was stopped by the cancel)", res.Status, domain.StatusCancelled)
 	}
 
-	// The snapshot at the cancelled boundary round-trips EXACTLY ONE directive — the restored drained
-	// (2 left) one — not the (1 left) copy the cancelled Turn re-derived stacked on top of it.
+	// The snapshot at the cancelled boundary round-trips EXACTLY ONE directive — the (1 left) one the
+	// settled Turn re-derived — not the drained (2 left) one restored on top of it.
 	snap, err := a.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot after cancel: %v", err)
 	}
 	if n := strings.Count(string(snap.State), deferDirectiveMarker); n != 1 {
-		t.Fatalf("snapshot carried %d remaining-items directives, want exactly 1 (the restored drained one)", n)
+		t.Fatalf("snapshot carried %d remaining-items directives, want exactly 1 (the settled Turn's re-derived one)", n)
 	}
-	if !strings.Contains(string(snap.State), deferDirectiveMarker+" (2 left)") {
-		t.Error("the single restored directive is not the drained (2 left) one")
+	if !strings.Contains(string(snap.State), deferDirectiveMarker+" (1 left)") {
+		t.Error("the single queued directive is not the settled Turn's (1 left) one")
 	}
 
-	// Resume and re-attempt the Turn: the first resumed request drains the ONE restored directive.
+	// Resume and carry on past the settled Turn: the first resumed request drains the ONE queued
+	// directive.
 	sink2 := &recordingSink{}
 	cfg2 := deferConfig(t, sink2)
 	resumeResponder := scriptedResponder(t,
-		subAgentCallTurn("m2b", deferSubtasks[1]),      // re-attempt T1: re-delegate subtask 2
-		contentTurn("report B: endpoint spec drafted"), // child B
 		subAgentCallTurn("m3", deferSubtasks[2]),       // delegate subtask 3
 		contentTurn("report C: tests written"),         // child C
 		contentTurn("Synthesis: resumed fan-out done"), // final no-tool answer
@@ -405,9 +406,9 @@ func TestDeferredAction_CancelDuringDelegationRestoresSingleDirective(t *testing
 		t.Fatal("the resumed run sent no request")
 	}
 	if n := deferDirectiveCount(resumeResponder.requests()[0]); n != 1 {
-		t.Errorf("the re-attempted request carried %d directives, want exactly 1 (no contradictory copies)", n)
+		t.Errorf("the resumed request carried %d directives, want exactly 1 (no contradictory copies)", n)
 	}
-	if !deferRequestContains(resumeResponder.requests()[0], deferDirectiveMarker+" (2 left)") {
-		t.Error("the re-attempted request did not carry the restored (2 left) directive")
+	if !deferRequestContains(resumeResponder.requests()[0], deferDirectiveMarker+" (1 left)") {
+		t.Error("the resumed request did not carry the settled Turn's (1 left) directive")
 	}
 }

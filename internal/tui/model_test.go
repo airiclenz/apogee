@@ -610,7 +610,7 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 		m := newTestModelEng(t, &fakeEngine{settleDrops: true}, testOpts) // even a "dropped" answer marks nothing without a mailbox
 		m.transcript.addUser("first", nil)
 		m.transcript.commitAssistant("done", runRef{})
-		m.worker.start(func() {}, nil) // the /compact worker drives no Exchange: no mailbox
+		m.worker.start(func(error) {}, nil) // the /compact worker drives no Exchange: no mailbox
 		m.state = stateRunning
 
 		m = step(t, m, cancelledMsg{})
@@ -619,6 +619,62 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 			t.Error("a cancelled /compact marked the completed prompt")
 		}
 	})
+}
+
+// TestStopWorker_ASecondStopStopsEveryDelegationOnTheBoard pins the second esc×2 of one run (ADR
+// 0088): the first stop cancels the worker with no cause of its own, and the second — the engine is
+// still folding the delegations the cancel stopped — fires no second cancel but routes StopChild to
+// every delegation on the activity board, grandchildren included, so each fold is skipped at once.
+func TestStopWorker_ASecondStopStopsEveryDelegationOnTheBoard(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	var causes []error
+	m.worker.start(func(cause error) { causes = append(causes, cause) }, nil)
+	m.state = stateRunning
+	m.acts.put(runRef{}, runActivity{})
+	m.acts.put(runRef{depth: 1, spawn: "c1", id: "run.1"}, runActivity{})
+	m.acts.put(runRef{depth: 2, spawn: "g1", id: "run.2"}, runActivity{})
+
+	m.stopWorker()
+
+	if len(causes) != 1 || causes[0] != nil {
+		t.Fatalf("worker cancels after the first stop = %v, want one, with no cause", causes)
+	}
+	if stops := eng.stoppedChildren(); len(stops) != 0 {
+		t.Fatalf("the first stop stopped delegations %v singly, want none — the cancel reaches them", stops)
+	}
+
+	m.stopWorker()
+
+	if len(causes) != 1 {
+		t.Errorf("worker cancels after the second stop = %d, want still 1", len(causes))
+	}
+	stops := eng.stoppedChildren()
+	slices.Sort(stops)
+	if !slices.Equal(stops, []string{"run.1", "run.2"}) {
+		t.Errorf("delegations the second stop reached = %v, want every one on the board", stops)
+	}
+}
+
+// TestQuit_CancelsARunningWorkerAsAShutdown pins the quit's cause (ADR 0088): a quit while a worker
+// runs cancels it with domain.ErrShuttingDown, which the engine reads as "fold nothing", so the exit
+// never waits on a delegation's summary.
+func TestQuit_CancelsARunningWorkerAsAShutdown(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	var cause error
+	m.worker.start(func(c error) { cause = c }, nil)
+	m.state = stateRunning
+
+	next, _ := m.quit()
+
+	if !errors.Is(cause, domain.ErrShuttingDown) {
+		t.Errorf("worker cancel cause on quit = %v, want domain.ErrShuttingDown", cause)
+	}
+	if !next.(Model).quitting {
+		t.Error("the quit was not deferred until the worker unwinds")
+	}
 }
 
 // TestCancelSettlesKeepingFinishedTurns is the Stage A fix of apogee-2un at the TUI: Esc closes the

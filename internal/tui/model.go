@@ -2033,7 +2033,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 // It takes a pointer because the generation bump and the frame reset must land on the Model copy
 // the caller returns — so a caller binds the Cmd in a statement of its own, never
 // `return m, m.enterRunning(…)` (spinnerAnim.arm).
-func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelFunc, box *interjectBox, kind activityKind) tea.Cmd {
+func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelCauseFunc, box *interjectBox, kind activityKind) tea.Cmd {
 	m.cacheBoundaryAtIdle()
 	m.worker.start(cancel, box)
 	m.installBox()
@@ -2078,11 +2078,40 @@ func (m *Model) markRunning() {
 // child slot still on the board is not allowed to speak over it (Model.shownSlot). Their slots are
 // deliberately left standing rather than dropped here — the worker has not unwound yet, and
 // finishWorker is what closes the board.
-func (m *Model) stopWorker() {
-	if m.worker.cancel != nil {
-		m.worker.cancel()
+//
+// It is the human's stop, so it carries no cause of its own: the engine then gives each
+// delegation the cancel finds running the stop-summary a single stop gives it (ADR 0088).
+func (m *Model) stopWorker() { m.stopWorkerFor(nil) }
+
+// stopWorkerFor is stopWorker with the context cause the stop carries — nil for the human's stop,
+// domain.ErrShuttingDown for a quit, which the engine reads as "fold nothing, leave at once".
+//
+// The first stop of a worker cancels it. A SECOND stop — esc×2 again, or a quit, while the engine
+// is still settling the first (folding each delegation the cancel stopped, up to 20 s apiece) — has
+// no cancel left to fire, so it stops every delegation still on the activity board instead
+// (stopEveryChild): each fold in flight is cut and each fold not yet begun is skipped, and the
+// worker unwinds at once (ADR 0088).
+func (m *Model) stopWorkerFor(cause error) {
+	if m.worker.stop(cause) {
+		m.stopEveryChild()
 	}
 	m.setActivity(runRef{}, actStopping, "")
+}
+
+// stopEveryChild asks the engine to stop every delegation that holds a slot on the activity board
+// (runActivities) — each is a run the engine may still be folding. It is called from the Update
+// goroutine, which StopChild is written for (tui.go, agent/children.go).
+func (m *Model) stopEveryChild() {
+	for run := range m.acts {
+		if run.id == "" {
+			continue
+		}
+		if err := m.eng.StopChild(run.id); err != nil {
+			// A refusal is a run that has already reported, or is being reported: its fold is
+			// over, so there is nothing left for this stop to skip.
+			continue
+		}
+	}
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
@@ -2297,7 +2326,9 @@ func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 // (flushAfterCompletion).
 func (m Model) quit() (tea.Model, tea.Cmd) {
 	if m.busy() {
-		m.stopWorker()
+		// A quit is the program leaving, so the cancel carries that cause and the engine settles
+		// the run without folding a single delegation (ADR 0088).
+		m.stopWorkerFor(domain.ErrShuttingDown)
 		m.quitting = true
 		return m, nil
 	}

@@ -14,17 +14,23 @@ import (
 // ----------------------------------------------------------------------------
 
 // worker is the in-flight worker as the Model holds it: one value carrying everything "an
-// Exchange is in flight" is made of on the Model's side — the CancelFunc the stop key calls (C4),
+// Exchange is in flight" is made of on the Model's side — the cancel the stop key calls (C4),
 // the Exchange's interjection mailbox, and the spinner tick chain's generation — so the three are
 // written by three verbs (start, resume, finish) rather than by a run of assignments a launch path
 // can leave one out of. The four-state machine itself stays on the Model (Model.state): it is what
 // the keys and the folds route on, and a worker exists in three of its four states.
 //
-// It rides the value-copied Model by value (ADR 0011): a func, a pointer and an int, no mutex
-// and no self-pointer — the mailbox itself carries a mutex, which is exactly why it is held BY
+// It rides the value-copied Model by value (ADR 0011): a func, a pointer, an int and a bool, no
+// mutex and no self-pointer — the mailbox itself carries a mutex, which is exactly why it is held BY
 // POINTER (interjectBox).
 type worker struct {
-	cancel context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
+	// cancel is non-nil while a worker runs; the stop key calls it (C4) with the cause the stop
+	// carries — nil for the human's stop, domain.ErrShuttingDown for a quit (ADR 0088).
+	cancel context.CancelCauseFunc
+	// stopped marks a worker a stop has already cancelled: the engine is then settling the run —
+	// folding each delegation the cancel stopped — and a second stop has no cancel left to fire,
+	// so it reaches those delegations one by one instead (Model.stopWorkerFor).
+	stopped bool
 	// box is the running Exchange's mailbox: created fresh per Exchange, handed to that
 	// Exchange's worker goroutine, and dropped at the terminal fold. Non-nil means "a worker is
 	// draining this", nil means there is nothing to deliver into right now (idle, or the /compact
@@ -40,13 +46,28 @@ type worker struct {
 	gen int
 }
 
-// start records a launched worker: the CancelFunc the stop key reaches and the mailbox the worker
+// start records a launched worker: the cancel the stop key reaches and the mailbox the worker
 // drains (nil for a /compact, which drives no Exchange), and opens a new tick-chain generation.
 // Its caller is the one launch verb (Model.enterRunning).
-func (w *worker) start(cancel context.CancelFunc, box *interjectBox) {
+func (w *worker) start(cancel context.CancelCauseFunc, box *interjectBox) {
 	w.cancel = cancel
 	w.box = box
+	w.stopped = false
 	w.gen++
+}
+
+// stop cancels the running worker with cause, once: it reports whether an earlier stop had
+// already cancelled it (again), in which case nothing is cancelled here. A worker that is not
+// running is left alone and is not marked.
+func (w *worker) stop(cause error) (again bool) {
+	if w.stopped {
+		return true
+	}
+	if w.cancel != nil {
+		w.cancel(cause)
+		w.stopped = true
+	}
+	return false
 }
 
 // resume re-opens the tick chain for a worker that never died — a blocked Step a decision has
@@ -61,10 +82,11 @@ func (w *worker) resume() { w.gen++ }
 // — and drops the mailbox, which has no reader left. The generation is kept (see the field).
 func (w *worker) finish() {
 	if w.cancel != nil {
-		w.cancel()
+		w.cancel(nil)
 	}
 	w.cancel = nil
 	w.box = nil
+	w.stopped = false
 }
 
 // startExchange builds the cancellable worker that drives one Exchange over eng. It returns
@@ -85,8 +107,8 @@ func (w *worker) finish() {
 // seam tests that drive driveExchange in isolation pass. flush empties the sink's delta-coalescing
 // buffer at each Step boundary (Run wires it to the Bridge's sink; nil is a drive with no sink
 // behind it) — see stepToBoundary.
-func startExchange(parent context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
+func startExchange(parent context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelCauseFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
 	cmd := func() tea.Msg { return driveExchange(ctx, eng, input, box, notify, flush) }
 	return cmd, cancel
 }
@@ -104,8 +126,8 @@ func startExchange(parent context.Context, eng Engine, input domain.UserInput, b
 // reported as compacted, not cancelled. Only an error that is context.Canceled — which the
 // reducer returns exactly when the cancel pre-empted the summary and left the conversation
 // untouched — becomes cancelledMsg.
-func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
+func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelCauseFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
 	cmd := func() tea.Msg {
 		skipped, err := eng.Compact(ctx)
 		if errors.Is(err, context.Canceled) {
@@ -127,8 +149,8 @@ func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFu
 // invariant keeps eng driven from one goroutine, so C1 still holds. It takes an interjection box
 // for the same reason startExchange does — a resumed Exchange is a running Exchange, and the human
 // may type into it — and the same Step-boundary flush.
-func startResume(parent context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
+func startResume(parent context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelCauseFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
 	cmd := func() tea.Msg { return driveResume(ctx, eng, box, notify, flush) }
 	return cmd, cancel
 }

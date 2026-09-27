@@ -45,7 +45,10 @@ import (
 // Beside each entry the registry holds the run's STOP HANDLE (ADR 0086 D4): the cancel of the
 // context the child's work runs under, armed only while a stop can still cut that work short —
 // the child's Run, then the fold a stopped run is given — and withdrawn between the two, so a stop
-// that lands once the run has returned finds nothing to cancel (StopChild).
+// that lands once the run has returned finds nothing to cancel (StopChild). A stop that lands on a
+// Run whose context the whole Turn's cancel has already ended cannot cancel it again, so it is
+// held as a mark instead (stopMarks) and carried into the fold's arm, which then skips that fold
+// at once — the second esc×2 that skips the folds a cancel gives its running children (ADR 0088).
 //
 // And it holds the run ids of a pooled group's delegations that have not been armed yet (ADR 0086
 // D4: a stop reaches a queued child too). dispatchGroup enters every pooled delegation here before
@@ -58,7 +61,10 @@ import (
 type childRegistry struct {
 	mu      sync.Mutex
 	byRunID map[string]*Agent
-	stops   map[string]context.CancelCauseFunc
+	stops   map[string]armedStop
+	// stopMarks holds the run ids a stop reached while their armed context was already cancelled
+	// (stop): the next arm of that run cancels its new context at once.
+	stopMarks map[string]bool
 	// queued maps the run id of a pooled delegation not yet armed to its stop mark: false while
 	// nothing has asked to stop it, true once a StopChild has.
 	queued map[string]bool
@@ -83,20 +89,33 @@ func (r *childRegistry) unregister(runID string) {
 	defer r.mu.Unlock()
 	delete(r.byRunID, runID)
 	delete(r.stops, runID)
+	delete(r.stopMarks, runID)
 }
 
-// arm makes the run registered under runID stoppable through cancel until disarm withdraws it.
-// Arming again replaces the handle: the fold a stopped run is given takes the one its Run held.
-// A run still held as queued leaves that set here, and a stop marked on it after the pool dequeued
-// it — in the window before this arm — is carried in: cancel fires at once, so the child's context
-// is cancelled as it is created.
-func (r *childRegistry) arm(runID string, cancel context.CancelCauseFunc) {
+// armedStop is one run's stop handle: the context its armed work runs under and that context's
+// cancel. The context is kept so a stop can tell a live run from one a cancel already ended.
+type armedStop struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+}
+
+// arm makes the run registered under runID stoppable through cancel — the cancel of ctx — until
+// disarm withdraws it. Arming again replaces the handle: the fold a stopped run is given takes the
+// one its Run held. A run still held as queued leaves that set here, and a stop marked on it after
+// the pool dequeued it — in the window before this arm — is carried in: cancel fires at once, so
+// the child's context is cancelled as it is created. A stop mark left by a stop that found the
+// previous handle's context already cancelled (stop) is carried in the same way.
+func (r *childRegistry) arm(runID string, ctx context.Context, cancel context.CancelCauseFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stops == nil {
-		r.stops = make(map[string]context.CancelCauseFunc, 1)
+		r.stops = make(map[string]armedStop, 1)
 	}
-	r.stops[runID] = cancel
+	r.stops[runID] = armedStop{ctx: ctx, cancel: cancel}
+	if r.stopMarks[runID] {
+		delete(r.stopMarks, runID)
+		cancel(errDelegationStopped)
+	}
 	if marked, ok := r.queued[runID]; ok {
 		delete(r.queued, runID)
 		if marked {
@@ -150,13 +169,21 @@ func (r *childRegistry) disarm(runID string) {
 }
 
 // stop cancels runID's armed work with errDelegationStopped as the cause, or marks runID stopped
-// while it is still held as queued, and reports whether either reached it. A cancel func never
+// while it is still held as queued, and reports whether either reached it. Armed work whose
+// context is already cancelled — a Run the whole Turn's cancel ended, still unwinding — is marked
+// as well, so the fold it is about to be given is skipped when it arms (arm). A cancel func never
 // blocks, so calling it under the lock is safe.
 func (r *childRegistry) stop(runID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if cancel, ok := r.stops[runID]; ok {
-		cancel(errDelegationStopped)
+	if armed, ok := r.stops[runID]; ok {
+		if armed.ctx.Err() != nil {
+			if r.stopMarks == nil {
+				r.stopMarks = make(map[string]bool, 1)
+			}
+			r.stopMarks[runID] = true
+		}
+		armed.cancel(errDelegationStopped)
 		return true
 	}
 	if _, ok := r.queued[runID]; ok {
@@ -243,11 +270,11 @@ func (d retainedDelegate) withRound(round delegateRound) retainedDelegate {
 // entry and rides the session snapshot under the `retained` key (agentState, ADR 0086 D3): the map
 // is emptied by /clear (Agent.ClearContext) and REPLACED by a restore with the set the restored
 // snapshot carries (Agent.restoreState — none, for a snapshot without the key), and a fork keeps
-// only the rounds spawned before its cut (CutSession). A cancel puts it back as it stood: a Turn
-// rolled back by cancel restores the set its Turn began with (markTurn / rollBackTurn), and an
-// aborted Exchange the set its Exchange opened with (markExchange / rollBackExchange), so what a
-// cancelled Turn retained or took is undone with the conversation it rode (ADR 0086 D3). It is
-// guarded because the depth-0 fan-out retains from several pool workers at once (ADR 0039).
+// only the rounds spawned before its cut (CutSession). An aborted Exchange puts it back as its
+// Exchange opened (markExchange / rollBackExchange), so what the dropped Turns retained or took is
+// undone with the conversation they rode (ADR 0086 D3). A cancelled Turn changes nothing here: it
+// is settled, not rolled back, and what its delegations retained stands with the results that name
+// them (ADR 0088). It is guarded because the depth-0 fan-out retains from several pool workers at once (ADR 0039).
 //
 // The zero value is ready to use.
 type retainedDelegates struct {
@@ -255,12 +282,10 @@ type retainedDelegates struct {
 	byName map[string]retainedDelegate
 	seq    uint64 // the last use sequence stamped (retain)
 
-	// atTurn and atExchange are the set as the running Turn began and as the open Exchange opened —
-	// what a cancelled Turn's rollback and an aborted Exchange restore. They are shallow copies of
-	// byName, which is safe because an entry's rounds are never written in place (retain and
-	// withRound clone before they write). Neither is serialized: a restore resets both to the set it
-	// loads (load), and clear empties them with the set.
-	atTurn     map[string]retainedDelegate
+	// atExchange is the set as the open Exchange opened — what an aborted Exchange restores. It is a
+	// shallow copy of byName, which is safe because an entry's rounds are never written in place
+	// (retain and withRound clone before they write). It is not serialized: a restore resets it to
+	// the set it loads (load), and clear empties it with the set.
 	atExchange map[string]retainedDelegate
 }
 
@@ -269,8 +294,8 @@ type retainedDelegates struct {
 // piece of work, and the latest is the one a continuation should pick up from. An unnamed
 // delegation (d.name == "") is not retained — there is no handle a continuation could name it by.
 // retain is the only stamp a use needs: every take is followed by a retain — the continuation's
-// round re-retained, or the entry given back on a refusal — except a cancelled continuation, which
-// retains nothing.
+// round re-retained, or the entry given back on a refusal or on a cancel that reached the
+// continuation before its child started.
 func (r *retainedDelegates) retain(d retainedDelegate) {
 	if d.name == "" {
 		return
@@ -305,9 +330,9 @@ func (r *retainedDelegates) entries() []retainedDelegate {
 // load REPLACES the retained set with entries — a restored session's (Agent.restoreState) — and
 // resumes the use sequence past every stamp they carry, so an entry retained after the restore
 // still sorts as the most recently used and its round after every restored one. The Turn-start and
-// Exchange-start copies are reset to the loaded set: a restore can land mid-Exchange (a snapshot
+// Exchange-start copy is reset to the loaded set: a restore can land mid-Exchange (a snapshot
 // taken after a cancelled Turn), and the Exchange that opened in the outgoing session held a set
-// the incoming one never had, so a later rollback or abort must fall back to what was loaded.
+// the incoming one never had, so a later abort must fall back to what was loaded.
 func (r *retainedDelegates) load(entries []retainedDelegate) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -322,15 +347,7 @@ func (r *retainedDelegates) load(entries []retainedDelegate) {
 			r.seq = max(r.seq, round.seq)
 		}
 	}
-	r.atTurn, r.atExchange = maps.Clone(r.byName), maps.Clone(r.byName)
-}
-
-// markTurn records the set as a Turn begins (Agent.step) — what rollBackTurn restores should the
-// Turn be cancelled.
-func (r *retainedDelegates) markTurn() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.atTurn = maps.Clone(r.byName)
+	r.atExchange = maps.Clone(r.byName)
 }
 
 // markExchange records the set as an Exchange opens (Agent.step, at turnLifecycle.open) — what
@@ -341,24 +358,12 @@ func (r *retainedDelegates) markExchange() {
 	r.atExchange = maps.Clone(r.byName)
 }
 
-// rollBackTurn restores the set the cancelled Turn began with (Agent.turnRolledBack): a pooled
-// sibling the Turn retained before the cancel is forgotten, and an entry a continuation took is
-// back in place. The use sequence is not rewound — a stamp is never reused, and a stamp only
-// orders. Idempotent, as the observer contract requires: a re-attempted Turn cancelled again
-// restores the same mark its re-attempt took.
-func (r *retainedDelegates) rollBackTurn() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.byName = maps.Clone(r.atTurn)
-}
-
 // rollBackExchange restores the set the aborted Exchange opened with (Agent.exchangeAborted), undoing
 // every Turn of it that the abort drops from the conversation.
 func (r *retainedDelegates) rollBackExchange() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.byName = maps.Clone(r.atExchange)
-	r.atTurn = maps.Clone(r.atExchange)
 }
 
 // lookup returns the delegation retained under name.
@@ -372,8 +377,8 @@ func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 // take returns the delegation retained under name and FORGETS it: a continuation consumes
 // the entry it starts from, so the same rounds are never continued twice — the continued child's
 // run is appended to them as a round and the entry retained anew under the name that run ended
-// wearing, whatever its outcome but a cancel — and a cancel's Turn rollback puts the taken entry
-// back (rollBackTurn).
+// wearing, whatever its outcome — and a continuation refused, or reached by a cancel, before its
+// child started gives the taken entry back (runSubAgent).
 func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -471,12 +476,12 @@ func cutRetainedRounds(entries []retainedDelegate, dropped map[string]int) []ret
 	return out
 }
 
-// clear forgets every retained delegation, and the Turn-start and Exchange-start copies a rollback
-// would restore with them — the session that owned them has been cleared or swapped out.
+// clear forgets every retained delegation, and the Exchange-start copy an abort would restore
+// with them — the session that owned them has been cleared or swapped out.
 func (r *retainedDelegates) clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byName, r.atTurn, r.atExchange = nil, nil, nil
+	r.byName, r.atExchange = nil, nil
 }
 
 // ----------------------------------------------------------------------------
@@ -508,11 +513,13 @@ const (
 	// a recovered panic, a loop-level Run error, or a reply the engine refused to hand over as a
 	// report (a missing output file, tool-call markup, a degenerate repeat).
 	delegationFaulted delegationOutcome = "faulted"
-	// delegationCancelled is a child the human cancelled with the whole Turn; its Turn was rolled
-	// back with the parent's.
+	// delegationCancelled is a delegation the human's cancel of the whole Turn reached before its
+	// child started: it took the not-started result (ADR 0088). A child the cancel found running is
+	// delegationStopped.
 	delegationCancelled delegationOutcome = "cancelled"
-	// delegationStopped is a child the human stopped singly (StopChild, ADR 0086 D4): the parent's
-	// Turn went on and read the engine fold of the child's work as a partial result.
+	// delegationStopped is a child the human stopped singly (StopChild, ADR 0086 D4) — the parent's
+	// Turn went on and read the engine fold of the child's work as a partial result — or one the
+	// cancel of the whole Turn found running, which is stopped the same way (ADR 0088).
 	delegationStopped delegationOutcome = "stopped"
 	// delegationRefused is a sub_agent call no child was ever built or started for: the depth
 	// bound, bad arguments, an unknown `continue`, a bad seat or roster, a construction or Submit

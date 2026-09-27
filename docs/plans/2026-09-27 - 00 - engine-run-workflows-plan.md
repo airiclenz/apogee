@@ -101,7 +101,44 @@ The width-1 settle is keyed on the slot kind, never the width: `dispatchGroup`'s
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(agent): a cancelled Turn settles and keeps its finished tool results`
 
-## 2. A cancelled delegation pool keeps its finished children
+## 2. A cancelled delegation pool keeps its finished children — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): re-derived from the assumption that the pool's post-join early return is the only place a cancelled delegation group is dropped: the width-1 loop, dispatchTools and step (loop.go) each carried a dispatchCancelled rollback branch for a delegation. All three now settle. dispatchGroup ends on settledIfCancelled(ctx), so any group the cancel reached returns dispatchSettled, including a leaf-only group whose last leaf finished as the cancel landed (at base that Turn completed and the next one was dropped mid-stream).
+
+NOTES (2026-09-27): the never-started delegation takes a new error-shaped constant, cancelledQueuedDelegationContent ("sub-agent not started: the user cancelled the turn before it started; …"), not item 1's leaf text "not run: cancelled by the user". The Goal and ADR 0088 D2 say "the not-started result", and the TUI tells a delegation that never ran from finished work by the `sub-agent not started:` head (transcript.go neverStarted). The Regression guard's looser "not-run result" wording was read as that. Item 1's commitNotRun still answers delegations after a leaf cancel with the leaf not-run text. That is left as item 1 shipped it.
+
+NOTES (2026-09-27): a slot is settled unstarted at two sites. settleCancelledDelegation runs at the pool dequeue (beside stopQueuedDelegation) and before runCall in the width-1 loop. A ctx check in runSubAgent before the child is built returns dispatchCancelled and gives a continuation's entry back. runDelegation then answers that with the not-started result on a finished phase with Cancelled false. Under a cancel, commitCall appends without the post-tool-result Moment, as settleCancelledLeaf does, but still books a ran child's audit record.
+
+NOTES (2026-09-27): the 20 s bound is defaultCancelFoldBound. An unexported Agent field, cancelFoldBound, overrides it: children inherit it through the delegation seed, and tests inject it. The fold runs on context.WithoutCancel(ctx), capped at min(StreamIdleTimeout, bound). finishAtStop now takes the bound. The quit/shutdown cause is the new domain.ErrShuttingDown. The TUI quit and Scheduler.Close cancel with it, and foldStoppedChild then skips the fold on a marker naming the shutdown.
+
+NOTES (2026-09-27): the second esc×2 works as follows. worker.cancel is now a CancelCauseFunc with a `stopped` latch. A second stopWorker, or a quit after a stop, routes StopChild to every delegate run on the activity board. childRegistry.arm now takes the armed ctx, and a stop that lands on an already-cancelled run leaves a mark (stopMarks). The next arm, the fold's, is then cancelled at once, so a child still unwinding its Run also skips its fold.
+
+NOTES (2026-09-27): retainedDelegates.markTurn/rollBackTurn/atTurn were deleted. Nothing calls them once no dispatch-time cancel rolls a Turn back, and turnRolledBack now only re-arms notices. The ^x fold cut short by a whole-Turn cancel is kept stopped on a new "turn cancelled" marker. At base it became the cancel.
+
+NOTES (2026-09-27): TestE2EOutcomeCancelledDelegationCarriesTheFailureTone keeps its name because item 3's Read-first anchor names it. It now pins `stopped by you` live and on reopen, in the marker tone (not error red), with no ✓. The golden was re-recorded with -update. The rewritten and renamed tests are TestFanOut_CancelKeepsFinishedSiblingsAndStopsRunningOnes, TestFanOut_CancelKeepsASiblingRetainedBeforeIt, TestSubAgent_ACancelledChildIsStoppedAndTheParentTurnSettles, TestSubAgent_ACancelledDelegateIsStoppedAndRetained, TestSubAgent_ACancelledContinuationIsKeptAsItsNextRound and TestDeferredAction_CancelDuringDelegationKeepsOneDirective. The last now asserts the settled Turn's (1 left) directive, not a restored (2 left).
+
+NOTES (2026-09-27): consequential edit — internal/agent/delegationphase_test.go: made necessary by the finished phase no longer being Cancelled (assertCancelledBracket replaced by assertStoppedBracket)
+
+NOTES (2026-09-27): consequential edit — internal/agent/stop_test.go: made necessary by childRegistry.arm's new ctx parameter (plus one registry test for the stop mark)
+
+NOTES (2026-09-27): consequential edit — internal/agent/statemachine_test.go: made necessary by the rename of TestDeferredAction_CancelDuringDelegationRestoresSingleDirective (comment reference)
+
+NOTES (2026-09-27): consequential edit — internal/agent/loop.go: made necessary by dispatchTools no longer returning dispatchCancelled (step's rollback branch and the markTurn call removed, comments restated)
+
+NOTES (2026-09-27): consequential edit — internal/agent/turn.go: made necessary by a delegation cancel settling instead of rolling back (endCancelled/endSettled/observer comments)
+
+NOTES (2026-09-27): consequential edit — internal/tui/bridge_test.go: made necessary by the worker cancel becoming a CancelCauseFunc
+
+NOTES (2026-09-27): consequential edit — internal/tui/e2e_test.go: made necessary by the worker cancel becoming a CancelCauseFunc
+
+NOTES (2026-09-27): consequential edit — internal/tui/interject_test.go: made necessary by the worker cancel becoming a CancelCauseFunc
+
+NOTES (2026-09-27): consequential edit — internal/tui/worker_test.go: made necessary by the worker cancel becoming a CancelCauseFunc
+
+NOTES (2026-09-27): consequential edit — internal/schedule/schedule_test.go: made necessary by Scheduler.Close's new shutdown cause (new pinning test)
+
+NOTES (2026-09-27): item 3 still owns the rest of the display. Until it lands, the armed-esc hint still says "drops %d finished …" (model.go escStopHintDropsFormat). activity.go:459 and transcript.go:1638 comments still speak of a rolled-back delegation. SubAgentPhaseEvent.Cancelled is now never set, but eventjson, headless.go and the TUI folds still read it. Pre-existing gap exposed: a child whose only Turn was settled (a leaf cancel on its first Turn) has exchangeTurns 0, so a stop or cancel gives it the zero-Turn marker instead of a fold.
+
 
 **What:** Recast at the regression check (2026-09-27). Depends on item 1. Closes Stage B of `apogee-2un`.
 **Goal:** a cancel during a `sub_agent` group commits every child's result: a finished child its report; a running child is stopped exactly as `^x` stops it (fold, `[stopped by the user — engine summary follows]` partial result, retained under its name, ledger `stopped`); a queued child the not-started result. No finished child's report is lost.

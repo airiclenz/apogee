@@ -115,7 +115,7 @@ func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng 
 
 	m.transcript.addUser(text, nil)
 	cmd, cancel := startExchange(ctx, eng, domain.UserInput{Text: text}, nil, nil, nil)
-	defer cancel()
+	defer cancel(nil)
 	m.worker.start(cancel, nil) // the launch verb minus its tick: the real CancelFunc, no mailbox
 	m.state = stateRunning
 	m.refreshViewport()

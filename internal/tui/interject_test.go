@@ -345,7 +345,7 @@ func runningModel(t *testing.T) Model {
 func startStubWorker(t *testing.T, m *Model) (cancelled func() bool) {
 	t.Helper()
 	fired := false
-	m.worker.start(func() { fired = true }, newInterjectBox())
+	m.worker.start(func(error) { fired = true }, newInterjectBox())
 	if !m.state.busy() {
 		m.state = stateRunning
 	}

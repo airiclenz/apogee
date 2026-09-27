@@ -127,11 +127,6 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// Derive this Turn's request-scoped working values (rollback boundary, request, deferred
 	// floor) from the current conversation — the same trio refold re-derives after a fold.
 	a.armRequest(t)
-	// Mark the retained set as this Turn begins: a cancel that rolls the Turn back restores it
-	// (Agent.turnRolledBack), so a delegation this Turn retained or took is undone with the Turn
-	// (ADR 0086 D3). Here, not in armRequest, because refold re-arms mid-Turn and a mark is per
-	// Turn attempt; nothing between here and the tool dispatch changes the set.
-	a.retained.markTurn()
 
 	// The PREDICTIVE half of overflow protection: when the calibrated estimate already says this
 	// request cannot fit, fold BEFORE spending the round-trip that would be rejected — and cover
@@ -254,14 +249,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	}
 
 	// The model requested tools: commit the assistant tool-call message, then dispatch
-	// each call through Approval. A cancel that reaches a leaf call settles the Turn — the reply
-	// and a result for every call it issued stay (ADR 0088 D1) — while one that reaches a
-	// delegation still rolls the whole Turn back (ADR 0013 §5).
+	// each call through Approval. A cancel that reaches the dispatch settles the Turn — the reply
+	// and a result for every call it issued stay, a delegation's included (ADR 0088 D1, D2).
 	a.conv.Append(assistantMessage(resp, calls))
-	switch a.dispatchTools(ctx, turn, calls) {
-	case dispatchCancelled:
-		return a.turns.end(t, endCancelled), nil
-	case dispatchSettled:
+	if a.dispatchTools(ctx, turn, calls) == dispatchSettled {
 		return a.turns.end(t, endSettled), nil
 	}
 	if a.turns.wrappingUp() {
@@ -280,10 +271,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 // request and again by refold after a fold rewrites the conversation, so every value the request
 // depends on is re-read from the same post-fold state.
 func (a *Agent) armRequest(t *turnRun) {
-	// rollback marks the boundary a rolled-back cancellation (one during the stream, or inside a
-	// delegation) restores to: this Turn's assistant message and tool results are dropped and the
+	// rollback marks the boundary a rolled-back cancellation (one during the stream, or during a
+	// fold) restores to: this Turn's assistant message and tool results are dropped and the
 	// drained deferred corrections re-queued, so resume re-attempts the Turn from serializable
-	// state. A cancel settled on a leaf call keeps the Turn and never reads it (endSettled). The committed user message is kept — the input
+	// state. A cancel that reached the dispatch keeps the Turn and never reads it (endSettled). The committed user message is kept — the input
 	// is not lost to a cancel. After a fold this re-derives PAST the fold (decision 6: the fold is
 	// history maintenance, not part of the Turn's attempt, so a later cancel keeps it and must
 	// never roll back into a pre-fold index).

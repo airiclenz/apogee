@@ -159,7 +159,7 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	// an Exchange is aborted, the Agent owns what each costs — the undo journal's closing capture
 	// (ADR 0074); the two notices that rode the tool results the rollback drops, the context-fill
 	// ladder (ADR 0077 D4) and the step-budget notice's latch (stepnotice.go); and the retained
-	// delegations a rollback or an abort restores (ADR 0086 D3).
+	// delegations an abort restores (ADR 0086 D3).
 	a.turns = &turnLifecycle{
 		conv:     &a.conv,
 		observer: a,
@@ -172,14 +172,12 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 func (a *Agent) exchangeClosed() { a.closeUndoGroup() }
 
 // turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
-// ROLLBACK (turnLifecycle.end's endCancelled row): the two notices that rode the dropped tool
-// results are re-armed (rearmNotices, stepnotice.go), and the retained delegations are put back as
-// the Turn began (retainedDelegates.rollBackTurn, ADR 0086 D3) — a pooled sibling capped before
-// the cancel is not kept, and an entry a cancelled continuation took is back. The Turn-start copy
-// is held on the retained set itself (markTurn, taken by step), so the observer needs no argument.
+// ROLLBACK (turnLifecycle.end's endCancelled row — a cancel while the reply streamed or during a
+// history fold): the two notices that rode the dropped tool results are re-armed (rearmNotices,
+// stepnotice.go). The retained delegations are left as they stand: a Turn rolled back dispatched no
+// delegation, since a cancel that reaches a dispatch settles the Turn instead (ADR 0088).
 func (a *Agent) turnRolledBack() {
 	a.rearmNotices()
-	a.retained.rollBackTurn()
 }
 
 // exchangeAborted is the Agent's half of the exchangeObserver contract for an Exchange's ABORT
@@ -218,6 +216,7 @@ func (d *delegation) seed(a *Agent) {
 	a.tokenCap = d.tokenCap
 	a.timeCap = d.timeCap
 	a.now = d.now
+	a.cancelFoldBound = d.cancelFoldBound
 	a.effortDialect = d.effortDialect
 	a.dial = d.dial                  // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
 	a.ownsUpstream = d.upstreamOwned // a routed child closes the client it dialled; an unrouted one must never close the session's out from under the parent still speaking over it (Agent.Close)

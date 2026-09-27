@@ -245,9 +245,9 @@ type Scheduler struct {
 	clock  Clock
 
 	// ctx is the root every Firing runs under and every per-Schedule context descends from;
-	// cancel is Close's single lever.
+	// cancel is Close's single lever, pulled with domain.ErrShuttingDown as the cause.
 	ctx    context.Context
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 
 	// wg counts both the per-Schedule loops and the in-flight Firings, so Close joins
 	// everything this Scheduler started. done is closed once that join has happened, which is
@@ -305,7 +305,7 @@ func New(cfg Config) (*Scheduler, error) {
 	if clock == nil {
 		clock = systemClock{}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Scheduler{
 		fire:    cfg.Fire,
 		gate:    cfg.Gate,
@@ -419,6 +419,10 @@ func (s *Scheduler) List() []Status {
 // Nothing is persisted and no Event is emitted: the Driver is going away, and notices into a
 // dying surface are noise. A closed Scheduler accepts nothing further (ErrClosed).
 //
+// The cancel carries domain.ErrShuttingDown as its cause, which a Firing's engine reads as the
+// program leaving rather than a human's stop: it folds none of the delegations it stops, so Close
+// is never held up by a summary call (ADR 0088).
+//
 // Close must never be called from inside a seam — it waits for the goroutine that would be
 // making that call.
 func (s *Scheduler) Close() {
@@ -429,7 +433,7 @@ func (s *Scheduler) Close() {
 		s.order = nil
 		s.mu.Unlock()
 
-		s.cancel()
+		s.cancel(domain.ErrShuttingDown)
 		s.wg.Wait()
 		close(s.done)
 	})

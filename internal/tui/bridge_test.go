@@ -141,7 +141,7 @@ func TestSeamConcurrentEmitApproveCancel(t *testing.T) {
 	go func() { defer wg.Done(); b.Bind(prog) }()
 	// A user stop — may or may not catch the in-flight Approve; both outcomes are valid.
 	wg.Add(1)
-	go func() { defer wg.Done(); cancel() }()
+	go func() { defer wg.Done(); cancel(nil) }()
 
 	wg.Wait()
 	prog.wait()

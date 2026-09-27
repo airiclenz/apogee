@@ -311,26 +311,26 @@ func TestFanOut_SiblingSurvivesAFailedChild(t *testing.T) {
 	}
 }
 
-// TestFanOut_CancelRollsTheWholeTurnBack pins decision 10 at N children: Esc reaches every
-// in-flight child, the pool waits for all of them, and the parent Turn rolls back with NO partial
-// delegation in history — while every child's lifecycle bracket still CLOSES (ADR 0075 decision
-// 12), so a log reader sees the rollback rather than a delegation that never ends.
-func TestFanOut_CancelRollsTheWholeTurnBack(t *testing.T) {
-	sink := &recordingSink{}
+// TestFanOut_CancelKeepsFinishedSiblingsAndStopsRunningOnes pins ADR 0088 D2 at N children: Esc
+// reaches every in-flight child and the pool waits for all of them, but nothing is rolled back — a
+// sibling that finished before the cancel keeps its report, a sibling still running is stopped as
+// the human's stop would stop it, and the parent Turn is settled with both results in call order.
+// The ledger books the two outcomes as the rows they are.
+func TestFanOut_CancelKeepsFinishedSiblingsAndStopsRunningOnes(t *testing.T) {
+	sink := newPhaseTripwireSink("c1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	probe := newConcurrencyProbe(2, 3*time.Second)
-	// Both children reach the Upstream, then the human presses Esc: each stream surfaces the
-	// cancellation the way the real provider does.
+	// The second child is still in flight when the first has reported; only then does the human
+	// press Esc, and its stream surfaces the cancellation the way the real provider does.
 	interrupted := func(c context.Context) {
-		probe.enter(c)
+		waitFor(c, sink.done, 3*time.Second)
 		cancel()
 		<-c.Done()
 	}
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
-		route("task one", interrupted, []provider.Delta{{Kind: provider.DeltaError, Err: "context canceled"}}).
+		route("task one", nil, contentScript("child one done")).
 		route("task two", interrupted, []provider.Delta{{Kind: provider.DeltaError, Err: "context canceled"}})
 
 	a := fanOutAgent(t, sink, 2, up)
@@ -338,23 +338,97 @@ func TestFanOut_CancelRollsTheWholeTurnBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+
+	if res.Status != domain.StatusCancelled || res.Faulted {
+		t.Fatalf("parent result = %+v, want a cancel that is not a fault", res)
+	}
+	results := subAgentResults(sink.events)
+	if len(results) != 2 {
+		t.Fatalf("depth-0 tool results = %d, want 2 — the cancel keeps every delegation's result", len(results))
+	}
+	if results[0].IsError || !strings.Contains(results[0].Content, "child one done") {
+		t.Errorf("finished sibling's result = %+v, want its report intact", results[0])
+	}
+	if results[1].IsError || !strings.HasPrefix(results[1].Content, stoppedResultHead) {
+		t.Errorf("running sibling's result = %+v, want the non-error stopped result", results[1])
+	}
+	assertStoppedBracket(t, sink.events, "c2")
+	var kept int
+	for _, m := range a.conv.Messages() {
+		if m.Role == domain.RoleTool {
+			kept++
+		}
+	}
+	if kept != 2 {
+		t.Errorf("tool messages in the settled Turn = %d, want 2", kept)
+	}
+	rows := a.delegations.rows()
+	if len(rows) != 2 || rows[0].outcome != delegationCompleted || rows[1].outcome != delegationStopped {
+		t.Errorf("ledger rows = %+v, want c1 completed then c2 stopped", rows)
+	}
+}
+
+// TestFanOut_ASlotDequeuedAfterTheCancelIsNeverStarted pins the pool's dequeue under a cancel (ADR
+// 0088 D2): with both workers busy when the human presses Esc, the third delegation is only
+// dequeued after it, so it is never started — no started phase, one finished phase carrying the not-started
+// result with Cancelled false, the not-started result committed in its place, no audit record and a
+// `cancelled` ledger row — while the two running children are stopped.
+func TestFanOut_ASlotDequeuedAfterTheCancelIsNeverStarted(t *testing.T) {
+	sink := &recordingSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	probe := newConcurrencyProbe(2, 3*time.Second)
+	cancelling := func(c context.Context) {
+		probe.enter(c)
+		cancel()
+		<-c.Done()
+	}
+	running := func(c context.Context) {
+		probe.enter(c)
+		<-c.Done()
+	}
+	cancelled := []provider.Delta{{Kind: provider.DeltaError, Err: "context canceled"}}
+	up := newRoutedResponder().
+		route("delegate two things", nil, fanOutScript(
+			[2]string{"c1", "task one"}, [2]string{"c2", "task two"}, [2]string{"c3", "task three"})).
+		route("task one", cancelling, cancelled).
+		route("task two", running, cancelled).
+		route("task three", nil, contentScript("child three done"))
+
+	a := fanOutAgent(t, sink, 2, up)
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
 	if res.Status != domain.StatusCancelled {
 		t.Fatalf("parent status = %q, want %q", res.Status, domain.StatusCancelled)
 	}
-	if res.Faulted {
-		t.Error("a cancelled fan-out reported as a fault; a cancel is a re-attemptable rollback")
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
 	}
-	if peak := probe.peakInFlight(); peak != 2 {
-		t.Errorf("peak children in flight = %d, want 2 (both children must have been in flight)", peak)
-	}
-	if got := subAgentResults(sink.events); len(got) != 0 {
-		t.Errorf("cancelled fan-out surfaced %d tool results, want none", len(got))
-	}
-	assertCancelledBracket(t, sink.events, "c1", "c2")
-	for _, m := range a.conv.Messages() {
-		if m.Role == domain.RoleTool {
-			t.Fatalf("a tool message survived the rollback: %+v", m)
+	for i := range 2 {
+		if results[i].IsError || !strings.HasPrefix(results[i].Content, stoppedResultHead) {
+			t.Errorf("running child %d's result = %+v, want the stopped result", i+1, results[i])
 		}
+	}
+	if !results[2].IsError || results[2].Content != cancelledQueuedDelegationContent {
+		t.Errorf("queued child's result = %+v, want the error-shaped %q", results[2], cancelledQueuedDelegationContent)
+	}
+	phases := phasesFor(sink.events, "c3")
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Cancelled ||
+		phases[0].Result.Content != cancelledQueuedDelegationContent {
+		t.Errorf("queued child's phases = %+v, want one finished phase carrying the not-started result", phases)
+	}
+	for _, ae := range auditEvents(sink.events) {
+		if ae.CallID == "c3" {
+			t.Errorf("the never-started child was audit-recorded (%+v); a child that never ran books no record", ae)
+		}
+	}
+	if rows := a.delegations.rows(); len(rows) != 3 || rows[2].outcome != delegationCancelled {
+		t.Errorf("ledger rows = %+v, want the third row cancelled", rows)
 	}
 }
 
@@ -373,10 +447,11 @@ func (r gatedTaskResponder) Stream(ctx context.Context, req provider.Request) it
 	return r.next.Stream(ctx, req)
 }
 
-// TestFanOut_CancelForgetsASiblingRetainedBeforeIt pins D3's Turn rollback on the pool: a sibling
-// capped — and so retained — before the human cancels the Turn is forgotten with the Turn, since
-// the rollback drops the result that would have told the parent its name.
-func TestFanOut_CancelForgetsASiblingRetainedBeforeIt(t *testing.T) {
+// TestFanOut_CancelKeepsASiblingRetainedBeforeIt pins retention under the settle rule (ADR 0088
+// D2): a sibling capped — and so retained — before the human cancels the Turn stays retained, since
+// its result stands in the settled Turn and names it, and the sibling the cancel stopped is
+// retained beside it under the name its call gave.
+func TestFanOut_CancelKeepsASiblingRetainedBeforeIt(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
@@ -434,8 +509,10 @@ func TestFanOut_CancelForgetsASiblingRetainedBeforeIt(t *testing.T) {
 	if !alphaRetained.Load() {
 		t.Fatal("Alpha was never retained before the cancel; the test did not reach the leak it pins")
 	}
-	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after the Turn was cancelled, want none — Alpha goes with the rolled-back Turn", names)
+	names := a.retained.names()
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Alpha", "Beta"}) {
+		t.Errorf("retained names = %v after the Turn was cancelled, want Alpha (capped) and Beta (stopped)", names)
 	}
 }
 

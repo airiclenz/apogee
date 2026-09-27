@@ -99,13 +99,12 @@ type turnLifecycle struct {
 // caller, so a cancelled Turn never closes the group the Exchange's next writes go into — the
 // host's close (SettleExchange, AbortExchange) or a later Turn's end does.
 //
-// turnRolledBack fires once per Turn ROLLBACK (endCancelled — a cancel during the stream, a fold
-// or a delegation), after the conversation is dropped back to the Turn's boundary. The rollback
+// turnRolledBack fires once per Turn ROLLBACK (endCancelled — a cancel during the stream or a
+// fold), after the conversation is dropped back to the Turn's boundary. The rollback
 // drops the Turn's committed tool results, including the one a notice rode on, so what tracks
 // against the dropped conversation ends here exactly as it does on AbortExchange. A Turn a cancel
 // SETTLED (endSettled) drops nothing and fires nothing. A Step-driven host may re-attempt a
-// rolled-back Turn and cancel again, so an implementation must be idempotent (the re-arm and the
-// retention restore are).
+// rolled-back Turn and cancel again, so an implementation must be idempotent (the re-arm is).
 //
 // exchangeAborted fires once per Exchange ABORT (abort — AbortExchange, and a settle that finds no
 // finished Turn to keep), after the conversation is dropped back to the Exchange's boundary and
@@ -214,13 +213,13 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		faulted = true
 	case endCancelled:
 		// The Turn is rolled back and re-attempted on resume. This is the cancel that left
-		// nothing to keep — one that landed while the reply streamed (no call was issued), during
-		// a history fold, or inside a delegation, which is atomic within the Turn (ADR 0013 §5); a
-		// cancel that lands on a leaf tool call keeps the Turn instead (endSettled).
+		// nothing to keep — one that landed while the reply streamed (no call was issued) or during
+		// a history fold; a cancel that reaches the tool dispatch keeps the Turn instead
+		// (endSettled), a delegation's included (ADR 0088).
 		// Roll the conversation back to the boundary the Turn began at (dropping this Turn's
 		// assistant message and any tool results). Truncate the queue back to its pre-hooks floor
 		// before restoring: the cancelled Turn's own post-response deferrals (e.g. a shrunken
-		// directive built from a delegation that is now rolled back) die with the Turn, so
+		// directive built from a result that is now dropped) die with the Turn, so
 		// restoreDeferred re-queues the drained injections exactly once and a re-attempt or
 		// snapshot never carries two contradictory directives (F6).
 		l.conv.DropRange(t.rollback, l.conv.Len())
@@ -259,10 +258,11 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		status = domain.StatusExchangeComplete
 		stepCapped = true
 	case endSettled:
-		// A cancel that landed on a leaf tool call SETTLES the Turn rather than rolling it back
-		// (ADR 0088 D1): the dispatch has already answered every call the reply issued — a
-		// finished call with its real result, the call the cancel ended with its cancelled result,
-		// the calls never reached with the not-run result — so the reply and its results stand and
+		// A cancel that reached the tool dispatch SETTLES the Turn rather than rolling it back
+		// (ADR 0088 D1, D2): the dispatch has already answered every call the reply issued — a
+		// finished call with its real result, the leaf the cancel ended with its cancelled result,
+		// a running delegation with its stopped result, the calls never reached with the not-run
+		// result — so the reply and its results stand and
 		// nothing is dropped. The Turn COMPLETED as far as the conversation is concerned, so the
 		// counter advances past it and the deferred queue is left as a completed Turn leaves it:
 		// the corrections its request drained were sent and answered, never re-queued. The
@@ -401,7 +401,7 @@ var cancelledNoteLine = mustPrompt("cancelled-note.txt")
 
 // settle closes a cancelled Exchange KEEPING its finished Turns (Agent.SettleExchange's engine
 // half) — the exit for "the human moved on", where abort is the explicit throw-away. The Turn the
-// cancel reached has already been settled or dropped by end(): one cancelled on a leaf tool call
+// cancel reached has already been settled or dropped by end(): one cancelled in its tool dispatch
 // is kept with a result for every call (endSettled — the not-run and the while-it-ran results are
 // tool results like any other), one cancelled while its reply streamed is rolled back
 // (endCancelled). So what stands past exchangeStart is the opening user message and the tool

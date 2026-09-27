@@ -452,13 +452,45 @@ func TestChildRegistry_AStopAfterTheDequeueReachesTheArmedChild(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
-	r.arm(firstRunID, cancel)
+	r.arm(firstRunID, ctx, cancel)
 	if !errors.Is(context.Cause(ctx), errDelegationStopped) {
 		t.Errorf("child context cause = %v, want the stop carried into arm", context.Cause(ctx))
 	}
 	r.unregister(firstRunID)
 	if r.stop(firstRunID) {
 		t.Error("stop on an unregistered run still reached something")
+	}
+}
+
+// TestChildRegistry_AStopOnACancelledRunSkipsItsNextArm pins the second esc×2's reach into a run
+// the Turn's cancel already ended (ADR 0088): the stop cannot cancel that run's context again, so it
+// is held as a mark and the fold armed next is cancelled as it is armed, with the stop as its
+// cause. A stop on a live run leaves no mark behind for the fold after it.
+func TestChildRegistry_AStopOnACancelledRunSkipsItsNextArm(t *testing.T) {
+	var r childRegistry
+	runCtx, cancelRun := context.WithCancelCause(context.Background())
+	r.arm(firstRunID, runCtx, cancelRun)
+	cancelRun(context.Canceled)
+
+	if !r.stop(firstRunID) {
+		t.Fatal("stop on an armed run whose context is already cancelled reached nothing")
+	}
+	foldCtx, cancelFold := context.WithCancelCause(context.Background())
+	defer cancelFold(nil)
+	r.arm(firstRunID, foldCtx, cancelFold)
+
+	if !errors.Is(context.Cause(foldCtx), errDelegationStopped) {
+		t.Errorf("fold context cause = %v, want the stop's mark carried into its arm", context.Cause(foldCtx))
+	}
+
+	liveCtx, cancelLive := context.WithCancelCause(context.Background())
+	r.arm(secondRunID, liveCtx, cancelLive)
+	r.stop(secondRunID)
+	nextCtx, cancelNext := context.WithCancelCause(context.Background())
+	defer cancelNext(nil)
+	r.arm(secondRunID, nextCtx, cancelNext)
+	if nextCtx.Err() != nil {
+		t.Errorf("the fold after a stop on a live run was cancelled as it was armed (cause %v)", context.Cause(nextCtx))
 	}
 }
 

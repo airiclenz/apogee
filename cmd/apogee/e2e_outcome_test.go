@@ -28,7 +28,7 @@ import (
 )
 
 // The prompts testdata/stubllm/outcome.yaml answers, and the wordings the frames are read for. The
-// wordings are internal constants (toolview.go's interruptedSummary, subagent.go's
+// wordings are internal constants (toolregistry.go's delegationStoppedVerdict, subagent.go's
 // subAgentFaultPrefix) restated here for the reason the delegation tests restate theirs: they are
 // what the checklist promises a human will read, so a rename over there has to fail here.
 const (
@@ -47,9 +47,11 @@ const (
 	// what it got through, then the bare verdict word the failure layer words the slot with. The
 	// fault LINE itself is behind the ▶ since the ratified call on failed tool rows (plan
 	// "2026-09-03 - 02", item 7) — which is why the row still shows the delegation's name at all.
-	faultedSlot   = "0 tool calls · error"
-	quotedError   = "error: 3 errors found"
-	interruptedIn = "interrupted — the run did not finish"
+	faultedSlot = "0 tool calls · error"
+	quotedError = "error: 3 errors found"
+	// stoppedSlot is the verdict a delegation the cancel stopped wears (internal/tui's
+	// delegationStoppedVerdict, ADR 0088 D2).
+	stoppedSlot = "stopped by you"
 )
 
 // linesFixture is the twelve-line file the two edits change. Its content is the whole reason the
@@ -135,12 +137,12 @@ func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 // TestE2EOutcomeCancelledDelegationCarriesTheFailureTone is T-15 steps 2 to 4: a delegation stopped
 // with Esc while its child was still working, and what its outcome slot says afterwards.
 //
-// It says it on the REOPENED session, and that is a finding rather than a convenience. A live Esc
-// discards the interrupted Exchange (Model.foldCancelled) and closes nothing: the delegation's call
-// is left open — its leader dots run to the row's edge with no verdict in the slot, and the block
-// keeps the ✦ that marks work still standing behind it. The verdict the checklist asks to see is
-// written by the replay that closes every call a record left open (closeInterruptedCalls), so it
-// exists from the reopen onwards and nowhere before it.
+// Since ADR 0088 a cancel settles the Turn instead of discarding it: the running delegation is
+// stopped exactly as the human's single stop stops it, and its stopped result closes the call. So
+// the live session already reads the verdict — `stopped by you`, in the ordinary marker tone rather
+// than the failure red (the human's stop is not the child's failure), with no done ✓ — and the
+// reopened session reads the same, from the result the record kept. (The name keeps the T-15 step
+// it has always pinned; the tone it pins is now the stopped one.)
 func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 	t.Parallel()
 
@@ -156,26 +158,28 @@ func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 	drv.WaitFor(func() bool { return childRequests(stub, cancelTask) > 0 },
 		tuitest.Awaiting("the child's request, which the script never answers"))
 
-	// Step 3 — Esc×2 stops it (one press only arms the gesture). The note is the whole of what the
-	// live session says about it.
+	// Step 3 — Esc×2 stops it (one press only arms the gesture). The stopped result closes the call
+	// in the live session.
 	stopRun(t, drv)
+	drv.WaitText(stoppedSlot)
 	drv.WaitText("cancelled")
 	drv.WaitQuiet(settled)
 	live := drv.Frame()
-	assertNoDoneMark(t, live, "survey")
+	assertNoDoneMark(t, live, stoppedSlot)
+	assertNoErrorTone(t, live, stoppedSlot)
 
-	// Steps 3 and 4 on the surface that carries them: the reopened session, where the call the
-	// record left open is closed as what befell it, in the scheme's error tone, with no ✓ beside it.
+	// Steps 3 and 4 on the reopened session: the record kept the stopped result, so the call reads
+	// the same verdict in the same tone, with no ✓ beside it.
 	drv.WaitFor(func() bool { return len(sess.sessionRecords()) > 0 },
 		tuitest.Awaiting("the cancelled session to reach the store"))
 	next := restoreNewestSession(t, sess)
 
 	restored := next.Frame()
-	if !strings.Contains(flatten(restored.String()), interruptedIn) {
-		t.Fatalf("the reopened delegation's slot does not read %q:\n%s", interruptedIn, restored)
+	if !strings.Contains(flatten(restored.String()), stoppedSlot) {
+		t.Fatalf("the reopened delegation's slot does not read %q:\n%s", stoppedSlot, restored)
 	}
-	assertErrorTone(t, restored, interruptedIn)
-	assertNoDoneMark(t, restored, interruptedIn)
+	assertNoErrorTone(t, restored, stoppedSlot)
+	assertNoDoneMark(t, restored, stoppedSlot)
 	tuitest.Golden(t, "t15-cancelled-delegation", restored, goldenRedactions(sess)...)
 
 	if err := sess.Quit(); err != nil {

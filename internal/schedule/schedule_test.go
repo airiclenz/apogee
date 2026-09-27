@@ -315,6 +315,37 @@ func TestStopLetsAFiringAlreadyUnderWayFinish(t *testing.T) {
 	}
 }
 
+// TestCloseCancelsAFiringAsAShutdown pins the cause Close cancels a Firing's context with (ADR
+// 0088): domain.ErrShuttingDown, which the Firing's engine reads as the daemon leaving, so it folds
+// none of the delegations it stops and Close is never held up by a summary call.
+func TestCloseCancelsAFiringAsAShutdown(t *testing.T) {
+	t.Parallel()
+
+	clk, rec := newFakeClock(), newRecorder()
+	started := make(chan struct{}, 1)
+	var cause atomic.Value
+	fire := func(ctx context.Context, _ Firing) (Outcome, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		cause.Store(context.Cause(ctx))
+		return Outcome{}, ctx.Err()
+	}
+	s := start(t, clk, rec, fire, nil)
+	if _, err := s.Add(testSpec("nightly")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	rec.next(t, EventCreated)
+	clk.tick(t, 0)
+	rec.next(t, EventFired)
+	signalled(t, started, "the firing to start")
+
+	s.Close()
+
+	if got, _ := cause.Load().(error); !errors.Is(got, domain.ErrShuttingDown) {
+		t.Errorf("the firing's context cause after Close = %v, want domain.ErrShuttingDown", got)
+	}
+}
+
 // TestCloseIsIdempotentAndJoinsEveryGoroutine proves Close is the lever a Driver's quit path
 // can trust: the Firing's context is cancelled, nothing is still running when it returns, and
 // calling it twice neither panics nor races past the first call.

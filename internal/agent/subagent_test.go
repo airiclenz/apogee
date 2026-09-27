@@ -1017,12 +1017,12 @@ func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
 	}
 }
 
-// TestSubAgent_CancelledChildRollsTheParentTurnBack pins the neighbouring row the fault marker
-// must not disturb: a CANCELLED child still unwinds the parent Turn wholesale (D2) — no tool
-// result is surfaced at all, and the cancel is not reported as a fault. runDelegation closes the
-// cancelled delegation's bracket at width 1 exactly as it does on a pool worker (ADR 0075
-// decision 12).
-func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
+// TestSubAgent_ACancelledChildIsStoppedAndTheParentTurnSettles pins the lone delegation under the
+// settle rule (ADR 0088 D2): Esc while the child works stops the child as the human's stop would —
+// its non-error stopped result reaches the parent — and the parent Turn is settled around it, the
+// reply and that result kept, rather than rolled back. The cancel is not reported as a fault, and
+// runDelegation closes the bracket at width 1 exactly as a pool worker does.
+func TestSubAgent_ACancelledChildIsStoppedAndTheParentTurnSettles(t *testing.T) {
 	sink := &recordingSink{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1045,16 +1045,19 @@ func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Status != domain.StatusCancelled {
-		t.Errorf("parent status = %q, want %q (a cancelled child rolls the parent Turn back)", res.Status, domain.StatusCancelled)
+
+	if res.Status != domain.StatusCancelled || res.Faulted {
+		t.Errorf("parent result = %+v, want a cancel that is not a fault", res)
 	}
-	if res.Faulted {
-		t.Error("a cancelled delegation reported as a fault; a cancel is a re-attemptable rollback")
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok || sub.IsError || !strings.HasPrefix(sub.Content, stoppedResultHead) {
+		t.Errorf("delegation result = %+v (found %v), want the non-error stopped result", sub, ok)
 	}
-	if sub, ok := lastSubAgentResult(sink.events); ok {
-		t.Errorf("a cancelled delegation surfaced a tool result (%+v); no partial result may reach the parent", sub)
+	msgs := a.conv.Messages()
+	if last := msgs[len(msgs)-1]; last.Role != domain.RoleTool || last.ToolCallID != "c1" {
+		t.Errorf("last message = %+v, want the settled Turn's result for c1", last)
 	}
-	assertCancelledBracket(t, sink.events, "c1")
+	assertStoppedBracket(t, sink.events, "c1")
 }
 
 // TestSubAgent_ChildInheritsTheLiveNoticeSwitch proves the context-fill notice switch
@@ -2851,7 +2854,8 @@ func TestSubAgent_ResultIsCappedAtSixtyFourKiB(t *testing.T) {
 // outcome that produces a result carries the notice, and the cancelled one produces no result to
 // carry it. It drives delegationResult directly because two of these outcomes cannot be scripted
 // through a.Run — Run returns a Go error only for a loop-level fault it cannot localise, and a
-// cancelled child surfaces no ToolResultEvent at all.
+// cancelled run with neither a stop nor the parent's cancel behind it is one runSubAgent never
+// produces (the dispatch would answer it with the not-started result, ADR 0088 D2).
 func TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled(t *testing.T) {
 	t.Parallel()
 
@@ -2892,7 +2896,7 @@ func TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled(t *testing.T) {
 			t.Fatalf("outcome = %v, want dispatchCancelled", outcome)
 		}
 		if got != (domain.ToolResult{}) {
-			t.Errorf("cancelled result = %+v, want an empty result — a rolled-back delegation carries no notice either", got)
+			t.Errorf("cancelled result = %+v, want an empty result — the not-started result the dispatch gives it carries no notice either", got)
 		}
 	})
 }
@@ -4897,15 +4901,88 @@ func TestSubAgent_FaultedDelegateFoldIsBounded(t *testing.T) {
 	}
 }
 
-// TestSubAgent_CancelledDelegateIsNotRetained keeps D2: a cancel while the child runs unwinds the
-// whole delegation — no fold, no result, no retained name, so nothing to continue.
-func TestSubAgent_CancelledDelegateIsNotRetained(t *testing.T) {
+// TestSubAgent_ACancelledDelegateIsStoppedAndRetained pins the cancel's stop end to end (ADR 0088
+// D2): Esc while the named child runs its second Turn folds the work it did, hands the parent the
+// exact stopped result a human's stop gives — fold, closing text, continue line — retains the
+// delegate under its name for a continue, and books it `stopped` in the ledger.
+func TestSubAgent_ACancelledDelegateIsStoppedAndRetained(t *testing.T) {
+	a, responder, sink := runCancelledSurveyParent(t, map[int]bool{2: true}, nil, 0)
+
+	if got := responder.calls; got != 4 {
+		t.Errorf("the upstream saw %d calls, want 4 — the spawn, one Turn, the cancelled Turn, the fold", got)
+	}
+	want := stoppedResult(childFoldSummary, "reading file 0", nil, retainedSurveyName)
+	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.IsError || got.Content != want {
+		t.Errorf("cancelled delegation result = %+v, want the non-error stopped result\n%s", got, want)
+	}
+	retained, ok := a.retained.lookup(retainedSurveyName)
+	if !ok || len(retained.rounds) != 1 || retained.rounds[0].report != summaryReport(childFoldSummary, "reading file 0") {
+		t.Errorf("retained delegate = %+v (found %v), want one round reporting the fold", retained, ok)
+	}
+	if rows := a.delegations.rows(); len(rows) != 1 || rows[0].outcome != delegationStopped {
+		t.Errorf("ledger rows = %+v, want one stopped row", rows)
+	}
+}
+
+// TestSubAgent_ACancelFoldPastItsBoundIsKeptUnavailable pins the cancel fold's bound (the owner's
+// 20 s, injected smaller here): a fold that has not answered by then is cut, and the stopped result
+// and the retained round carry the unavailable marker naming the bound in the fold's place.
+func TestSubAgent_ACancelFoldPastItsBoundIsKeptUnavailable(t *testing.T) {
+	a, _, sink := runCancelledSurveyParent(t, map[int]bool{2: true, 3: true}, nil, 20*time.Millisecond)
+
+	marker := fmt.Sprintf(engineFoldUnavailableFormat, fmt.Sprintf(foldBoundExceededFormat, "20ms"))
+	want := stoppedResult(marker, "reading file 0", nil, retainedSurveyName)
+	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.IsError || got.Content != want {
+		t.Errorf("cancelled delegation result = %+v, want the stopped result with the bound's marker\n%s", got, want)
+	}
+	if retained, ok := a.retained.lookup(retainedSurveyName); !ok || len(retained.rounds) != 1 ||
+		retained.rounds[0].report != summaryReport(marker, "reading file 0") {
+		t.Errorf("retained delegate = %+v (found %v), want one round reporting the marker", retained, ok)
+	}
+}
+
+// TestSubAgent_ASecondStopDuringTheCancelFoldReturnsAtOnce pins the second esc×2 (ADR 0088): a stop
+// landing while the cancel's fold of a running child is in flight cuts that fold at once — the run
+// returns long before the 20 s bound — and the stopped result carries the second stop's marker.
+func TestSubAgent_ASecondStopDuringTheCancelFoldReturnsAtOnce(t *testing.T) {
+	var runID string
+	started := time.Now()
+	_, _, sink := runCancelledSurveyParent(t, map[int]bool{2: true, 3: true}, func(parent *Agent, call int) {
+		switch call {
+		case 2:
+			runID = runningChildRunID(t, parent)
+		case 3:
+			if err := parent.StopChild(runID); err != nil {
+				t.Errorf("StopChild during the cancel's fold = %v, want nil", err)
+			}
+		}
+	}, 0)
+
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Errorf("the run took %v, want it to return at once after the second stop", elapsed)
+	}
+	marker := fmt.Sprintf(engineFoldUnavailableFormat, secondStopFoldCause)
+	want := stoppedResult(marker, "reading file 0", nil, retainedSurveyName)
+	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.Content != want {
+		t.Errorf("cancelled delegation result = %+v, want the stopped result with the second stop's marker\n%s", got, want)
+	}
+}
+
+// TestSubAgent_AShutdownCancelSkipsTheFold pins the cancel that is the program leaving (a quit, a
+// daemon's shutdown — domain.ErrShuttingDown as the context's cause): no fold request is made, and
+// the running child is stopped at once on the unavailable marker naming the shutdown.
+func TestSubAgent_AShutdownCancelSkipsTheFold(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
-	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName))}
-	scripts = append(scripts, cappedChildTurns(1)...)
-	responder := &blockAtResponder{scripts: scripts, blockAt: 2, started: make(chan struct{})} // the child's second Turn blocks
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	responder := &stopResponder{scripts: stoppedSurveyScripts("c1"), block: map[int]bool{2: true, 3: true}}
+	responder.before = func(call int) {
+		if call == 2 {
+			cancel(domain.ErrShuttingDown)
+		}
+	}
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -4913,11 +4990,6 @@ func TestSubAgent_CancelledDelegateIsNotRetained(t *testing.T) {
 	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-responder.started
-		cancel()
-	}()
 
 	res, err := a.Run(ctx)
 	if err != nil {
@@ -4927,22 +4999,104 @@ func TestSubAgent_CancelledDelegateIsNotRetained(t *testing.T) {
 	if res.Status != domain.StatusCancelled {
 		t.Fatalf("parent result = %+v, want a cancel", res)
 	}
-	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after a cancel, want none", names)
-	}
 	if got := responder.calls; got != 3 {
-		t.Errorf("the upstream saw %d calls, want 3 — no fold request after a cancel", got)
+		t.Errorf("the upstream saw %d calls, want 3 — no fold request on a shutdown", got)
 	}
-	if _, ok := subAgentResultFor(sink.events, "c1"); ok {
-		t.Error("a cancelled delegation surfaced a result")
+	marker := fmt.Sprintf(engineFoldUnavailableFormat, shutdownFoldCause)
+	want := stoppedResult(marker, "reading file 0", nil, retainedSurveyName)
+	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.Content != want {
+		t.Errorf("cancelled delegation result = %+v, want the stopped result with the shutdown marker\n%s", got, want)
 	}
 }
 
-// TestSubAgent_ACancelledContinuationLeavesTheEntryItTook keeps D2 on the continue path and D3's
-// rollback: a cancel while the continued child runs unwinds the delegation, so no round is appended
-// for a run that returned no result — and the Turn's rollback puts back the entry the continuation
-// took, exactly as the Turn began, so the parent can still continue it.
-func TestSubAgent_ACancelledContinuationLeavesTheEntryItTook(t *testing.T) {
+// TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted pins the one delegation a
+// cancel still leaves unstarted rather than stopped (ADR 0088 D2): a call whose context is already
+// cancelled when it would build its child builds none — it takes the not-started result, carried on
+// a finished phase with Cancelled false, books no audit record and a `cancelled` ledger row — and a
+// continuation reached so gives the entry it took back.
+func TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted(t *testing.T) {
+	sink := &recordingSink{}
+	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), scriptedResponder(t))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.retained.retain(retainedDelegate{task: "earlier work", name: "Earlier", rounds: []delegateRound{{report: "done"}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	call := domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: []byte(continueArgs("Earlier", "carry on", 0))}
+	slot := dispatchSlot{call: call, verdict: resolution{kind: resolveDelegate}, run: true}
+
+	a.runCall(ctx, 0, &slot)
+
+	if slot.outcome != dispatchCancelled || slot.delegated {
+		t.Errorf("slot outcome = %v, delegated = %v, want dispatchCancelled with no audit record owed", slot.outcome, slot.delegated)
+	}
+	if !slot.result.IsError || slot.result.Content != cancelledQueuedDelegationContent {
+		t.Errorf("slot result = %+v, want the error-shaped %q", slot.result, cancelledQueuedDelegationContent)
+	}
+	phases := phasesFor(sink.events, "c1")
+	if n := len(phases); n == 0 || phases[n-1].Phase != domain.SubAgentFinished || phases[n-1].Cancelled ||
+		phases[n-1].Result.Content != cancelledQueuedDelegationContent {
+		t.Errorf("phases = %+v, want a closing finished phase carrying the not-started result", phases)
+	}
+	if rows := a.delegations.rows(); len(rows) != 1 || rows[0].outcome != delegationCancelled {
+		t.Errorf("ledger rows = %+v, want one cancelled row", rows)
+	}
+	if kept, ok := a.retained.lookup("Earlier"); !ok || len(kept.rounds) != 1 {
+		t.Errorf("retained entry = %+v (found %v), want the taken entry given back with its one round", kept, ok)
+	}
+}
+
+// runCancelledSurveyParent drives a parent whose one named delegation (stoppedSurveyScripts) runs
+// one Turn and is then caught by the cancel of the parent's whole Turn in its second Turn's request
+// (call 2). block lists the calls that block until their context ends; before, when set, also runs
+// before each call with the parent; foldBound, when positive, is the cancel's fold bound. It checks
+// the parent settled on a cancel and returns the parent, the responder and the sink.
+func runCancelledSurveyParent(
+	t *testing.T,
+	block map[int]bool,
+	before func(parent *Agent, call int),
+	foldBound time.Duration,
+) (*Agent, *stopResponder, *recordingSink) {
+	t.Helper()
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	responder := &stopResponder{scripts: stoppedSurveyScripts("c1"), block: block}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.cancelFoldBound = foldBound
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	responder.before = func(call int) {
+		if before != nil {
+			before(a, call)
+		}
+		if call == 2 {
+			cancel()
+		}
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusCancelled || res.Faulted {
+		t.Fatalf("parent result = %+v, want a cancel that is not a fault", res)
+	}
+	return a, responder, sink
+}
+
+// TestSubAgent_ACancelledContinuationIsKeptAsItsNextRound keeps D2's continue path under the
+// settle rule (ADR 0088 D2): a cancel while the continued child runs stops it, so its run is
+// appended to the entry it took as the second round — the zero-Turn marker standing for a fold
+// there was no Turn to make — and the stopped result reaches the parent.
+func TestSubAgent_ACancelledContinuationIsKeptAsItsNextRound(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
@@ -4973,11 +5127,11 @@ func TestSubAgent_ACancelledContinuationLeavesTheEntryItTook(t *testing.T) {
 		t.Fatalf("parent result = %+v, want a cancel", res)
 	}
 	kept, ok := a.retained.lookup(retainedSurveyName)
-	if !ok || len(kept.rounds) != 1 || kept.rounds[0].spawnCallID != "c1" {
-		t.Errorf("retained under %q = %+v (found %v) after a cancelled continuation, want the entry it took with its one round", retainedSurveyName, kept, ok)
+	if !ok || len(kept.rounds) != 2 || kept.rounds[0].spawnCallID != "c1" || kept.rounds[1].spawnCallID != "c2" {
+		t.Errorf("retained under %q = %+v (found %v) after a cancelled continuation, want its two rounds", retainedSurveyName, kept, ok)
 	}
-	if _, ok := subAgentResultFor(sink.events, "c2"); ok {
-		t.Error("a cancelled continuation surfaced a result")
+	if got, ok := subAgentResultFor(sink.events, "c2"); !ok || got.IsError || !strings.HasPrefix(got.Content, stoppedResultHead) {
+		t.Errorf("cancelled continuation result = %+v (found %v), want the non-error stopped result", got, ok)
 	}
 }
 

@@ -18,22 +18,24 @@ import (
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
-// dispatchOutcome reports whether a Turn's tool dispatch ran to completion or was cut short
-// by a ctx cancellation — settled, every call answered, or cancelled inside a delegation, which
-// rolls the whole Turn back.
+// dispatchOutcome reports whether a Turn's tool dispatch ran to completion or was cut short by a
+// ctx cancellation, which settles it with every call answered.
 type dispatchOutcome int
 
 const (
 	dispatchDone dispatchOutcome = iota
-	// dispatchCancelled reports a call that ended on a ctx cancellation. On a slot it is the call's
-	// own outcome — a leaf slot then already carries its cancelled result (cancelledWhileRunningContent
-	// or notRunCancelledContent). From dispatchTools it means a DELEGATION took the cancel, which is
-	// still atomic within the parent Turn (ADR 0013 §5): the caller rolls the Turn back.
+	// dispatchCancelled reports a call that ended on a ctx cancellation. It is only ever a slot's
+	// own outcome, and the slot then already carries its cancelled result: a leaf the running or the
+	// not-run text (cancelledWhileRunningContent, notRunCancelledContent), a delegation the cancel
+	// reached before its child was built the not-started text (cancelledQueuedDelegationContent,
+	// runDelegation). A delegation whose child
+	// the cancel found running is not one: it is stopped and ends dispatchDone (runSubAgent).
 	dispatchCancelled
-	// dispatchSettled reports a cancel that reached a LEAF call (ADR 0088 D1): the dispatch stopped
-	// there and every call of the reply now has a result in history — the finished calls their real
-	// results, the cancelled one its cancelled result, the calls never reached the not-run result
-	// (commitNotRun) — so the Turn is kept, not rolled back (end()'s endSettled row).
+	// dispatchSettled reports a cancel that reached the dispatch (ADR 0088 D1, D2): every call of
+	// the reply now has a result in history — the finished calls their real results, a cancelled
+	// leaf its cancelled result, a running delegation its stopped result, the calls never reached
+	// the not-run result (commitNotRun) — so the Turn is kept, not rolled back (end()'s endSettled
+	// row).
 	dispatchSettled
 	// dispatchConfinementUnavailable reports that a Confine subprocess call could not be
 	// confined at run time (the Confiner returned ErrConfinementUnavailable). The call did NOT
@@ -56,19 +58,17 @@ const (
 // group then runs concurrently or serially — a write a child depends on lands before any child
 // starts, and the model maps results back by call ID either way.
 //
-// A cancel is answered where it lands (ADR 0088 D1). One that reaches a leaf call returns
-// dispatchSettled: the leaf group commits its cancelled call's result and the not-run result for
-// its calls never reached, and dispatchTools adds the not-run result for every delegation of the
-// reply, so the Turn is kept whole. One that reaches a delegation returns dispatchCancelled and
-// the caller rolls the Turn back (ADR 0013 §5). Every other failure — an unknown tool, a
+// A cancel is answered where it lands, and every answer keeps the Turn whole: dispatchSettled
+// (ADR 0088). One that reaches a leaf call ends the leaf group there — its cancelled call's result
+// and the not-run result for its calls never reached — and dispatchTools adds the not-run result for
+// every delegation of the reply. One that reaches the delegation group commits every slot of it in
+// call order (dispatchGroup): a finished child its report, a running child its stopped result, a
+// child not yet started the not-started result. Every other failure — an unknown tool, a
 // denied call, a tool error, a recovered tool panic — becomes an error tool-result the
 // model sees on the next Turn, and dispatch continues to the next call (ADR 0007).
 func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
 	leaves, delegations := partitionDispatch(calls)
-	switch a.dispatchGroup(ctx, turn, 1, leaves) {
-	case dispatchCancelled:
-		return dispatchCancelled
-	case dispatchSettled:
+	if a.dispatchGroup(ctx, turn, 1, leaves) == dispatchSettled {
 		// A leaf took the cancel, so no delegation of this reply ever started: each is answered
 		// not-run, in emitted order, and the Turn is kept whole.
 		a.commitNotRun(turn, delegations)
@@ -310,14 +310,14 @@ func (a *Agent) delegationCap() int {
 // history — stays on the dispatching goroutine, in emitted-call order, on either side of the
 // pool. That is what keeps the Agent's own state (reactions, guards, conversation) single-goroutine
 // while N children run, and what makes the resulting history DETERMINISTIC regardless of which
-// child finishes first. A pooled group's cancellation is answered between the last two phases —
-// every child is joined first, then the whole group is discarded unappended, so the parent Turn
-// rolls back with no partial delegation in history (ADR 0013 §5, now N-wide). A leaf's
-// cancellation is answered at its own commit instead: the call commits its cancelled result and
-// the Turn is settled (ADR 0088 D1). dispatchTools hands the pool
-// delegations only — the leaf group always runs at width 1 — but the phases themselves are blind
-// to a call's kind, which is what makes a call's disposition a property of the call alone and
-// never of the width its group happened to run under.
+// child finishes first. A delegation group's cancellation is answered in the run phase — a
+// running child is stopped and folded, one not yet started is settled unstarted — and the commit
+// phase then lands every slot as it always does, so no finished child's report is lost (ADR 0088
+// D2). A leaf's cancellation is answered at its own commit instead: the call commits its cancelled
+// result and the group ends there (ADR 0088 D1). Either way the Turn is settled. dispatchTools
+// hands the pool delegations only — the leaf group always runs at width 1 — but the phases
+// themselves are blind to a call's kind, which is what makes a call's disposition a property of
+// the call alone and never of the width its group happened to run under.
 
 // dispatchSlot is one call's state as it crosses the pipeline: what prepareCall decided about the
 // call before anything ran, what runCall produced, and how it ended. Each slot is written by
@@ -366,19 +366,21 @@ type dispatchSlot struct {
 	widthNote string
 }
 
-// dispatchGroup runs one group of calls through the pipeline, width at a time. A call that ends
-// on a cancellation ends the group: a LEAF call settles it (settleCancelledLeaf) and the group
-// returns dispatchSettled with every one of its calls answered; a DELEGATION returns
-// dispatchCancelled and the caller rolls the Turn back.
+// dispatchGroup runs one group of calls through the pipeline, width at a time, and reports
+// dispatchSettled when the user's cancel reached it — every one of its calls then answered — and
+// dispatchDone otherwise. A LEAF call that ends on the cancel ends the group: it settles it
+// (settleCancelledLeaf) with the not-run result for the calls after it. A DELEGATION never ends
+// it: a child the cancel found running is stopped and folded (runSubAgent) and one it reached
+// before starting takes the not-started result (settleCancelledDelegation, runDelegation), and each is
+// committed in its turn like any other result (ADR 0088 D2).
 //
 // Width 1 is the per-call loop: prepare, run and commit each call before the next is looked at,
 // so a call's result is in history before its successor's ToolCallEvent — the path every leaf
 // group takes, and a delegation group's whenever fanOutWidthFor says 1 (cap < 2, a delegate, or a
 // single call). The settle is keyed on the slot's kind, never on the width: a delegation that
-// runs at width 1 is cancelled exactly as a pooled one is. Above 1 the whole group is prepared — the calls within the fan-out ceiling to a
+// runs at width 1 is settled exactly as a pooled one is. Above 1 the whole group is prepared — the calls within the fan-out ceiling to a
 // verdict, the calls past it to their refusal (refusePastCeiling) — then run through a pool of
-// width workers, then committed in emitted-call order — a delegation is atomic within the parent
-// Turn, so a cancelled group is dropped whole, unappended, after the join (ADR 0013 §5).
+// width workers, then committed in emitted-call order, the cancel's settled slots included.
 //
 // A group wider than its width states that width once, on its last committed result
 // (fanOutWidthNote) — decided here, after the join, because whether every slot ran is only known
@@ -395,17 +397,16 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 		for i, call := range calls {
 			slot := a.prepareCall(ctx, turn, call, true, i, len(calls))
 			a.recordCeilingRefusal(&slot)
-			a.runCall(ctx, turn, &slot)
-			if slot.outcome == dispatchCancelled {
-				if slot.verdict.kind == resolveDelegate {
-					return dispatchCancelled
-				}
+			if !a.settleCancelledDelegation(ctx, turn, &slot) {
+				a.runCall(ctx, turn, &slot)
+			}
+			if slot.outcome == dispatchCancelled && slot.verdict.kind != resolveDelegate {
 				a.settleCancelledLeaf(turn, &slot, calls[i+1:])
 				return dispatchSettled
 			}
 			a.commitCall(ctx, turn, &slot)
 		}
-		return dispatchDone
+		return settledIfCancelled(ctx)
 	}
 
 	slots := make([]dispatchSlot, len(calls))
@@ -431,18 +432,23 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 
 	a.runPool(ctx, turn, width, slots)
 
-	// Join first, decide after: a sibling that reached its boundary with a usable result is
-	// still discarded, because the recovery point is the pre-dispatch boundary of the whole Turn.
-	for i := range slots {
-		if slots[i].outcome == dispatchCancelled {
-			return dispatchCancelled
-		}
-	}
+	// Join first, commit after: a cancel has already been answered slot by slot in the run phase,
+	// so every slot holds its result and the whole group lands in call order (ADR 0088 D2).
 	if everySlotRan(slots) {
 		slots[len(slots)-1].widthNote = fanOutWidthNote(len(slots), width)
 	}
 	for i := range slots {
 		a.commitCall(ctx, turn, &slots[i])
+	}
+	return settledIfCancelled(ctx)
+}
+
+// settledIfCancelled is a group's outcome once every one of its calls is committed: dispatchSettled
+// when the user's cancel has reached the dispatch — the Turn is then kept as it stands and ends
+// there (end()'s endSettled row) — and dispatchDone otherwise.
+func settledIfCancelled(ctx context.Context) dispatchOutcome {
+	if ctx.Err() != nil {
+		return dispatchSettled
 	}
 	return dispatchDone
 }
@@ -630,8 +636,8 @@ func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	switch slot.verdict.kind {
 	case resolveDelegate:
 		slot.result, slot.outcome = a.runDelegation(ctx, turn, slot)
-		// A cancelled group is discarded unappended and never reaches commitCall; the record is
-		// owed only for a child that ran to a result.
+		// The record is owed only for a child that ran: one the cancel reached before it was
+		// built commits its not-started result with none.
 		slot.delegated = slot.outcome != dispatchCancelled
 	case resolveGate:
 		slot.result, slot.outcome = a.executeGate(ctx, turn, slot.tool, slot.call, slot.verdict)
@@ -651,6 +657,11 @@ func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 // because no decision was ever reached about the call. A refused slot was already recorded by
 // executeRefuse in the prepare phase, a leaf by its own arm in the run phase, and a slot the pool
 // skipped for a pending interjection never ran and records nothing.
+//
+// Once the user's cancel has reached the dispatch, a slot is appended without the post-tool-result
+// Moment, as settleCancelledLeaf appends a cancelled leaf: the Turn is being settled, and no
+// reaction can run under the cancelled context. The audit record a child that ran earns is still
+// booked (ADR 0088 D2).
 func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	if slot.hookFailed {
 		a.appendToolResult(turn, slot.call, slot.runID, slot.result, "", nil)
@@ -664,6 +675,10 @@ func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 		// own result, and as the last line of the BODY — the SeatFallbackNote precedent — so the
 		// user-steered trailer stays the result's final line where both apply (ADR 0063 D3).
 		slot.result.Content = withBodyNote(slot.result.Content, slot.widthNote)
+	}
+	if ctx.Err() != nil {
+		a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, nil)
+		return
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
 	a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, advised)
@@ -752,6 +767,10 @@ func everySlotRan(slots []dispatchSlot) bool {
 // unwinds at its own next boundary; the join below is what "the pool waits" means. A child's
 // failure is ITS result and nothing more — no sibling is cancelled (ADR 0039 decision 4).
 //
+// The dequeue is also where the user's cancel reaches a pooled delegation no worker has taken yet
+// (settleCancelledDelegation): it is settled unstarted, while every child already
+// running is stopped at its own boundary (runSubAgent).
+//
 // The dequeue is where a queued user message PRE-EMPTS a pooled group (preemptDelegation): a
 // delegation dequeued while a message waits for the boundary is not run at all — it takes the
 // skip result and only a finished phase, at once, so a Driver's row leaves "scheduled"
@@ -783,15 +802,43 @@ func (a *Agent) runPool(ctx context.Context, turn, width int, slots []dispatchSl
 }
 
 // runPooledSlot is one pool worker's handling of the slot it dequeued: a delegation the human
-// stopped while it waited is settled unstarted (stopQueuedDelegation), then one a queued message
-// pre-empts (preemptDelegation), and anything else runs. The slot's queued entry is forgotten once
-// it has settled, whichever way it went.
+// stopped while it waited is settled unstarted (stopQueuedDelegation), then one dequeued after the
+// user's cancel (settleCancelledDelegation), then one a queued message pre-empts
+// (preemptDelegation), and anything else runs. The slot's queued entry is forgotten once it has
+// settled, whichever way it went.
 func (a *Agent) runPooledSlot(ctx context.Context, turn int, slot *dispatchSlot) {
 	defer a.children.unqueue(slot.runID)
-	if a.stopQueuedDelegation(turn, slot) || a.preemptDelegation(turn, slot) {
+	if a.stopQueuedDelegation(turn, slot) || a.settleCancelledDelegation(ctx, turn, slot) ||
+		a.preemptDelegation(turn, slot) {
 		return
 	}
 	a.runCall(ctx, turn, slot)
+}
+
+// settleCancelledDelegation settles a delegation the user's cancel reached before its child
+// started — dequeued by a pool worker, or reached by the width-1 loop, after the cancel (ADR 0088
+// D2): nothing is built or run, it takes the not-started result (cancelledQueuedDelegationContent)
+// and its finished phase at once
+// (skipDelegation), its run flag is cleared so commitCall books no audit record, and its
+// delegate-ledger row is booked here, `cancelled` by the rule every row is (classifyDelegation),
+// since the call never reaches runSubAgent. True
+// is returned for a slot it settled; a leaf, a slot with nothing left to run, and any slot while
+// the context is live are left alone.
+func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *dispatchSlot) bool {
+	if ctx.Err() == nil || !slot.run || slot.verdict.kind != resolveDelegate {
+		return false
+	}
+	slot.run = false
+	slot.result = a.skipDelegation(turn, slot, errorToolResult(slot.call.ID, cancelledQueuedDelegationContent))
+	ended, cause := classifyDelegation(slot.result, dispatchCancelled, false, false, domain.StepResult{})
+	a.delegations.record(delegationRecord{
+		spawnIndex: a.delegations.open(slot.call.ID),
+		callID:     slot.call.ID,
+		name:       delegationLabel("", slot.call),
+		outcome:    ended,
+		cause:      cause,
+	})
+	return true
 }
 
 // stopQueuedDelegation settles a pooled delegation the human stopped before a worker took it (ADR
@@ -824,6 +871,13 @@ func (a *Agent) stopQueuedDelegation(turn int, slot *dispatchSlot) bool {
 // Driver and the model read every unstarted kind alike, and it is a constant because it is the
 // model's only account of a child that never ran.
 const stoppedQueuedDelegationContent = "sub-agent not started: the user stopped it before it started; delegate again if the task is still needed"
+
+// cancelledQueuedDelegationContent is the whole tool result of a delegation the user's cancel of the
+// whole Turn reached before its child started (settleCancelledDelegation, runDelegation; ADR 0088
+// D2): error-shaped under the same `sub-agent not started:` head as every other unstarted kind, so
+// a Driver reads it as a delegation that never ran rather than a child's own failure, and a constant
+// because it is the model's only account of that child.
+const cancelledQueuedDelegationContent = "sub-agent not started: the user cancelled the turn before it started; delegate again if the task is still needed"
 
 // skippedDelegationContent is the whole tool result a delegation pre-empted by a queued user
 // message carries. It is a constant because it is the model's only account of a child that never
@@ -872,8 +926,9 @@ func (a *Agent) interjectionPending() bool {
 // phase that closes the child's bracket without a started one — carrying that result, not
 // Cancelled, since nothing is rolled back — and returns it for the caller to commit in call order.
 // Its callers are the ways a delegation is settled before it starts, preemptDelegation (a
-// queued message) and refusePastCeiling (the fan-out ceiling), at either width, so a lone
-// delegation is closed exactly as a pooled one — and stopQueuedDelegation (the human's stop on a
+// queued message), refusePastCeiling (the fan-out ceiling) and settleCancelledDelegation (the
+// user's cancel), at either width, so a lone delegation is closed exactly as a pooled one — and
+// stopQueuedDelegation (the human's stop on a
 // pooled delegation still waiting for a worker), which only a pool has. The phase carries the run id the slot's head
 // ToolCallEvent carried, so the bracket closes the block that event opened.
 func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolResult) domain.ToolResult {
@@ -885,10 +940,12 @@ func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolR
 // by the lifecycle phases a Driver reads (domain.SubAgentPhaseEvent): started as the child is
 // reached — the instant a pool worker dequeues it, or the instant the width-1 loop arrives at it,
 // which is what makes a slot-less delegation observably queued rather than silently pending — and
-// finished, carrying the result, as the child returns. A child the human CANCELLED is bracketed
-// too: the cancelled delegation is rolled back with the parent Turn and never becomes a result, so
-// its finished phase carries none and says so (ADR 0075 decision 12) — an unclosed bracket would
-// be a delegation no Driver can see end.
+// finished, carrying the result, as the child returns. A child the user's cancel found running
+// returns its stopped result like any other (runSubAgent); a call the cancel reached before its
+// child was built returns dispatchCancelled, and is answered here with the not-started result
+// (cancelledQueuedDelegationContent), carried
+// on its finished phase with Cancelled false like every other (ADR 0088 D2, superseding ADR 0075
+// decision 12) — the slot commits it, so no delegation ends without a result.
 //
 // The recover that keeps a child's panic from crossing a pool worker's top frame — which would
 // take the process down with it — sits in runSubAgent's own frame, inside every caller's chain,
@@ -918,7 +975,8 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, slot *dispatchSlot)
 	})
 	result, outcome := a.runSubAgent(ctx, call, runID)
 	if outcome == dispatchCancelled {
-		a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Cancelled: true})
+		result = errorToolResult(call.ID, cancelledQueuedDelegationContent)
+		a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 		return result, dispatchCancelled
 	}
 	a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})

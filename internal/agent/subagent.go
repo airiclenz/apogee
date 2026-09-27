@@ -38,12 +38,12 @@ import (
 //
 // The sub-agent runs ATOMICALLY WITHIN the parent Turn (D2): the parent is mid-tool-dispatch
 // while the nested loop runs to completion, so there is no quiescent boundary inside it. A
-// cancel propagates to the nested loop's next boundary and unwinds the whole call (the parent
-// rolls its Turn back from the pre-sub_agent boundary); no partial sub-agent result is
-// surfaced and no snapshot lands mid-sub-agent. Nested STEPPING (suspend/resume a sub-agent at
-// its own boundary) is deliberately out of scope for v1 — the driver below runs the nested
-// Agent to its Exchange boundary in one shot, behind a seam a later snapshot-schema-additive
-// change can swap for a suspendable driver.
+// cancel propagates to the nested loop's next boundary and STOPS the child there, as the human's
+// stop does: its work is folded and handed back as the stopped partial result, and the parent's
+// Turn is settled with it (ADR 0088 D2); no snapshot lands mid-sub-agent. Nested STEPPING
+// (suspend/resume a sub-agent at its own boundary) is deliberately out of scope for v1 — the
+// driver below runs the nested Agent to its Exchange boundary in one shot, behind a seam a later
+// snapshot-schema-additive change can swap for a suspendable driver.
 
 // defaultMaxSubAgentDepth is what a Config.Delegation.MaxDepth of 0 reads as: the top-level agent
 // (depth 0) delegates, and its delegates do not. It is the engine's own floor rather than the
@@ -821,8 +821,10 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 
 // runSubAgent is the recursion point: it parses the delegated task, constructs a nested Agent
 // bounded by this Agent's privileges (ADR 0005/0013), drives it to its Exchange boundary, and
-// returns the sub-agent's final message as this call's tool result. A cancellation propagates
-// out as dispatchCancelled so the parent rolls the whole Turn back (atomic-within-the-Turn);
+// returns the sub-agent's final message as this call's tool result. A cancellation of the parent's
+// Turn STOPS a running child exactly as the human's stop does — folded, answered with the stopped
+// partial result, retained — and one that reached the call before its child was built returns
+// dispatchCancelled, which the dispatch answers with the not-started result (ADR 0088 D2);
 // a FAULTED child Exchange — abandoned rather than completed, which closes on the same
 // StatusExchangeComplete a real completion does — returns an ERROR result naming the fault
 // instead of the child's last assistant text (StepResult.Faulted). A STEP-CAPPED child
@@ -847,11 +849,12 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
 // results, so every way out of this frame — a refusal before any child exists, a cancel, a fault, a
 // cap, a completion, a recovered panic — is classified from the ToolResult and dispatchOutcome
-// actually returned (classifyDelegation) and lands as one row. Two calls that never reach it book
+// actually returned (classifyDelegation) and lands as one row. Three calls that never reach it book
 // their rows themselves: a delegation refused past the reply's fan-out ceiling, which dispatchGroup
-// books (recordCeilingRefusal, dispatch.go) — the ceiling's own second site — and a pooled
+// books (recordCeilingRefusal, dispatch.go) — the ceiling's own second site — a pooled
 // delegation the human stopped before a worker took it, which the pool books at the dequeue
-// (stopQueuedDelegation, dispatch.go). The spawn index is taken FIRST, under the ledger's
+// (stopQueuedDelegation, dispatch.go), and one the user's cancel reached before it started
+// (settleCancelledDelegation, dispatch.go). The spawn index is taken FIRST, under the ledger's
 // lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
 // — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
 // completion order is the model's call order; the row records the child's RESOLVED output target,
@@ -865,8 +868,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		ledgerTarget string
 		ran          bool
 		res          domain.StepResult
-		// stopped is set once a human's stop (StopChild) is known to have cut the child's Run
-		// short; the ledger reads it before any error case (classifyDelegation).
+		// stopped is set once a human's stop (StopChild) or the cancel of the whole Turn is known
+		// to have cut the child's Run short; the ledger reads it before any error case
+		// (classifyDelegation).
 		stopped bool
 		// stopLeftover is what the child's mailbox held when a stopped run's result was rendered:
 		// the result lists it, and the reaping defer still reports it undelivered.
@@ -989,6 +993,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 
+	// A cancel of the parent's Turn that reached the call before its child exists settles it
+	// unstarted: nothing is built, a continuation's entry is given back, and the dispatch answers
+	// the call with the not-started result (runDelegation, ADR 0088 D2).
+	if ctx.Err() != nil {
+		giveBack()
+		return domain.ToolResult{}, dispatchCancelled
+	}
 	sub, err := a.newChildAgentOn(seat, call.ID, runID, task, delegationName(args.Name))
 	if err != nil {
 		giveBack()
@@ -1075,7 +1086,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// stop in here: arm cancels the context at once, and the run is stopped like any other.
 	childCtx, stopRun := context.WithCancelCause(ctx)
 	defer stopRun(nil)
-	a.children.arm(runID, stopRun)
+	a.children.arm(runID, childCtx, stopRun)
 	// A name a continuation INHERITED is re-announced for the new spawn id: the call that spawned
 	// this child named nothing, so every Driver reads its block off the call's `task` — the
 	// continuation instructions — until told the name the continued delegation already wears. It is
@@ -1101,25 +1112,15 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	}
 	naming.Wait()
 	ledgerName = sub.displayName()
-	// A STOP is read off the cause of the child's context, and only where it cut the Run short: the
-	// Run returned cancelled, or faulted with finishAtFault's fold cancelled under it. The parent's
-	// own context must still be live — a whole-Turn cancel reaches a grandchild through the stopped
-	// child's context carrying that child's cause, and is still the grandchild's cancel. A stop
-	// that landed as the child finished leaves the finished result standing.
-	stopped = err == nil && ctx.Err() == nil && errors.Is(context.Cause(childCtx), errDelegationStopped) &&
-		(res.Status == domain.StatusCancelled || (res.Faulted && sub.capFold == ""))
+	// A STOP is read where something cut the Run short — it returned cancelled, or faulted with
+	// finishAtFault's fold cancelled under it — and that something is either the human's stop (the
+	// cause of the child's own context) or the cancel of the parent's whole Turn, which reaches
+	// every running child and is answered the same way (ADR 0088 D2). A stop or cancel that landed
+	// as the child finished leaves the finished result standing.
+	stopped = err == nil && (res.Status == domain.StatusCancelled || (res.Faulted && sub.capFold == "")) &&
+		(ctx.Err() != nil || errors.Is(context.Cause(childCtx), errDelegationStopped))
 	if stopped {
-		// The fold of the stopped work (finishAtStop), under a context of its own that is re-armed
-		// as the run's stop handle: a second stop skips it. A cancel of the parent's context during
-		// the fold is the whole Turn's cancel, and the run is then reported as the cancel it is.
-		foldCtx, stopFold := context.WithCancelCause(ctx)
-		a.children.arm(runID, stopFold)
-		sub.finishAtStop(foldCtx)
-		a.children.disarm(runID)
-		stopFold(nil)
-		stopped = ctx.Err() == nil
-	}
-	if stopped {
+		a.foldStoppedChild(ctx, runID, sub)
 		// Closed HERE rather than in the reaping defer, so the result can list what the human
 		// wrote to the child that never reached it; the defer still reports each one undelivered.
 		stopLeftover = sub.mailbox.close()
@@ -1133,14 +1134,15 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// fold was written at the fault (Agent.finishAtFault) and its last words stand as the closing
 	// text, so the Turns it spent before its upstream died are continued from rather than lost —
 	// the error result stays an error result, and only gains the continue line. A STOPPED child is
-	// retained the same way (ADR 0086 D4): its fold was written at the stop (Agent.finishAtStop). A
+	// retained the same way (ADR 0086 D4), whether the human's stop or the whole Turn's cancel stopped
+	// it (ADR 0088 D2): its fold was written at the stop (foldStoppedChild). A
 	// CONTINUATION is retained whatever its outcome (ADR 0086 D2): its run is appended to the entry
 	// it took as the next round. A run that COMPLETED — no Run error, not cancelled, not capped,
 	// faulted or stopped — is retained only when its call NAMED it (ADR 0086 D1): naming is the
 	// parent's own opt-in, and a namer-generated name never reached the model for a completed run,
-	// so there is no handle the parent knows to continue it by. A CANCEL is still none of these: it
-	// returns no result and retains nothing — a cancelled continuation's entry included — so the contract at the head of this
-	// file — no partial result surfaces and no snapshot lands mid-sub-agent — holds unchanged. Read
+	// so there is no handle the parent knows to continue it by. A call the cancel reached before its
+	// child was built is none of these: it returned before here, having given a continuation's entry
+	// back. Read
 	// AFTER the namer is joined, so a delegation named out of band is retained under the name the
 	// parent model has been told (ADR 0068); an unnamed one has no handle and is not retained. A
 	// continuation is keyed by the name its continue line spells — the one the call gave, or the
@@ -1164,6 +1166,65 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	}
 	return result, outcome
 }
+
+// foldStoppedChild writes the engine fold of a child a stop cut short — the human's stop
+// (StopChild, ADR 0086 D4) or the cancel of the parent's whole Turn (ADR 0088 D2) — into the
+// child's capFold (finishAtStop), under a context of its own armed as the run's stop handle, so a
+// second stop skips it (secondStopFoldCause). The receiver is the PARENT; ctx is the parent's.
+//
+// The human's stop folds under the child's Config.StreamIdleTimeout bound, as a fault's fold does.
+// A cancel of the parent's Turn has already ended ctx, so that fold runs past it — on a context
+// that keeps ctx's values but not its cancel — and is held to the cancel's own bound as well
+// (cancelFoldBound, 20 s by default): the human who pressed esc×2 waits at most that long per
+// child. A cancel that is the program leaving (domain.ErrShuttingDown — a quit, a daemon's
+// shutdown) folds nothing and returns at once, on the unavailable marker naming it. A human's
+// stop whose fold the Turn's cancel then cut short keeps the marker naming that cancel, and a fold
+// the second stop skipped the one naming the second stop (secondStopFoldCause).
+func (a *Agent) foldStoppedChild(ctx context.Context, runID string, sub *Agent) {
+	if errors.Is(context.Cause(ctx), domain.ErrShuttingDown) {
+		sub.capFold = fmt.Sprintf(engineFoldUnavailableFormat, shutdownFoldCause)
+		return
+	}
+	parent, bound := ctx, sub.cfg.StreamIdleTimeout
+	if ctx.Err() != nil {
+		parent = context.WithoutCancel(ctx)
+		limit := a.cancelFoldBound
+		if limit <= 0 {
+			limit = defaultCancelFoldBound
+		}
+		if bound <= 0 || bound > limit {
+			bound = limit
+		}
+	}
+	foldCtx, stopFold := context.WithCancelCause(parent)
+	a.children.arm(runID, foldCtx, stopFold)
+	sub.finishAtStop(foldCtx, bound)
+	a.children.disarm(runID)
+	stopFold(nil)
+	if sub.capFold == "" {
+		// The only fold that ends empty is a human's stop's, cut short by the cancel of the whole
+		// Turn landing during it (foldForParent reads its own ctx's cancel as "skip").
+		cause := turnCancelledFoldCause
+		if errors.Is(context.Cause(ctx), domain.ErrShuttingDown) {
+			cause = shutdownFoldCause
+		}
+		sub.capFold = fmt.Sprintf(engineFoldUnavailableFormat, cause)
+	}
+}
+
+// shutdownFoldCause and turnCancelledFoldCause are the causes the unavailable marker names when a
+// stopped child's fold was never made because the program was leaving (domain.ErrShuttingDown),
+// or was cut short by the cancel of the parent's whole Turn (foldStoppedChild).
+const (
+	shutdownFoldCause      = "apogee was shutting down before the summary could be made"
+	turnCancelledFoldCause = "the user cancelled the turn before the summary finished"
+)
+
+// defaultCancelFoldBound is the longest the fold of each running child a cancel of the whole Turn
+// stops may take (foldStoppedChild): the owner's ratified bound (2026-09-27), so the human who
+// pressed esc×2 is never held longer than this per child. A fold past it is kept on the
+// unavailable marker naming the bound.
+const defaultCancelFoldBound = 20 * time.Second
 
 // roundReport is the report the run just read is retained with as a round (ADR 0086 D2), and
 // whether it is the engine fold and closing text (summary) rather than a report — the receiver is
@@ -1341,10 +1402,10 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 			IsError: false,
 		}
 	case res.Status == domain.StatusCancelled:
-		// The cancel reached the nested loop's boundary and it returned resumably; the parent
-		// Turn must now roll back wholesale (D2: the recovery point is the pre-sub_agent
-		// boundary — the sub-agent's progress is discarded, no partial result surfaced). Nothing
-		// reaches the parent, the trailer included: there is no result to carry it.
+		// A run cancelled with neither the human's stop nor the parent's cancel behind it — which
+		// runSubAgent never produces, since those are its child context's only cancels. It is
+		// reported as the cancel it is, and the dispatch answers it with the not-started result
+		// (runDelegation), as it answers a call the cancel reached before its child was built.
 		return domain.ToolResult{}, dispatchCancelled
 	case res.Faulted:
 		// The nested Exchange was ABANDONED, not completed — an Upstream fault, a recovered
@@ -1491,6 +1552,9 @@ type delegation struct {
 	tokenCap int              // and its two siblings, read at spawn for the same reason
 	timeCap  time.Duration    //
 	now      func() time.Time // the clock the time bound reads — the parent's, so a pinned parent pins the child
+	// cancelFoldBound is the parent's bound on a cancel's fold of each running child
+	// (foldStoppedChild), so the child holds its own children's to the same one.
+	cancelFoldBound time.Duration
 
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
@@ -1725,7 +1789,8 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		timeCap:  childCfg.Delegation.Timeout,
 		// The clock the time bound reads is the parent's, so a test that pins the parent's now has
 		// pinned the child's.
-		now: a.now,
+		now:             a.now,
+		cancelFoldBound: a.cancelFoldBound,
 		// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
 		// than the childCfg copy the child's Config carries. The field is the authority the way it is
 		// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two

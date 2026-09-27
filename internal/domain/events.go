@@ -202,9 +202,8 @@ const (
 	SubAgentStarted SubAgentPhase = "started"
 	// SubAgentFinished reports that the child reached its boundary and its result is known. The
 	// result rides the event, so an observer can show THAT delegation's report the moment it lands
-	// instead of waiting for the group's trailing result burst. It also closes the bracket of a
-	// delegation that was CANCELLED rather than reported — see SubAgentPhaseEvent.Cancelled, which
-	// is the one thing that separates the two.
+	// instead of waiting for the group's trailing result burst. A delegation the human's cancel
+	// reached finishes the same way, on the result the cancel settled it with (ADR 0088).
 	SubAgentFinished SubAgentPhase = "finished"
 )
 
@@ -228,13 +227,13 @@ const (
 //
 // Result is the child's ToolResult on SubAgentFinished and the zero value on SubAgentStarted.
 //
-// Cancelled says the finished phase closes a delegation the human CANCELLED: the group is dropped
-// unappended and never becomes a result, so Result is the zero value and no ToolResultEvent will
-// follow. The phase is still emitted, because a bracket a Driver cannot see close is a bracket
-// left permanently open in its log (ADR 0075 decision 12); it is the rollback's announcement, not
-// a report. A consumer that treats finished as "the child reported" must therefore ask this first:
-// a cancelled finished has nothing to fold and nothing to mark done. It is always false on
-// SubAgentStarted.
+// Cancelled is false on every phase this engine emits. A cancel no longer rolls a delegation back
+// (ADR 0088, superseding ADR 0075 decision 12): it SETTLES every delegation of the group with a
+// result — a finished child its report, a running child the stopped partial result the human's stop
+// gives it, a child the cancel reached before it started the not-started result — so every finished
+// phase carries its Result and the delegation's ToolResultEvent follows, as for any other outcome.
+// The field is kept for a consumer reading a log recorded before that change, where true marked a
+// finished phase with the zero Result and no ToolResultEvent after it.
 //
 // StepCap and CapRequested are the child's step-cap facts, set on SubAgentStarted only and zero on
 // every finished phase: StepCap is the cap the child actually runs under (the configured
