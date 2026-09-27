@@ -592,6 +592,44 @@ func TestLabelWritesRefuseAJunction(t *testing.T) {
 	}
 }
 
+func TestSetSDDLWritesAndClearsALabel(t *testing.T) {
+	// SetSDDL is the write behind every restore and every root clear, and the one the lifecycle
+	// tests seed foreign labels with. It must succeed wherever LabelTree's own write does: a
+	// handle opened with WRITE_OWNER alone is refused by SetSecurityInfo ("Access is denied"),
+	// which failed every teardown on Windows while labelling still worked — and hid behind
+	// labelOrSkip, which reads a failed SetSDDL as a host policy. So the host is probed through
+	// the access LabelTree opens with, and only a host that refuses THAT skips.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", file, err)
+	}
+	for _, path := range []string{dir, file} {
+		probe, err := openLabelHandle(path, labelReadWriteAccess)
+		if err != nil {
+			t.Skipf("cannot open %q for a label write on this host: %v", path, err)
+		}
+		err = probe.setSDDL(lowSDDL)
+		probe.close()
+		if err != nil {
+			t.Skipf("cannot write a mandatory label to %q on this host: %v", path, err)
+		}
+
+		if err := SetSDDL(path, foreignSDDL); err != nil {
+			t.Fatalf("SetSDDL(%q, %q) = %v; want the write LabelTree's access allows", path, foreignSDDL, err)
+		}
+		if label := mustReadLabel(t, path); !strings.Contains(label, "ME)") {
+			t.Errorf("label of %q = %q, want the Medium label just written", path, label)
+		}
+		if err := SetSDDL(path, clearSDDL); err != nil {
+			t.Fatalf("SetSDDL(%q, clear) = %v; want the label cleared", path, err)
+		}
+		if label := mustReadLabel(t, path); label != "" {
+			t.Errorf("label of %q = %q after the clear, want none", path, label)
+		}
+	}
+}
+
 func TestRetireDrainsALegacyEntryWhosePathBecameAJunction(t *testing.T) {
 	// A journal written before entries carried an identity, whose verdicts were persisted
 	// (RootJudged, Judged) before the labelled directory was replaced by a junction. Nothing

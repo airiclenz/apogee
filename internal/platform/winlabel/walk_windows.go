@@ -706,11 +706,13 @@ func readJudgedLabel(path string) (string, error) {
 }
 
 // The access each kind of label handle asks for. Reading a mandatory label needs READ_CONTROL
-// and writing one needs WRITE_OWNER (LABEL_SECURITY_INFORMATION); FILE_READ_ATTRIBUTES is what
-// the reparse check reads the object's attributes with.
+// and writing one needs WRITE_OWNER (LABEL_SECURITY_INFORMATION) — and READ_CONTROL as well:
+// SetSecurityInfo reads the object's descriptor before it writes, and a handle holding
+// WRITE_OWNER alone is refused with "Access is denied" (TestSetSDDLWritesAndClearsALabel).
+// FILE_READ_ATTRIBUTES is what the reparse check reads the object's attributes with.
 const (
 	labelReadAccess      = windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES
-	labelWriteAccess     = windows.WRITE_OWNER | windows.FILE_READ_ATTRIBUTES
+	labelWriteAccess     = windows.READ_CONTROL | windows.WRITE_OWNER | windows.FILE_READ_ATTRIBUTES
 	labelReadWriteAccess = labelReadAccess | labelWriteAccess
 )
 

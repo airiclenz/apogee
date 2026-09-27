@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed (Windows):** confinement teardown reverts its Low integrity labels again. Since the label writes moved onto one reparse-checked handle (v0.23.3), every restore and clear opened that handle with `WRITE_OWNER` alone, which `SetSecurityInfo` refuses — so each session's Close failed with "Access is denied", kept its journal and left the workspace labelled Low until a later run. The write handle now also asks for `READ_CONTROL`.
+
 - **Security: an MCP tool can no longer rename its way past the dangerous-action floor.** The guard used to skip any argument named like a payload (`body`, `message`, `content`, `query` and seven more) on every tool, so an MCP server tool called with `{"body":"rm -rf ~/.ssh"}` escaped the hard refusal. The exemption is now each built-in tool's own declaration and covers only its top-level arguments: an MCP tool declares none, so every argument it is handed is inspected in full, nested values included, and a payload-shaped key nested inside any other argument is inspected too. Built-in tools keep exactly the exemptions they had (ADR 0012 amendment 2026-09-26).
 
 - **Security:** the `remote-pipe-to-shell` dangerous-action rule now forces approval when the shell sits at any later stage of the download's pipeline (`curl … | tee i.sh | bash`, `curl … | cat | /bin/zsh`), not only the first. A later stage never crosses a command separator (`;`, `&&`, `||`, a background `&`) unless it is quoted or backslash-escaped, so `curl u | grep x; echo hi | bash` and `curl … | shellcheck -` stay clear; the download's own stage matches exactly as before, so every command the rule caught still forces approval (`curl -o f u; cat f | bash` included).
