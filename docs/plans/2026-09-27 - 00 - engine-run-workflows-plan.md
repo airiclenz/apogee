@@ -217,7 +217,11 @@ NOTES (2026-09-27): ValidateModelPlan has no separate "fanout comes first" rule.
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): plan model and validation`
 
-## 5. Receipt conditions
+## 5. Receipt conditions — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): ParseCond(string) parses syntax only, and the type-check against a ReceiptSpec is a separate `Cond.Check(ReceiptSpec) error`. This keeps the Goal's one-argument signature and lets item 10 check a condition against a spec it builds itself (a fanout's tally fields). Every parse or check error is a `*CondError{Token, Offset, Message}` that quotes the offending token. Precedence is `not` over `and` over `or`. Values are an integer, a bare word or a "double-quoted" string (no escapes). An int field takes any of the six operators and needs an integer value. An enum or text field takes only == and != (an enum value must be one it declares). A list field cannot be compared. Eval picks the comparison from the receipt value's shape, so an enum declared `1|2|3` still matches `level == 2`. A term on an absent or mistyped value is false, and `not` of that term is true.
+
+NOTES (2026-09-27): Validate parses every stage's `when:`. It type-checks only a verify stage's condition, against the ReceiptSpec of the fanout the verify works over (its `from`, or the nearest earlier fanout). A skip `when:` on any other kind, and a repeat's `when:`, read an earlier stage's receipt or a fanout's tally (`ok < 3`, `parts > 0` in item 4's tests), not the stage's own spec. Which receipt that is belongs to item 10's Regression guard (not yet done), so those conditions are syntax-checked here. Type-checking them against the stage's own Returns would have refused item 4's well-formed recipe.
 
 **What:** Depends on item 4.
 **Goal:** `workflow.ParseCond(string)` parses `field op value` terms (`== != > >= < <=`) joined by `and`/`or`/`not` with parentheses, type-checked against a `ReceiptSpec`; `Cond.Eval(Receipt) bool`; errors quote the offending token.

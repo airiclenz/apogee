@@ -131,6 +131,52 @@ func TestValidateNamesEachProblemsStageAndField(t *testing.T) {
 	}
 }
 
+func TestValidateRefusesABadCondition(t *testing.T) {
+	t.Parallel()
+
+	scored := fanoutStage("score")
+	scored.Returns = ReceiptSpec{"score": "int"}
+	cases := []problemCase{
+		{name: "verify on an undeclared field", stages: withStage(Stage{Name: "check", Kind: StageVerify, When: "severity == high"}), wantStage: "check", wantField: "when", wantMessage: `at "severity"`},
+		{name: "verify on an undeclared enum value", stages: withStage(Stage{Name: "check", Kind: StageVerify, When: "verdict == maybe"}), wantStage: "check", wantField: "when", wantMessage: "confirmed, refuted, unclear"},
+		{name: "verify ordering an enum", stages: withStage(Stage{Name: "check", Kind: StageVerify, When: "verdict > confirmed"}), wantStage: "check", wantField: "when", wantMessage: "only with == or !="},
+		{name: "verify comparing a list", stages: withStage(Stage{Name: "check", Kind: StageVerify, When: "paths == x"}), wantStage: "check", wantField: "when", wantMessage: "cannot compare a list"},
+		{name: "verify reads the fanout its from names", stages: withStage(scored, Stage{Name: "check", Kind: StageVerify, From: "find", When: "score > 1"}), wantStage: "check", wantField: "when", wantMessage: `at "score"`},
+		{name: "verify reads the nearest earlier fanout", stages: withStage(scored, Stage{Name: "check", Kind: StageVerify, When: "findings > 1"}), wantStage: "check", wantField: "when", wantMessage: `at "findings"`},
+		{name: "script with a single equals", stages: withStage(Stage{Name: "s", Kind: StageScript, Run: "true", When: "parts = 0"}), wantStage: "s", wantField: "when", wantMessage: "compare with =="},
+		{name: "merge with an unclosed paren", stages: withStage(Stage{Name: "m", Kind: StageMerge, Task: "Merge.", When: "(status == ok"}), wantStage: "m", wantField: "when", wantMessage: "never closed"},
+		{name: "repeat with a dangling operator", stages: withStage(Stage{Name: "r", Kind: StageRepeat, Repeat: "find", When: "ok <", Max: 2}), wantStage: "r", wantField: "when", wantMessage: "expected a value"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			problems := Validate(Plan{Stages: c.stages})
+
+			assertOneProblem(t, c, problems)
+		})
+	}
+}
+
+func TestValidateTypesAVerifyConditionAgainstItsFanout(t *testing.T) {
+	t.Parallel()
+
+	scored := fanoutStage("score")
+	scored.Returns = ReceiptSpec{"score": "int"}
+	stages := withStage(
+		scored,
+		Stage{Name: "check", Kind: StageVerify, From: "score", When: "score >= 2 and not status == blocked"},
+		Stage{Name: "recheck", Kind: StageVerify, From: "find", When: "(verdict == confirmed or findings > 0) and summary != none"},
+	)
+
+	problems := Validate(Plan{Stages: stages})
+
+	if len(problems) != 0 {
+		t.Errorf("Validate = %v, want no problems", problems)
+	}
+}
+
 func TestValidateModelPlanKeepsTheFanOutShape(t *testing.T) {
 	t.Parallel()
 

@@ -44,7 +44,8 @@ var stageFields = []stageField{
 
 // Validate reports every problem with p, each naming the stage and field it sits in and saying
 // how to fix it. It checks shape only — kinds, required and misplaced keys, bounds, references to
-// earlier stages, receipt type spellings — and reads no file. An empty result means p can run.
+// earlier stages, receipt type spellings, `when:` conditions — and reads no file. An empty result
+// means p can run.
 func Validate(p Plan) []Problem {
 	if len(p.Stages) == 0 {
 		return []Problem{{Field: "stages", Message: "the workflow has no stages; add at least one fanout stage"}}
@@ -119,6 +120,7 @@ func validateStage(stages []Stage, index int) []Problem {
 	}
 
 	problems = append(problems, misplacedFieldProblems(stage)...)
+	problems = append(problems, conditionProblems(stages, index)...)
 	switch stage.Kind {
 	case StageFanout:
 		problems = append(problems, childStageProblems(stage, true)...)
@@ -388,6 +390,54 @@ func receiptSpecProblems(stage Stage) []Problem {
 		}
 	}
 	return problems
+}
+
+// conditionProblems reports a `when:` that does not parse, and a verify stage's `when:` that does
+// not type-check against the ReceiptSpec of the fanout it works over — the per-item receipts its
+// condition selects from. Every other kind's condition reads an earlier stage's receipt rather than
+// its own, so it is checked for syntax here. A blank `when:` is no condition (a repeat's missing one
+// is repeatProblems').
+func conditionProblems(stages []Stage, index int) []Problem {
+	stage := stages[index]
+	if strings.TrimSpace(stage.When) == "" {
+		return nil
+	}
+	problem := func(err error) []Problem {
+		return []Problem{{Stage: stage.Name, Field: "when", Message: err.Error()}}
+	}
+
+	cond, err := ParseCond(stage.When)
+	if err != nil {
+		return problem(err)
+	}
+	if stage.Kind != StageVerify {
+		return nil
+	}
+	source, found := sourceFanout(stages, index)
+	if !found {
+		return nil
+	}
+	if err := cond.Check(source.Returns); err != nil {
+		return problem(err)
+	}
+	return nil
+}
+
+// sourceFanout returns the fanout a verify or merge stage at index works over: the one its `from`
+// names, or the nearest earlier fanout. found is false when there is none, which
+// fanoutSourceProblems reports.
+func sourceFanout(stages []Stage, index int) (Stage, bool) {
+	stage := stages[index]
+	if stage.From != "" {
+		source, message := earlierStage(stages, index, stage.From)
+		return source, message == "" && source.Kind == StageFanout
+	}
+	for earlier := index - 1; earlier >= 0; earlier-- {
+		if stages[earlier].Kind == StageFanout {
+			return stages[earlier], true
+		}
+	}
+	return Stage{}, false
 }
 
 // blankEntryProblems reports a list key holding a blank entry.

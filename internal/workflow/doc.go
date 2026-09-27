@@ -17,6 +17,8 @@
 // hands back, the ReceiptSpec that declares its typed fields with ReceiptSpec.Check (the on-the-spot
 // check a `finish` call gets, ADR 0087 D3), and the Problem both checks report.
 // validate.go is Validate and ValidateModelPlan: shape checks over a Plan whose every Problem names
-// the stage and field and says how to fix it.
+// the stage and field and says how to fix it, a stage's `when:` included.
+// cond.go is ParseCond, Cond.Check and Cond.Eval: the `when:` condition language over receipt
+// fields (`field op value` terms, and / or / not, parentheses), type-checked against a ReceiptSpec.
 // And doc.go this map.
 package workflow
