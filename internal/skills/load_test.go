@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -1038,4 +1039,80 @@ func shippedIDs(t *testing.T) []string {
 		}
 	}
 	return ids
+}
+
+// recipePromptSkill is a recipe skill whose two prompt paths take both spellings an author has:
+// relative to the skill folder, and led by {{SKILL_DIR}}.
+const recipePromptSkill = "---\nid: sweep\nsummary: sweep a tree\nrecipe:\n" +
+	"  - name: find\n    kind: fanout\n    over:\n      list: [a, b]\n    prompt: prompts/find.md\n" +
+	"  - name: report\n    kind: merge\n    prompt: \"{{SKILL_DIR}}/prompts/merge.md\"\n" +
+	"---\nRun the sweep."
+
+// Once Load places a recipe skill, each prompt path is an address under the skill's own folder —
+// the same one Dir announces and {{SKILL_DIR}} expands to — whichever spelling the author used.
+func TestLoadRecipePromptsResolveUnderTheSkillDir(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "sweep", recipePromptSkill)
+
+	cat, err := Load(Sources{Home: home})
+	if err != nil {
+		t.Fatalf("Load soft error: %v", err)
+	}
+	sk, ok := cat.Get("sweep")
+	if !ok || sk.Recipe == nil {
+		t.Fatalf("the recipe skill did not load with its recipe: %+v", cat.Skipped())
+	}
+	dir := filepath.Join(home, "skills", "sweep")
+	want := []string{filepath.Join(dir, "prompts", "find.md"), filepath.Join(dir, "prompts", "merge.md")}
+	got := []string{sk.Recipe.Stages[0].Prompt, sk.Recipe.Stages[1].Prompt}
+	if !slices.Equal(got, want) {
+		t.Errorf("prompts = %v, want %v", got, want)
+	}
+}
+
+// A shipped recipe's prompts stay on the virtual mount its Dir is announced under — never a host
+// path, which no host folder would answer to.
+func TestShippedRecipePromptsStayVirtual(t *testing.T) {
+	cat := newCatalog()
+	walkSkills(cat, sourceTree{
+		fsys:   fstest.MapFS{"sweep/SKILL.md": {Data: []byte(recipePromptSkill)}},
+		name:   shippedSource,
+		dirFor: shippedDirFor,
+	})
+	sk, ok := cat.Get("sweep")
+	if !ok || sk.Recipe == nil {
+		t.Fatalf("the shipped recipe skill did not load with its recipe: %+v", cat.Skipped())
+	}
+	want := []string{ShippedMountPrefix + "sweep/prompts/find.md", ShippedMountPrefix + "sweep/prompts/merge.md"}
+	got := []string{sk.Recipe.Stages[0].Prompt, sk.Recipe.Stages[1].Prompt}
+	if !slices.Equal(got, want) {
+		t.Errorf("prompts = %v, want %v", got, want)
+	}
+}
+
+// A skill whose recipe fails the validator is a recorded skip naming the problem, and its
+// siblings still load.
+func TestLoadInvalidRecipeIsASkipNamingTheProblem(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "good", "---\nid: good\nsummary: fine\n---\nbody")
+	writeSkill(t, filepath.Join(home, "skills"), "sweep",
+		"---\nid: sweep\nsummary: s\nrecipe:\n  - name: find\n    kind: fanout\n---\nbody")
+
+	cat, err := Load(Sources{Home: home})
+	if err == nil {
+		t.Error("Load returned no soft error for the invalid recipe")
+	}
+	if _, ok := cat.Get("good"); !ok {
+		t.Error("the good skill was dropped because a sibling's recipe was invalid")
+	}
+	if _, ok := cat.Get("sweep"); ok {
+		t.Error("the skill with an invalid recipe loaded")
+	}
+	skipped := cat.Skipped()
+	if len(skipped) != 1 || skipped[0].Name() != "sweep" {
+		t.Fatalf("Skipped() = %+v, want the one sweep skip", skipped)
+	}
+	if reason := skipped[0].Reason(); !strings.Contains(reason, `stage "find", field "over"`) {
+		t.Errorf("skip reason = %q, want the validator's problem naming the stage and field", reason)
+	}
 }

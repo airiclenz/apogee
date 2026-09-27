@@ -535,7 +535,17 @@ NOTES (2026-09-27): internal/tui/fold.go needed no change — the event is inert
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/eventjson/ && go test -race -count=1 -run TestFoldEventCoversEveryEventVariant ./internal/tui/ && go test -race -count=1 -run 'EventLine' ./cmd/apogee/`
 **Commit:** `feat(engine): workflow phase events`
 
-## 18. Recipes parse from a skill header
+## 18. Recipes parse from a skill header — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): prompt paths are normalised at parse (a leading `{{SKILL_DIR}}/` stripped, the path cleaned, and an absolute path, a `..` climb, a non-leading token or the folder itself refused) and resolved in loadSkillFile after `sk.Dir` through the same `src.dirFor` seam — so both spellings (folder-relative and `{{SKILL_DIR}}`-led) land on the Dir-rooted address (host path, or `shipped:<id>/…`), not only the token-led one.
+
+NOTES (2026-09-27): beyond workflow.Validate, a recipe stage, its `over:` mapping and an input entry refuse unknown keys (key sets read off the workflow types' yaml tags) so a misspelt `promt:` is a load error; `recipe:`/`inputs:` are held as yaml.Node and decoded separately so a type error names the recipe instead of sending the block to the lenient scan.
+
+NOTES (2026-09-27): internal/workflow/inputs.go also carries `ValidateInputs` (name present, one `[A-Za-z][A-Za-z0-9_-]*` token, unique) beside `InputDecl`, tested through the skills parse tests; `inputs:` is accepted without a `recipe:` (no binding site exists before item 19/20).
+
+NOTES (2026-09-27): loadShipped's dirFor closure became the named `shippedDirFor` so the shipped `shipped:<id>` case is tested through walkSkills over an fstest.MapFS — no shipped recipe skill exists until item 23, so Load itself cannot reach one yet.
+
+NOTES (2026-09-27): consequential edit — internal/skills/doc.go: made necessary by the recipe exception to the parse paragraph's "only a hard YAML failure falls through to the scan" rule
 
 **What:** Depends on item 4.
 **Goal:** a `SKILL.md` frontmatter may carry `inputs:` (name, required, default, description) and `recipe:` (a stage list mapping onto `workflow.Plan`, prompt paths relative to the skill dir); a skill with an invalid recipe fails to load with the validator's problems; `skills.Skill` exposes `Recipe` and `Inputs`.

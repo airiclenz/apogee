@@ -467,3 +467,136 @@ func TestParseSkillMalformedTriggersKeepsYAMLSemantics(t *testing.T) {
 		t.Errorf("Summary = %q, want the strict parser's decoding of the escape", sk.Summary)
 	}
 }
+
+// validRecipeSkill is a recipe skill with every part a recipe header can carry: two inputs, a
+// fanout whose brief is a {{SKILL_DIR}}-led prompt path, a verify, and a merge whose brief is an
+// inline task — plus the summary and body every skill needs, recipe or not.
+const validRecipeSkill = `---
+id: sweep
+summary: Sweep a tree for bugs
+inputs:
+  - name: scope
+    required: true
+    description: the folder to sweep
+  - name: focus
+    default: bugs
+recipe:
+  - name: find
+    kind: fanout
+    over:
+      files: "src/**/*.go"
+    prompt: "{{SKILL_DIR}}/prompts/find.md"
+    returns:
+      findings: int
+  - name: check
+    kind: verify
+    when: "findings > 0"
+    prompt: prompts/./verify.md
+  - name: report
+    kind: merge
+    task: Merge the findings into one report.
+---
+Run the sweep over the scope.`
+
+func TestParseSkillRecipe(t *testing.T) {
+	sk, err := parseSkill(validRecipeSkill, "d")
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if sk.Summary != "Sweep a tree for bugs" || sk.Body != "Run the sweep over the scope." {
+		t.Errorf("summary/body = %q / %q, want the header's summary and the body", sk.Summary, sk.Body)
+	}
+	if sk.Recipe == nil {
+		t.Fatal("Recipe is nil, want the header's stage list")
+	}
+	if sk.Recipe.Name != "sweep" {
+		t.Errorf("Recipe.Name = %q, want the skill id", sk.Recipe.Name)
+	}
+	var names []string
+	for _, stage := range sk.Recipe.Stages {
+		names = append(names, stage.Name+":"+string(stage.Kind))
+	}
+	if want := []string{"find:fanout", "check:verify", "report:merge"}; !slices.Equal(names, want) {
+		t.Fatalf("stages = %v, want %v", names, want)
+	}
+	find, check, report := sk.Recipe.Stages[0], sk.Recipe.Stages[1], sk.Recipe.Stages[2]
+	if find.Over == nil || find.Over.Files != "src/**/*.go" || find.Returns["findings"] != "int" {
+		t.Errorf("find stage = %+v, want its over.files and returns decoded", find)
+	}
+	// Before Load places the skill, a prompt path is the clean folder-relative one.
+	if find.Prompt != "prompts/find.md" || check.Prompt != "prompts/verify.md" {
+		t.Errorf("prompts = %q, %q, want the folder-relative prompts/find.md and prompts/verify.md", find.Prompt, check.Prompt)
+	}
+	if report.Task != "Merge the findings into one report." || report.Prompt != "" {
+		t.Errorf("report stage task/prompt = %q / %q, want the inline task alone", report.Task, report.Prompt)
+	}
+	wantInputs := []string{"scope:true::the folder to sweep", "focus:false:bugs:"}
+	var gotInputs []string
+	for _, in := range sk.Inputs {
+		gotInputs = append(gotInputs, fmt.Sprintf("%s:%v:%s:%s", in.Name, in.Required, in.Default, in.Description))
+	}
+	if !slices.Equal(gotInputs, wantInputs) {
+		t.Errorf("inputs = %v, want %v", gotInputs, wantInputs)
+	}
+}
+
+// A skill without recipe: or inputs: parses exactly as it always did.
+func TestParseSkillWithoutRecipeHasNone(t *testing.T) {
+	sk, err := parseSkill("---\nid: plain\nsummary: a plain skill\n---\nbody", "d")
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if sk.Recipe != nil || sk.Inputs != nil {
+		t.Errorf("Recipe/Inputs = %+v / %+v, want none on a skill whose header declares none", sk.Recipe, sk.Inputs)
+	}
+}
+
+// Every way a recipe or its inputs can be wrong fails the skill's load with an error naming the
+// problem — never a skill that loads with its recipe silently dropped.
+func TestParseSkillRecipeRefused(t *testing.T) {
+	const head = "---\nid: sweep\nsummary: s\n"
+	const stage = "recipe:\n  - name: find\n    kind: fanout\n    over:\n      list: [a, b]\n    task: look\n"
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"a scalar recipe", head + "recipe: find everything\n---\nbody", "recipe must be a list of stages"},
+		{"a mapping recipe", head + "recipe:\n  stages: []\n---\nbody", "recipe must be a list of stages"},
+		{"an empty recipe", head + "recipe: []\n---\nbody", "the workflow has no stages"},
+		{"a null recipe", head + "recipe:\n---\nbody", "the workflow has no stages"},
+		{"a stage that is not a mapping", head + "recipe:\n  - find\n---\nbody", "stage 1 is not a mapping"},
+		{"an unknown stage key", head + "recipe:\n  - name: find\n    kind: fanout\n    promt: p.md\n---\nbody", `unknown key "promt"`},
+		{"an unknown over key", head + "recipe:\n  - name: find\n    kind: fanout\n    over:\n      glob: x\n    task: t\n---\nbody", `stage 1 over has the unknown key "glob"`},
+		{"a mistyped value", head + "recipe:\n  - name: again\n    kind: repeat\n    repeat: find\n    max: many\n---\nbody", "cannot unmarshal"},
+		{"a validator problem", head + "recipe:\n  - name: find\n    kind: fanout\n    over:\n      list: [a]\n---\nbody", `stage "find", field "task": a fanout stage needs a brief`},
+		{"two validator problems", head + "recipe:\n  - name: find\n    kind: nope\n  - name: find\n    kind: fanout\n---\nbody", `stage "find", field "kind"`},
+		{"a prompt climbing out", head + "recipe:\n  - name: find\n    kind: fanout\n    over:\n      list: [a]\n    prompt: ../../secret.md\n---\nbody", `stage "find", field "prompt": prompt path "../../secret.md" is not a file inside the skill folder`},
+		{"an absolute prompt", head + "recipe:\n  - name: find\n    kind: fanout\n    over:\n      list: [a]\n    prompt: /etc/passwd\n---\nbody", `prompt path "/etc/passwd"`},
+		{"a token not leading", head + "recipe:\n  - name: find\n    kind: fanout\n    over:\n      list: [a]\n    prompt: x/{{SKILL_DIR}}/p.md\n---\nbody", `prompt path "x/{{SKILL_DIR}}/p.md"`},
+		{"the folder itself", head + "recipe:\n  - name: find\n    kind: fanout\n    over:\n      list: [a]\n    prompt: \"{{SKILL_DIR}}\"\n---\nbody", "not a file inside the skill folder"},
+		{"scalar inputs", head + "inputs: scope\n" + stage + "---\nbody", "inputs must be a list"},
+		{"an unknown input key", head + "inputs:\n  - name: scope\n    requried: true\n" + stage + "---\nbody", `input 1 has the unknown key "requried"`},
+		{"a nameless input", head + "inputs:\n  - description: d\n" + stage + "---\nbody", "input 1 has no name"},
+		{"an input name with a space", head + "inputs:\n  - name: the scope\n" + stage + "---\nbody", `input name "the scope" is not one word`},
+		{"an input declared twice", head + "inputs:\n  - name: scope\n  - name: scope\n" + stage + "---\nbody", `input "scope" is declared twice`},
+		// The strict parse fails (a tab indents a mapping key); the lenient scan would recover the
+		// id and summary and load the skill with no recipe — it must not be asked.
+		{"a recipe block that is not YAML", head + "recipe:\n\t- name: find\n---\nbody", "malformed YAML frontmatter in a skill with a recipe"},
+		{"an inputs block that is not YAML", head + "inputs: [scope\n" + stage + "---\nbody", "malformed YAML frontmatter in a skill with a recipe"},
+		// A recipe skill still needs everything any skill needs.
+		{"a recipe skill with no body", head + stage + "---\n", "missing a required field"},
+		{"a recipe skill with no summary", "---\nid: sweep\n" + stage + "---\nbody", "missing a required field"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sk, err := parseSkill(tc.content, "d")
+			if err == nil {
+				t.Fatalf("parseSkill loaded %+v, want an error containing %q", sk, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}

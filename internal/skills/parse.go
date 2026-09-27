@@ -2,13 +2,19 @@ package skills
 
 import (
 	"fmt"
+	"io/fs"
+	"path"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/sanitize"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // maxSummaryLen caps a skill summary, mirroring the apogee-code oracle (summary.slice(0,200)):
@@ -75,10 +81,19 @@ var recognisedKeys = map[string]bool{
 	"triggers":    true,
 }
 
+// recipeKeyRe finds a `recipe:` or `inputs:` key line in a frontmatter block, so a block that
+// failed the strict parse can be told apart from one the lenient scan may recover: a recipe is a
+// program the engine runs, and the scan — which models neither key — could only drop it.
+var recipeKeyRe = regexp.MustCompile(`(?mi)^[ \t]*(recipe|inputs)[ \t]*:`)
+
 // frontmatter is the recognised YAML frontmatter keys, including the apogee-code/agent-skills
 // aliases: id|name for the identifier, displayName for the menu label, summary|description
 // for the menu hint, and apogee's own optional triggers for the suggestion matcher. An unknown key
 // is ignored (yaml.v3 does not error on extras).
+//
+// Recipe and Inputs are held as raw nodes and decoded by parseRecipe, not here: a mistyped recipe
+// must fail the skill's load with a message that names the recipe, never fail the strict unmarshal
+// and so send the whole block to the lenient scan. An absent key leaves its node's Kind zero.
 type frontmatter struct {
 	ID          string        `yaml:"id"`
 	Name        string        `yaml:"name"`
@@ -86,6 +101,8 @@ type frontmatter struct {
 	Summary     string        `yaml:"summary"`
 	Description string        `yaml:"description"`
 	Triggers    triggersField `yaml:"triggers"`
+	Inputs      yaml.Node     `yaml:"inputs"`
+	Recipe      yaml.Node     `yaml:"recipe"`
 }
 
 // hasNamingField reports whether a scanned block yielded any field a skill could actually be built
@@ -198,7 +215,7 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 	}
 	id := firstNonEmpty(fm.ID, fm.Name, dirName)
 	summary := strings.TrimSpace(firstNonEmpty(fm.Summary, fm.Description))
-	return validate(Skill{
+	sk, err := validate(Skill{
 		ID:          strings.TrimSpace(id),
 		DisplayName: strings.TrimSpace(firstNonEmpty(fm.DisplayName, titleCase(id))),
 		Summary:     sanitize.ClampRunes(summary, maxSummaryLen),
@@ -206,6 +223,172 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 		Body:        strings.TrimSpace(body),
 		Triggers:    normalizeTriggers(fm.Triggers),
 	})
+	if err != nil {
+		return Skill{}, err
+	}
+	if sk.Inputs, err = parseInputs(fm.Inputs); err != nil {
+		return Skill{}, err
+	}
+	if sk.Recipe, err = parseRecipe(fm.Recipe, sk.ID); err != nil {
+		return Skill{}, err
+	}
+	return sk, nil
+}
+
+// parseInputs decodes the frontmatter's `inputs:` — a list of {name, required, default,
+// description} — and checks it with workflow.ValidateInputs. An absent key yields no inputs; a
+// key that is not a list, an entry that is not a mapping, an unknown key in an entry or a failed
+// check is an error naming the problem, so the skill does not load.
+func parseInputs(node yaml.Node) ([]workflow.InputDecl, error) {
+	if node.Kind == 0 || isNullNode(node) {
+		return nil, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("invalid inputs: line %d: inputs must be a list, each entry with a name "+
+			"(and optionally required, default, description)", node.Line)
+	}
+	for index, entry := range node.Content {
+		if err := checkKeys(entry, fmt.Sprintf("input %d", index+1), inputKeys); err != nil {
+			return nil, fmt.Errorf("invalid inputs: %w", err)
+		}
+	}
+	var decls []workflow.InputDecl
+	if err := node.Decode(&decls); err != nil {
+		return nil, fmt.Errorf("invalid inputs: %w", err)
+	}
+	if problems := workflow.ValidateInputs(decls); len(problems) > 0 {
+		return nil, fmt.Errorf("invalid inputs: %s", joinProblems(problems))
+	}
+	return decls, nil
+}
+
+// parseRecipe decodes the frontmatter's `recipe:` — a list of stages — into a workflow.Plan named
+// after the skill, normalises each stage's prompt path (normalizePromptPath) and runs
+// workflow.Validate over the result. An absent key yields nil: the skill carries no recipe. Every
+// other failure — a key that is not a list, a stage that is not a mapping, a key no stage takes, a
+// value of the wrong type, a prompt path outside the skill folder, a Validate problem — is an
+// error naming it, so the skill does not load rather than load a recipe that cannot run.
+func parseRecipe(node yaml.Node, name string) (*workflow.Plan, error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+	plan := workflow.Plan{Name: name}
+	if !isNullNode(node) {
+		if node.Kind != yaml.SequenceNode {
+			return nil, fmt.Errorf("invalid recipe: line %d: recipe must be a list of stages, "+
+				"each a mapping with at least a name and a kind", node.Line)
+		}
+		for index, entry := range node.Content {
+			if err := checkStageKeys(entry, index); err != nil {
+				return nil, fmt.Errorf("invalid recipe: %w", err)
+			}
+		}
+		if err := node.Decode(&plan.Stages); err != nil {
+			return nil, fmt.Errorf("invalid recipe: %w", err)
+		}
+	}
+	problems := workflow.Validate(plan)
+	for index := range plan.Stages {
+		stage := &plan.Stages[index]
+		if stage.Prompt == "" {
+			continue
+		}
+		clean, err := normalizePromptPath(stage.Prompt)
+		if err != nil {
+			problems = append(problems, workflow.Problem{Stage: stage.Name, Field: "prompt", Message: err.Error()})
+			continue
+		}
+		stage.Prompt = clean
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("invalid recipe: %s", joinProblems(problems))
+	}
+	return &plan, nil
+}
+
+// normalizePromptPath turns a stage's prompt path as the author wrote it — relative to the skill
+// folder (`prompts/find.md`) or led by the folder token (`{{SKILL_DIR}}/prompts/find.md`) — into
+// the clean folder-relative path the loader later joins onto the skill's Dir (resolveRecipePrompts).
+// A path that leaves the folder — absolute, a `..` climb, the token anywhere but the lead, the
+// folder itself — is refused: a skill from an untrusted repo must not be able to have the engine
+// read a host file into a child's brief.
+func normalizePromptPath(raw string) (string, error) {
+	rel := raw
+	if rest, led := strings.CutPrefix(rel, domain.SkillDirToken); led {
+		rel = strings.TrimLeft(rest, "/")
+	}
+	clean := path.Clean(strings.ReplaceAll(rel, "\\", "/"))
+	if strings.Contains(clean, domain.SkillDirToken) || clean == "." || !fs.ValidPath(clean) {
+		return "", fmt.Errorf("prompt path %q is not a file inside the skill folder; write it relative "+
+			"to the folder (prompts/find.md) or as %s/prompts/find.md", raw, domain.SkillDirToken)
+	}
+	return clean, nil
+}
+
+// isNullNode reports whether node is an explicit YAML null (`recipe:` with nothing after it).
+func isNullNode(node yaml.Node) bool {
+	return node.Kind == yaml.ScalarNode && node.Tag == "!!null"
+}
+
+// stageKeys, itemSourceKeys and inputKeys are the keys a recipe stage, a fanout's `over:` and an
+// input declaration take — read off the workflow types' own yaml tags, so they cannot drift from
+// what the decode fills in.
+var (
+	stageKeys      = yamlKeys(reflect.TypeFor[workflow.Stage]())
+	itemSourceKeys = yamlKeys(reflect.TypeFor[workflow.ItemSource]())
+	inputKeys      = yamlKeys(reflect.TypeFor[workflow.InputDecl]())
+)
+
+// yamlKeys lists the yaml key of every field of the struct type t, in declaration order.
+func yamlKeys(t reflect.Type) []string {
+	keys := make([]string, 0, t.NumField())
+	for field := range t.Fields() {
+		key, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		if key != "" && key != "-" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// checkStageKeys checks one recipe stage's keys, and its `over:` source's when that is a mapping.
+func checkStageKeys(entry *yaml.Node, index int) error {
+	where := fmt.Sprintf("stage %d", index+1)
+	if err := checkKeys(entry, where, stageKeys); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(entry.Content); i += 2 {
+		if entry.Content[i].Value == "over" && entry.Content[i+1].Kind == yaml.MappingNode {
+			return checkKeys(entry.Content[i+1], where+" over", itemSourceKeys)
+		}
+	}
+	return nil
+}
+
+// checkKeys refuses an entry that is not a mapping, or one carrying a key outside allowed. The
+// strict frontmatter parse ignores unknown keys; a recipe must not, because a misspelt key
+// (`promt:`) would otherwise be a silent no-op in a program the engine runs.
+func checkKeys(entry *yaml.Node, where string, allowed []string) error {
+	if entry.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: %s is not a mapping of keys; write it as key: value lines", entry.Line, where)
+	}
+	for i := 0; i < len(entry.Content); i += 2 {
+		key := entry.Content[i]
+		if !slices.Contains(allowed, key.Value) {
+			return fmt.Errorf("line %d: %s has the unknown key %q; the keys it takes are %s",
+				key.Line, where, key.Value, strings.Join(allowed, ", "))
+		}
+	}
+	return nil
+}
+
+// joinProblems renders a validator's problems as one error text, one problem after another.
+func joinProblems(problems []workflow.Problem) string {
+	lines := make([]string, len(problems))
+	for i, problem := range problems {
+		lines[i] = problem.String()
+	}
+	return strings.Join(lines, "; ")
 }
 
 // parseFrontmatterFields reads the recognised keys out of a frontmatter block, strictly first
@@ -225,11 +408,18 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 //
 // When even the scan finds no recognised key, the original YAML error is returned rather than the
 // scan's silence: it names the actual line and fault, which is the more useful thing to print.
+//
+// A block carrying `recipe:` or `inputs:` never reaches the scan: the scan models neither key, so
+// its "recovery" would load the skill with its recipe silently gone. The YAML error is returned
+// instead, and the skill does not load until its author fixes the block.
 func parseFrontmatterFields(text string) (frontmatter, error) {
 	var strict frontmatter
 	strictErr := yaml.Unmarshal([]byte(text), &strict)
 	if strictErr == nil {
 		return strict, nil
+	}
+	if recipeKeyRe.MatchString(text) {
+		return frontmatter{}, fmt.Errorf("malformed YAML frontmatter in a skill with a recipe: %w", strictErr)
 	}
 	if lenient, ok := scanFrontmatterFields(text); ok {
 		return lenient, nil

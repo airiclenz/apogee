@@ -3,6 +3,8 @@ package skills
 import (
 	"fmt"
 	"path/filepath"
+
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // Skill is one discovered skill: a folder containing a SKILL.md whose frontmatter and body define
@@ -50,6 +52,17 @@ type Skill struct {
 	// through the load_skill door (lookup.go), which is a question it chose to spend a call on
 	// rather than a listing apogee volunteered.
 	Triggers []string
+
+	// Recipe is the stage list the SKILL.md's header declares under "recipe:" (ADR 0087 D6), named
+	// after the skill and already through workflow.Validate — a skill whose recipe fails it does not
+	// load. nil means the skill carries no recipe. Each stage's Prompt is an ADDRESS once Load has
+	// placed the skill, like Dir: the author's folder-relative path (or {{SKILL_DIR}}-led one) joined
+	// onto the skill's folder — a host path for a disk skill, `shipped:<id>/…` for a shipped one.
+	Recipe *workflow.Plan
+
+	// Inputs is the recipe's declared inputs, under "inputs:", in the order the user's text binds
+	// bare tokens to them; nil when the header declares none.
+	Inputs []workflow.InputDecl
 }
 
 // SkipError is discovery's other outcome: one SKILL.md the walk FOUND but could not turn into

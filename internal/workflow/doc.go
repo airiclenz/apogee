@@ -39,6 +39,8 @@
 // folder file into the next fanout's items, script runs through the ScriptRunner seam, ask through
 // the Asker seam (its default taken when there is none), and repeat re-runs a stage in rounds keyed
 // apart; any stage's `when:`, read off earlier stages, skips it.
+// inputs.go is InputDecl and ValidateInputs: the inputs a Recipe declares in its skill's header
+// (name, required, default, description), the values the user's text fills in when it starts.
 // format.go is Format: the result lines the parent reads — one `#<n> <item> — <status> — <summary>`
 // line per item, a totals line, the stages' notes, `report:` — listing only the non-ok items past
 // 40 and pointing to the full items.md the Store writes as the run ends.
