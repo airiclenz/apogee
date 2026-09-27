@@ -92,8 +92,16 @@ func (t *LoadSkill) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, "load_skill is unavailable: no skill catalog is configured"), nil
 	}
 
-	return okResult(call.ID, renderSkillLookup(query, t.lookup.LookupSkill(query))), nil
+	return okResult(call.ID, renderSkillLookup(query, t.lookup.LookupSkill(query), domain.FanOutOffered(ctx))), nil
 }
+
+// The line a recipe skill's body is followed by (ADR 0087 D6): how the recipe is started. The
+// model may start it only through fan_out, so the line names fan_out when the calling Agent offers
+// it, and otherwise says the user starts it — the "/<id>" the TUI and every other Driver launch.
+const (
+	recipeLineFanOut = "this is a recipe: start it with " + FanOutToolName + "{recipe: %q}\n"
+	recipeLineUser   = "this is a recipe: the user starts it with /%s\n"
+)
 
 // renderSkillLookup turns one lookup answer into the text the model reads.
 //
@@ -103,14 +111,22 @@ func (t *LoadSkill) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 // the same thing whichever door it came through, and an instruction pointing at a bundled file
 // names an address the read tools accept rather than a literal placeholder they refuse.
 //
-// The "also matched" line and the candidates rung sit OUTSIDE that wrapper: they are this tool
-// answering, not the skill speaking, and a model that treats everything inside <skill> as
-// instructions must not read a list of ids as one.
-func renderSkillLookup(query string, res domain.SkillLookupResult) string {
+// The recipe line, the "also matched" line and the candidates rung sit OUTSIDE that wrapper: they
+// are this tool answering, not the skill speaking, and a model that treats everything inside
+// <skill> as instructions must not read a list of ids as one. The recipe line is decided per call
+// from fanOutOffered — whether the Agent that made THIS call offers fan_out — because one
+// load_skill instance serves a parent and all its children.
+func renderSkillLookup(query string, res domain.SkillLookupResult, fanOutOffered bool) string {
 	var b strings.Builder
 	if res.Found {
 		s := res.Skill
 		b.WriteString(s.Block(s.Body))
+		switch {
+		case s.Recipe && fanOutOffered:
+			fmt.Fprintf(&b, recipeLineFanOut, s.ID)
+		case s.Recipe:
+			fmt.Fprintf(&b, recipeLineUser, s.ID)
+		}
 		if len(res.Also) > 0 {
 			fmt.Fprintf(&b, "\nalso matched, not loaded: %s — call load_skill again with one of "+
 				"these ids if this was not the skill you wanted.\n", strings.Join(res.Also, ", "))

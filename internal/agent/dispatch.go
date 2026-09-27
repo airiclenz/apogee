@@ -1408,6 +1408,16 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 	return a.tools.Lookup(name)
 }
 
+// offersTool reports whether name is on this Agent's live menu: registered, and not filtered out
+// by Plan mode (toolMenu's filter).
+func (a *Agent) offersTool(name string) bool {
+	tool, ok := a.lookupTool(name)
+	if !ok {
+		return false
+	}
+	return a.Mode() != domain.ModePlan || planOffers(tool, a.ScratchDir() != "")
+}
+
 // unknownToolResult renders the registry miss prepareCall answers with at every width, so a pooled
 // group and a lone call can never word it differently: the former `unknown tool "<name>"`
 // sentence, plus a ` — did you mean: <name>` clause when a
@@ -1737,7 +1747,13 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 // and MCP kinds), otherwise to the tool's live Execute. The gating decision keyed on the
 // effect KIND (the Resolution); routing here is the SEPARATE concern of where the effect
 // actually runs, so the two stay distinct (confinement-execution-contract §8 / task P3.4).
+//
+// The context the tool runs under records whether THIS Agent offers fan_out
+// (domain.WithFanOutOffered): one tool instance may serve a parent and its children, whose menus
+// differ, so a tool that words its answer by the caller's menu — load_skill naming how a recipe is
+// started — reads the caller's own answer here rather than one bound when it was built.
 func (a *Agent) runTool(ctx context.Context, tool domain.Tool, call domain.ToolCall) (domain.ToolResult, error) {
+	ctx = domain.WithFanOutOffered(ctx, a.offersTool(tools.FanOutToolName))
 	if _, isExternal := tool.(domain.ExternalEffectTool); isExternal && a.cfg.ExternalEffects != nil {
 		return a.cfg.ExternalEffects.Do(ctx, call)
 	}

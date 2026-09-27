@@ -77,6 +77,52 @@ func TestLoadSkillReturnsTheBody(t *testing.T) {
 	}
 }
 
+// TestLoadSkillNamesHowARecipeStarts pins the recipe line (ADR 0087 D6): a recipe skill's body is
+// followed, outside the <skill> wrapper, by how the recipe is started — through fan_out when the
+// calling Agent offers it, by the user otherwise — decided per call from the context, so one
+// instance answers a parent and a child differently. A skill without a recipe carries no line.
+func TestLoadSkillNamesHowARecipeStarts(t *testing.T) {
+	t.Parallel()
+
+	recipe := domain.SkillLookupResult{Found: true, Skill: domain.ResolvedSkill{
+		ID: "audit", DisplayName: "Audit", Body: "Run the audit.", Recipe: true,
+	}}
+	plain := domain.SkillLookupResult{Found: true, Skill: domain.ResolvedSkill{
+		ID: "debugging", DisplayName: "Debugging", Body: "Reproduce it first.",
+	}}
+	cases := []struct {
+		name    string
+		res     domain.SkillLookupResult
+		offered bool
+		want    string
+	}{
+		{"fan_out offered", recipe, true, "</skill>\nthis is a recipe: start it with fan_out{recipe: \"audit\"}\n"},
+		{"fan_out not offered", recipe, false, "</skill>\nthis is a recipe: the user starts it with /audit\n"},
+		{"no recipe", plain, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool := NewLoadSkill(&stubLookup{res: tc.res})
+			res, err := tool.Execute(domain.WithFanOutOffered(context.Background(), tc.offered), domain.ToolCall{
+				ID: "c1", Tool: "load_skill", Arguments: json.RawMessage(`{"query":"x"}`),
+			})
+			if err != nil || res.IsError {
+				t.Fatalf("Execute = %+v, %v; want a found skill", res, err)
+			}
+			if tc.want == "" {
+				if strings.Contains(res.Content, "this is a recipe") {
+					t.Errorf("a skill without a recipe carries a recipe line:\n%s", res.Content)
+				}
+				return
+			}
+			if !strings.HasSuffix(res.Content, tc.want) {
+				t.Errorf("result does not end on %q:\n%s", tc.want, res.Content)
+			}
+		})
+	}
+}
+
 // TestLoadSkillNamesTheAlsoMatchedIDs pins the confident rung's second half: the ids the winner beat
 // are named OUTSIDE the <skill> wrapper, so a model that treats the wrapper's contents as
 // instructions does not read a list of ids as one.

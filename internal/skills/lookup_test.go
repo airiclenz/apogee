@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // TestLookupExactIDReturnsTheBody pins the first rung: a query that NAMES a skill is answered with
@@ -162,6 +163,24 @@ func TestLookupSkillReturnsDomainTypes(t *testing.T) {
 		if cand.ID == "" || cand.Summary == "" {
 			t.Errorf("candidate %+v is missing half its rung", cand)
 		}
+	}
+}
+
+// TestLookupSkillMarksARecipeSkill pins the flag load_skill words its recipe line by: a skill whose
+// header declares a recipe is looked up with Recipe set, any other without it.
+func TestLookupSkillMarksARecipeSkill(t *testing.T) {
+	t.Parallel()
+	plan := workflow.Plan{Name: "audit", Stages: []workflow.Stage{{
+		Name: "items", Kind: workflow.StageFanout, Task: "check {item}",
+		Over: &workflow.ItemSource{List: []string{"a"}},
+	}}}
+	c := build(Skill{ID: "audit", Body: "b", Recipe: &plan}, Skill{ID: "plain", Body: "b"})
+
+	if got := c.LookupSkill("audit"); !got.Found || !got.Skill.Recipe {
+		t.Errorf("LookupSkill(audit) = %+v, want a found skill marked as a recipe", got)
+	}
+	if got := c.LookupSkill("plain"); !got.Found || got.Skill.Recipe {
+		t.Errorf("LookupSkill(plain) = %+v, want a found skill not marked as a recipe", got)
 	}
 }
 

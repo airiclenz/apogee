@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -1004,11 +1005,16 @@ type SkillResolver interface {
 // the model can read the files bundled beside the skill (refs, prompts, scripts) with the
 // read-only tools. It is empty when the resolver has none, and an empty Dir simply omits that
 // line — the block is then exactly what it was before the field existed.
+//
+// Recipe reports that the skill carries a Recipe (ADR 0087 D6) — a stage list the engine runs as
+// a Workflow rather than instructions the model follows. The load_skill tool reads it to say how
+// the recipe is started; the loop's attach ignores it.
 type ResolvedSkill struct {
 	ID          string
 	DisplayName string
 	Body        string
 	Dir         string
+	Recipe      bool
 }
 
 // SkillDirToken is the placeholder a skill author may write anywhere in a SKILL.md body to name
@@ -1082,6 +1088,25 @@ type SkillLookup interface {
 	// back: a body when the match is certain enough to spend the tokens on, candidate ids when it
 	// is not, and neither when nothing matched at all.
 	LookupSkill(query string) SkillLookupResult
+}
+
+// fanOutOfferedCtxKey carries whether the Agent running a tool call offers fan_out.
+type fanOutOfferedCtxKey struct{}
+
+// WithFanOutOffered records on ctx whether the Agent dispatching a tool call has fan_out on its
+// live menu. Unlike WithPromptSlot it always overrides what ctx carries: the answer belongs to the
+// calling Agent, and a child's menu may differ from its parent's. The load_skill tool reads it to
+// tell the model how a recipe skill is started — one tool instance serves a parent and every
+// child, so the answer cannot be bound when the tool is built.
+func WithFanOutOffered(ctx context.Context, offered bool) context.Context {
+	return context.WithValue(ctx, fanOutOfferedCtxKey{}, offered)
+}
+
+// FanOutOffered reports whether the Agent running the call under ctx offers fan_out; false when
+// no Agent recorded it (a tool called outside a running Agent).
+func FanOutOffered(ctx context.Context) bool {
+	offered, _ := ctx.Value(fanOutOfferedCtxKey{}).(bool)
+	return offered
 }
 
 // SkillLookupResult is one lookup's answer, in the three shapes load_skill can return.

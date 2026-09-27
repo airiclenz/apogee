@@ -99,7 +99,7 @@ func (c *Catalog) Lookup(query string) LookupResult {
 // LookupSkill satisfies domain.SkillLookup: the same answer in the loop-facing types, with the
 // winner reduced to a domain.ResolvedSkill so the tool renders a looked-up body through exactly the
 // fields the loop renders an attached one through (ID, DisplayName, Body, Dir — the folder address
-// the model reads the skill's bundled files from).
+// the model reads the skill's bundled files from), plus whether the skill carries a recipe.
 func (c *Catalog) LookupSkill(query string) domain.SkillLookupResult {
 	res := c.Lookup(query)
 	out := domain.SkillLookupResult{Found: res.Found, Also: res.Also}
@@ -109,6 +109,7 @@ func (c *Catalog) LookupSkill(query string) domain.SkillLookupResult {
 			DisplayName: res.Skill.DisplayName,
 			Body:        res.Skill.Body,
 			Dir:         res.Skill.Dir,
+			Recipe:      res.Skill.Recipe != nil,
 		}
 	}
 	for _, cand := range res.Candidates {

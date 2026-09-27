@@ -5,7 +5,10 @@ package agent
 // Workflow verdict), keeps it in the leaf group, and runs it here: the arguments become a
 // workflow.Plan — one fanout, then at most one verify and one merge — checked by
 // workflow.ValidateModelPlan, whose problems come back as one tool error naming each argument to
-// fix. A valid plan runs through a workflow.Runner over the session's `<scratch>/workflows/` store,
+// fix. A call naming a `recipe` instead runs that Recipe (ADR 0087 D2) through the core the recipe
+// launch shares (runRecipe, recipe.go) with its keyed `inputs`: an unknown recipe is answered with
+// the recipes there are, and a recipe beside any argument that describes a fan-out is refused
+// before anything runs. A valid plan runs through a workflow.Runner over the session's `<scratch>/workflows/` store,
 // its item children spawned through the recursion point (workflowspawn.go), its progress reported
 // as WorkflowPhaseEvents (workflowObserver), and the call is answered with workflow.Format's result
 // lines. The same call again finds the stored workflow by
@@ -24,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -44,13 +48,16 @@ const (
 // The model-facing refusals a fan_out call can take before any child runs. Each is the whole tool
 // error, so it says what to do instead.
 const (
-	fanOutProblemsHead      = "fan_out was not run — fix these arguments and call it again:"
-	fanOutArgumentsFormat   = "fan_out was not run: its arguments are not valid JSON (%v); send an object with task and over"
-	fanOutOverFormat        = "fan_out was not run: over must be an array of strings or an object with one of files, lines or split (%v)"
-	fanOutRecipeUnavailable = "fan_out was not run: recipes cannot be started through fan_out yet; describe the fan-out with task and over instead"
-	fanOutNoScratch         = "fan_out was not run: this session has no scratch directory to keep the workflow in"
-	fanOutNoWorkspace       = "fan_out was not run: this session has no workspace to read the items from"
-	fanOutRunFailedPrefix   = "fan_out could not run: "
+	fanOutProblemsHead       = "fan_out was not run — fix these arguments and call it again:"
+	fanOutArgumentsFormat    = "fan_out was not run: its arguments are not valid JSON (%v); send an object with task and over"
+	fanOutOverFormat         = "fan_out was not run: over must be an array of strings or an object with one of files, lines or split (%v)"
+	fanOutRecipeMixedFormat  = "fan_out was not run: recipe runs a recipe's own stages, so it cannot be combined with %s; call it again with only recipe and inputs, or without recipe to describe the fan-out yourself"
+	fanOutUnknownRecipe      = "fan_out was not run: %q is not a recipe; the recipes are: %s"
+	fanOutRecipeInputsFormat = "fan_out was not run: inputs must be an object of name: text pairs (%v)"
+	fanOutRecipeFailed       = "fan_out could not run recipe %s: %v"
+	fanOutNoScratch          = "fan_out was not run: this session has no scratch directory to keep the workflow in"
+	fanOutNoWorkspace        = "fan_out was not run: this session has no workspace to read the items from"
+	fanOutRunFailedPrefix    = "fan_out could not run: "
 )
 
 // fanOutListingLineFormat is the line a stopped workflow's answer ends on when Format has not
@@ -60,7 +67,7 @@ const fanOutListingLineFormat = "items: %s"
 
 // fanOutArgs is a fan_out call's arguments as the tool publishes them (tools.fanOutSchemaTemplate).
 // `run_on` and `background` are read by nothing here yet: the item children run on the configured
-// seat, and the call blocks.
+// seat, and the call blocks. `recipe` and `inputs`, the recipe form, are read by parseFanOutRecipe.
 type fanOutArgs struct {
 	Task    string               `json:"task"`
 	Over    json.RawMessage      `json:"over"`
@@ -71,8 +78,15 @@ type fanOutArgs struct {
 	Verify  *fanOutVerifyArgs    `json:"verify"`
 	Merge   *fanOutMergeArgs     `json:"merge"`
 	Tools   []string             `json:"tools"`
-	Recipe  string               `json:"recipe"`
 }
+
+// fanOutPlanFields are the fan_out arguments that describe a fan-out, in schema order: none of
+// them may be set beside `recipe`, whose stages the recipe itself declares.
+var fanOutPlanFields = []string{"task", "over", "batch", "context", "returns", "out", "verify", "merge", "tools"}
+
+// emptyJSONValues are the argument values that count as unset when fan_out checks a recipe call
+// for fan-out arguments: a model that fills every field in with an empty value asked for nothing.
+var emptyJSONValues = []string{"null", `""`, "[]", "{}", "0", "false"}
 
 // fanOutVerifyArgs is fan_out's `verify` object: which items to check and what to look at.
 type fanOutVerifyArgs struct {
@@ -120,6 +134,12 @@ func (a *Agent) runWorkflowCall(ctx context.Context, turn int, slot *dispatchSlo
 
 // workflowCallResult parses, checks and runs one fan_out call's Workflow and renders its answer.
 func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
+	if recipe, inputs, refusal, isRecipe := parseFanOutRecipe(call.Arguments); isRecipe {
+		if refusal != "" {
+			return errorToolResult(call.ID, refusal)
+		}
+		return a.recipeCallResult(ctx, turn, call, recipe, inputs)
+	}
 	plan, refusal := parseFanOutPlan(call.Arguments)
 	if refusal != "" {
 		return errorToolResult(call.ID, refusal)
@@ -138,6 +158,57 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		return errorToolResult(call.ID, fanOutRunFailedPrefix+err.Error())
 	}
 	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome)}
+}
+
+// recipeCallResult runs the recipe id one fan_out call names over its keyed inputs and renders its
+// answer: the result lines, the recipes there are for an unknown id, or why the recipe could not
+// run (an unknown or missing input among them).
+func (a *Agent) recipeCallResult(ctx context.Context, turn int, call domain.ToolCall, id string, inputs map[string]string) domain.ToolResult {
+	source := a.recipeSource()
+	if source == nil {
+		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, id, "none"))
+	}
+	if _, ok := source.Recipe(id); !ok {
+		known := "none"
+		if ids := source.RecipeIDs(); len(ids) > 0 {
+			known = strings.Join(ids, ", ")
+		}
+		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, id, known))
+	}
+	result, err := a.runRecipe(ctx, turn, call, id, inputs)
+	if err != nil {
+		return errorToolResult(call.ID, fmt.Sprintf(fanOutRecipeFailed, id, err))
+	}
+	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result)}
+}
+
+// parseFanOutRecipe reads a fan_out call that names a recipe: the recipe id and its inputs, or the
+// refusal a recipe beside fan-out arguments, or inputs that are not name: text pairs, earn.
+// isRecipe is false — and the call is an ordinary fan-out — when the arguments name no recipe or
+// are not a JSON object (parseFanOutPlan reports that).
+func parseFanOutRecipe(raw json.RawMessage) (id string, inputs map[string]string, refusal string, isRecipe bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return "", nil, "", false
+	}
+	if err := json.Unmarshal(fields["recipe"], &id); err != nil || id == "" {
+		return "", nil, "", false
+	}
+	var mixed []string
+	for _, name := range fanOutPlanFields {
+		if value, set := fields[name]; set && !slices.Contains(emptyJSONValues, string(bytes.TrimSpace(value))) {
+			mixed = append(mixed, name)
+		}
+	}
+	if len(mixed) > 0 {
+		return id, nil, fmt.Sprintf(fanOutRecipeMixedFormat, strings.Join(mixed, ", ")), true
+	}
+	if value, set := fields["inputs"]; set {
+		if err := json.Unmarshal(value, &inputs); err != nil {
+			return id, nil, fmt.Sprintf(fanOutRecipeInputsFormat, err), true
+		}
+	}
+	return id, inputs, "", true
 }
 
 // newWorkflowRunner builds the Runner one fan_out call runs under, or the refusal that keeps it
@@ -187,9 +258,6 @@ func parseFanOutPlan(raw json.RawMessage) (workflow.Plan, string) {
 	var args fanOutArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return workflow.Plan{}, fmt.Sprintf(fanOutArgumentsFormat, err)
-	}
-	if args.Recipe != "" {
-		return workflow.Plan{}, fanOutRecipeUnavailable
 	}
 	source, err := parseFanOutSource(args.Over, args.Batch)
 	if err != nil {

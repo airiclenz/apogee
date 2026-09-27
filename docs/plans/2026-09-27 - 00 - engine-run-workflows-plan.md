@@ -605,7 +605,15 @@ The launch is detected only on `in.SkillIDs[0]` (Driver-parsed through `refs.Ski
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ && go test -race -count=1 ./internal/run/ && go test -race -count=1 ./internal/skills/`
 **Commit:** `feat(agent): start a recipe as a workflow`
 
-## 21. fan_out starts a recipe
+## 21. fan_out starts a recipe — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the calling Agent's menu reaches load_skill through a new `domain.WithFanOutOffered` / `domain.FanOutOffered` context pair (internal/domain/config.go). `Agent.runTool` sets it on every leaf call from a new `offersTool` helper, which checks that the tool is registered and not hidden by Plan mode, mirroring toolMenu's filter. Unlike WithPromptSlot it always overrides the value already on the context. No `tools.HostTools` field was added, so the HostTools every-field check was not touched.
+
+NOTES (2026-09-27): `domain.ResolvedSkill` gains `Recipe bool`, which only `LookupSkill` sets (internal/skills/lookup.go). The loop's attach and `ResolveSkills` ignore it.
+
+NOTES (2026-09-27): the recipe form is read by a new `parseFanOutRecipe` over the raw argument map. A fan-out field counts as set unless its value is null, "", [], {}, 0 or false, so a small model that fills every field with an empty value is not refused. The `Recipe` field and the old `fanOutRecipeUnavailable` refusal are removed from fanOutArgs/parseFanOutPlan. The unknown-recipe answer lists ids through `workflow.RecipeSource.RecipeIDs` in workflowcall.go rather than reusing recipeByID's Driver-facing `apogee:`-prefixed error.
+
+NOTES (2026-09-27): runRecipe errors (missing/unknown input, no scratch dir or workspace, a Runner failure) answer as `fan_out could not run recipe <id>: <error>`.
 
 **What:** Recast at the regression check (2026-09-27). Depends on item 20.
 **Goal:** `fan_out{recipe, inputs}` starts the named recipe blocking and returns its result lines; an unknown recipe lists the recipe skills available; `recipe` with any fan-out field is a fixable error.

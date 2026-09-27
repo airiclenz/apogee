@@ -708,3 +708,119 @@ func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
 		t.Errorf("a run that failed before it had an id emitted %v, want nothing", phaseNames(got))
 	}
 }
+
+// recipeFanOutUpstream answers a parent whose first reply calls fan_out with args and whose second
+// closes the Exchange, and the review recipe's two children bound to scope src.
+func recipeFanOutUpstream(args string) *workflowResponder {
+	return (&workflowResponder{}).
+		route("please run it", nil, toolCallScript("fo1", tools.FanOutToolName, args)).
+		route("please run it", nil, contentScript("all done")).
+		route("check alpha in src", nil, finishScript("f1", "alpha is fine")).
+		route("check beta in src", nil, finishScript("f2", "beta is fine"))
+}
+
+func TestWorkflowCall_ARecipeRunsAndAnswersItsResultLines(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := recipeConfig(t, sink, reviewRecipe())
+	// Empty fan-out fields beside recipe ask for nothing, so they do not refuse the call.
+	up := recipeFanOutUpstream(`{"recipe":"review","inputs":{"scope":"src"},"task":"","over":[]}`)
+
+	runWorkflowParent(t, context.Background(), cfg, up, "please run it")
+
+	got := callResult(t, sink.events, "fo1")
+	if got.IsError {
+		t.Fatalf("fan_out result is an error: %q", got.Content)
+	}
+	for _, want := range []string{"#1 alpha — ok — alpha is fine count=1", "#2 beta — ok — beta is fine count=1"} {
+		if !strings.Contains(got.Content, want) {
+			t.Errorf("fan_out result lacks %q:\n%s", want, got.Content)
+		}
+	}
+	if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 1 {
+		t.Errorf("workflow folders = %v, want the recipe's one", folders)
+	}
+}
+
+func TestWorkflowCall_ARecipeCallThatCannotRunIsAFixableError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"an unknown recipe", `{"recipe":"nope"}`, `"nope" is not a recipe; the recipes are: review`},
+		{"fan-out fields beside it", `{"recipe":"review","task":"check {item} carefully and report","over":["a"],"verify":{}}`,
+			"cannot be combined with task, over; call it again with only recipe and inputs"},
+		{"inputs of the wrong shape", `{"recipe":"review","inputs":{"scope":3}}`, "inputs must be an object of name: text pairs"},
+		{"a missing input", `{"recipe":"review"}`, "fan_out could not run recipe review: missing input: scope"},
+		{"an unknown input", `{"recipe":"review","inputs":{"scope":"src","depth":"2"}}`, `unknown input "depth"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := recipeConfig(t, sink, reviewRecipe())
+
+			runWorkflowParent(t, context.Background(), cfg, recipeFanOutUpstream(tc.args), "please run it")
+
+			got := callResult(t, sink.events, "fo1")
+			if !got.IsError || !strings.Contains(got.Content, tc.want) {
+				t.Errorf("fan_out result = %+v, want an error containing %q", got, tc.want)
+			}
+			if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
+				t.Errorf("workflow folders = %v, want none for a recipe that did not run", folders)
+			}
+		})
+	}
+}
+
+// recipeLookup finds the review skill, which carries a recipe, for every query.
+type recipeLookup struct{}
+
+func (recipeLookup) LookupSkill(string) domain.SkillLookupResult {
+	return domain.SkillLookupResult{Found: true, Skill: domain.ResolvedSkill{
+		ID: "review", DisplayName: "Review", Body: reviewBody, Recipe: true,
+	}}
+}
+
+// TestWorkflowCall_LoadSkillNamesHowARecipeStartsFromTheCallersMenu drives ONE load_skill instance
+// from a parent that offers fan_out and from its delegate, which at the depth bound does not: the
+// recipe line is decided per call, so the parent is told to start the recipe with fan_out and the
+// child that the user starts it.
+func TestWorkflowCall_LoadSkillNamesHowARecipeStartsFromTheCallersMenu(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink, tools.NewSubAgent(), tools.NewLoadSkill(recipeLookup{}))
+	up := (&workflowResponder{}).
+		route("please load it", nil, toolCallScript("p1", "load_skill", `{"query":"review"}`)).
+		route("please load it", nil, toolCallScript("p2", tools.SubAgentToolName, `{"task":"child loads the review skill"}`)).
+		route("please load it", nil, contentScript("all done")).
+		route("child loads the review skill", nil, toolCallScript("c1", "load_skill", `{"query":"review"}`)).
+		route("child loads the review skill", nil, contentScript("loaded"))
+
+	runWorkflowParent(t, context.Background(), cfg, up, "please load it")
+
+	if menu := up.menus["child loads the review skill"]; slices.Contains(menu, tools.FanOutToolName) {
+		t.Fatalf("the child's menu %v offers fan_out; the test needs one that does not", menu)
+	}
+	parent := callResult(t, sink.events, "p1")
+	if want := `this is a recipe: start it with fan_out{recipe: "review"}`; !strings.Contains(parent.Content, want) {
+		t.Errorf("the parent's load_skill result lacks %q:\n%s", want, parent.Content)
+	}
+	var child *domain.ToolResult
+	for _, e := range sink.events {
+		if re, ok := e.(domain.ToolResultEvent); ok && re.Depth == 1 && re.Result.CallID == "c1" {
+			child = &re.Result
+		}
+	}
+	if child == nil {
+		t.Fatal("the child's load_skill call was never answered")
+	}
+	if want := "this is a recipe: the user starts it with /review"; !strings.Contains(child.Content, want) {
+		t.Errorf("the child's load_skill result lacks %q:\n%s", want, child.Content)
+	}
+}
