@@ -558,7 +558,13 @@ NOTES (2026-09-27): consequential edit — internal/skills/doc.go: made necessar
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/skills/`
 **Commit:** `feat(skills): recipes and inputs in the skill header`
 
-## 19. Recipe inputs bind from the user's text
+## 19. Recipe inputs bind from the user's text — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the tokenizer is written in internal/workflow rather than reusing refs.ScanToken — the package may import only the standard library and internal/domain (ADR 0087 D10, enforced by validate_test.go); a quote may open anywhere in a token (so `focus="a b"` is one keyed token), and a token is keyed only when an input-name-shaped word precedes the first unquoted `=` (so a URL or a quoted `"a=b"` stays positional).
+
+NOTES (2026-09-27): beyond the item text — an unterminated quote is an error naming the token (ScanToken's lenient run-to-end-of-line is not copied, since a silent mis-bind would start a workflow on the wrong values); an empty value (`scope=`, a bare `""`) binds nothing and falls to the default, a positional `""` still taking its slot; the returned map holds every declared input except the missing ones, an optional input with no value or default binding ""; every problem is reported in one error.
+
+NOTES (2026-09-27): consequential edit — internal/workflow/doc.go: made necessary by BindInputs joining inputs.go (the file-map line names it)
 
 **What:** Depends on item 18.
 **Goal:** `workflow.BindInputs(decls, text) (map[string]string, missing []string, error)` binds `key=value` tokens by name and the remaining tokens in declared order (quoted tokens allowed); unknown keys and surplus tokens are errors naming them.
