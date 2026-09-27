@@ -112,8 +112,10 @@
 // machine-id file, falling back to the hostname, and reports whether the result is the
 // unidentified sentinel.
 //
-// The single-instance lock. lock.go is the OS-neutral half: AcquireLock, the LockHeldError a
-// refused caller turns into "already running (pid N)", and the PID it writes into the file for
+// The single-instance lock. lock.go is the OS-neutral half: AcquireLock, AcquireLockWait (the
+// same lock, retried through contention up to a timeout, for short critical sections), the
+// LockHeldError a refused caller turns into "already running (pid N)", and the PID it writes
+// into the file for
 // `cat`-diagnostics and nothing else — the kernel drops the lock with the process, so no
 // liveness is ever probed and no stale file is ever judged. lock_unix.go takes it with flock,
 // whose lock belongs to the open file description rather than the process, and lock_windows.go

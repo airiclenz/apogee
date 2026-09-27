@@ -364,7 +364,10 @@ NOTES (2026-09-27): consequential edit — internal/agent/prune.go: made necessa
 **Acceptance:** `go test -race -count=1 ./internal/domain/ && go test -race -count=1 ./internal/agent/`
 **Commit:** `fix(domain): drop the advice ledger when a rewrite loses its fence`
 
-## 21. Blocking variant of the platform file lock
+## 21. Blocking variant of the platform file lock — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the retry loop (`lockFileWithin`, 10 ms poll) lives once in the OS-neutral `lock.go` over the existing per-OS non-blocking `lockFile`, so `lock_unix.go`/`lock_windows.go` needed no change; `AcquireLock` now delegates to the shared `acquireLock(path, 0)` body with identical behaviour.
+NOTES (2026-09-27): consequential edit — internal/platform/doc.go: made necessary by adding AcquireLockWait to lock.go (the package map's lock.go line enumerates its exported surface).
 
 **What:**
 **Goal:** `internal/platform` offers `AcquireLockWait(path string, timeout time.Duration) (release func(), err error)` that blocks up to `timeout` for the flock/`LockFileEx` lock and returns `*LockHeldError` on timeout; `AcquireLock` is unchanged.

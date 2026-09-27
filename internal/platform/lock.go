@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The advisory single-instance lock (ADR 0034 decision 7): the mechanism by which a second
@@ -38,6 +39,11 @@ const (
 	// longer is not one, and reading past that would only give a corrupt file a way to make a
 	// diagnostic expensive.
 	pidReadLimit = 32
+
+	// lockRetryInterval is how long [AcquireLockWait] sleeps between two non-blocking attempts.
+	// A holder here keeps the lock for the few milliseconds of a file rewrite, so a short poll
+	// hands the lock over promptly without spinning a core while it waits.
+	lockRetryInterval = 10 * time.Millisecond
 )
 
 // errLockHeld is the platform-neutral signal each per-OS lockFile returns when the OS says the
@@ -45,7 +51,8 @@ const (
 // it never leaves this file: [AcquireLock] turns it into the [LockHeldError] a caller reads.
 var errLockHeld = errors.New("apogee: lock: held by another process")
 
-// LockHeldError is [AcquireLock]'s refusal when another live process already holds the lock.
+// LockHeldError is [AcquireLock]'s refusal when another live process already holds the lock,
+// and [AcquireLockWait]'s when it still holds it once the wait has run out.
 //
 // It is a type rather than a sentinel because the line the caller prints needs the two facts
 // inside it — which file is held, and who the holder said it was — so `apogee daemon` can say
@@ -85,12 +92,37 @@ func (e *LockHeldError) Error() string {
 // is nil on every error. On success it is safe to call more than once — the second and later
 // calls do nothing — so a caller can defer it and still release early.
 func AcquireLock(path string) (release func(), err error) {
+	return acquireLock(path, 0)
+}
+
+// AcquireLockWait is [AcquireLock] for a caller that would rather queue than be refused: when
+// another holder has the lock it retries every [lockRetryInterval] until the lock is free or
+// timeout has elapsed. It is for short, bounded critical sections — a file rewrite two
+// processes must not interleave — never for a lifetime lock like the daemon's, whose second
+// instance must be told at once that it is not wanted.
+//
+// A timeout of zero or less makes exactly one attempt, like [AcquireLock]. The file, the PID it
+// records and the release it returns behave exactly as [AcquireLock] documents.
+//
+// Errors: a *[LockHeldError] when the lock is still held elsewhere once timeout has elapsed; a
+// wrapped error naming the path, returned at once without waiting, when the file could not be
+// opened or the lock call failed for any reason other than contention. release is nil on every
+// error.
+func AcquireLockWait(path string, timeout time.Duration) (release func(), err error) {
+	return acquireLock(path, timeout)
+}
+
+// acquireLock is the one body behind [AcquireLock] and [AcquireLockWait]: open the file, take
+// the lock (retrying through contention until timeout has elapsed), record the PID. The
+// descriptor stays open across the retries, so each attempt contends with the holder exactly
+// as the first one did.
+func acquireLock(path string, timeout time.Duration) (release func(), err error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, lockFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("apogee: lock %s: open: %w", path, err)
 	}
 
-	if err := lockFile(file); err != nil {
+	if err := lockFileWithin(file, timeout); err != nil {
 		// Read the holder's PID while the descriptor is still open: it is the only diagnostic
 		// the refusal can carry, and failing to read it is not a failure to refuse.
 		held := errors.Is(err, errLockHeld)
@@ -112,6 +144,20 @@ func AcquireLock(path string) (release func(), err error) {
 
 	var once sync.Once
 	return func() { once.Do(func() { releaseLock(file) }) }, nil
+}
+
+// lockFileWithin takes the lock on file, retrying every [lockRetryInterval] while it is held
+// elsewhere and timeout has not yet elapsed. It returns [errLockHeld] once the time is up, and
+// any other lockFile failure at once — only contention is worth waiting out.
+func lockFileWithin(file *os.File, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := lockFile(file)
+		if !errors.Is(err, errLockHeld) || !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(min(lockRetryInterval, time.Until(deadline)))
+	}
 }
 
 // releaseLock drops the lock and closes the descriptor. Both failures are unreported by

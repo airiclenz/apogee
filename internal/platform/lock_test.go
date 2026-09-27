@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The lock tests run entirely in this process, on both supported platforms, because the
@@ -170,5 +171,89 @@ func TestAcquireLockErrorRendersAnUnknownPID(t *testing.T) {
 				t.Errorf("LockHeldError.Error() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAcquireLockWaitTakesTheLockOnceTheHolderReleases(t *testing.T) {
+	t.Parallel()
+
+	path := lockPath(t)
+	release := acquire(t, path)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		release()
+	}()
+
+	second, err := AcquireLockWait(path, 10*time.Second)
+
+	if err != nil {
+		t.Fatalf("AcquireLockWait while the holder releases = %v, want the lock", err)
+	}
+	second()
+}
+
+func TestAcquireLockWaitRefusesAHolderThatOutlastsTheTimeout(t *testing.T) {
+	t.Parallel()
+
+	// Zero is the documented single attempt; the positive timeout must actually be waited out
+	// before the refusal, not cut short at the first contended attempt.
+	tests := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{name: "single attempt", timeout: 0},
+		{name: "waited out", timeout: 60 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := lockPath(t)
+			acquire(t, path)
+			started := time.Now()
+
+			release, err := AcquireLockWait(path, tt.timeout)
+
+			elapsed := time.Since(started)
+			if release != nil {
+				t.Errorf("AcquireLockWait returned a release for a refused lock, want nil")
+			}
+			var held *LockHeldError
+			if !errors.As(err, &held) {
+				t.Fatalf("AcquireLockWait on a held lock = %v, want a *LockHeldError", err)
+			}
+			if held.Path != path || held.PID != os.Getpid() {
+				t.Errorf("LockHeldError = %+v, want path %q and the holder's pid %d", held, path, os.Getpid())
+			}
+			if elapsed < tt.timeout {
+				t.Errorf("AcquireLockWait refused after %v, want it to wait the full %v", elapsed, tt.timeout)
+			}
+		})
+	}
+}
+
+func TestAcquireLockWaitReportsAnUnusablePathWithoutWaiting(t *testing.T) {
+	t.Parallel()
+
+	// Only contention is worth waiting out: a path that cannot be opened fails at once, as a
+	// plain error, however long the caller was prepared to wait.
+	const patience = time.Minute
+	path := filepath.Join(t.TempDir(), "absent", "config.yaml.lock")
+	started := time.Now()
+
+	release, err := AcquireLockWait(path, patience)
+
+	if release != nil {
+		t.Errorf("AcquireLockWait returned a release for an unusable path, want nil")
+	}
+	var held *LockHeldError
+	if err == nil || errors.As(err, &held) {
+		t.Fatalf("AcquireLockWait on an unusable path = %v, want a plain error", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("AcquireLockWait error = %q, want it to name the path", err)
+	}
+	if elapsed := time.Since(started); elapsed >= patience {
+		t.Errorf("AcquireLockWait took %v on an unusable path, want an immediate failure", elapsed)
 	}
 }
