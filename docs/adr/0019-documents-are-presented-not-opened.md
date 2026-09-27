@@ -416,3 +416,28 @@ Everything else stands: the extension allow-lists are untouched, the model still
 command, and the doc server keeps fencing its grants to the workspace root — so on a remote session
 a mounted document degrades to rung 0, which the tool's result states in words ("Outside the
 workspace it is served locally; a remote session shows the path only").
+
+## Amendment (2026-09-26) — a `present.command` that resolves to a cmd shim gets the name bound
+
+**Why now.** The second amendment's (c) left rung 3 name-unbounded on the premise that a
+`present.command` "is launched without cmd.exe". That holds for a native program and fails for a
+**batch file**: Windows starts a `.bat` or `.cmd` by handing the whole joined command line to
+cmd.exe, which re-parses it as grammar exactly as it re-parses rung 1's `cmd /c start` line. A
+`.cmd` shim is the shape many CLI wrapper installs take, so with `present.command` pointed at one
+and `present.command-on-model-documents` set, a model-written `report&calc&.html` reads back as
+three commands (code audit 2026-09-26, Medium; plan `2026-09-26 - 00`, item 27).
+
+**(a) The bound.** On Windows — and only there — when the program rung 3's `argv[0]` **resolves**
+to is `cmd.exe` or ends in `.bat` or `.cmd` (case-insensitive), the document path must pass the
+second amendment's (a) bound; a path carrying any character that bound refuses launches nothing. The resolved program is what is judged, so a bare `zed` that PATH resolves to
+`zed.cmd` is bound too, and the path is judged wherever it lands in the template — substituted for
+`{path}` or appended.
+
+**(b) Refused loudly, not degraded.** Rung 1's name refusal reports `ErrNoOpener` because the user
+named no opener and "nothing to open into" is the honest summary. Here the user **did** name one,
+so the refusal is a real error naming the resolved program and the path; the ladder still presents
+the path on rung 0, with the reason in the transcript (§4's degrade — the document is never lost).
+
+**(c) Nothing else moves.** A native program still receives any name the workspace holds, rung 3
+stays extension-unbounded (the first amendment's (c)), macOS and Linux are untouched, and the
+2026-09-22 opt-in and argv[0] fence stand as written.

@@ -450,7 +450,10 @@ NOTES (2026-09-27): a workspace whose add errors on every capture (for example, 
 **Acceptance:** `go test -race -count=1 ./cmd/demorig/`
 **Commit:** `fix(demorig): strip APOGEE_API_KEY from a take's environment`
 
-## 27. present.command via a cmd shim gets the metacharacter check
+## 27. present.command via a cmd shim gets the metacharacter check — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): a shim refusal is a real error, not `ErrNoOpener` as rung 1's name refusal is — the user configured this opener, so the ladder's "no opener on this machine" reason would misstate why it did not run; the document still reaches rung 0 with a "could not open: …" reason. Recorded as the ADR amendment's (b).
+NOTES (2026-09-27): `TestOpenerCommandOverrideIsNotNameBounded` now names `zed.exe` so its native-program premise is explicit; the new `TestOpenerCommandOverrideViaACmdShimIsNameBounded` holds the shim cases (7 refusal subtests fail on the pre-item tree).
 
 **What:** Fixes the audit's Medium "A document-opener override path skips the Windows shell-metacharacter check".
 **Goal:** on Windows, an override whose resolved program is `cmd.exe` or ends in `.bat`/`.cmd` (case-insensitive) refuses a substituted `{path}` failing `cmdSafe`; any other override still opens `report&calc&.html`.

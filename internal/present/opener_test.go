@@ -389,22 +389,94 @@ func TestOpenerCommandOverrideIsNotExtensionBounded(t *testing.T) {
 	}
 }
 
-// The name bound stops at rung 3 exactly as the extension bound does (ADR 0019, both 2026-07-26
-// amendments): a present.command names ONE application and is launched without cmd.exe anywhere
-// near it, so the user's configured opener still shows a file whose name the Windows OS table
-// refuses.
+// The name bound stops at a NATIVE rung 3 program exactly as the extension bound does (ADR 0019,
+// both 2026-07-26 amendments): a present.command naming an .exe hands it the path as one argument
+// with no cmd.exe anywhere near it, so the user's configured opener still shows a file whose name
+// the Windows OS table refuses. A cmd shim is the one exception
+// (TestOpenerCommandOverrideViaACmdShimIsNameBounded).
 func TestOpenerCommandOverrideIsNotNameBounded(t *testing.T) {
 	t.Parallel()
 
 	runner := &recordingRunner{}
-	opener := Opener{GOOS: "windows", CommandOverride: "zed {path}", LookPath: lookInBin, Run: runner.run}
+	opener := Opener{GOOS: "windows", CommandOverride: "zed.exe {path}", LookPath: lookInBin, Run: runner.run}
 	path := docNamed("report&calc&.html")
 
 	if err := opener.Open(path); err != nil {
 		t.Fatalf("Open(%q) = %v, want the user's own opener to run", path, err)
 	}
-	if got := runner.only(t); !equalArgv(got, resolvedArgv([]string{"zed", path})) {
+	if got := runner.only(t); !equalArgv(got, resolvedArgv([]string{"zed.exe", path})) {
 		t.Errorf("Open(%q) ran %q, want the configured application", path, got)
+	}
+}
+
+// A present.command whose program resolves to cmd.exe or to a `.bat`/`.cmd` shim — the shape a
+// CLI wrapper install commonly takes — reaches the same cmd.exe re-parse rung 1's Windows line
+// does: Windows starts a batch file by handing the joined command line to cmd.exe. The substituted
+// path therefore gets rung 1's cmdSafe (ADR 0019, amendment 2026-09-26), refused LOUDLY rather
+// than degraded, because the user configured this command and "no opener" would misstate why it
+// did not run. The bound is Windows' alone and judges the RESOLVED program, case-insensitively.
+func TestOpenerCommandOverrideViaACmdShimIsNameBounded(t *testing.T) {
+	t.Parallel()
+
+	unsafe := docNamed("report&calc&.html")
+	tests := []struct {
+		name     string
+		goos     string
+		override string
+		look     func(string) (string, error)
+		path     string
+		// refused says Open must return a non-sentinel error and run nothing.
+		refused bool
+	}{
+		{name: "a .cmd shim refuses a metacharacter name", goos: "windows", override: "zed.cmd {path}", path: unsafe, refused: true},
+		{name: "a .bat shim refuses a metacharacter name", goos: "windows", override: "zed.bat {path}", path: unsafe, refused: true},
+		{name: "the extension is matched case-insensitively", goos: "windows", override: "Zed.CMD {path}", path: unsafe, refused: true},
+		{name: "cmd.exe itself refuses a metacharacter name", goos: "windows", override: "cmd.exe /c zed {path}", path: unsafe, refused: true},
+		{
+			name: "a bare name PATH resolves to a shim is judged by the resolution",
+			goos: "windows", override: "zed {path}",
+			look:    func(name string) (string, error) { return filepath.Join(openerBinDir, name+".cmd"), nil },
+			path:    unsafe,
+			refused: true,
+		},
+		{name: "an appended path is bound too", goos: "windows", override: "zed.cmd", path: unsafe, refused: true},
+		{
+			name: "a control character is refused like a metacharacter", goos: "windows",
+			override: "zed.cmd {path}", path: docNamed("report\nx.md"), refused: true,
+		},
+		{name: "a shim still opens a clean name", goos: "windows", override: "zed.cmd {path}", path: testDocPath},
+		{name: "a clean name with parentheses still opens", goos: "windows", override: "zed.bat {path}", path: docNamed("report(1).md")},
+		{name: "a shim name is no shell off Windows", goos: "linux", override: "zed.cmd {path}", path: unsafe},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			look := tt.look
+			if look == nil {
+				look = lookInBin
+			}
+			runner := &recordingRunner{}
+			opener := Opener{GOOS: tt.goos, CommandOverride: tt.override, LookPath: look, Run: runner.run}
+
+			err := opener.Open(tt.path)
+			if !tt.refused {
+				if err != nil {
+					t.Fatalf("Open(%q) = %v, want the configured shim to run", tt.path, err)
+				}
+				runner.only(t)
+				return
+			}
+			if err == nil || errors.Is(err, ErrNoOpener) {
+				t.Fatalf("Open(%q) = %v, want a loud refusal, not a launch or a degrade", tt.path, err)
+			}
+			if !strings.Contains(err.Error(), "cmd.exe would read as syntax") {
+				t.Errorf("Open(%q) = %v, want the refusal to say why", tt.path, err)
+			}
+			if len(runner.calls) != 0 {
+				t.Errorf("Open(%q) launched %v, want nothing run", tt.path, runner.calls)
+			}
+		})
 	}
 }
 
@@ -715,9 +787,10 @@ func TestOpenerRefusesAProgramInsideTheWorkspace(t *testing.T) {
 // refused is loud.
 //
 // What the fence does NOT touch is everything after argv[0] — the operator's own flags and the
-// substituted {path} ride through unchanged, which is why rung 3 stays neither extension-bounded
-// nor name-bounded (TestOpenerCommandOverrideIsNotExtensionBounded,
-// TestOpenerCommandOverrideIsNotNameBounded).
+// substituted {path} ride through unchanged, which is why rung 3 stays extension-unbounded and,
+// for a native program, name-unbounded (TestOpenerCommandOverrideIsNotExtensionBounded,
+// TestOpenerCommandOverrideIsNotNameBounded; a cmd shim is the exception,
+// TestOpenerCommandOverrideViaACmdShimIsNameBounded).
 func TestOpenerFencesTheOverridesProgram(t *testing.T) {
 	t.Parallel()
 

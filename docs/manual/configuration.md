@@ -2049,6 +2049,12 @@ has a `command` configured degrades to the transcript rung — the path is shown
 is not run, and the model is told to tell you which key would change that. Nothing changes
 when no `command` is set: the built-in OS opener of rung 1 is not affected by this key.
 
+On Windows, a `command` whose program is `cmd.exe` or a `.bat`/`.cmd` script — the shape
+many CLI wrappers install as — hands the document path to cmd.exe, which reads characters
+such as `&`, `|`, `%` and `^` as shell syntax. Such a `command` refuses a document whose
+name holds one of those characters: the transcript says why and shows the path instead. An
+`.exe` receives any name unchanged.
+
 `host` is a fallback, not an override: over SSH the address you connected to this box on
 is used, because it is known-routable. If a printed URL is unreachable on **macOS
 Sequoia or later**, the first browser connection to a local-network address needs Local

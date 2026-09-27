@@ -154,11 +154,12 @@ func (o Opener) Open(path string) error {
 // start read the path as one), `xdg-open <path>` on Linux. Windows ships unexercised until the
 // merge plan's Phase 5 provides a real Windows harness — stated in ADR 0019 rather than hidden.
 //
-// The Windows line is the one rung that travels through a SHELL — cmd.exe re-parses the joined
-// command line — so it alone carries a third bound, on the NAME: a path holding a character cmd
-// reads as syntax (cmdSafe) builds no argv and degrades exactly like a refused extension
+// The Windows line is rung 1's one launch that travels through a SHELL — cmd.exe re-parses the
+// joined command line — so it alone carries a third bound, on the NAME: a path holding a character
+// cmd reads as syntax (cmdSafe) builds no argv and degrades exactly like a refused extension
 // (ADR 0019, second amendment 2026-07-26). macOS and Linux need no name bound, because `open`
-// and `xdg-open` receive the path as one execve argument with no shell in between.
+// and `xdg-open` receive the path as one execve argument with no shell in between. Rung 3 meets
+// the same shell only through a cmd shim, and carries the same bound there (below).
 //
 // A fourth bound applies to BOTH rungs, on the PROGRAM: argv[0] — each of the OS table's three
 // names, and equally the first word of a present.command template — is resolved to an absolute
@@ -172,10 +173,19 @@ func (o Opener) Open(path string) error {
 // workspace bin directory a confined call may write is a program the MODEL chose, however the
 // operator meant the key — the same PATH-entry shape rung 1 already refuses (resolveProgram).
 //
-// The bound judges argv[0] and nothing else. The template's own flags, and the {path} substituted
-// into them, ride through exactly as the operator wrote them, so rung 3 stays neither
-// extension-bounded nor name-bounded: what is fenced is which program runs, never which document
-// it is handed.
+// The program bound judges argv[0] alone. The template's own flags, and the {path} substituted
+// into them, ride through exactly as the operator wrote them, so rung 3 stays extension-unbounded:
+// what that bound fences is which program runs, never which document it is handed.
+//
+// Rung 3 is name-bounded in ONE case, on Windows alone (ADR 0019, amendment 2026-09-26): when the
+// program argv[0] resolves to is cmd.exe itself or a `.bat`/`.cmd` shim (cmdShim). Windows starts
+// a batch file through cmd.exe, which re-parses the joined argument list as grammar exactly as it
+// does rung 1's `cmd /c start` line — so a model-chosen `report&calc&.html` handed to a CLI
+// wrapper's .cmd shim reads back as three commands. The substituted path must then pass rung 1's
+// cmdSafe. Unlike rung 1's name refusal, which degrades via ErrNoOpener because the user named no
+// opener, this one is a real error: the user configured this command, and "no opener on this
+// machine" would misstate why it did not run. Every other program — a native .exe handed the path
+// as one argument, with no shell in between — still receives any name the workspace holds.
 func (o Opener) argv(path string) ([]string, error) {
 	if template := strings.TrimSpace(o.CommandOverride); template != "" {
 		argv, err := overrideArgv(template, path)
@@ -185,6 +195,10 @@ func (o Opener) argv(path string) ([]string, error) {
 		resolved, err := o.resolveProgram(argv[0])
 		if err != nil {
 			return nil, err
+		}
+		if o.GOOS == "windows" && cmdShim(resolved) && !cmdSafe(path) {
+			return nil, fmt.Errorf("present: refusing to hand %s a document name cmd.exe would read as syntax: %s",
+				resolved, path)
 		}
 		argv[0] = resolved
 		return argv, nil
@@ -397,8 +411,9 @@ const cmdMetacharacters = "&|^<>%\"!;,="
 // RE-PARSES it, so on Windows — and only there — the model-chosen name is a third bound beside
 // the machine and the extension: a refusal here is what keeps `report&calc&.html` in a
 // space-free workspace path from reading back as three commands. Control characters are refused
-// with the metacharacters (`\r` and `\n` end a cmd command the way `&` does); a refused path
-// degrades to the baseline rung via ErrNoOpener, never an error.
+// with the metacharacters (`\r` and `\n` end a cmd command the way `&` does). On rung 1 a refused
+// path degrades to the baseline rung via ErrNoOpener, never an error; rung 3 applies the same
+// check when its program is a cmd shim (cmdShim) and refuses loudly instead (Opener.argv).
 func cmdSafe(path string) bool {
 	if strings.ContainsAny(path, cmdMetacharacters) {
 		return false
@@ -409,6 +424,16 @@ func cmdSafe(path string) bool {
 		}
 	}
 	return true
+}
+
+// cmdShim reports whether a resolved Windows program runs its arguments through cmd.exe's parser:
+// cmd.exe itself, or a batch file (`.bat`, `.cmd`), which Windows starts by handing the whole
+// joined command line to cmd.exe. The comparison is case-insensitive because the Windows file
+// system is, and the base name is cut at either separator because a Windows path may carry both
+// and the suite judges Windows argvs on hosts whose filepath knows only `/`.
+func cmdShim(program string) bool {
+	base := strings.ToLower(program[strings.LastIndexAny(program, `/\`)+1:])
+	return base == "cmd.exe" || strings.HasSuffix(base, ".bat") || strings.HasSuffix(base, ".cmd")
 }
 
 // overrideArgv turns a present.command template into an argv for path. The template is split
