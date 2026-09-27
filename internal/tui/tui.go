@@ -1011,6 +1011,20 @@ type Engine interface {
 	// replaced by it.
 	// Goroutine-safe like ConfineToWorkspace.
 	ThinkingEffort() (override, profile domain.ThinkingEffort)
+	// Wake opens an Exchange on the finish notes of the background workflows that ended while the
+	// agent was idle (ADR 0089 D3): the notes are queued as the Exchange's opening message, which
+	// the Driver then Steps exactly as it Steps a Submitted one. It reports whether it opened one;
+	// it opens nothing, and leaves the notes held, under `workflow-wake: off`, with no note held,
+	// or with an Exchange open or input queued. With no model bound it refuses as Submit does.
+	// Called ONLY at idle, from the Update goroutine, with no worker driving the engine — the
+	// same class as ClearContext (workflow.go, wakeIfIdle).
+	Wake(context.Context) (bool, error)
+	// TakeWorkflowNotes hands over, as one interjection, the finish notes of the background
+	// workflows that ended while the OPEN Exchange runs, taking them (ADR 0089 D3); it reports
+	// false, and takes nothing, when no Exchange is open or no note is held. Called ONLY by the
+	// worker goroutine, between Steps, where Interject is — which commits what it returns
+	// (deliverWorkflowNotes, worker.go).
+	TakeWorkflowNotes() (domain.UserInput, bool)
 }
 
 // ----------------------------------------------------------------------------

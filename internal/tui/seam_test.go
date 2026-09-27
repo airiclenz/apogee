@@ -166,6 +166,11 @@ type fakeEngine struct {
 
 	childStops  []string           // records StopChild calls (^x on a delegation), by run id, in order
 	stopChildFn func(string) error // scripted StopChild error (nil ⇒ stopped)
+
+	wakeCalls     int                                 // records Wake calls (the idle wake on a background workflow's end)
+	wakeFn        func(context.Context) (bool, error) // scripted Wake answer (nil ⇒ nothing held, no wake)
+	workflowNotes []domain.UserInput                  // what TakeWorkflowNotes hands over, one per call, oldest first
+	notesTaken    int                                 // records TakeWorkflowNotes calls that handed a note over
 }
 
 // childInterjection is one recorded InterjectChild call: the run it addressed and the message.
@@ -212,6 +217,41 @@ func (f *fakeEngine) Interject(_ context.Context, in domain.UserInput) error {
 		return fn(in)
 	}
 	return nil
+}
+
+// Wake records the call and answers with whatever the test scripted — nil models an engine with
+// no finish note held, which opens nothing.
+func (f *fakeEngine) Wake(ctx context.Context) (bool, error) {
+	f.mu.Lock()
+	f.wakeCalls++
+	fn := f.wakeFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx)
+	}
+	return false, nil
+}
+
+// wakes reports how many times Wake was called.
+func (f *fakeEngine) wakes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.wakeCalls
+}
+
+// TakeWorkflowNotes hands over the oldest scripted note and takes it, or reports false when none is
+// left — the fake holds no Exchange state, so the open-Exchange half of the contract is the
+// worker's to honour (it drains only once the Exchange is open).
+func (f *fakeEngine) TakeWorkflowNotes() (domain.UserInput, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.workflowNotes) == 0 {
+		return domain.UserInput{}, false
+	}
+	note := f.workflowNotes[0]
+	f.workflowNotes = f.workflowNotes[1:]
+	f.notesTaken++
+	return note, true
 }
 
 // interjections reports the inputs Interject was handed, in delivery order — empty when the

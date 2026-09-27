@@ -350,6 +350,7 @@ func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
+	m.sessionLoading = true             // …and a background workflow's wake waits for it (workflow.go)
 	return m, m.loadSession(meta.ID)
 }
 

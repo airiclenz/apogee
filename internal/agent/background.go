@@ -77,8 +77,10 @@ import (
 )
 
 // backgroundCallPrefix leads the synthetic call id a background workflow's children are bracketed
-// under in their phase events (the workflow's id follows it). It is never put in history.
-const backgroundCallPrefix = "workflow-"
+// under in their phase events (the workflow's id follows it). It is never put in history. It is the
+// domain's constant because a Driver reads it too, to keep those children's events apart from the
+// conversation's own delegations.
+const backgroundCallPrefix = domain.BackgroundWorkflowCallPrefix
 
 // The refusals of the manager's public calls.
 const (
@@ -435,6 +437,7 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 // held before the end is reported, so a Driver that wakes on that event finds it.
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	observer := run.host.observeWorkflow(run.runner, run.turn, run.plan.Name)
+	observer.background = true
 	result, err := run.runner.Run(ctx, run.plan)
 	a.background.hold(finishNote(run.plan.Name, result, err))
 	observer.end(result, err)

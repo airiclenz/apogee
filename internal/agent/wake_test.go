@@ -300,3 +300,34 @@ func TestFinishNote_SaysHowTheWorkflowEnded(t *testing.T) {
 		})
 	}
 }
+
+// TestBackgroundWorkflow_EventsCarryTheMarkerADriverRoutesBy pins what a Driver keeps a background
+// workflow's events apart by (ADR 0089): every phase of it is marked Background, and its item
+// child's events carry the synthetic call id the domain names.
+func TestBackgroundWorkflow_EventsCarryTheMarkerADriverRoutesBy(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	up := (&workflowResponder{}).route("sweep alpha", nil, finishScript("f1", "alpha is fine"))
+	a, _ := newPairParent(t, sink, up, nil)
+	id := launchBackground(t, a, "pair")
+	a.background.waitAll()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	phases, childEvents := 0, 0
+	for _, e := range sink.events {
+		if event, ok := e.(domain.WorkflowPhaseEvent); ok && event.Workflow == id {
+			phases++
+			if !event.Background {
+				t.Errorf("phase %s of a background workflow is not marked Background", event.Phase)
+			}
+		}
+		if base := e.Identity(); base.Depth > 0 && base.CallID == domain.BackgroundWorkflowCallPrefix+id {
+			childEvents++
+		}
+	}
+	if phases == 0 || childEvents == 0 {
+		t.Errorf("phases = %d, child events under %q = %d; want both", phases, domain.BackgroundWorkflowCallPrefix+id, childEvents)
+	}
+}

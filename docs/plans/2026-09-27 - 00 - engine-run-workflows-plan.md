@@ -812,7 +812,25 @@ Driver opt-in (ADR 0089 D1, D4): the background gate is "`workflow` on the roste
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tools/ && go test -race -count=1 ./internal/agent/ && go test -race -count=1 -run 'RegistryWithMCP|HostToolsFor|FiringConfig' ./cmd/apogee/`
 **Commit:** `feat(tools): the workflow control tool and background fan_out`
 
-## 28. The TUI wakes the agent
+## 28. The TUI wakes the agent — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): re-derived from "the TUI knows from WorkflowPhaseEvent which workflow and runs are background": at 28cd8ee5 the event carried no such marker. internal/domain/events.go now gives `WorkflowPhaseEvent` a `Background bool` field and exports `BackgroundWorkflowCallPrefix` (the agent's `backgroundCallPrefix` now aliases it). It also adds `Identity() EventBase` to the sealed `Event` interface (EventBase implements it) so the TUI can read any event's run. internal/agent/workflowcall.go's observer stamps the flag, and background.go's driveBackground sets it. The NDJSON encoding does not carry the flag, because headless and daemon runs never start a background workflow (ADR 0089 D1). internal/agent/wake_test.go pins the flag and the child call id.
+
+NOTES (2026-09-27): re-derived from "a Bridge.NotifyWorkflow → Msg route as NotifySchedule does": WorkflowPhaseEvents already reach the Model through the event sink as eventMsg, so bridge.go is unchanged and no Bridge method was added.
+
+NOTES (2026-09-27): re-derived from "TakeWorkflowNotes() []string": the engine's call is `TakeWorkflowNotes() (domain.UserInput, bool)`. The worker's `deliverWorkflowNotes` commits the returned input through Interject right after `deliverInterjections`. A refused Interject is reported as `workflowNoteLostMsg`, which folds to a note.
+
+NOTES (2026-09-27): rule (b) is checked in the Update tail (`wakeAfterFold`, deferred in Update in model.go), not at a list of idle sites. That way any fold that leaves the session idle can release a held wake: an Exchange ending, a save landing, a load returning or a pane closing. `canWake` requires all of the following: stateIdle, bound, not quitting, no /sessions load in flight, no queued or in-flight record/fork write, no held messages, and no modal pane. The load needed a new `sessionLoading` flag, set in `acceptBrowser` and cleared on `sessionLoadedMsg`.
+
+NOTES (2026-09-27): Engine.Wake is called on the Update goroutine at idle, so the prompt row is written only when the wake actually opened an Exchange. The boundary cached for mid-wake progress saves is the Snapshot taken before Wake, restored after `enterRunning`. A record saved mid-wake therefore never carries the queued opening as pending input.
+
+NOTES (2026-09-27): rule (c): a claimed event (a Background phase, an event of a run under `workflow-<id>` of a live background workflow, or of a run such a run spawned via ToolCallEvent.SpawnRunID) is folded only into the Inspector rings and the workflow's own state. It skips the whole of foldEvent's other folds (stats, thinking, advice, transcript, usage, activity), the stall clock, progress saves and the parked-decision withdraw. A background workflow's start therefore no longer opens a transcript Workflow block.
+
+NOTES (2026-09-27): consequential edit — internal/tui/model.go: made necessary by the Model fields (workflows, wakePending, sessionLoading), the eventMsg routing, the Update tail's wake and the sessionLoadedMsg/workflowNoteLostMsg folds this item adds.
+
+NOTES (2026-09-27): consequential edit — internal/tui/sessions.go: made necessary by the session-load-in-flight hold (acceptBrowser sets sessionLoading).
+
+NOTES (2026-09-27): transcript.go and fold.go are unchanged. The wake row is an ordinary depth-0 entryUser, which forkPoints and markAborted already count. The background routing sits before foldEvent in Update rather than inside it.
 
 **What:** Recast at the regression check (2026-09-27). Depends on item 26. The Engine call that takes the held finish note (item 26's guard) is `TakeWorkflowNotes() []string` — the worker's call at the between-Steps boundary, returning and clearing the held notes, which `deliverInterjections` commits via `Interject`; it joins `tui.Engine`, `lateEngine` and `fakeEngine` here beside `Wake`.
 **Goal:** the TUI shows a background workflow's finish line in the transcript; when idle and `workflow-wake: on` it opens an Exchange through `Agent.Wake`; when busy the note arrives at the boundary; `esc` never stops a background workflow.

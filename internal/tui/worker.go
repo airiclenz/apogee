@@ -155,6 +155,26 @@ func startResume(parent context.Context, eng Engine, box *interjectBox, notify f
 	return cmd, cancel
 }
 
+// startWake builds the cancellable worker that drives the Exchange a wake just opened (ADR 0089
+// D3): Engine.Wake has already queued the finished background workflows' notes as the opening
+// message on the Update goroutine (Model.wakeIfIdle), so this is startExchange without the Submit.
+// It returns the tea.Cmd and CancelFunc exactly as startExchange does ([Model.enterRunning]), with
+// the same mailbox, per-Turn snapshots and Step-boundary flush — a woken Exchange is a running one
+// like any other, which the human may type into and stop.
+func startWake(parent context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelCauseFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
+	cmd := func() tea.Msg { return driveWake(ctx, eng, box, notify, flush) }
+	return cmd, cancel
+}
+
+// driveWake Steps the Exchange a wake opened to its quiescent boundary and returns the single
+// terminal Msg the model folds — driveExchange minus the Submit, because Wake queued the opening
+// itself. Like driveExchange it enters with only the input queued: the Exchange opens inside the
+// first Step, so nothing is drained before it (stepToBoundary's exchangeOpen).
+func driveWake(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) tea.Msg {
+	return stepToBoundary(ctx, eng, box, false, notify, flush)
+}
+
 // driveExchange runs one Exchange from its Submit to the quiescent Exchange boundary and returns
 // the single terminal Msg the model folds. It Submits the input, then hands off to stepToBoundary —
 // the canonical drive loop (Agent.Run / the bench's coreagent.Run). All intermediate output —
@@ -212,7 +232,8 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 // (deliverInterjections): the same between-Steps window Snapshot occupies, now carrying the human's
 // mid-task remarks into the conversation the next Step's request is built from (ADR 0025). ctx goes
 // with it because a cancel that has already landed makes this Exchange a doomed one — see
-// deliverInterjections.
+// deliverInterjections. Right behind the human's rows it commits, the same way, the finish notes of
+// any background workflow that ended while this Exchange runs (deliverWorkflowNotes, ADR 0089 D3).
 //
 // The same mailbox is also read from INSIDE a Step, by the engine and not by this loop: while a
 // delegation group runs, the dispatching goroutine and its pool workers ask the Bridge whether the
@@ -234,6 +255,7 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 	for {
 		if exchangeOpen {
 			deliverInterjections(ctx, eng, box, notify)
+			deliverWorkflowNotes(ctx, eng, notify)
 		}
 		exchangeOpen = true // whatever the entry state, the Exchange is open from the first Step on
 		res, err := eng.Step(ctx)
@@ -259,6 +281,32 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 		default: // StatusExchangeComplete and any future terminal status
 			return exchangeDoneMsg{Result: res}
 		}
+	}
+}
+
+// deliverWorkflowNotes commits the finish notes of the background workflows that ended while this
+// Exchange runs (ADR 0089 D3): the engine holds each note until a Driver takes it, and this is the
+// Driver's between-Steps drain — the boundary Interject is legal at, right behind the human's own
+// staged rows (deliverInterjections), so the engine consumes no slot of its own for them (ADR
+// 0025). The transcript already carries each workflow's finish line, written when its end event
+// folded (workflow.go), so the delivery reports nothing back.
+//
+// A cancelled ctx skips the drain for deliverInterjections' reason — the Exchange is being stopped —
+// and leaves the notes held, so the next Exchange's opening message or a wake takes them. A refused
+// Interject is not expected here — TakeWorkflowNotes hands a note over only while an Exchange is
+// open, and a note carries text — but were one to happen the note is lost, since the engine has no
+// call that takes one back, so it is reported (workflowNoteLostMsg) rather than dropped unseen. A
+// nil notify is a drive with no program behind it (the seam tests).
+func deliverWorkflowNotes(ctx context.Context, eng Engine, notify func(tea.Msg)) {
+	if ctx.Err() != nil {
+		return
+	}
+	note, ok := eng.TakeWorkflowNotes()
+	if !ok {
+		return
+	}
+	if err := eng.Interject(ctx, note); err != nil && notify != nil {
+		notify(workflowNoteLostMsg{err: err})
 	}
 }
 

@@ -778,6 +778,25 @@ func (e *lateEngine) ThinkingEffort() (override, profile domain.ThinkingEffort) 
 	return effort, ""
 }
 
+// Wake opens an Exchange on the held finish notes of ended background workflows. Unbound there is
+// no Agent to have launched one, so nothing is held and nothing wakes.
+func (e *lateEngine) Wake(ctx context.Context) (bool, error) {
+	agent := e.bound()
+	if agent == nil {
+		return false, nil
+	}
+	return agent.Wake(ctx)
+}
+
+// TakeWorkflowNotes hands over the held finish notes for the open Exchange; unbound there is none.
+func (e *lateEngine) TakeWorkflowNotes() (apogee.UserInput, bool) {
+	agent := e.bound()
+	if agent == nil {
+		return apogee.UserInput{}, false
+	}
+	return agent.TakeWorkflowNotes()
+}
+
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.
 func (e *lateEngine) Close() error {
 	agent := e.bound()

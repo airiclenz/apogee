@@ -473,6 +473,9 @@ type workflowObserver struct {
 	agent *Agent
 	turn  int
 	name  string
+	// background marks every event a background workflow's observer emits (domain.
+	// WorkflowPhaseEvent.Background); driveBackground sets it before the run starts.
+	background bool
 
 	mu sync.Mutex
 	id string // the Workflow's id, once started was emitted
@@ -558,7 +561,7 @@ func (o *workflowObserver) startLocked(id string) {
 // The caller holds mu.
 func (o *workflowObserver) emitLocked(event domain.WorkflowPhaseEvent) {
 	event.EventBase = o.agent.base(o.turn)
-	event.Workflow, event.Name = o.id, o.name
+	event.Workflow, event.Name, event.Background = o.id, o.name, o.background
 	o.agent.cfg.Events.Emit(event)
 }
 

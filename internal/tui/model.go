@@ -391,6 +391,22 @@ type Model struct {
 	// rows above they are session-ephemeral: a quit drops them unrun.
 	deferredCommands []parsedInput
 
+	// workflows is the session's background workflows as their events fold (workflow.go, ADR 0089):
+	// each live one's name and item tally, and the runs it spawned. Its events go there and to the
+	// Inspector only — never the transcript, the activity board or the stall clock — which is what
+	// keeps the conversation's own view, and a stop key, off work that runs beside it.
+	//
+	// wakePending says a background workflow has ended since the last wake was tried: the Update
+	// tail asks the engine to wake on its finish note at the first idle fold with no idle-only
+	// operation in flight (wakeIfIdle), and clears it on that one try.
+	//
+	// sessionLoading marks a /sessions load in flight — the record is being read off the loop, and
+	// the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held until it
+	// lands.
+	workflows      backgroundWorkflows
+	wakePending    bool
+	sessionLoading bool
+
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
 	//
@@ -1041,7 +1057,15 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// settleFrame), and then the activity is reported. Both are pure bookkeeping over the folded
 	// model, and both are TOTAL for the same reason: a fold that forgot to ask for either still
 	// gets it here.
-	defer func() { next = reportActivity(settleFrame(msg, next)) }()
+	//
+	// The wake goes first (wakeAfterFold, workflow.go): a background workflow that ended while this
+	// session was busy is held until a fold leaves it idle with nothing idle-only in flight, and
+	// that can be ANY fold — a save landing, a load returning, a pane closing — so it is asked here
+	// rather than at a list of sites. It launches a worker, so the frame settles over the result.
+	defer func() {
+		next, cmd = wakeAfterFold(next, cmd)
+		next = reportActivity(settleFrame(msg, next))
+	}()
 
 	// The --tui-diag observation point (diagnostics.go). It consumes nothing — every message it
 	// recognises still reaches the switch below — so a session with the flag on behaves exactly
@@ -1099,6 +1123,17 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	case eventMsg:
+		// A background workflow's event — its phases, and every event of the runs it spawned — goes
+		// to the workflow's own state and nowhere the conversation is drawn from: not the transcript,
+		// not the activity board (so no stop key reaches its runs), not the stall clock (it is not
+		// this Exchange's life) — workflow.go, ADR 0089.
+		if m.workflows.owns(msg.Event) {
+			m = m.foldBackgroundEvent(msg.Event)
+			if _, isToolResult := msg.Event.(domain.ToolResultEvent); isToolResult {
+				return m.reassertMouse()
+			}
+			return m, nil
+		}
 		// Any Event, any depth, any variant: the engine is not silent. Stamped before the fold and
 		// unconditionally, so an Event the folds deliberately ignore — usage accounting, an audit
 		// record, a fired mechanism — still counts as life on the stall guard's clock (activity.go).
@@ -1283,8 +1318,16 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case sessionLoadedMsg:
 		// Sessions.Load(id) returned: restore the record into the live engine and repaint its
-		// scrollback, or note the failure with the view left untouched (sessions.go).
+		// scrollback, or note the failure with the view left untouched (sessions.go). The load is
+		// no longer in flight either way, so a held wake may go at the tail.
+		m.sessionLoading = false
 		return m, m.resumeLoaded(msg)
+
+	case workflowNoteLostMsg:
+		// The worker's drain could not commit a background workflow's finish note (worker.go,
+		// deliverWorkflowNotes): say so, since the engine cannot take the note back.
+		m.transcript.addNote(workflowNoteLostPrefix + msg.err.Error())
+		return m, nil
 
 	case skillsReloadedMsg:
 		// The catalog re-scan the merged "/" menu dispatched when it opened has finished and swapped

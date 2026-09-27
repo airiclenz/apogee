@@ -30,6 +30,8 @@ type EventSink interface {
 // versioned; external code switches on the concrete types but cannot add variants.
 type Event interface {
 	eventDepth() int // sealing marker; also carries sub-agent nesting depth
+	// Identity is the emitting agent's stamp (EventBase), whatever the variant.
+	Identity() EventBase
 }
 
 // EventBase is embedded in every Event variant. Depth is the sub-agent nesting
@@ -80,6 +82,12 @@ type EventBase struct {
 }
 
 func (b EventBase) eventDepth() int { return b.Depth }
+
+// Identity returns the stamp itself. Every Event variant embeds EventBase, so every Event answers
+// it — which is how a reader that routes events by the run that emitted them (a Driver keeping a
+// background workflow's children apart, ADR 0089) reads that run off an Event of any variant
+// without a switch over the whole set.
+func (b EventBase) Identity() EventBase { return b }
 
 // TokenEvent is one streamed chunk of assistant text. The tokens streamed for a Turn may be
 // superseded by a StreamResetEvent (the loop re-streamed the Turn on a retry):
@@ -729,18 +737,32 @@ type WorkflowReceipt struct {
 // or Recipe launch started it — never an item child's: each child's own events carry the child's
 // run identity, as a delegation's do.
 //
+// Background is true on every phase of a background workflow (ADR 0089) — one that runs beside the
+// conversation rather than inside the call or launch that started it — and false on a blocking
+// one's. A background workflow's item children run under the synthetic call id
+// BackgroundWorkflowCallPrefix + Workflow, so their events carry that EventBase.CallID; that is
+// how a Driver keeps them apart from the conversation's own delegations. No headless or daemon
+// run starts one (ADR 0089 D1), so the NDJSON encoding does not carry the flag.
+//
 // It is OBSERVATION ONLY: nothing in the loop reads it, and the result the Workflow's caller reads
 // is its result lines, not these events. A Driver that ignores it loses the Workflow's liveness
 // and nothing else.
 type WorkflowPhaseEvent struct {
 	EventBase
-	Phase    WorkflowPhase
-	Workflow string
-	Name     string
-	Stage    string
-	Item     string
-	Index    int
-	Resumed  bool
-	Receipt  WorkflowReceipt
-	Detail   string
+	Phase      WorkflowPhase
+	Workflow   string
+	Name       string
+	Stage      string
+	Item       string
+	Index      int
+	Resumed    bool
+	Receipt    WorkflowReceipt
+	Detail     string
+	Background bool
 }
+
+// BackgroundWorkflowCallPrefix leads the synthetic call id a background workflow's item children
+// are bracketed under — the workflow's id follows it — so every event such a child emits carries
+// EventBase.CallID == BackgroundWorkflowCallPrefix + WorkflowPhaseEvent.Workflow. It is never put
+// in history and never sent to a model.
+const BackgroundWorkflowCallPrefix = "workflow-"

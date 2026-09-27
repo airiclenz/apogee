@@ -821,7 +821,9 @@
 // [Bridge.NotifySchedule], [Bridge.NotifyRouting]) — and separates them from ADR 0011's three
 // legality classes for touching the ENGINE; worker.go the
 // cancellable engine driver and the in-flight [worker] value the Model holds it as (the CancelFunc,
-// the mailbox and the tick-chain generation behind three verbs); model.go the [Model] itself — the lifecycle state machine, the
+// the mailbox and the tick-chain generation behind three verbs), whose between-Steps drain also
+// commits a background workflow's finish note ([deliverWorkflowNotes]) and whose wake driver
+// Steps the Exchange a wake opened ([startWake]); model.go the [Model] itself — the lifecycle state machine, the
 // layout, the frame's one stacking order and the block spans View publishes while walking it
 // ([frameSpans], read by every pane rectangle), the status line and the footer; footerfit.go the
 // footer's FIT beside it — the pure composer ([footerFit]) that spends a window on the row's six
@@ -1085,7 +1087,10 @@
 // both read had long earned (blocktarget_test.go is the suite named for it);
 // subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
 // workflowblock.go the block a launched Recipe's Workflow reports its run in (ADR 0087), folded
-// from its WorkflowPhaseEvents and grown in place;
+// from its WorkflowPhaseEvents and grown in place; workflow.go the session's background workflows
+// (ADR 0089) — the rule that keeps their events out of the transcript, the activity board and the
+// stall clock, the finish line their end writes, and the wake that opens an Exchange on it once the
+// session is idle;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
