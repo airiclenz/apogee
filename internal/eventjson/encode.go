@@ -6,8 +6,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-one line kinds of ADR 0075 §4 — nineteen Event variants plus the two frames that
-// bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// The twenty-two line kinds of ADR 0075 §4 — twenty Event variants, workflow_phase (ADR 0087) the
+// newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -31,12 +31,13 @@ const (
 	kindAudit             = "audit"
 	kindSeamClosed        = "seam_closed"
 	kindUpstreamAttempt   = "upstream_attempt"
+	kindWorkflowPhase     = "workflow_phase"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
 
 // Kinds returns every line kind the Event lines can carry, the two frames included, in the order
-// ADR 0075 §4 lists them. It is the vocabulary itself rather than a derivation of it, so the
+// ADR 0075 §4 lists them, a kind added since placed before the frames. It is the vocabulary itself rather than a derivation of it, so the
 // manual's table of kinds is checkable against the code that writes them instead of drifting from
 // it silently. The caller receives a fresh slice it may keep or sort.
 func Kinds() []string {
@@ -60,6 +61,7 @@ func Kinds() []string {
 		kindAudit,
 		kindSeamClosed,
 		kindUpstreamAttempt,
+		kindWorkflowPhase,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -188,6 +190,18 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			OutputTokens: e.OutputTokens,
 			Outcome:      e.Outcome,
 		}, true
+	case domain.WorkflowPhaseEvent:
+		return kindWorkflowPhase, e.EventBase, workflowPhaseData{
+			Phase:    string(e.Phase),
+			Workflow: e.Workflow,
+			Name:     e.Name,
+			Stage:    e.Stage,
+			Item:     e.Item,
+			Index:    e.Index,
+			Resumed:  e.Resumed,
+			Receipt:  workflowReceiptOf(e.Receipt),
+			Detail:   e.Detail,
+		}, true
 	default:
 		return "", domain.EventBase{}, nil, false
 	}
@@ -250,6 +264,38 @@ type subAgentPhaseData struct {
 	Phase     string     `json:"phase"`
 	Result    toolResult `json:"result"`
 	Cancelled bool       `json:"cancelled"`
+}
+
+// workflowPhaseData is the workflow_phase line: one Workflow crossing a lifecycle boundary. Stage,
+// item, index, resumed and receipt are the zero values on the phases they do not describe, and the
+// receipt's status is "" on every phase but item_finished.
+type workflowPhaseData struct {
+	Phase    string          `json:"phase"`
+	Workflow string          `json:"workflow"`
+	Name     string          `json:"name"`
+	Stage    string          `json:"stage"`
+	Item     string          `json:"item"`
+	Index    int             `json:"index"`
+	Resumed  bool            `json:"resumed"`
+	Receipt  workflowReceipt `json:"receipt"`
+	Detail   string          `json:"detail"`
+}
+
+// workflowReceipt is a workflow item's receipt on the line. Fields is an object on every line,
+// empty when the receipt has none.
+type workflowReceipt struct {
+	Status  string            `json:"status"`
+	Summary string            `json:"summary"`
+	Fields  map[string]string `json:"fields"`
+}
+
+// workflowReceiptOf copies a receipt onto the line, a missing field map written as an empty object.
+func workflowReceiptOf(receipt domain.WorkflowReceipt) workflowReceipt {
+	fields := receipt.Fields
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	return workflowReceipt{Status: receipt.Status, Summary: receipt.Summary, Fields: fields}
 }
 
 // subAgentNamedData is the sub_agent_named line: the name the out-of-band namer gave a delegation

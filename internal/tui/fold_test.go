@@ -324,6 +324,17 @@ func foldCases() []foldCase {
 			wantAttempts: 1,
 		},
 		{
+			name: "WorkflowPhaseEvent is inert in the view",
+			// Nothing yet: a Workflow's liveness is observation only, and the result the human reads
+			// is the fan_out call's own tool result, which the transcript already pairs with its call.
+			// Each item child's own events fold as a delegation's do; the workflow block that draws
+			// this event is the recipe renderer's to add.
+			event: domain.WorkflowPhaseEvent{
+				Phase: domain.WorkflowItemFinished, Workflow: "20260927-101500-ab12", Stage: "items", Item: "alpha",
+				Receipt: domain.WorkflowReceipt{Status: "ok", Summary: "alpha is fine"},
+			},
+		},
+		{
 			name: "SeamClosedEvent is inert in the view",
 			// Nothing at all, and by contract: the event is a sink's to consume (the headless
 			// stream writes it only when asked, and never its Value), and its Value is the seam's

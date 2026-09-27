@@ -675,3 +675,72 @@ type UpstreamAttemptEvent struct {
 	// Outcome is how the attempt ended (see the vocabulary above).
 	Outcome string
 }
+
+// WorkflowPhase names the point in a Workflow's life that a WorkflowPhaseEvent reports.
+type WorkflowPhase string
+
+const (
+	// WorkflowStarted reports that a Workflow has begun: its folder exists and it has an id. It is
+	// the first phase of every run, a resumed one included.
+	WorkflowStarted WorkflowPhase = "started"
+	// WorkflowStageStarted reports that one of the Workflow's stages began running. A stage its
+	// `when:` skipped never starts.
+	WorkflowStageStarted WorkflowPhase = "stage_started"
+	// WorkflowItemFinished reports that one item of a stage ended on a receipt — ok, partial or
+	// blocked. An item an earlier run of the same Workflow finished is reported too, as Resumed.
+	WorkflowItemFinished WorkflowPhase = "item_finished"
+	// WorkflowWaiting reports that an `ask` stage has put its question to the user and waits for
+	// the answer; Detail carries the question.
+	WorkflowWaiting WorkflowPhase = "waiting"
+	// WorkflowFinished reports that the Workflow ran every stage to its end.
+	WorkflowFinished WorkflowPhase = "finished"
+	// WorkflowStopped reports that a cancel ended the Workflow before every item finished; the
+	// finished items are kept (ADR 0088).
+	WorkflowStopped WorkflowPhase = "stopped"
+	// WorkflowFailed reports that the Workflow could not go on — its store could not be written;
+	// Detail carries the cause.
+	WorkflowFailed WorkflowPhase = "failed"
+)
+
+// WorkflowReceipt is the receipt a workflow item ended on, in the shape an Event carries it: its
+// status (`ok`, `partial` or `blocked`), its one-line summary, and its typed fields rendered as
+// text — a list joined by commas, a number as written. It is the domain's copy of the workflow
+// package's own receipt, which that package converts to, because internal/workflow imports this
+// package and never the reverse. The zero value is no receipt.
+type WorkflowReceipt struct {
+	Status  string
+	Summary string
+	Fields  map[string]string
+}
+
+// WorkflowPhaseEvent reports one Workflow (ADR 0087) crossing a lifecycle boundary: starting, a
+// stage starting, an item finishing on its receipt, an `ask` stage waiting for the user, and the
+// Workflow ending — finished, stopped or failed. Every Workflow that starts ends on exactly one of
+// those three.
+//
+// Workflow is the Workflow's id — its folder name in the session's workflow store — and is what
+// tells two Workflows' events apart. Name is the Workflow's name (a fan_out's first task line, a
+// Recipe's name). Stage names the stage on the stage and item phases; Item, Index, Resumed and
+// Receipt are the finished item's label, its 0-based place in the stage, whether an earlier run
+// had already finished it, and the receipt it ended on — all zero on every other phase. Detail is
+// the question on WorkflowWaiting and the cause on WorkflowFailed, "" otherwise.
+//
+// Its EventBase is the identity of the agent that runs the Workflow — the one whose fan_out call
+// or Recipe launch started it — never an item child's: each child's own events carry the child's
+// run identity, as a delegation's do.
+//
+// It is OBSERVATION ONLY: nothing in the loop reads it, and the result the Workflow's caller reads
+// is its result lines, not these events. A Driver that ignores it loses the Workflow's liveness
+// and nothing else.
+type WorkflowPhaseEvent struct {
+	EventBase
+	Phase    WorkflowPhase
+	Workflow string
+	Name     string
+	Stage    string
+	Item     string
+	Index    int
+	Resumed  bool
+	Receipt  WorkflowReceipt
+	Detail   string
+}

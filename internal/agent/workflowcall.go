@@ -6,8 +6,9 @@ package agent
 // workflow.Plan — one fanout, then at most one verify and one merge — checked by
 // workflow.ValidateModelPlan, whose problems come back as one tool error naming each argument to
 // fix. A valid plan runs through a workflow.Runner over the session's `<scratch>/workflows/` store,
-// its item children spawned through the recursion point (workflowspawn.go), and the call is
-// answered with workflow.Format's result lines. The same call again finds the stored workflow by
+// its item children spawned through the recursion point (workflowspawn.go), its progress reported
+// as WorkflowPhaseEvents (workflowObserver), and the call is answered with workflow.Format's result
+// lines. The same call again finds the stored workflow by
 // its plan hash and skips the items already finished.
 //
 // A cancel stops the running items and keeps every finished one on disk: the call is answered with
@@ -24,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/sanitize"
@@ -129,7 +131,9 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if refusal != "" {
 		return errorToolResult(call.ID, refusal)
 	}
+	observer := a.observeWorkflow(runner, turn, plan.Name)
 	outcome, err := runner.Run(ctx, plan)
+	observer.end(outcome, err)
 	if err != nil {
 		return errorToolResult(call.ID, fanOutRunFailedPrefix+err.Error())
 	}
@@ -274,4 +278,117 @@ func workflowAnswer(result workflow.Result) string {
 		return text
 	}
 	return text + "\n" + line
+}
+
+// workflowObserver turns one Workflow run's Runner notifications into the WorkflowPhaseEvents this
+// Agent emits (domain.WorkflowPhaseEvent), stamped with this Agent's own identity at the Turn that
+// started the Workflow: started on the first notification that names the Workflow's id, a stage
+// started for each stage that begins running, an item finished for each item that ends on a
+// receipt, waiting while an `ask` stage's question is out, and — from end — finished, stopped or
+// failed. The Runner serialises its Observer calls, but an ask and the run's end arrive from the
+// Run caller, so mu guards the started state.
+type workflowObserver struct {
+	agent *Agent
+	turn  int
+	name  string
+
+	mu sync.Mutex
+	id string // the Workflow's id, once started was emitted
+}
+
+// observeWorkflow installs a workflowObserver on runner — as its Observer, and around its Asker
+// when it has one, so an `ask` stage's question is reported before it is put — and returns it for
+// the caller to end once Run returns. name is the Workflow's name the events carry.
+func (a *Agent) observeWorkflow(runner *workflow.Runner, turn int, name string) *workflowObserver {
+	observer := &workflowObserver{agent: a, turn: turn, name: name}
+	runner.Observer = observer
+	if runner.Asker != nil {
+		runner.Asker = observedAsker{inner: runner.Asker, observer: observer}
+	}
+	return observer
+}
+
+// StagePhase reports a stage that began running; a stage's other phases add nothing the item and
+// end phases do not.
+func (o *workflowObserver) StagePhase(event workflow.StageEvent) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.startLocked(event.Workflow)
+	if event.Phase != workflow.PhaseRunning {
+		return
+	}
+	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStageStarted, Stage: event.Stage})
+}
+
+// ItemPhase reports an item that ended on a receipt — a resumed one, which never ran, included.
+func (o *workflowObserver) ItemPhase(event workflow.ItemEvent) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.startLocked(event.Workflow)
+	if event.Phase != workflow.PhaseDone || event.Receipt == nil {
+		return
+	}
+	o.emitLocked(domain.WorkflowPhaseEvent{
+		Phase: domain.WorkflowItemFinished, Stage: event.Stage, Item: event.Label, Index: event.Index,
+		Resumed: event.Attempt == 0, Receipt: event.Receipt.Domain(),
+	})
+}
+
+// waiting reports an `ask` stage's question as it is put to the user.
+func (o *workflowObserver) waiting(question workflow.Question) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.startLocked(question.Workflow)
+	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowWaiting, Stage: question.Stage, Detail: question.Text})
+}
+
+// end reports how the run Run returned ended: failed when it returned an error after the Workflow
+// started, else stopped or finished by the result's phase. A run that failed before its Workflow
+// had an id started nothing and reports nothing.
+func (o *workflowObserver) end(result workflow.Result, err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.startLocked(result.ID)
+	if o.id == "" {
+		return
+	}
+	switch {
+	case err != nil:
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFailed, Detail: err.Error()})
+	case result.Stopped():
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStopped})
+	default:
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFinished})
+	}
+}
+
+// startLocked emits started the first time a notification names the Workflow's id. The caller
+// holds mu.
+func (o *workflowObserver) startLocked(id string) {
+	if o.id != "" || id == "" {
+		return
+	}
+	o.id = id
+	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted})
+}
+
+// emitLocked stamps event with this Agent's identity, the Workflow's id and name, and emits it.
+// The caller holds mu.
+func (o *workflowObserver) emitLocked(event domain.WorkflowPhaseEvent) {
+	event.EventBase = o.agent.base(o.turn)
+	event.Workflow, event.Name = o.id, o.name
+	o.agent.cfg.Events.Emit(event)
+}
+
+// observedAsker reports an `ask` stage's question as waiting before it puts the question through
+// the Asker it wraps.
+type observedAsker struct {
+	inner    workflow.Asker
+	observer *workflowObserver
+}
+
+// Ask reports the question, then asks it.
+func (a observedAsker) Ask(ctx context.Context, question workflow.Question) (string, error) {
+	a.observer.waiting(question)
+	return a.inner.Ask(ctx, question)
 }

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // maxListedItems is how many item lines Format lists in full. Past it only the items that did not
@@ -172,6 +174,21 @@ func fieldPairs(fields map[string]any) []string {
 		pairs[index] = key + "=" + fieldValue(fields[key])
 	}
 	return pairs
+}
+
+// Domain is the receipt in the shape a domain.WorkflowPhaseEvent carries it: its status and
+// summary as they are, and each typed field rendered as text — a text field verbatim, any other
+// the way the result lines render it (a list joined by commas, a number as written).
+func (r Receipt) Domain() domain.WorkflowReceipt {
+	fields := make(map[string]string, len(r.Fields))
+	for key, value := range r.Fields {
+		if text, ok := value.(string); ok {
+			fields[key] = text
+			continue
+		}
+		fields[key] = fieldValue(value)
+	}
+	return domain.WorkflowReceipt{Status: string(r.Status), Summary: r.Summary, Fields: fields}
 }
 
 // fieldValue renders one field value on one line: a list joined by commas, a number as written (a

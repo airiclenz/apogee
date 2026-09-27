@@ -158,6 +158,56 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"cancelled":false}`,
 		},
 		{
+			name: "workflow_phase started",
+			event: domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Turn: 2},
+				Phase:     domain.WorkflowStarted,
+				Workflow:  "20260927-101500-ab12",
+				Name:      "check each package",
+			},
+			wantKind: "workflow_phase",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"phase":"started","workflow":"20260927-101500-ab12","name":"check each package",` +
+				`"stage":"","item":"","index":0,"resumed":false,` +
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":""}`,
+		},
+		{
+			name: "workflow_phase item_finished carries the receipt",
+			event: domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.3"},
+				Phase:     domain.WorkflowItemFinished,
+				Workflow:  "20260927-101500-ab12",
+				Name:      "check each package",
+				Stage:     "items",
+				Item:      "internal/tui",
+				Index:     2,
+				Resumed:   true,
+				Receipt: domain.WorkflowReceipt{
+					Status: "partial", Summary: "two findings", Fields: map[string]string{"findings": "2"},
+				},
+			},
+			wantKind: "workflow_phase",
+			wantBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.3"},
+			wantData: `{"phase":"item_finished","workflow":"20260927-101500-ab12","name":"check each package",` +
+				`"stage":"items","item":"internal/tui","index":2,"resumed":true,` +
+				`"receipt":{"status":"partial","summary":"two findings","fields":{"findings":"2"}},"detail":""}`,
+		},
+		{
+			name: "workflow_phase waiting carries the question",
+			event: domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Turn: 5},
+				Phase:     domain.WorkflowWaiting,
+				Workflow:  "20260927-101500-ab12",
+				Stage:     "confirm",
+				Detail:    "Fix the refuted items?",
+			},
+			wantKind: "workflow_phase",
+			wantBase: domain.EventBase{Turn: 5},
+			wantData: `{"phase":"waiting","workflow":"20260927-101500-ab12","name":"",` +
+				`"stage":"confirm","item":"","index":0,"resumed":false,` +
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"Fix the refuted items?"}`,
+		},
+		{
 			name: "sub_agent_named",
 			event: domain.SubAgentNamedEvent{
 				EventBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9"},
@@ -513,16 +563,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyOne pins the vocabulary itself — the nineteen serialized variants, the opt-in
+// TestKindsAreTwentyTwo pins the vocabulary itself — the twenty serialized variants, the opt-in
 // seam_closed among them, plus the two frames — so a kind added to the encoder without a manual
 // entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyOne(t *testing.T) {
+func TestKindsAreTwentyTwo(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 21 {
-		t.Fatalf("len(Kinds()) = %d, want 21: %v", len(kinds), kinds)
+	if len(kinds) != 22 {
+		t.Fatalf("len(Kinds()) = %d, want 22: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

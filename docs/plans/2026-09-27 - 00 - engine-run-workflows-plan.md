@@ -512,7 +512,17 @@ NOTES (2026-09-27): consequential edit — docs/manual/configuration.md: made ne
 **Acceptance:** `go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(agent): the fan-out ceiling names fan_out when it is enabled`
 
-## 17. Workflow events
+## 17. Workflow events — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the Runner's Observer has no workflow-level start or end call, so the agent-side adapter (`workflowObserver` in workflowcall.go) emits `started` on the first notification naming the workflow's id and the end phase from the Result/error `Runner.Run` returns; stage_started is a stage's `running` notification, item_finished an item's `done` notification with a receipt (a resumed item included, `Resumed` set).
+
+NOTES (2026-09-27): added a `failed` phase (with `Detail` = the cause) beside finished/stopped so every workflow that starts ends on exactly one end phase even when `Runner.Run` returns a store error mid-run; the goal's list names finished/stopped only.
+
+NOTES (2026-09-27): `waiting` is emitted by an Asker wrapper `observeWorkflow` installs when the Runner has an Asker (Detail = the question); the fan_out path runs with no Asker, so it is live only once a later item (20/25) supplies one — pinned by a unit test on the observer.
+
+NOTES (2026-09-27): per the item's regression guard ("workflow converts to it"), the conversion to `domain.WorkflowReceipt` is `workflow.Receipt.Domain()` in internal/workflow/format.go (reusing its field renderer; a text field verbatim), a path the item's Files did not list; pinned by TestReceiptDomain.
+
+NOTES (2026-09-27): internal/tui/fold.go needed no change — the event is inert in the view (its fold_test row says so; the workflow block is item 22's), so it is not in FILES.
 
 **What:** Depends on item 15.
 **Goal:** the engine emits `WorkflowPhaseEvent` (started, stage started, item finished with receipt, finished/stopped, waiting-for-answer) carrying the workflow id; headless NDJSON encodes it as kind `workflow_phase`; the facade exports it; the manual's event kinds table lists it.

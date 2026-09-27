@@ -179,3 +179,23 @@ func TestFormatAskThatTookItsDefault(t *testing.T) {
 		"fanout deep: skipped: scope.answer == yes is false",
 	}, "\n"))
 }
+
+// TestReceiptDomain pins the receipt a WorkflowPhaseEvent carries: status and summary as they are,
+// a text field verbatim, a list joined by commas and a number as written.
+func TestReceiptDomain(t *testing.T) {
+	t.Parallel()
+
+	receipt := Receipt{Status: StatusPartial, Summary: "two findings", Fields: map[string]any{
+		"note": "needs a second look", "files": []any{"a.go", "b.go"}, "findings": float64(2),
+	}}
+
+	got := receipt.Domain()
+
+	if got.Status != "partial" || got.Summary != "two findings" {
+		t.Errorf("Domain() status, summary = %q, %q; want partial, two findings", got.Status, got.Summary)
+	}
+	want := map[string]string{"note": "needs a second look", "files": "a.go,b.go", "findings": "2"}
+	if fmt.Sprint(got.Fields) != fmt.Sprint(want) {
+		t.Errorf("Domain().Fields = %v, want %v", got.Fields, want)
+	}
+}

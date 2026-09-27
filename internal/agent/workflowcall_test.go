@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // The blocking fan_out call (ADR 0087 D1, ADR 0088 D3): each test drives a parent Agent whose reply
@@ -561,5 +562,149 @@ func TestWorkflowContextLimit(t *testing.T) {
 				t.Errorf("workflowContextLimit() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// workflowPhaseEvents returns the WorkflowPhaseEvents among events, in emission order.
+func workflowPhaseEvents(events []domain.Event) []domain.WorkflowPhaseEvent {
+	var phases []domain.WorkflowPhaseEvent
+	for _, event := range events {
+		if phase, ok := event.(domain.WorkflowPhaseEvent); ok {
+			phases = append(phases, phase)
+		}
+	}
+	return phases
+}
+
+// phaseNames is the phase of each event, for a failure message.
+func phaseNames(events []domain.WorkflowPhaseEvent) []domain.WorkflowPhase {
+	names := make([]domain.WorkflowPhase, len(events))
+	for index, event := range events {
+		names[index] = event.Phase
+	}
+	return names
+}
+
+// TestWorkflowCall_EmitsItsPhases pins the events a fan_out's Workflow reports: started, the item
+// stage starting, one item finished per item with its receipt, then finished — every one naming
+// the one Workflow and stamped with the parent's own identity.
+func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink)
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, fanOutArgsJSON("alpha", "beta"))).
+		route("please fan out", nil, contentScript("all done")).
+		route("check alpha", nil, finishScript("f1", "alpha is fine")).
+		route("check beta", nil, finishScript("f2", "beta is fine"))
+
+	runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+	phases := workflowPhaseEvents(sink.events)
+	want := []domain.WorkflowPhase{
+		domain.WorkflowStarted, domain.WorkflowStageStarted,
+		domain.WorkflowItemFinished, domain.WorkflowItemFinished, domain.WorkflowFinished,
+	}
+	if !slices.Equal(phaseNames(phases), want) {
+		t.Fatalf("workflow phases = %v, want %v", phaseNames(phases), want)
+	}
+	id := phases[0].Workflow
+	if id == "" || !slices.Contains(workflowFolders(t, cfg.ScratchDir), id) {
+		t.Errorf("started names workflow %q, want the id of its folder %v", id, workflowFolders(t, cfg.ScratchDir))
+	}
+	summaries := map[string]string{}
+	for _, phase := range phases {
+		if phase.Workflow != id || phase.Name != "check {item} carefully and report" || phase.Depth != 0 || phase.RunID != "" {
+			t.Errorf("phase %s = %+v, want workflow %q, the fan_out's name and the parent's identity", phase.Phase, phase, id)
+		}
+		if phase.Phase == domain.WorkflowItemFinished {
+			if phase.Stage != fanOutStageName || phase.Resumed || phase.Receipt.Status != "ok" || phase.Receipt.Fields["count"] != "1" {
+				t.Errorf("item_finished = %+v, want an ok items receipt with count=1, not resumed", phase)
+			}
+			summaries[phase.Item] = phase.Receipt.Summary
+		}
+	}
+	if summaries["alpha"] != "alpha is fine" || summaries["beta"] != "beta is fine" {
+		t.Errorf("item summaries = %v, want each item's own", summaries)
+	}
+}
+
+// TestWorkflowCall_ACancelEndsItsPhasesStopped pins a cancelled fan_out's events: the item that
+// finished is reported, and the Workflow ends stopped rather than finished.
+func TestWorkflowCall_ACancelEndsItsPhasesStopped(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, fanOutArgsJSON("alpha", "beta"))).
+		route("check alpha", nil, finishScript("f1", "alpha is fine")).
+		route("check beta", cancelWith(cancel, nil), cancelledScript())
+
+	runWorkflowParent(t, ctx, cfg, up, "please fan out")
+
+	phases := workflowPhaseEvents(sink.events)
+	want := []domain.WorkflowPhase{
+		domain.WorkflowStarted, domain.WorkflowStageStarted, domain.WorkflowItemFinished, domain.WorkflowStopped,
+	}
+	if !slices.Equal(phaseNames(phases), want) {
+		t.Fatalf("workflow phases = %v, want %v", phaseNames(phases), want)
+	}
+	if phases[2].Item != "alpha" {
+		t.Errorf("item_finished = %+v, want alpha's", phases[2])
+	}
+}
+
+// fixedAsker answers every question with answer.
+type fixedAsker struct{ answer string }
+
+func (f fixedAsker) Ask(context.Context, workflow.Question) (string, error) { return f.answer, nil }
+
+// TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure pins the two phases a fan_out cannot
+// reach yet: a question put through the Runner's Asker is reported as waiting before it is asked,
+// and a run that fails after its Workflow started ends failed with the cause — while a run that
+// fails before it has an id reports nothing at all.
+func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, err := newAgent(workflowConfig(t, sink), &workflowResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runner := &workflow.Runner{Asker: fixedAsker{answer: "yes"}}
+	observer := a.observeWorkflow(runner, 3, "audit")
+
+	answer, err := runner.Asker.Ask(context.Background(), workflow.Question{Workflow: "wf-1", Stage: "confirm", Text: "Go on?"})
+	observer.end(workflow.Result{ID: "wf-1"}, errors.New("disk full"))
+
+	if answer != "yes" || err != nil {
+		t.Errorf("Ask = %q, %v; want the wrapped Asker's answer", answer, err)
+	}
+	phases := workflowPhaseEvents(sink.events)
+	want := []domain.WorkflowPhase{domain.WorkflowStarted, domain.WorkflowWaiting, domain.WorkflowFailed}
+	if !slices.Equal(phaseNames(phases), want) {
+		t.Fatalf("workflow phases = %v, want %v", phaseNames(phases), want)
+	}
+	if phases[1].Stage != "confirm" || phases[1].Detail != "Go on?" || phases[2].Detail != "disk full" {
+		t.Errorf("waiting = %+v, failed = %+v; want the question and the cause", phases[1], phases[2])
+	}
+	for _, phase := range phases {
+		if phase.Workflow != "wf-1" || phase.Name != "audit" || phase.Turn != 3 {
+			t.Errorf("phase %s = %+v, want workflow wf-1, name audit, turn 3", phase.Phase, phase)
+		}
+	}
+
+	quiet := &recordingSink{}
+	b, err := newAgent(workflowConfig(t, quiet), &workflowResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	b.observeWorkflow(&workflow.Runner{}, 1, "audit").end(workflow.Result{}, errors.New("invalid plan"))
+	if got := workflowPhaseEvents(quiet.events); len(got) != 0 {
+		t.Errorf("a run that failed before it had an id emitted %v, want nothing", phaseNames(got))
 	}
 }

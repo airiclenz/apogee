@@ -308,6 +308,7 @@ type (
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent
+	WorkflowPhaseEvent     = domain.WorkflowPhaseEvent
 )
 
 // SubAgentPhase is the phase a SubAgentPhaseEvent reports.
@@ -330,6 +331,24 @@ const (
 	UndeliveredCancelled = domain.UndeliveredCancelled
 	UndeliveredRefused   = domain.UndeliveredRefused
 	UndeliveredStopped   = domain.UndeliveredStopped
+)
+
+// WorkflowPhase is the phase a WorkflowPhaseEvent reports.
+type WorkflowPhase = domain.WorkflowPhase
+
+// WorkflowReceipt is the receipt a WorkflowPhaseEvent's finished item ended on.
+type WorkflowReceipt = domain.WorkflowReceipt
+
+// The phases a Workflow is reported at: started, then its stages and items, then exactly one of
+// finished, stopped or failed.
+const (
+	WorkflowStarted      = domain.WorkflowStarted
+	WorkflowStageStarted = domain.WorkflowStageStarted
+	WorkflowItemFinished = domain.WorkflowItemFinished
+	WorkflowWaiting      = domain.WorkflowWaiting
+	WorkflowFinished     = domain.WorkflowFinished
+	WorkflowStopped      = domain.WorkflowStopped
+	WorkflowFailed       = domain.WorkflowFailed
 )
 
 // The two values WireEvent.Direction takes.
