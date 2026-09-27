@@ -1112,7 +1112,7 @@ func TestApplyConfigStartupContextWindowComesFromTheSelectedEntry(t *testing.T) 
 			}
 			// And the room INSIDE it, carried on the same entry and for the same reason: a session
 			// that starts on a bounded entry must work in that room from its first Turn.
-			if opts.StartupEntry.WorkingWindow != tt.wantWorking {
+			if int(opts.StartupEntry.WorkingWindow) != tt.wantWorking {
 				t.Errorf("StartupEntry.WorkingWindow = %d; want %d — the bound travels from the SELECTED entry, unresolved",
 					opts.StartupEntry.WorkingWindow, tt.wantWorking)
 			}
@@ -2062,9 +2062,9 @@ func TestApplyConfigContextWindowRefusesAFractionOrANegative(t *testing.T) {
 	}
 }
 
-// Every other top-level count key gets context-window's decode guard through WholeCount: a value
-// yaml.v3 would truncate into the int — a fraction, or a whole number written as a float — is a
-// load error naming the value, never a bound nobody wrote. Every `!!int` spelling still loads, and
+// Every other count key — top-level, and a servers: entry's own three — gets context-window's decode
+// guard through WholeCount: a value yaml.v3 would truncate into the int — a fraction, or a whole
+// number written as a float — is a load error naming the value, never a bound nobody wrote. Every `!!int` spelling still loads, and
 // the sign is not WholeCount's to judge (each key's own validator keeps that, pinned elsewhere).
 func TestApplyConfigCountKeysRefuseAFraction(t *testing.T) {
 	t.Parallel()
@@ -2090,6 +2090,12 @@ func TestApplyConfigCountKeysRefuseAFraction(t *testing.T) {
 			func(value string) string { return "ui:\n  tools-fold-over: " + value + "\n" },
 			func(o Options) int { return o.UI.ToolsFoldOver },
 		},
+		{"a servers: entry's parallel-agents", serverEntryKey("parallel-agents"),
+			func(o Options) int { return int(o.Servers[0].ParallelAgents) }},
+		{"a servers: entry's working-window", serverEntryKey("working-window"),
+			func(o Options) int { return int(o.Servers[0].WorkingWindow) }},
+		{"a servers: entry's max-output-tokens", serverEntryKey("max-output-tokens"),
+			func(o Options) int { return int(o.Servers[0].MaxOutputTokens) }},
 	}
 	tests := []struct {
 		name  string
@@ -2142,6 +2148,15 @@ func TestApplyConfigCountKeysRefuseAFraction(t *testing.T) {
 // topLevelKey is the file text that sets one top-level key to a value, as written.
 func topLevelKey(key string) func(value string) string {
 	return func(value string) string { return key + ": " + value + "\n" }
+}
+
+// serverEntryKey is the file text that sets one key of the only `servers:` entry to a value, as
+// written — the entry the session starts on, so the load reaches the entry-level validation too.
+func serverEntryKey(key string) func(value string) string {
+	return func(value string) string {
+		return "server: box\nservers:\n  - name: box\n    endpoint: http://one:1111\n" +
+			"    " + key + ": " + value + "\n"
+	}
 }
 
 // WholeCount judges the tag and nothing else: every `!!int` spelling decodes, a negative one

@@ -287,7 +287,7 @@ func (w *rootWiring) resolveConfig() error {
 	w.cfg.Context.MaxContextTokens = w.opts.ContextWindow
 	w.cfg.Context.WorkingWindow = w.opts.WorkingWindow
 	w.cfg.Context.ResponseReserveFraction = w.opts.ResponseReserve
-	w.cfg.Context.MaxOutputTokens = w.opts.StartupEntry.MaxOutputTokens
+	w.cfg.Context.MaxOutputTokens = int(w.opts.StartupEntry.MaxOutputTokens)
 	return nil
 }
 

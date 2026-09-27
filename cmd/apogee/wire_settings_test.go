@@ -3151,7 +3151,7 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 			}
 			live := newLiveSettings(config.Options{
 				HostAlias:    "here",
-				StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: tt.entryCap},
+				StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: config.WholeCount(tt.entryCap)},
 			})
 			probe := &rebindProbe{}
 			apply := applySettingFor(settingsApplier{

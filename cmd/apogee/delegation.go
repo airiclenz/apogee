@@ -887,17 +887,17 @@ func resolveDelegationTarget(
 		// number sized for the orchestrator's window has no business fencing. There is no observed
 		// half either — a server reports no working room — so an absent key stays 0 and a delegation
 		// there works in the whole window resolved above (subagent.go).
-		WorkingWindow: entry.WorkingWindow,
+		WorkingWindow: int(entry.WorkingWindow),
 		// The entry's `max-output-tokens:` pin, carried as written (ADR 0046). There is no observed
 		// half to fall back to — a server advertises no reply ceiling — so an absent key stays 0 and
 		// the child derives its cap from the window resolved above.
-		MaxOutputTokens: entry.MaxOutputTokens,
+		MaxOutputTokens: int(entry.MaxOutputTokens),
 		// The entry's `response-reserve:` override, carried as written. There is no observed half
 		// here either — a server reports no split — and no top-level rank to resolve against, on
 		// purpose: an entry that states no share leaves the child on the share the PARENT resolved,
 		// which already IS the top-level key when nobody overrode it (subagent.go).
 		ResponseReserveFraction: entry.ResponseReserve,
-		ParallelAgents: config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots,
+		ParallelAgents: config.ResolveParallelAgents(int(entry.ParallelAgents), observed.TotalSlots,
 			config.DefaultParallelAgents(entry)),
 		Profile:       profile,
 		EffortDialect: dialect,

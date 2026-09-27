@@ -410,7 +410,10 @@ NOTES (2026-09-27): the unused `intptr` test helper in config_test.go was remove
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/`
 **Commit:** `fix(config): top-level count keys refuse a fractional value`
 
-## 24. Server-entry count keys refuse fractions
+## 24. Server-entry count keys refuse fractions — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): readers convert with `int(...)` at each site rather than through a new `Int()` accessor — the regression guard's own wording (`wire_boot.go:290`, `wire_firing_test.go:220,239`) and the existing `int(entry.ContextWindow)` pattern for TokenCount both use the cast, and one shape for both types reads better than two; the entry-level validator's `WorkingWindow > ContextWindow` comparison in config.go also gains the cast.
+NOTES (2026-09-27): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by retyping `ServerEntry.MaxOutputTokens` to WholeCount — a table test builds an entry from an int field, now `config.WholeCount(tt.entryCap)`.
 
 **What:** Depends on item 23. Fixes the rest of the audit's High TokenCount-extension finding.
 **Regression guard.** Add `cmd/apogee/wire_boot.go` to Files; convert at line 290 with `int(w.opts.StartupEntry.MaxOutputTokens)`, mirroring `wire_settings.go:250`'s `int(entry.ContextWindow)` pattern. Add `cmd/apogee/wire_firing_test.go` to Files; wrap the `entry.MaxOutputTokens` (line 220) and `entry.ParallelAgents` (line 239) reads in `int(...)`, as line 217 already does for `entry.ContextWindow`. Every doc clause in the Goal is either moved under the Approach or checked by a grep added to Acceptance: the `docs/manual/configuration.md` clause moves under the Approach below.

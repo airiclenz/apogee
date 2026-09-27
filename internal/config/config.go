@@ -1306,11 +1306,11 @@ type ServerEntry struct {
 	Model           string       `yaml:"model,omitempty"`
 	LlamaLauncher   string       `yaml:"llama-launcher,omitempty"`
 	LaunchProfile   string       `yaml:"launch-profile,omitempty"`
-	ParallelAgents  int          `yaml:"parallel-agents,omitempty"`
+	ParallelAgents  WholeCount   `yaml:"parallel-agents,omitempty"`
 	Bypass          *bool        `yaml:"bypass,omitempty"`
 	ContextWindow   TokenCount   `yaml:"context-window,omitempty"`
-	WorkingWindow   int          `yaml:"working-window,omitempty"`
-	MaxOutputTokens int          `yaml:"max-output-tokens,omitempty"`
+	WorkingWindow   WholeCount   `yaml:"working-window,omitempty"`
+	MaxOutputTokens WholeCount   `yaml:"max-output-tokens,omitempty"`
 	ResponseReserve float64      `yaml:"response-reserve,omitempty"`
 	EffortDialect   string       `yaml:"effort-dialect,omitempty"`
 	Wire            string       `yaml:"wire,omitempty"`
@@ -1641,7 +1641,7 @@ func ValidateServers(servers []ServerEntry) error {
 				"room a session on this server should work in, in tokens (1 or more), or remove the key to "+
 				"work in the whole window", i+1, s.Name, s.WorkingWindow)
 		}
-		if s.ContextWindow >= 1 && s.WorkingWindow > int(s.ContextWindow) {
+		if s.ContextWindow >= 1 && int(s.WorkingWindow) > int(s.ContextWindow) {
 			return fmt.Errorf("apogee: servers: entry %d (%q): working-window: %d is larger than this "+
 				"entry's context-window: %d — the working window is the room INSIDE the context window, so "+
 				"lower it, or raise the pin it has to fit in", i+1, s.Name, s.WorkingWindow, s.ContextWindow)

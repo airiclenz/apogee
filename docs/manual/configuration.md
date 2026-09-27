@@ -984,7 +984,10 @@ place to start. Leave it unset (`0`) and the working room is the whole advertise
 which is what apogee always did. The same key on a `servers:` entry bounds that one server's
 room and outranks the top-level one while the session is on it — following a `/server`
 switch, a scheduled run and a delegation exactly as the two keys above do — and it may not
-exceed that entry's own `context-window:` pin, which is the roof it sits under.
+exceed that entry's own `context-window:` pin, which is the roof it sits under. At either scope
+it takes a whole number, as `context-window:` does: a fraction, or a whole number written with a
+decimal point or an exponent (`32000.0`, `1e3`), is refused when the config loads rather than
+rounded into a bound you did not write.
 
 Every reply is **bounded**, and by the same budget: apogee tells the server how many tokens
 one answer may take, using the room it already reserves for the reply — clamped to between
@@ -992,7 +995,8 @@ one answer may take, using the room it already reserves for the reply — clampe
 thinking model can reason for an hour and hit the context wall instead of answering. Set
 `max-output-tokens:` on a `servers:` entry (in tokens) to pin your own ceiling for that
 server, whatever its window says — which is how you let a cloud endpoint that advertises no
-window answer at length. A reply that runs into that ceiling with nothing visible to show
+window answer at length. It too takes a whole number: a fraction or a float-written whole
+number is refused at load. A reply that runs into that ceiling with nothing visible to show
 for it fails the turn and names the cap and roughly what the reasoning cost, rather than
 reporting an empty reply: the remedy is a bigger ceiling or a smaller task. One exception is
 tried for you first: when such a reply *reasoned* — a thinking model that spent the whole
@@ -1346,7 +1350,8 @@ requests as a matter of course, and runs up to **four** delegations at once; any
 entry, an unkeyed LAN or loopback server or the `--endpoint` flag's, runs them one at a
 time, as apogee always has. `parallel-agents: N` (a file-only key) sets the width yourself,
 and is a **pin** apogee never overrides — `parallel-agents: 1` is how a keyed server is
-held serial. Mind the trade the server makes for you:
+held serial. N is a whole number: a fraction or a float-written whole number is refused when
+the config loads, rather than truncated to a width you did not write. Mind the trade the server makes for you:
 `--parallel N` splits its context into N slots, so more parallel agents means a smaller
 window each — the per-slot number is the one apogee has always shown you. A sub-agent's
 own delegations stay one at a time. When a reply asks for more delegations than the

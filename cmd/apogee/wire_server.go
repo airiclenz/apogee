@@ -106,7 +106,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// same way, through the Config, because the pin must bound the session's very first Turn. 0 is
 	// the honest absent value: the engine then derives the cap from the reply room its Budget
 	// already reserves out of the window.
-	cfg.Context.MaxOutputTokens = entry.MaxOutputTokens
+	cfg.Context.MaxOutputTokens = int(entry.MaxOutputTokens)
 	// And the sixth, the number that ceiling is derived from when nobody pins it: what this server
 	// BOUNDS a session to (ADR 0045 decision 3). The entry's own `context-window:` outranks the
 	// top-level key already in cfg — the precedence config.ResolveContextWindow spells, single-sited
@@ -120,7 +120,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// the ranks the pin above spells). It goes in through the Config for the pin's reason — a session
 	// that STARTS on a bounded entry must work in that room from its first Turn — and 0 at both scopes
 	// is the honest absent value: the whole advertised window is then the working room.
-	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(entry.WorkingWindow, cfg.Context.WorkingWindow)
+	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(int(entry.WorkingWindow), cfg.Context.WorkingWindow)
 	// And the eighth: how that window is SPLIT on this server — the entry's own `response-reserve:`
 	// over the top-level key already in cfg (config.ResolveResponseReserve, the ranks the window two
 	// above spells). It goes in through the Config for the two bounds' reason — the split must hold

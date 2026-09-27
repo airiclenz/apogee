@@ -217,7 +217,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if cfg.Context.MaxContextTokens != int(entry.ContextWindow) {
 		t.Errorf("Context.MaxContextTokens = %d; want the entry's pin %d", cfg.Context.MaxContextTokens, entry.ContextWindow)
 	}
-	if cfg.Context.MaxOutputTokens != entry.MaxOutputTokens {
+	if cfg.Context.MaxOutputTokens != int(entry.MaxOutputTokens) {
 		t.Errorf("Context.MaxOutputTokens = %d; want the entry's pin %d", cfg.Context.MaxOutputTokens, entry.MaxOutputTokens)
 	}
 	if cfg.Context.ResponseReserveFraction != entry.ResponseReserve {
@@ -236,7 +236,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		t.Errorf("Delegation.MaxSteps = %d; want the host's delegate-max-steps %d",
 			cfg.Delegation.MaxSteps, opts.DelegateMaxSteps)
 	}
-	if cfg.ParallelAgents != entry.ParallelAgents {
+	if cfg.ParallelAgents != int(entry.ParallelAgents) {
 		t.Errorf("Config.ParallelAgents = %d; want the entry's pin %d", cfg.ParallelAgents, entry.ParallelAgents)
 	}
 	if beats.calls != 1 {

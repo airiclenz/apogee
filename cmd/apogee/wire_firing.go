@@ -217,7 +217,7 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	pinnedWindow := config.ResolveContextWindow(int(in.entry.ContextWindow), in.opts.ContextWindow)
 	specOpts.ContextWindow = pinnedWindow
 	specOpts.ResponseReserve = config.ResolveResponseReserve(in.entry.ResponseReserve, in.opts.ResponseReserve)
-	spec, notices, err := rebindSpecFor(specOpts, in.roots, model, 0, pinnedWindow, in.entry.MaxOutputTokens)
+	spec, notices, err := rebindSpecFor(specOpts, in.roots, model, 0, pinnedWindow, int(in.entry.MaxOutputTokens))
 	if err != nil {
 		return firingBinding{}, err
 	}
@@ -298,7 +298,7 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// The room inside it this run works in: the bound entry's own `working-window:` over the
 	// top-level key (config.ResolveWorkingWindow, the ranks the window pin above spells).
 	// Unbounded at both scopes it stays 0 and the run works in the whole advertised window.
-	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(in.entry.WorkingWindow, in.opts.WorkingWindow)
+	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(int(in.entry.WorkingWindow), in.opts.WorkingWindow)
 	// The `response-reserve:` share the bound entry resolves to, read back off the spec
 	// above. Unstated at both scopes it stays 0 and the Budget holds its own built-in fifth
 	// back.
@@ -306,7 +306,7 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// The bound entry's `max-output-tokens:` pin (ADR 0046). Unpinned it stays 0 and the
 	// engine derives the cap from its own reply budget — never "no cap", which for an
 	// unattended run is precisely the thing a runaway reply must not be able to become.
-	cfg.Context.MaxOutputTokens = in.entry.MaxOutputTokens
+	cfg.Context.MaxOutputTokens = int(in.entry.MaxOutputTokens)
 
 	return firingBinding{cfg: cfg, spec: spec, apiKey: apiKey, keys: keys, notices: notices}, nil
 }
@@ -456,7 +456,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// the same five words on this side of the boundary (internal/agent's toProviderDialect
 	// converts them back at the wire seam, where the provider package holds no domain import).
 	cfg.EffortDialect = domain.EffortDialect(effortDialect)
-	cfg.ParallelAgents = config.ResolveParallelAgents(in.entry.ParallelAgents, slots,
+	cfg.ParallelAgents = config.ResolveParallelAgents(int(in.entry.ParallelAgents), slots,
 		config.DefaultParallelAgents(in.entry))
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink

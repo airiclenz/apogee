@@ -180,8 +180,8 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		// both fields are the honest zero until the human's first pick latches one through
 		// followEntry.
 		entryWindow:      int(opts.StartupEntry.ContextWindow),
-		entryWorking:     opts.StartupEntry.WorkingWindow,
-		entryCap:         opts.StartupEntry.MaxOutputTokens,
+		entryWorking:     int(opts.StartupEntry.WorkingWindow),
+		entryCap:         int(opts.StartupEntry.MaxOutputTokens),
 		entryReserve:     opts.StartupEntry.ResponseReserve,
 		entryName:        opts.HostAlias,
 		entry:            opts.StartupEntry,
@@ -247,11 +247,11 @@ func (s *liveSettings) pin() int {
 func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entryWindow, s.entryCap, s.entryName = int(entry.ContextWindow), entry.MaxOutputTokens, entry.Name
+	s.entryWindow, s.entryCap, s.entryName = int(entry.ContextWindow), int(entry.MaxOutputTokens), entry.Name
 	// The room inside that window this server is worked in, moving with the pin it sits under and for
 	// its reason: a bound describes ONE server, so carrying the retired server's onto the new one
 	// would work a 32K slot in the room a 1M one was bounded to.
-	s.entryWorking = entry.WorkingWindow
+	s.entryWorking = int(entry.WorkingWindow)
 	// The third statement the entry makes about its own slot: how its window is split for the reply.
 	// It follows the two pins for their reason — an entry that states no share writes 0, which leaves
 	// the top-level key answering — and it is assigned apart from them only because it is the one
@@ -510,12 +510,12 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.now.Servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
-			s.entryWindow, s.entryCap = int(e.ContextWindow), e.MaxOutputTokens
+			s.entryWindow, s.entryCap = int(e.ContextWindow), int(e.MaxOutputTokens)
 			// The re-read entry's own working room travels with them so the next bind, move or Firing
 			// works in the room the file names NOW. It is deliberately absent from the moved-answer
 			// below: nothing a rebind carries reads it (apogee.RebindSpec states no working room), so
 			// riding on it would drive a re-resolution that changes nothing anybody sees.
-			s.entryWorking = e.WorkingWindow
+			s.entryWorking = int(e.WorkingWindow)
 			// The re-read entry's own share travels with the two bounds so the next bind, move or
 			// Firing divides this server's window the way the file says NOW — and it is part of the
 			// moved-answer below, because a rebind now carries the share too
