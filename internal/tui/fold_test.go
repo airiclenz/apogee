@@ -324,15 +324,22 @@ func foldCases() []foldCase {
 			wantAttempts: 1,
 		},
 		{
-			name: "WorkflowPhaseEvent is inert in the view",
-			// Nothing yet: a Workflow's liveness is observation only, and the result the human reads
-			// is the fan_out call's own tool result, which the transcript already pairs with its call.
-			// Each item child's own events fold as a delegation's do; the workflow block that draws
-			// this event is the recipe renderer's to add.
+			name: "a WorkflowPhaseEvent for a Workflow with no block moves nothing",
+			// A later phase lands ON the workflow block its Workflow's id names (workflowblock.go), so
+			// on this fresh Model — which has no such block — it appends nothing. No progress save: a
+			// Workflow's liveness is observation only, and each item child's own events fold (and
+			// save) as a delegation's do.
 			event: domain.WorkflowPhaseEvent{
 				Phase: domain.WorkflowItemFinished, Workflow: "20260927-101500-ab12", Stage: "items", Item: "alpha",
 				Receipt: domain.WorkflowReceipt{Status: "ok", Summary: "alpha is fine"},
 			},
+		},
+		{
+			name: "a started WorkflowPhaseEvent no fan_out call accounts for opens a workflow block",
+			// A Recipe's Workflow runs before the model's first request, so no call block stands for
+			// it: its started phase appends the block the rest of its phases grow in place.
+			event:       domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Workflow: "20260927-101500-ab12", Name: "audit"},
+			wantEntries: 1,
 		},
 		{
 			name: "SeamClosedEvent is inert in the view",

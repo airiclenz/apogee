@@ -1198,6 +1198,22 @@ what says the run is going. Everything else a Schedule does — created, skipped
 one-line note: those are lifecycle facts with no body, and a block around them would be an empty
 drawer.
 
+**The workflow block.** A message that opens with a Recipe skill's `/<id>` runs that Recipe as a
+Workflow before the model's first request, so there is no tool call to hang its progress on; it
+gets one block of its own instead, appended when the Workflow starts and grown in place as it
+runs. The header reads `✦ Workflow <name> — running` (`waiting for you` while an `ask` stage's
+question is out, then `finished`, `stopped` or `failed`). Beneath it, in the detail tone: the stage
+running now (`stage: <name>`), one result line per item as it finishes on its receipt — `#<n>
+<item> — <status> — <summary>` plus its fields as `k=v`, the line the model is handed — headed by
+its stage's name when the run spans several, the question an `ask` stage waits on, the totals line
+(`items N · ok a · partial b · blocked c`) once an item has finished, and a failed run's cause.
+Past forty items only the items that did not end ok are listed, as the model's result lines list
+them. The block paints one way and never collapses. A Workflow a `fan_out` call starts draws no
+block: the call's own block already stands, its children nest under it, and its result is those
+lines. A recipe line starts only from an idle prompt with nothing held — typed while the agent
+works, into a sub-agent's view, or with messages held, it is refused with a note and left in the
+box.
+
 ---
 
 ## Run view

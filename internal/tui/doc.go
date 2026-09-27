@@ -1084,6 +1084,8 @@
 // resolves it to, given the file of its own that the one accounting the mouse and the block cursor
 // both read had long earned (blocktarget_test.go is the suite named for it);
 // subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
+// workflowblock.go the block a launched Recipe's Workflow reports its run in (ADR 0087), folded
+// from its WorkflowPhaseEvents and grown in place;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the

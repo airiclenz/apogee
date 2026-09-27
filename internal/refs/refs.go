@@ -109,6 +109,31 @@ func SkillRefs(s string, known func(string) bool) []string {
 	return Names(SkillSpans(s, known))
 }
 
+// LeadingSkill reports the skill the line s opens with: its first word, past any leading
+// whitespace, when that word is an inline "/" token whose bare name `known` confirms — the grammar
+// [SkillSpans] owns, read at the one position a Recipe launch is keyed on (ADR 0087 D6). A token
+// anywhere later in s is not a leading one, and a nil `known` confirms nothing.
+func LeadingSkill(s string, known func(string) bool) (string, bool) {
+	if known == nil {
+		return "", false
+	}
+	start := 0
+	for start < len(s) && IsSpace(s[start]) {
+		start++
+	}
+	if start == len(s) || s[start] != '/' {
+		return "", false
+	}
+	end := start + 1
+	for end < len(s) && !IsSpace(s[end]) {
+		end++
+	}
+	if id := s[start+1 : end]; id != "" && known(id) {
+		return id, true
+	}
+	return "", false
+}
+
 // ScanToken scans the token of an @file reference and reports the referenced path together
 // with the offset just past the token. start is the byte immediately after the "@"; the caller
 // owns the word-boundary rule.

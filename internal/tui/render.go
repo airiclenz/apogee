@@ -1041,6 +1041,8 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		return plainPaint(railLines(th, renderPresentedBlock(th, in.presented, inner), in.depth))
 	case entryStartup:
 		return plainPaint(railLines(th, renderStartupBox(th, in.startup, inner), in.depth))
+	case entryWorkflow:
+		return plainPaint(railLines(th, renderWorkflowBlock(th, in.text, inner), in.depth))
 	default:
 		return blockPaint{}
 	}

@@ -403,6 +403,10 @@ type entry struct {
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
+	// entryWorkflow only: the live state of the Workflow the block reports (workflowblock.go),
+	// which each fold re-renders into text. View-only and never persisted — the text is the record —
+	// so a replayed block carries none and no later event finds it.
+	workflow workflowView
 	// the head of a sub-agent run only: the child's latest context reading and the CHILD's own
 	// window it filled (the Delegation target's where the run was routed), frozen together when
 	// the reading folded (applyUsage)
@@ -1245,6 +1249,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addPrune(e.Results, e.Tokens, runOf(e.EventBase))
 	case domain.RefClippedEvent:
 		t.addRefClipped(e, runOf(e.EventBase))
+	case domain.WorkflowPhaseEvent:
+		t.addWorkflowPhase(e)
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.

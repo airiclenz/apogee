@@ -52,7 +52,7 @@ var ErrTranscriptVersion = errors.New("apogee: unsupported transcript version")
 // codec when a Driver hands it a blob from anywhere else. The caller degrades to a no-replay note.
 var ErrTranscriptTooLarge = errors.New("apogee: transcript exceeds the 256 MiB limit")
 
-// The ten persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
+// The eleven persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
 // own iota, so a future reordering of that Driver's constants can never re-interpret an old file.
 // A Driver kind with no name here — the TUI's one-time start-up box, say — is simply never written,
 // and a name this build does not know decodes as an entry of an unrecognised kind.
@@ -62,6 +62,9 @@ var ErrTranscriptTooLarge = errors.New("apogee: transcript exceeds the 256 MiB l
 // of the record can tell WHEN a context was folded and whose, which a plain note's text alone could
 // not answer once its wording moved. An older build skips it on replay, as it skips any name it does
 // not know.
+//
+// EntryKindWorkflow is the block a Workflow a human launched reports its run in (ADR 0087): its
+// progress, one result line per finished item and the end it came to, all held in Text.
 const (
 	EntryKindUser        = "user"
 	EntryKindAssistant   = "assistant"
@@ -73,6 +76,7 @@ const (
 	EntryKindInterjected = "interjected"
 	EntryKindSchedule    = "schedule"
 	EntryKindCompacted   = "compacted"
+	EntryKindWorkflow    = "workflow"
 )
 
 // envelope is the top-level serialized form of the scrollback: a version tag plus the committed

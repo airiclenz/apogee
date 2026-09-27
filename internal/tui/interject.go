@@ -187,14 +187,15 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // staged row and empties the box, launching nothing (the single-worker invariant is untouched —
 // the running worker delivers the row at its next between-Steps boundary, ADR 0025).
 //
-// Five outcomes, and the input's fate is the difference between them: a REPORTING /command runs on
+// Six outcomes, and the input's fate is the difference between them: a REPORTING /command runs on
 // the spot — /version, /skills, /confine status answer while the model works, because they touch no
 // boundary (commandRunnable), and the box empties exactly as it does at idle since a whole-input
 // invocation IS the command line; any other /command is QUEUED to run at the next idle, and the box
 // empties the same way (stageCommand — ADR 0025 D10, amended 2026-09-14); a lone /word that names
 // nothing is refused with the typo guard's note and the line left exactly where it was
 // (refuseUnknownSlash — a mistyped invocation must no more be queued for the model than sent to
-// it); a blank box stages nothing at all; anything else is queued and the
+// it); a line opening with a Recipe skill is refused the same way, since a recipe starts only from
+// an idle prompt (refuseRecipe); a blank box stages nothing at all; anything else is queued and the
 // editor is cleared, the same way a submit clears it. The row carries both halves — the verbatim
 // editor text for the Backspace restore, and the parsed input the engine consumes, whose @file
 // references deliberately stay unresolved until delivery, so the model reads the file as it stands
@@ -207,7 +208,7 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	sent := m.input.Value()
 	var record tea.Cmd
 
-	parsed := m.promptEditor.submitParse(m.knownSkillID)
+	parsed := m.submitLine()
 	if parsed.kind == kindCommand {
 		return m.stageCommand(parsed, sent)
 	}
@@ -216,6 +217,12 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	}
 	if parsed.text == "" {
 		return m, nil
+	}
+	if parsed.recipe != "" {
+		// A recipe opens an Exchange of its own, so it is never staged into this one — where it
+		// would reach the engine as an interjection, which refuses to launch it — nor held for the
+		// flush, which would seat it behind other rows. The line stays in the box for the idle.
+		return m.refuseRecipe(recipeBusyNote(parsed.recipe))
 	}
 	m.interjectSeq++
 	row := queuedInterjection{
@@ -354,7 +361,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	sent := m.input.Value()
 	var record tea.Cmd
 
-	parsed := m.promptEditor.submitParse(m.knownSkillID)
+	parsed := m.submitLine()
 	if parsed.kind == kindCommand {
 		return m.stageCommand(parsed, sent) // a command never reaches the child: it runs or queues at the top level
 	}
@@ -363,6 +370,11 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	}
 	if parsed.text == "" {
 		return m, nil
+	}
+	if parsed.recipe != "" {
+		// A running child is inside an Exchange too, and a delegate never launches a Workflow (ADR
+		// 0087 D9): the line is refused rather than attached, and stays in the box.
+		return m.refuseRecipe(recipeBusyNote(parsed.recipe))
 	}
 	run := m.viewedRun()
 	spawn := run.spawn

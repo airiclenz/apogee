@@ -1918,7 +1918,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	sent := m.input.Value()
 	var record tea.Cmd
 
-	parsed := m.promptEditor.submitParse(m.knownSkillID)
+	parsed := m.submitLine()
 	if parsed.kind == kindCommand {
 		// A whole-input invocation IS the command line — nothing else was typed — so emptying the
 		// box is exactly stripping the verb. runCommand does not touch the editor: its other caller,
@@ -1936,6 +1936,13 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m.refuseUnknownSlash(parsed)
 	}
 	held := len(m.pendingInterjections) > 0
+	if parsed.recipe != "" && held {
+		// A recipe line launches only while it LEADS the message the engine opens with
+		// (domain.UserInput), and the flush would seat it behind the held rows (joinedInterjections),
+		// where it would attach the recipe's body instead of running it. It is never merged: the
+		// line stays in the box until the held rows are sent or taken back.
+		return m.refuseRecipe(recipeHeldNote(parsed.recipe))
+	}
 	// Nothing to send only when there is neither text NOR a held row. A message that is only a skill
 	// token ("/grill-me") HAS text — the token itself — so it sends, which is the owner's edge
 	// default: "just run the skill".
@@ -1977,7 +1984,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		m.eng.SettleExchange()
 		m.transcript.addNote(interruptedSettledNote)
 	}
-	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
+	in := parsed.userInput()
 	// Where the /tokens sit in the text that is about to become the block — the parse's own offsets
 	// for a plain send, re-based onto the composition when the held rows join it below.
 	spans := parsed.skillSpans
@@ -2004,6 +2011,48 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	nameCmd := m.maybeAutoTitle(in.Text)
 	next, cmd := m.launchExchange(in)
 	return next, tea.Batch(cmd, nameCmd, record)
+}
+
+// submitLine parses the editor's contents for a send: the chat mini-language's parse
+// ([parseInput], through the editor's own seam) with a line that opens with a Recipe skill marked
+// as that recipe's launch ([parsedInput.withRecipe]). Every path that sends what the human typed —
+// a submit at idle, an interjection, a message to a viewed child — reads the line through it, so
+// the three agree on what is a recipe line.
+func (m Model) submitLine() parsedInput {
+	return m.promptEditor.submitParse(m.knownSkillID).withRecipe(m.recipeSkill)
+}
+
+// recipeSkill reports whether id names a catalog skill that carries a Recipe (ADR 0087 D6) — one a
+// leading "/<id>" runs as a Workflow rather than attaching.
+func (m Model) recipeSkill(id string) bool {
+	if m.opts.Skills == nil {
+		return false
+	}
+	skill, ok := m.opts.Skills.Get(id)
+	return ok && skill.Recipe != nil
+}
+
+// The refusals a recipe line meets where it cannot launch. A recipe opens an Exchange of its own
+// around the Workflow it runs, so it starts only from an idle prompt and only as the message's
+// opening line: mid-run it would be an interjection (which the engine refuses to launch from), and
+// behind held rows it would no longer lead.
+const (
+	recipeBusyFormat = "/%s is a recipe: it starts only when the agent is idle — send it once this exchange ends"
+	recipeHeldFormat = "/%s is a recipe: it starts only on its own — send or take back the held messages first"
+)
+
+// recipeBusyNote is the refusal of a recipe line typed while a worker runs.
+func recipeBusyNote(id string) string { return fmt.Sprintf(recipeBusyFormat, id) }
+
+// recipeHeldNote is the refusal of a recipe line sent while rows are held for the next message.
+func recipeHeldNote(id string) string { return fmt.Sprintf(recipeHeldFormat, id) }
+
+// refuseRecipe refuses a recipe line where it cannot launch, with note saying why. The line is left
+// exactly where it was — nothing is sent, staged, recorded or attached — so ⏎ sends it once the
+// agent is idle and nothing is held, as the refusals of an offline upstream leave theirs.
+func (m Model) refuseRecipe(note string) (tea.Model, tea.Cmd) {
+	m.transcript.addNote(note)
+	return m, nil
 }
 
 // enterRunning is the ONE launch verb: every worker launch — a typed or flushed submit

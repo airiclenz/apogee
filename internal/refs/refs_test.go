@@ -244,3 +244,34 @@ func TestIsSpace(t *testing.T) {
 		}
 	}
 }
+
+// LeadingSkill answers only for the line's first word: the position a Recipe launch is keyed on.
+func TestLeadingSkill(t *testing.T) {
+	t.Parallel()
+
+	known := knownSkills("audit", "grill-me")
+	for _, tc := range []struct {
+		name   string
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{name: "a bare token", in: "/audit", want: "audit", wantOK: true},
+		{name: "a token then its text", in: "/audit internal/ scope=deep", want: "audit", wantOK: true},
+		{name: "leading whitespace is skipped", in: " \t\n/audit x", want: "audit", wantOK: true},
+		{name: "a token ended by a newline", in: "/audit\nmore", want: "audit", wantOK: true},
+		{name: "a token later in the line", in: "please /audit this", wantOK: false},
+		{name: "an unknown leading token", in: "/usr/bin is a path", wantOK: false},
+		{name: "a known name glued to more text", in: "/audit-all x", wantOK: false},
+		{name: "a lone slash", in: "/ audit", wantOK: false},
+		{name: "an empty line", in: "", wantOK: false},
+	} {
+		got, ok := LeadingSkill(tc.in, known)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("%s: LeadingSkill(%q) = (%q, %v), want (%q, %v)", tc.name, tc.in, got, ok, tc.want, tc.wantOK)
+		}
+	}
+	if got, ok := LeadingSkill("/audit", nil); ok || got != "" {
+		t.Errorf("LeadingSkill with a nil predicate = (%q, %v), want (\"\", false)", got, ok)
+	}
+}

@@ -627,7 +627,21 @@ load_skill is one shared instance across parent and children (wire_config.go:122
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ && go test -race -count=1 ./internal/tools/ && go test -race -count=1 ./internal/skills/`
 **Commit:** `feat(agent): fan_out starts a recipe`
 
-## 22. Invoking a recipe skill in the TUI runs it
+## 22. Invoking a recipe skill in the TUI runs it — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): re-derived from "submit sets `UserInput.Recipe`". Item 20 added no such field: the engine launches on `SkillIDs[0]` plus a text that opens with `/<id>`. So `parsedInput` gains `recipe`, set after the parse by `parsedInput.withRecipe(Model.recipeSkill)`, and the recipe id is taken out of `skillIDs`. `parsedInput.userInput()` then puts it back as `SkillIDs[0]` of the UserInput that submit sends. `parseInput(raw, known)` keeps its signature. `Model.submitLine()` is the one parse that submit, stageInterjection and stageChildMessage share.
+
+NOTES (2026-09-27): re-derived from "the fold row is internal/tui/fold.go". Every Event reaches the transcript through `transcript.apply` (transcript.go), so the WorkflowPhaseEvent case lives there and fold.go is unchanged. The `renderEntryLines` case is in render.go. The entry gains a view-only `workflow workflowView` field. fold_test.go's WorkflowPhaseEvent row is restated, and a second row covers a started phase opening a block.
+
+NOTES (2026-09-27): the block's text is its whole paint and its whole record, so a resumed session paints it with no view to rebuild. Because the text changes after the entry is committed, `entryWorkflow` is not cacheable (like the start-up box). It is persisted as `session.EntryKindWorkflow` = "workflow" and is not a host note. A Workflow started while a fan_out call in the same run is still open draws no block.
+
+NOTES (2026-09-27): a recipe line with held rows is refused in submit instead of being merged: joinedInterjections is unchanged, and staging already refuses recipe lines, so a held row can never be one. `refs.LeadingSkill` is new in refs.go and tested in refs_test.go.
+
+NOTES (2026-09-27): the ask-pane goal is proven end to end by TestE2ERecipeMissingInputOpensTheAskPane: a real Agent with a `skills.Load` catalog, the TUI Bridge's Asker, and a stubllm upstream that answers only a request carrying `recipe /review-tree could not run: missing input: scope`. No wiring change was needed, because cmd/apogee already sets `Config.Asker` to the bridge.
+
+NOTES (2026-09-27): consequential edit — layout.md: made necessary by the new workflow block and the recipe-line refusals (the TUI rendering spec describes each block kind, next to the firing block).
+
+NOTES (2026-09-27): a recipe launch's item children emit events under the synthetic `recipe-<id>-<turn>` call, which has no head block in the transcript. Their entries therefore land as unheaded depth-1 entries after the workflow block, not nested under it. Giving the block run-head behaviour would change the run-grouping walk, which is outside this item's detect-and-render scope.
 
 **What:** Recast at the regression check (2026-09-27). Depends on item 20.
 **Goal:** submitting `/<recipe-skill> <text>` runs the recipe as a foreground workflow (not an attached skill body); the transcript shows a workflow block with live per-item progress and the result lines; a missing required input opens the ask pane.

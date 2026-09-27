@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/refs"
 )
 
@@ -47,6 +48,12 @@ const (
 // its inline accent from ([skillSpan]). For kindUnknownSlash,
 // text is the lone token as typed (leading slash included) — the refusal note names it back
 // (unknownSlashNote) and nothing else on the value is set.
+//
+// recipe is set on a kindMessage only, and only by [parsedInput.withRecipe] after the parse: the id
+// of the Recipe skill the line opens with ("/audit internal/"), which the engine RUNS as a
+// Workflow rather than attaching its body (ADR 0087 D6). That id is taken out of skillIDs — its
+// body is never attached — and travels as the launch the engine keys on instead
+// ([parsedInput.userInput]).
 type parsedInput struct {
 	kind       inputKind
 	command    string
@@ -58,6 +65,7 @@ type parsedInput struct {
 	fileRefs   []string
 	skillIDs   []string
 	skillSpans []skillSpan
+	recipe     string
 }
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
@@ -356,6 +364,44 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 		skillIDs:   refs.Names(skills),
 		skillSpans: skillTokenSpans(skills),
 	}
+}
+
+// withRecipe marks a message line that opens with a Recipe skill's "/<id>" — isRecipe names the
+// skills that carry one — as that recipe's launch: recipe holds the id, and the id leaves skillIDs,
+// since a launched recipe's body is never attached. It is a step AFTER [parseInput] rather than
+// part of it because the parse's signature is shared by every caller that only wants the grammar;
+// the recipe verdict is the send path's alone. Any other line comes back unchanged — a command, a
+// refusal, a recipe token later in the text (which attaches its body as any skill's does), and a
+// line whose leading skill carries no recipe.
+func (p parsedInput) withRecipe(isRecipe func(string) bool) parsedInput {
+	if p.kind != kindMessage {
+		return p
+	}
+	id, ok := refs.LeadingSkill(p.text, isRecipe)
+	if !ok {
+		return p
+	}
+	p.recipe = id
+	kept := make([]string, 0, len(p.skillIDs))
+	for _, skill := range p.skillIDs {
+		if skill != id {
+			kept = append(kept, skill)
+		}
+	}
+	p.skillIDs = kept
+	return p
+}
+
+// userInput is the message line as the engine is handed it. A recipe line is spelled the way the
+// engine keys a launch on (domain.UserInput): the recipe's id FIRST in SkillIDs and the text opening
+// with its "/<id>", which the parse keeps in place — so the Driver says "launch" without a field of
+// its own, and the other skills the line names still ride behind it.
+func (p parsedInput) userInput() domain.UserInput {
+	ids := p.skillIDs
+	if p.recipe != "" {
+		ids = append([]string{p.recipe}, p.skillIDs...)
+	}
+	return domain.UserInput{Text: p.text, FileRefs: p.fileRefs, SkillIDs: ids}
 }
 
 // soleUnknownSlash reports the lone "/word" of an input that is nothing but that word and names
