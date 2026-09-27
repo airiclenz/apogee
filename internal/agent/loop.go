@@ -36,8 +36,10 @@ var errHookPanicked = errors.New("apogee: extension boundary recovered a panic")
 // through Approval and continue the Exchange (StatusTurnComplete); otherwise commit the
 // final message and end it (StatusExchangeComplete).
 //
-// Every return is at a serializable boundary. A ctx cancellation rolls this Turn's work
-// back and returns StatusCancelled with resumable state; a recovered extension panic or
+// Every return is at a serializable boundary. A ctx cancellation returns StatusCancelled with
+// resumable state: one that lands while the reply streams (or inside a delegation) rolls this
+// Turn's work back, and one that lands on a leaf tool call settles the Turn, keeping the reply and
+// a result for every call it issued (ADR 0088 D1); a recovered extension panic or
 // Upstream fault degrades the Turn to a clean boundary without unwinding the host. Two Upstream
 // faults do NOT end the Turn on the spot. A context-window overflow: the respond phase folds the
 // history (emergencyFold) and re-sends the same Turn once before falling back to that same clean
@@ -252,10 +254,15 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	}
 
 	// The model requested tools: commit the assistant tool-call message, then dispatch
-	// each call through Approval. A cancellation mid-tool rolls the whole Turn back.
+	// each call through Approval. A cancel that reaches a leaf call settles the Turn — the reply
+	// and a result for every call it issued stay (ADR 0088 D1) — while one that reaches a
+	// delegation still rolls the whole Turn back (ADR 0013 §5).
 	a.conv.Append(assistantMessage(resp, calls))
-	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
+	switch a.dispatchTools(ctx, turn, calls) {
+	case dispatchCancelled:
 		return a.turns.end(t, endCancelled), nil
+	case dispatchSettled:
+		return a.turns.end(t, endSettled), nil
 	}
 	if a.turns.wrappingUp() {
 		// The wrap-up's one kept write has been dispatched — run against the output path, refused
@@ -273,9 +280,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 // request and again by refold after a fold rewrites the conversation, so every value the request
 // depends on is re-read from the same post-fold state.
 func (a *Agent) armRequest(t *turnRun) {
-	// rollback marks the boundary a cancellation restores to: this Turn's assistant message and
-	// tool results are dropped and the drained deferred corrections re-queued, so resume
-	// re-attempts the Turn from serializable state. The committed user message is kept — the input
+	// rollback marks the boundary a rolled-back cancellation (one during the stream, or inside a
+	// delegation) restores to: this Turn's assistant message and tool results are dropped and the
+	// drained deferred corrections re-queued, so resume re-attempts the Turn from serializable
+	// state. A cancel settled on a leaf call keeps the Turn and never reads it (endSettled). The committed user message is kept — the input
 	// is not lost to a cancel. After a fold this re-derives PAST the fold (decision 6: the fold is
 	// history maintenance, not part of the Turn's attempt, so a later cancel keeps it and must
 	// never roll back into a pre-fold index).

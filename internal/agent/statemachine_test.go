@@ -406,16 +406,23 @@ func (t blockingTool) Execute(ctx context.Context, _ domain.ToolCall) (domain.To
 	return domain.ToolResult{}, ctx.Err()
 }
 
-// TestStep_CancelMidTool cancels while a tool executes and proves the Step returns
-// StatusCancelled with the Turn rolled back to a serializable boundary that resumes.
+// TestStep_CancelMidTool cancels while the second of three tool calls executes and proves the Turn
+// is SETTLED, not rolled back (ADR 0088 D1): the reply stays and every call it issued has a result —
+// the finished call its real one, the running call the while-it-ran text, the call never reached the
+// not-run text — each reaching the Drivers as a ToolResultEvent; the kept Turn advances the counter,
+// and its snapshot resumes into the next Turn, which reads the results.
 func TestStep_CancelMidTool(t *testing.T) {
 	sink := &recordingSink{}
 	started := make(chan struct{})
-	cfg := configWithTools(sink, blockingTool{name: "block", started: started})
-	responder := scriptedResponder(t,
-		toolCallTurn("c1", "block", "{}"),
+	cfg := configWithTools(sink,
+		fakeTool{name: "lookup", readOnly: true, result: "42"},
+		blockingTool{name: "block", started: started},
 	)
-
+	responder := scriptedResponder(t, stubllm.Turn{ToolCalls: []stubllm.ToolCall{
+		{ID: "c1", Name: "lookup", Arguments: `{"n":1}`},
+		{ID: "c2", Name: "block", Arguments: "{}"},
+		{ID: "c3", Name: "lookup", Arguments: `{"n":3}`},
+	}})
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -423,52 +430,166 @@ func TestStep_CancelMidTool(t *testing.T) {
 	if err := a.Submit(domain.UserInput{Text: "run the slow tool"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-started
 		cancel()
 	}()
+
 	res, err := a.Step(ctx)
+
 	if err != nil {
 		t.Fatalf("Step returned a loop error on cancel: %v", err)
 	}
 	if res.Status != domain.StatusCancelled {
 		t.Fatalf("Step status = %q, want %q", res.Status, domain.StatusCancelled)
 	}
-
-	// The Turn rolled back: only the user message remains (no assistant tool-call message,
-	// no partial tool result) — a clean, serializable boundary.
-	if got := a.conv.Len(); got != 1 {
-		t.Errorf("after cancel the conversation has %d messages, want 1 (the user input)", got)
+	if got := a.conv.Len(); got != 5 {
+		t.Fatalf("after cancel the conversation has %d messages, want 5 (user, reply, three results)", got)
+	}
+	if reply := a.conv.At(1); reply.Role != domain.RoleAssistant || len(reply.ToolCalls) != 3 {
+		t.Errorf("message 1 = %+v, want the assistant reply with its three calls", reply)
+	}
+	want := []struct {
+		callID, content string
+		outcome         domain.ToolOutcome
+	}{
+		{"c1", "42", domain.ToolOutcomeOf(false)},
+		{"c2", "cancelled by the user while it ran", domain.ToolOutcomeOf(true)},
+		{"c3", "not run: cancelled by the user", domain.ToolOutcomeOf(true)},
+	}
+	for i, w := range want {
+		m := a.conv.At(2 + i)
+		if m.Role != domain.RoleTool || m.ToolCallID != w.callID || m.Content != w.content || m.ToolOutcome != w.outcome {
+			t.Errorf("result %d = {role %q, call %q, content %q, outcome %v}, want {tool, %q, %q, %v}",
+				i, m.Role, m.ToolCallID, m.Content, m.ToolOutcome, w.callID, w.content, w.outcome)
+		}
+	}
+	var resulted []string
+	for _, e := range sink.events {
+		if re, ok := e.(domain.ToolResultEvent); ok {
+			resulted = append(resulted, re.Result.CallID)
+		}
+	}
+	if strings.Join(resulted, ",") != "c1,c2,c3" {
+		t.Errorf("ToolResultEvents for %v, want one per call in order [c1 c2 c3]", resulted)
+	}
+	if a.turns.index != 1 {
+		t.Errorf("Turn index = %d, want 1 (a kept Turn advances past itself)", a.turns.index)
 	}
 
-	// The snapshot resumes and completes against a working responder.
+	// The snapshot resumes; the cancelled Exchange is still open, so a Submit is rejected and the
+	// host carries on by re-Stepping into the next Turn, which reads the settled results.
 	snap, err := a.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot after cancel: %v", err)
 	}
-	sink2 := &recordingSink{}
-	cfg2 := configWithTools(sink2, fakeTool{name: "block", readOnly: true, result: "ok"})
-	b, err := resumeAgent(cfg2, snap, scriptedResponder(t, contentTurn("recovered")))
+	cfg2 := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"}, fakeTool{name: "block", readOnly: true, result: "ok"})
+	upstream := echoResponder(t, "recovered")
+	b, err := resumeAgent(cfg2, snap, upstream)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-
-	// The cancelled Exchange is still open (inExchange survived the cancel/resume), so a
-	// Submit is rejected — interleaving a fresh user message into the open Exchange would
-	// produce a malformed conversation. The host continues by re-Stepping, not re-Submitting.
 	if err := b.Submit(domain.UserInput{Text: "intrude"}); err == nil {
 		t.Error("Submit after a mid-Exchange cancel was accepted; the open Exchange must reject it")
 	}
-
-	// Re-Stepping re-attempts the Turn from the rolled-back boundary and completes it.
 	res2, err := b.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run (resumed): %v", err)
 	}
 	if res2.Status != domain.StatusExchangeComplete {
 		t.Errorf("resumed status = %q, want %q", res2.Status, domain.StatusExchangeComplete)
+	}
+	var carried int
+	for _, m := range upstream.last().Messages {
+		if m.Role == "tool" {
+			carried++
+		}
+	}
+	if carried != 3 {
+		t.Errorf("the resumed request carried %d tool results, want the 3 the cancel settled", carried)
+	}
+}
+
+// TestStep_CancelWhileStreamingDropsTheTurn pins the other half of the settle rule: a Turn
+// cancelled before its reply finished streaming issued nothing that ran, so it is rolled back
+// whole — no assistant message, the counter held for the re-attempt (ADR 0088 D1).
+func TestStep_CancelWhileStreamingDropsTheTurn(t *testing.T) {
+	responder := &blockAtResponder{blockAt: 0, started: make(chan struct{})}
+	a, err := newAgent(configWithTools(&recordingSink{}), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "think hard"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+
+	res, err := a.Step(ctx)
+
+	if err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step = %+v, %v; want StatusCancelled", res, err)
+	}
+	if got := a.conv.Len(); got != 1 {
+		t.Errorf("after the cancel the conversation has %d messages, want 1 (the user input alone)", got)
+	}
+	if a.turns.index != 0 {
+		t.Errorf("Turn index = %d, want 0 (a dropped Turn is re-attempted, not advanced past)", a.turns.index)
+	}
+	if !a.InExchange() {
+		t.Error("the cancel closed the Exchange; it stays open for the host's close or re-attempt")
+	}
+}
+
+// ctxApprover parks inside Approve until the Turn is cancelled, then answers with the cancel — a
+// human who never answered the prompt before pressing stop.
+type ctxApprover struct{ entered chan struct{} }
+
+func (c ctxApprover) Approve(ctx context.Context, _ domain.ApprovalRequest) (domain.ApprovalDecision, error) {
+	close(c.entered)
+	<-ctx.Done()
+	return domain.ApprovalDeny, ctx.Err()
+}
+
+// TestStep_CancelAtTheApprovalGateSettlesNotRun proves a call the cancel reached at its Approval
+// gate never ran and says so: its result is the not-run text, never the while-it-ran one, and the
+// Turn is settled with the tool untouched.
+func TestStep_CancelAtTheApprovalGateSettlesNotRun(t *testing.T) {
+	ran := 0
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "write_it", readOnly: false, ran: &ran, result: "wrote"})
+	cfg.Mode = domain.ModeAskBefore
+	approver := ctxApprover{entered: make(chan struct{})}
+	cfg.Approver = approver
+	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c1", "write_it", "{}")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "edit it"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-approver.entered
+		cancel()
+	}()
+
+	res, err := a.Step(ctx)
+
+	if err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step = %+v, %v; want StatusCancelled", res, err)
+	}
+	if ran != 0 {
+		t.Errorf("the gated tool ran %d times, want 0", ran)
+	}
+	if got := a.conv.Len(); got != 3 {
+		t.Fatalf("conversation has %d messages, want 3 (user, reply, result)", got)
+	}
+	if last := a.conv.At(2); last.ToolCallID != "c1" || last.Content != "not run: cancelled by the user" {
+		t.Errorf("result = {call %q, content %q}, want {c1, %q}", last.ToolCallID, last.Content, "not run: cancelled by the user")
 	}
 }
 
@@ -654,25 +775,72 @@ func TestSettleExchange_KeepsFinishedTurnsAndNotesTheCut(t *testing.T) {
 	if !noted {
 		t.Errorf("the next request carried no noted tool result; messages = %+v", upstream.last().Messages)
 	}
+
+	// A Turn the cancel reached on a tool call is kept as well (ADR 0088 D1): its finished leaf
+	// keeps its real result, unmarked, and the cut rides the Turn's last result — the cancelled
+	// call's own.
+	t.Run("a Turn cancelled on a tool call keeps its finished leaf", func(t *testing.T) {
+		started := make(chan struct{})
+		cfg := configWithTools(&recordingSink{},
+			fakeTool{name: "lookup", readOnly: true, result: "42"},
+			blockingTool{name: "block", started: started},
+		)
+		responder := scriptedResponder(t,
+			toolCallTurn("c1", "lookup", `{"n":1}`),
+			twoToolCallScript(toolReq{"c2", "lookup", `{"n":2}`}, toolReq{"c3", "block", "{}"}),
+		)
+		b, err := newAgent(cfg, responder)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		if err := b.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if res, err := b.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+			t.Fatalf("Step 0 = %+v, %v; want StatusTurnComplete", res, err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-started
+			cancel()
+		}()
+		if res, err := b.Step(ctx); err != nil || res.Status != domain.StatusCancelled {
+			t.Fatalf("Step 1 = %+v, %v; want StatusCancelled", res, err)
+		}
+
+		dropped := b.SettleExchange()
+
+		if dropped {
+			t.Fatal("SettleExchange reported the Exchange dropped; the finished Turns must be kept")
+		}
+		if got := b.conv.Len(); got != 6 {
+			t.Fatalf("after settle the conversation has %d messages, want 6 (user, two replies, three results)", got)
+		}
+		if leaf := b.conv.At(4); leaf.ToolCallID != "c2" || leaf.Content != "42" {
+			t.Errorf("the settled Turn's finished leaf = {call %q, content %q}, want {c2, 42} unmarked", leaf.ToolCallID, leaf.Content)
+		}
+		last := b.conv.At(5)
+		if last.ToolCallID != "c3" || !strings.HasPrefix(last.Content, cancelledWhileRunningContent) || !strings.Contains(last.Content, settledExchangeMarker) {
+			t.Errorf("last result = {call %q, content %q}, want c3's while-it-ran text carrying the cancelled note", last.ToolCallID, last.Content)
+		}
+	})
 }
 
-// TestSettleExchange_LoneUserMessageFallsBackToAbort pins the fall-through: with no finished Turn
-// there is no tool result to carry the cut, so a stop during Turn 0 scraps the lone opening user
-// message exactly as AbortExchange does — and says so.
+// TestSettleExchange_LoneUserMessageFallsBackToAbort pins the fall-through: a Turn 0 cancelled
+// while its reply streamed is dropped (ADR 0088 D1), so no tool result is left to carry the cut and
+// the settle scraps the lone opening user message exactly as AbortExchange does — and says so.
 func TestSettleExchange_LoneUserMessageFallsBackToAbort(t *testing.T) {
-	sink := &recordingSink{}
-	started := make(chan struct{})
-	cfg := configWithTools(sink, blockingTool{name: "block", started: started})
-	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c1", "block", "{}")))
+	responder := &blockAtResponder{blockAt: 0, started: make(chan struct{})}
+	a, err := newAgent(configWithTools(&recordingSink{}), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	if err := a.Submit(domain.UserInput{Text: "run the slow tool"}); err != nil {
+	if err := a.Submit(domain.UserInput{Text: "think hard"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		<-started
+		<-responder.started
 		cancel()
 	}()
 	if res, err := a.Step(ctx); err != nil || res.Status != domain.StatusCancelled {
@@ -692,6 +860,48 @@ func TestSettleExchange_LoneUserMessageFallsBackToAbort(t *testing.T) {
 	}
 	if err := a.Submit(domain.UserInput{Text: "start over"}); err != nil {
 		t.Errorf("Submit after settle: %v, want accepted", err)
+	}
+}
+
+// TestSettleExchange_TurnZeroCancelledMidToolKeepsThePrompt proves a stop during Turn 0's tool call
+// no longer scraps the prompt: the settled Turn is a kept Turn, so the opening user message, the
+// reply and the cancelled call's result stay, the cut rides that result, and the Exchange closes.
+func TestSettleExchange_TurnZeroCancelledMidToolKeepsThePrompt(t *testing.T) {
+	started := make(chan struct{})
+	cfg := configWithTools(&recordingSink{}, blockingTool{name: "block", started: started})
+	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c1", "block", "{}")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "run the slow tool"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	if res, err := a.Step(ctx); err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step = %+v, %v; want StatusCancelled", res, err)
+	}
+
+	dropped := a.SettleExchange()
+
+	if dropped {
+		t.Fatal("SettleExchange scrapped the Exchange; a Turn settled on its tool call is a kept Turn")
+	}
+	if got := a.conv.Len(); got != 3 {
+		t.Fatalf("after settle the conversation has %d messages, want 3 (user, reply, result)", got)
+	}
+	if first := a.conv.At(0); first.Role != domain.RoleUser || first.Content != "run the slow tool" {
+		t.Errorf("message 0 = %+v, want the opening prompt", first)
+	}
+	last := a.conv.At(2)
+	if !strings.HasPrefix(last.Content, "cancelled by the user while it ran") || !strings.Contains(last.Content, settledExchangeMarker) {
+		t.Errorf("last result = %q, want the while-it-ran text carrying the cancelled note", last.Content)
+	}
+	if a.InExchange() {
+		t.Error("SettleExchange left the Exchange open")
 	}
 }
 

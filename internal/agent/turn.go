@@ -63,8 +63,8 @@ type turnLifecycle struct {
 	// fillRung is the context-fill notice's ladder position (fillnotice.go): the highest rung fired
 	// on the current climb toward the compaction line, 0 = none. Every path that shrinks or
 	// replaces the conversation behind the model's back — a fold, /clear, a restored snapshot, an
-	// aborted Exchange, a cancelled Turn's rollback — re-arms the whole ladder (rearmFill), so the
-	// next climb fires from its first reached rung (ADR 0077 D4).
+	// aborted Exchange, a cancelled Turn's rollback (a settled Turn drops nothing) — re-arms the
+	// whole ladder (rearmFill), so the next climb fires from its first reached rung (ADR 0077 D4).
 	fillRung int
 
 	// lastFault is the text of the most recent loop-level fault this Agent surfaced as an
@@ -79,7 +79,7 @@ type turnLifecycle struct {
 
 	// observer is told the three MOMENTS this type owns that mean something outside it: an Exchange
 	// ENDING (exchangeClosed, fired by closeExchange), a cancelled Turn's ROLLBACK (turnRolledBack,
-	// fired by end()'s endCancelled row) and an Exchange's ABORT (exchangeAborted, fired by abort).
+	// fired by end()'s endCancelled row, never by the endSettled row that keeps the Turn) and an Exchange's ABORT (exchangeAborted, fired by abort).
 	// It is an interface rather than an Agent for the same reason conv is a pointer: this type owns
 	// the moments and knows nothing of what an Agent wants to do about them — the undo journal's
 	// closing capture hangs off the first (Agent.closeUndoGroup, agent.go), the context-fill
@@ -95,14 +95,17 @@ type turnLifecycle struct {
 // (turnLifecycle.observer); the Agent is its one implementation (construct.go).
 //
 // exchangeClosed fires on every row that ends an Exchange and on none that leaves one open, which
-// is exactly closeExchange's own contract: endCancelled is not a caller, so a Turn that will be
-// re-attempted never closes the group its re-attempt writes into.
+// is exactly closeExchange's own contract: neither cancel row (endCancelled, endSettled) is a
+// caller, so a cancelled Turn never closes the group the Exchange's next writes go into — the
+// host's close (SettleExchange, AbortExchange) or a later Turn's end does.
 //
-// turnRolledBack fires once per Turn ROLLBACK, after the conversation is dropped back to the
-// Turn's boundary. The rollback drops the Turn's committed tool results, including the one a
-// notice rode on, so what tracks against the dropped conversation ends here exactly as it does
-// on AbortExchange. A Step-driven host may re-attempt the Turn and cancel again, so an
-// implementation must be idempotent (the re-arm and the retention restore are).
+// turnRolledBack fires once per Turn ROLLBACK (endCancelled — a cancel during the stream, a fold
+// or a delegation), after the conversation is dropped back to the Turn's boundary. The rollback
+// drops the Turn's committed tool results, including the one a notice rode on, so what tracks
+// against the dropped conversation ends here exactly as it does on AbortExchange. A Turn a cancel
+// SETTLED (endSettled) drops nothing and fires nothing. A Step-driven host may re-attempt a
+// rolled-back Turn and cancel again, so an implementation must be idempotent (the re-arm and the
+// retention restore are).
 //
 // exchangeAborted fires once per Exchange ABORT (abort — AbortExchange, and a settle that finds no
 // finished Turn to keep), after the conversation is dropped back to the Exchange's boundary and
@@ -159,7 +162,7 @@ type turnRun struct {
 	capRetrySpent bool
 }
 
-// turnEnd names the five ways a Turn exits. One row per exit; end() is the whole table.
+// turnEnd names the six ways a Turn exits. One row per exit; end() is the whole table.
 type turnEnd int
 
 const (
@@ -168,6 +171,7 @@ const (
 	endAbandoned                   // advance · Exchange closes       · StatusExchangeComplete + Faulted
 	endCancelled                   // roll back + restore deferred · no advance · Exchange stays open · StatusCancelled
 	endStepCapped                  // step-cap fallback · no advance · Exchange closes · StatusExchangeComplete + StepCapped
+	endSettled                     // keep the Turn · advance · Exchange stays open · StatusCancelled
 )
 
 // end exits the Turn t on the row how names — the single table that replaced the three exit
@@ -209,7 +213,10 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		status = domain.StatusExchangeComplete
 		faulted = true
 	case endCancelled:
-		// The Turn is rolled back and re-attempted on resume.
+		// The Turn is rolled back and re-attempted on resume. This is the cancel that left
+		// nothing to keep — one that landed while the reply streamed (no call was issued), during
+		// a history fold, or inside a delegation, which is atomic within the Turn (ADR 0013 §5); a
+		// cancel that lands on a leaf tool call keeps the Turn instead (endSettled).
 		// Roll the conversation back to the boundary the Turn began at (dropping this Turn's
 		// assistant message and any tool results). Truncate the queue back to its pre-hooks floor
 		// before restoring: the cancelled Turn's own post-response deferrals (e.g. a shrunken
@@ -251,6 +258,20 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		l.closeExchange()
 		status = domain.StatusExchangeComplete
 		stepCapped = true
+	case endSettled:
+		// A cancel that landed on a leaf tool call SETTLES the Turn rather than rolling it back
+		// (ADR 0088 D1): the dispatch has already answered every call the reply issued — a
+		// finished call with its real result, the call the cancel ended with its cancelled result,
+		// the calls never reached with the not-run result — so the reply and its results stand and
+		// nothing is dropped. The Turn COMPLETED as far as the conversation is concerned, so the
+		// counter advances past it and the deferred queue is left as a completed Turn leaves it:
+		// the corrections its request drained were sent and answered, never re-queued. The
+		// observer hears nothing — no result a notice rode was dropped, so every notice latch and
+		// the fill ladder's climb stand — and the Exchange stays OPEN exactly as endCancelled leaves
+		// it: the host closes it (SettleExchange, which marks the cut on the last result this Turn
+		// committed) or a Step-driven host re-Steps and the next Turn reads the results.
+		l.index++
+		status = domain.StatusCancelled
 	}
 	return domain.StepResult{
 		Status:     status,
@@ -267,9 +288,10 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 // flow's next request must never ride into a different Exchange's. Its callers are the
 // Exchange ends: end()'s endExchangeDone row (a final no-tool reply), its endAbandoned row (a
 // faulted Turn), its endStepCapped fallback, and the host's two ways of ending a cancelled
-// Exchange — AbortExchange (scrapping it) and SettleExchange (keeping its finished Turns). endCancelled is
-// deliberately NOT one — a cancelled Turn leaves the Exchange open for the resume re-attempt
-// and truncates-then-restores the deferred queue instead (F6(b)). Being the one owner is what
+// Exchange — AbortExchange (scrapping it) and SettleExchange (keeping its finished Turns). The two
+// cancel rows are deliberately NOT callers — a cancelled Turn leaves the Exchange open for the
+// host's close or a Step-driven host's next Step; a rolled-back one (endCancelled)
+// truncates-then-restores the deferred queue instead (F6(b)). Being the one owner is what
 // lets the undo journal hang its closing capture here through the observer: four Exchange ends, one
 // capture point, and the row that does not end an Exchange does not take an image either.
 func (l *turnLifecycle) closeExchange() {
@@ -378,17 +400,20 @@ const cancelledNoteTopic = "cancelled"
 var cancelledNoteLine = mustPrompt("cancelled-note.txt")
 
 // settle closes a cancelled Exchange KEEPING its finished Turns (Agent.SettleExchange's engine
-// half) — the exit for "the human moved on", where abort is the explicit throw-away. A cancelled
-// Turn's rollback (endCancelled) has already dropped the in-flight Turn, so what stands past
-// exchangeStart is the opening user message and the tool Turns that completed before the stop;
-// dropping those too (abort) is what saved 48 sessions as `messages: null`. When the Exchange
-// holds a finished Turn — a RoleTool message past exchangeStart — the history stays, the
-// cut is marked as an engine note on the LAST tool result (cancelledNoteTopic; ephemeral, so
+// half) — the exit for "the human moved on", where abort is the explicit throw-away. The Turn the
+// cancel reached has already been settled or dropped by end(): one cancelled on a leaf tool call
+// is kept with a result for every call (endSettled — the not-run and the while-it-ran results are
+// tool results like any other), one cancelled while its reply streamed is rolled back
+// (endCancelled). So what stands past exchangeStart is the opening user message and the tool
+// Turns that completed or settled before the stop; dropping those too (abort) is what saved 48
+// sessions as `messages: null`. When the Exchange holds a finished Turn — a RoleTool message
+// past exchangeStart — the history stays, the cut is marked as an engine note on the LAST tool result (cancelledNoteTopic; ephemeral, so
 // the saved record keeps the results and no marker) and the Exchange closes; any interjection
 // delivered after that tool result stays too, so the next Submit opens user→user exactly as an
 // abandoned Exchange's tail already does (endAbandoned). Without a finished Turn there is no
 // tool result to carry the note, so the lone opening — or the opening plus an interjection
-// Turn 0's cancel left behind — falls through to abort. The fill ladder is NOT re-armed: the
+// Turn 0's cancel left behind while its reply streamed — falls through to abort; a Turn 0
+// settled on a tool call is a finished Turn, so its prompt is kept. The fill ladder is NOT re-armed: the
 // kept results are still the ones the model has seen, so the climb they measured stands.
 // dropped reports which way it went: true means abort ran. No-op when no Exchange is open.
 func (l *turnLifecycle) settle() (dropped bool) {

@@ -1086,8 +1086,9 @@ const foldBoundExceededFormat = "the summary call exceeded its %s bound"
 // far — and clears inExchange. It is a no-op when no Exchange is open.
 //
 // It is the interactive host's counterpart to the Step-driven resume path. After a cancel,
-// Step leaves the Exchange OPEN on purpose so a Step-driven host (the bench) re-Steps to
-// re-attempt the Turn (see end()'s endCancelled row, turn.go). A host with no resume affordance
+// Step leaves the Exchange OPEN on purpose so a Step-driven host (the bench) re-Steps to carry
+// on — re-attempting a Turn the cancel rolled back, or continuing from one it settled (end()'s
+// endCancelled and endSettled rows, turn.go). A host with no resume affordance
 // calls one of the two closes instead, so the next /clear or message is accepted rather than
 // rejected with ErrInputPending. Abort is the explicit throw-away — /clear, where the human asks
 // for the Exchange to be gone; SettleExchange is "the human moved on" — the stop itself, after
@@ -1098,8 +1099,10 @@ const foldBoundExceededFormat = "the summary call exceeded its %s bound"
 func (a *Agent) AbortExchange() { a.turns.abort() }
 
 // SettleExchange closes an interrupted Exchange keeping the Turns that finished before the stop
-// (turnLifecycle.settle). The cancelled Turn itself is already rolled back (end()'s endCancelled
-// row); what SettleExchange decides is the fate of the rest. When the Exchange holds a finished
+// (turnLifecycle.settle). The cancelled Turn itself is already settled or dropped (end()'s
+// endSettled row keeps a Turn cancelled on a tool call with a result for every call, its
+// endCancelled row drops one cancelled while its reply streamed); what SettleExchange decides is
+// the fate of the rest. When the Exchange holds a finished
 // Turn, the conversation stays as it stands and the cut is marked on its last tool result as an
 // `[engine — cancelled]` note — the model's next request reads that the results above stand and
 // the reply was not given — and the note is ephemeral: a saved record and a resumed conversation
@@ -1347,8 +1350,9 @@ func (a *Agent) RedoRevert(generation uint64) (undo.Report, error) {
 // 0074's capture pair — and is what turnLifecycle.closeExchange fires through its
 // exchangeObserver seam (Agent.exchangeClosed, construct.go). It runs on every row that ENDS an
 // Exchange (a final reply, a faulted Turn, a step-capped delegation, the host's AbortExchange)
-// and on no row that leaves one open: a cancelled Turn is re-attempted inside the same Exchange,
-// so its group stays open for the re-attempt's writes. An Exchange that reached no write-capable
+// and on no row that leaves one open: a cancelled Turn — rolled back for a re-attempt or settled
+// with its results kept — leaves its Exchange open, so the group stays open for the next Turn's
+// writes until the host's close (SettleExchange, AbortExchange) ends it. An Exchange that reached no write-capable
 // call opened no group, and its close leaves the previous Exchange's group untouched — the
 // journal decides that (undo.Journal.Close), so this call need not.
 //

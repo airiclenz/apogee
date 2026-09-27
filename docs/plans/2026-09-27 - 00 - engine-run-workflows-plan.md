@@ -81,7 +81,13 @@
 - Token-level constrained receipts (llama.cpp grammar, Anthropic forced tool choice); cross-session workflow reuse.
 - `/implement-plan`-style per-item implement→verify→commit loops as recipes; VERSION and release acts.
 
-## 1. A cancelled Turn keeps its finished tool results
+## 1. A cancelled Turn keeps its finished tool results — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the settle is a sixth turnEnd row, `endSettled` (keep the Turn, advance, Exchange open, StatusCancelled, no observer fire), which step selects when dispatchTools returns the new `dispatchSettled` outcome. `endCancelled` keeps its DropRange for the stream, fold and delegation cancels. The Approach wanted the settle inside the endCancelled row; the Regression guard says step's call tells a leaf from a pool, and a separate row does that.
+
+NOTES (2026-09-27): the synthetic results are written by the dispatch rather than by end(), because only the dispatch knows whether a call ran. executeTool/executeGate/executeConfineFallback now return the cancelled result text themselves. A ctx check at the top of executeTool makes a call reached after the cancel "not run". Calls never reached, including every delegation of a reply whose leaf took the cancel, get a ToolCallEvent and then their not-run result through appendToolResult (commitNotRun), so a Driver pairs them with a row instead of rendering an orphan result.
+
+NOTES (2026-09-27): TestContextFillNoticeReArmsAfterACancelledTurnRollsBack drove a leaf cancel, so it is rewritten as TestContextFillNoticeStandsWhenACancelSettlesTheTurn (a kept Turn re-arms nothing). The rollback re-arm is still reached by the stream and delegation cancels and stays pinned by the direct rearmNotices tests in stepnotice_test.go. interject_test.go, stepnotice_test.go and harness_test.go needed no change: their cancels are streaming cancels or direct calls. construct.go and stepnotice.go comments still describe only the rollback row, so they are unchanged. ADR 0007/0011 already carry their dated ADR 0088 amendments.
 
 **What:** Recast at the regression check (2026-09-27).
 **Goal:** after `esc×2` mid-Turn, the Turn's assistant reply stays in the conversation and every tool call it issued has a result: a finished call its real result, a running call `cancelled by the user while it ran`, an unstarted call `not run: cancelled by the user`; a Turn cancelled before its reply finished streaming is dropped; a cancelled delegation group and the retained-delegation set behave exactly as at base (item 2 changes both); `SettleExchange` then places its cancelled marker on the last result.

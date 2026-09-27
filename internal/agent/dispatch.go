@@ -19,12 +19,22 @@ import (
 )
 
 // dispatchOutcome reports whether a Turn's tool dispatch ran to completion or was cut short
-// by a ctx cancellation (which rolls the whole Turn back).
+// by a ctx cancellation — settled, every call answered, or cancelled inside a delegation, which
+// rolls the whole Turn back.
 type dispatchOutcome int
 
 const (
 	dispatchDone dispatchOutcome = iota
+	// dispatchCancelled reports a call that ended on a ctx cancellation. On a slot it is the call's
+	// own outcome — a leaf slot then already carries its cancelled result (cancelledWhileRunningContent
+	// or notRunCancelledContent). From dispatchTools it means a DELEGATION took the cancel, which is
+	// still atomic within the parent Turn (ADR 0013 §5): the caller rolls the Turn back.
 	dispatchCancelled
+	// dispatchSettled reports a cancel that reached a LEAF call (ADR 0088 D1): the dispatch stopped
+	// there and every call of the reply now has a result in history — the finished calls their real
+	// results, the cancelled one its cancelled result, the calls never reached the not-run result
+	// (commitNotRun) — so the Turn is kept, not rolled back (end()'s endSettled row).
+	dispatchSettled
 	// dispatchConfinementUnavailable reports that a Confine subprocess call could not be
 	// confined at run time (the Confiner returned ErrConfinementUnavailable). The call did NOT
 	// run; the executor follows the verdict's precomputed fallback — a forced Approval gate
@@ -46,14 +56,23 @@ const (
 // group then runs concurrently or serially — a write a child depends on lands before any child
 // starts, and the model maps results back by call ID either way.
 //
-// It returns dispatchCancelled only if ctx was cancelled while a tool was approving or
-// executing; the caller then rolls the Turn back. Every other failure — an unknown tool, a
+// A cancel is answered where it lands (ADR 0088 D1). One that reaches a leaf call returns
+// dispatchSettled: the leaf group commits its cancelled call's result and the not-run result for
+// its calls never reached, and dispatchTools adds the not-run result for every delegation of the
+// reply, so the Turn is kept whole. One that reaches a delegation returns dispatchCancelled and
+// the caller rolls the Turn back (ADR 0013 §5). Every other failure — an unknown tool, a
 // denied call, a tool error, a recovered tool panic — becomes an error tool-result the
 // model sees on the next Turn, and dispatch continues to the next call (ADR 0007).
 func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
 	leaves, delegations := partitionDispatch(calls)
-	if outcome := a.dispatchGroup(ctx, turn, 1, leaves); outcome == dispatchCancelled {
+	switch a.dispatchGroup(ctx, turn, 1, leaves) {
+	case dispatchCancelled:
 		return dispatchCancelled
+	case dispatchSettled:
+		// A leaf took the cancel, so no delegation of this reply ever started: each is answered
+		// not-run, in emitted order, and the Turn is kept whole.
+		a.commitNotRun(turn, delegations)
+		return dispatchSettled
 	}
 	return a.dispatchGroup(ctx, turn, a.fanOutWidthFor(delegations), delegations)
 }
@@ -291,9 +310,11 @@ func (a *Agent) delegationCap() int {
 // history — stays on the dispatching goroutine, in emitted-call order, on either side of the
 // pool. That is what keeps the Agent's own state (reactions, guards, conversation) single-goroutine
 // while N children run, and what makes the resulting history DETERMINISTIC regardless of which
-// child finishes first. A cancellation is answered between the last two phases — every child is
-// joined first, then the whole group is discarded unappended, so the parent Turn rolls back with
-// no partial delegation in history (ADR 0013 §5, now N-wide). dispatchTools hands the pool
+// child finishes first. A pooled group's cancellation is answered between the last two phases —
+// every child is joined first, then the whole group is discarded unappended, so the parent Turn
+// rolls back with no partial delegation in history (ADR 0013 §5, now N-wide). A leaf's
+// cancellation is answered at its own commit instead: the call commits its cancelled result and
+// the Turn is settled (ADR 0088 D1). dispatchTools hands the pool
 // delegations only — the leaf group always runs at width 1 — but the phases themselves are blind
 // to a call's kind, which is what makes a call's disposition a property of the call alone and
 // never of the width its group happened to run under.
@@ -345,13 +366,16 @@ type dispatchSlot struct {
 	widthNote string
 }
 
-// dispatchGroup runs one group of calls through the pipeline, width at a time, and returns
-// dispatchCancelled when ANY call ended on a cancellation: the caller then rolls the Turn back.
+// dispatchGroup runs one group of calls through the pipeline, width at a time. A call that ends
+// on a cancellation ends the group: a LEAF call settles it (settleCancelledLeaf) and the group
+// returns dispatchSettled with every one of its calls answered; a DELEGATION returns
+// dispatchCancelled and the caller rolls the Turn back.
 //
 // Width 1 is the per-call loop: prepare, run and commit each call before the next is looked at,
 // so a call's result is in history before its successor's ToolCallEvent — the path every leaf
 // group takes, and a delegation group's whenever fanOutWidthFor says 1 (cap < 2, a delegate, or a
-// single call). Above 1 the whole group is prepared — the calls within the fan-out ceiling to a
+// single call). The settle is keyed on the slot's kind, never on the width: a delegation that
+// runs at width 1 is cancelled exactly as a pooled one is. Above 1 the whole group is prepared — the calls within the fan-out ceiling to a
 // verdict, the calls past it to their refusal (refusePastCeiling) — then run through a pool of
 // width workers, then committed in emitted-call order — a delegation is atomic within the parent
 // Turn, so a cancelled group is dropped whole, unappended, after the join (ADR 0013 §5).
@@ -373,7 +397,11 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 			a.recordCeilingRefusal(&slot)
 			a.runCall(ctx, turn, &slot)
 			if slot.outcome == dispatchCancelled {
-				return dispatchCancelled
+				if slot.verdict.kind == resolveDelegate {
+					return dispatchCancelled
+				}
+				a.settleCancelledLeaf(turn, &slot, calls[i+1:])
+				return dispatchSettled
 			}
 			a.commitCall(ctx, turn, &slot)
 		}
@@ -639,6 +667,38 @@ func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
 	a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, advised)
+}
+
+// cancelledWhileRunningContent is the whole tool result of a leaf call the user's cancel ended while
+// it executed, and notRunCancelledContent the whole tool result of one the cancel reached before it
+// executed — at its Approval gate, before its tool was started, or never reached at all (ADR 0088
+// D1). Both are constants because each is the model's only account of what became of the call:
+// the same words every time, so the next request tells a call that may have done part of its work
+// from one that did none.
+const (
+	cancelledWhileRunningContent = "cancelled by the user while it ran"
+	notRunCancelledContent       = "not run: cancelled by the user"
+)
+
+// settleCancelledLeaf lands a leaf call that ended on the user's cancel and answers the calls of
+// its group the cancel kept from starting (ADR 0088 D1). The cancelled slot carries its result
+// already — the arm that saw the cancel wrote the running or the not-run text — and it commits
+// through appendToolResult alone: no post-tool-result Moment and no audit record, since no
+// decision about a finished call is left to make. rest are then answered not-run (commitNotRun).
+func (a *Agent) settleCancelledLeaf(turn int, slot *dispatchSlot, rest []domain.ToolCall) {
+	a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, nil)
+	a.commitNotRun(turn, rest)
+}
+
+// commitNotRun answers each call a cancel kept from starting with the not-run result, in emitted
+// order. Each call's ToolCallEvent is surfaced first — the dispatch never reached the call, so
+// nothing has announced it — so a Driver pairs the result with a row of its own rather than
+// reading it as an orphan; nothing else of the pipeline runs for it.
+func (a *Agent) commitNotRun(turn int, calls []domain.ToolCall) {
+	for _, call := range calls {
+		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
+		a.appendToolResult(turn, call, "", errorToolResult(call.ID, notRunCancelledContent), "", nil)
+	}
 }
 
 // fanOutWidthNoteFormat is the ONE structural fact a fan-out states to the parent model about HOW
@@ -1160,7 +1220,7 @@ func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call
 func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
 	allowed, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason, verdict.remedy)
 	if outcome == dispatchCancelled {
-		return domain.ToolResult{}, dispatchCancelled
+		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
 	}
 	if !allowed {
 		// A denied gate the guard FORCED answers the model with the rule's way out appended,
@@ -1221,7 +1281,7 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 
 	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, fb.reason, fb.remedy)
 	if outcome == dispatchCancelled {
-		return domain.ToolResult{}, dispatchCancelled
+		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
 	}
 	if !allowed {
 		result := errorToolResult(call.ID, confineDemoteRefuseReason)
@@ -1403,7 +1463,8 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 
 // executeTool runs one tool under a recover boundary (ADR 0007): a panic becomes an ErrorEvent
 // and an error tool-result so the loop survives; a ctx cancellation propagates as
-// dispatchCancelled; any other Execute error is surfaced to the model as an error result rather
+// dispatchCancelled with the result the Turn settles with — the not-run text when the cancel
+// landed before the tool started, the while-it-ran text when it ended the tool; any other Execute error is surfaced to the model as an error result rather
 // than failing the Turn (a tool returns a Go error only for cancellation).
 //
 // When box is non-nil the call is a Confine verdict: the Confinement handle (Confiner + box) is
@@ -1430,6 +1491,13 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 			outcome = dispatchDone
 		}
 	}()
+
+	// A cancel that landed before the call started — between two calls, or while an earlier one
+	// ran and ignored it — keeps the call from running at all, so the result it settles with says
+	// the call did nothing (ADR 0088 D1) rather than letting a tool start under a dead context.
+	if ctx.Err() != nil {
+		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
+	}
 
 	// The carriers installed below, and every other context key the engine installs (the box, the
 	// permits, the prompt slot), are listed with their readers and lifetimes in one table:
@@ -1558,7 +1626,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	res, err := a.runTool(ctx, tool, call)
 	if err != nil {
 		if ctx.Err() != nil {
-			return domain.ToolResult{}, dispatchCancelled
+			return errorToolResult(call.ID, cancelledWhileRunningContent), dispatchCancelled
 		}
 		// A subprocess tool that could not confine its command (the backend returned
 		// ErrConfinementUnavailable when asked to wrap the cmd) reports it as a Go error rather

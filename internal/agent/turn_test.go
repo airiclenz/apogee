@@ -175,6 +175,57 @@ func TestTurnEnd_Table(t *testing.T) {
 			t.Errorf("deferred queue = %v (ok=%v), want exactly [drained-correction]", got, ok)
 		}
 	})
+
+	t.Run("endSettled keeps the Turn and its results, advances and leaves the queue as a completed Turn does", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"}) // idx 0
+		rollback := conv.Len()                                           // 1 — never read by the settle
+		conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{
+			{ID: "c1", Tool: "lookup"}, {ID: "c2", Tool: "block"}, {ID: "c3", Tool: "lookup"},
+		}})
+		kept := []domain.Message{
+			{Role: domain.RoleTool, ToolCallID: "c1", Content: "42"},
+			{Role: domain.RoleTool, ToolCallID: "c2", Content: cancelledWhileRunningContent, ToolOutcome: domain.ToolOutcomeOf(true)},
+			{Role: domain.RoleTool, ToolCallID: "c3", Content: notRunCancelledContent, ToolOutcome: domain.ToolOutcomeOf(true)},
+		}
+		for _, m := range kept {
+			conv.Append(m)
+		}
+		deferredFloor := conv.DeferredLen()
+		conv.Defer("own-directive")
+		obs := &countingObserver{}
+		l := &turnLifecycle{conv: conv, index: 5, inExchange: true, observer: obs}
+		t0 := &turnRun{turn: 5, start: past, rollback: rollback, deferred: []string{"drained-correction"}, deferredFloor: deferredFloor}
+
+		res := l.end(t0, endSettled)
+
+		if res.Status != domain.StatusCancelled || res.Faulted || res.StepCapped {
+			t.Errorf("result = %+v, want StatusCancelled, not faulted, not capped", res)
+		}
+		if l.index != 6 {
+			t.Errorf("index = %d, want 6 (a kept Turn is advanced past, never re-attempted)", l.index)
+		}
+		if !l.inExchange {
+			t.Error("inExchange cleared; the host closes a settled Exchange, the Turn's end does not")
+		}
+		if got := l.conv.Len(); got != 5 {
+			t.Fatalf("conversation len = %d, want 5 (nothing dropped)", got)
+		}
+		for i, want := range kept {
+			if got := l.conv.At(2 + i); got.ToolCallID != want.ToolCallID || got.Content != want.Content || got.ToolOutcome != want.ToolOutcome {
+				t.Errorf("result %d = {%q, %q, %v}, want {%q, %q, %v}", i, got.ToolCallID, got.Content, got.ToolOutcome, want.ToolCallID, want.Content, want.ToolOutcome)
+			}
+		}
+		// The drained correction was sent and answered: it is not re-queued, and the Turn's own
+		// deferral stands exactly as endTurnDone leaves it.
+		got, ok := l.conv.TakeDeferred()
+		if !ok || len(got) != 1 || got[0] != "own-directive" {
+			t.Errorf("deferred queue = %v (ok=%v), want exactly [own-directive]", got, ok)
+		}
+		if obs.rolledBack != 0 || obs.closed != 0 || obs.aborted != 0 {
+			t.Errorf("observer told rolledBack=%d closed=%d aborted=%d, want 0/0/0 — a settled Turn drops nothing", obs.rolledBack, obs.closed, obs.aborted)
+		}
+	})
 }
 
 // The Exchange-boundary mutations (item 4) are unit-testable in isolation: each drives a
