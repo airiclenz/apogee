@@ -632,7 +632,9 @@ func (d *denier) count() int {
 // delegating sub_agent ToolCallEvent opens a bracket under the run id it spawns (SpawnRunID), the
 // child's usage — stamped with that same id as its own (domain.EventBase.RunID) — updates it, a
 // SubAgentNamedEvent stamped the same way names it (ADR 0068), and the tool result answering that
-// run (the same SpawnRunID) closes the bracket into Result.SubAgents.
+// run (the same SpawnRunID) closes the bracket into Result.SubAgents. A fan_out call spawns one
+// child per item under ONE call (ADR 0087), so its ToolCallEvent is noted rather than bracketed,
+// and each item child is bracketed by its own lifecycle phases under its own run id.
 //
 // The run id is what makes the bracketing survive CONCURRENT delegation (ADR 0039): siblings
 // spawned by one reply share a depth, so a depth-keyed bracket would braid their fills together
@@ -671,6 +673,12 @@ type eventTap struct {
 	// ([runKey]); runs is the finished ones in finish order.
 	open map[runKey]*openSubAgent
 	runs []SubAgentUsage
+	// fanOuts holds the fan_out calls in flight, keyed by the depth and call id their item
+	// children are stamped with, each with the brief's first line those children run under. A
+	// fan_out spawns many children under one call, so its ToolCallEvent names no run: each item
+	// child's bracket opens on its own started phase and closes on its finished one
+	// ([eventTap.noteItemPhase]).
+	fanOuts map[runKey]string
 }
 
 // openSubAgent is one sub-agent run in flight: the task it was given, the optional name it carries
@@ -690,6 +698,9 @@ type openSubAgent struct {
 	model  string
 	window int
 	usage  Usage
+	// item marks a fan_out item child's run, which its finished phase closes: no tool result
+	// answers one child of a fan_out.
+	item bool
 }
 
 // Emit records a top-level usage total and answer, tracks the sub-agent runs that pass
@@ -712,15 +723,21 @@ func (t *eventTap) Emit(e domain.Event) {
 		t.final = ev.Text
 		t.mu.Unlock()
 	case domain.ToolCallEvent:
-		if ev.Call.Tool == tools.SubAgentToolName {
+		switch ev.Call.Tool {
+		case tools.SubAgentToolName:
 			t.openSubAgentRun(ev)
+		case tools.FanOutToolName:
+			t.openFanOut(ev)
 		}
 	case domain.SubAgentNamedEvent:
 		t.nameSubAgentRun(ev.EventBase, ev.Name)
+	case domain.SubAgentPhaseEvent:
+		t.noteItemPhase(ev)
 	case domain.ToolResultEvent:
 		// The run the result answers is what identifies it as the delegation's: only the result
 		// closing the run that opened the bracket closes it.
 		t.closeSubAgentRun(ev)
+		t.closeFanOut(ev)
 	}
 	if t.inner != nil {
 		t.inner.Emit(e)
@@ -860,6 +877,59 @@ func (t *eventTap) closeSubAgentRun(ev domain.ToolResultEvent) {
 	if run == nil {
 		return
 	}
+	t.fileRun(key, run)
+}
+
+// openFanOut notes a fan_out call in flight, so the started phases of the item children it spawns
+// open brackets of their own (ADR 0087): each child is one run, filed under its own run id.
+func (t *eventTap) openFanOut(ev domain.ToolCallEvent) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.fanOuts == nil {
+		t.fanOuts = make(map[runKey]string)
+	}
+	t.fanOuts[spawnedRun("", ev.Depth+1, ev.Call.ID)] = firstTaskLine(ev.Call.Arguments)
+}
+
+// closeFanOut forgets the fan_out call ev answers; a result for any other call leaves the noted
+// calls alone.
+func (t *eventTap) closeFanOut(ev domain.ToolResultEvent) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.fanOuts, spawnedRun("", ev.Depth+1, ev.Result.CallID))
+}
+
+// noteItemPhase brackets one fan_out item child by its lifecycle phases: the started phase of a
+// child spawned under a noted fan_out call opens a bracket under the child's run id, carrying the
+// call's brief, and that child's finished phase files it. A sub_agent child's phases are left
+// alone — its call and result bracket it.
+func (t *eventTap) noteItemPhase(ev domain.SubAgentPhaseEvent) {
+	if ev.RunID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	key := runKey{id: ev.RunID}
+	switch ev.Phase {
+	case domain.SubAgentStarted:
+		task, ok := t.fanOuts[spawnedRun("", ev.Depth, ev.CallID)]
+		if !ok {
+			return
+		}
+		if t.open == nil {
+			t.open = make(map[runKey]*openSubAgent)
+		}
+		t.open[key] = &openSubAgent{task: task, item: true}
+	case domain.SubAgentFinished:
+		if run := t.open[key]; run != nil && run.item {
+			t.fileRun(key, run)
+		}
+	}
+}
+
+// fileRun closes the open run under key, appending its reading in finish order; a run that
+// reported no usage at all is dropped. The caller holds t.mu.
+func (t *eventTap) fileRun(key runKey, run *openSubAgent) {
 	delete(t.open, key)
 	if run.used <= 0 {
 		return

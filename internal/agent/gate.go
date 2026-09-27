@@ -71,7 +71,9 @@ const (
 // reaches the recursion point — a Tier-2 force is deliberately not applied to a delegation
 // (D3/ADR 0013) — and nothing executes there anyway: the child inherits this gate and asks on the
 // calls that actually do something, so the human is still asked before any action runs. A deny
-// still refuses the delegation, because that answer needs no seam to land on.
+// still refuses the delegation, because that answer needs no seam to land on. A fan_out Workflow
+// is read the same way: its item children are spawned through the same recursion point and
+// inherit the same gates.
 func (a *Agent) applyGates(ctx context.Context, turn int, call domain.ToolCall, verdict resolution) resolution {
 	if verdict.kind == resolveRefuse {
 		return verdict
@@ -80,7 +82,7 @@ func (a *Agent) applyGates(ctx context.Context, turn int, call domain.ToolCall, 
 	if len(gates) == 0 {
 		return verdict
 	}
-	deferred := verdict.kind == resolveDelegate
+	deferred := verdict.kind == resolveDelegate || verdict.kind == resolveWorkflow
 
 	askID, askReason, asked := "", "", false
 	for _, r := range gates {

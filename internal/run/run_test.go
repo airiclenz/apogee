@@ -1348,6 +1348,49 @@ func TestEventTapAttributesSiblingsThatShareACallIDByRunID(t *testing.T) {
 	}
 }
 
+// TestEventTapBracketsEachFanOutItemByItsPhases pins the headless readout of a fan_out (ADR 0087):
+// one call spawns one child per item, so the call names no run and no tool result answers a child.
+// Each item child's started phase under the noted call opens a bracket under its own run id, its
+// usage fills it, and its finished phase files it in finish order, carrying the call's brief. A
+// sub_agent child's phases under a call the tap never noted as a fan_out open nothing.
+func TestEventTapBracketsEachFanOutItemByItsPhases(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+	fanOut := domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "fo1", Tool: tools.FanOutToolName, Arguments: json.RawMessage(`{"task":"audit {item}","over":["a","b"]}`),
+	}}
+	phase := func(callID, runID string, which domain.SubAgentPhase) domain.SubAgentPhaseEvent {
+		return domain.SubAgentPhaseEvent{EventBase: domain.EventBase{Depth: 1, CallID: callID, RunID: runID}, Phase: which}
+	}
+	usage := func(callID, runID string, total int) domain.UsageEvent {
+		ev := usageWithTotals(1, callID, total, Usage{Calls: 1, TotalTokens: total}, false)
+		ev.RunID = runID
+		return ev
+	}
+
+	tap.Emit(fanOut)
+	tap.Emit(phase("fo1", "r.1", domain.SubAgentStarted))
+	tap.Emit(phase("fo1", "r.2", domain.SubAgentStarted))
+	tap.Emit(phase("other", "r.3", domain.SubAgentStarted)) // no fan_out was noted under this call
+	tap.Emit(usage("fo1", "r.1", 4000))
+	tap.Emit(usage("fo1", "r.2", 6000))
+	tap.Emit(usage("other", "r.3", 9000))
+	tap.Emit(phase("fo1", "r.2", domain.SubAgentFinished))
+	tap.Emit(phase("fo1", "r.1", domain.SubAgentFinished))
+	tap.Emit(phase("other", "r.3", domain.SubAgentFinished))
+	tap.Emit(toolResult(0, "fo1"))
+
+	want := []SubAgentUsage{
+		{Used: 6000, Limit: window, Task: "audit {item}", Usage: Usage{Calls: 1, TotalTokens: 6000}},
+		{Used: 4000, Limit: window, Task: "audit {item}", Usage: Usage{Calls: 1, TotalTokens: 4000}},
+	}
+	if runs := tap.subAgentRuns(); !slices.Equal(runs, want) {
+		t.Errorf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+}
+
 // namedSubAgentCall is the delegating tool-call event for a delegation that carries the OPTIONAL
 // short name beside its task.
 func namedSubAgentCall(depth int, id, task, name string) domain.ToolCallEvent {

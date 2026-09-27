@@ -53,10 +53,13 @@ const (
 //
 // A reply's calls are PARTITIONED first (ADR 0039 decision 11): the leaf tools run first, in
 // their emitted order and one at a time (dispatchGroup at width 1), and the sub_agent delegations
-// run after them as one group, at the width fanOutWidthFor snapshots for that reply. The order is a property of the reply alone, not of
-// the bound server's fan-out width, so the same reply produces the same history whether the
-// group then runs concurrently or serially — a write a child depends on lands before any child
-// starts, and the model maps results back by call ID either way.
+// run after them as one group, at the width fanOutWidthFor snapshots for that reply. The order is
+// a property of the reply alone, not of the bound server's fan-out width, so the same reply
+// produces the same history whether the group then runs concurrently or serially — a write a
+// child depends on lands before any child starts, and the model maps results back by call ID
+// either way. A fan_out call stays in the leaf group: it runs a whole Workflow at its own width
+// (runWorkflowCall), so it never takes a slot in the delegations' pool and the fan-out ceiling
+// never counts it.
 //
 // A cancel is answered where it lands, and every answer keeps the Turn whole: dispatchSettled
 // (ADR 0088). One that reaches a leaf call ends the leaf group there — its cancelled call's result
@@ -378,9 +381,10 @@ type dispatchSlot struct {
 // so a call's result is in history before its successor's ToolCallEvent — the path every leaf
 // group takes, and a delegation group's whenever fanOutWidthFor says 1 (cap < 2, a delegate, or a
 // single call). The settle is keyed on the slot's kind, never on the width: a delegation that
-// runs at width 1 is settled exactly as a pooled one is. Above 1 the whole group is prepared — the calls within the fan-out ceiling to a
-// verdict, the calls past it to their refusal (refusePastCeiling) — then run through a pool of
-// width workers, then committed in emitted-call order, the cancel's settled slots included.
+// runs at width 1 is settled exactly as a pooled one is. Above 1 the whole group is prepared —
+// the calls within the fan-out ceiling to a verdict, the calls past it to their refusal
+// (refusePastCeiling) — then run through a pool of width workers, then committed in emitted-call
+// order, the cancel's settled slots included.
 //
 // A group wider than its width states that width once, on its last committed result
 // (fanOutWidthNote) — decided here, after the join, because whether every slot ran is only known
@@ -628,7 +632,9 @@ func (a *Agent) recordCeilingRefusal(slot *dispatchSlot) {
 // call order.
 //
 // resolve() answers a sub_agent call with Delegate or Refuse and nothing else (its row 2: a
-// Tier-2 force is deliberately not applied to a delegation), so the leaf arms below never see one.
+// Tier-2 force is deliberately not applied to a delegation), so the leaf arms below never see one;
+// it answers a fan_out call with Workflow or Refuse on the same row. A Workflow runs in the leaf
+// group, on the dispatching goroutine, and books its own audit record as a leaf arm does.
 func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	if !slot.run {
 		return
@@ -639,6 +645,8 @@ func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 		// The record is owed only for a child that ran: one the cancel reached before it was
 		// built commits its not-started result with none.
 		slot.delegated = slot.outcome != dispatchCancelled
+	case resolveWorkflow:
+		slot.result, slot.outcome = a.runWorkflowCall(ctx, turn, slot)
 	case resolveGate:
 		slot.result, slot.outcome = a.executeGate(ctx, turn, slot.tool, slot.call, slot.verdict)
 	case resolveConfine:
@@ -1519,8 +1527,9 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 // executeTool runs one tool under a recover boundary (ADR 0007): a panic becomes an ErrorEvent
 // and an error tool-result so the loop survives; a ctx cancellation propagates as
 // dispatchCancelled with the result the Turn settles with — the not-run text when the cancel
-// landed before the tool started, the while-it-ran text when it ended the tool; any other Execute error is surfaced to the model as an error result rather
-// than failing the Turn (a tool returns a Go error only for cancellation).
+// landed before the tool started, the while-it-ran text when it ended the tool; any other Execute
+// error is surfaced to the model as an error result rather than failing the Turn (a tool returns a
+// Go error only for cancellation).
 //
 // When box is non-nil the call is a Confine verdict: the Confinement handle (Confiner + box) is
 // installed in its context, so a subprocess tool confines the *exec.Cmd it builds

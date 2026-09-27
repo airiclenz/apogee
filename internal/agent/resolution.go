@@ -85,6 +85,9 @@ const (
 	resolveRefuse
 	// resolveDelegate drives the sub_agent recursion point (a nested Agent), not a leaf tool.
 	resolveDelegate
+	// resolveWorkflow runs the Workflow a fan_out call asks for (runWorkflowCall): its item
+	// children are spawned through the same recursion point, not a leaf tool.
+	resolveWorkflow
 )
 
 // String renders the kind for readable test and audit output.
@@ -100,6 +103,8 @@ func (k resolutionKind) String() string {
 		return "refuse"
 	case resolveDelegate:
 		return "delegate"
+	case resolveWorkflow:
+		return "workflow"
 	default:
 		return fmt.Sprintf("resolutionKind(%d)", int(k))
 	}
@@ -283,7 +288,10 @@ type resolutionInput struct {
 //  3. The sub_agent recursion point is Delegated, not run as a leaf. A Tier-2 force-approval
 //     is DELIBERATELY not applied to a Delegate (D3/ADR 0013): nothing executes at
 //     delegation, so the shared read-only floor re-fires on the child's own dangerous call.
-//     At the depth bound the delegation is refused defensively (mirrors runSubAgent).
+//     At the depth bound the delegation is refused defensively (mirrors runSubAgent). A fan_out
+//     call takes the same row as a Workflow verdict: its item children are spawned through the
+//     same recursion point, and at the depth bound it is refused with the same reason, so no
+//     child starts a nested workflow past `delegate-max-depth` (ADR 0087).
 //  4. An unknown tool refuses (not audit-recorded today, D8).
 //  5. The autonomy-ladder × blast-radius table produces the leaf verdict, then the leaf
 //     overlays apply: a Tier-2 force upgrades a non-Refuse leaf to a forced Gate; a Gate with
@@ -309,8 +317,9 @@ func resolve(in resolutionInput) resolution {
 		}
 	}
 
-	// 3. The sub_agent recursion point (Tier-2 is intentionally NOT applied here — D3).
-	if isSubAgentCall(in.call) {
+	// 3. The sub_agent recursion point and the fan_out Workflow (Tier-2 is intentionally NOT
+	// applied here — D3).
+	if isSubAgentCall(in.call) || isFanOutCall(in.call) {
 		if in.atDepthBound {
 			return resolution{
 				kind:          resolveRefuse,
@@ -319,8 +328,12 @@ func resolve(in resolutionInput) resolution {
 				auditReason:   in.guard.Reason,
 			}
 		}
+		kind := resolveDelegate
+		if isFanOutCall(in.call) {
+			kind = resolveWorkflow
+		}
 		return resolution{
-			kind:          resolveDelegate,
+			kind:          kind,
 			auditDecision: in.guard.Audit,
 			auditReason:   in.guard.Reason,
 		}

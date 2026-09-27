@@ -1522,10 +1522,7 @@ func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.User
 // structuralFloor) reads the one number set here.
 func (a *Agent) budget() domain.Budget {
 	window := a.cfg.Context.MaxContextTokens
-	limit := window
-	if working := a.cfg.Context.WorkingWindow; working > 0 && (window <= 0 || working < window) {
-		limit = working
-	}
+	limit := workingLimit(a.cfg.Context)
 	alloc := apogeectx.Allocate(limit, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction,
 		a.standingMeasured())
 	history := alloc.History
@@ -1549,6 +1546,17 @@ func (a *Agent) budget() domain.Budget {
 		History:          history,
 		StandingAdvisory: alloc.StandingAdvisory,
 	}
+}
+
+// workingLimit is the working ceiling a context configuration yields — Budget.ContextLimit's rule
+// (budget): the advertised window, lowered to the `working-window:` bound when that is smaller,
+// and the working bound as written when no window is advertised.
+func workingLimit(config domain.ContextConfig) int {
+	window, working := config.MaxContextTokens, config.WorkingWindow
+	if working > 0 && (window <= 0 || working < window) {
+		return working
+	}
+	return window
 }
 
 // standingMeasured measures this request's standing content for the Allocation: the context-files

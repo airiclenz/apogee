@@ -458,9 +458,27 @@ NOTES (2026-09-27): README.md's "34 built-in tools" is now one short. Left alone
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tools/ && go test -race -count=1 -run 'TestContextCostGolden|TestFloorWriteSuperset' ./internal/agent/`
 **Commit:** `feat(tools): the default-off fan_out tool schema`
 
-## 15. fan_out runs a blocking workflow
+## 15. fan_out runs a blocking workflow — ✅ DONE (2026-09-27)
 
 NOTES (2026-09-27): comment lines edited by items 1, 2 and 10 were not re-wrapped and run past 120 columns: internal/agent/dispatch.go (the doc comments above dispatchGroup and executeTool), internal/agent/turn.go (the `observer` field doc and the comment above turnLifecycle.settle), internal/agent/loop.go (the rollback comment in armRequest) and internal/workflow/store.go (the ItemKey doc). Re-wrap them to the file's width when next touched; this item touches dispatch.go.
+
+NOTES (2026-09-27): fan_out resolves to a new Resolution kind, `resolveWorkflow`, on the sub_agent row of `resolve` (same depth-bound refusal), rather than reusing `resolveDelegate`. It stays in the leaf group (partitionDispatch unchanged), so it never takes a pool slot and the fan-out ceiling never counts it. A cancelled fan_out therefore settles through settleCancelledLeaf with its own stopped answer, and the calls after it are answered not-run. runWorkflowCall books its audit record itself, as a leaf arm does.
+
+NOTES (2026-09-27): consequential edit — internal/agent/gate.go: made necessary by resolveWorkflow; a gate reaction's `ask` is deferred for a Workflow as for a delegation. Otherwise the ask would force a Gate verdict and run the fan_out placeholder's Execute.
+
+NOTES (2026-09-27): internal/agent/loop.go (not listed): the working-window rule inside `budget()` is extracted into `workingLimit(domain.ContextConfig)`, so the split budget applies the same rule to a Delegation target's binding (`target.binding().applyTo(cfg)`). With no target latched it reads `budget().ContextLimit`.
+
+NOTES (2026-09-27): internal/run/run_test.go (not listed): added TestEventTapBracketsEachFanOutItemByItsPhases for the run.go change. The tap notes a fan_out ToolCallEvent by (depth, call id). Each item child's started phase under that call opens a bracket under the child's run id, and its finished phase files it. No tool result answers one item child.
+
+NOTES (2026-09-27): a stopped item child is not folded: the Runner discards a stopped Outcome's report and restarts the item fresh on resume. So the only folds under a fan_out cancel are those of the item children's own delegations, which foldStoppedChild holds to the inherited cancelFoldBound and skips on domain.ErrShuttingDown. The two fold-guard tests exercise exactly that, with delegate-max-depth 2 and an item child that delegates. A shutdown cause makes no fold request. An esc×2 cancel makes one fold request, cut at the injected 20 ms bound.
+
+NOTES (2026-09-27): the report-so-far path is items.md (Result.Listing). A stopped answer ends on `items: <path>` when Format has not already listed it, because Format prints `items:` only past 40 items.
+
+NOTES (2026-09-27): Runner.Width is `a.delegationWidth()`. The Runner's own semaphore never runs more children than a stage has items, so the width in effect is min(delegationWidth, N). fanOutWidthFor is not used.
+
+NOTES (2026-09-27): a fan_out call with `recipe` set is refused with a fixable tool error until item 21 wires recipes. `run_on` and `background` are parsed by nothing yet (see DEFER; background belongs to item 27).
+
+NOTES (2026-09-27): the dispatch.go comment lines past 120 columns that item 15's earlier NOTES named are re-wrapped: the partition paragraph above dispatchTools, the dispatchGroup doc and the executeTool doc.
 
 **What:** Depends on items 11, 12, 13, 14.
 **Goal:** a model `fan_out` call is validated (`ValidateModelPlan`; problems returned as a tool error the model can fix), runs a workflow in `<scratch>/workflows/` at the dispatch width, and returns the formatted result lines; the same call again resumes the stored workflow; a cancel answers the call with `stopped by the user: K of N done` and the report-so-far path (ADR 0088 D3).

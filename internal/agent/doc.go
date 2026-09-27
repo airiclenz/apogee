@@ -83,7 +83,10 @@
 // delegation value the constructor copies once. workflowspawn.go is that same recursion point for
 // a Workflow's items (ADR 0087): the workflow.Spawner whose children report through a checked
 // `finish` receipt, carry the finish block in the delegate report block's place, close a capped
-// run on finish alone, and book no ledger row, retention entry or generated name.
+// run on finish alone, and book no ledger row, retention entry or generated name. workflowcall.go
+// is the blocking fan_out call that runs them: the call's arguments made a checked plan, run over
+// the session's workflow store at the dispatch width, and answered with one line per item — or,
+// under a cancel, with how many finished and the listing written so far (ADR 0088 D3).
 // approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.
