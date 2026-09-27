@@ -446,6 +446,8 @@ NOTES (2026-09-27): consequential edit — cmd/apogee/wire_config_test.go: made 
 
 ## 15. fan_out runs a blocking workflow
 
+NOTES (2026-09-27): comment lines edited by items 1, 2 and 10 were not re-wrapped and run past 120 columns: internal/agent/dispatch.go (the doc comments above dispatchGroup and executeTool), internal/agent/turn.go (the `observer` field doc and the comment above turnLifecycle.settle), internal/agent/loop.go (the rollback comment in armRequest) and internal/workflow/store.go (the ItemKey doc). Re-wrap them to the file's width when next touched; this item touches dispatch.go.
+
 **What:** Depends on items 11, 12, 13, 14.
 **Goal:** a model `fan_out` call is validated (`ValidateModelPlan`; problems returned as a tool error the model can fix), runs a workflow in `<scratch>/workflows/` at the dispatch width, and returns the formatted result lines; the same call again resumes the stored workflow; a cancel answers the call with `stopped by the user: K of N done` and the report-so-far path (ADR 0088 D3).
 **Approach (assumed at the header base):** Recognise `fan_out` beside `isSubAgentCall` in `prepareCall`/`resolve`, route to a `runWorkflowCall` in a new `internal/agent/workflowcall.go`; width = `min(a.delegationWidth(), N)`; `fan_out` calls are not counted by the fan-out ceiling. The split budget reads the Delegation target's per-slot window.
@@ -579,6 +581,8 @@ load_skill is one shared instance across parent and children (wire_config.go:122
 
 ## 25. Background workflow manager
 
+NOTES (2026-09-27): resume re-asks. Item 10 (7235dbbd) skips only finished fan-out items on resume: `prepareItems` (runner.go) reads each item's stored receipt through `Store.ReadReceipt`, but `openStatus` resets every stage to pending and `runRound` sends script and ask stages to `runScript` and `runAsk` (stages.go), which look up nothing stored and run fresh. A resumed recipe therefore re-runs its scripts and asks the user its questions again. Weigh this here: either persist ask answers and script results and replay them on resume, or accept the re-ask and document it.
+
 **What:** Depends on items 15, 20.
 **Goal:** `internal/agent` runs background workflows outside any Turn: at `ParallelAgents − 1` width (min 1, sharing the slot on a width-1 server), one at a time per server with the rest queued, listed by `Agent.Workflows()`, stopped by `Agent.StopWorkflow(id)` (keeping finished items), all stopped by `Close`; the running set is saved as an additive `workflows` snapshot key and resumed on restore.
 **Approach (assumed at the header base):** New `internal/agent/background.go` owning goroutines and a per-server queue; snapshot pattern of `Retained` in `state.go` (`encodeState`/`restoreState`). Background asks queue in the manager (item 30 surfaces them).
@@ -644,6 +648,8 @@ load_skill is one shared instance across parent and children (wire_config.go:122
 
 ## 30. Status indicator and waiting questions
 
+NOTES (2026-09-27): resume re-asks. Item 10 (7235dbbd) skips only finished fan-out items on resume: `prepareItems` (runner.go) reads each item's stored receipt through `Store.ReadReceipt`, but `openStatus` resets every stage to pending and `runRound` sends script and ask stages to `runScript` and `runAsk` (stages.go), which look up nothing stored and run fresh. A resumed recipe therefore re-runs its scripts and asks the user its questions again. Weigh this here: either persist ask answers and script results and replay them on resume, or accept the re-ask and document it.
+
 **What:** Depends on items 25, 28.
 **Goal:** the status line shows `N workflows running` and, when a background `ask` waits, `1 workflow waiting for you`; the waiting question opens in the ask pane when the user is idle; the answer resumes the workflow.
 **Approach (assumed at the header base):** A `statusLeft` qualifier beside the queued readout; the manager's queued asks surface through the Bridge; reuse `foldAskRequest`/`askPromptSpec` outside an Exchange.
@@ -696,6 +702,8 @@ The save key is `ctrl+s`, not a bare `s`: a bare letter hits the listSurface fil
 **Commit:** `feat(tui): save a fan_out as a recipe`
 
 ## 34. /clear, quit and resume with workflows running
+
+NOTES (2026-09-27): resume re-asks. Item 10 (7235dbbd) skips only finished fan-out items on resume: `prepareItems` (runner.go) reads each item's stored receipt through `Store.ReadReceipt`, but `openStatus` resets every stage to pending and `runRound` sends script and ask stages to `runScript` and `runAsk` (stages.go), which look up nothing stored and run fresh. A resumed recipe therefore re-runs its scripts and asks the user its questions again. Weigh this here: either persist ask answers and script results and replay them on resume, or accept the re-ask and document it.
 
 **What:** Depends on items 25, 26, 32.
 **Goal:** `/clear` with a background workflow running asks `stop running workflows? (y/n)` — `y` stops them, `n` keeps them and their finish notes go to the new conversation; quitting stops them; resuming the session (flag or `/sessions`) resumes them.
