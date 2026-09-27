@@ -556,7 +556,7 @@ func TestHostToolsOfFillsEveryHostField(t *testing.T) {
 			Scratch: func() string { return t.TempDir() },
 			Virtual: func() map[string]fs.FS { return nil },
 		},
-	}, true))
+	}, true, true))
 	for _, name := range zeroHostFields(host) {
 		t.Errorf("HostToolsOf left HostTools.%s zero for a Config that sets every field it "+
 			"reads — a host policy that stops here is one the operator configured and never got", name)
@@ -587,14 +587,19 @@ func zeroHostFields(host reflect.Value) []string {
 	return zero
 }
 
-// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the one field Config does not carry: the engine
-// passes false and the composition root the configured value, and nothing on Config can flip it.
+// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the two fields Config does not carry: the engine
+// passes false for both and the composition root its own values, and nothing on Config can flip
+// either — nor can one argument reach the other's field.
 func TestHostToolsOfLeavesSeatChoiceToTheCaller(t *testing.T) {
 	t.Parallel()
 
 	for _, seatChoice := range []bool{false, true} {
-		if got := HostToolsOf(domain.Config{}, seatChoice).SubAgentSeatChoice; got != seatChoice {
-			t.Errorf("HostToolsOf(cfg, %v).SubAgentSeatChoice = %v", seatChoice, got)
+		for _, offersBackground := range []bool{false, true} {
+			host := HostToolsOf(domain.Config{}, seatChoice, offersBackground)
+			if host.SubAgentSeatChoice != seatChoice || host.OffersBackground != offersBackground {
+				t.Errorf("HostToolsOf(cfg, %v, %v) = seat choice %v, background %v",
+					seatChoice, offersBackground, host.SubAgentSeatChoice, host.OffersBackground)
+			}
 		}
 	}
 }
@@ -627,7 +632,7 @@ func TestHostToolsCarriesSecretEnvVars(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := HostToolsOf(tc.cfg, false).SecretEnvVars; !slices.Equal(got, tc.want) {
+			if got := HostToolsOf(tc.cfg, false, false).SecretEnvVars; !slices.Equal(got, tc.want) {
 				t.Errorf("HostToolsOf().SecretEnvVars = %q, want %q", got, tc.want)
 			}
 		})
@@ -653,7 +658,7 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 	t.Run("a configured deny reaches the guard", func(t *testing.T) {
 		t.Parallel()
 
-		guard := HostToolsOf(domain.Config{URLDenyHosts: []string{"Blocked.EXAMPLE."}}, false).
+		guard := HostToolsOf(domain.Config{URLDenyHosts: []string{"Blocked.EXAMPLE."}}, false, false).
 			URLGuard.WithResolver(publicResolver)
 
 		if err := guard.Check("https://blocked.example/x"); !errors.Is(err, security.ErrURLBlocked) {
@@ -667,7 +672,7 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 	t.Run("a configured allow list reaches the guard", func(t *testing.T) {
 		t.Parallel()
 
-		guard := HostToolsOf(domain.Config{URLAllowHosts: []string{"docs.example.com"}}, false).
+		guard := HostToolsOf(domain.Config{URLAllowHosts: []string{"docs.example.com"}}, false, false).
 			URLGuard.WithResolver(publicResolver)
 
 		if err := guard.Check("https://docs.example.com/x"); err != nil {
@@ -681,7 +686,7 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 	t.Run("a config naming no hosts leaves the reach as it was", func(t *testing.T) {
 		t.Parallel()
 
-		guard := HostToolsOf(domain.Config{}, false).URLGuard
+		guard := HostToolsOf(domain.Config{}, false, false).URLGuard
 		if guard.AllowHosts != nil || guard.DenyHosts != nil {
 			t.Errorf("an unconfigured Config produced host lists: allow=%q deny=%q", guard.AllowHosts, guard.DenyHosts)
 		}

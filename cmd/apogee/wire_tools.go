@@ -77,6 +77,14 @@ type toolSetSpec struct {
 	// construction (tools.HostTools.SubAgentSeatChoice) and no tool exposes a setter for it, so
 	// moving the gate means building again.
 	seatChoice bool
+
+	// offersBackground is the Driver's opt-in to background Workflows (ADR 0089 D1, D4) as the set
+	// was built under it: true ⇒ fan_out may publish `background` and the workflow control tool may
+	// be offered, wherever the roster lifts `workflow`; false ⇒ neither, whatever the roster says.
+	// It belongs to the SET for seatChoice's reason — it decides a schema and a tool settled at
+	// construction (tools.HostTools.OffersBackground) — and it never changes within a session: the
+	// TUI builds with it on and carries it forward, so a rebuild for any other reason keeps it.
+	offersBackground bool
 }
 
 // newLiveTools holds the registry the session was constructed with, the spec it was built from, and
@@ -233,9 +241,18 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // it (ADR 0031 — the engine reads no config of its own). It travels with the tool SET instead, off
 // the spec the live holder rebuilds from (toolSetSpec.seatChoice), so a rebuild driven by something
 // else entirely — a reconnect, a model switch — carries the gate this session is actually on.
-func registryWithMCP(workspace string, cfg apogee.Config, seatChoice bool,
-	mcpTools []apogee.Tool) *apogee.ToolRegistry {
-	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostToolsOf(cfg, seatChoice))
+//
+// offersBackground arrives beside it for the same reason: whether this Driver offers background
+// Workflows (ADR 0089 D1) decides fan_out's `background` and the workflow control tool, and no
+// Config field carries it. The TUI passes true (and carries it on toolSetSpec.offersBackground); a
+// headless run and a daemon firing pass false, so neither is offered there whatever the roster says.
+func registryWithMCP(
+	workspace string,
+	cfg apogee.Config,
+	seatChoice, offersBackground bool,
+	mcpTools []apogee.Tool,
+) *apogee.ToolRegistry {
+	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostToolsOf(cfg, seatChoice, offersBackground))
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "apogee: skipping MCP tool %q: %v\n", t.Name(), err)

@@ -86,7 +86,8 @@ const (
 	// resolveDelegate drives the sub_agent recursion point (a nested Agent), not a leaf tool.
 	resolveDelegate
 	// resolveWorkflow runs the Workflow a fan_out call asks for (runWorkflowCall): its item
-	// children are spawned through the same recursion point, not a leaf tool.
+	// children are spawned through the same recursion point, not a leaf tool. A `workflow` control
+	// call takes it too: dispatch answers it itself (runWorkflowCall), over the workflows it steers.
 	resolveWorkflow
 )
 
@@ -291,7 +292,8 @@ type resolutionInput struct {
 //     At the depth bound the delegation is refused defensively (mirrors runSubAgent). A fan_out
 //     call takes the same row as a Workflow verdict: its item children are spawned through the
 //     same recursion point, and at the depth bound it is refused with the same reason, so no
-//     child starts a nested workflow past `delegate-max-depth` (ADR 0087).
+//     child starts a nested workflow past `delegate-max-depth` (ADR 0087). A `workflow` control
+//     call (ADR 0089 D4) is a Workflow verdict too, but spawns nothing, so no depth bound applies.
 //  4. An unknown tool refuses (not audit-recorded today, D8).
 //  5. The autonomy-ladder × blast-radius table produces the leaf verdict, then the leaf
 //     overlays apply: a Tier-2 force upgrades a non-Refuse leaf to a forced Gate; a Gate with
@@ -318,7 +320,14 @@ func resolve(in resolutionInput) resolution {
 	}
 
 	// 3. The sub_agent recursion point and the fan_out Workflow (Tier-2 is intentionally NOT
-	// applied here — D3).
+	// applied here — D3), then the workflow control call, which spawns nothing.
+	if isWorkflowControlCall(in.call) {
+		return resolution{
+			kind:          resolveWorkflow,
+			auditDecision: in.guard.Audit,
+			auditReason:   in.guard.Reason,
+		}
+	}
 	if isSubAgentCall(in.call) || isFanOutCall(in.call) {
 		if in.atDepthBound {
 			return resolution{

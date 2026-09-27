@@ -527,8 +527,14 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// Asker and Presenter go on shaping the engine's roster exactly as before. That is the guard,
 	// not an optimisation: a registry handed over on the default path would decide the roster from
 	// this Config's delegates rather than from the ones the runner pins.
+	//
+	// Either way a Firing offers no background Workflows (ADR 0089 D1): with no conversation to go
+	// on, a workflow there blocks. So the set built here passes offersBackground false — fan_out
+	// publishes no `background` and the workflow control tool is not offered, whatever
+	// `tools.enabled:` says — exactly as the engine's own roster does on the nil path.
 	if in.opts.SubAgentsChoice == config.SubAgentsChoiceModel {
-		cfg.Tools = registryWithMCP(in.roots.workspace, cfg, true, nil)
+		const offersBackground = false
+		cfg.Tools = registryWithMCP(in.roots.workspace, cfg, true, offersBackground, nil)
 	}
 
 	return cfg, routing, notices, nil

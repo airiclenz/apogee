@@ -49,6 +49,9 @@ var writeCapableNonFileBuiltins = map[string]bool{
 	// fan_out (ADR 0087) is a placeholder dispatch runs as a Workflow: like sub_agent it writes
 	// nothing itself, and each helper's own writes are classified at their call sites one level down.
 	"fan_out": true,
+	// workflow (ADR 0089 D4) is a placeholder dispatch answers itself: it stops and messages running
+	// workflows, but writes no workspace file, so no NAME in the call classifies a write.
+	"workflow": true,
 	// The Console family's write-capable half (ADR 0059): what a Console writes is whatever the
 	// model typed into a live shell, so no NAME in the call classifies it — the same reason
 	// terminal sits here. Its read-only half (console_read, console_close) never reaches this
@@ -81,6 +84,8 @@ func TestFloorWriteSupersetCoversEveryWorkspaceWritingBuiltin(t *testing.T) {
 		Presenter:   stubPresenter{},
 		SkillLookup: stubSkillLookup{},
 		Enabled:     tools.KnownToolNames(),
+		// The workflow tool is offered only where the Driver offers background workflows.
+		OffersBackground: true,
 	})
 	if len(menu) != len(tools.KnownToolNames()) {
 		t.Fatalf("menu has %d tools, KnownToolNames %d: the pin is not walking the whole roster", len(menu), len(tools.KnownToolNames()))
@@ -151,6 +156,8 @@ func TestLoopViewToolDefsCarryTheReadOnlyBit(t *testing.T) {
 		Presenter:   stubPresenter{},
 		SkillLookup: stubSkillLookup{},
 		Enabled:     tools.KnownToolNames(),
+		// The workflow tool is offered only where the Driver offers background workflows.
+		OffersBackground: true,
 	})
 	toolset = append(toolset, mcpServerTool{name: "github__create_issue", alias: "github"})
 	byName := make(map[string]domain.Tool, len(toolset))

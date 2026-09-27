@@ -824,3 +824,265 @@ func TestWorkflowCall_LoadSkillNamesHowARecipeStartsFromTheCallersMenu(t *testin
 		t.Errorf("the child's load_skill result lacks %q:\n%s", want, child.Content)
 	}
 }
+
+// The background fan_out and the workflow control call (ADR 0089 D1, D4): a parent whose fan_out
+// publishes `background` and whose menu carries the workflow tool — the set the TUI builds — starts
+// a workflow beside its conversation and steers it.
+
+// backgroundWorkflowConfig is workflowConfig with the background pair on the menu: fan_out
+// publishing `background`, and the workflow control tool.
+func backgroundWorkflowConfig(t *testing.T, sink domain.EventSink) domain.Config {
+	t.Helper()
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewFanOutWith(tools.FanOutOptions{Background: true}))
+	_ = reg.Register(tools.NewWorkflow())
+	_ = reg.Register(fakeTool{name: "read_thing", readOnly: true, result: "package main"})
+	cfg.Tools = reg
+	cfg.ScratchDir = t.TempDir()
+	cfg.WorkspaceDir = t.TempDir()
+	return cfg
+}
+
+// backgroundArgsJSON is fanOutArgsJSON over items with `background` set.
+func backgroundArgsJSON(items ...string) string {
+	b, _ := json.Marshal(map[string]any{
+		"task": fanOutTask, "over": items, "returns": map[string]string{"count": "int"}, "background": true,
+	})
+	return string(b)
+}
+
+// lockedEvents is a copy of every event sink has seen.
+func lockedEvents(sink *lockedSink) []domain.Event {
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	return slices.Clone(sink.events)
+}
+
+// gateOn returns a gate that waits for ch to close or the request's context to end.
+func gateOn(ch <-chan struct{}) func(context.Context) {
+	return func(ctx context.Context) {
+		select {
+		case <-ch:
+		case <-ctx.Done():
+		}
+	}
+}
+
+// controlCall runs one workflow control call on a with args and returns its answer.
+func controlCall(a *Agent, args string) domain.ToolResult {
+	return a.workflowControlResult(domain.ToolCall{ID: "wf1", Tool: tools.WorkflowToolName, Arguments: json.RawMessage(args)})
+}
+
+// soleWorkflowID is the id of the one workflow a's session holds.
+func soleWorkflowID(t *testing.T, a *Agent) string {
+	t.Helper()
+	infos, err := a.Workflows()
+	if err != nil || len(infos) != 1 {
+		t.Fatalf("Workflows = %+v, %v; want exactly one", infos, err)
+	}
+	return infos[0].Status.ID
+}
+
+func TestWorkflowCall_BackgroundAnswersAtOnceAndRunsBesideTheConversation(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundWorkflowConfig(t, sink)
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, backgroundArgsJSON("alpha"))).
+		route("please fan out", nil, contentScript("started it")).
+		route("check alpha", signalThenWait(started, release), finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+
+	res := runSubmitted(t, context.Background(), a, "please fan out")
+	awaitClosed(t, started, "alpha's child")
+
+	if res.Status == domain.StatusCancelled {
+		t.Fatalf("parent result = %+v, want a completed Exchange", res)
+	}
+	id := soleWorkflowID(t, a)
+	got := callResult(t, lockedEvents(sink), "fo1")
+	for _, want := range []string{
+		"workflow " + id + " started in the background",
+		"status: " + filepath.Join(cfg.ScratchDir, "workflows", id, "status.json"),
+		`workflow{action: "status", id: "` + id + `"}`,
+	} {
+		if got.IsError || !strings.Contains(got.Content, want) {
+			t.Errorf("fan_out answer lacks %q (error %v):\n%s", want, got.IsError, got.Content)
+		}
+	}
+	if info := workflowInfo(t, a, id); !info.Background {
+		t.Errorf("after the Exchange ended the workflow is %+v, want it still running in the background", info)
+	}
+
+	close(release)
+	a.background.waitAll()
+
+	if ends := workflowEnds(sink, id); !slices.Equal(ends, []domain.WorkflowPhase{domain.WorkflowFinished}) {
+		t.Errorf("workflow ends = %v, want one finished", ends)
+	}
+}
+
+// TestWorkflowCall_BackgroundRunsBlockingWhereTheSwitchIsNotOffered pins ADR 0089 D1's other half:
+// an engine whose fan_out did not publish `background` — a headless run's, a daemon firing's, the
+// facade's own roster — runs a `background: true` that reaches dispatch blocking, to its end.
+func TestWorkflowCall_BackgroundRunsBlockingWhereTheSwitchIsNotOffered(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink)
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, backgroundArgsJSON("alpha"))).
+		route("please fan out", nil, contentScript("all done")).
+		route("check alpha", nil, finishScript("f1", "alpha is fine"))
+
+	a, _ := runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+	got := callResult(t, sink.events, "fo1")
+	if got.IsError || !strings.Contains(got.Content, "#1 alpha — ok — alpha is fine count=1") {
+		t.Errorf("fan_out answer = %q (error %v), want the blocking run's result lines", got.Content, got.IsError)
+	}
+	if info := workflowInfo(t, a, soleWorkflowID(t, a)); info.Background || info.Status.Phase != workflow.PhaseDone {
+		t.Errorf("workflow = %+v, want a finished workflow that never ran in the background", info)
+	}
+}
+
+// TestWorkflowCall_TheFacadeRosterOffersNoBackground pins the engine's own roster (defaultRoster,
+// the one a headless run or a daemon firing gets): with fan_out and workflow lifted, fan_out still
+// publishes no `background` and no workflow tool is offered.
+func TestWorkflowCall_TheFacadeRosterOffersNoBackground(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.WorkspaceDir = t.TempDir()
+	cfg.EnabledTools = []string{tools.FanOutToolName, tools.WorkflowToolName}
+
+	roster := defaultRoster(cfg)
+
+	if _, ok := roster.Lookup(tools.WorkflowToolName); ok {
+		t.Error("the facade roster offers the workflow tool; only a Driver that offers background workflows may")
+	}
+	tool, ok := roster.Lookup(tools.FanOutToolName)
+	if !ok {
+		t.Fatal("the facade roster dropped the lifted fan_out")
+	}
+	if fanOut, _ := tool.(*tools.FanOut); fanOut == nil || fanOut.OffersBackground() {
+		t.Error("the facade roster's fan_out publishes background")
+	}
+}
+
+func TestWorkflowControl_MessageReachesTheRunningItem(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundWorkflowConfig(t, sink)
+	started, release := make(chan struct{}), make(chan struct{})
+	const note = "check alpha: read the tests too"
+	message := `{"action":"message","item":"alpha","text":"` + note + `"}`
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, backgroundArgsJSON("alpha"))).
+		route("please fan out", gateOn(started), toolCallScript("wf1", tools.WorkflowToolName, message)).
+		route("please fan out", nil, contentScript("told it")).
+		route("check alpha", signalThenWait(started, release), toolCallScript("r1", "read_thing", `{}`)).
+		route("check alpha", nil, finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+
+	runSubmitted(t, context.Background(), a, "please fan out")
+	close(release)
+	a.background.waitAll()
+
+	events := lockedEvents(sink)
+	if got := callResult(t, events, "wf1"); got.IsError || !strings.Contains(got.Content, "message queued for alpha") {
+		t.Errorf("workflow message answer = %q (error %v), want it queued for alpha", got.Content, got.IsError)
+	}
+	landed := false
+	for _, e := range events {
+		if event, ok := e.(domain.ChildInterjectionEvent); ok && event.Landed && event.Input.Text == note {
+			landed = true
+		}
+	}
+	if !landed {
+		t.Error("no ChildInterjectionEvent reports the message landing in alpha's child")
+	}
+}
+
+func TestWorkflowControl_StatusStopAndRefusals(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundWorkflowConfig(t, sink)
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, backgroundArgsJSON("alpha", "beta"))).
+		route("please fan out", nil, contentScript("started it")).
+		route("check alpha", nil, finishScript("f1", "alpha is fine")).
+		route("check beta", signalThenWait(started, nil), cancelledScript())
+	a := newBackgroundParent(t, cfg, up)
+	runSubmitted(t, context.Background(), a, "please fan out")
+	awaitClosed(t, started, "beta's child")
+	id := soleWorkflowID(t, a)
+
+	t.Run("status lists every workflow", func(t *testing.T) {
+		got := controlCall(a, `{"action":"status"}`)
+		if got.IsError || !strings.Contains(got.Content, id+" — ") || !strings.Contains(got.Content, "running in the background") {
+			t.Errorf("status = %q (error %v), want %s listed as running in the background", got.Content, got.IsError, id)
+		}
+	})
+	t.Run("status of one shows its items and the running ones", func(t *testing.T) {
+		got := controlCall(a, `{"action":"status","id":"`+id+`"}`)
+		for _, want := range []string{"#1 alpha — ok — alpha is fine count=1", "running items", " beta"} {
+			if got.IsError || !strings.Contains(got.Content, want) {
+				t.Errorf("status %s lacks %q (error %v):\n%s", id, want, got.IsError, got.Content)
+			}
+		}
+	})
+	for _, tc := range []struct {
+		name, args, want string
+	}{
+		{"an unknown workflow", `{"action":"status","id":"nope"}`, `no workflow "nope"`},
+		{"an unknown action", `{"action":"pause"}`, `action "pause"`},
+		{"stop without an id", `{"action":"stop"}`, "stop needs the id"},
+		{"message without text", `{"action":"message","item":"beta"}`, "message needs item"},
+		{"message to no running item", `{"action":"message","item":"gamma","text":"hi"}`, `no running item "gamma"`},
+		{"arguments that are not JSON", `{`, "not valid JSON"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := controlCall(a, tc.args); !got.IsError || !strings.Contains(got.Content, tc.want) {
+				t.Errorf("answer = %q (error %v), want an error naming %q", got.Content, got.IsError, tc.want)
+			}
+		})
+	}
+
+	got := controlCall(a, `{"action":"stop","id":"`+id+`"}`)
+	a.background.waitAll()
+
+	if got.IsError || !strings.Contains(got.Content, "finished items are kept") {
+		t.Errorf("stop = %q (error %v), want the stopping answer", got.Content, got.IsError)
+	}
+	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("after the stop = %+v, want a stopped workflow no longer live", info)
+	}
+	if phases := itemPhases(workflowInfo(t, a, id)); phases["alpha"] != workflow.PhaseDone {
+		t.Errorf("item phases = %v, want alpha kept done", phases)
+	}
+}
+
+func TestWorkflowControl_ADelegateIsRefused(t *testing.T) {
+	t.Parallel()
+
+	a, err := newAgent(backgroundWorkflowConfig(t, &recordingSink{}), &workflowResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.depth = 1
+
+	if got := controlCall(a, `{"action":"status"}`); !got.IsError || !strings.Contains(got.Content, "only the main agent") {
+		t.Errorf("a delegate's status = %q (error %v), want the main-agent refusal", got.Content, got.IsError)
+	}
+	if a.offersBackground() {
+		t.Error("a delegate offers background; a background workflow belongs to the top-level Agent")
+	}
+}

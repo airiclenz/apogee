@@ -316,7 +316,14 @@ func (a *Agent) startBackgroundRecipe(recipe workflow.Recipe, text string) (stri
 	if len(missing) > 0 {
 		return "", fmt.Errorf(missingInputFormat, missing[0])
 	}
-	inputs, err := completeInputs(recipe.Inputs, values)
+	return a.startKeyedBackgroundRecipe(recipe, values)
+}
+
+// startKeyedBackgroundRecipe launches recipe in the background over keyed inputs — the ones the
+// user's text bound, or the ones a model's `fan_out{recipe, inputs, background}` named — and returns
+// the workflow's id. An undeclared key or a required input left unset is refused, never asked.
+func (a *Agent) startKeyedBackgroundRecipe(recipe workflow.Recipe, given map[string]string) (string, error) {
+	inputs, err := completeInputs(recipe.Inputs, given)
 	if err != nil {
 		return "", err
 	}

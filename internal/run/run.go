@@ -330,7 +330,10 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// every gate without parking, and nil Asker/Presenter unregister ask_user and
 	// present_document. The tap wraps the caller's sink (nil ⇒ a discard) so a Firing has
 	// the EventSink construction requires, the record can relight its context gauge and the
-	// Result can carry the answer.
+	// Result can carry the answer. Nothing here offers background workflows either (ADR 0089 D1):
+	// a Firing has no conversation to go on while one runs, so the roster it runs on — the engine's
+	// own, or the composition root's firing set — publishes no `background` on fan_out and no
+	// workflow tool, and a fan_out blocks until its workflow ends.
 	den := &denier{}
 	tap := &eventTap{
 		inner:  spec.Config.Events,

@@ -142,12 +142,17 @@ Reaction.
 
 The **built-in tools** are all on by default — all but the default-off **Console family**
 (`console_open`, `console_send`, `console_read`, `console_close`;
-[what they do](#the-console-family)) and `fan_out`, which asks apogee to run one brief over a
-list of items with a fresh helper per item — and `tools:` (a file-only block) is how you change that:
+[what they do](#the-console-family)), `fan_out`, which asks apogee to run one brief over a
+list of items with a fresh helper per item, and `workflow`, which lets the model check on, stop or
+message the workflows it started in the background — and `tools:` (a file-only block) is how you change that:
 `disabled:` takes a tool off the menu — the model is never shown it, and a call naming it is
 refused as a tool that does not exist — while `enabled:` puts one back on, for a tool this build
-leaves off by default. The Console family and `fan_out` are what that second list is for today:
-they are in the binary and offered to nobody until you name them.
+leaves off by default. The Console family, `fan_out` and `workflow` are what that second list is for
+today: they are in the binary and offered to nobody until you name them. Lifting `workflow` beside
+`fan_out` also gives `fan_out` its `background` switch, which starts a workflow in the background and
+wakes the model when it ends — in the TUI only: a `headless` or `daemon` run has no conversation to
+go on while a workflow runs, so there `fan_out` always blocks and `workflow` is not offered, whatever
+the list says.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -167,7 +172,7 @@ The names this build knows are fixed. In menu order they are `read_file`, `write
 `grep`, `find_files`, `single_find_and_replace`, `multi_find_and_replace`, `edit_existing_file`,
 `view_diff`, `copy_file`, `move_file`, `delete_file`, `terminal`, `python_exec`, `git_branch`,
 `git_commit`, `git_diff_range`, `git_status`, `git_log`, `git_show`, `diagnostics`, `run_tests`, `web_fetch`,
-`http_request`, `web_search`, `sub_agent`, the default-off `fan_out`, `task_list`, the default-off
+`http_request`, `web_search`, `sub_agent`, the default-off `fan_out` and `workflow`, `task_list`, the default-off
 Console four `console_open`, `console_send`, `console_read` and `console_close`, `load_skill` — the model's own door onto the
 [skill catalogue](#skills-apogee-ships--use-shipped-skills), which every apogee run wires — and
 the two the **host** supplies rather than the build — `ask_user` and `present_document`, which the

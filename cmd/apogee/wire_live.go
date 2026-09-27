@@ -118,7 +118,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// be the same reading of the key — the gate is a `sub-agents-choice:` word and the tool takes a
 	// bool, and two places translating it is two places one of them can be wrong.
 	seatChoice := w.opts.SubAgentsChoice == config.SubAgentsChoiceModel
-	w.cfg.Tools = registryWithMCP(w.roots.workspace, w.cfg, seatChoice, w.mcpSet.tools())
+	// The TUI is the Driver that offers background Workflows (ADR 0089 D1): a conversation goes on
+	// while one runs, and the session wakes the agent when it ends. So its set may carry fan_out's
+	// `background` and the workflow control tool, wherever the roster lifts `workflow`.
+	const offersBackground = true
+	w.cfg.Tools = registryWithMCP(w.roots.workspace, w.cfg, seatChoice, offersBackground, w.mcpSet.tools())
 	// What the set the session runs was BUILT from — the values a later rebuild has to carry rather
 	// than take from this snapshot again. The url-safety host lists ride it beside the endpoint and
 	// the roster because the guard is built WITH the set (registryWithMCP hands one URLGuard to every
@@ -135,6 +139,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		allowHosts: w.cfg.URLAllowHosts,
 		denyHosts:  w.cfg.URLDenyHosts,
 		seatChoice: seatChoice,
+		// The background opt-in rides it too, so a rebuild for any reason keeps the pair on offer.
+		offersBackground: offersBackground,
 	}
 	w.toolSet = newLiveTools(w.cfg.Tools, built, func(spec toolSetSpec) *apogee.ToolRegistry {
 		// The set as this session would have built it with another search endpoint, another roster,
@@ -148,7 +154,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		host.Profile.Tools = spec.roster
 		host.URLAllowHosts = spec.allowHosts
 		host.URLDenyHosts = spec.denyHosts
-		return registryWithMCP(w.roots.workspace, host, spec.seatChoice, w.mcpSet.tools())
+		return registryWithMCP(w.roots.workspace, host, spec.seatChoice, spec.offersBackground, w.mcpSet.tools())
 	})
 
 	// The id-addressed session store under this run's sessions root, and the record a --resume or

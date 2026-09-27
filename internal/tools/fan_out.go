@@ -19,17 +19,10 @@ import (
 // exported so dispatch can key on it without re-declaring the spelling.
 const FanOutToolName = "fan_out"
 
-// workflowToolName is the name of the background-workflow control tool (ADR 0089). fan_out publishes
-// its `background` argument only while that tool is on the roster, because a workflow started in the
-// background is one the model can only check on or stop through it. The tool itself is registered
-// by a later change; the gate reads the roster ladder's verdict for this name, which says "off"
-// until a configuration rung lifts it.
-const workflowToolName = "workflow"
-
 // fanOutSchemaTemplate is the fan_out schema with TWO holes: the optional `run_on` property the
 // seat-choice variant fills (the `sub-agents-choice: model` gate, ADR 0069, spelled as sub_agent's)
-// and the optional `background` property the background variant fills (only while the workflow tool
-// is on the roster). Both holes empty is the plain variant, and one literal keeps every variant's
+// and the optional `background` property the background variant fills (only where the workflow tool
+// is offered — on the roster, and the Driver offers background workflows). Both holes empty is the plain variant, and one literal keeps every variant's
 // shared properties byte-identical — the same reason subAgentSchemaTemplate is one literal.
 //
 // The properties follow ADR 0087 D1: a brief template, the items, the receipt fields wanted back, a
@@ -67,8 +60,8 @@ const fanOutRunOnProperty = `,
     "run_on": {"type": "string", "enum": ["session", "sub-agents-server"], "description": "Optional; where the helpers run — see the Delegations line of the host orientation. Leave unset for the configured default."}`
 
 // fanOutBackgroundProperty is the property the background variant adds (ADR 0089). It is published
-// only while the workflow tool is on the roster: a background workflow ends by waking the agent,
-// and the workflow tool is the only way the model can check on or stop one meanwhile.
+// only where the workflow tool (WorkflowToolName) is offered: a background workflow ends by waking
+// the agent, and the workflow tool is the only way the model can check on or stop one meanwhile.
 const fanOutBackgroundProperty = `,
     "background": {"type": "boolean", "description": "Optional; true starts the workflow in the background and answers at once. You are woken with its result when it ends; use the workflow tool to check on it or stop it meanwhile."}`
 
@@ -101,7 +94,8 @@ var fanOutSpec = toolSpec{
 type FanOutOptions struct {
 	// SeatChoice publishes `run_on`, as on sub_agent (the `sub-agents-choice: model` gate, ADR 0069).
 	SeatChoice bool
-	// Background publishes `background` (ADR 0089): set while the workflow tool is on the roster.
+	// Background publishes `background` (ADR 0089): set where the workflow tool is offered — the
+	// Driver offers background workflows (HostTools.OffersBackground) and the roster lifts it.
 	Background bool
 }
 

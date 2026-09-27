@@ -20,6 +20,19 @@ package agent
 // resume and keeps no report of it — so the only folds under the cancel are those of the item
 // children's own delegations, which foldStoppedChild holds to the inherited cancel bound and skips
 // on a quit or a daemon's shutdown.
+//
+// A call setting `background` (ADR 0089 D1) hands the same plan — or the same recipe — to the
+// background manager (background.go) and is answered at once with the workflow's id and status
+// path, but only where this Agent's fan_out published that switch (offersBackground) and this Agent
+// is the top-level one: everywhere else — a headless run, a daemon firing, a delegate — the call
+// runs blocking, as if the switch were unset, because with no conversation to go on there is
+// nothing for a background workflow to run beside.
+//
+// The WORKFLOW CONTROL CALL (ADR 0089 D4) is answered here too: `workflow{action}` is a placeholder
+// dispatch answers itself (resolve's Workflow verdict, spawning nothing) — status reads the session's
+// workflow folders (Agent.Workflows), stop is Agent.StopWorkflow, and message queues a note for one
+// running background item's child through InterjectChild, addressed by the run id or item name the
+// status listing shows.
 
 import (
 	"bytes"
@@ -27,6 +40,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -58,7 +72,24 @@ const (
 	fanOutNoScratch          = "fan_out was not run: this session has no scratch directory to keep the workflow in"
 	fanOutNoWorkspace        = "fan_out was not run: this session has no workspace to read the items from"
 	fanOutRunFailedPrefix    = "fan_out could not run: "
+	fanOutBackgroundFailed   = "fan_out could not start the workflow in the background: %v"
 )
+
+// The answer a background fan_out call gets at once (ADR 0089 D1): the workflow's id and name,
+// whether it started or waits in line behind another on its server, its status path, and how the
+// model hears of it again.
+const (
+	fanOutBackgroundStarted = "workflow %s started in the background: %s"
+	fanOutBackgroundQueued  = "workflow %s queued in the background behind another workflow on its server: %s"
+	fanOutBackgroundStatus  = "status: %s"
+	fanOutBackgroundHint    = "You are woken with its result when it ends. Meanwhile " +
+		`workflow{action: "status", id: "%[1]s"} checks on it and workflow{action: "stop", id: "%[1]s"} stops it.`
+)
+
+// workflowStatusFileName is the file a workflow's folder keeps its status in — the store's own
+// status.json (internal/workflow's Store), named here so a background answer can hand the model
+// the path it may read.
+const workflowStatusFileName = "status.json"
 
 // fanOutListingLineFormat is the line a stopped workflow's answer ends on when Format has not
 // already named the item listing: the report so far, in Format's own `items:` spelling so the model
@@ -66,8 +97,8 @@ const (
 const fanOutListingLineFormat = "items: %s"
 
 // fanOutArgs is a fan_out call's arguments as the tool publishes them (tools.fanOutSchemaTemplate).
-// `run_on` and `background` are read by nothing here yet: the item children run on the configured
-// seat, and the call blocks. `recipe` and `inputs`, the recipe form, are read by parseFanOutRecipe.
+// `run_on` is read by nothing here yet: the item children run on the configured seat. `recipe` and
+// `inputs`, the recipe form, are read by parseFanOutRecipe, and `background` by asksBackground.
 type fanOutArgs struct {
 	Task    string               `json:"task"`
 	Over    json.RawMessage      `json:"over"`
@@ -112,6 +143,66 @@ func isFanOutCall(call domain.ToolCall) bool {
 	return call.Tool == tools.FanOutToolName
 }
 
+// isWorkflowControlCall reports whether call is a `workflow` control call (ADR 0089 D4).
+func isWorkflowControlCall(call domain.ToolCall) bool {
+	return call.Tool == tools.WorkflowToolName
+}
+
+// asksBackground reports whether a fan_out call's arguments set `background` true. Arguments that
+// are not an object, or a `background` that is not a boolean, ask for nothing: the call runs
+// blocking, and parseFanOutPlan reports what it cannot read.
+func asksBackground(raw json.RawMessage) bool {
+	var args struct {
+		Background bool `json:"background"`
+	}
+	return json.Unmarshal(raw, &args) == nil && args.Background
+}
+
+// offersBackground reports whether a fan_out call on this Agent may start its workflow in the
+// background: this is the top-level Agent — background workflows belong to it (startBackground) —
+// and the fan_out on its menu published the switch, which only a Driver that offers background
+// workflows lets it do (tools.HostTools.OffersBackground; ADR 0089 D1). Anywhere else a
+// `background: true` that reaches dispatch runs blocking.
+func (a *Agent) offersBackground() bool {
+	if a.isDelegate() {
+		return false
+	}
+	tool, ok := a.lookupTool(tools.FanOutToolName)
+	if !ok {
+		return false
+	}
+	fanOut, ok := tool.(*tools.FanOut)
+	return ok && fanOut.OffersBackground()
+}
+
+// backgroundCallResult answers a fan_out call whose workflow was handed to the background manager:
+// the workflow's id and name, whether it started or waits in line, its status path and how the model
+// hears of it again — or, when it could not start, why.
+func (a *Agent) backgroundCallResult(callID, id string, err error) domain.ToolResult {
+	if err != nil {
+		return errorToolResult(callID, fmt.Sprintf(fanOutBackgroundFailed, err))
+	}
+	lead := fanOutBackgroundStarted
+	if queued, live := a.background.liveStates()[id]; live && queued {
+		lead = fanOutBackgroundQueued
+	}
+	name, statusPath := "", ""
+	if store, err := workflow.NewStore(a.ScratchDir()); err == nil {
+		if status, err := store.ReadStatus(id); err == nil {
+			name = status.Name
+		}
+		if dir, err := store.Dir(id); err == nil {
+			statusPath = filepath.Join(dir, workflowStatusFileName)
+		}
+	}
+	lines := []string{fmt.Sprintf(lead, id, oneLine(name))}
+	if statusPath != "" {
+		lines = append(lines, fmt.Sprintf(fanOutBackgroundStatus, statusPath))
+	}
+	lines = append(lines, fmt.Sprintf(fanOutBackgroundHint, id))
+	return domain.ToolResult{CallID: callID, Content: strings.Join(lines, "\n")}
+}
+
 // runWorkflowCall runs the Workflow one fan_out call asks for and answers the call: the formatted
 // result lines when it ran, a tool error the model can act on when it could not. The outcome is
 // dispatchCancelled exactly when the user's cancel reached the dispatch — the answer is then the
@@ -132,13 +223,19 @@ func (a *Agent) runWorkflowCall(ctx context.Context, turn int, slot *dispatchSlo
 	return result, dispatchDone
 }
 
-// workflowCallResult parses, checks and runs one fan_out call's Workflow and renders its answer.
+// workflowCallResult parses, checks and runs one fan_out call's Workflow and renders its answer —
+// or, for a workflow control call, answers that. A fan_out call asking for the background where it
+// may have it is started there and answered at once.
 func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
+	if isWorkflowControlCall(call) {
+		return a.workflowControlResult(call)
+	}
+	background := asksBackground(call.Arguments) && a.offersBackground()
 	if recipe, inputs, refusal, isRecipe := parseFanOutRecipe(call.Arguments); isRecipe {
 		if refusal != "" {
 			return errorToolResult(call.ID, refusal)
 		}
-		return a.recipeCallResult(ctx, turn, call, recipe, inputs)
+		return a.recipeCallResult(ctx, turn, call, recipe, inputs, background)
 	}
 	plan, refusal := parseFanOutPlan(call.Arguments)
 	if refusal != "" {
@@ -151,6 +248,10 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if refusal != "" {
 		return errorToolResult(call.ID, refusal)
 	}
+	if background {
+		id, err := a.startBackground(backgroundLaunch{plan: plan, runner: runner, tool: tools.FanOutToolName, turn: turn})
+		return a.backgroundCallResult(call.ID, id, err)
+	}
 	observer := a.observeWorkflow(runner, turn, plan.Name)
 	outcome, err := runner.Run(ctx, plan)
 	observer.end(outcome, err)
@@ -162,18 +263,31 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 
 // recipeCallResult runs the recipe id one fan_out call names over its keyed inputs and renders its
 // answer: the result lines, the recipes there are for an unknown id, or why the recipe could not
-// run (an unknown or missing input among them).
-func (a *Agent) recipeCallResult(ctx context.Context, turn int, call domain.ToolCall, id string, inputs map[string]string) domain.ToolResult {
+// run (an unknown or missing input among them). With background set it starts the recipe in the
+// background instead and answers at once.
+func (a *Agent) recipeCallResult(
+	ctx context.Context,
+	turn int,
+	call domain.ToolCall,
+	id string,
+	inputs map[string]string,
+	background bool,
+) domain.ToolResult {
 	source := a.recipeSource()
 	if source == nil {
 		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, id, "none"))
 	}
-	if _, ok := source.Recipe(id); !ok {
+	recipe, ok := source.Recipe(id)
+	if !ok {
 		known := "none"
 		if ids := source.RecipeIDs(); len(ids) > 0 {
 			known = strings.Join(ids, ", ")
 		}
 		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, id, known))
+	}
+	if background {
+		workflowID, err := a.startKeyedBackgroundRecipe(recipe, inputs)
+		return a.backgroundCallResult(call.ID, workflowID, err)
 	}
 	result, err := a.runRecipe(ctx, turn, call, id, inputs)
 	if err != nil {
@@ -459,4 +573,273 @@ type observedAsker struct {
 func (a observedAsker) Ask(ctx context.Context, question workflow.Question) (string, error) {
 	a.observer.waiting(question)
 	return a.inner.Ask(ctx, question)
+}
+
+// The workflow control call's answers (ADR 0089 D4). Each refusal is the whole tool error, so it
+// says what to send instead.
+const (
+	workflowControlArgumentsFormat = "workflow was not run: its arguments are not valid JSON (%v); send an object with action"
+	workflowControlActionFormat    = "workflow was not run: action %q is not one of status, stop, message"
+	workflowControlDelegate        = "workflow was not run: only the main agent controls the session's background workflows"
+	workflowControlNeedsID         = "workflow was not run: stop needs the id of the workflow to stop, as status lists it"
+	workflowControlNeedsItem       = "workflow was not run: message needs item (a running item's run id or name, as status lists it) and text"
+	workflowControlListFailed      = "workflow could not list the session's workflows: %v"
+	workflowControlUnknownFormat   = "workflow: no workflow %q in this session; the workflows are: %s"
+	workflowControlStopFailed      = "workflow could not stop %s: %v"
+	workflowControlStopped         = "workflow %s is stopping; its finished items are kept, and its result reaches you when it ends"
+	workflowControlNoItemFormat    = "workflow: no running item %q; the running items are: %s"
+	workflowControlAmbiguousFormat = "workflow: %d running items are named %q; send item as one of their run ids: %s"
+	workflowControlGoneFormat      = "workflow: item %s ended before the message could be queued"
+	workflowControlQueuedFormat    = "message queued for %s (%s); it reaches the helper between its steps"
+)
+
+// The words the status listing is built from.
+const (
+	workflowStatusNone        = "no workflows in this session"
+	workflowStatusHeadFormat  = "workflows (%d):"
+	workflowStatusLineFormat  = "%s — %s — %s — items %d/%d done"
+	workflowStatusDetailHint  = `workflow{action: "status", id: "<id>"} shows one workflow's items and the run ids to message`
+	workflowStatusFolder      = "folder: "
+	workflowStatusStageFormat = "stage %s (%s) — %s"
+	workflowStatusItemFormat  = "  #%d %s — %s"
+	workflowStatusRunningHead = "running items (message one by run id or name):"
+	workflowStatusRunning     = "running in the background"
+	workflowStatusQueued      = "queued in the background"
+	workflowNamesNone         = "none"
+)
+
+// workflowControlArgs is a workflow control call's arguments as the tool publishes them.
+type workflowControlArgs struct {
+	Action string `json:"action"`
+	ID     string `json:"id"`
+	Item   string `json:"item"`
+	Text   string `json:"text"`
+}
+
+// runningItem is one running item child of a background workflow, as the status listing names it
+// and a message addresses it: its run id, its item name and the workflow it runs in.
+type runningItem struct {
+	runID    string
+	name     string
+	workflow string
+}
+
+// workflowControlResult answers one workflow control call. Only the top-level Agent holds the
+// session's background workflows, so a delegate's call is refused.
+func (a *Agent) workflowControlResult(call domain.ToolCall) domain.ToolResult {
+	if a.isDelegate() {
+		return errorToolResult(call.ID, workflowControlDelegate)
+	}
+	var args workflowControlArgs
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return errorToolResult(call.ID, fmt.Sprintf(workflowControlArgumentsFormat, err))
+	}
+	args.ID, args.Item = strings.TrimSpace(args.ID), strings.TrimSpace(args.Item)
+	switch args.Action {
+	case tools.WorkflowActionStatus:
+		return a.workflowStatusResult(call.ID, args.ID)
+	case tools.WorkflowActionStop:
+		return a.workflowStopResult(call.ID, args.ID)
+	case tools.WorkflowActionMessage:
+		return a.workflowMessageResult(call.ID, args)
+	default:
+		return errorToolResult(call.ID, fmt.Sprintf(workflowControlActionFormat, args.Action))
+	}
+}
+
+// workflowStatusResult lists every workflow of the session, one line each, or — with id — that one
+// in detail: its stages, every item with its receipt so far, and the running items a message can
+// address.
+func (a *Agent) workflowStatusResult(callID, id string) domain.ToolResult {
+	infos, err := a.Workflows()
+	if err != nil {
+		return errorToolResult(callID, fmt.Sprintf(workflowControlListFailed, err))
+	}
+	if id == "" {
+		return domain.ToolResult{CallID: callID, Content: workflowListing(infos)}
+	}
+	for _, info := range infos {
+		if info.Status.ID == id {
+			return domain.ToolResult{CallID: callID, Content: workflowDetail(info, a.runningItems(id))}
+		}
+	}
+	return errorToolResult(callID, fmt.Sprintf(workflowControlUnknownFormat, id, workflowIDs(infos)))
+}
+
+// workflowStopResult stops the background workflow id, keeping its finished items (ADR 0088).
+func (a *Agent) workflowStopResult(callID, id string) domain.ToolResult {
+	if id == "" {
+		return errorToolResult(callID, workflowControlNeedsID)
+	}
+	if err := a.StopWorkflow(id); err != nil {
+		return errorToolResult(callID, fmt.Sprintf(workflowControlStopFailed, id, err))
+	}
+	return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStopped, id)}
+}
+
+// workflowMessageResult queues args.Text for the one running item args.Item names — by run id, or by
+// item name when no run id matches — narrowed to the workflow args.ID when it is set. It rides the
+// item child's mailbox exactly as a human Interjection does (InterjectChild, ADR 0063): the message
+// lands at the child's next between-Steps boundary and grants it nothing.
+func (a *Agent) workflowMessageResult(callID string, args workflowControlArgs) domain.ToolResult {
+	if args.Item == "" || strings.TrimSpace(args.Text) == "" {
+		return errorToolResult(callID, workflowControlNeedsItem)
+	}
+	running := a.runningItems(args.ID)
+	var named []runningItem
+	for _, item := range running {
+		if item.runID == args.Item {
+			named = []runningItem{item}
+			break
+		}
+		if item.name == args.Item {
+			named = append(named, item)
+		}
+	}
+	switch len(named) {
+	case 0:
+		return errorToolResult(callID, fmt.Sprintf(workflowControlNoItemFormat, args.Item, runningItemNames(running)))
+	case 1:
+	default:
+		return errorToolResult(callID, fmt.Sprintf(workflowControlAmbiguousFormat, len(named), args.Item, runningItemNames(named)))
+	}
+	target := named[0]
+	if err := a.InterjectChild(target.runID, domain.UserInput{Text: args.Text}); err != nil {
+		return errorToolResult(callID, fmt.Sprintf(workflowControlGoneFormat, target.runID))
+	}
+	return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlQueuedFormat, target.name, target.runID)}
+}
+
+// runningItems lists the item children of this Agent's background workflows that are running now —
+// of the workflow id only, when id is set — ordered by run id. A background workflow's children are
+// registered on this Agent (startBackground) under the call id `workflow-<id>`, which is how they are
+// told from the conversation's own delegations; a child's run id and call id are fixed at its
+// construction, so reading them here races nothing.
+func (a *Agent) runningItems(id string) []runningItem {
+	var items []runningItem
+	for _, child := range a.children.all() {
+		workflowID, ok := strings.CutPrefix(child.callID, backgroundCallPrefix)
+		if !ok || (id != "" && workflowID != id) {
+			continue
+		}
+		items = append(items, runningItem{runID: child.runID, name: child.displayName(), workflow: workflowID})
+	}
+	slices.SortFunc(items, func(x, y runningItem) int { return strings.Compare(x.runID, y.runID) })
+	return items
+}
+
+// runningItemNames renders running items as `<run id> <name>` pairs, or "none".
+func runningItemNames(items []runningItem) string {
+	if len(items) == 0 {
+		return workflowNamesNone
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.runID+" "+item.name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// workflowIDs renders the session's workflow ids, or "none".
+func workflowIDs(infos []WorkflowInfo) string {
+	if len(infos) == 0 {
+		return workflowNamesNone
+	}
+	ids := make([]string, 0, len(infos))
+	for _, info := range infos {
+		ids = append(ids, info.Status.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// workflowListing is the status of every workflow, one line each, oldest first, then how to see one
+// in detail.
+func workflowListing(infos []WorkflowInfo) string {
+	if len(infos) == 0 {
+		return workflowStatusNone
+	}
+	lines := make([]string, 0, len(infos)+2)
+	lines = append(lines, fmt.Sprintf(workflowStatusHeadFormat, len(infos)))
+	for _, info := range infos {
+		done, total := itemCounts(info.Status)
+		lines = append(lines, fmt.Sprintf(workflowStatusLineFormat,
+			info.Status.ID, oneLine(info.Status.Name), workflowState(info), done, total))
+	}
+	lines = append(lines, workflowStatusDetailHint)
+	return strings.Join(lines, "\n")
+}
+
+// workflowDetail is one workflow in detail: its line, its folder, every stage with its items and
+// their receipts so far, and the items running now.
+func workflowDetail(info WorkflowInfo, running []runningItem) string {
+	done, total := itemCounts(info.Status)
+	lines := []string{
+		fmt.Sprintf(workflowStatusLineFormat, info.Status.ID, oneLine(info.Status.Name), workflowState(info), done, total),
+		workflowStatusFolder + info.Dir,
+	}
+	for _, stage := range info.Status.Stages {
+		head := fmt.Sprintf(workflowStatusStageFormat, stage.Name, stage.Kind, stage.Phase)
+		if stage.Note != "" {
+			head += finishSeparator + oneLine(stage.Note)
+		}
+		lines = append(lines, head)
+		for index, item := range stage.Items {
+			lines = append(lines, fmt.Sprintf(workflowStatusItemFormat, index+1, oneLine(item.Label), itemStatusText(item)))
+		}
+	}
+	if len(running) > 0 {
+		lines = append(lines, workflowStatusRunningHead)
+		for _, item := range running {
+			lines = append(lines, "  "+item.runID+" "+item.name)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// workflowState is how a workflow stands: running or queued in the background when this session's
+// manager holds it, else the phase its status.json records.
+func workflowState(info WorkflowInfo) string {
+	switch {
+	case info.Queued:
+		return workflowStatusQueued
+	case info.Background:
+		return workflowStatusRunning
+	default:
+		return string(info.Status.Phase)
+	}
+}
+
+// itemCounts counts the items of a workflow's fan-out stages that are done, and all of them.
+func itemCounts(status workflow.RunStatus) (done, total int) {
+	for _, stage := range status.Stages {
+		if stage.Kind != workflow.StageFanout {
+			continue
+		}
+		for _, item := range stage.Items {
+			total++
+			if item.Phase == workflow.PhaseDone {
+				done++
+			}
+		}
+	}
+	return done, total
+}
+
+// itemStatusText is one item's outcome so far: `<status> — <summary>[ k=v…]` once its receipt is in,
+// its phase until then.
+func itemStatusText(item workflow.ItemStatus) string {
+	if item.Receipt == nil {
+		return string(item.Phase)
+	}
+	receipt := item.Receipt.Domain()
+	text := receipt.Status + finishSeparator + oneLine(receipt.Summary)
+	keys := make([]string, 0, len(receipt.Fields))
+	for key := range receipt.Fields {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		text += " " + key + "=" + oneLine(receipt.Fields[key])
+	}
+	return text
 }

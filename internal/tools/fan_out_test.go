@@ -154,8 +154,9 @@ func TestFanOut_IsADefaultOffPlaceholder(t *testing.T) {
 }
 
 // TestFanOut_RegistryGates pins where the assembly reads each gate: `run_on` off the seat-choice
-// flag, `background` off the roster ladder's verdict for the workflow tool — global and profile
-// rungs alike, the profile having the last word.
+// flag, `background` off the Driver's opt-in AND the roster ladder's verdict for the workflow tool —
+// global and profile rungs alike, the profile having the last word. Without the opt-in no roster
+// publishes it (ADR 0089 D1: a headless run and a daemon firing offer no background).
 func TestFanOut_RegistryGates(t *testing.T) {
 	t.Parallel()
 
@@ -166,31 +167,41 @@ func TestFanOut_RegistryGates(t *testing.T) {
 		wantRunOn      bool
 		wantBackground bool
 	}{
-		{name: "lifted alone", host: HostTools{Enabled: lift}},
+		{name: "lifted alone", host: HostTools{Enabled: lift, OffersBackground: true}},
 		{name: "seat choice", host: HostTools{Enabled: lift, SubAgentSeatChoice: true}, wantRunOn: true},
 		{
 			name:           "workflow on the global roster",
-			host:           HostTools{Enabled: []string{FanOutToolName, workflowToolName}},
+			host:           HostTools{Enabled: []string{FanOutToolName, WorkflowToolName}, OffersBackground: true},
 			wantBackground: true,
 		},
 		{
 			name: "workflow on the profile roster",
 			host: HostTools{
-				Enabled:       lift,
-				ProfileRoster: domain.ToolRosterDelta{Enabled: []string{workflowToolName}},
+				Enabled:          lift,
+				ProfileRoster:    domain.ToolRosterDelta{Enabled: []string{WorkflowToolName}},
+				OffersBackground: true,
 			},
 			wantBackground: true,
 		},
 		{
 			name: "the profile keeps off what the global rung lifted",
 			host: HostTools{
-				Enabled:       []string{FanOutToolName, workflowToolName},
-				ProfileRoster: domain.ToolRosterDelta{Disabled: []string{workflowToolName}},
+				Enabled:          []string{FanOutToolName, WorkflowToolName},
+				ProfileRoster:    domain.ToolRosterDelta{Disabled: []string{WorkflowToolName}},
+				OffersBackground: true,
 			},
 		},
 		{
 			name: "a same-scope conflict fails closed",
-			host: HostTools{Enabled: []string{FanOutToolName, workflowToolName}, Disabled: []string{workflowToolName}},
+			host: HostTools{
+				Enabled:          []string{FanOutToolName, WorkflowToolName},
+				Disabled:         []string{WorkflowToolName},
+				OffersBackground: true,
+			},
+		},
+		{
+			name: "a Driver that offers no background publishes none whatever the roster says",
+			host: HostTools{Enabled: []string{FanOutToolName, WorkflowToolName}},
 		},
 	}
 	for _, tc := range cases {

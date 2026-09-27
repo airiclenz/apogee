@@ -299,7 +299,10 @@
 // drives a nested Agent and deliberately carries none of the disposition markers. fan_out.go is
 // fan_out, the Workflow the model asks for (ADR 0087): a placeholder like sub_agent that dispatch
 // runs itself, registered default-off, publishing `run_on` under the seat-choice gate and
-// `background` only while the workflow tool is on the roster.
+// `background` only where the workflow tool is offered. workflow.go is workflow, the model's control
+// over the background workflows fan_out starts (ADR 0089 D4) — status, stop, message — another
+// default-off placeholder dispatch answers itself, offered only where the Driver offers background
+// workflows (HostTools.OffersBackground: the TUI, never a headless run or a daemon firing).
 // task_list.go is task_list, the model's own checklist (ADR 0072): a whole-list replace over the
 // list the engine holds and reaches the call through (internal/tasklist), read-only because
 // writing down what you mean to do touches nothing the host owns. finish.go is finish, the receipt

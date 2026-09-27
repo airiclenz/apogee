@@ -512,6 +512,15 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail,
 		solo:   true,
 	},
+	// workflow is the model's control over the background workflows fan_out starts (ADR 0089 D4):
+	// status, stop or message. Default-off and TUI-only, so this row is the plain floor too — the
+	// action as the target, the answer's first line as the detail.
+	"workflow": {
+		label:  "Workflow",
+		verb:   "checking workflows",
+		target: stringArg("action"),
+		detail: firstLineDetail,
+	},
 	// task_list is the model's own checklist, held as engine session state (ADR 0072). No target:
 	// its one argument IS the list, so the list is the target — the same reason git_status carries
 	// none — and the rendered list the tool echoes back is both the branch row and the body under

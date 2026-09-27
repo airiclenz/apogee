@@ -190,7 +190,7 @@ func TestEffectiveRoster_LeavesTheGivenSetUntouched(t *testing.T) {
 
 // TestDefaultToolsHonourTheRoster pins the assembly's own use of the ladder against the shipped
 // menu: with no deltas and every delegate backed, the default set is the whole build MINUS the tools
-// registered default-off (fan_out, ADR 0087 D8, and the Console family, ADR 0059 — the build rung's
+// registered default-off (fan_out, ADR 0087 D8, workflow, ADR 0089 D4, and the Console family, ADR 0059 — the build rung's
 // first users), and the global lists still subtract exactly what they name. The delegates are backed
 // so that the build's three delegate tools — constructed whoever the host is, dropped only when
 // unbacked — sit on both sides of the comparison.
@@ -214,9 +214,9 @@ func TestDefaultToolsHonourTheRoster(t *testing.T) {
 	if got, want := rosterNamesOf(full), rosterNamesOf(onMenu); got != want {
 		t.Errorf("default menu = %q, want the build minus the default-off tools %q", got, want)
 	}
-	wantOff := append([]string{FanOutToolName}, consoleFamilyNames...)
+	wantOff := append([]string{FanOutToolName, WorkflowToolName}, consoleFamilyNames...)
 	if got, want := strings.Join(offMenu, ","), strings.Join(wantOff, ","); got != want {
-		t.Errorf("default-off built-ins = %q, want fan_out and the Console family %q", got, want)
+		t.Errorf("default-off built-ins = %q, want fan_out, workflow and the Console family %q", got, want)
 	}
 	if len(KnownToolNames()) < len(full) {
 		t.Error("KnownToolNames must name at least every tool the default menu offers")

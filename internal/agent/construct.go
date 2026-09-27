@@ -398,9 +398,12 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // The Config → HostTools translation is tools.HostToolsOf — the one composer the composition root's
 // MCP-aware assembly shares, so no host policy can apply on one path and not the other. The engine
 // passes seatChoice false: `sub-agents-choice:` shapes the sub_agent schema a Driver publishes, and
-// Config carries no field for it because the engine reads no config of its own (ADR 0031).
+// Config carries no field for it because the engine reads no config of its own (ADR 0031). It
+// passes offersBackground false for the same reason: only a Driver with a conversation to go on
+// offers background workflows (ADR 0089 D1), so the facade's own roster — the one a headless run or
+// a daemon firing gets — publishes no `background` on fan_out and no workflow tool.
 func defaultRoster(cfg domain.Config) *domain.ToolRegistry {
-	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, tools.HostToolsOf(cfg, false))
+	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, tools.HostToolsOf(cfg, false, false))
 }
 
 // composesDefaultRoster reports whether the tool set an Agent built from cfg is the engine's OWN

@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -25,7 +27,7 @@ func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.Presenter = stubPresenter{}
 
-	if _, ok := registryWithMCP(t.TempDir(), cfg, false, nil).Lookup("present_document"); !ok {
+	if _, ok := registryWithMCP(t.TempDir(), cfg, false, false, nil).Lookup("present_document"); !ok {
 		t.Error("present_document is missing from the MCP registry build despite a configured Presenter")
 	}
 }
@@ -45,7 +47,7 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.ReadMounts.Roots = func() []string { return []string{extra} }
 
-	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("read_file")
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("read_file")
 	if !ok {
 		t.Fatal("read_file is missing from the MCP registry build")
 	}
@@ -76,7 +78,7 @@ func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
 	if !ok {
 		t.Fatal("the shipped debugging skill did not load")
 	}
-	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("list_dir")
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("list_dir")
 	if !found {
 		t.Fatal("list_dir is missing from the MCP registry build")
 	}
@@ -104,7 +106,7 @@ func TestRegistryWithMCPThreadsSkillLookup(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.SkillLookup = provider
 
-	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("load_skill")
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("load_skill")
 	if !found {
 		t.Fatal("load_skill is missing from the MCP registry build")
 	}
@@ -135,7 +137,7 @@ func TestRegistryWithMCPThreadsURLSafetyHosts(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.URLDenyHosts = []string{"Blocked.EXAMPLE."}
 
-	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("web_fetch")
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("web_fetch")
 	if !ok {
 		t.Fatal("web_fetch is missing from the MCP registry build")
 	}
@@ -167,7 +169,7 @@ func TestRegistryWithMCPHonoursDisabledTools(t *testing.T) {
 	cfg.DisabledTools = []string{"view_diff", "python_exec"}
 	mcpTool := mcpFixtureTool{name: "docs__search"}
 
-	registry := registryWithMCP(t.TempDir(), cfg, false, []apogee.Tool{mcpTool})
+	registry := registryWithMCP(t.TempDir(), cfg, false, false, []apogee.Tool{mcpTool})
 
 	for _, name := range []string{"view_diff", "python_exec"} {
 		if _, ok := registry.Lookup(name); ok {
@@ -240,7 +242,7 @@ func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
 			cfg.EnabledTools = tt.enabled
 			cfg.Profile.Tools = tt.profile
 
-			registry := registryWithMCP(t.TempDir(), cfg, false, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
+			registry := registryWithMCP(t.TempDir(), cfg, false, false, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
 
 			for _, name := range append(tt.wantOn, "docs__search") {
 				assertRegistryOffers(t, registry, name, true)
@@ -249,7 +251,7 @@ func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
 				assertRegistryOffers(t, registry, name, false)
 			}
 			if len(tt.wantOff) == 0 {
-				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), false, nil).All())+1; got != want {
+				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), false, false, nil).All())+1; got != want {
 					t.Errorf("the roster left %d tools, want %d — the lift subtracted something", got, want)
 				}
 			}
@@ -287,8 +289,8 @@ func assertRegistryOffers(t *testing.T, registry *apogee.ToolRegistry, name stri
 func TestRegistryWithMCPCarriesTheSeatChoiceGate(t *testing.T) {
 	t.Parallel()
 
-	plain := registryWithMCP(t.TempDir(), validCfg(t), false, nil)
-	offered := registryWithMCP(t.TempDir(), validCfg(t), true, nil)
+	plain := registryWithMCP(t.TempDir(), validCfg(t), false, false, nil)
+	offered := registryWithMCP(t.TempDir(), validCfg(t), true, false, nil)
 
 	if seatChoiceOffered(t, plain) {
 		t.Error("the gate off still published run_on; a session under `fixed` must offer no seat")
@@ -339,7 +341,7 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.ReadMounts.Scratch = func() string { return t.TempDir() }
 	cfg.ReadMounts.Virtual = func() map[string]fs.FS { return nil }
 
-	host := reflect.ValueOf(tools.HostToolsOf(cfg, true))
+	host := reflect.ValueOf(tools.HostToolsOf(cfg, true, true))
 	mountsType := reflect.TypeFor[tools.ReadMounts]()
 	for i := range host.NumField() {
 		field, name := host.Field(i), host.Type().Field(i).Name
@@ -358,6 +360,112 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 			t.Errorf("HostToolsOf left tools.HostTools.%s zero for a Config that sets every field "+
 				"it reads — the MCP-aware assembly must carry every host policy the engine's own "+
 				"build would have", name)
+		}
+	}
+}
+
+// backgroundPairOffered reports what registry offers of the background pair (ADR 0089 D1, D4):
+// whether fan_out publishes `background`, and whether the workflow control tool is registered. It
+// fails when the registry holds no fan_out, since every caller lifts it.
+func backgroundPairOffered(t *testing.T, registry *apogee.ToolRegistry) (background, workflow bool) {
+	t.Helper()
+	found, ok := registry.Lookup(tools.FanOutToolName)
+	if !ok {
+		t.Fatal("the registry holds no fan_out; the roster lifted it")
+	}
+	fanOut, ok := found.(*tools.FanOut)
+	if !ok {
+		t.Fatalf("fan_out is a %T, want *tools.FanOut", found)
+	}
+	_, workflow = registry.Lookup(tools.WorkflowToolName)
+	return fanOut.OffersBackground(), workflow
+}
+
+// backgroundRosterCfg is validCfg with fan_out and workflow lifted by `tools.enabled:`.
+func backgroundRosterCfg(t *testing.T) apogee.Config {
+	t.Helper()
+	cfg := validCfg(t)
+	cfg.EnabledTools = []string{tools.FanOutToolName, tools.WorkflowToolName}
+	return cfg
+}
+
+// The background opt-in is a Driver's (ADR 0089 D1): the TUI passes it on, a firing passes it off,
+// and the same roster — `tools.enabled: [fan_out, workflow]` — then offers the pair in the one and
+// neither half of it in the other. It shapes a schema and one tool, never the rest of the roster.
+func TestRegistryWithMCPCarriesTheBackgroundOptIn(t *testing.T) {
+	t.Parallel()
+
+	firing := registryWithMCP(t.TempDir(), backgroundRosterCfg(t), false, false, nil)
+	live := registryWithMCP(t.TempDir(), backgroundRosterCfg(t), false, true, nil)
+
+	if background, workflow := backgroundPairOffered(t, firing); background || workflow {
+		t.Errorf("without the opt-in: background %v, workflow %v — want neither, whatever the roster says", background, workflow)
+	}
+	if background, workflow := backgroundPairOffered(t, live); !background || !workflow {
+		t.Errorf("with the opt-in: background %v, workflow %v — want both where the roster lifts workflow", background, workflow)
+	}
+	if got, want := len(live.All()), len(firing.All())+1; got != want {
+		t.Errorf("the opt-in moved the roster by %d tools, want exactly the workflow tool", got-len(firing.All()))
+	}
+}
+
+// A rebuild carries the opt-in the set was built under, as it carries the seat-choice gate: a door
+// that moves something else entirely — here the gate itself — must not drop the background pair.
+func TestRegistryWithMCPRebuildCarriesTheBackgroundOptIn(t *testing.T) {
+	t.Parallel()
+
+	workspace, cfg := t.TempDir(), backgroundRosterCfg(t)
+	build := func(spec toolSetSpec) *apogee.ToolRegistry {
+		return registryWithMCP(workspace, cfg, spec.seatChoice, spec.offersBackground, nil)
+	}
+	spec := toolSetSpec{offersBackground: true}
+	live := newLiveTools(build(spec), spec, build)
+	spy := &applySettingSpy{}
+
+	if err := live.setSeatChoice(true, spy); err != nil {
+		t.Fatalf("setSeatChoice: %v", err)
+	}
+
+	if len(spy.swaps) != 1 {
+		t.Fatalf("swaps = %d, want the one rebuild", len(spy.swaps))
+	}
+	if background, workflow := backgroundPairOffered(t, spy.swaps[0]); !background || !workflow {
+		t.Errorf("after the rebuild: background %v, workflow %v — want the opt-in carried", background, workflow)
+	}
+}
+
+// A Firing — headless or daemon — offers no background workflows (ADR 0089 D1). Under
+// `sub-agents-choice: model` it builds its own set, which must carry the opt-in off; with the key
+// absent it hands the engine no set, and the engine's own roster (defaultRoster) offers neither.
+func TestFiringConfigOffersNoBackgroundWorkflows(t *testing.T) {
+	roots := firingRoots(t)
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "entry-model"}},
+		Props:  &stubllm.Props{TotalSlots: 2},
+	}})
+	entry := config.ServerEntry{Name: "box", Endpoint: srv.URL, APIKey: "sk-entry", Model: "entry-model"}
+	lifted := []string{tools.FanOutToolName, tools.WorkflowToolName}
+
+	for _, choice := range []config.SubAgentsChoice{config.SubAgentsChoiceModel, ""} {
+		cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+			opts:     config.Options{ToolsEnabled: lifted, SubAgentsChoice: choice},
+			entry:    entry,
+			roots:    roots,
+			confiner: fenceableHost,
+			mode:     domain.ModePlan,
+			recordID: "2026-09-27T10-00-00-firing",
+		})
+		if err != nil {
+			t.Fatalf("firingConfig(%q): %v", choice, err)
+		}
+		if cfg.Tools == nil {
+			if choice == config.SubAgentsChoiceModel {
+				t.Error("under `model` the firing built no set of its own")
+			}
+			continue
+		}
+		if background, workflow := backgroundPairOffered(t, cfg.Tools); background || workflow {
+			t.Errorf("sub-agents-choice %q: background %v, workflow %v — a firing offers neither", choice, background, workflow)
 		}
 	}
 }

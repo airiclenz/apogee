@@ -98,6 +98,20 @@ type HostTools struct {
 	// argument published. Where the choice IS offered, the seat is still resolved by the engine —
 	// this flag decides what the model may ASK for, never where the child ends up.
 	SubAgentSeatChoice bool
+
+	// OffersBackground is the Driver's opt-in to background Workflows (ADR 0089 D1, D4): true only
+	// where a conversation goes on while a workflow runs and something can wake the agent when it
+	// ends — the TUI. A headless run and a daemon firing leave it false, as does the engine's own
+	// default roster: with no conversation to go on, a workflow there blocks. False withholds the
+	// pair whatever the roster says — fan_out publishes no `background`, and the workflow control
+	// tool is not offered (backedTools) — because the switch and the tool that controls what it
+	// starts travel together. True lets the roster decide: `background` and the tool appear exactly
+	// where a configuration rung lifts `workflow`.
+	//
+	// Like SubAgentSeatChoice it is a Driver's policy rather than a Config field (ADR 0031 — the
+	// engine reads no config of its own), and like it, it shapes the set a build carries, so a
+	// Driver that rebuilds its set carries it forward.
+	OffersBackground bool
 }
 
 // NewDefaultRegistry assembles the built-in tool set — the read/write/list/grep base
@@ -133,7 +147,7 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 
 // HostToolsOf composes the HostTools a Config implies — the ONE translation from what the host put
 // on domain.Config into the tool assembly's own configuration, shared by the engine's default roster
-// (internal/agent, seatChoice false) and the composition root's MCP-aware assembly (cmd/apogee).
+// (internal/agent, seatChoice and offersBackground false) and the composition root's MCP-aware assembly (cmd/apogee).
 // It is one function rather than a literal in each of those places because a field added to
 // HostTools that only one composer filled is how a configured URL deny, credential scrub or read
 // root silently stopped applying on the other path (TestHostToolsOfFillsEveryHostField pins every
@@ -157,10 +171,12 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // RosterConflicts), never a refusal to build. SecretEnvVars is the caller-named half of the
 // execution tools' credential scrub (`api-key-env:`, ADR 0047); empty ⇒ apogee's own alone.
 //
-// seatChoice is the one policy Config does NOT carry: `sub-agents-choice:` shapes the sub_agent
-// and fan_out schemas this build publishes (ADR 0069), and the engine reads no config of its own
-// (ADR 0031), so the engine passes false and the composition root passes the configured value.
-func HostToolsOf(cfg domain.Config, seatChoice bool) HostTools {
+// seatChoice and offersBackground are the two policies Config does NOT carry: `sub-agents-choice:`
+// shapes the sub_agent and fan_out schemas this build publishes (ADR 0069), and whether the Driver
+// offers background Workflows decides fan_out's `background` and the workflow tool (ADR 0089 D1) —
+// and the engine reads no config of its own (ADR 0031), so the engine passes false for both and the
+// composition root passes its own values (offersBackground true for the TUI alone).
+func HostToolsOf(cfg domain.Config, seatChoice, offersBackground bool) HostTools {
 	return HostTools{
 		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
 		WebSearchEndpoint:  cfg.WebSearchEndpoint,
@@ -173,6 +189,7 @@ func HostToolsOf(cfg domain.Config, seatChoice bool) HostTools {
 		ReadMounts:         cfg.ReadMounts,
 		SecretEnvVars:      cfg.SecretEnvVars,
 		SubAgentSeatChoice: seatChoice,
+		OffersBackground:   offersBackground,
 	}
 }
 
@@ -293,12 +310,17 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice}),
 		// fan_out (ADR 0087) is registered DEFAULT-OFF beside the recursion point it spawns through,
 		// so it reaches no default menu. It publishes `run_on` under the same seat-choice gate as
-		// sub_agent, and `background` only while the workflow tool is on the roster (ADR 0089) — a
-		// question the configuration rungs answer, since that tool ships default-off too.
+		// sub_agent, and `background` only where the workflow tool is offered (ADR 0089): the Driver
+		// offers background workflows, and a configuration rung lifts that tool, which ships
+		// default-off too.
 		NewFanOutWith(FanOutOptions{
 			SeatChoice: host.SubAgentSeatChoice,
-			Background: host.rosterDeltas().lifts(workflowToolName),
+			Background: host.OffersBackground && host.rosterDeltas().lifts(WorkflowToolName),
 		}),
+		// workflow (ADR 0089 D4) is the control over what fan_out's `background` starts: DEFAULT-OFF
+		// like it, built whoever the host is (so KnownToolNames spells it), and dropped by backedTools
+		// where the Driver offers no background workflows.
+		NewWorkflow(),
 		// task_list (ADR 0072) is the last DEFAULT-ON slot: it holds the model's own checklist as
 		// engine state, so it is offered to every model and `tools.disabled:` is what turns it off.
 		NewTaskList(),
@@ -321,8 +343,10 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 
 // backedTools drops from all the host-delegate tools this host leaves without a delegate — the
 // graceful-degradation half of HostTools' contract: no Asker ⇒ no ask_user, no Presenter ⇒ no
-// present_document (ADR 0019), no SkillLookup ⇒ no load_skill (ADR 0065) — so the model is never
-// offered a door nothing behind it can answer for. It is a step of its own, between the build and
+// present_document (ADR 0019), no SkillLookup ⇒ no load_skill (ADR 0065), and a Driver that offers
+// no background workflows ⇒ no workflow tool (ADR 0089 D1) — so the model is never offered a door
+// nothing behind it can answer for. It runs before the roster ladder, so no `tools.enabled:` entry
+// can bring back a tool dropped here. It is a step of its own, between the build and
 // the roster ladder, rather than a condition inside builtinTools, so that the build rung stays the
 // whole build (KnownToolNames must list these three names whoever the host is). Menu order is kept.
 func (h HostTools) backedTools(all []domain.Tool) []domain.Tool {
@@ -339,6 +363,10 @@ func (h HostTools) backedTools(all []domain.Tool) []domain.Tool {
 			}
 		case *PresentDocument:
 			if h.Presenter == nil {
+				continue
+			}
+		case *Workflow:
+			if !h.OffersBackground {
 				continue
 			}
 		}
