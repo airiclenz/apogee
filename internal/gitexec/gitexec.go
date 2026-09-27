@@ -289,6 +289,23 @@ func RunTo(ctx context.Context, dir string, env []string, timeout time.Duration,
 	return err
 }
 
+// RunDiagnosed is Run that also returns what git printed on standard error, on a zero exit as
+// much as on a failure. It exists for the caller whose command reports a PARTIAL outcome as a
+// warning and still exits zero — `add` says it could not open a directory and stages the rest —
+// where the warning is the only sign the answer is incomplete. Every other guarantee is Run's,
+// and a non-zero exit is still an error carrying the same diagnostics.
+//
+// stderr is capped at subprocess.MaxSubprocessOutputBytes like every diagnostic stream: a longer
+// string was cut there and carries the cap's truncation marker, so a caller that reads it as a
+// complete list checks its length first.
+func RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
+	gitPath, err := Resolve(ctx, dir, LookPath)
+	if err != nil {
+		return "", "", err
+	}
+	return queryDiagnosed(ctx, gitPath, dir, env, timeout, nil, args...)
+}
+
 // Query is Run for a caller that has already resolved (and fenced) its own git — the tools
 // package, whose git tools resolve through the execHost they were built with rather than
 // LookPath. It is Run minus the resolution: the probe, the hardening and the stdout-as-data
@@ -300,15 +317,22 @@ func Query(ctx context.Context, gitPath, dir string, env []string, timeout time.
 // query is the body Run, RunTo and Query share. A non-nil stdout takes the child's standard
 // output uncapped and leaves the returned string empty.
 func query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, error) {
+	out, _, err := queryDiagnosed(ctx, gitPath, dir, env, timeout, stdout, args...)
+	return out, err
+}
+
+// queryDiagnosed is query that also returns the child's standard error, which the split or
+// streamed stdout leaves alone in the result's CombinedOutput.
+func queryDiagnosed(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, string, error) {
 	if len(args) == 0 {
-		return "", errors.New("apogee: gitexec: no git subcommand")
+		return "", "", errors.New("apogee: gitexec: no git subcommand")
 	}
 	drivers, err := probeCommandConfig(ctx, gitPath, dir, env)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(drivers) > 0 {
-		return "", errors.New(CommandConfigRefusal(drivers))
+		return "", "", errors.New(CommandConfigRefusal(drivers))
 	}
 
 	spec := runSpec(gitPath, dir, env, timeout, stdout == nil, args...)
@@ -319,17 +343,17 @@ func query(ctx context.Context, gitPath, dir string, env []string, timeout time.
 		res, err = subprocess.RunSubprocess(ctx, spec)
 	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	switch {
 	case res.TimedOut:
-		return "", fmt.Errorf("git %s: timed out after %s", args[0], timeout)
+		return "", res.CombinedOutput, fmt.Errorf("git %s: timed out after %s", args[0], timeout)
 	case res.DrainWedged:
-		return "", fmt.Errorf("git %s: output drain wedged", args[0])
+		return "", res.CombinedOutput, fmt.Errorf("git %s: output drain wedged", args[0])
 	case res.ExitCode != 0:
-		return "", fmt.Errorf("git %s: exit %d: %s", args[0], res.ExitCode, strings.TrimSpace(res.CombinedOutput))
+		return "", res.CombinedOutput, fmt.Errorf("git %s: exit %d: %s", args[0], res.ExitCode, strings.TrimSpace(res.CombinedOutput))
 	}
-	return res.Stdout, nil
+	return res.Stdout, res.CombinedOutput, nil
 }
 
 // CommandConfigName matches every config name whose VALUE is a program git executes — an

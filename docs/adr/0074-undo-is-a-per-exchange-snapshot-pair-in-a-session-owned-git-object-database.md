@@ -148,7 +148,17 @@ exchange made readable is in the post-image, and a bare tree diff would call it 
 post-image could not read). So the paths a capture could still not stage — what git lists as
 untracked against that fresh index, plus every directory the capture cannot open, which git only
 warns about and lists nowhere — are recorded beside the objects, keyed by the tree, and the
-diff decision 4 scopes a revert to leaves out every path either image recorded. The record is a
+diff decision 4 scopes a revert to leaves out every path either image recorded. A directory git
+cannot open does not make the add fail, so an exit status alone cannot be the trigger: the add
+runs in the C locale with its stderr kept, and an add that exits zero but warned is settled from
+those warnings. Every entry the persistent index holds that git could not stat — the files of a
+directory an earlier capture staged and that has since stopped opening, or lost only its search
+bit — is dropped from that index before the tree is written, so it too is absent rather than
+stale, and is recorded; and every directory the warnings name is recorded as well. The warning is
+a message rather than a listing (git writes `?` over a control character in a path and caps the
+line and the stream), so its paths are used only while the account is whole, and the capture
+walks the workspace for unopenable directories the moment it is not — as it always does when the
+add failed, since a failed add may have stopped partway through its own walk. The record is a
 union and survives the process with the objects, so a reloaded journal rebuilds the same diff.
 Nothing in that residue loses cover it had before: decision 10 stands, and for every such path
 the funnel journal is what `/undo` uses.

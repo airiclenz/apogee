@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // snapshotTimeout bounds every git invocation the store makes. It is deliberately generous
@@ -37,6 +38,20 @@ const indexFileName = "index"
 const (
 	unreadDirName  = "unread"
 	unreadFilePerm = 0o600
+)
+
+// cLocale runs a capture's add in git's untranslated messages. The warning a capture reads for a
+// directory git could not open is recognisable only in the C locale, and the allowlisted
+// environment passes the operator's LANG and LC_ALL through, which would translate it.
+const cLocale = "LC_ALL=C"
+
+// openWarningPrefix and openWarningEnd bracket the path in the warning git prints for each
+// directory its walk could not open — "warning: could not open directory 'dir/': Permission
+// denied" — which is the only word git gives about such a directory: the add stages the rest and
+// exits zero.
+const (
+	openWarningPrefix = "warning: could not open directory '"
+	openWarningEnd    = "': "
 )
 
 // headFileName is the file whose presence says the store directory already holds a repository,
@@ -188,17 +203,25 @@ func Remove(dir string) error {
 // bytes. The persistent index is left alone rather than deleted, so a capture running beside
 // this one never sees it vanish between its own add and write-tree.
 //
+// An add that exits zero can still have left paths out: a directory git could not open, and an
+// entry already in the index that git could not even stat, are only warned about. Such a capture
+// is settled from those warnings instead (see [Store.settleWarnings]), so no exit status is the
+// sole judge of whether an image is whole.
+//
 // Absent is not the same as "did not exist", and the image alone cannot tell them apart: a file
 // this capture could not read, made readable by the exchange, is in the next image and would
 // diff as created — a revert would delete a file that was there all along. So the paths the
-// fresh add still could not stage are recorded beside the objects, keyed by the tree, and
-// [Store.Diff] leaves them out of every diff that tree takes part in. A capture that cannot
-// write that record fails rather than return an image whose absences read as deletions.
+// capture could not stage are recorded beside the objects, keyed by the tree, and [Store.Diff]
+// leaves them out of every diff that tree takes part in. A capture that cannot write that record
+// fails rather than return an image whose absences read as deletions.
 func (s *Store) Capture(ctx context.Context) (Tree, error) {
-	out, addErr, err := s.stageAndWrite(ctx, s.index)
+	out, warnings, addErr, err := s.stageAndWrite(ctx, s.index)
 	var unread []string
-	if err == nil && addErr != nil {
+	switch {
+	case err == nil && addErr != nil:
 		out, unread, addErr, err = s.captureFresh(ctx)
+	case err == nil && warnings != "":
+		out, unread, err = s.settleWarnings(ctx, out, warnings)
 	}
 	if err != nil {
 		if addErr != nil {
@@ -221,8 +244,11 @@ func (s *Store) Capture(ctx context.Context) (Tree, error) {
 // When that add fails too, unread lists what it left out: every path git still reports as
 // untracked against the fresh index, which — since the add was asked to stage them all under
 // the same excludes — is exactly what it could not read, plus every directory git could not
-// open, which it only warns about and so lists nowhere. The scratch directory goes with the
-// call.
+// open, which it only warns about and so lists nowhere. That list comes from a walk rather than
+// from the add's warnings: a failed add may have died partway through its own walk (a directory
+// it can list but not search is fatal), so its warnings are not a complete account. When the
+// fresh add succeeds, its walk finished and its warnings are. The scratch directory goes with
+// the call.
 func (s *Store) captureFresh(ctx context.Context) (out string, unread []string, addErr, err error) {
 	scratch, err := os.MkdirTemp(s.dir, "rebuild-")
 	if err != nil {
@@ -231,9 +257,16 @@ func (s *Store) captureFresh(ctx context.Context) (out string, unread []string, 
 	defer func() { _ = os.RemoveAll(scratch) }()
 
 	index := filepath.Join(scratch, indexFileName)
-	out, addErr, err = s.stageAndWrite(ctx, index)
-	if err != nil || addErr == nil {
+	out, warnings, addErr, err := s.stageAndWrite(ctx, index)
+	if err != nil {
 		return out, nil, addErr, err
+	}
+	if addErr == nil {
+		dirs, err := unopenedDirs(s.workspace, warnings)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("list the directories the fresh index left out: %w", err)
+		}
+		return out, dirs, nil, nil
 	}
 	listing, err := s.streamWith(ctx, s.envWithIndex(index),
 		"-c", "core.excludesFile=", "ls-files", "-z", "--others", "--exclude-standard")
@@ -245,6 +278,102 @@ func (s *Store) captureFresh(ctx context.Context) (out string, unread []string, 
 		return "", nil, addErr, fmt.Errorf("list the directories the fresh index left out: %w", err)
 	}
 	return out, append(splitRecords(listing), dirs...), addErr, nil
+}
+
+// settleWarnings finishes a capture whose add into the persistent index exited zero but printed
+// something, and returns the tree to keep and the paths to record as unread. Two warnings mean
+// the image is not whole. A directory git could not open leaves every file inside it that the
+// index did not already hold out of the image, unnamed. And an entry the index DID hold that git
+// could not stat — inside that directory, or under one that lost only its search bit — is kept
+// at whatever an earlier capture staged, which write-tree would freeze as the file's content:
+// the stale image the fresh index exists to prevent. So every entry git cannot stat is dropped
+// from the persistent index and the tree written again, leaving the path absent rather than
+// stale, and both kinds are recorded. Any other warning — a line-ending conversion, an embedded
+// repository — costs one stat pass over the index and records nothing.
+func (s *Store) settleWarnings(ctx context.Context, out, warnings string) (string, []string, error) {
+	listing, err := s.stream(ctx, "ls-files", "-z", "--deleted")
+	if err != nil {
+		return "", nil, fmt.Errorf("list the index entries git could not stat: %w", err)
+	}
+	stale := splitRecords(listing)
+	if len(stale) > 0 {
+		if err := s.dropFromIndex(ctx, stale); err != nil {
+			return "", nil, fmt.Errorf("drop the index entries git could not stat: %w", err)
+		}
+		if out, err = gitexec.Run(ctx, s.workspace, s.env(), snapshotTimeout, "write-tree"); err != nil {
+			return "", nil, err
+		}
+	}
+	dirs, err := unopenedDirs(s.workspace, warnings)
+	if err != nil {
+		return "", nil, fmt.Errorf("list the directories the capture could not open: %w", err)
+	}
+	return out, append(stale, dirs...), nil
+}
+
+// dropFromIndex removes paths from the persistent index and touches no work-tree file. The paths
+// reach git through a NUL-separated pathspec file inside the store rather than argv, which a wide
+// directory could overflow, and --literal-pathspecs stops a path holding glob characters from
+// matching its neighbours. --force skips rm's up-to-date check, which compares against a HEAD
+// this store never has.
+func (s *Store) dropFromIndex(ctx context.Context, paths []string) error {
+	file, err := os.CreateTemp(s.dir, "drop-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+	_, writeErr := file.WriteString(strings.Join(paths, "\x00") + "\x00")
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		return err
+	}
+	_, err = gitexec.Run(ctx, s.workspace, s.env(), snapshotTimeout, "--literal-pathspecs",
+		"rm", "--cached", "--force", "--quiet", "--ignore-unmatch",
+		"--pathspec-from-file="+file.Name(), "--pathspec-file-nul")
+	return err
+}
+
+// unopenedDirs returns the directories an add's warnings say it could not open, workspace-
+// relative with the trailing slash that makes an unread record cover everything inside them.
+// The warning is a message for a human rather than a listing, though: git turns a control
+// character in a path into '?', lets a newline through to split the line, and caps both the line
+// and the stream. So a path is taken from it only while the account is whole — the stream was
+// not cut at its cap, and every warning line closes its quote around a local path that names a
+// directory still there and holds no '?' — and the workspace is walked instead the moment it is
+// not. A newline can only end a line early at a slash inside the real path, so what survives
+// those checks is the directory or one of its parents: a record at least as wide as the one it
+// stands for.
+func unopenedDirs(workspace, warnings string) ([]string, error) {
+	if !strings.Contains(warnings, openWarningPrefix) {
+		return nil, nil
+	}
+	if len(warnings) > subprocess.MaxSubprocessOutputBytes {
+		return unopenableDirs(workspace)
+	}
+	var dirs []string
+	for _, line := range strings.Split(warnings, "\n") {
+		rest, found := strings.CutPrefix(line, openWarningPrefix)
+		if !found {
+			continue
+		}
+		end := strings.LastIndex(rest, openWarningEnd)
+		if end < 0 || !isWarnedDir(workspace, rest[:end]) {
+			return unopenableDirs(workspace)
+		}
+		dirs = append(dirs, rest[:end])
+	}
+	return dirs, nil
+}
+
+// isWarnedDir reports whether dir, as read out of a warning, is a path the warning can be
+// trusted to have spelled: slash-terminated like every directory git warns about, local to the
+// workspace, free of the '?' git writes over a control character, and naming a directory.
+func isWarnedDir(workspace, dir string) bool {
+	name := strings.TrimSuffix(dir, "/")
+	if name == dir || !filepath.IsLocal(filepath.FromSlash(name)) || strings.Contains(dir, "?") {
+		return false
+	}
+	info, err := os.Lstat(filepath.Join(workspace, filepath.FromSlash(name)))
+	return err == nil && info.IsDir()
 }
 
 // unopenableDirs walks workspace and returns every directory beneath it that cannot be opened,
@@ -339,15 +468,16 @@ func coveredBy(path string, records []string) bool {
 }
 
 // stageAndWrite runs one `add -A --ignore-errors` into index and then `write-tree` from it,
-// returning write-tree's output. The add's error is returned beside that output rather than
-// instead of it: see [Store.Capture] for why it is not fatal on its own.
-func (s *Store) stageAndWrite(ctx context.Context, index string) (out string, addErr, err error) {
+// returning write-tree's output and what the add printed on standard error. The add's error is
+// returned beside that output rather than instead of it: see [Store.Capture] for why it is not
+// fatal on its own. The add runs in the C locale so its warnings read the same on every host.
+func (s *Store) stageAndWrite(ctx context.Context, index string) (out, warnings string, addErr, err error) {
 	env := s.envWithIndex(index)
-	_, addErr = gitexec.Run(ctx, s.workspace, env, snapshotTimeout,
+	_, warnings, addErr = gitexec.RunDiagnosed(ctx, s.workspace, append(env, cLocale), snapshotTimeout,
 		"-c", "core.excludesFile=", "add", "-A", "--ignore-errors")
 
 	out, err = gitexec.Run(ctx, s.workspace, env, snapshotTimeout, "write-tree")
-	return out, addErr, err
+	return out, warnings, addErr, err
 }
 
 // Diff returns the workspace-relative paths that differ between two captures — added, removed

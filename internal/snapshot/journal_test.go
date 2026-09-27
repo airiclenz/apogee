@@ -368,7 +368,7 @@ func TestUndoNeverDeletesAFileTheCaptureCouldNotReadAtTheStart(t *testing.T) {
 	writeFile(t, workspace, "locked.txt", "the human's own file\n")
 	requireUndoKeepsWhatTheCaptureCouldNotRead(t, home, workspace,
 		[]string{filepath.Join(workspace, "locked.txt")},
-		map[string]string{"locked.txt": "the human's own file\n"})
+		map[string]string{"locked.txt": "the human's own file\n"}, nil)
 }
 
 // A directory the pre-image capture could not open is worse than a file it could not read: git
@@ -389,27 +389,68 @@ func TestUndoNeverDeletesTheFilesOfADirectoryTheCaptureCouldNotOpen(t *testing.T
 			"locked.txt":       "the human's own file\n",
 			"dir/inner.txt":    "inside the closed directory\n",
 			"dir/sub/deep.txt": "deeper inside it\n",
+		}, nil)
+}
+
+// A directory the pre-image capture could not open costs that image its files even when nothing
+// else goes wrong: git only warns about it and its add exits zero, so no failed add sends the
+// capture down the fresh index. Both shapes of the persistent index must still leave every file
+// inside the directory alone once the exchange made it readable again — one the index never held,
+// where the files read as created and `/undo` would delete them, and one an earlier capture staged
+// before the human edited it, where the index still holds the old bytes and `/undo` would write
+// them back over the edit.
+func TestUndoLeavesAloneTheFilesOfADirectoryTheCaptureOnlyWarnedAbout(t *testing.T) {
+	requireGit(t)
+	requireUnreadableFiles(t)
+	tests := []struct {
+		name    string
+		before  func(t *testing.T, workspace string)
+		between func(t *testing.T, workspace string)
+	}{
+		{
+			name: "never staged",
+			between: func(t *testing.T, workspace string) {
+				writeFile(t, workspace, "dir/inner.txt", "the human's own file\n")
+				writeFile(t, workspace, "dir/sub/deep.txt", "the human's deeper file\n")
+			},
+		},
+		{
+			name: "staged, then edited",
+			before: func(t *testing.T, workspace string) {
+				writeFile(t, workspace, "dir/inner.txt", "the bytes an earlier capture staged\n")
+				writeFile(t, workspace, "dir/sub/deep.txt", "the human's deeper file\n")
+			},
+			between: func(t *testing.T, workspace string) {
+				writeFile(t, workspace, "dir/inner.txt", "the human's own file\n")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, workspace := newHomeAndWorkspace(t)
+			if tt.before != nil {
+				tt.before(t, workspace)
+			}
+			requireUndoKeepsWhatTheCaptureCouldNotRead(t, home, workspace,
+				[]string{filepath.Join(workspace, "dir")},
+				map[string]string{
+					"dir/inner.txt":    "the human's own file\n",
+					"dir/sub/deep.txt": "the human's deeper file\n",
+				},
+				func() { tt.between(t, workspace) })
 		})
+	}
 }
 
 // requireUndoKeepsWhatTheCaptureCouldNotRead runs two exchanges over workspace: the first
-// captures every path readable, the second begins with each of locked at mode 000 and gives
-// each its mode back while it writes a file of its own. The step `/undo` would take — live and
-// from a reopened journal — must delete none of survivors, the revert must leave each with its
-// content, and the exchange's own file must go.
-func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace string, locked []string, survivors map[string]string) {
+// captures every path readable, then between — when not nil — plays the human's edits outside
+// any exchange, and the second exchange begins with each of locked at mode 000 and gives each its
+// mode back while it writes a file of its own. The step `/undo` would take — live and from a
+// reopened journal — must delete none of survivors, the revert must leave each with its content,
+// and the exchange's own file must go.
+func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace string, locked []string, survivors map[string]string, between func()) {
 	t.Helper()
 	ctx := context.Background()
-	modes := make(map[string]os.FileMode, len(locked))
-	for _, path := range locked {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		modes[path] = info.Mode().Perm()
-		t.Cleanup(func() { _ = os.Chmod(path, modes[path]) })
-	}
-
 	journal, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
 	if err != nil || reason != "" {
 		t.Fatalf("OpenJournal: reason %q, err %v", reason, err)
@@ -426,8 +467,18 @@ func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace st
 		}
 	}
 	exchange(func() { writeFile(t, workspace, "first.txt", "exchange one\n") })
+	if between != nil {
+		between()
+	}
 
+	modes := make(map[string]os.FileMode, len(locked))
 	for _, path := range locked {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modes[path] = info.Mode().Perm()
+		t.Cleanup(func() { _ = os.Chmod(path, modes[path]) })
 		if err := os.Chmod(path, 0); err != nil {
 			t.Fatal(err)
 		}

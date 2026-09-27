@@ -20,6 +20,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // requireGit skips the test when no git binary is on PATH — the store degrades to
@@ -558,5 +560,91 @@ func TestWithoutUnreadDropsCoveredPathsOnly(t *testing.T) {
 	}
 	if got := withoutUnread(paths, nil); strings.Join(got, ",") != strings.Join(paths, ",") {
 		t.Errorf("withoutUnread with no record = %v, want every path", got)
+	}
+}
+
+// A directory that stops opening after a capture staged it is only warned about — the add exits
+// zero — yet the index still holds what that earlier capture read inside it. The image must leave
+// those paths out rather than freeze the old bytes as their content, keep the rest, and take them
+// back in once the directory opens again.
+func TestCaptureLeavesOutTheStaleEntriesOfADirectoryItCouldNotOpen(t *testing.T) {
+	requireGit(t)
+	requireUnreadableFiles(t)
+	store, workspace := newStore(t)
+	ctx := context.Background()
+	writeFile(t, workspace, "kept.txt", "kept\n")
+	writeFile(t, workspace, "dir/inner.txt", "old content\n")
+	mustCapture(t, store)
+
+	writeFile(t, workspace, "dir/inner.txt", "new content, not the old one\n")
+	dir := filepath.Join(workspace, "dir")
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	closed := mustCapture(t, store)
+	blobs, err := store.ListBlobs(ctx, closed)
+	if err != nil {
+		t.Fatalf("ListBlobs: %v", err)
+	}
+	if id, ok := blobs["dir/inner.txt"]; ok {
+		t.Fatalf("ListBlobs holds dir/inner.txt as %s (old content is %s), want the unopened directory's file absent",
+			id, blobID([]byte("old content\n")))
+	}
+	if _, ok := blobs["kept.txt"]; !ok {
+		t.Fatalf("ListBlobs = %v, want kept.txt captured", blobs)
+	}
+
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blobs, err = store.ListBlobs(ctx, mustCapture(t, store))
+	if err != nil {
+		t.Fatalf("ListBlobs: %v", err)
+	}
+	if want := blobID([]byte("new content, not the old one\n")); blobs["dir/inner.txt"] != want {
+		t.Errorf("dir/inner.txt once the directory opens = %q, want %s", blobs["dir/inner.txt"], want)
+	}
+}
+
+// The warning is git's only word on a directory it could not open, and a message rather than a
+// listing: a path is taken from it only while the account is whole, and anything short of that
+// walks the workspace instead — which, here, finds nothing to add.
+func TestUnopenedDirsTrustsOnlyAWholeAccount(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	for _, dir := range []string{"dir", "sp ace", "a/b"} {
+		if err := os.MkdirAll(filepath.Join(workspace, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	warn := func(dir string) string { return openWarningPrefix + dir + openWarningEnd + "Permission denied\n" }
+
+	tests := []struct {
+		name     string
+		warnings string
+		want     string
+	}{
+		{"no warning names a directory", "warning: in the working copy of 'x', LF will be replaced by CRLF\n", ""},
+		{"whole", warn("dir/") + "dir/inner.txt: Permission denied\n" + warn("sp ace/") + warn("a/b/"), "dir/,sp ace/,a/b/"},
+		{"a control character git wrote over", warn("d?r/"), ""},
+		{"a directory that is not there", warn("gone/"), ""},
+		{"no trailing slash", warn("dir"), ""},
+		{"outside the workspace", warn("../dir/"), ""},
+		{"a line cut before its closing quote", openWarningPrefix + "dir/\n", ""},
+		{"a stream cut at its cap", warn("dir/") + strings.Repeat("x", subprocess.MaxSubprocessOutputBytes), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := unopenedDirs(workspace, tt.warnings)
+			if err != nil {
+				t.Fatalf("unopenedDirs: %v", err)
+			}
+			if strings.Join(got, ",") != tt.want {
+				t.Errorf("unopenedDirs = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

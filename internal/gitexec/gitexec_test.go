@@ -389,6 +389,30 @@ func TestRun_NonZeroExitIsAnError(t *testing.T) {
 	}
 }
 
+// TestRunDiagnosed_ReturnsTheWarningsOfAZeroExit pins why the diagnosed sibling exists: a command
+// that reports a partial outcome as a warning and exits zero — `add` over a directory it cannot
+// open — hands its caller that warning, kept apart from stdout, where Run would have dropped it.
+func TestRunDiagnosed_ReturnsTheWarningsOfAZeroExit(t *testing.T) {
+	posixScriptHost(t)
+
+	fakeGit := writeFakeGit(t, t.TempDir(), "#!/bin/sh\n"+
+		"case \"$*\" in *config*|*rev-parse*) exit 1 ;; esac\n"+
+		"echo \"warning: could not open directory 'dir/': Permission denied\" >&2\n"+
+		"echo PAYLOAD\n")
+	withFakeGit(t, fakeGit)
+
+	stdout, stderr, err := gitexec.RunDiagnosed(context.Background(), t.TempDir(), nil, testTimeout, "add", "-A")
+	if err != nil {
+		t.Fatalf("RunDiagnosed err = %v", err)
+	}
+	if strings.TrimSpace(stdout) != "PAYLOAD" {
+		t.Errorf("stdout = %q, want the child's stdout alone", stdout)
+	}
+	if strings.TrimSpace(stderr) != "warning: could not open directory 'dir/': Permission denied" {
+		t.Errorf("stderr = %q, want the warning the zero exit carried", stderr)
+	}
+}
+
 // TestRunTo_StreamsPayloadUntruncated pins why the streaming sibling exists: a caller whose
 // payload IS the child's output — a blob read out of an object database — must not have it cut at
 // the capped path's ceiling, where the truncation would silently corrupt the bytes it writes.

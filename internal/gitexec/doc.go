@@ -25,11 +25,13 @@
 //     ([security.GitCommandConfigNameSource]), which the shell write view widens with
 //     core.hooksPath to name .git/config for a `git config` line that sets such a key.
 //
-// Four entry points, one funnel. [Capture] returns the captured outcome — exit code and output —
+// Five entry points, one funnel. [Capture] returns the captured outcome — exit code and output —
 // for a caller rendering what git printed to the model. [Run] and [Query] return the child's
 // stdout as DATA, with the diagnostics left out of the payload and every failure flattened to one
 // error. [RunTo] is Run with the payload streamed uncapped to the caller's writer, for output a
-// truncation would corrupt. All four take an env the caller appends — GIT_DIR, GIT_WORK_TREE,
+// truncation would corrupt. [RunDiagnosed] is Run that also hands back the child's stderr on a
+// zero exit, for a command whose warning is the only sign its answer is partial. All five take an
+// env the caller appends — GIT_DIR, GIT_WORK_TREE,
 // GIT_INDEX_FILE — which redirects the run to an object database of apogee's own without
 // weakening anything the hardening put there.
 //
