@@ -150,6 +150,10 @@ re-established or re-confirmed on resume:
 - **Sub-agent sessions stay ephemeral.** A child's effects live in the parent's conversation and
   transcript (which persist); the child `Session` itself is never a separate record.
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D5).** A Workflow item's conversation is saved in its workflow
+> folder under the session's Scratch dir, for `/workflows` inspection. It is still never a Session
+> record, and a plain `sub_agent` child stays ephemeral.
+
 **9. The in-TUI resume primitive is a live-restore method, not an Agent rebuild.**
 `(*Agent).RestoreSession` swaps a snapshot into the **live** Agent at a quiescent boundary, so
 tools, Mechanisms, and MCP wiring stand; `(*Agent).InExchange` reports whether a restored
@@ -569,3 +573,7 @@ snapshot, which never held a delegation in flight and holds no retained fold now
 > with. Decision 8 itself stands: a child's `Session` is still never a record, and the retained
 > entry is the parent's engine state, not the child's. The 2026-08-25 addendum's progress save and
 > its engine half are unchanged.
+
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D1–D2).** A cancel no longer rolls the Turn in flight back: it is
+> settled, its finished calls keeping their results, so the record written at idle holds that Turn
+> too. The retained set is no longer restored to its Turn-start value on a cancel.

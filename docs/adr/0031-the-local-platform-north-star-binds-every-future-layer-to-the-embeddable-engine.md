@@ -59,6 +59,10 @@ doors below must argue against this ADR explicitly (and supersede it if it wins)
    daemon is a thin main over a workflow library over the engine, exactly as the TUI is
    a thin renderer ([ADR 0011](0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md)).
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D10).** Invariant 4's thin workflow layer is being built: the
+> Workflow engine is a Driver-free library in its own engine package, re-exported through the root
+> facade so the bench drives it in-process.
+
 **Doors already held** (recorded, no new decision): the engine's `domain.Session`
 envelope is Driver-neutral and resumable
 ([ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md)), and

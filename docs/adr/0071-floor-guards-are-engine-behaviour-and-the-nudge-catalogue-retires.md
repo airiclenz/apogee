@@ -110,6 +110,11 @@ that licence — `stall_nudge`, `list_nudge`, `tool_use_directive`, `decompose`,
 `toolfilter`, `error_enrichment`, `syntax`, `autofix` — and their source, tests and assets are
 deleted, on the `grammar` precedent.
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).** A Workflow is not `guided_decomposition` returning. That row told
+> the model how to plan its own work and dispatched delegations it never asked for; a Workflow runs
+> only a fan-out the model asked for in one `fan_out` call, or a Recipe a human wrote, and the engine
+> plans nothing.
+
 What the amendment *bought*, though, was a graceful-degradation rule: a user's Validated entry
 naming a retired id sheds that id and still applies, rather than being skipped whole. That rule
 survives verbatim and is now load-bearing, because a retired row here is no longer guaranteed

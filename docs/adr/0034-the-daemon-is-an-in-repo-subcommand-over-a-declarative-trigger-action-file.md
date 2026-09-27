@@ -49,6 +49,10 @@ hand-edit. This is the door the north star's workflow layer enters through: ADR 
 made the scheduler runner-agnostic behind an injected seam, so an action type beyond
 "run a prompt" is a new seam implementation, not a scheduler change.
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D10).** The reserved `run: workflow:` key arrives as
+> `run: workflow: {recipe, inputs}`: an entry names a Recipe and the scope to run it over, and the
+> daemon starts that Workflow through the same engine library the TUI and headless `--recipe` use.
+
 ```yaml
 schedules:
   - name: nightly-audit

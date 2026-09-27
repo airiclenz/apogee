@@ -70,6 +70,11 @@ cancelled ctx (user stop) unblocks the human gate; the Step then rolls the Turn 
 quiescent boundary with `StatusCancelled` ([ADR 0007](0007-step-turn-and-the-quiescent-boundary.md)).
 This is the most race-prone piece of the seam and carries the heaviest test.
 
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D1).** The Step no longer rolls the cancelled
+> Turn back: it settles it — finished calls keep their results, the running and unstarted ones get
+> cancelled and not-run results — and the Exchange closes without an answer. The rendezvous above and the
+> worker ctx mechanics of C4 are unchanged.
+
 **C4 — Cancellation is the worker ctx's `CancelFunc`.** When the worker launches, the model
 stores the ctx's `CancelFunc`; the stop key calls it; the in-flight `Step` honours it at the
 next boundary and the worker returns `cancelledMsg`, leaving a resumable Session. This is the

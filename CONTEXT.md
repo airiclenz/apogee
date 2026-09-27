@@ -304,7 +304,8 @@ _Avoid_: "title" (that is the **Session**'s — a delegation has a name, and no 
 **Retained delegation**:
 A finished **Sub-agent** run the parent can pick up again with `sub_agent`'s `continue: "<name>"`,
 kept under its **Delegation name** for the rest of the **Session** — saved with it, restored on
-resume, dropped by `/clear`, cut by a fork and restored by a cancelled Turn's rollback. A run
+resume, dropped by `/clear` and cut by a fork; a cancel keeps it — what a finished or stopped child
+left stands ([ADR 0088](docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md) D2). A run
 completed normally is retained only when its call **named** it; a capped, faulted or **stopped**
 one is retained under any name it ended wearing. A continuation re-spawns a fresh child from the
 original task and the run's rounds of reports, never resuming the old one. Ratified 2026-09-25
@@ -321,8 +322,9 @@ back. The engine folds the child at the stop — no wrap-up Turn — and the non
 `[stopped by the user — engine summary follows]`; a pooled child stopped before it started runs
 and folds nothing, and returns `sub-agent not started: the user stopped it before it started;
 delegate again if the task is still needed`. A stopped run is a **Retained delegation** under its
-name. Its delegate-ledger outcome is `stopped`. It is distinct from **cancel**, which is
-`esc×2` ending and rolling back the whole Turn, and from **capped**, the engine ending a run at a
+name. Its delegate-ledger outcome is `stopped`. **Cancel** (`esc×2`) stops every running child
+the same way and settles the whole Turn instead of letting it go on
+([ADR 0088](docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md) D2); **capped** is the engine ending a run at a
 bound. Ratified 2026-09-25 (ADR 0086).
 _Avoid_: "stopped" for a run the engine capped (say **capped**), "kill", "abort".
 
@@ -371,7 +373,10 @@ re-issued by the engine: the bound exists so a coordinator cannot commit itself 
 it can read a result of before the group returns (the 2026-09-20 session it closes fanned 56 out at
 width 4, 35 never started, and lost the lot to one Esc), and the model is told the ceiling before
 its first call by the **Orientation block**'s `Delegation bounds:` line and the `max_steps`
-schema text. Ratified 2026-09-20 (ADR 0039, amended the same day).
+schema text. It binds `sub_agent` alone: a `fan_out` **Workflow** runs its items in waves of the
+width with no ceiling, since each item hands back a one-line **Receipt** rather than a full report,
+and when `fan_out` is enabled the refusal names it ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D7). Ratified 2026-09-20 (ADR 0039,
+amended the same day; amended 2026-09-27 by ADR 0087).
 _Avoid_: "fan-out cap" (the cap is the width; this is a count of rounds of it), "delegation
 limit" (says nothing about what is bounded — calls per reply, not per session).
 
@@ -459,6 +464,55 @@ so a resumed session opens at the top level. Ratified 2026-08-30
 ([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)).
 _Avoid_: "full screen" (the frame's other rows stay — only the transcript slot is taken),
 "expanded sub-agent" (the inline expanded shape is gone; a run has no fold state), "drill-down".
+
+**Workflow**:
+One engine-run orchestration of **Sub-agent** runs: an ordered list of **stages**, each covering a
+list of **items**, where every item is done by a fresh child **run** that hands back a **Receipt**
+while its detail goes to a file. The engine, never the parent, runs the stages — fanning out in
+waves, retrying, verifying and merging — and the parent reads back one line per item plus a report
+path, so the orchestration costs its context almost nothing. A workflow has two sources: the
+top-level model's `fan_out` call (one fan-out stage, optionally followed by a verify and a merge
+stage) and a human-written **Recipe** (any number of stages). The model asks for the fan-out; the
+engine never plans work on its behalf (the distinction from the retired **Guided decomposition**).
+A workflow lives in a folder under the session's **Scratch dir**, so it survives `esc`, a crash and
+a resume: cancel stops it and keeps every finished item, and asking again with the same task,
+items and inputs picks it up where it stopped. It runs **blocking** by default, or as a
+**Background workflow**. Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
+_Avoid_: "run" (one child's execution — a workflow is made of runs), "job", "batch" (a count of
+items per child, not the whole), "sweep", "pipeline".
+
+**Recipe**:
+A saved **Workflow** definition a human writes into a **Skill**'s header: a declarative list of
+named stages — fan-out, merge, pick (a helper's output becomes the next stage's items), verify,
+script, ask (a question to the user) and bounded repeat — with simple conditions on **Receipt**
+fields between them. Anything computed (splitting a repo into parts, renumbering claims) is a
+script stage, never a language feature. Invoking the skill starts a workflow from its recipe with
+only its declared inputs filled in (for `audit`: scope and focus) — the model never writes a multi-stage workflow itself.
+Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D6).
+_Avoid_: "workflow" for the definition (the workflow is one execution of a recipe), "plan" (a
+`docs/plans/` document), "script" (one stage kind).
+
+**Receipt**:
+The short, fixed-shape note a **Workflow** item's child hands back in place of its full report —
+a status (`ok | partial | blocked`), a one-line summary, and the typed fields the workflow asked
+for (a count, a verdict) — delivered by calling the `finish` tool only workflow children carry.
+The engine checks it on the spot and bounces a malformed one back to the child to fix; routing
+between stages reads receipts alone, never the detail files. Ratified 2026-09-27
+([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D3).
+_Avoid_: "result" (a `sub_agent` call's full prose report), "summary" (one field of the receipt),
+"report" (the detail file, or the workflow's final merge).
+
+**Background workflow**:
+A **Workflow** that runs while the conversation goes on — launched by the user (a **Recipe**'s
+skill run in the background) or by the top-level model through `fan_out`'s background switch,
+which model classes see only where the bench has shown it helps. It keeps one server slot free
+for the conversation; a second one on the same server waits in line. When it finishes, a one-line
+note reaches the parent — at the next pause between tool calls if a reply is under way, otherwise
+by apogee **waking** the agent with a reply of its own, bounded by the **Mode** as any reply is.
+Quitting apogee stops it; resuming the session resumes it. Ratified 2026-09-27
+([ADR 0089](docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md); [ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
+_Avoid_: "async delegation" (ADR 0086's rejected option A — a spawn/message/wait tool family),
+"detached run".
 
 **Inspector**:
 The **Driver**-side view of what the loop actually put on the **Upstream** connection — the request
@@ -751,9 +805,14 @@ scrapped instead (`Agent.AbortExchange`, the explicit throw-away `/clear` also t
 interjection leaves the next Submit opening user→user — the tail a faulted Exchange already
 leaves ([ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md)'s
 2026-09-19 note). The TUI's cancel and loop-error folds and a fresh message on a restored
-interrupted session settle; a cancel inside a delegation pool still rolls the whole parent Turn
-back first ([ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md)
-§5, Stage A of `apogee-2un`; a finer cut inside the pool is Stage B).
+interrupted session settle. A cancel never rewinds finished work: the Turn in flight is settled
+too — a finished call keeps its real result, a running one ends with a cancelled result, one that
+never started gets a not-run result — and a cancelled delegation pool keeps its finished children
+and stops each running one as `^x` would (**Stop (a delegation)**); only a Turn cancelled before
+its reply finished streaming is dropped ([ADR 0088](docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md) D1–D2, superseding
+[ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md)
+§5(b)). An Exchange usually opens on a user message, but may also open on the one-line finish note
+of a **Background workflow** that ended while the agent was idle — the **wake** ([ADR 0089](docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md) D3).
 
 **Step**:
 The bench/embedder primitive that advances the loop **one Turn** and returns at a
@@ -839,16 +898,17 @@ instructions (the first round's are the task) and its report, which for a capped
 and the closing text — keyed by that name, for the rest of the **Session**. The set rides the
 engine snapshot under an additive `retained` key (no schema bump; ADR 0022 D8 stands — the child's
 own Session is still never a record), so `--resume`, `--continue` and a live restore load it,
-`/clear` drops it, a fork keeps only the rounds spawned before its cut, and a Turn rolled back by
-cancel restores the set it began with; Compaction and `/undo` leave it alone. A **faulted**
+`/clear` drops it, a fork keeps only the rounds spawned before its cut, and a cancel keeps what
+its finished and stopped children left (ADR 0088 D2); Compaction and `/undo` leave it alone. A **faulted**
 delegation is retained the same way (2026-09-20, ADR 0082,
 `apogee-60x`): its Run ends abandoned with the parent's ctx still live, the engine writes the fold
 at the fault — no wrap-up Turn, the fold is the only model call, under one `stream-idle-timeout`
 of its own so the error result lands at most one idle window late; a child that completed no Turn
 is retained without a fold request, its fold the unavailable marker saying so, and a fold that
 fails retains the marker naming the cause — and its last narration stands as the closing text;
-the error result keeps its fault head and gains the continue line. A cancel still unwinds the
-whole delegation, and its Turn's rollback leaves retention as the Turn began. The fault that
+the error result keeps its fault head and gains the continue line. A cancel no longer unwinds the
+delegation: it stops a running child as `^x` does, so that child is retained like a stopped one
+(ADR 0088 D2). The fault that
 reaches retention is one the child's
 Turn has already ridden out to its **re-stream budget** — the same three re-sends under the
 doubling hold-off depth 0 gets, each idle window counted — so a retained faulted delegate is one
@@ -869,8 +929,8 @@ instructions]`; the name, roster and `output_path` are inherited wherever the ca
 unset (an inherited name is re-announced for the new run), and the same name replaces an earlier
 entry. A continuation takes its entry as it SPAWNS — a continue call
 refused on its own arguments (an invalid `run_on`, an unknown tool name) keeps it, so a corrected
-retry still finds it — and its run, whatever the outcome but a cancel, is appended as the next
-round and retained anew under the name that run ended wearing, still over the ORIGINAL task, so a
+retry still finds it — and its run, whatever its outcome (a cancel stops a running continuation as
+`^x` does, ADR 0088 D2), is appended as the next round and retained anew under the name that run ended wearing, still over the ORIGINAL task, so a
 later continuation composes over the rounds, never a fold of a fold. An unknown
 name is refused with an error result naming the retained names — the 16 most recently used, then
 `(and N more)` — (`[no delegate named "<name>" to
@@ -2420,7 +2480,10 @@ rather than earning an unknown-id failure, and the archived
   nudge that steered wording, not delegation. A model still delegates through the `sub_agent` tool
   on its own initiative — nothing prompts it to.
   [ADR 0014](docs/adr/0014-guided-decomposition-steers-the-primary-call-and-serializes-delegation.md)
-  stands as history and binds nothing shipped.
+  stands as history and binds nothing shipped. A **Workflow**
+  ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)) is not
+  its return: the model (one `fan_out` call) or a human (a **Recipe**) asks for the work, and the
+  engine plans nothing.
 - The rest of the nudge catalogue — `stall_nudge`, `list_nudge`, `tool_use_directive`, `filehint`,
   `read_loop`, `read_repeat`, `toolfilter`, `error_enrichment`, `syntax`, `autofix` → retired
   unshipped, their catalogue verdicts never having left `pending`. Two names survive elsewhere

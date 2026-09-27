@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; §5(b) superseded by ADR 0088
 ---
 
 # The sub-agent orchestrator is a dispatch recursion point; its live guard state is isolated, its dangerous floor shared read-only
@@ -113,6 +113,9 @@ for real delegation while making a runaway tower structurally impossible.
 > zero field as the default 1, never as "no delegation" — an embedder's untouched Config still
 > delegates once. "Three levels is ample" is retired with the constant.
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D9).** The bound is unchanged: workflow children do not delegate,
+> and a workflow's `verify` and `merge` stages are sibling stages the engine runs, never grandchildren.
+
 **5 — Stepping is top-level-only; a sub-agent runs atomically within the parent Turn.** The
 driver runs the nested `Agent` to its Exchange boundary in one shot
 ([broad plan #15](../plans/archived/implementation-plan-apogee-merge.md)). While it runs, the parent is
@@ -146,6 +149,14 @@ behind the same single-shot driver seam.
 > receives a non-error partial result opening `[stopped by the user — engine summary follows]` and
 > goes on, nothing rolled back. (a) and (c) are unchanged: no snapshot lands mid-child, and resume
 > stays coarse.
+
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D1–D2).** (b) is superseded: a cancel no longer rolls the parent
+> Turn back. The Turn in flight is settled — a finished call keeps its real result, a running call
+> gets a cancelled result, an unstarted one a not-run result — and in a delegation pool a finished
+> child keeps its report while a running child is stopped exactly as `^x` stops it (fold, partial
+> result, retention under its name). Every cancel sentence in the amendments below reads the
+> same way, the retained set included: it is no longer restored to its Turn-start value. (a) and
+> (c) stand: a child is still atomic to the snapshot, no longer to the cancel.
 
 ## Considered options
 

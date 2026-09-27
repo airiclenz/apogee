@@ -179,6 +179,10 @@ cancel during child 2 already discards child 1.
 > width line remains the account of what a group actually RAN at, which may differ per reply.
 > Implemented by `docs/plans/2026-09-20 - 00`.
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D7).** The ceiling above binds `sub_agent` alone. A `fan_out` call
+> runs its items in waves of the Parallel-agents width with no ceiling, because each item hands back
+> a one-line Receipt rather than a full report; when `fan_out` is enabled, the refusal names it.
+
 > **Amended 2026-09-20 (`apogee-60x`, [ADR 0082](0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).**
 > "Failures are independent: a child's error, breaker trip, or denied approval becomes that
 > child's tool result" — the independence stands (siblings run to completion, the parent's next
@@ -192,6 +196,12 @@ cancel during child 2 already discards child 1.
 > the denied approval in that sentence are tool results inside the child's own Turn, never a
 > fault of its Run, and are untouched; a refused call never spawned a child and is retained by
 > nothing.
+
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D2).** "Cancel is unchanged" and every "still rolls the whole
+> parent Turn back" in the notes above no longer hold: a cancelled pool keeps its finished
+> children's reports, stops each running child exactly as `^x` does (fold, non-error partial
+> result, retention under its name), and settles each queued one with the not-started result. The
+> retained set is not restored to its Turn-start value. This closes Stage B of `apogee-2un`.
 
 **5 — Child streams are identified by the spawning call-ID.** `EventBase` gains the ID of
 the `sub_agent` tool call that spawned the emitting agent, stamped at child construction

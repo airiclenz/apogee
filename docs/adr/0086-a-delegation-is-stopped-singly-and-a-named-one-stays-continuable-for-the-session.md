@@ -33,6 +33,11 @@ parts are both prerequisites of A if A is ever grilled: the parent may go back t
 delegation it ran this session, and the **human** may stop one delegation without stopping the Turn.
 The parent itself still cannot stop a running child — it is not running while the child is.
 
+> **Amended 2026-09-27 ([ADR 0089](0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md)).** "We keep the blocking model and do not build asynchronous
+> delegation" now binds `sub_agent` alone. A Workflow (ADR 0087) may run in the background while the
+> conversation goes on, and its end wakes the agent with a one-line note (ADR 0089 D1–D3); the
+> `workflow` tool lets the model check, stop or message it (D4).
+
 **D1 — A named delegation stays continuable for the whole session.** A delegation that completed
 normally is retained when the `sub_agent` call **named** it; naming is the parent's own opt-in, so
 no new text reaches the model and nothing changes for a model that never names. A name the
@@ -73,6 +78,11 @@ history treat it as follows:
 Restoring on rollback also closes two existing leaks: a pooled sibling that capped before the
 cancel stays retained after its result is rolled back, and a continuation cancelled after it spawned
 loses the entry it consumed.
+
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D2).** The table's cancel row no longer holds: a cancelled Turn is
+> settled, not rolled back, so the retained set is not restored to its Turn-start value. A finished
+> child's entry stands, a running child is stopped as D4 stops it and retained under its name, and
+> the two leaks above cannot arise. D1's "the rollback of the Turn that made it" reads the same way.
 
 **D4 — The human stops one delegation, and the Turn goes on.** A stop ends one child — and every
 child under it — with the parent's context still live. It is not a cancel: nothing is rolled back,

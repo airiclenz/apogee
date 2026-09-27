@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; the "cancellation rolls the whole Turn back" consequence superseded by ADR 0088
 ---
 
 # Step, Turn, and the quiescent boundary
@@ -46,6 +46,10 @@ stepped; a sub-agent runs to completion within its parent's Step. The driver is 
 **swappable** so nested stepping can drop in later, and the snapshot schema leaves room for a
 suspended sub-agent.
 
+> **Amended 2026-09-27 ([ADR 0089](0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md) D3).** An Exchange may open on an engine note as well as a user
+> message: when a Background workflow ends while the agent is idle, the Driver opens a new Exchange
+> on its one-line finish note (the wake).
+
 ## Consequences
 
 - The loop must be written so that *every* `Step()` return is at a serializable boundary —
@@ -89,3 +93,10 @@ here as the canonical home, mirrored in the TDD §6 status notes.)
   advancing the Turn counter, and keeps the user input — so the snapshot taken there resumes
   and **re-attempts** the Turn from serializable state rather than continuing from a partial
   one. A re-run write tool overwrites idempotently (ADR 0008).
+
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D1).** This consequence is superseded: a
+> cancelled Turn that issued tool calls is now settled, not rolled back — a finished call keeps its
+> real result, a running call gets a cancelled result and an unstarted one a not-run result, and the
+> Turn stays in the conversation. A Turn cancelled before its reply finished streaming issued nothing
+> that ran, so it is still dropped. The boundary guarantee stands: a cancel takes effect at the next
+> boundary, and the state left there is serializable.

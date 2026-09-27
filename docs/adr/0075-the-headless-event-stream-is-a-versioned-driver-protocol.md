@@ -195,6 +195,11 @@ ADR that first needs the bracket closed, rather than slipped in later as the add
 also is — and why the TUI is checked, as part of the same change, that a rolled-back delegation
 renders no spurious finished line.
 
+> **Amended 2026-09-27 ([ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D2).** A cancelled delegation is no longer one
+> the parent Turn rolls back: a child running under a cancel is stopped exactly as `^x` stops it and
+> its partial result committed, and only a child that never started ends with the not-run result.
+> The bracket rule stands — every cancelled group still emits its `finished` phase.
+
 **13. `--format` reaches headless only.** The flag is installed in `runHeadless` and nowhere else:
 the daemon composes its Firings through `firingConfig` and `runOnce` directly (`daemonfire.go`;
 amended 2026-09-15: through `raise`, the same act headless calls, with no `narrate` hook and so no
