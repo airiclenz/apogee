@@ -619,9 +619,9 @@ func (r *Request) AppendSupersededAssistant(text string, calls []ToolCall) {
 // SetMessageContent edits one message's content in place by index — tool-result
 // capping and history-collapse of older messages. An out-of-range index is a no-op.
 //
-// Rewriting the content invalidates any advice spans the message carried, so a ledger the
-// new content no longer reaches is dropped — the same guard Conversation.SetMessageContent
-// carries, kept identical so the two edit seams cannot drift.
+// Rewriting the content invalidates any advice spans the message carried, so a ledger whose
+// fence the new content no longer opens at its offset is dropped — the same guard
+// Conversation.SetMessageContent carries, kept identical so the two edit seams cannot drift.
 func (r *Request) SetMessageContent(index int, content string) {
 	if index < 0 || index >= len(r.messages) {
 		return
@@ -890,8 +890,8 @@ func (c *Conversation) AssistantBoundaries() []int {
 // index is a no-op.
 //
 // Rewriting the content invalidates any advice spans the message carried — the prune
-// replaces an old tool result with a much shorter stub through this method — so a ledger
-// the new content no longer reaches is dropped rather than left pointing past the end.
+// replaces an old tool result with a stub through this method — so a ledger whose fence the
+// new content no longer opens at its offset is dropped rather than left pointing at other bytes.
 func (c *Conversation) SetMessageContent(i int, content string) {
 	if i < 0 || i >= len(c.messages) {
 		return
@@ -903,23 +903,15 @@ func (c *Conversation) SetMessageContent(i int, content string) {
 
 // HasEngineNote reports whether some message still carries an engine note on topic — the latch a
 // caller that lands a note once per conversation (the step- and token-budget notices, internal/agent) reads
-// after a rewrite it did not make. A ledger row alone is not proof the note stands: dropStaleAdvice
-// clears a ledger only when the content no longer reaches its first span, so a prune stub LONGER
-// than a short noted body keeps the row while the fence it recorded is gone. The row counts only
-// while the content at its offset still opens with the header RenderEngineNote wrote — a stub never
-// does.
+// after a rewrite it did not make. A row counts only while its fence still stands at its offset
+// (Message.fenceStands): SetMessageContent already clears a ledger whose fence a rewrite lost
+// (dropStaleAdvice), and the same check here keeps a message committed with a stale row from
+// reading as noted.
 func (c *Conversation) HasEngineNote(topic string) bool {
-	header := "\n\n" + EngineNoteFencePrefix + topic + "]"
 	for i := range c.messages {
 		m := &c.messages[i]
-		if !m.hasEngineNote(topic) {
-			continue
-		}
 		for _, span := range m.Advice {
-			if span.Origin != OriginEngine || span.Topic != topic || span.Offset > len(m.Content) {
-				continue
-			}
-			if strings.HasPrefix(m.Content[span.Offset:], header) {
+			if span.Topic == topic && m.fenceStands(span) {
 				return true
 			}
 		}

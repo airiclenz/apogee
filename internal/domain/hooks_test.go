@@ -996,8 +996,8 @@ func TestConversationNoteMessage(t *testing.T) {
 // for the topic a tool message carries, false for another topic, false once SetMessageContent
 // shortened the message below the note's offset (the ledger went with the fence), and false once
 // it replaced the message with a body LONGER than the offset that spells no header — the prune
-// stub over a short noted body, where the ledger row survives dropStaleAdvice and only the header
-// check tells the note is gone.
+// stub over a short noted body, where the offset still falls inside the content but the fence no
+// longer stands there, so dropStaleAdvice clears the ledger all the same.
 func TestConversationHasEngineNote(t *testing.T) {
 	const topic = "step budget"
 	noted := Message{Role: RoleTool, Content: "ok", ToolCallID: "call-1"}.WithEngineNote(topic, "3 of 4 used")
@@ -1010,7 +1010,7 @@ func TestConversationHasEngineNote(t *testing.T) {
 	}
 	stub := "[pruned: 1 lines from read_file main.go — re-run the call if you need it]"
 	if len(stub) <= noted.Advice[0].Offset {
-		t.Fatalf("stub of %d bytes must exceed the note's offset %d for the ledger row to survive", len(stub), noted.Advice[0].Offset)
+		t.Fatalf("stub of %d bytes must exceed the note's offset %d so the offset alone cannot tell the fence is gone", len(stub), noted.Advice[0].Offset)
 	}
 
 	cases := []struct {
@@ -1035,8 +1035,8 @@ func TestConversationHasEngineNote(t *testing.T) {
 			if got := conv.HasEngineNote(tc.topic); got != tc.want {
 				t.Errorf("HasEngineNote(%q) = %v, want %v (content %q, ledger %+v)", tc.topic, got, tc.want, conv.At(2).Content, conv.At(2).Advice)
 			}
-			if tc.content == stub && len(conv.At(2).Advice) == 0 {
-				t.Errorf("the stub case lost its ledger row; the test needs the row to survive so the header check alone decides")
+			if tc.rewritten && len(conv.At(2).Advice) != 0 {
+				t.Errorf("ledger = %+v after the rewrite lost the fence, want it empty", conv.At(2).Advice)
 			}
 		})
 	}

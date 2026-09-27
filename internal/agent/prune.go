@@ -53,8 +53,8 @@ func (a *Agent) autoPrune(turn int) {
 	}
 	// The step- and token-budget notices' latches are each note's own presence, never the Turn
 	// (stepnotice.go): a stub that replaced a noted result took the note with it — silently, since
-	// the ledger row may outlive the fence — so the notice re-arms here exactly as it does after a
-	// fold that swallowed it, and the next result past its threshold is told again.
+	// the prune never looks at the ledger it retires — so the notice re-arms here exactly as it does
+	// after a fold that swallowed it, and the next result past its threshold is told again.
 	if a.stepNoticeLive && !a.conv.HasEngineNote(stepNoticeTopic) {
 		a.rearmStepNotice()
 	}

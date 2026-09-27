@@ -62,8 +62,8 @@ var tokenNoticeLine = mustPrompt("token-notice.txt")
 // note's own presence, not the Turn: a fold that swallowed the note clears it (rearmStepNotice,
 // foldFor) and the next result is told again, because the model no longer holds the line; a prune
 // whose stub replaced the noted result clears it the same way (autoPrune, which asks the
-// conversation whether the note still stands — Conversation.HasEngineNote — because the ledger
-// row can outlive the fence); a cancelled Turn's rollback clears it only when the dropped result
+// conversation whether the note still stands — Conversation.HasEngineNote, which counts a ledger
+// row only while its fence still opens at its offset); a cancelled Turn's rollback clears it only when the dropped result
 // is the one the note rode (rearmNotices), so a surviving note is never doubled.
 //
 // Silent at depth 0 — a top-level Agent has no cap, and the main loop is the human's to stop — and

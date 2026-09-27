@@ -347,7 +347,12 @@ NOTES (2026-09-27): consequential edit — internal/tui/runview_test.go: made ne
 **Acceptance:** `go test -race -count=1 ./internal/tui/`
 **Commit:** `fix(tui): an ask_user pane ignores enter until it is armed`
 
-## 20. Advice ledger re-verifies the fence before trusting an offset
+## 20. Advice ledger re-verifies the fence before trusting an offset — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): `HasEngineNote` is simplified to count a row only while `Message.fenceStands` holds. `fenceStands` is the check `dropStaleAdvice` and `recordContent` now share. The old hand-built header match is gone. `hooks.go` also rewords the doc comments on `Conversation.SetMessageContent` and `Request.SetMessageContent` from "no longer reaches" to "no longer opens its fence at its offset".
+NOTES (2026-09-27): consequential edit — internal/agent/stepnotice_test.go: `TestTokenNoticeIsToldAgainAfterAPruneStubbedIt` ("the noted result is stubbed") had the same ledger-survives assertion as its step twin. It and its doc comment are inverted like the step twin, because the plan's list of sites is a minimum.
+NOTES (2026-09-27): consequential edit — internal/agent/stepnotice.go: made necessary by the dropStaleAdvice fence check. The `stepBudgetNotice` doc comment said "the ledger row can outlive the fence".
+NOTES (2026-09-27): consequential edit — internal/agent/prune.go: made necessary by the dropStaleAdvice fence check. The `autoPrune` re-arm comment said "the ledger row may outlive the fence".
 
 **What:** Fixes the audit's Critical "Persisted session record can silently carry truncated, garbled bytes" (not in the owner's tackle list; placed first among the remaining items by severity).
 **Regression guard.** Invert both assertions that currently expect the ledger row to SURVIVE a rewrite that loses its fence: `internal/domain/hooks_test.go` (`TestConversationHasEngineNote`, "a longer body without the header", ~line 1026) and `internal/agent/stepnotice_test.go` (`TestStepNoticeIsToldAgainAfterAPruneStubbedIt`, "the noted result is stubbed") now expect the ledger EMPTY. Rewrite their doc comments (`hooks_test.go:995-1000`, `stepnotice_test.go:341-349`) and `HasEngineNote`'s own comment (`hooks.go:899-905`), all three of which currently document "the row survives `dropStaleAdvice`, only the header check tells the note is gone" as the shape this item deliberately reverses.

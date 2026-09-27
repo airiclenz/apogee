@@ -2,6 +2,7 @@ package domain
 
 import (
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -170,27 +171,50 @@ func (m Message) WithAdvice(span AdviceSpan, text string) Message {
 // recordContent is the Content a session record carries for m: everything before the first
 // advice fence, so a snapshot never persists advice and a resume has nothing to drop.
 //
-// It clamps rather than slices blindly. A message's Content can be rewritten shorter after it
-// was advised — the prune replaces an old tool result with a stub through
-// Conversation.SetMessageContent — and a span's Offset does not follow it. An Offset past the
-// end therefore means the fence is already gone: the content is written whole.
+// It slices only at a VERIFIED offset. A message's Content can be rewritten after it was
+// advised — the prune replaces an old tool result with a stub through
+// Conversation.SetMessageContent — and a span's Offset does not follow it: over a short noted
+// body ("ok") a longer stub still reaches the offset, and cutting there would persist a
+// truncated stub. The cut is made only while the content at the first span's offset still opens
+// with that span's fence (fenceStands); otherwise the fence is already gone and the content is
+// written whole.
 func (m Message) recordContent() string {
-	if len(m.Advice) == 0 {
+	if len(m.Advice) == 0 || !m.fenceStands(m.Advice[0]) {
 		return m.Content
 	}
-	offset := m.Advice[0].Offset
-	if offset < 0 || offset > len(m.Content) {
-		return m.Content
-	}
-	return m.Content[:offset]
+	return m.Content[:m.Advice[0].Offset]
 }
 
-// dropStaleAdvice clears the ledger when m's Content no longer reaches the first span's fence.
+// dropStaleAdvice clears the ledger when any span's fence no longer stands at its offset
+// (fenceStands) — the content fell short of the offset, or a rewrite put other bytes there.
 // Rewriting a message's content out from under its spans (the prune's stub) invalidates every
 // offset at once, so the whole ledger goes rather than a corrected subset: what the model saw
 // is no longer in the message to attribute.
 func (m *Message) dropStaleAdvice() {
-	if len(m.Advice) > 0 && m.Advice[0].Offset > len(m.Content) {
-		m.Advice = nil
+	for _, span := range m.Advice {
+		if !m.fenceStands(span) {
+			m.Advice = nil
+			return
+		}
 	}
+}
+
+// fenceStands reports whether m's Content still opens span's fence at span's Offset: the header
+// RenderEngineNote writes for an engine note (Topic set), the header RenderAdvice writes for
+// advice otherwise, each through the field that names the row. An offset outside the content
+// never stands.
+func (m Message) fenceStands(span AdviceSpan) bool {
+	if span.Offset < 0 || span.Offset > len(m.Content) {
+		return false
+	}
+	return strings.HasPrefix(m.Content[span.Offset:], spanFenceHeader(span))
+}
+
+// spanFenceHeader is the opening every rendered fence of span's kind starts with, up to the
+// field that names the row — the bytes fenceStands matches at the span's offset.
+func spanFenceHeader(span AdviceSpan) string {
+	if span.Topic != "" {
+		return "\n\n" + EngineNoteFencePrefix + span.Topic + "]"
+	}
+	return "\n\n" + AdviceFencePrefix + span.Reaction + " ("
 }

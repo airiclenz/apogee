@@ -306,3 +306,89 @@ func TestEngineNoteNeverReachesTheRecord(t *testing.T) {
 		t.Errorf("noted Message JSON = %s, want the unnoted bytes %s", data, plain)
 	}
 }
+
+// TestAdviceLedgerIsDroppedWhenARewriteLosesTheFence pins dropStaleAdvice's check: the ledger goes
+// whenever the content at some span's offset no longer opens that span's fence — not only when the
+// content falls short of the offset. A prune stub LONGER than a short advised body ("ok") still
+// reaches the offset, so the offset alone cannot tell; a rewrite that keeps every fence where it
+// was keeps the ledger.
+func TestAdviceLedgerIsDroppedWhenARewriteLosesTheFence(t *testing.T) {
+	t.Parallel()
+
+	const stub = "[pruned: 1 lines from read_file main.go — re-run the call if you need it]"
+	bare := Message{Role: RoleTool, Content: "ok", ToolCallID: "call-1"}
+	advised := bare.WithAdvice(AdviceSpan{Reaction: "lint", Origin: OriginUser, Moment: MomentPostToolResult, Turn: 2}, "two findings")
+	noted := bare.WithEngineNote("step budget", "3 of 4 used")
+	both := advised.WithEngineNote("step budget", "3 of 4 used")
+
+	cases := []struct {
+		name     string
+		msg      Message
+		content  string
+		wantKept bool
+	}{
+		{name: "advice under a longer stub", msg: advised, content: stub},
+		{name: "engine note under a longer stub", msg: noted, content: stub},
+		{name: "a later span's fence cut away", msg: both, content: advised.Content + "\n\n[engine — step"},
+		{name: "another reaction's header at the offset", msg: advised, content: "ok" + RenderAdvice(AdviceSpan{Reaction: "other", Origin: OriginUser}, "x")},
+		{name: "every fence kept in place", msg: both, content: both.Content + " (appended)", wantKept: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.msg
+			m.Content = tc.content
+			m.dropStaleAdvice()
+
+			if kept := len(m.Advice) != 0; kept != tc.wantKept {
+				t.Errorf("ledger = %+v over content %q, want kept=%v", m.Advice, m.Content, tc.wantKept)
+			}
+		})
+	}
+}
+
+// TestRecordContentNeverSlicesAtAnUnverifiedOffset pins the strip's own guard: recordContent cuts
+// at the first span's offset only while that span's fence still opens there, so a message whose
+// content was rewritten under a stale ledger is written whole — never a slice of the new bytes —
+// and the "ok" result a prune later stubs persists the stub whole through the one encoder every
+// session record crosses.
+func TestRecordContentNeverSlicesAtAnUnverifiedOffset(t *testing.T) {
+	t.Parallel()
+
+	const stub = "[pruned: 1 lines from read_file main.go — re-run the call if you need it]"
+	noted := Message{Role: RoleTool, Content: "ok", ToolCallID: "call-1"}.WithEngineNote("step budget", "3 of 4 used")
+
+	t.Run("a stale ledger on the message itself", func(t *testing.T) {
+		stale := noted
+		stale.Content = stub // bypasses SetMessageContent, so the ledger row is left standing
+		if got := stale.recordContent(); got != stub {
+			t.Errorf("recordContent = %q, want the rewritten content whole %q", got, stub)
+		}
+
+		negative := noted
+		negative.Advice = []AdviceSpan{{Origin: OriginEngine, Offset: -1, Topic: "step budget"}}
+		if got := negative.recordContent(); got != noted.Content {
+			t.Errorf("recordContent at a negative offset = %q, want the content whole", got)
+		}
+	})
+
+	t.Run("the prune stub over an ok result", func(t *testing.T) {
+		conv := NewConversation([]Message{
+			{Role: RoleUser, Content: "do it"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Tool: "read_file"}}},
+			noted,
+		})
+		conv.SetMessageContent(2, stub)
+
+		data, err := json.Marshal(conv)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		want, err := json.Marshal(stub)
+		if err != nil {
+			t.Fatalf("Marshal stub: %v", err)
+		}
+		if !strings.Contains(string(data), `"content":`+string(want)) {
+			t.Errorf("pruned message JSON = %s, want the stub written whole", data)
+		}
+	})
+}

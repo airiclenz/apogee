@@ -340,11 +340,10 @@ func stepNoticePruneConfig(sink domain.EventSink) domain.Config {
 
 // A prune that stubs the noted result swallows the note as a fold does, and the next tool result
 // is told again. The noted body here is a few bytes — SHORTER than the stub that replaces it — on
-// purpose: dropStaleAdvice clears a ledger only when the new content no longer reaches the note's
-// offset, so over a short body the stub keeps the ledger row, and only the header check behind
-// Conversation.HasEngineNote tells the engine the note is gone. The control case prunes an old
-// result while the noted one stays inside the kept window: the latch stands and the next result
-// carries no second copy.
+// purpose: the stub still reaches the note's offset, so only the fence check dropStaleAdvice makes
+// at that offset tells the note is gone; it clears the ledger, and Conversation.HasEngineNote
+// reads the latch as released. The control case prunes an old result while the noted one stays
+// inside the kept window: the latch stands and the next result carries no second copy.
 func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 	t.Run("the noted result is stubbed", func(t *testing.T) {
 		sink := &recordingSink{}
@@ -364,10 +363,10 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 			t.Fatalf("the noted result = %q after the prune, want it stubbed", results[0])
 		}
 		if len(results[0]) <= len("one") {
-			t.Fatalf("stub %q is not longer than the noted body; the test needs the ledger row to survive dropStaleAdvice", results[0])
+			t.Fatalf("stub %q is not longer than the noted body; the test needs the stub to reach the note's offset", results[0])
 		}
-		if len(a.conv.At(1).Advice) == 0 {
-			t.Fatal("the stub dropped the ledger row; the test needs the row to survive so the header check alone re-arms")
+		if spans := a.conv.At(1).Advice; len(spans) != 0 {
+			t.Fatalf("ledger = %+v after the stub replaced the fence, want it empty", spans)
 		}
 		if a.stepNoticeLive {
 			t.Fatal("stepNoticeLive still true after the prune stubbed the noted result, want the latch cleared")
@@ -620,8 +619,9 @@ func TestTokenNoticeIsToldAgainAfterAFoldSwallowedIt(t *testing.T) {
 }
 
 // A prune that stubs the noted result swallows the token note as a fold does, and the next tool
-// result is told again — over a short noted body, where only Conversation.HasEngineNote's header
-// check can tell the engine the note is gone (see the step twin above). The control case keeps
+// result is told again — over a short noted body, where the stub still reaches the note's offset
+// and only the fence check dropStaleAdvice makes there clears the ledger (see the step twin
+// above). The control case keeps
 // the noted result inside the window: the latch stands and no second copy lands.
 func TestTokenNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 	t.Run("the noted result is stubbed", func(t *testing.T) {
@@ -636,8 +636,8 @@ func TestTokenNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		if !strings.HasPrefix(results[0], "[pruned:") {
 			t.Fatalf("the noted result = %q after the prune, want it stubbed", results[0])
 		}
-		if len(a.conv.At(1).Advice) == 0 {
-			t.Fatal("the stub dropped the ledger row; the test needs the row to survive so the header check alone re-arms")
+		if spans := a.conv.At(1).Advice; len(spans) != 0 {
+			t.Fatalf("ledger = %+v after the stub replaced the fence, want it empty", spans)
 		}
 		if a.tokenNoticeLive {
 			t.Fatal("tokenNoticeLive still true after the prune stubbed the noted result, want the latch cleared")
