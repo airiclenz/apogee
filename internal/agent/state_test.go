@@ -325,6 +325,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 		PendingInput:  &domain.UserInput{Text: "queued"},
 		Tasks:         []tasklist.Item{{Text: "the model's own checklist"}},
 		Retained:      []retainedEntryJSON{{Name: "Survey", Bound: "steps", Rounds: []retainedRoundJSON{{Report: "r", Bound: "steps"}}}},
+		Workflows:     []workflowEntryJSON{{ID: "20260927-120000-audit", Recipe: "audit"}},
 	})
 	if err != nil {
 		t.Fatalf("marshal agentState: %v", err)
@@ -333,7 +334,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 	if err := json.Unmarshal(raw, &keyed); err != nil {
 		t.Fatalf("unmarshal encoded state to keys: %v", err)
 	}
-	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput", "tasks", "retained"} {
+	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput", "tasks", "retained", "workflows"} {
 		if _, ok := keyed[key]; !ok {
 			t.Errorf("encoded session state missing key %q (the schema is version-gated and must stay byte-compatible)", key)
 		}
@@ -1214,4 +1215,80 @@ func TestRestore_KeepsProseThatMerelyMentionsTheWords(t *testing.T) {
 		{Role: domain.RoleAssistant, Content: "The engine renders advice spans, and the [engine — topic] " +
 			"fence shown mid-line here is prose about it, not furniture.\nWorkspace context: AGENTS.md is loaded."},
 	})
+}
+
+// TestRestoreState_RefusesAWorkflowEntryOutsideTheStore pins the `workflows` key's decode check
+// (checkRestoredWorkflows): an entry is identifiers only, and an id that could name anything but a
+// folder directly under `<scratch>/workflows/` — or a recipe id that is not a single name — refuses
+// the whole payload, where a well-formed entry is loaded for ResumeWorkflows and nothing starts.
+func TestRestoreState_RefusesAWorkflowEntryOutsideTheStore(t *testing.T) {
+	t.Parallel()
+
+	const valid = "20260927-120000-audit"
+	for _, tc := range []struct {
+		name    string
+		entries []workflowEntryJSON
+		refused bool
+	}{
+		{"a climbing id", []workflowEntryJSON{{ID: "../escape"}}, true},
+		{"a nested id", []workflowEntryJSON{{ID: "a/b"}}, true},
+		{"an absolute id", []workflowEntryJSON{{ID: "/tmp/x"}}, true},
+		{"an empty id", []workflowEntryJSON{{ID: ""}}, true},
+		{"an upper-case id", []workflowEntryJSON{{ID: "20260927-120000-Audit"}}, true},
+		{"a repeated id", []workflowEntryJSON{{ID: valid}, {ID: valid}}, true},
+		{"a climbing recipe", []workflowEntryJSON{{ID: valid, Recipe: "../audit"}}, true},
+		{"a recipe with a newline", []workflowEntryJSON{{ID: valid, Recipe: "audit\nx"}}, true},
+		{"a well-formed entry", []workflowEntryJSON{{ID: valid, Recipe: "audit"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := newSnapshotAgent(t)
+			snap := cutFixtureSession(t, agentState{Conversation: domain.NewConversation(nil), Workflows: tc.entries})
+
+			err := a.RestoreSession(snap)
+
+			if tc.refused {
+				if !errors.Is(err, ErrSnapshotRefused) {
+					t.Errorf("RestoreSession error = %v, want ErrSnapshotRefused", err)
+				}
+				if got := a.background.entries(); len(got) != 0 {
+					t.Errorf("a refused restore loaded %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RestoreSession: %v", err)
+			}
+			if got := a.background.entries(); !reflect.DeepEqual(got, tc.entries) {
+				t.Errorf("loaded entries = %+v, want %+v", got, tc.entries)
+			}
+			if a.background.isLive(valid) {
+				t.Error("a restore started a workflow; only ResumeWorkflows may")
+			}
+		})
+	}
+}
+
+// TestCutSessionCarriesNoWorkflows pins that a fork leaves the background workflows with the
+// session that launched them: the cut payload has no `workflows` key at all.
+func TestCutSessionCarriesNoWorkflows(t *testing.T) {
+	t.Parallel()
+
+	snap := cutFixtureSession(t, agentState{
+		Conversation: domain.NewConversation(threeExchanges()),
+		Workflows:    []workflowEntryJSON{{ID: "20260927-120000-audit", Recipe: "audit"}},
+	})
+
+	cut, err := CutSession(snap, 1)
+	if err != nil {
+		t.Fatalf("CutSession: %v", err)
+	}
+
+	var keyed map[string]json.RawMessage
+	if err := json.Unmarshal(cut.State, &keyed); err != nil {
+		t.Fatalf("decode the cut state: %v", err)
+	}
+	if raw, ok := keyed["workflows"]; ok {
+		t.Errorf("the cut state carries workflows = %s, want no key", raw)
+	}
 }

@@ -300,12 +300,24 @@ type queuedApprover struct {
 	cache *approvalCache // the Session's allow-for-session memory, shared by the whole agent tree
 }
 
+// Approve takes the prompt slot, re-checks the Session's memory on the far side of the wait, and
+// asks the inner Approver.
+//
+// A gate a BACKGROUND workflow's child or script stage reaches (ADR 0089) takes neither slot: its
+// context carries the manager's scope (withBackgroundPrompts, background.go), and the request waits
+// in that manager's queue until the Driver takes it up, so it can never land on the prompt the
+// conversation is showing. The memory is consulted and written for it all the same.
 func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
-	slot := domain.PromptSlotFor(ctx, q.slot)
-	if err := slot.Acquire(ctx); err != nil {
-		return domain.ApprovalDeny, err
+	ask := q.inner.Approve
+	if scope, background := backgroundPromptsFrom(ctx); background {
+		ask = scope.approve
+	} else {
+		slot := domain.PromptSlotFor(ctx, q.slot)
+		if err := slot.Acquire(ctx); err != nil {
+			return domain.ApprovalDeny, err
+		}
+		defer slot.Release()
 	}
-	defer slot.Release()
 
 	// The TWIN: a request that was queued behind the very prompt whose answer allowed its key.
 	// Its caller checked the memory before queueing, when the key was not yet allowed, so without
@@ -317,7 +329,7 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 		return domain.ApprovalAllowForSession, nil
 	}
 
-	decision, err := q.inner.Approve(ctx, req)
+	decision, err := ask(ctx, req)
 	// Only an ANSWERED allow-for-session is remembered: an errored call is not a decision (the
 	// caller discards the verdict with it), and an empty key is a request whose answer may never be
 	// remembered at all — a forced gate, which authorises its own call and nothing later.

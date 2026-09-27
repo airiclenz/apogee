@@ -9,7 +9,8 @@ package agent
 // else, a skill without a recipe, a delegate's task and an interjection attach the body as before
 // (an interjection that would launch one is refused instead). StartRecipe is the same launch for a
 // Driver that holds a recipe id rather than a typed line: it binds the inputs first, asking the
-// user for a missing required one, and submits the launch.
+// user for a missing required one, and submits the launch — or, for a background launch, hands the
+// recipe to the background workflow manager (background.go) and submits nothing.
 //
 // The catalog reaches the loop through workflow.RecipeSource, read off Config.Skills, so the loop
 // never imports internal/skills (ADR 0010). runRecipe is the core both launches share and
@@ -80,8 +81,6 @@ var (
 	// errRecipeInterjection refuses an interjection that would launch a recipe: a Workflow opens an
 	// Exchange of its own and cannot run inside one already open.
 	errRecipeInterjection = errors.New("apogee: a recipe cannot start inside a running Exchange; send it once the agent is idle")
-	// errBackgroundRecipe refuses a background launch: this build runs recipes in the foreground only.
-	errBackgroundRecipe = errors.New("apogee: background workflows are not available yet")
 	// errNoRecipes is a launch on an Agent whose skill resolver serves no recipes.
 	errNoRecipes = errors.New("apogee: no recipes are configured")
 )
@@ -108,16 +107,20 @@ type RecipeLaunch struct {
 // launch.Text — asking the user through Config.Asker for a required input the text left unbound,
 // and failing with `missing input: <name>` when there is no one to ask — and submits the launch:
 // the Exchange it opens runs the workflow on its first Step and hands the model the user's line
-// plus the result lines. The id it returns names a background workflow and is empty for a
-// foreground launch. It fails on an unknown or recipe-less id (listing the recipes), an input
-// error, a background launch (not available yet), and anything Submit refuses.
+// plus the result lines. It fails on an unknown or recipe-less id (listing the recipes), an input
+// error, and anything Submit refuses.
+//
+// A Background launch submits nothing: the recipe runs as a background workflow (background.go,
+// ADR 0089) and the id it returns names it — the id is empty for a foreground launch. Its inputs
+// are bound from the text alone, and a required one the text leaves unbound is refused as
+// `missing input: <name>` rather than asked, since the conversation may be busy.
 func (a *Agent) StartRecipe(ctx context.Context, launch RecipeLaunch) (string, error) {
-	if launch.Background {
-		return "", errBackgroundRecipe
-	}
 	recipe, err := a.recipeByID(launch.SkillID)
 	if err != nil {
 		return "", err
+	}
+	if launch.Background {
+		return a.startBackgroundRecipe(recipe, launch.Text)
 	}
 	inputs, err := a.bindRecipeInputs(ctx, recipe, launch.Text)
 	if err != nil {

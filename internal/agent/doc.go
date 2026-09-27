@@ -89,7 +89,11 @@
 // under a cancel, with how many finished and the listing written so far (ADR 0088 D3). recipe.go is
 // the recipe launch: a leading "/<recipe>" or StartRecipe binds a Recipe's inputs and runs it as a
 // Workflow on the opening Step, its script stages through the terminal's own Resolution, and the
-// opening message carries the user's line plus the result lines (ADR 0087 D6).
+// opening message carries the user's line plus the result lines (ADR 0087 D6). background.go is
+// the background workflow manager (ADR 0089): the Workflows that run outside any Turn at the
+// server's width minus one, one per server at a time with the rest queued, their gates and
+// questions waiting in its queue, stopped by StopWorkflow and Close, and carried across a session
+// snapshot as identifiers that ResumeWorkflows starts again.
 // approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.

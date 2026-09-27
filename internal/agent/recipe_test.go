@@ -261,7 +261,7 @@ func TestRecipe_StartRecipeRefusals(t *testing.T) {
 		{"unknown id lists the recipes", RecipeLaunch{SkillID: "nope"}, `"nope" is not a recipe; the recipes are: review`},
 		{"missing input with no asker", RecipeLaunch{SkillID: "review"}, "missing input: scope"},
 		{"unknown key", RecipeLaunch{SkillID: "review", Text: "depth=2"}, "depth"},
-		{"background", RecipeLaunch{SkillID: "review", Text: "src", Background: true}, errBackgroundRecipe.Error()},
+		{"background missing input", RecipeLaunch{SkillID: "review", Background: true}, "missing input: scope"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

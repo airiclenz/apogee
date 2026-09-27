@@ -707,9 +707,23 @@ NOTES (2026-09-27): SKILL.md gains one body paragraph naming `{{SKILL_DIR}}/prom
 **Acceptance:** `go test -race -count=1 ./internal/skills/ && ! grep -rn "\.claude" internal/skills/shipped/audit/`
 **Commit:** `feat(skills): the audit recipe's stage prompts`
 
-## 25. Background workflow manager
+## 25. Background workflow manager — ✅ DONE (2026-09-27)
 
 NOTES (2026-09-27): resume re-asks. Item 10 (7235dbbd) skips only finished fan-out items on resume: `prepareItems` (runner.go) reads each item's stored receipt through `Store.ReadReceipt`, but `openStatus` resets every stage to pending and `runRound` sends script and ask stages to `runScript` and `runAsk` (stages.go), which look up nothing stored and run fresh. A resumed recipe therefore re-runs its scripts and asks the user its questions again. Weigh this here: either persist ask answers and script results and replay them on resume, or accept the re-ask and document it.
+
+NOTES (2026-09-27): re-derived from the assumption that the background approval queue fits in background.go. Every approval goes through `queuedApprover.Approve` (internal/agent/construct.go), so the background branch sits there. It keys on a context value that background.go sets (`withBackgroundPrompts`), and the allow-for-session memory still applies to it.
+
+NOTES (2026-09-27): re-derived from item 20's NOTES, which leave `StartRecipe{Background: true}` to item 25. internal/agent/recipe.go now sends a background launch to the manager, and `errBackgroundRecipe` is gone. The background case in internal/agent/recipe_test.go's refusal table is now the `missing input: scope` refusal. A background launch binds inputs from the text alone and refuses a missing required input instead of asking (item 29's guard).
+
+NOTES (2026-09-27): a snapshot `workflows` entry is `{"id", "recipe"}`, identifiers only. The recipe skill id is needed on resume to find the recipe's prompt files and script staging again, and the plan is read back from the folder's plan.json. The decode check (`checkRestoredWorkflows`, called from `checkRestoredStructure`) is shape-only: one folder name in the store's alphabet, no repeats, and a recipe id that is a single name, otherwise `ErrSnapshotRefused`. decodeState does not know the scratch dir, so `ResumeWorkflows` resolves the folder under the live `<scratch>/workflows/` through `Store.Dir`/`ReadPlan`.
+
+NOTES (2026-09-27): the workflow folder is opened when the workflow is launched, not when it starts (`openWorkflowFolder` repeats Runner.Run's expand → PlanHash → Find-or-Create). That way a queued workflow already has the id and status path it is listed and stopped by, and the Run that follows reopens the same folder. The snapshot round-trip test pins that it is the same folder.
+
+NOTES (2026-09-27): per the DECISION, resume re-asks: script stages run again and ask stages ask again, and neither is persisted or replayed. This is documented in the background.go file comment and in `ResumeWorkflows`'s doc comment.
+
+NOTES (2026-09-27): the queue of background approvals and asks has only unexported accessors so far (`waiting`, `answer`). Item 30 adds the Driver-facing calls. Until then, a background gate or ask waits until its workflow is stopped. `StopWorkflow` returns without waiting for the stop to finish; `Close` (top-level Agent only) and `RestoreSession` do wait. `WorkflowInfo` has no alias in apogee.go, which is outside this item's files.
+
+NOTES (2026-09-27): "sharing the slot on a width-1 server" needs no code of its own. The background width is `max(delegationCap−1, 1)`, and the server queues the conversation's requests and the children's requests on its one slot.
 
 **What:** Depends on items 15, 20.
 **Goal:** `internal/agent` runs background workflows outside any Turn: at `ParallelAgents − 1` width (min 1, sharing the slot on a width-1 server), one at a time per server with the rest queued, listed by `Agent.Workflows()`, stopped by `Agent.StopWorkflow(id)` (keeping finished items), all stopped by `Close`; the running set is saved as an additive `workflows` snapshot key and resumed on restore.

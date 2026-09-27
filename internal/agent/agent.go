@@ -415,6 +415,12 @@ type Agent struct {
 	// by a fork (CutSession), and put back as its Exchange opened by an abort (exchangeAborted). A
 	// cancelled Turn leaves it standing: the cancel settles the delegations, it never drops them.
 	retained retainedDelegates
+	// background is the set of Workflows THIS Agent runs outside any Turn (background.go, ADR
+	// 0089): the live ones — running, or queued behind another on their server — the snapshot's set
+	// a restore loaded for ResumeWorkflows, and the approvals and questions they wait on. It rides
+	// the session snapshot as identifiers (the `workflows` key); Close stops it on the top-level
+	// Agent only, and RestoreSession stops the outgoing session's before the incoming one resumes.
+	background backgroundManager
 	// delegations is the ledger of every delegation THIS Agent spawned in its current Exchange —
 	// spawn order, outcome, cause and resolved output target (children.go, apogee-clb): what the
 	// `[engine — delegations]` note buildRequest stamps on the request tail is rendered from, once
@@ -749,7 +755,15 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // sockets, so a later request dials again. The other live resources of a running session belong
 // to the host that wired them rather than to this call: cmd/apogee closes the MCP connections
 // alongside it, and the log sink is torn down by the TUI that opened it (internal/tui).
+//
+// The background workflows are the other live resource it ends (ADR 0089 D5, background.go): on
+// the top-level Agent only — the closeConsoles rule — so a finishing delegate's deferred Close
+// never reaches them. Each is stopped with its finished items kept, and Close waits for them to
+// end; a resumed session starts them again from their folders (ResumeWorkflows).
 func (a *Agent) Close() error {
+	if !a.isDelegate() {
+		a.stopAllBackground()
+	}
 	a.closeConsoles()
 	return a.closeOwnedUpstream(a.upstream)
 }
@@ -1836,6 +1850,11 @@ func (a *Agent) ClearContext() error {
 // session speaks from the CURRENT files, not the ones its snapshot was taken under. A REFUSED
 // restore (mid-Exchange, or a corrupt/future-version snapshot) leaves the cache untouched
 // along with the conversation.
+//
+// The outgoing session's background workflows are stopped too, after the swap and before the call
+// returns (their finished items kept in the outgoing session's folders), and the incoming
+// snapshot's set is only loaded: the Driver starts it with ResumeWorkflows once it has moved the
+// scratch directory to the incoming session. A REFUSED restore leaves them running.
 func (a *Agent) RestoreSession(snap domain.Session) error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
@@ -1843,6 +1862,7 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 	if err := a.restoreSnapshot(snap); err != nil {
 		return err
 	}
+	a.stopAllBackground()
 	a.consoles.CloseAll()
 	a.usage = usageTally{}
 	a.reloadContextFiles()

@@ -47,6 +47,12 @@ import (
 //     the delegations its conversation named, and a fork can cut away the rounds spawned after its
 //     cut (CutSession). Additive exactly as tasks is: omitempty, no SessionVersion bump, and a
 //     snapshot written before it existed restores with nothing retained.
+//   - workflows    : the background workflows running or queued (ADR 0089 D5, background.go) —
+//     each one's folder id under `<scratch>/workflows/` and the recipe it comes from, identifiers
+//     only — so a resumed session starts them again from their folders (ResumeWorkflows, which the
+//     Driver calls; a restore only loads and checks the set). Additive exactly as tasks is:
+//     omitempty, no SessionVersion bump. A fork carries none (CutSession): the fork is a new
+//     conversation, and the workflows belong to the session that launched them.
 //
 // The per-message Interjected marker rides the conversation's own marshal as an omitempty
 // sibling, so it needs NO SessionVersion bump in either direction: a snapshot written before
@@ -90,6 +96,7 @@ type agentState struct {
 	PendingInput  *domain.UserInput    `json:"pendingInput,omitempty"`
 	Tasks         []tasklist.Item      `json:"tasks,omitempty"`
 	Retained      []retainedEntryJSON  `json:"retained,omitempty"`
+	Workflows     []workflowEntryJSON  `json:"workflows,omitempty"`
 }
 
 // retainedEntryJSON is one retained delegation (retainedDelegate) as the session snapshot spells
@@ -198,6 +205,7 @@ func (a *Agent) encodeState() (json.RawMessage, error) {
 		PendingInput:  turns.pendingInput,
 		Tasks:         a.tasks.Items(),
 		Retained:      retainedToJSON(a.retained.entries()),
+		Workflows:     a.background.entries(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apogee: encode session state: %w", err)
@@ -274,6 +282,11 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	// Exchange-start copies a rollback or an abort restores are reset to the loaded set with it, so a
 	// session restored mid-Exchange and then aborted keeps what it loaded.
 	a.retained.load(retainedFromJSON(st.Retained))
+	// The background workflows are LOADED, never started (background.go): a Resume has not re-supplied
+	// the scratch directory, catalog and tools yet, so ResumeWorkflows — the Driver's call once the
+	// engine is bound — starts them. The snapshot's set replaces whatever the outgoing session had
+	// loaded and not resumed; RestoreSession stops the outgoing session's running ones.
+	a.background.load(st.Workflows)
 	return nil
 }
 
@@ -418,8 +431,9 @@ func messageBytes(m domain.Message) int {
 // with the history (ADR 0086 D3): a round whose spawning sub_agent result the cut drops goes, and
 // an entry left with no round goes whole (cutRetainedRounds). Either way the result is
 // normalised to a clean boundary: the deferred-correction queue is cleared, no Exchange is open
-// (InExchange false, ExchangeStart 0), no input is pending, and the task list is empty — a fork at
-// the newest prompt clears the checklist exactly like a fork at an earlier one. The Turn counter
+// (InExchange false, ExchangeStart 0), no input is pending, the task list is empty — a fork at
+// the newest prompt clears the checklist exactly like a fork at an earlier one — and no background
+// workflow rides along (no `workflows` key): they belong to the session that launched them. The Turn counter
 // carries over, so the child's Turn numbering continues the parent's.
 //
 // A negative dropExchanges, or one that would drop every opening, is refused with an error naming
@@ -533,6 +547,10 @@ func dropLeadingSystem(conv *domain.Conversation) int {
 // is about to become is held to. Its FileRefs are not checked here: decodeState is Agent-less and
 // workspace-blind, and an escaping ref is already fenced by security.SafeOpen when readFileRef
 // opens it (loop.go).
+//
+// The background workflow entries are identifiers, never text the model reads, so they are held to
+// their shape instead (checkRestoredWorkflows): an id that could name a folder outside
+// `<scratch>/workflows/` refuses the payload.
 func checkRestoredStructure(st *agentState) error {
 	if st.Conversation != nil {
 		var bad error
@@ -561,6 +579,9 @@ func checkRestoredStructure(st *agentState) error {
 		}
 	}
 	if err := checkRestoredRetained(st.Retained); err != nil {
+		return err
+	}
+	if err := checkRestoredWorkflows(st.Workflows); err != nil {
 		return err
 	}
 	if st.PendingInput != nil {
