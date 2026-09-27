@@ -23,5 +23,8 @@
 // items.go is Expand, Item and SplitBudget: a fanout's items from a literal list, a `files:` glob
 // (`**` included), a file's non-blank `lines:`, or a `split:` directory cut into contiguous parts
 // sized to a child's context window, batched N per child.
+// store.go is Store, ItemKey and PlanHash: one workflow's folder under `<scratch>/workflows/` —
+// plan.json, status.json, items/<key>/ with receipt and transcript, stage outputs — written
+// atomically, its items keyed by content so a re-issue found by PlanHash skips finished work.
 // And doc.go this map.
 package workflow

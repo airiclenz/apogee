@@ -252,7 +252,13 @@ NOTES (2026-09-27): only `split:` reads the budget, so a budget ≤ 0 is an erro
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): item sources and context-sized splits`
 
-## 7. Workflow folder store
+## 7. Workflow folder store — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the status.json type is named `RunStatus` (with `StageStatus` and `ItemStatus`), because `Status` is already the receipt-status type in plan.go. Workflows, stages and items share one `Phase` enum: pending, running, done, skipped, failed, stopped. Receipts sit inline on `ItemStatus`, and receipt.json is written too.
+
+NOTES (2026-09-27): these calls are made here because nothing else settles them. `NewStore(scratchDir)` refuses an empty or relative dir and roots the store at `<scratchDir>/workflows`; that dir is made on the first Create. `ItemKey(brief, item, contextFiles, fsys)` hashes labelled, length-prefixed fields: the brief, the item's label and units, and each context file's cleaned workspace path and contents, in the order given. An unreadable context file is an error. `PlanHash(plan, inputs, items)` hashes the JSON of {plan, inputs, items}; encoding/json sorts map keys. `Find` returns the newest match by Created, with the id breaking ties, and skips folders whose status.json is missing or unreadable.
+
+NOTES (2026-09-27): these store methods are beyond the goal's literal list: `Dir`, `ReadPlan`, `Read/WriteStatus`, `Read/WriteReceipt`, `WriteTranscript([]domain.Message)`, `Path` and `WriteFile`. `WriteTranscript` writes default-JSON JSONL, because domain.Message has no json tags. `Path` returns a validated path for a stage output and makes its parent dirs. An id must match the minted shape (timestamp, then [a-z0-9-]). A key must be 64 lower-case hex characters. An output name must pass filepath.IsLocal and contain no backslash.
 
 **What:** Depends on item 4.
 **Goal:** `workflow.Store` rooted at `<scratch>/workflows/` creates `<id>/` (id `YYYYMMDD-HHMMSS-<slug>`) holding `plan.json`, `status.json`, `items/<key>/{receipt.json,transcript.jsonl}` and the stage outputs; the item key is a SHA-256 of the rendered brief, the item and the contents of every context file; `Store.Find(planHash)` returns an existing workflow for resume; writes are atomic (temp + rename).
