@@ -382,9 +382,10 @@ func TestKeyResolverRunsARelativeCommandProgramOutsideTheWorkspace(t *testing.T)
 	}
 }
 
-// A resolver built with NO workspace root — the shape `probe model` and `daemon` pass, neither
-// having a workspace to measure a program against — inherits security.ResolveProgram's empty-fence
-// rule and refuses nothing, so a command those two commands could run before still runs.
+// A resolver built with NO workspace root — the shape `daemon` passes, having no one workspace to
+// measure a program against (`probe model` fences api-key-cmd against roots.workspace (cwd), like
+// apogee probe) — inherits security.ResolveProgram's empty-fence rule and refuses nothing, so a
+// command the daemon could run before still runs.
 func TestKeyResolverWithNoWorkspaceRootFencesNothing(t *testing.T) {
 	t.Parallel()
 

@@ -132,10 +132,11 @@ type KeyResolver struct {
 
 	// workspaceRoot is the fence an `api-key-cmd:` program is measured against before it runs (see
 	// runKeyCommand) when a caller does not name one of its own (Resolve). It is the resolved
-	// workspace root of the Driver that built this resolver, and EMPTY where that Driver has no one
-	// workspace to name: `probe model`, which reads no workspace and so refuses nothing
-	// (internal/userexec's empty-fence rule), and the daemon, whose workspace is the Firing's — there
-	// the fence is judged per Firing against the Firing's workspace, through ResolveWithin.
+	// workspace root of the Driver that built this resolver — `probe model` fences api-key-cmd
+	// against roots.workspace (cwd), like apogee probe — and EMPTY where that Driver has no one
+	// workspace to name: the daemon, whose workspace is the Firing's — there the fence is judged per
+	// Firing against the Firing's workspace, through ResolveWithin (an empty root refuses nothing,
+	// internal/userexec's empty-fence rule).
 	workspaceRoot string
 
 	// commandTimeout overrides keyCommandTimeout for one resolver. It exists for tests, which
@@ -146,8 +147,8 @@ type KeyResolver struct {
 
 // NewKeyResolver returns an empty resolver fenced to workspaceRoot: an `api-key-cmd:` whose program
 // resolves inside that root is refused before it runs. An empty root fences nothing, which is what
-// a command holding no workspace passes — and what a Driver whose workspace is decided per use
-// passes, judging each use through ResolveWithin instead.
+// a Driver whose workspace is decided per use passes, judging each use through ResolveWithin
+// instead.
 func NewKeyResolver(workspaceRoot string) *KeyResolver {
 	return &KeyResolver{workspaceRoot: workspaceRoot}
 }

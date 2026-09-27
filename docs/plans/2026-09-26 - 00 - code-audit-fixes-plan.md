@@ -464,7 +464,10 @@ NOTES (2026-09-27): `TestOpenerCommandOverrideIsNotNameBounded` now names `zed.e
 **Acceptance:** `go test -race -count=1 ./internal/present/`
 **Commit:** `fix(present): a cmd-shim document opener gets the metacharacter check`
 
-## 28. probe model fences api-key-cmd like probe
+## 28. probe model fences api-key-cmd like probe — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): docs/manual/configuration.md is reworded in user-facing prose ("`apogee probe model`, like `apogee probe`, measures it against the directory it runs from, its workspace") rather than the literal "fences api-key-cmd against roots.workspace (cwd)" phrase, since `roots.workspace` is an internal identifier the manual never uses; the code/test comments carry the literal phrase.
+NOTES (2026-09-27): new test TestProbeModelRefusesAKeyCommandInsideTheWorkspace (not parallel — t.Chdir) was confirmed to fail with the old NewKeyResolver("") and pass with roots.workspace; writeProbeConfig gained api-key-cmd support for it.
 
 **What:** Fixes the audit's Medium "`apogee probe model` resolves an api-key-cmd outside the exec-from-writable-path fence".
 **Regression guard.** `grep -rn "no workspace\|refuses nothing\|never read roots.workspace" internal/config/keyresolve.go internal/config/keyresolve_test.go cmd/apogee/probemodel_test.go docs/manual/configuration.md` and reword every hit describing `probe model` to "fences api-key-cmd against roots.workspace (cwd), like apogee probe"; add `internal/config/keyresolve_test.go` to Files (its `TestKeyResolverWithNoWorkspaceRootFencesNothing` comment, ~line 384-386, is one such hit). The Goal's doc clause is checked by adding `&& ! grep -q "refuses nothing" docs/manual/configuration.md` to Acceptance.

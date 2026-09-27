@@ -103,10 +103,11 @@ func probeModelCommand() *cobra.Command {
 			if err := config.ApplyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
-			// The workspace argument is deliberately empty: the model path reads only the
-			// home-derived roots (the probe records), so there is no
-			// --workspace flag here — the probe commands admit only flags that CHANGE what
-			// is reported (probe.go), and a workspace never changed this report.
+			// The workspace argument is deliberately empty, so roots.workspace is the working
+			// directory: the report reads only the home-derived roots (the probe records), and
+			// the one use of the workspace is the api-key-cmd fence below. There is no
+			// --workspace flag here — the probe commands admit only flags that CHANGE what is
+			// reported (probe.go), and a workspace never changed this report.
 			roots, err := resolveRoots(opts.ConfigDir, "")
 			if err != nil {
 				return err
@@ -121,11 +122,12 @@ func probeModelCommand() *cobra.Command {
 			// refuses fails the command here: this one spends real money on a live server, and
 			// probing it unauthenticated would buy a 401 and record nothing.
 			//
-			// The resolver is built with an EMPTY workspace root, so its exec fence refuses
-			// nothing: this command reads no workspace (see the roots above), and an
-			// `api-key-cmd:` here resolves exactly as it did before the fence existed. Inventing
-			// a root to measure it against would be the --workspace flag this command refuses.
-			apiKey, err := config.NewKeyResolver("").Resolve(opts.StartupEntry)
+			// The resolver fences api-key-cmd against roots.workspace (cwd), like apogee probe:
+			// a program that resolves inside the directory this command runs from is refused
+			// before it runs, because that directory is where a session here would hand the
+			// model its workspace, and a key command sitting in it would hand the model the
+			// credential the key source exists to protect.
+			apiKey, err := config.NewKeyResolver(roots.workspace).Resolve(opts.StartupEntry)
 			if err != nil {
 				return err
 			}

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/sanitize"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
@@ -390,9 +394,10 @@ func TestProbeModelWarnsAboutAnOldFormatRecord(t *testing.T) {
 	}
 }
 
-// --workspace is gone from `probe model`: the model path never read roots.workspace (only
-// `probe host` reports it), and the probe commands' own flag rule admits only flags that CHANGE
-// what is reported — an inert flag trains users to expect an effect it never had.
+// --workspace is gone from `probe model`: the report never depends on roots.workspace (only
+// `probe host` reports it; `probe model` fences api-key-cmd against roots.workspace (cwd), like
+// apogee probe), and the probe commands' own flag rule admits only flags that CHANGE what is
+// reported — an inert flag trains users to expect an effect it never had.
 func TestProbeModelRejectsTheWorkspaceFlag(t *testing.T) {
 	t.Parallel()
 	cmd := newProbeCommand()
@@ -465,6 +470,9 @@ func writeProbeConfig(t *testing.T, configHome string, upstream config.ServerEnt
 	if upstream.APIKey != "" {
 		entry += "    api-key: " + upstream.APIKey + "\n"
 	}
+	if upstream.APIKeyCmd != "" {
+		entry += "    api-key-cmd: " + strconv.Quote(upstream.APIKeyCmd) + "\n"
+	}
 	if upstream.Model != "" {
 		entry += "    model: " + upstream.Model + "\n"
 	}
@@ -524,6 +532,43 @@ func TestProbeModelWithoutAnAPIKeySendsNoAuthHeader(t *testing.T) {
 		if e.header != "" {
 			t.Errorf("request to %s carried Authorization %q with no key configured", e.path, e.header)
 		}
+	}
+}
+
+// `probe model` fences api-key-cmd against roots.workspace (cwd), like apogee probe: a relative
+// `api-key-cmd:` whose program resolves inside the directory the command runs from is refused
+// before it runs, and the refusal fails the command before a single request reaches the server.
+// Not parallel: t.Chdir moves the whole process, and the working directory IS the workspace here.
+func TestProbeModelRefusesAKeyCommandInsideTheWorkspace(t *testing.T) {
+	auth := &authLog{}
+	srv := modelUpstreamRecording(t, "battery-model", auth)
+	configHome := t.TempDir()
+	writeProbeConfig(t, configHome, config.ServerEntry{
+		Name: "probe-target", Endpoint: srv.URL, APIKeyCmd: "bin/getkey",
+	}, "")
+
+	workspace := t.TempDir()
+	program := "getkey"
+	if runtime.GOOS == "windows" {
+		program += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "bin", program), []byte("#!/bin/sh\necho sk-planted\n"), 0o755); err != nil {
+		t.Fatalf("planting the key command: %v", err)
+	}
+	t.Chdir(workspace)
+
+	err := probeModelRefusal(t, configHome)
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("error = %v; want the exec-from-writable-path refusal", err)
+	}
+	if !strings.Contains(err.Error(), "api-key-cmd") {
+		t.Errorf("the refusal never names api-key-cmd: %v", err)
+	}
+	if entries := auth.all(); len(entries) != 0 {
+		t.Errorf("the server saw %d requests after the key source refused, want none: %v", len(entries), entries)
 	}
 }
 
