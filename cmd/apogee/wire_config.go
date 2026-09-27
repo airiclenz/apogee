@@ -103,7 +103,9 @@ func projectConfig(
 		// user's "/id" resolves against, so a skill added or edited mid-session is reachable
 		// through both as soon as the next Reload lands, and an unattended run's model can reach a
 		// written procedure without a human there to attach one. A nil lookup would simply leave
-		// the tool out of the roster; wiring it is what puts the door in the menu.
+		// the tool out of the roster; wiring it is what puts the door in the menu. The provider is
+		// also the recipe port (workflow.RecipeSource) the engine reads off Skills, so a leading
+		// "/<recipe>" starts that skill's Recipe as a Workflow in every Driver (ADR 0087 D6).
 		Skills:      skillProvider,
 		SkillLookup: skillProvider,
 		// The read-only mounts. Roots and Virtual are the projection's; Scratch is left to the host

@@ -577,7 +577,21 @@ NOTES (2026-09-27): consequential edit — internal/workflow/doc.go: made necess
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): bind recipe inputs from text`
 
-## 20. The engine starts a recipe
+## 20. The engine starts a recipe — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the recipe port is `workflow.RecipeSource` (new internal/workflow/recipe.go, with the `workflow.Recipe` value: Plan, Inputs, Dir, Files), and the agent reads it off `Config.Skills` by type assertion instead of taking a new agent Option or Config field. domain cannot name a workflow type, and an Option would have to be threaded through apogee.New/Resume and cmd/apogee/wire_engine.go. `*skills.Provider` (already wired as Skills in wire_config.go, which only gains a comment) implements it, so every Driver gets recipes with no new wiring. The loop still never imports internal/skills.
+
+NOTES (2026-09-27): consequential edit — internal/workflow/doc.go: made necessary by recipe.go joining the package (the file map names it)
+
+NOTES (2026-09-27): `runRecipe` takes `(ctx, turn, call, id, inputs)`, not `(ctx, id, inputs)`: turn and call stamp the item children's phase events. Item 21 passes its fan_out call, and the launch passes a synthetic `recipe` call that is used only for events and is never put in history. runRecipe fills defaults, refuses an unknown key and fails a missing required input as `missing input: <name>`.
+
+NOTES (2026-09-27): `StartRecipe(ctx, RecipeLaunch) (string, error)` binds and asks, then submits `UserInput{Text: "/<id> <text>", SkillIDs: [id], RecipeInputs: bound}`. The caller then drives the Exchange with Step/Run. The id it returns is for a background workflow, and `Background: true` is refused (`errBackgroundRecipe`) until item 25 exists. `domain.UserInput` gains `RecipeInputs map[string]string` (json omitempty) rather than a `Recipe` field.
+
+NOTES (2026-09-27): inputs reach the stages as `{<name>}` placeholders. They are filled in task, question, default, out, pick file, context and item sources as written, and in `run:` shell-quoted; the names `item` and `out` are never bound. Binding happens before Runner.Run, so a run with other inputs gets another plan hash and another folder. A script's `run:` also renders `{{SKILL_DIR}}` (the host folder, or, for a `shipped:` skill, `<workflow>/skill/` with every `{{SKILL_DIR}}/<path>` it names copied there first), `{workflow_dir}`, and `{part_bytes}` (the split budget in bytes). Item 23's split.sh should take its window from `{part_bytes}` on its `run:` line, since there is no PART_LINES environment variable.
+
+NOTES (2026-09-27): a launch whose inputs cannot bind or whose run fails emits an ErrorEvent (Source `recipe`), and the opening message carries `recipe /<id> could not run: <error>` where the result lines would go. The model still answers.
+
+NOTES (2026-09-27): a Plan-mode test script stage is refused because runScriptCall puts it through the terminal's own Resolution, and Plan refuses every ClassSubprocess call. So Plan refuses all script stages, not only those that write outside scratch.
 
 **What:** Recast at the regression check (2026-09-27). Depends on items 15, 19.
 **Goal:** `Agent.StartRecipe(ctx, RecipeLaunch{SkillID, Text, Background})` resolves the skill, binds inputs (a missing required one is asked through the Asker; with no Asker it is an error), runs the workflow with a `ScriptRunner` that obeys the Mode and approval rules of the agent's shell tool, and an `Asker` from the engine config; a foreground launch opens an Exchange whose first model request carries the user's line plus the result lines.

@@ -2,10 +2,17 @@ package skills
 
 import (
 	"errors"
+	"io/fs"
+	"maps"
+	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // Catalog is the outcome of one discovery scan: the skills that loaded, keyed by ID, AND the
@@ -166,6 +173,75 @@ func (c *Catalog) ResolveSkills(ids []string) []domain.ResolvedSkill {
 	return out
 }
 
+// Recipe satisfies workflow.RecipeSource: the recipe the skill id carries — its own copy of the
+// plan, the declared inputs, the folder's address and the folder itself — and false for an unknown
+// id or a skill without a `recipe:` block.
+func (c *Catalog) Recipe(id string) (workflow.Recipe, bool) {
+	s, ok := c.byID[id]
+	if !ok || s.Recipe == nil {
+		return workflow.Recipe{}, false
+	}
+	return workflow.Recipe{
+		ID:     s.ID,
+		Plan:   clonePlan(*s.Recipe),
+		Inputs: slices.Clone(s.Inputs),
+		Dir:    s.Dir,
+		Files:  skillFiles(s.Dir),
+	}, true
+}
+
+// RecipeIDs satisfies workflow.RecipeSource: the ids of every skill carrying a recipe, sorted.
+func (c *Catalog) RecipeIDs() []string {
+	var ids []string
+	for id, s := range c.byID {
+		if s.Recipe != nil {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// clonePlan copies plan deeply enough that a caller rewriting a stage's fields — the agent binds
+// inputs into them — never reaches the catalog's own, which Reload's readers share lock-free.
+func clonePlan(plan workflow.Plan) workflow.Plan {
+	stages := make([]workflow.Stage, len(plan.Stages))
+	for index, stage := range plan.Stages {
+		stage.Returns = maps.Clone(stage.Returns)
+		stage.Context = slices.Clone(stage.Context)
+		stage.Tools = slices.Clone(stage.Tools)
+		stage.Options = slices.Clone(stage.Options)
+		if stage.Over != nil {
+			over := *stage.Over
+			over.List = slices.Clone(over.List)
+			stage.Over = &over
+		}
+		stages[index] = stage
+	}
+	return workflow.Plan{Name: plan.Name, Stages: stages}
+}
+
+// skillFiles opens a skill's folder by the address its Dir announces: the embedded tree below
+// `shipped:` for one of apogee's own, the host folder for one found on disk. It is nil when the
+// address opens nothing.
+func skillFiles(dir string) fs.FS {
+	if rel, shipped := strings.CutPrefix(dir, ShippedMountPrefix); shipped {
+		files, err := fs.Sub(shippedFiles, path.Join(shippedDir, rel))
+		if err != nil {
+			return nil
+		}
+		return files
+	}
+	if !filepath.IsAbs(dir) {
+		return nil
+	}
+	return os.DirFS(dir)
+}
+
 // Compile-time proof the catalog satisfies the loop's resolver seam (ADR 0010: skills depends
 // on domain, never the reverse — domain defines the interface, this package implements it).
 var _ domain.SkillResolver = (*Catalog)(nil)
+
+// And the recipe port the agent starts a recipe through (ADR 0087 D6), declared beside the Plan
+// it carries so the loop never imports this package.
+var _ workflow.RecipeSource = (*Catalog)(nil)

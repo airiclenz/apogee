@@ -1486,13 +1486,24 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 // reference of either kind is reported as an ErrorEvent and skipped, never a refusal.
 // interjected marks the message as committed inside a running Exchange (Interject) so the
 // derived Exchange opening does not move (domain.Message.Interjected).
+//
+// An opening input that launches a recipe (recipeLaunch — its first skill carries one and its text
+// opens with that skill's "/<id>") runs the recipe here, before anything else is resolved, and the
+// leading skill is not attached: the message is the other skills' blocks, the @file blocks, the
+// human's line, and the workflow's result lines after it (recipe.go). An interjection never
+// launches one — Interject refuses such an input before it reaches here.
 func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.UserInput, interjected bool) domain.Message {
-	bound := a.refBound(len(in.SkillIDs) + len(in.FileRefs))
-	skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs, bound)
+	skillIDs, launched := in.SkillIDs, ""
+	if recipe, ok := a.recipeLaunch(in); ok && !interjected {
+		launched = a.launchRecipe(ctx, turn, in, recipe)
+		skillIDs = skillIDs[1:]
+	}
+	bound := a.refBound(len(skillIDs) + len(in.FileRefs))
+	skillBlocks := a.resolveSkillRefs(turn, skillIDs, bound)
 	refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
 	return domain.Message{
 		Role:        domain.RoleUser,
-		Content:     skillBlocks + refs + in.Text,
+		Content:     skillBlocks + refs + in.Text + launched,
 		Interjected: interjected,
 	}
 }

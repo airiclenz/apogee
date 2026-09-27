@@ -227,7 +227,9 @@ type Config struct {
 	// bodies; nil ⇒ no skills are wired and any attached ID is reported and dropped. It is an
 	// interface defined here (not the concrete internal/skills catalog) so the loop fulfils the
 	// SkillIDs seam without domain importing skills — the dependency flows toward domain (ADR
-	// 0010). The host (cmd/apogee) loads the catalog and injects it.
+	// 0010). The host (cmd/apogee) loads the catalog and injects it. A resolver that also
+	// implements workflow.RecipeSource serves the recipes a leading "/<id>" starts (ADR 0087 D6);
+	// one that does not starts none, and every "/<id>" attaches the skill's body as before.
 	Skills SkillResolver
 
 	// SkillLookup lets the MODEL search that same catalog mid-Turn through the load_skill tool
@@ -970,10 +972,17 @@ func modeRank(m Mode) int {
 // SkillIDs are the skills the user attached in chat (inline "/id" tokens); the loop resolves
 // each through Config.Skills and prepends its body to the user message for that one turn. The
 // refs round-trip through a snapshot, so a resumed session re-resolves them.
+//
+// A recipe launch (ADR 0087 D6) is spelled in the same fields: when SkillIDs[0] names a skill
+// carrying a recipe and Text begins with "/" and that id, the opening Step runs the recipe as a
+// Workflow instead of attaching its body, binding its inputs from the rest of Text. RecipeInputs,
+// when set, are those inputs already bound (Agent.StartRecipe binds them, asking for any missing
+// one, before it submits), and the Step takes them as they are instead of binding Text again.
 type UserInput struct {
-	Text     string
-	FileRefs []string
-	SkillIDs []string `json:",omitempty"`
+	Text         string
+	FileRefs     []string
+	SkillIDs     []string          `json:",omitempty"`
+	RecipeInputs map[string]string `json:",omitempty"`
 }
 
 // SkillResolver maps attached skill IDs to their injectable form. It is implemented by the

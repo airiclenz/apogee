@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // TestOncePersistsAFiringUnderItsScheduleIdentity is the item's headline: one Firing lands
@@ -2678,4 +2679,72 @@ func readJournalIndex(t *testing.T, path string) undo.Index {
 		t.Fatalf("decode the journal index: %v", err)
 	}
 	return index
+}
+
+// firingRecipes serves one recipe, `review`, through a Firing's skill resolver: a fanout over one
+// item whose brief names the `scope` input its prompt binds.
+type firingRecipes struct{}
+
+func (firingRecipes) ResolveSkills(ids []string) []domain.ResolvedSkill {
+	var out []domain.ResolvedSkill
+	for _, id := range ids {
+		if id == "review" {
+			out = append(out, domain.ResolvedSkill{ID: id, DisplayName: id, Body: "REVIEW SKILL BODY"})
+		}
+	}
+	return out
+}
+
+func (firingRecipes) Recipe(id string) (workflow.Recipe, bool) {
+	if id != "review" {
+		return workflow.Recipe{}, false
+	}
+	return workflow.Recipe{
+		ID: "review",
+		Plan: workflow.Plan{Name: "review", Stages: []workflow.Stage{{
+			Name: "items",
+			Kind: workflow.StageFanout,
+			Task: "check {item} in {scope}",
+			Over: &workflow.ItemSource{List: []string{"alpha"}},
+		}}},
+		Inputs: []workflow.InputDecl{{Name: "scope", Required: true}},
+		Dir:    "/skills/review",
+	}, true
+}
+
+func (firingRecipes) RecipeIDs() []string { return []string{"review"} }
+
+// TestOnceLaunchesALeadingRecipeReference pins the headless door onto a Recipe: a prompt opening
+// with a recipe skill's "/<id>" runs that recipe as a Workflow on the Firing's first Step — its
+// child answers through `finish` — and the model's request carries the prompt plus the result
+// lines, not the skill's body.
+func TestOnceLaunchesALeadingRecipeReference(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: "check alpha in src"}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_1", Name: tools.FinishToolName, Arguments: `{"status":"ok","summary":"alpha is fine"}`,
+		}}},
+		{Text: "reviewed"},
+	}})
+	spec := planSpec(up.URL, "/review src")
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.ScratchDir = t.TempDir()
+	spec.Config.Skills = firingRecipes{}
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the Upstream saw %d requests, want the child's and the firing's", len(reqs))
+	}
+	got := up.LastMessage(2)
+	if !strings.HasPrefix(got, "/review src\n\n") || !strings.Contains(got, "#1 alpha — ok — alpha is fine") {
+		t.Errorf("the firing's message does not carry the prompt plus the result lines:\n%s", got)
+	}
+	if strings.Contains(got, "REVIEW SKILL BODY") {
+		t.Errorf("the launch attached the skill body:\n%s", got)
+	}
 }

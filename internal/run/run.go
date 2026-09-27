@@ -543,6 +543,10 @@ func delegateTotals(runs []SubAgentUsage) session.Usage {
 // loop will inject the body through, so a token this test accepts is a token the loop can
 // resolve. A nil resolver returns nil, which SkillSpans reads as "no catalog is wired": no "/"
 // token is a reference then, and the prompt travels exactly as it did before this seam existed.
+// A prompt that OPENS with a recipe skill's token launches that recipe engine-side on the
+// Firing's first Step, exactly as a session's message does (internal/agent recipe.go); with no
+// Asker, a required input the prompt leaves unbound is reported as `missing input: <name>` in the
+// result lines' place and no workflow runs.
 func knownSkillID(r domain.SkillResolver) func(string) bool {
 	if r == nil {
 		return nil

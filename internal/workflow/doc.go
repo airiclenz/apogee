@@ -42,6 +42,8 @@
 // inputs.go is InputDecl, ValidateInputs and BindInputs: the inputs a Recipe declares in its
 // skill's header (name, required, default, description), and the binding of the user's text to
 // them — `key=value` by name, the rest in declared order, quotes allowed — that starts it.
+// recipe.go is Recipe and the RecipeSource port: a skill's recipe — plan, inputs, folder address
+// and files — as the skill catalog serves it to the agent that starts it.
 // format.go is Format: the result lines the parent reads — one `#<n> <item> — <status> — <summary>`
 // line per item, a totals line, the stages' notes, `report:` — listing only the non-ok items past
 // 40 and pointing to the full items.md the Store writes as the run ends.

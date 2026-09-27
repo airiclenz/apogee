@@ -45,6 +45,7 @@ import (
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // ----------------------------------------------------------------------------
@@ -439,6 +440,21 @@ type SkillResolver = domain.SkillResolver
 // ResolvedSkill is one attached skill reduced to the fields the loop injects (ID, DisplayName,
 // Body) — the return shape a SkillResolver produces.
 type ResolvedSkill = domain.ResolvedSkill
+
+// RecipeSource is the port a skill resolver serves Recipes through (ADR 0087 D6): a
+// Config.Skills that also implements it lets a leading "/<id>" and Agent.StartRecipe start the
+// recipe that skill carries. The binary's catalog implements both; an embedder may too.
+type RecipeSource = workflow.RecipeSource
+
+// Recipe is one recipe as a RecipeSource serves it: its stages, declared inputs and folder.
+type Recipe = workflow.Recipe
+
+// InputDecl is one input a Recipe declares, which the user's text binds.
+type InputDecl = workflow.InputDecl
+
+// RecipeLaunch is the request Agent.StartRecipe takes: the recipe skill's id, the text its inputs
+// bind from, and whether it runs in the background.
+type RecipeLaunch = agent.RecipeLaunch
 
 // ----------------------------------------------------------------------------
 // Tools (internal/domain)

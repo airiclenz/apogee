@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // Provider is the live, reloadable view over the discovered skills. Load builds one immutable
@@ -176,6 +177,13 @@ func (p *Provider) ResolveSkills(ids []string) []domain.ResolvedSkill {
 	return p.current().ResolveSkills(ids)
 }
 
+// Recipe satisfies workflow.RecipeSource against the current snapshot (see Catalog.Recipe), so a
+// recipe edited mid-session starts as written once the next Reload lands.
+func (p *Provider) Recipe(id string) (workflow.Recipe, bool) { return p.current().Recipe(id) }
+
+// RecipeIDs lists the current snapshot's recipe skills (see Catalog.RecipeIDs).
+func (p *Provider) RecipeIDs() []string { return p.current().RecipeIDs() }
+
 // Compile-time proof the provider satisfies the loop's resolver seam, exactly as *Catalog does —
 // so it is a drop-in for Config.Skills while adding the reload capability.
 var _ domain.SkillResolver = (*Provider)(nil)
@@ -183,3 +191,7 @@ var _ domain.SkillResolver = (*Provider)(nil)
 // And the model-facing door onto the same catalog (ADR 0065), so one *Provider is all a host
 // injects for both seams.
 var _ domain.SkillLookup = (*Provider)(nil)
+
+// And the recipe port on that same catalog: the host injects the *Provider as Config.Skills, and
+// the agent reads the recipes off that one resolver (ADR 0087 D6).
+var _ workflow.RecipeSource = (*Provider)(nil)

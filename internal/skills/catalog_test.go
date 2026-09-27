@@ -2,9 +2,12 @@ package skills
 
 import (
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // build assembles a catalog directly from skills, bypassing disk, for catalog-shape tests. Each
@@ -145,5 +148,52 @@ func TestCatalogGet(t *testing.T) {
 	}
 	if _, ok := c.Get("nope"); ok {
 		t.Error("Get(unknown) reported found")
+	}
+}
+
+func TestCatalogRecipeServesOnlyRecipeSkills(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	plan := workflow.Plan{Name: "audit", Stages: []workflow.Stage{{
+		Name: "items", Kind: workflow.StageFanout, Task: "check {item}",
+		Over: &workflow.ItemSource{List: []string{"a"}},
+	}}}
+	c := build(
+		Skill{ID: "audit", Recipe: &plan, Inputs: []workflow.InputDecl{{Name: "scope"}}, Dir: dir},
+		Skill{ID: "plain", Dir: dir},
+	)
+
+	recipe, ok := c.Recipe("audit")
+	if !ok || recipe.ID != "audit" || recipe.Dir != dir || len(recipe.Inputs) != 1 || recipe.Files == nil {
+		t.Fatalf("Recipe(audit) = %+v, %v; want the recipe with its inputs and folder", recipe, ok)
+	}
+	recipe.Plan.Stages[0].Over.List[0] = "changed"
+	if plan.Stages[0].Over.List[0] != "a" {
+		t.Errorf("the served plan shares its item list with the catalog's")
+	}
+	if _, ok := c.Recipe("plain"); ok {
+		t.Errorf("Recipe(plain) served a skill without a recipe")
+	}
+	if _, ok := c.Recipe("missing"); ok {
+		t.Errorf("Recipe(missing) served an unknown id")
+	}
+	if got := c.RecipeIDs(); !reflect.DeepEqual(got, []string{"audit"}) {
+		t.Errorf("RecipeIDs = %v, want [audit]", got)
+	}
+}
+
+func TestSkillFilesOpensAShippedFolder(t *testing.T) {
+	t.Parallel()
+
+	files := skillFiles(ShippedMountPrefix + "debugging")
+	if files == nil {
+		t.Fatal("skillFiles(shipped:debugging) = nil")
+	}
+	if _, err := fs.Stat(files, "SKILL.md"); err != nil {
+		t.Errorf("the shipped folder does not hold its SKILL.md: %v", err)
+	}
+	if skillFiles("relative/dir") != nil {
+		t.Errorf("a relative folder address opened a folder")
 	}
 }
