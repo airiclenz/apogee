@@ -287,7 +287,7 @@ NOTES (2026-09-27): the recording fake reaches connectOne through a new package-
 **Acceptance:** `go test -race -count=1 ./internal/mcp/ && GOOS=windows go vet ./internal/mcp/ ./internal/platform/`
 **Commit:** `fix(mcp): contain a stdio server's process tree before the handshake`
 
-## 16. Discovery response bodies are byte-capped
+## 16. Discovery response bodies are byte-capped — ✅ DONE (2026-09-27)
 
 **What:** Fixes the audit's High "Model/props discovery decodes an unbounded response body".
 **Goal:** `discoverModels` and `discoverProps` read at most `maxResponseBodyBytes`; an oversized `/v1/models` body fails discovery with the existing decode error, an oversized `/props` body degrades to unknown values.

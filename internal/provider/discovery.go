@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -319,7 +320,9 @@ func (e *TransportError) Unwrap() error { return e.err }
 // discoverModels probes GET /v1/models and resolves the model list plus the active model. It is
 // the one probe both wires make: the request carries the selected codec's headers (setAuth), and
 // the list shape — `{data:[{id,…}]}` — is the same on both, differing only in the fields the
-// entries carry (see modelsResponse).
+// entries carry (see modelsResponse). The body is read through the same maxResponseBodyBytes limit
+// Respond applies, so an oversized list is cut mid-JSON and fails as the existing decode error rather
+// than being buffered into memory whole.
 func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+modelsPath, nil)
 	if err != nil {
@@ -340,7 +343,7 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	}
 
 	var decoded modelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&decoded); err != nil {
 		return ModelInfo{}, fmt.Errorf("apogee: decode models: %w", err)
 	}
 
@@ -360,7 +363,9 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 // loaded chat template exposes a thinking-effort dial (chat_template). It is best-effort: a
 // non-llama.cpp server returns a non-200 or omits any of them, and any failure (including a
 // cancelled context) yields the zero value for all three, so the caller keeps the /v1/models window
-// and treats the slot count and the dial as unknown. It shares the caller's discovery deadline.
+// and treats the slot count and the dial as unknown. It shares the caller's discovery deadline. The
+// body is read through the maxResponseBodyBytes limit, so an oversized payload fails its decode and
+// degrades to those same unknown values instead of exhausting memory.
 //
 // All three come out of ONE response because they are one observation: asking again would cost a
 // second round trip and could straddle a restart that moved every number at once.
@@ -382,7 +387,7 @@ func (c *Client) discoverProps(ctx context.Context) (window, slots int, effort E
 	}
 
 	var decoded propsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&decoded); err != nil {
 		return 0, 0, EffortSupport{}
 	}
 	if decoded.DefaultGenerationSettings.NCtx > 0 {

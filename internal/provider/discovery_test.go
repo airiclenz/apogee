@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -442,6 +443,63 @@ func TestDiscover_Errors(t *testing.T) {
 			t.Fatal("Discover succeeded on empty data, want error")
 		}
 	})
+}
+
+// paddedJSON closes an object opened by prefix with an ignored string member sized so the whole
+// body is exactly maxResponseBodyBytes+1 bytes: a valid document one byte past the cap, which only
+// a capped read cuts mid-JSON.
+func paddedJSON(prefix string) string {
+	const padOpen, padClose = `,"pad":"`, `"}`
+	padding := strings.Repeat("a", maxResponseBodyBytes+1-len(prefix)-len(padOpen)-len(padClose))
+	return prefix + padOpen + padding + padClose
+}
+
+// TestDiscover_ModelsBodyIsCapped proves GET /v1/models is read through maxResponseBodyBytes: a
+// well-formed list one byte past the limit is cut mid-JSON and fails discovery with the existing
+// decode error instead of being buffered into memory whole.
+func TestDiscover_ModelsBodyIsCapped(t *testing.T) {
+	t.Parallel()
+
+	srv, _ := modelsServer(paddedJSON(`{"data":[{"id":"m","context_length":32768}]`))
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "").Discover(context.Background())
+
+	if err == nil {
+		t.Fatalf("Discover returned no error for a %d-byte /v1/models body, want the capped decode to fail (info = %+v)",
+			maxResponseBodyBytes+1, info)
+	}
+	if !strings.Contains(err.Error(), "decode models") {
+		t.Errorf("error = %q, want the existing decode error — the cap adds no error kind", err)
+	}
+}
+
+// TestDiscover_PropsBodyIsCapped proves GET /props is read through maxResponseBodyBytes: a
+// well-formed payload one byte past the limit fails its decode, so the best-effort probe degrades
+// to unknown values and the /v1/models window stands.
+func TestDiscover_PropsBodyIsCapped(t *testing.T) {
+	t.Parallel()
+
+	srv, rec := discoveryServer(
+		`{"data":[{"id":"m","context_length":32768}]}`,
+		paddedJSON(`{"default_generation_settings":{"n_ctx":8192},"total_slots":4`),
+	)
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "").Discover(context.Background())
+
+	if err != nil {
+		t.Fatalf("Discover: %v — an oversized /props body must degrade, not fail discovery", err)
+	}
+	if !rec.sawProps {
+		t.Fatal("Discover did not probe /props")
+	}
+	if info.ContextWindow != 32768 {
+		t.Errorf("ContextWindow = %d, want 32768 (an oversized /props body leaves the /v1/models window)", info.ContextWindow)
+	}
+	if info.TotalSlots != 0 {
+		t.Errorf("TotalSlots = %d, want 0 (an oversized /props body leaves the slot count unknown)", info.TotalSlots)
+	}
 }
 
 func TestDiscover_SendsAuth(t *testing.T) {
