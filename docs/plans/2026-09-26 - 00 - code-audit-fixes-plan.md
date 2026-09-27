@@ -494,6 +494,8 @@ NOTES (2026-09-27): the match lives in a new `childDeliveryMatches` helper, whic
 
 ## 30. Patch refuses an unanchored insertion hunk — ✅ DONE (2026-09-27)
 
+NOTES (2026-09-27): edit_existing_file description's anchor sentence cut from 144 to 101 bytes and now names the `*** Add File` exception ("Each @@ hunk needs a ' ' context or '-' line as its anchor, except in an empty file or *** Add File."); golden tool-menu row repinned 23886 -> 23987 (+101). No other golden pins the live tool menu or tool descriptions: the internal/probe and cmd/apogee headless "tool menu" figures are fixed fixtures, and cmd/apogee probecontext tests only assert relations between rows. All of them pass.
+
 **What:** Fixes the audit's Medium "A patch's pure-insertion hunk always lands at file-end".
 **Goal:** `applyPatch` refuses a hunk with no context or removal lines, with an error telling the model to include at least one context line, unless the target content is empty or the section is `*** Add File`; the file is left untouched on refusal; the tool description states the rule.
 **Approach (assumed at the header base):** In `internal/tools/file_edit.go` `applyPatch`, replace the pure-insertion append branch; update the description strings and the comment citing the oracle.

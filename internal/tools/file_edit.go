@@ -13,7 +13,7 @@ import (
 
 var fileEditSpec = toolSpec{
 	name:        "edit_existing_file",
-	description: "Edit an existing file. Accepts either full replacement content or a patch in \"*** Begin Patch\" format. Each @@ hunk needs at least one context (' ') or removal ('-') line to anchor it: a hunk of only '+' lines is refused unless the file is empty.",
+	description: "Edit an existing file. Accepts either full replacement content or a patch in \"*** Begin Patch\" format. Each @@ hunk needs a ' ' context or '-' line as its anchor, except in an empty file or *** Add File.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "content"],
