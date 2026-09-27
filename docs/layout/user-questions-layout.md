@@ -22,8 +22,8 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 > approval decision the row names, `Cancel` included. It is always two clicks. The row an activating
 > click may take is the row the *pointer* put the `❯` on, so the highlight both sketches below open
 > with — the first choice, and `Allow` — is never one a single click can act on, and no approval is
-> ever granted by one press. The approval prompt's arming delay gates that second click just as it
-> gates `⏎`; a click on a choice is swallowed while the input box holds a custom answer being typed,
+> ever granted by one press. Each prompt's arming delay gates that second click just as it gates
+> `⏎`; a click on a choice is swallowed while the input box holds a custom answer being typed,
 > the same empty-box rule the arrows follow; and a click on the question text, a blank, the hint row
 > or the border belongs to the box and does nothing.
 >
@@ -31,6 +31,15 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 > stays `esc`'s alone — and it is not swallowed either: it falls through to whatever it was aimed at,
 > seating the caret in the input box or starting a transcript selection, because the prompt below an
 > ask question stays live and the transcript behind an approval is where its context is read.
+
+> Amended 2026-09-27 by `docs/plans/2026-09-26 - 00 - code-audit-fixes-plan.md` item 19: the ask
+> question **arms like the approval prompt**, on the one latch the two prompts share. Its `⏎` — and
+> the second click that sends a choice — is dead from the moment the question is folded in until the
+> terminal has answered the drain marker asked from behind the prompt's frame (or the two-second
+> backstop lands), so a keystroke already in flight when the question appeared cannot send an answer
+> nobody read. What sends nothing stays live at once: typing a custom answer, `↑↓`, a multi-select
+> `␣` (and a first click that ticks or highlights), and `esc`. A stale arm — a backstop tick or a
+> drain answer left over from an earlier approval or question — never arms a later prompt.
 
 
 # User Approval:

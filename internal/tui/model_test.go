@@ -2645,12 +2645,32 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 // newAskModel drives a fresh model to awaitingAsk with a buffered reply channel.
 func newAskModel(t *testing.T, req domain.AskRequest) (Model, chan domain.AskAnswer) {
 	t.Helper()
+	m, reply := newUnarmedAskModel(t, req)
+	return armAsk(t, m), reply
+}
+
+// newUnarmedAskModel folds an ask_user question in and stops there — the pane is up and its sending
+// ⏎ and click are still dead, the state the arming tests act on.
+func newUnarmedAskModel(t *testing.T, req domain.AskRequest) (Model, chan domain.AskAnswer) {
+	t.Helper()
 	reply := make(chan domain.AskAnswer, 1)
 	m := step(t, newTestModel(t), askReqMsg{Request: req, Reply: reply})
 	if m.state != stateAwaitingAsk {
 		t.Fatalf("state = %v, want awaitingAsk", m.state)
 	}
 	return m, reply
+}
+
+// armAsk is armApproval's twin for an ask_user pane: the two panes share one decision latch
+// (openDecisionLatch), so it delivers the same arming message the fold's backstop tick would, read
+// off the model's generation rather than waited out.
+func armAsk(t *testing.T, m Model) Model {
+	t.Helper()
+	m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
+	if !m.approvalArmed {
+		t.Fatal("ask pane did not arm on its own approvalArmedMsg")
+	}
+	return m
 }
 
 // typeInput feeds each rune of s into the model as a keypress (the input box is live while
@@ -2661,6 +2681,236 @@ func typeInput(t *testing.T, m Model, s string) Model {
 		m = step(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	return m
+}
+
+// takeNoAnswer fails the test if the worker received anything: the reply channel is buffered
+// (cap 1) and the send synchronous, so an empty read right after an Update proves nothing was sent.
+func takeNoAnswer(t *testing.T, reply chan domain.AskAnswer, what string) {
+	t.Helper()
+	select {
+	case got := <-reply:
+		t.Fatalf("%s answered the question before it was armed (sent %q)", what, got.Text)
+	default:
+	}
+}
+
+// An ask_user pane's sending ⏎ is DEAD until the pane arms, exactly as the approval pane's decision
+// keys are: the pane opens with the first choice highlighted, so an ⏎ already in the input buffer
+// when the question appeared would send an answer nobody read. Everything that sends nothing stays
+// live — ↑/↓ over the offering, a multi-select ␣, and typing a free-text answer — and once the arm
+// lands the same ⏎ sends as always.
+func TestModelAskEnterIsDeadUntilArmed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("choices: the arrows move, the enter waits", func(t *testing.T) {
+		t.Parallel()
+		m, reply := newUnarmedAskModel(t, domain.AskRequest{
+			Question: "which way?",
+			Choices:  []string{"left", "right"},
+		})
+
+		m = step(t, m, keyEnter())
+		takeNoAnswer(t, reply, "⏎")
+		if m.state != stateAwaitingAsk || m.pendingAsk == nil {
+			t.Fatalf("⏎ before the arm let go of the question (state %v)", m.state)
+		}
+		m = step(t, m, keyDown())
+		if m.askSel.selected != 1 {
+			t.Fatalf("askSel = %d after ↓ before the arm, want 1 — the highlight is outside the latch", m.askSel.selected)
+		}
+
+		m = armAsk(t, m)
+		step(t, m, keyEnter())
+		if got := takeAnswer(t, reply); got != "right" {
+			t.Errorf("answer = %q after the arm, want the highlighted %q", got, "right")
+		}
+	})
+
+	t.Run("multi-select: the space ticks, the enter waits", func(t *testing.T) {
+		t.Parallel()
+		m, reply := newUnarmedAskModel(t, domain.AskRequest{
+			Question:    "which ones?",
+			Choices:     []string{"alpha", "beta"},
+			MultiSelect: true,
+		})
+
+		m = step(t, m, keySpace())
+		if !m.askChecked[0] {
+			t.Fatalf("askChecked = %v after ␣ before the arm, want the highlighted row ticked", m.askChecked)
+		}
+		m = step(t, m, keyEnter())
+		takeNoAnswer(t, reply, "⏎")
+
+		m = armAsk(t, m)
+		step(t, m, keyEnter())
+		if got := takeAnswer(t, reply); got != "alpha" {
+			t.Errorf("answer = %q after the arm, want the ticked %q", got, "alpha")
+		}
+	})
+
+	t.Run("free text: the typing lands, the enter waits", func(t *testing.T) {
+		t.Parallel()
+		m, reply := newUnarmedAskModel(t, domain.AskRequest{Question: "what colour?"})
+
+		m = typeInput(t, m, "teal")
+		if got := m.input.Value(); got != "teal" {
+			t.Fatalf("box = %q after typing before the arm, want %q — typing is outside the latch", got, "teal")
+		}
+		m = step(t, m, keyEnter())
+		takeNoAnswer(t, reply, "⏎")
+		if got := m.input.Value(); got != "teal" {
+			t.Fatalf("box = %q after the swallowed ⏎, want the typed answer %q kept", got, "teal")
+		}
+
+		m = armAsk(t, m)
+		step(t, m, keyEnter())
+		if got := takeAnswer(t, reply); got != "teal" {
+			t.Errorf("answer = %q after the arm, want %q", got, "teal")
+		}
+	})
+
+	// Esc is outside the latch as it is outside the approval pane's: the stop is the safe direction,
+	// and its double-tap reaches the worker while the ⏎ beside it is still dead.
+	t.Run("esc: the stop reaches the worker, the enter waits", func(t *testing.T) {
+		t.Parallel()
+		m, reply := newUnarmedAskModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}})
+		cancelled := startStubWorker(t, &m)
+
+		m = step(t, m, keyEnter())
+		takeNoAnswer(t, reply, "⏎")
+		m = step(t, m, keyEsc())
+		m = step(t, m, keyEsc())
+
+		if !cancelled() {
+			t.Error("esc×2 before the arm did not cancel the in-flight worker")
+		}
+		if m.approvalArmed {
+			t.Error("esc armed the question's sending keys")
+		}
+	})
+}
+
+// The ask pane arms on the DRAINED INPUT POSITION, the approval pane's rule: the answer to the
+// fold's own marker proves only the frame written and asks a second marker from behind it, and
+// only that second answer brings the sending ⏎ to life.
+func TestModelAskArmsOnTheDrainedInputPosition(t *testing.T) {
+	t.Parallel()
+	m, reply := newUnarmedAskModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}})
+
+	m, relay := stepCmd(t, m, tea.CursorPositionMsg{})
+	if m.approvalArmed {
+		t.Fatal("the ask pane armed on the answer to a marker that left ahead of its own frame")
+	}
+	if relay == nil {
+		t.Fatal("the first answer asked no second marker from behind the ask pane's frame")
+	}
+	m = step(t, m, keyEnter())
+	takeNoAnswer(t, reply, "an ⏎ delivered between the two drain answers")
+
+	m = step(t, m, tea.CursorPositionMsg{})
+	if !m.approvalArmed {
+		t.Fatal("the ask pane did not arm on the terminal's answer to the marker asked behind its frame")
+	}
+	step(t, m, keyEnter())
+	if got := takeAnswer(t, reply); got != "left" {
+		t.Errorf("answer = %q, want the highlighted %q", got, "left")
+	}
+}
+
+// A stale arm never arms a later pane, whichever kind raised it: an approval pane and an ask pane
+// share one latch, so a backstop tick or a drain answer left over from a cancelled approval must not
+// bring a following question's ⏎ to life — and nor must one left over from a cancelled question.
+func TestModelAskStaleArmDoesNotArmTheNextPane(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		first tea.Msg
+	}{
+		{"after an approval", approvalReqMsg{
+			Request: domain.ApprovalRequest{Tool: "write_file", Reason: "first", CacheKey: ordinaryGateKey},
+			Reply:   make(chan domain.ApprovalDecision, 1),
+		}},
+		{"after a question", askReqMsg{
+			Request: domain.AskRequest{Question: "first?"},
+			Reply:   make(chan domain.AskAnswer, 1),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := step(t, newTestModel(t), tc.first)
+			stale := m.approvalSeq
+
+			startStubWorker(t, &m)
+			m = step(t, m, keyEsc())
+			m = step(t, m, keyEsc())
+			m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+			if m.state != stateIdle {
+				t.Fatalf("state = %v, want idle after the first pane was cancelled", m.state)
+			}
+
+			reply := make(chan domain.AskAnswer, 1)
+			m = step(t, m, askReqMsg{
+				Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}},
+				Reply:   reply,
+			})
+
+			m = step(t, m, approvalArmedMsg{seq: stale})
+			m = step(t, m, tea.CursorPositionMsg{}) // the FIRST pane's marker, answered late
+			if m.approvalArmed {
+				t.Fatal("the first pane's stale arm armed the question that followed it")
+			}
+			m = step(t, m, keyEnter())
+			takeNoAnswer(t, reply, "⏎ on the first pane's stale arm")
+
+			m = armAsk(t, m)
+			step(t, m, keyEnter())
+			if got := takeAnswer(t, reply); got != "left" {
+				t.Errorf("answer = %q after the question's own arm, want %q", got, "left")
+			}
+		})
+	}
+}
+
+// The ask fold ASKS for its arm the way the approval fold does: the batch it returns carries the
+// drain marker, so on a terminal that answers a cursor report the pane arms in one round trip rather
+// than on its backstop.
+func TestModelAskFoldAsksTheTerminalForItsDrainMarker(t *testing.T) {
+	t.Parallel()
+	_, cmd := stepCmd(t, newTestModel(t), askReqMsg{
+		Request: domain.AskRequest{Question: "which way?"},
+		Reply:   make(chan domain.AskAnswer, 1),
+	})
+
+	// Every member runs on a goroutine of its own and a nested batch is opened in place, because one
+	// member IS the backstop: a tea.Tick parks for approvalArmBackstop, and running the batch in
+	// order would wait it out before reaching the marker.
+	msgs := make(chan tea.Msg, 8)
+	pending := 0
+	launch := func(c tea.Cmd) {
+		pending++
+		go func() { msgs <- cmdMsg(c) }()
+	}
+	launch(cmd)
+	deadline := time.After(time.Second)
+	for pending > 0 {
+		select {
+		case msg := <-msgs:
+			pending--
+			if batch, batched := msg.(tea.BatchMsg); batched {
+				for _, member := range batch {
+					launch(member)
+				}
+				continue
+			}
+			if msg == tea.RequestCursorPosition() {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the ask fold's cmds yielded no drain marker within a second")
+		}
+	}
+	t.Fatal("the ask fold's cmds carry no drain marker: the pane would arm on its backstop alone")
 }
 
 // An ask question switches to awaitingAsk; typing then enter sends the answer on the reply
@@ -2746,7 +2996,7 @@ func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
 		if got := m.input.Value(); got != "" {
 			t.Fatalf("the borrowed box holds %q, want it emptied for the answer (D5)", got)
 		}
-		return m, reply
+		return armAsk(t, m), reply
 	}
 
 	t.Run("the answer goes out", func(t *testing.T) {

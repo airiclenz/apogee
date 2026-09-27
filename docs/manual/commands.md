@@ -132,7 +132,9 @@ anywhere else while the model works — the pane's own `[esc]` Cancel row is the
 spelling of the same cancel. A question from the model is the one carve-out: there a single `esc`
 cancels — the pane's hint reads `esc cancel` — because backing out of a question is not
 abandoning a turn you lost track of; and on a multi-select question `space` ticks and un-ticks
-the highlighted row. `⌥↑`/`⌥↓` light a
+the highlighted row. A question's `⏎` arms exactly as an approval's decision keys do — it takes
+effect a moment after the question appears, so a keystroke already in flight cannot send an
+answer you have not read — while typing an answer, `↑`/`↓`, `space` and `esc` are live at once. `⌥↑`/`⌥↓` light a
 bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
 the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
 the bar, and `esc`, or simply typing your next message, gives the keys back. `^x` on a
@@ -218,7 +220,7 @@ keys above describe. What that second row actually remembers is worth knowing be
 the way `↑`/`↓` do; a **second** click on that same row takes it, the way `⏎` does. It is always two,
 and the row a second click can take is the row *you* clicked onto — the `Allow` the prompt opens on
 is never one press away from being granted, and the arming latch gates the deciding click exactly as
-it gates `⏎`. The same two-click rule runs every other pane that asks you something: the `/sessions`
+it gates `⏎` — on a question from the model as on an approval. The same two-click rule runs every other pane that asks you something: the `/sessions`
 browser, the `/model` and `/server` pickers, a question from the model, and the `/` | `@` menu, where
 the second click completes the token the way `⇥` does. A click **outside** one of these boxes never
 answers or cancels it — that stays `esc`'s job. It closes the pickers and the browser, closes the `/`

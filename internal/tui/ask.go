@@ -17,6 +17,12 @@ import (
 // (emptied) box is re-focused so the human types the answer. View renders the question through
 // [Model.askPrompt] and [Model.submitAnswer] replies on the request's Reply channel — the C3
 // rendezvous the [uiAsker] parked a Step on.
+//
+// The pane arms the way an approval pane does ([Model.openDecisionLatch], approval.go): the ⏎ and
+// the second click that SEND an answer are dead until the terminal has answered the drain marker
+// asked from behind the pane's frame, or the backstop tick lands, so a keystroke already in flight
+// when the question appeared cannot answer it unread. Typing an answer, ↑/↓, a multi-select ␣ and
+// esc are outside the latch — none of them sends anything.
 func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	m.state = stateAwaitingAsk
 	m.pendingAsk = &msg
@@ -27,6 +33,7 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	if msg.Request.MultiSelect && len(msg.Request.Choices) > 0 {
 		m.askChecked = make([]bool, len(msg.Request.Choices))
 	}
+	latch := m.openDecisionLatch()
 	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The box is BORROWED, not repossessed: whatever the human was part-way through typing is
 	// stashed and handed back when the question lets go of it (restoreAskDraft). Emptying it
@@ -38,7 +45,7 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	// box back the moment submitAnswer moves the state on.
 	m.sel = fieldSel{} // the input was emptied for the answer; drop any stale selection
 	m.dropRecall()     // and any walk in progress: the box now belongs to the question
-	return m, m.input.Focus()
+	return m, tea.Batch(m.input.Focus(), latch)
 }
 
 // askChoiceKey is the ask prompt's keypress half, beside the pane that paints it: while a question
@@ -119,7 +126,10 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	m.pendingAsk = nil
-	m.askChecked = nil // the question is answered: no checked set outlives it
+	m.askChecked = nil      // the question is answered: no checked set outlives it
+	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
+	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own
+	m.approvalDrainRelayed = false
 	m.input.Reset()
 	m.restoreAskDraft()       // the question has let go of the box: the message it interrupted comes back
 	tick := m.resumeRunning() // the box is the human's own again — ⏎ queues from here

@@ -1573,6 +1573,11 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 // arm's (clickArm, model.go): the pane's own default highlight was put there by the pane, not by the
 // human, so a single click can never turn it into an answer somebody gave.
 //
+// The pane's ARMING latch gates that second click on top of the arm, exactly as it gates ⏎ and as it
+// gates the approval pane's deciding click (handleApprovalClick): an unarmed sending click is
+// swallowed and leaves the arm STANDING, so once the pane arms the next click on that row sends. The
+// first click — the highlight, and the tick on a multi-select row — sends nothing and stays live.
+//
 // Everything else INSIDE the box it swallows. A click that names no row — the question, a pad line,
 // the hint, a border — is the pane's and does nothing; so is every click while the input box holds
 // text, which is the empty-box guard askChoiceKey makes for the arrows (D5, call G), and so is a
@@ -1607,6 +1612,9 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 		return m, nil, true
 	}
 	if m.clickArmed.holds(panePrompt, row) {
+		if !m.approvalArmed {
+			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
+		}
 		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
 		// the next keypress to drop, because the question it belonged to is over.
 		m.clickArmed = clickArm{}

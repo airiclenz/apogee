@@ -157,20 +157,31 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.state = stateAwaitingApproval
 	m.pending = &msg
 	m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
-	m.approvalArmed = false      // a key already in flight must not answer the pane it arrived with
-	m.approvalSeq++
-	seq := m.approvalSeq
-	m.inputDrainAsked++
-	m.approvalDrainMark = m.inputDrainAsked // the answer this pane relays from, and no earlier one
-	m.approvalDrainRelayed = false          // the first answer asks again; only the second arms
-	m.dismissAutocomplete()                 // a stale menu never shares the frame with a decision surface
+	latch := m.openDecisionLatch()
+	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
 	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts.
 	// The state flip above is all it takes — the legend is derived from it at paint and yields to
 	// the pane for as long as the question stands ([Model.legend]) — and so is the frame: the pane
 	// the decision turns on outranks the draft's extra rows (draftRowsCeiling), and Update's tail
 	// lays out when either height has moved from under its last set ([Model.settle]).
-	return m, tea.Batch(
+	return m, latch
+}
+
+// openDecisionLatch closes the decision latch over the question the caller has just folded in —
+// an approval pane (foldApprovalRequest) or an ask_user pane (foldAskRequest), whichever of
+// pending/pendingAsk is live — and returns the two Cmds that open it again: the drain marker the
+// latch really arms on and the backstop tick for a terminal that answers none. It is the ONE place
+// both panes take a generation and a place in the marker queue, so an answer or a tick left over
+// from either kind of pane can never arm the other kind that follows it.
+func (m *Model) openDecisionLatch() tea.Cmd {
+	m.approvalArmed = false // a key already in flight must not answer the pane it arrived with
+	m.approvalSeq++
+	seq := m.approvalSeq
+	m.inputDrainAsked++
+	m.approvalDrainMark = m.inputDrainAsked // the answer this pane relays from, and no earlier one
+	m.approvalDrainRelayed = false          // the first answer asks again; only the second arms
+	return tea.Batch(
 		approvalDrainMarker(),
 		tea.Tick(approvalArmBackstop, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} }),
 	)
@@ -196,7 +207,7 @@ func (m Model) foldInputDrained() (tea.Model, tea.Cmd) {
 	if m.inputDrainSeen < m.inputDrainAsked {
 		m.inputDrainSeen++
 	}
-	if m.pending == nil || m.approvalDrainMark == 0 || m.inputDrainSeen < m.approvalDrainMark {
+	if !m.questionOpen() || m.approvalDrainMark == 0 || m.inputDrainSeen < m.approvalDrainMark {
 		return m, nil
 	}
 	if !m.approvalDrainRelayed {
@@ -215,7 +226,7 @@ func (m Model) foldInputDrained() (tea.Model, tea.Cmd) {
 // generation, or a pane that has since been answered or cancelled, leaves the latch exactly where it
 // was — so a tick can never arm a pane the human has been looking at for less than the backstop.
 func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
-	if m.pending == nil || msg.seq != m.approvalSeq {
+	if !m.questionOpen() || msg.seq != m.approvalSeq {
 		return m, nil
 	}
 	m.approvalArmed = true

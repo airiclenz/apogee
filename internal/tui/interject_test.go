@@ -1362,6 +1362,7 @@ func TestApprovalAndAskKeysUnchanged(t *testing.T) {
 		m := runningModel(t)
 		reply := make(chan domain.AskAnswer, 1)
 		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
+		m = armAsk(t, m) // the sending ⏎ goes live one arming tick after the pane opens
 		for _, r := range "42" {
 			m = step(t, m, keyRune(r))
 		}
@@ -1398,6 +1399,7 @@ func TestPlaceholderFollowsTheExchange(t *testing.T) {
 	if got := m.legend(); got != idlePlaceholder {
 		t.Errorf("placeholder = %q; want the send legend while the box holds an answer", got)
 	}
+	m = armAsk(t, m)
 	m = step(t, m, keyEnter()) // answer away; the box is the human's own again
 	if got := m.legend(); got != runningPlaceholder {
 		t.Errorf("placeholder = %q; want the running legend once the answer is away", got)

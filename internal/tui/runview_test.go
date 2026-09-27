@@ -915,6 +915,7 @@ func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
 		reply := make(chan domain.AskAnswer, 1)
 
 		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
+		m = armAsk(t, m)
 		for _, r := range "42" {
 			m = step(t, m, keyRune(r))
 		}
@@ -992,6 +993,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 			t.Errorf("placeholder = %q after an event under the pane; want the answering legend to stand", got)
 		}
 
+		m = armAsk(t, m)
 		for _, r := range "42" {
 			m = step(t, m, keyRune(r))
 		}
@@ -1202,9 +1204,10 @@ func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
 				t.Errorf("the status slot is %q under %s; the two rows advertise one key and must fall silent together", got, tc.name)
 			}
 
-			// The answer, and the header wears the key again — the view stood behind the pane.
+			// The answer, and the header wears the key again — the view stood behind the pane. Both
+			// panes arm on the one decision latch before ⏎ may answer them.
+			m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
 			if tc.answer == nil {
-				m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
 				m = step(t, m, keyEnter())
 			}
 			for _, msg := range tc.answer {

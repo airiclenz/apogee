@@ -5551,6 +5551,45 @@ func TestAskClickHighlightsThenTheSecondClickSends(t *testing.T) {
 	}
 }
 
+// The ask pane's arming latch gates the SENDING click exactly as it gates ⏎: before the pane arms,
+// the first click still seats the highlight and arms the row (it sends nothing), but the second is
+// swallowed — and it leaves the row armed, so the first click after the arm sends without costing
+// the human a third.
+func TestAskClickSendsNothingUntilThePaneArms(t *testing.T) {
+	t.Parallel()
+	m, reply := newUnarmedAskModel(t, domain.AskRequest{
+		Question: "which way?",
+		Choices:  []string{"left", "middle", "right"},
+	})
+	if _, _, ok := m.frameSpans().pane(panePrompt); !ok {
+		t.Fatal("the ask pane is not on the frame; there is nothing to aim at")
+	}
+	x, y := frameCell(t, m, "middle")
+
+	m = step(t, m, leftClick(x, y))
+	if m.askSel.selected != 1 {
+		t.Fatalf("askSel = %d after a click before the arm, want the highlight seated on 1", m.askSel.selected)
+	}
+	m = step(t, m, leftClick(x, y))
+
+	if answer, sent := sentAnswer(t, reply); sent {
+		t.Fatalf("a click sent %q with the pane's sending keys still dead", answer)
+	}
+	if m.state != stateAwaitingAsk {
+		t.Fatalf("state = %v after the swallowed click, want the question still up", m.state)
+	}
+	if !m.clickArmed.holds(panePrompt, 1) {
+		t.Errorf("the swallowed click dropped the arm (%+v); the latch must not cost a third click", m.clickArmed)
+	}
+
+	m = armAsk(t, m)
+	step(t, m, leftClick(x, y))
+
+	if answer, sent := sentAnswer(t, reply); !sent || answer != "middle" {
+		t.Errorf("the first click after the arm sent %q (sent=%v), want %q", answer, sent, "middle")
+	}
+}
+
 // The pane's OWN default highlight is not an answer the pointer gave, so a click on the first choice
 // — the one the ❯ already sits on — arms it and sends nothing. It is the whole point of the arm: two
 // clicks always, whatever the keyboard or the pane left highlighted (call J).

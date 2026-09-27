@@ -850,7 +850,8 @@
 // ([Model.submitAnswer], [Model.checkedLabels], [Model.restoreAskDraft]) and the pane that paints
 // the question with its choices ([Model.askPrompt], [askChoiceRows] and the row/line budgeting
 // around them), so a choice can never be paintable and unreachable (the Model still owns the
-// pending question, the highlight and the ticked set); commandrun.go the third cluster lifted out
+// pending question, the highlight and the ticked set) — its sending ⏎ and click arming on the same
+// latch as the approval pane's decision keys ([Model.openDecisionLatch]); commandrun.go the third cluster lifted out
 // of model.go (ADR 0043) — what a
 // recognised /command DOES ([Model.runCommand]'s three gates before the row's own
 // commandSpec.run, the adapters a row names its verb through, the verbs with no file of their own

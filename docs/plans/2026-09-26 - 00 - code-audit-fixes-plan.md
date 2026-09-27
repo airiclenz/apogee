@@ -328,7 +328,14 @@ NOTES (2026-09-27): of the new tests only `TestCollectConsoleWindow_HoldsNoMoreT
 **Acceptance:** `go test -race -count=1 ./internal/tools/ && go test -race -count=1 ./internal/console/`
 **Commit:** `fix(tools): bound console output during the wait window`
 
-## 19. ask_user questions arm like approval panes
+## 19. ask_user questions arm like approval panes — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the latch is generalised by sharing, not renaming — the existing identifiers (`approvalArmed`, `approvalSeq`, `approvalDrainMark`, `approvalDrainRelayed`, `approvalArmedMsg`, `foldApprovalArmed`) are kept and their doc comments now say they serve both panes; the arming setup moved into one new `(*Model).openDecisionLatch` both folds call, and a new `pendingDecision.questionOpen` replaces the `m.pending == nil` guard in `foldInputDrained`/`foldApprovalArmed`; `submitAnswer` resets the latch as `sendApproval` does.
+NOTES (2026-09-27): `newAskModel` now arms (newUnarmedAskModel + armAsk, mirroring newApprovalModel), so the listed round-trip/click tests built on it and on `askClickModel` pass unedited; the ask tests that fold `askReqMsg` directly and then send (TestAskGivesTheBorrowedDraftBack's `raise`, TestApprovalAndAskKeysUnchanged, TestPlaceholderFollowsTheExchange, TestRunViewDecisionPanesKeepEnter, TestRunViewDecisionPaneOwnsTheLegend, TestRunViewBreadcrumbHintFollowsTheKey) arm explicitly.
+NOTES (2026-09-27): the esc-stays-live check is a subtest of TestModelAskEnterIsDeadUntilArmed rather than a standalone TestModelAskEscapeIsLiveBeforeArming, so that every new test fails against the pre-item tree (a standalone esc test passes there by construction).
+NOTES (2026-09-27): consequential edit — internal/tui/doc.go: made necessary by ask.go's send keys now arming on the shared latch (openDecisionLatch)
+NOTES (2026-09-27): consequential edit — internal/tui/interject_test.go: made necessary by the ask pane's ⏎ now being latched (tests that answer a directly-folded question must arm first)
+NOTES (2026-09-27): consequential edit — internal/tui/runview_test.go: made necessary by the ask pane's ⏎ now being latched (tests that answer a directly-folded question must arm first)
 
 **What:** Fixes the audit's High "A keystroke queued before an ask_user question is drawn can silently submit it unread".
 **Regression guard.** Add `internal/tui/mouse_test.go` to Files — `handleAskClick`'s own tests are not currently listed, though `mouse.go` is. Give `newAskModel` (and `askClickModel`) the same arm step `armApproval` already gives `newUnarmedApprovalModel`'s callers — an `armAsk` helper mirroring `armApproval` — and update every existing ask round-trip/click test that currently submits unarmed (`TestModelAskRoundTrip`, `TestModelAskChoicesRoundTrip`, `TestAskGivesTheBorrowedDraftBack`, the `TestModelAskMultiSelect*` round-trips, `TestAskClickHighlightsThenTheSecondClickSends`, `TestAskClickOnTheDefaultHighlightArmsAndSendsNothing`) the same way approval's own tests already do.
