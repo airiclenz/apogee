@@ -116,6 +116,35 @@ func clearTreeOutcome(root string, failures int, first error) error {
 		failures, root, first)
 }
 
+// errReparsePoint is what a label handle reports for a path that is a reparse point: a label
+// read or written there would reach the link's target, wherever it points. It is declared here,
+// untagged, because the revert's disposition of that refusal (revertTargetGone) is pure.
+var errReparsePoint = errors.New("the path is a reparse point (a junction or symlink), whose mandatory label would be its target's")
+
+// revertTargetGone reports whether a revert write's failure — ClearTree's clear of a root or
+// a descendant, revertJournal's restore of a prior — means the object the journal names is no
+// longer at its path. That is the one write failure a revert SETTLES rather than retries: the
+// write reached nothing, and no later run can find the object at that path either.
+//
+//   - A path that is GONE is a completed revert ("restored, not reconstructed"): an object
+//     that no longer exists carries no label to clear or put back.
+//   - A path that is now a REPARSE POINT (errReparsePoint) is the same case. apogee never
+//     labels one — resolveBoxRoot and LabelTree refuse a reparse root, and both walks skip a
+//     reparse descendant — so the object the journal names was moved or deleted and a link put
+//     in its place, exactly as for a vanished path, and the refused write wrote nothing
+//     through the link. Counting it as a failure instead wedged the journal: an entry with no
+//     journalled identity (identityRefuses cannot refuse it) whose verdict was persisted
+//     (Entry.RootJudged, Entry.Judged — so the label read that reads a link as "no label" is
+//     skipped) reached the write on every revert, failed it every time, and was never retired.
+//
+// Every other failure — a denied write, an unreadable object — is not settled: the label may
+// still be on the disk, so the error keeps the journal (retire) and a later run retries.
+//
+// It is pure so the disposition is table-testable on any OS — the retire seam pattern.
+func revertTargetGone(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, errReparsePoint)
+}
+
 // priorVerdict is priorRestorable's answer over one journalled prior. The zero value is the
 // unknown read, the answer that acts on nothing.
 type priorVerdict int
@@ -302,7 +331,7 @@ func priorRestorable(current string, readErr error) priorVerdict {
 // which is what keeps restorablePriors from ever writing it. A missing path is not a
 // replacement and falls through to the label rules, where it drops as it always has.
 //
-// readLabel and readIdentity are injected (ReadSDDL and statHandle in production, both
+// readLabel and readIdentity are injected (readJudgedLabel and statHandle in production, both
 // Windows-tagged) so every decision the pre-clear pass makes is table-testable on any OS — the
 // retire seam pattern.
 func judgeEntries(entries []Entry, readLabel func(string) (string, error), readIdentity statFunc) (changed, settled bool, err error) {
@@ -495,7 +524,7 @@ func isDriveLetter(b byte) bool {
 //
 // Roots are compared case-folded (foldPath): C:\Work and c:\work name one location.
 // alive is injected (ProcessAlive in production, which is Windows-tagged), and readLabel and
-// readIdentity with it (ReadSDDL and statHandle, likewise), so the decision is table-testable
+// readIdentity with it (readJudgedLabel and statHandle, likewise), so the decision is table-testable
 // on any OS — the retire seam pattern.
 func revertibleRoots(r Record, siblings []Record, alive func(pid int, started uint64) bool, readLabel func(string) (string, error), readIdentity statFunc) (clear []string, spared []Entry) {
 	claimed := make(map[string]bool)

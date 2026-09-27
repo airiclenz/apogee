@@ -286,11 +286,14 @@ func osStat() statFunc { return statHandle }
 // record apogee never wrote to, which is the mirror image of the harm the label-side skip
 // exists to prevent. A skipped path is not a failure and is not counted. The ROOT is cleared
 // through the same reparse-checked handle (SetSDDL), and a root that has become a reparse point
-// since it was labelled is refused with an error rather than cleared through to its target,
-// which keeps the journal.
+// since it was labelled is refused at that handle, never cleared through to its target. Like a
+// root that has vanished, it is then a completed revert and returns nil (revertTargetGone):
+// apogee never labelled a reparse point, so the directory the journal names is no longer at
+// that path, there is nothing of apogee's there to clear, and an error would keep the journal
+// forever over a write that can never succeed.
 func ClearTree(root string) error {
 	if err := SetSDDL(root, clearSDDL); err != nil {
-		if os.IsNotExist(err) {
+		if revertTargetGone(err) {
 			return nil
 		}
 		return fmt.Errorf("apogee: confine: clear the mandatory label of %q: %w", root, err)
@@ -342,7 +345,7 @@ func ClearTree(root string) error {
 func clearDescendant(path string) error {
 	handle, err := openLabelHandle(path, labelWriteAccess)
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, errReparsePoint) {
+		if revertTargetGone(err) {
 			return nil
 		}
 		links, linksErr := hardLinkCount(path)
@@ -522,7 +525,8 @@ func judgePriors(r Record, own string) error {
 // carries no label to put back ("restored, not reconstructed" — the posture ClearTree's root
 // already takes). Failing on it instead would wedge the lifecycle permanently: teardown would
 // warn every session and recovery would retry and fail every startup, over a label that
-// stopped existing.
+// stopped existing. A prior-labelled path that is now a reparse point is the same case
+// (revertTargetGone): the write refuses the link, writes nothing through it, and settles.
 func revertJournal(roots []string, priors map[string]string) error {
 	var firstErr error
 	for _, root := range roots {
@@ -531,7 +535,7 @@ func revertJournal(roots []string, priors map[string]string) error {
 		}
 	}
 	for path, sddl := range priors {
-		if err := SetSDDL(path, sddl); err != nil && !os.IsNotExist(err) && firstErr == nil {
+		if err := SetSDDL(path, sddl); err != nil && !revertTargetGone(err) && firstErr == nil {
 			firstErr = fmt.Errorf("apogee: confine: restore the prior label of %q: %w", path, err)
 		}
 	}
@@ -709,10 +713,6 @@ const (
 	labelWriteAccess     = windows.WRITE_OWNER | windows.FILE_READ_ATTRIBUTES
 	labelReadWriteAccess = labelReadAccess | labelWriteAccess
 )
-
-// errReparsePoint is what a label handle reports for a path that is a reparse point: a label
-// read or written there would reach the link's target, wherever it points.
-var errReparsePoint = errors.New("the path is a reparse point (a junction or symlink), whose mandatory label would be its target's")
 
 // labelHandle is one open of an object that its mandatory-label reads and writes go through,
 // opened ON the path itself (FILE_FLAG_OPEN_REPARSE_POINT) and already vetted as no reparse

@@ -579,13 +579,59 @@ func TestLabelWritesRefuseAJunction(t *testing.T) {
 	if _, err := ReadSDDL(link); !errors.Is(err, errReparsePoint) {
 		t.Errorf("ReadSDDL(junction) = %v; want errReparsePoint", err)
 	}
-	if err := ClearTree(link); err == nil {
-		t.Errorf("ClearTree(junction) succeeded; want the root refused")
+	// The clear refuses the link at its handle and settles it as a vanished root would
+	// (revertTargetGone): nothing of apogee's is at that path, and nothing reaches the target.
+	if err := ClearTree(link); err != nil {
+		t.Errorf("ClearTree(junction) = %v; want nil, the root settled as no longer there", err)
 	}
 	if label, err := readJudgedLabel(link); err != nil || label != "" {
 		t.Errorf("readJudgedLabel(junction) = %q, %v; want no label and no error", label, err)
 	}
 	if after := mustReadLabel(t, target); after != before {
 		t.Errorf("junction target label = %q, want it unchanged at %q", after, before)
+	}
+}
+
+func TestRetireDrainsALegacyEntryWhosePathBecameAJunction(t *testing.T) {
+	// A journal written before entries carried an identity, whose verdicts were persisted
+	// (RootJudged, Judged) before the labelled directory was replaced by a junction. Nothing
+	// refuses such an entry before the write — identityRefuses has no identity to compare and
+	// the persisted verdicts skip the label read — so the write itself meets the link. It must
+	// refuse it AND settle it: the journal retires, and the junction's target is untouched. A
+	// refusal counted as a failure kept the journal forever, failing every revert.
+	lowLabelledDir(t)
+	target, child, before := foreignLabelledTarget(t)
+	links := t.TempDir()
+	root := filepath.Join(links, "root")
+	prior := filepath.Join(links, "prior")
+	junctionTo(t, root, target)
+	junctionTo(t, prior, target)
+
+	home := t.TempDir()
+	own := JournalPath(home, 999999)
+	r := Record{PID: 999999, Entries: []Entry{
+		{Path: root, Root: true, RootJudged: true},
+		{Path: prior, PriorSDDL: foreignSDDL, Judged: true},
+	}}
+	if err := WriteJournal(own, r); err != nil {
+		t.Fatalf("WriteJournal: %v", err)
+	}
+
+	dead := func(int, uint64) bool { return false }
+	remaining, err := retire(own, r, revertSparingLiveSiblings(home, own, dead))
+	if err != nil {
+		t.Fatalf("retire over a legacy entry whose path became a junction = %v; want the journal retired", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("remaining entries = %+v, want none", remaining)
+	}
+	if _, err := os.Stat(own); !os.IsNotExist(err) {
+		t.Errorf("journal %q still on the disk (stat: %v); want it retired", own, err)
+	}
+	if after := mustReadLabel(t, target); after != before {
+		t.Errorf("junction target label = %q, want it unchanged at %q", after, before)
+	}
+	if label := mustReadLabel(t, child); label != "" {
+		t.Errorf("label of %q under the junction target = %q, want none", child, label)
 	}
 }

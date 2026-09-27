@@ -216,7 +216,12 @@ no special case: a below-floor Windows host is exactly today's Windows host.
   the label on that handle. A root that became a reparse point after resolution fails the label
   pass with confinement unavailable, exactly as an up-front reparse root does; a descendant
   that did so takes the tolerated-descendant rung; and the revert's judgement reads a reparse
-  point as carrying no label of apogee's, so it neither clears nor restores through one.
+  point as carrying no label of apogee's, so it neither clears nor restores through one. A revert
+  write that reaches a reparse point anyway — a journal entry with no recorded identity whose
+  verdict was persisted before its path became a link — is refused at the handle and settles
+  as a vanished path does (amended 2026-09-27): the object the journal names is no longer at
+  that path, so the entry is retired rather than retried, and nothing is written through the
+  link.
 
 **7. Probe expectations (the escape battery on Windows).**
 

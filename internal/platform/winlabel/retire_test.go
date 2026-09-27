@@ -426,6 +426,37 @@ func TestClearTreeOutcome(t *testing.T) {
 	}
 }
 
+func TestRevertTargetGoneTable(t *testing.T) {
+	t.Parallel()
+
+	// The one revert-write failure a revert settles rather than retries. A path that is gone,
+	// or that is now a reparse point, no longer holds the object the journal names, so the
+	// entry must retire; a reparse point counted as a failure wedged a legacy identity-less
+	// root whose RootJudged verdict skipped the label read — ClearTree failed on every revert
+	// and the journal was never retired. Every other failure keeps the journal for a retry.
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"no failure", nil, false},
+		{"path gone", &fs.PathError{Op: "open", Path: `C:\work`, Err: fs.ErrNotExist}, true},
+		{"path now a reparse point", &fs.PathError{Op: "open", Path: `C:\work`, Err: errReparsePoint}, true},
+		{"reparse refusal wrapped by a caller", fmt.Errorf("clear %q: %w", `C:\work`, errReparsePoint), true},
+		{"write denied", &fs.PathError{Op: "open", Path: `C:\work`, Err: fs.ErrPermission}, false},
+		{"other failure", errors.New("the device is not ready"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := revertTargetGone(tc.err); got != tc.want {
+				t.Errorf("revertTargetGone(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 	t.Parallel()
 
