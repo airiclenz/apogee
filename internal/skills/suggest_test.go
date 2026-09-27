@@ -445,6 +445,8 @@ func TestShippedTriggersKeepTheirTokenCounts(t *testing.T) {
 	}
 
 	want := map[string]map[string]int{
+		// audit declares no triggers: it is a recipe, started by `/audit`, never offered.
+		"audit": {},
 		"code-review": {
 			"review this": 1, "code review": 2, "review my changes": 2, "review the diff": 2,
 			"review this pr": 2, "look over this code": 2, "check this code": 2, "any bugs in this": 1,

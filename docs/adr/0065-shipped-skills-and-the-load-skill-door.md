@@ -51,6 +51,12 @@ clash (ADR 0032), and now so does either workspace dir: a shipped skill is the w
 id in the system, so nobody who has written their own `planning` skill loses it, and the shadowing
 is recorded through the same skip channel ADR 0032 built, so `/skills` names both sides.
 
+> **Amended 2026-09-27 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D6).** The shipped set is five skills: `audit` joins the four above as a
+> Recipe — a skill whose header declares inputs and a stage list the engine runs as a Workflow —
+> with its split script bundled beside its `SKILL.md`. Every rule of this section binds it
+> unchanged: it is the lowest-priority claim on its id, a user's own `code-audit` skill is
+> untouched, and a user's own `audit` shadows it.
+
 **2. Shipped skills are never installed.** No `~/.apogee/skills/<id>/` is written on first run and
 no directory is auto-created. The catalog serves the embedded bytes directly, and an upgrade
 therefore refreshes every shipped skill for every user — the freeze ADR 0064 §1 removed from the

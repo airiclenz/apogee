@@ -1,4 +1,4 @@
-// Package skills discovers skills — the user's own, from disk, and apogee's four shipped ones,
+// Package skills discovers skills — the user's own, from disk, and apogee's five shipped ones,
 // from an embedded tree — and serves them as one catalog.
 //
 // A skill is a folder containing a SKILL.md file — YAML frontmatter (id/name, displayName,
@@ -19,8 +19,9 @@
 //
 //	ADR 0001  no implicit ~/.apogee — the state roots are injected (here, via Sources)
 //	ADR 0002  skills are an open extension point — anyone may add one, nobody's is privileged
-//	ADR 0065  four skills ship embedded, as the LOWEST-priority source (supersedes the
-//	          "no builtins shipped" attribution this list used to hang on ADR 0002)
+//	ADR 0065  shipped skills ship embedded, as the LOWEST-priority source (supersedes the
+//	          "no builtins shipped" attribution this list used to hang on ADR 0002); five
+//	          since ADR 0087 D6 added the `audit` recipe
 //	ADR 0010  package layout: depend only on internal/domain (downward), never the root facade
 //	ADR 0032  the user's global library outranks the workspace on an id collision
 //

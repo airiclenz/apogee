@@ -29,27 +29,32 @@ func TestShippedSkillAnnouncesOnlyReadableAddresses(t *testing.T) {
 		cfg.ReadMounts.Virtual = provider.VirtualReadRoots
 	})
 
-	block := a.resolveSkillRefs(1, []string{"debugging"}, 1<<20)
-	if !strings.Contains(block, "files: shipped:debugging ") {
-		t.Fatalf("the injected block names no shipped folder; got:\n%s", block)
-	}
-
-	addresses := uniqueSorted(mountAddress.FindAllString(block, -1))
-	if len(addresses) < 2 {
-		t.Fatalf("want the files: folder AND at least one bundled file address, got %v", addresses)
-	}
-
-	files := 0
-	for _, address := range addresses {
-		if address == "shipped:debugging" {
-			assertToolReads(t, a, "list_dir", address, "SKILL.md")
-			continue
+	// debugging carries a bundled checklist; audit, a recipe, carries the split script its first
+	// stage runs — named in the body only as a file to read, never as one to execute.
+	for _, id := range []string{"debugging", "audit"} {
+		folder := skills.ShippedMountPrefix + id
+		block := a.resolveSkillRefs(1, []string{id}, 1<<20)
+		if !strings.Contains(block, "files: "+folder+" ") {
+			t.Fatalf("the injected %s block names no shipped folder; got:\n%s", id, block)
 		}
-		assertToolReads(t, a, "read_file", address, "")
-		files++
-	}
-	if files == 0 {
-		t.Fatal("the body expanded no {{SKILL_DIR}} file address, so nothing proved a bundled file is readable")
+
+		addresses := uniqueSorted(mountAddress.FindAllString(block, -1))
+		if len(addresses) < 2 {
+			t.Fatalf("%s: want the files: folder AND at least one bundled file address, got %v", id, addresses)
+		}
+
+		files := 0
+		for _, address := range addresses {
+			if address == folder {
+				assertToolReads(t, a, "list_dir", address, "SKILL.md")
+				continue
+			}
+			assertToolReads(t, a, "read_file", address, "")
+			files++
+		}
+		if files == 0 {
+			t.Fatalf("the %s body expanded no {{SKILL_DIR}} file address, so nothing proved a bundled file is readable", id)
+		}
 	}
 }
 

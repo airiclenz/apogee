@@ -129,7 +129,7 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 	// The note's own heading — the count of what DID load — is the row a golden of the visible
 	// frame cannot hold: the shipped set outgrew the thirty-row viewport and the header scrolled
 	// off above it. It is still transcript, so it is still assertable; page up and read it there.
-	// The literal is the count this fixture yields — four shipped skills and the workspace's
+	// The literal is the count this fixture yields — five shipped skills and the workspace's
 	// /dupe — and not a number computed from the same source the header is drawn from.
 	rows := scrollbackRows(t, drv, hostileSkillsHeader)
 	if !rowsContain(rows, hostileSkillsHeader) {
@@ -345,12 +345,12 @@ func wrappedPaneFrame(t *testing.T, ws string) tuitest.Frame {
 // The fixture
 // ----------------------------------------------------------------------------
 
-// hostileSkillsHeader is the heading the /skills note opens with in this fixture: the four shipped
+// hostileSkillsHeader is the heading the /skills note opens with in this fixture: the five shipped
 // skills plus the workspace's /dupe, behind the note renderer's own "· " lead (internal/tui:
 // loadedSkillLines, renderBlock). The count is written out because the assertion is about what the
 // reader was told, and a count derived from the loader would agree with the note however wrong both
 // were.
-const hostileSkillsHeader = "· 5 skills available:"
+const hostileSkillsHeader = "· 6 skills available:"
 
 // scrollbackRows walks the transcript up from where it stands, a window at a time, and returns the
 // content of every row it painted on the way — including the window it started on. The walk stops

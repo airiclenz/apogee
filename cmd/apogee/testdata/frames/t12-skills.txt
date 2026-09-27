@@ -9,7 +9,7 @@
       triggers: make a plan, plan this, plan out, how should i approach, break this down, what are │
   the steps, implement this feature, wh…                                                           │
                                                                                                    │
-  1 skill found but not loaded:                                                                    ┃
+  1 skill found but not loaded:                                                                    │
     evil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                           ┃
   displayName="ev\x1b[31mil\nrow" summary="ev\x1b[31mil\nrow" body-empty=true)                     ┃
       <root>/wsRED/.apogee/skills/evil row/SKILL.md ┃

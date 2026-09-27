@@ -3,15 +3,19 @@ package skills
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // writeSkill creates <base>/<id>/SKILL.md with the given content (a skill folder).
@@ -927,7 +931,7 @@ func TestShippedCatalogIDsArePinned(t *testing.T) {
 	t.Parallel()
 
 	// Edit this list ONLY together with the cmd/apogee fixtures the failure message names.
-	want := []string{"code-review", "commit-hygiene", "debugging", "planning"}
+	want := []string{"audit", "code-review", "commit-hygiene", "debugging", "planning"}
 
 	cat, _ := Load(Sources{UseShippedSkills: true})
 	got := make([]string, 0, cat.Len())
@@ -1115,4 +1119,226 @@ func TestLoadInvalidRecipeIsASkipNamingTheProblem(t *testing.T) {
 	if reason := skipped[0].Reason(); !strings.Contains(reason, `stage "find", field "over"`) {
 		t.Errorf("skip reason = %q, want the validator's problem naming the stage and field", reason)
 	}
+}
+
+// The shipped audit skill is a recipe (ADR 0087 D6): it loads with its stages through
+// workflow.Validate, declares scope as its one required input and focus as an optional one, opens
+// on the split script it carries, asks the focus with `all` as the answer a human-less Driver
+// takes, and ends on the report merge.
+func TestShippedAuditRecipeLoads(t *testing.T) {
+	t.Parallel()
+	cat, _ := Load(Sources{UseShippedSkills: true})
+	sk, ok := cat.Get("audit")
+	if !ok || sk.Recipe == nil {
+		t.Fatalf("the shipped audit skill did not load with its recipe: %+v", cat.Skipped())
+	}
+	wantInputs := []workflow.InputDecl{{Name: "scope", Required: true}, {Name: "focus"}}
+	if len(sk.Inputs) != len(wantInputs) {
+		t.Fatalf("audit declares inputs %+v, want scope and focus", sk.Inputs)
+	}
+	for i, want := range wantInputs {
+		if got := sk.Inputs[i]; got.Name != want.Name || got.Required != want.Required || got.Default != "" {
+			t.Errorf("input %d = %+v, want name %q required %v and no default", i, got, want.Name, want.Required)
+		}
+	}
+
+	stages := sk.Recipe.Stages
+	if problems := workflow.Validate(*sk.Recipe); len(problems) > 0 {
+		t.Fatalf("the loaded recipe does not validate: %v", problems)
+	}
+	split := stages[0]
+	if split.Kind != workflow.StageScript || !strings.Contains(split.Run, "{{SKILL_DIR}}/split.sh") {
+		t.Errorf("the first stage = %+v, want the script stage running the bundled split.sh", split)
+	}
+	if _, err := fs.Stat(shippedFiles, shippedDir+"/audit/split.sh"); err != nil {
+		t.Errorf("the recipe runs split.sh, which the embedded skill folder does not carry: %v", err)
+	}
+	at := slices.IndexFunc(stages, func(stage workflow.Stage) bool { return stage.Name == "focus" })
+	if at < 0 || stages[at].Kind != workflow.StageAsk || stages[at].Default != "all" {
+		t.Errorf("the recipe has no focus question defaulting to all: %+v", stages)
+	}
+	if last := stages[len(stages)-1]; last.Kind != workflow.StageMerge {
+		t.Errorf("the last stage = %+v, want the report merge", last)
+	}
+}
+
+// The fixture tree the split tests cut: 360 source lines over three folders, one test file, one
+// file with a concurrency primitive, and the docs and prose a code audit never reads.
+func auditFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	lines := func(n int, extra string) string {
+		return strings.Repeat("x := 1\n", n-1) + extra + "\n"
+	}
+	files := map[string]string{
+		"cmd/app/main.go":         lines(60, "x := 1"),
+		"internal/a/a1_test.go":   lines(20, "x := 1"),
+		"internal/b/b1.go":        lines(30, "go func() {}()"),
+		"README.md":               lines(10, "prose"),
+		"docs/design/notes.go":    lines(10, "x := 1"),
+		"internal/a/testdata/f.g": lines(10, "x := 1"),
+	}
+	for i := 1; i <= 6; i++ {
+		files[fmt.Sprintf("internal/a/a%d.go", i)] = lines(30, "x := 1")
+	}
+	for i := 2; i <= 4; i++ {
+		files[fmt.Sprintf("internal/b/b%d.go", i)] = lines(30, "x := 1")
+	}
+	for name, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// runAuditSplit runs the embedded split.sh from workspace over scope, as the recipe's script stage
+// does, with partLines as its PART_LINES ("" leaves it unset) and partBytes as the engine's split
+// budget, and returns the workflow folder and the receipt lines it printed.
+func runAuditSplit(t *testing.T, workspace, scope, partLines, partBytes string) (string, map[string]string) {
+	t.Helper()
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no POSIX sh on this host to run split.sh")
+	}
+	script, err := fs.ReadFile(shippedFiles, shippedDir+"/audit/split.sh")
+	if err != nil {
+		t.Fatalf("read the embedded split.sh: %v", err)
+	}
+	run := t.TempDir()
+	scriptPath := filepath.Join(run, "split.sh")
+	if err := os.WriteFile(scriptPath, script, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", scriptPath, run, scope, "", partBytes)
+	cmd.Dir = workspace
+	// GIT_DIR at a missing folder makes `git ls-files` fail, so the listing takes the find
+	// fallback over the fixture whatever repository the temp dir happens to sit in.
+	cmd.Env = append(os.Environ(), "PART_LINES="+partLines, "GIT_DIR="+filepath.Join(workspace, "no-git"))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("split.sh failed: %v\n%s", err, out)
+	}
+	receipt := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if !found || key == "" || strings.ToLower(key) != key || strings.ContainsAny(key, " \t") {
+			t.Fatalf("split.sh printed %q, which is not one KEY=value line", line)
+		}
+		if _, repeated := receipt[key]; repeated {
+			t.Fatalf("split.sh printed the key %q twice", key)
+		}
+		receipt[key] = value
+	}
+	return run, receipt
+}
+
+// split.sh prints exactly the receipt the recipe's split stage declares — one KEY=value a line,
+// every declared field and a summary — and cuts the fixture into parts that each fit PART_LINES
+// and the file bound, losing no source file, filing every test file with a part, and leaving
+// docs and prose out of scope.
+func TestAuditSplitFitsPartsUnderTheBudget(t *testing.T) {
+	t.Parallel()
+	cat, _ := Load(Sources{UseShippedSkills: true})
+	sk, ok := cat.Get("audit")
+	if !ok || sk.Recipe == nil {
+		t.Fatalf("the shipped audit skill did not load with its recipe: %+v", cat.Skipped())
+	}
+	const partLines, partFiles = 100, 15
+	workspace := auditFixture(t)
+	run, receipt := runAuditSplit(t, workspace, ".", strconv.Itoa(partLines), "")
+
+	wantKeys := []string{workflow.FieldSummary}
+	for key := range sk.Recipe.Stages[0].Returns {
+		wantKeys = append(wantKeys, key)
+	}
+	gotKeys := make([]string, 0, len(receipt))
+	for key := range receipt {
+		gotKeys = append(gotKeys, key)
+	}
+	slices.Sort(wantKeys)
+	slices.Sort(gotKeys)
+	if !slices.Equal(gotKeys, wantKeys) {
+		t.Errorf("split.sh printed the keys %v, want the split stage's receipt %v", gotKeys, wantKeys)
+	}
+	if receipt["part_lines"] != strconv.Itoa(partLines) || receipt["focus"] != "none" {
+		t.Errorf("receipt = %v, want part_lines=%d read from PART_LINES and focus=none", receipt, partLines)
+	}
+
+	parts := readLines(t, filepath.Join(run, "parts.txt"))
+	if len(parts) < 2 || strconv.Itoa(len(parts)) != receipt["parts"] {
+		t.Fatalf("parts.txt lists %v; want several parts and parts=%s", parts, receipt["parts"])
+	}
+	var covered, tested []string
+	for _, part := range parts {
+		sources := readLines(t, filepath.Join(part, "scope.txt"))
+		total := 0
+		for _, source := range sources {
+			total += len(readLines(t, filepath.Join(workspace, source)))
+		}
+		if len(sources) > partFiles || total > partLines {
+			t.Errorf("part %s holds %d files and %d lines, over the %d-file, %d-line bound",
+				filepath.Base(part), len(sources), total, partFiles, partLines)
+		}
+		covered = append(covered, sources...)
+		tested = append(tested, readLines(t, filepath.Join(part, "tests.txt"))...)
+	}
+	slices.Sort(covered)
+	if src := readLines(t, filepath.Join(run, "src.txt")); !slices.Equal(covered, src) {
+		t.Errorf("the parts cover %v, want every source file exactly once: %v", covered, src)
+	}
+	if !slices.Contains(tested, "internal/a/a1_test.go") {
+		t.Errorf("the test file is filed with no part: %v", tested)
+	}
+	for _, name := range readLines(t, filepath.Join(run, "scope.txt")) {
+		if strings.HasPrefix(name, "docs/") || strings.HasSuffix(name, ".md") || strings.Contains(name, "testdata/") {
+			t.Errorf("scope.txt holds %q, which a code audit never reads", name)
+		}
+	}
+	if conc := readLines(t, filepath.Join(run, "conc-parts.txt")); len(conc) != 1 {
+		t.Errorf("conc-parts.txt = %v, want the one part holding b1.go's goroutine", conc)
+	}
+}
+
+// With no PART_LINES in the environment the part bound is the window: half the engine's split
+// budget at forty bytes a line, clamped to 200..8000, and 8000 when the budget is unknown.
+func TestAuditSplitTakesItsBoundFromTheWindow(t *testing.T) {
+	t.Parallel()
+	workspace := auditFixture(t)
+	for _, tc := range []struct {
+		name, partLines, partBytes, want string
+	}{
+		{"PART_LINES wins", "150", "80000", "150"},
+		{"derived from the budget", "", "80000", "1000"},
+		{"clamped low", "", "400", "200"},
+		{"clamped high", "", "10000000", "8000"},
+		{"unknown window", "", "0", "8000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, receipt := runAuditSplit(t, workspace, "internal", tc.partLines, tc.partBytes)
+			if receipt["part_lines"] != tc.want {
+				t.Errorf("part_lines = %q, want %s", receipt["part_lines"], tc.want)
+			}
+		})
+	}
+}
+
+// readLines is a file's non-blank lines.
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var lines []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }

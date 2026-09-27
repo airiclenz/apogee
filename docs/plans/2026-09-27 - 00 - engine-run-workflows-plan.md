@@ -655,7 +655,23 @@ NOTES (2026-09-27): a recipe launch's item children emit events under the synthe
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/refs/ && go test -race -count=1 ./internal/session/`
 **Commit:** `feat(tui): a recipe skill runs as a workflow`
 
-## 23. The shipped audit recipe: skeleton and split
+## 23. The shipped audit recipe: skeleton and split — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the concurrency lens is gated by a `flags` script stage (`split.sh --flags` reads the CONCURRENCY line ground-truth writes into bundle.md). A `when:` reads only a fanout's tally, never an item's receipt field, so the ground-truth flag cannot be read off the fanout directly.
+
+NOTES (2026-09-27): a brief renders only {item} and {out}, so the workflow folder reaches the children through item labels. split.sh writes absolute item lists (run-dir.txt, parts.txt, conc-parts.txt, groups.txt) for pick stages, and a folder per part and per group (part-<name>/scope.txt and tests.txt; group-<name>/parts.txt and cap.txt). Stage outputs sit beside those folders through `out: "{item}/…"`: bundle.md and tools.md at the top, findings-<lens>.md per part, merged.md and claims.md per group.
+
+NOTES (2026-09-27): an ask answer is not a placeholder, so split.sh echoes the focus input back as `focus=` (`none` when it is absent or not a focus area). The focus ask runs only `when: split.focus == none`, and each lens's `when:` reads split.focus or focus.answer.
+
+NOTES (2026-09-27): stages beyond the item's list. machine-checks sits beside ground-truth (the Phase 1 pair). An `enumerate` fanout per group always runs (on a one-group scope it is the single enumerator), while rollup runs only `when: split.parts > 1`. `verify` is a fanout over the picked claims returning `verdict`, not the engine's verify kind, because the claims are the items, not an earlier fanout's receipts. The report is a merge from verify.
+
+NOTES (2026-09-27): split.sh port changes. A scope that fits one part is one part, `all`. The small-part merge is refused when it would push a part over a bound. A test file matched by no part goes to the root part, or else the first part. PART_LINES comes from the env, or else from the {part_bytes} argument (half the budget at 40 bytes a line, clamped to 200..8000; 8000 when the budget is unknown). A changed scope or bound re-splits.
+
+NOTES (2026-09-27): the recipe names prompts/*.md files that item 24 writes. Load does not check prompt paths, so the recipe loads now, but a run before item 24 lands blocks at its first child stage. The SKILL.md body names only `{{SKILL_DIR}}/split.sh` (readable), not the prompts folder, so TestShippedSkillAnnouncesOnlyReadableAddresses stays green.
+
+NOTES (2026-09-27): consequential edit — internal/agent/skillmount_test.go: made necessary by the item's Tests line (the audit body must pass TestShippedSkillAnnouncesOnlyReadableAddresses); the test now loops over debugging and audit.
+
+NOTES (2026-09-27): improvement idea — a re-run with the same scope and inputs reuses the same part-folder paths. ItemKey hashes a unit's path, not the contents of the files it lists, so lens receipts resume even after the audited code changed. A content-derived part name or a scope hash in the plan would force fresh work.
 
 **What:** Depends on item 18.
 **Goal:** a shipped skill `audit` (`internal/skills/shipped/audit/`) declares inputs `scope` (required) and `focus` (optional), and a recipe: script `split.sh` (parts and groups sized to the window), ask `focus` (default `all`), fanout ground-truth, then lens fanout over parts × lenses (concurrency lens `when:` the ground-truth flag), merge per group on large scopes, pick claims, verify, merge report. Prose body explains the stages for a model that loads it with `load_skill`.

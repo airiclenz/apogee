@@ -1966,8 +1966,8 @@ A reusable block of instructions the user *invokes* from a message — a folder 
 Skills are discovered from layered dirs (the project's `.apogee/skills`, — when
 `use-project-skills` is on — the project's `skills/`, and the global `<apogee home>/skills`) plus
 a fourth, **lowest-priority** source: the skills apogee **ships embedded in the binary**
-(`debugging`, `planning`, `code-review`, `commit-hygiene`), never installed to disk, refreshed by
-every upgrade and switched off wholesale by `use-shipped-skills`. The **user's global library wins
+(`debugging`, `planning`, `code-review`, `commit-hygiene`, and the `audit` Recipe), never
+installed to disk, refreshed by every upgrade and switched off wholesale by `use-shipped-skills`. The **user's global library wins
 any cross-source id clash** while the two project dirs keep their order between themselves, and a
 shipped skill is the weakest claim on an id in the system; a repo may contribute a new skill but
 never replace one of the user's, and every shadowed copy is recorded so `/skills` names both

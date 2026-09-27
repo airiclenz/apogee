@@ -169,8 +169,9 @@ The full tour is in [the manual](docs/manual/README.md).
   step budget; a job can be narrowed to read-only tools, and by default a sub-agent cannot
   delegate further. Open one as its own full screen to watch it work, and type to it while
   it runs.
-- **Skills** — short markdown playbooks you invoke with `/name`. apogee ships four
-  (debugging, planning, code review, commit hygiene), reads your own from
+- **Skills** — short markdown playbooks you invoke with `/name`. apogee ships five
+  (debugging, planning, code review, commit hygiene, and a code audit that runs as a
+  workflow), reads your own from
   `~/.apogee/skills`, and picks up skills a repository ships. As you type, it names the
   skills that clearly fit above the input box; `Tab` picks one. `/skills export` copies a
   shipped skill into your library to make it your own.
