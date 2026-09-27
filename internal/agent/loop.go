@@ -818,7 +818,8 @@ func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.To
 // thinking/harmony channels never leaks that markup onto a live stream (item 3), and the
 // channel's visible text is revealed once its span closes. A native / no-inline-thinking
 // profile's stripper is never mid-channel and returns the content untouched, so every content
-// delta emits verbatim and unbuffered — byte-identical to the pre-profile loop. Each native
+// delta up to the strip throttle's floor (below) emits verbatim and unbuffered — byte-identical to
+// the pre-profile loop. Each native
 // reasoning Delta emits a ReasoningEvent verbatim (the server already split the channel; the
 // provider never yields an empty Thinking chunk), and the terminal Done calibrates the token
 // estimator and emits the Turn's UsageEvent right there — observation only: the text still
@@ -838,22 +839,44 @@ func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.To
 // DeltaThinking at all (the model skipped reasoning, or thinking is off for the turn), is held
 // to its MessageEvent — nothing on the wire tells those apart from a pre-opened span before
 // the first delta, and streaming them live would re-leak the span this hold exists to catch.
+//
+// Each strip pass re-reads the whole accumulation, so a pass per delta is quadratic in the reply.
+// Past streamStripFloor accumulated bytes the pass is THROTTLED (streamStripDue): it re-runs only
+// once streamStripStride new bytes have arrived since the last one, so the live stream advances in
+// stride-sized steps instead of per delta. At or below the floor every delta is stripped, exactly
+// as before. A terminal Delta (Done, error, overflow) flushes the bytes a throttled pass left
+// unscanned, so the live stream still ends where it would have unthrottled; the committed message
+// never depends on any of this — collectCompletion strips the full text once, after the drain.
 func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) completion {
 	var content strings.Builder // the observer's own accumulation: the visible/reasoning split is prefix-stable over it
 	emitted := 0                // bytes of stripped visible content already sent as TokenEvents this stream
 	reasoned := 0               // bytes of stripped inline reasoning already sent as ReasoningEvents this stream
+	scanned := 0                // length of the accumulation the last strip pass read
 	splitSeen := false          // the server split reasoning into its own field this stream: a pre-opened hold is released
+	strip := func() {
+		acc := content.String()
+		scanned = len(acc)
+		emitted = a.emitVisibleDelta(turn, acc, emitted, splitSeen)
+		reasoned = a.emitReasoningDelta(turn, acc, reasoned)
+	}
 	observe := func(delta provider.Delta) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
-			acc := content.String()
-			emitted = a.emitVisibleDelta(turn, acc, emitted, splitSeen)
-			reasoned = a.emitReasoningDelta(turn, acc, reasoned)
+			if streamStripDue(content.Len(), scanned) {
+				strip()
+			}
 		case provider.DeltaThinking:
 			splitSeen = true
 			a.cfg.Events.Emit(domain.ReasoningEvent{EventBase: a.base(turn), Text: delta.Thinking})
+		case provider.DeltaError, provider.DeltaContextOverflow:
+			if scanned < content.Len() {
+				strip()
+			}
 		case provider.DeltaDone:
+			if scanned < content.Len() {
+				strip()
+			}
 			if u := delta.Usage; u != nil {
 				// Calibrate the token accounting against the server's own count before surfacing
 				// it: the reported prompt tokens are the honest fill, and prompt-tokens vs the
@@ -879,6 +902,23 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 		}
 	}
 	return a.collectCompletion(ctx, a.toProviderRequest(req), observe)
+}
+
+// streamStripFloor is the accumulated reply size past which streamResponse throttles its live
+// strip passes; at or below it every content delta is stripped, byte-identical to an unthrottled
+// stream.
+const streamStripFloor = 256 << 10
+
+// streamStripStride is how many new bytes a throttled stream accumulates between strip passes —
+// the bound on how far the live stream trails the wire past streamStripFloor.
+const streamStripStride = 64 << 10
+
+// streamStripDue reports whether streamResponse runs a strip pass over an accumulation of length
+// bytes whose previous pass read scanned bytes: always at or below streamStripFloor, and past it
+// only once streamStripStride new bytes have arrived. It bounds a reply's strip passes to the
+// floor's delta count plus one per stride, where a pass per delta is quadratic in the reply.
+func streamStripDue(length, scanned int) bool {
+	return length <= streamStripFloor || length-scanned >= streamStripStride
 }
 
 // emitAttempt reports one HTTP attempt's measurement (a DeltaAttempt) as an UpstreamAttemptEvent

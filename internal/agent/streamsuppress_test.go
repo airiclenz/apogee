@@ -4,16 +4,20 @@ package agent
 // thinking/harmony channel, streamResponse HOLDS token emission so the channel markup and its
 // reasoning never surface on the live TokenEvent stream; the visible text is revealed once the
 // span closes, and a native profile streams every content delta verbatim and unbuffered
-// (byte-identical, event-for-event). Channel tokens are chunked WHOLE — a token split across
+// (byte-identical, event-for-event) up to the strip throttle's floor, past which a pass runs
+// once per stride. Channel tokens are chunked WHOLE — a token split across
 // deltas leaks its partial prefix live by design (the recorded chunk-boundary edge), so a
 // mid-token-split assertion would fail on purpose and is deliberately avoided here.
 
 import (
 	"context"
+	"iter"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/processing"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
@@ -352,5 +356,151 @@ func TestStream_PreOpenedSplitReasoningStreamsLive(t *testing.T) {
 	}
 	if reasoning := reasoningTexts(sink.events); strings.Join(reasoning, "") != strings.Join(thinking, "") {
 		t.Errorf("joined ReasoningEvents = %q, want %q", strings.Join(reasoning, ""), strings.Join(thinking, ""))
+	}
+}
+
+// countingStripper wraps the profile's real ContentStripper and counts the calls made to it:
+// passes is how many live strip passes ran (each one opens with IsMidChannel), calls every call,
+// the collector's post-drain Strip included.
+type countingStripper struct {
+	inner  processing.ContentStripper
+	passes int
+	calls  int
+}
+
+func (c *countingStripper) Strip(raw string) (string, string) {
+	c.calls++
+	return c.inner.Strip(raw)
+}
+
+func (c *countingStripper) IsMidChannel(raw string, splitSeen bool) bool {
+	c.passes++
+	c.calls++
+	return c.inner.IsMidChannel(raw, splitSeen)
+}
+
+// byteResponder streams reply one byte per content delta, then a terminal Done — the in-process
+// upstream for a reply too long to push through stubllm's wire one byte at a time.
+type byteResponder struct{ reply string }
+
+func (r byteResponder) Stream(_ context.Context, _ provider.Request) iter.Seq[provider.Delta] {
+	return func(yield func(provider.Delta) bool) {
+		for i := range len(r.reply) {
+			if !yield(provider.Delta{Kind: provider.DeltaContent, Content: r.reply[i : i+1]}) {
+				return
+			}
+		}
+		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: "stop"})
+	}
+}
+
+// stepWithCountingStripper submits one prompt to a and runs one Step with a's stripper wrapped in
+// a countingStripper, which it returns.
+func stepWithCountingStripper(t *testing.T, a *Agent) *countingStripper {
+	t.Helper()
+	counter := &countingStripper{inner: a.stripper}
+	a.stripper = counter
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	return counter
+}
+
+// TestStream_LargeReplyThrottlesStripPasses: a 2 MiB reply in 1-byte deltas is stripped once per
+// delta only up to the throttle floor and once per stride past it — not once per delta, which
+// re-reads the whole accumulation 2 Mi times — while below the floor every delta still streams
+// verbatim and the live stream and the committed message both end on the whole reply.
+func TestStream_LargeReplyThrottlesStripPasses(t *testing.T) {
+	const replySize = 2 << 20
+	reply := strings.Repeat("abcdefg\n", replySize/8)
+	sink := &recordingSink{}
+	a := newProfileAgent(t, baseConfig(sink), byteResponder{reply: reply})
+
+	counter := stepWithCountingStripper(t, a)
+
+	// One pass per delta to the floor, one per stride past it, one terminal flush, and slack.
+	const maxPasses = streamStripFloor + (replySize-streamStripFloor)/streamStripStride + 4
+	if counter.passes > maxPasses {
+		t.Errorf("ran %d live strip passes over a %d-byte reply, want at most %d (throttled past %d bytes)",
+			counter.passes, replySize, maxPasses, streamStripFloor)
+	}
+	// Each pass costs IsMidChannel plus the visible and the reasoning Strip; the collector strips once.
+	if maxCalls := 3*maxPasses + 1; counter.calls > maxCalls {
+		t.Errorf("made %d stripper calls, want at most %d", counter.calls, maxCalls)
+	}
+
+	tokens := tokenTexts(sink.events)
+	if len(tokens) < streamStripFloor {
+		t.Fatalf("emitted %d TokenEvents, want at least %d (one per delta below the floor)", len(tokens), streamStripFloor)
+	}
+	for i := range streamStripFloor {
+		if tokens[i] != reply[i:i+1] {
+			t.Fatalf("TokenEvent[%d] = %q, want %q (verbatim, unbuffered below the floor)", i, tokens[i], reply[i:i+1])
+		}
+	}
+	if joined := strings.Join(tokens, ""); joined != reply {
+		t.Errorf("joined live tokens are %d bytes, want the whole %d-byte reply", len(joined), len(reply))
+	}
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != reply {
+		t.Errorf("final MessageEvent is %d bytes (ok=%v), want the whole %d-byte reply", len(me.Text), ok, len(reply))
+	}
+}
+
+// TestStream_ThrottledThinkingCommitsUnthrottledResult: a delimited reply whose <think> span
+// streams past the throttle floor skips strip passes there, yet never leaks the span onto the
+// live stream, and its live stream, committed message and reasoning are exactly what one strip of
+// the full reply yields.
+func TestStream_ThrottledThinkingCommitsUnthrottledResult(t *testing.T) {
+	const chunkSize = 1 << 10
+	profile := domain.ModelProfile{
+		Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
+	}
+	var chunks []string
+	appendChunks := func(text string, count int) {
+		for range count {
+			chunks = append(chunks, text)
+		}
+	}
+	const visibleChunk, reasoningChunk = "Visible words.", "Pondering it."
+	visible := strings.Repeat(visibleChunk, chunkSize/len(visibleChunk)+1)[:chunkSize]
+	reasoning := strings.Repeat(reasoningChunk, chunkSize/len(reasoningChunk)+1)[:chunkSize]
+	appendChunks(visible, 300)
+	appendChunks("<think>", 1)
+	appendChunks(reasoning, 150)
+	appendChunks("</think>", 1)
+	appendChunks(visible, 100)
+	full := strings.Join(chunks, "")
+
+	_, stripper, err := processing.ParserFor(profile)
+	if err != nil {
+		t.Fatalf("ParserFor: %v", err)
+	}
+	wantVisible, wantReasoning := stripper.Strip(full)
+
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Profile = profile
+	a := newProfileAgent(t, cfg, chunkedResponder(t, nil, chunks))
+
+	counter := stepWithCountingStripper(t, a)
+
+	if counter.passes >= len(chunks) {
+		t.Errorf("ran %d live strip passes over %d content deltas, want fewer (throttled past %d bytes)",
+			counter.passes, len(chunks), streamStripFloor)
+	}
+	tokens := tokenTexts(sink.events)
+	assertNoLeak(t, tokens, []string{"<think>", "</think>", reasoningChunk})
+	if joined := strings.Join(tokens, ""); joined != wantVisible {
+		t.Errorf("joined live tokens are %d bytes, want the %d-byte unthrottled visible text", len(joined), len(wantVisible))
+	}
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != wantVisible {
+		t.Errorf("final MessageEvent is %d bytes (ok=%v), want the %d-byte unthrottled visible text", len(me.Text), ok, len(wantVisible))
+	}
+	assertReasoning(t, lastAssistantMessage(t, a), wantReasoning)
+	if joined := strings.Join(reasoningTexts(sink.events), ""); joined != wantReasoning {
+		t.Errorf("joined ReasoningEvents are %d bytes, want the %d-byte unthrottled reasoning", len(joined), len(wantReasoning))
 	}
 }

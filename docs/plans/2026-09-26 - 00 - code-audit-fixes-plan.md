@@ -298,7 +298,11 @@ NOTES (2026-09-27): the recording fake reaches connectOne through a new package-
 **Acceptance:** `go test -race -count=1 ./internal/provider/`
 **Commit:** `fix(provider): cap model and props discovery bodies`
 
-## 17. Live stream stripping is throttled on large replies
+## 17. Live stream stripping is throttled on large replies — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): a terminal Delta (Done, error, overflow) flushes the bytes a throttled pass left unscanned, so the live TokenEvent/ReasoningEvent stream still ends where it would have unthrottled; the Goal does not name this flush — it only fires past 256 KiB, so the below-floor stream stays byte-identical.
+NOTES (2026-09-27): the test bounds live strip PASSES (one IsMidChannel each) by 256 KiB + 2 MiB/64 KiB + a small constant, and total stripper calls by three per pass plus the collector's one, since each pass costs IsMidChannel plus the visible and reasoning Strip; the 2 MiB 1-byte-delta reply streams from an in-process byteResponder rather than stubllm, whose wire would take 2 Mi SSE events.
+NOTES (2026-09-27): the throttle applies to every profile, the native no-op stripper included (the Goal names no exemption), so a native reply past 256 KiB also streams in 64 KiB steps although its strip pass is O(1).
 
 **What:** Fixes the audit's High "Streamed response processing rescans the whole accumulated buffer on every delta".
 **Goal:** while streaming, once the accumulated reply exceeds 256 KiB, `emitVisibleDelta`/`emitReasoningDelta` re-run the stripper only after at least 64 KiB of new bytes since the last scan; below 256 KiB behaviour is byte-identical to today; the committed message is stripped from the full text exactly as before.
