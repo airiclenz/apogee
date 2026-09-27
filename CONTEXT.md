@@ -490,7 +490,9 @@ script stage, never a language feature. Invoking the skill starts a workflow fro
 only its declared inputs filled in (for `audit`: scope and focus) — the model never writes a multi-stage workflow itself.
 Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D6).
 _Avoid_: "workflow" for the definition (the workflow is one execution of a recipe), "plan" (a
-`docs/plans/` document), "script" (one stage kind).
+`docs/plans/` document), "script" (one stage kind). The one exception to "plan" is the in-memory
+Go type `workflow.Plan`, the parsed stage list either source (a recipe or a `fan_out` call) produces;
+prose still says recipe (2026-09-27).
 
 **Receipt**:
 The short, fixed-shape note a **Workflow** item's child hands back in place of its full report —

@@ -194,7 +194,17 @@ NOTES (2026-09-27): consequential edit — cmd/apogee/headless_test.go: made nec
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/ && go test -race -count=1 -run Cancel ./cmd/apogee/ && grep -n -i "cancel" docs/manual/commands.md`
 **Commit:** `feat(tui): a cancel shows the work it kept`
 
-## 4. Workflow plan model and validation
+## 4. Workflow plan model and validation — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): internal/workflow/docmap_test.go is not in the item's Files list. It is the house way a package enlists in docmap.Check (the Regression guard names docmap.Check), and it follows internal/floor/docmap_test.go.
+
+NOTES (2026-09-27): ReceiptSpec is a named `map[string]string` (field name to type spelling), not a struct. Written out, it is the `returns: {findings: int, verdict: confirmed|refuted|unclear}` shape that fan_out (item 14) and verify (item 9) use. It has no struct fields, so there are no yaml/json tags to add. An enum is written `a|b|c`, with an optional `enum ` prefix, and needs two or more distinct values.
+
+NOTES (2026-09-27): these calls were made here because they are not settled elsewhere. A stage's brief is `task` (inline) or `prompt` (a path): exactly one on fanout and merge, at most one on verify (items 14/18). verify and merge take an optional `from` naming the fanout they work over; empty means the nearest earlier fanout. pick takes `from` + `field` (a list field that stage declares) or `file`, plus `cap`/`batch`. A fanout reads a pick's items through `over: {stage: <pick>}`. ask stores its answer in the fixed field `answer` and requires `default`. A repeat names its target with `repeat:`, requires `when:`, and bounds `max:` to 1..10 (MaxRepeatRounds). A key set on a kind that does not read it is a Problem. A stage may refer only to stages before it.
+
+NOTES (2026-09-27): ReceiptSpec.Check requires every declared field on an `ok` receipt only. A partial or blocked receipt may leave fields out, which matches item 5's "a comparison on an absent field is false". ReceiptSpec.Field(name) also returns the core fields' types (status: enum ok|partial|blocked, summary: text) for item 5's type-checker. Validate does not parse `when:`; item 5 adds that.
+
+NOTES (2026-09-27): ValidateModelPlan has no separate "fanout comes first" rule. Every stage that could come before the fanout is already refused: verify or merge fail Validate, and every other kind is refused by the fan_out shape. validate_test.go also carries an import-boundary guard (on internal/webhook's pattern) that refuses internal/agent, config, run, tools, tui and the root facade.
 
 **What:**
 **Goal:** a new package `internal/workflow` defines `Plan`, `Stage` (kinds `fanout`, `verify`, `merge`, `pick`, `script`, `ask`, `repeat`), `ReceiptSpec` (core `status ok|partial|blocked`, `summary` ≤ 20 words; typed extras `int`, `enum a|b|…`, `text` ≤ 200 runes, `list`), `ItemSource`, and `Validate(Plan) []Problem` whose problems name the stage and field and say how to fix it.
