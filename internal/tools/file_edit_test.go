@@ -182,6 +182,23 @@ func TestEditExistingFile_PatchFailuresDoNotCorrupt(t *testing.T) {
 			[]string{"*** Begin Patch", "*** End Patch"},
 			"no hunks",
 		},
+		{
+			"unanchored insertion",
+			[]string{"*** Begin Patch", "*** Update File: patch.ts", "@@", "+  const z = baz();", "*** End Patch"},
+			"context line",
+		},
+		{
+			// The audit's trigger: a real replacement followed by an insertion meant for the
+			// middle of the file, which the oracle's applier silently appended at file-end.
+			"unanchored insertion after a replacement",
+			[]string{
+				"*** Begin Patch", "*** Update File: patch.ts",
+				"@@", "-  return x + y;", "+  return x + y + 1;",
+				"@@", "+  const z = baz();",
+				"*** End Patch",
+			},
+			"context line",
+		},
 	}
 
 	for _, tc := range cases {
@@ -632,5 +649,76 @@ func TestEditExistingFile_Execute_NoTrailerForAnUnknownLanguage(t *testing.T) {
 	}
 	if result.Content != "updated notes.txt" {
 		t.Errorf("Content = %q, want the bare sentence for a path with no known language", result.Content)
+	}
+}
+
+// A hunk of only '+' lines has a position only where the file has none to lose: an empty file,
+// or an "*** Add File" section. There it lands at the end, as before.
+func TestEditExistingFile_PureInsertionWhereItHasAPosition(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		original string
+		patch    []string
+		want     string
+	}{
+		{
+			"empty file",
+			"",
+			[]string{"*** Begin Patch", "*** Update File: f.txt", "@@", "+first", "+second", "*** End Patch"},
+			"first\nsecond",
+		},
+		{
+			"add file section",
+			"kept\n",
+			[]string{"*** Begin Patch", "*** Add File: f.txt", "@@", "+added", "*** End Patch"},
+			"kept\nadded",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := tempRoot(t)
+			path := writeTempFile(t, root, "f.txt", tc.original)
+
+			result, err := NewEditExistingFile(root).Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": "f.txt", "content": strings.Join(tc.patch, "\n")}))
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("unexpected tool error: %q", result.Content)
+			}
+			if got := string(mustRead(t, path)); got != tc.want {
+				t.Errorf("file = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The Add File flag belongs to its section: an "*** Update File" marker after it closes it, so a
+// later pure-insertion hunk is unanchored again.
+func TestParsePatchHunks_AddFileFlagFollowsTheSection(t *testing.T) {
+	t.Parallel()
+
+	hunks := parsePatchHunks(strings.Join([]string{
+		"*** Begin Patch",
+		"*** Add File: a.txt",
+		"@@",
+		"+new",
+		"*** Update File: b.txt",
+		"@@",
+		"+more",
+		"*** End Patch",
+	}, "\n"))
+
+	if len(hunks) != 2 {
+		t.Fatalf("got %d hunks, want 2", len(hunks))
+	}
+	if !hunks[0].addFile || hunks[1].addFile {
+		t.Errorf("addFile = [%v %v], want [true false]", hunks[0].addFile, hunks[1].addFile)
 	}
 }

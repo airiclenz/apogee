@@ -492,7 +492,7 @@ NOTES (2026-09-27): the match lives in a new `childDeliveryMatches` helper, whic
 **Acceptance:** `go test -race -count=1 ./internal/tui/`
 **Commit:** `fix(tui): match child-delivery rows by run id`
 
-## 30. Patch refuses an unanchored insertion hunk
+## 30. Patch refuses an unanchored insertion hunk — ✅ DONE (2026-09-27)
 
 **What:** Fixes the audit's Medium "A patch's pure-insertion hunk always lands at file-end".
 **Goal:** `applyPatch` refuses a hunk with no context or removal lines, with an error telling the model to include at least one context line, unless the target content is empty or the section is `*** Add File`; the file is left untouched on refusal; the tool description states the rule.

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 var fileEditSpec = toolSpec{
 	name:        "edit_existing_file",
-	description: "Edit an existing file. Accepts either full replacement content or a patch in \"*** Begin Patch\" format.",
+	description: "Edit an existing file. Accepts either full replacement content or a patch in \"*** Begin Patch\" format. Each @@ hunk needs at least one context (' ') or removal ('-') line to anchor it: a hunk of only '+' lines is refused unless the file is empty.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "content"],
@@ -112,9 +113,9 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if len(hunks) == 0 {
 			return errorResult(call.ID, "patch contained no hunks"), nil
 		}
-		patched, ok := applyPatch(string(original), hunks)
-		if !ok {
-			return errorResult(call.ID, "patch hunk did not match file content"), nil
+		patched, err := applyPatch(string(original), hunks)
+		if err != nil {
+			return errorResult(call.ID, err.Error()), nil
 		}
 		if err := target.write([]byte(patched), 0o644); err != nil {
 			return errorResult(call.ID, err.Error()), nil
@@ -141,16 +142,19 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 
 // patchHunk is one @@ block of a "*** Begin Patch" edit: the original lines it removes
 // (oldLines) and the lines it inserts (newLines). A context (space-prefixed) line
-// appears in both.
+// appears in both. addFile records that the hunk sits under an "*** Add File" section,
+// the one place a hunk with no oldLines has a position (the file's end).
 type patchHunk struct {
 	oldLines []string
 	newLines []string
+	addFile  bool
 }
 
 var (
 	patchStart  = regexp.MustCompile(`(?i)^\*{3}\s*Begin\s+Patch`)
 	patchEnd    = regexp.MustCompile(`(?i)^\*{3}\s*End\s+Patch`)
 	patchFile   = regexp.MustCompile(`(?i)^\*{3}\s*(?:Update|Add|Delete)\s+File:\s*`)
+	patchAdd    = regexp.MustCompile(`(?i)^\*{3}\s*Add\s+File:\s*`)
 	patchHeader = regexp.MustCompile(`^@@`)
 )
 
@@ -162,13 +166,15 @@ func isPatchContent(content string) bool {
 
 // parsePatchHunks splits a patch into hunks. Begin/End/File markers are skipped; each @@
 // header opens a new hunk; a '-' line removes, a '+' line inserts, and a ' ' (space) line
-// is context kept in both. Lines outside a hunk are ignored, mirroring the oracle.
+// is context kept in both. Lines outside a hunk are ignored, mirroring the oracle. A hunk
+// opened after an "*** Add File" marker (and before the next File marker) is flagged addFile.
 func parsePatchHunks(content string) []patchHunk {
 	lines := strings.Split(content, "\n")
 	var hunks []patchHunk
 	inHunk := false
 	var current patchHunk
 	have := false
+	addSection := false
 
 	flush := func() {
 		if have && (len(current.oldLines) > 0 || len(current.newLines) > 0) {
@@ -177,13 +183,17 @@ func parsePatchHunks(content string) []patchHunk {
 	}
 
 	for _, line := range lines {
-		if patchStart.MatchString(line) || patchEnd.MatchString(line) || patchFile.MatchString(line) {
+		if patchFile.MatchString(line) {
+			addSection = patchAdd.MatchString(line)
+			continue
+		}
+		if patchStart.MatchString(line) || patchEnd.MatchString(line) {
 			continue
 		}
 
 		if patchHeader.MatchString(line) {
 			flush()
-			current = patchHunk{}
+			current = patchHunk{addFile: addSection}
 			have = true
 			inHunk = true
 			continue
@@ -208,15 +218,30 @@ func parsePatchHunks(content string) []patchHunk {
 	return hunks
 }
 
+// errUnanchoredHunk refuses a pure-insertion hunk (no context or removal line) against a
+// non-empty file outside an "*** Add File" section: nothing in the hunk says where its lines
+// belong, and the oracle's answer — append at file-end — silently misplaces an insertion
+// meant for the middle of the file.
+var errUnanchoredHunk = errors.New("patch hunk has only '+' lines, so its position in the file is unknown: " +
+	"include at least one unchanged context line (prefixed with a space) or a '-' line next to the insertion")
+
+// errHunkMismatch reports a hunk whose joined oldLines do not occur in the file.
+var errHunkMismatch = errors.New("patch hunk did not match file content")
+
 // applyPatch applies each hunk to original by locating its joined oldLines verbatim and
-// substituting its joined newLines. A pure-insertion hunk (no oldLines) appends. It
-// returns ok=false if any hunk's old text is not found, leaving the caller to discard the
-// result so the file is never corrupted. Ported from the oracle's indexOf-based applier.
-func applyPatch(original string, hunks []patchHunk) (string, bool) {
+// substituting its joined newLines. A pure-insertion hunk (no oldLines) has no anchor, so it
+// appends only when original is empty or the hunk sits under "*** Add File"; anywhere else it
+// is refused with errUnanchoredHunk. Any refusal or unmatched hunk returns an error, leaving
+// the caller to discard the result so the file is never corrupted. Ported from the oracle's
+// indexOf-based applier.
+func applyPatch(original string, hunks []patchHunk) (string, error) {
 	result := original
 
 	for _, hunk := range hunks {
 		if len(hunk.oldLines) == 0 {
+			if original != "" && !hunk.addFile {
+				return "", errUnanchoredHunk
+			}
 			result += strings.Join(hunk.newLines, "\n")
 			continue
 		}
@@ -224,7 +249,7 @@ func applyPatch(original string, hunks []patchHunk) (string, bool) {
 		needle := strings.Join(hunk.oldLines, "\n")
 		idx := strings.Index(result, needle)
 		if idx == -1 {
-			return "", false
+			return "", errHunkMismatch
 		}
 
 		before := result[:idx]
@@ -232,7 +257,7 @@ func applyPatch(original string, hunks []patchHunk) (string, bool) {
 		result = before + strings.Join(hunk.newLines, "\n") + after
 	}
 
-	return result, true
+	return result, nil
 }
 
 var (
