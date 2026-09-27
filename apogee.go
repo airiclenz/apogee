@@ -147,6 +147,11 @@ type ContextConfig = domain.ContextConfig
 // DelegationConfig bounds what a sub-agent run may spend (Config.Delegation).
 type DelegationConfig = domain.DelegationConfig
 
+// WorkflowConfig carries the second chances an engine-run Workflow gives an item and whether a
+// background workflow's end wakes the agent (Config.Workflow). Its zero value is the documented
+// defaults: one retry, two continuations, the wake on.
+type WorkflowConfig = domain.WorkflowConfig
+
 // FloorConfig switches individual Floor guards off (Config.Floor, ADR 0071). Every field is a
 // Disable… bool, so the zero value keeps the whole floor on and an embedder that never names this
 // type still gets it.

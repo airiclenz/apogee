@@ -62,6 +62,9 @@ func fabricatedSettings() config.Options {
 		DelegateTimeout:       90 * time.Minute,
 		StreamIdleTimeout:     45 * time.Second,
 		RestreamBudget:        1,
+		WorkflowRetries:       3,
+		WorkflowContinuations: 0,
+		WorkflowWake:          false,
 		ServerStats:           false,
 		AutoTitle:             false,
 		RememberModel:         true,
@@ -419,6 +422,9 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"delegate-timeout":        "1h30m0s", // a duration prints itself, ui.stall-after's spelling
 		"stream-idle-timeout":     "45s",
 		"re-stream-budget":        "1",
+		"workflow-retries":        "3",
+		"workflow-continuations":  "0",     // a stated 0 is a value (no continuation), never the default
+		"workflow-wake":           "off",   // the enum's own word, never a YAML bool
 		"server-stats":            "false", // switched off in the fixture: the row reports the value, never the default
 		"auto-title":              "false",
 		"remember-model":          "true",

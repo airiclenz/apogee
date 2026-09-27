@@ -201,6 +201,20 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.RestreamBudget = 0 },
 		},
 		{
+			name: "the workflow keys are file-only and default 1, 2 and on",
+			file: fileConfig{WorkflowRetries: countptr(3), WorkflowContinuations: countptr(4), WorkflowWake: "off"},
+			want: func(o *Options) {
+				o.WorkflowRetries = 3
+				o.WorkflowContinuations = 4
+				o.WorkflowWake = false
+			},
+		},
+		{
+			name: "an explicit workflow-retries: 0 and workflow-continuations: 0 stay 0 — no second chance",
+			file: fileConfig{WorkflowRetries: countptr(0), WorkflowContinuations: countptr(0)},
+			want: func(o *Options) { o.WorkflowRetries = 0; o.WorkflowContinuations = 0 },
+		},
+		{
 			name: "auto-title is file-only and defaults true",
 			file: fileConfig{AutoTitle: boolptr(false)},
 			want: func(o *Options) { o.AutoTitle = false },
@@ -382,19 +396,22 @@ func wantDefaults() Options {
 		ToolUseEnforcer:  true, EmptyResponseRecovery: true, ToolCallRepair: true,
 		ToolCallSalvage: true,
 		ToolLoopBreaker: true, ToolResultCap: true, ReadCache: true,
-		UndoSnapshots:        true,
-		SubAgentsChoice:      SubAgentsChoiceFixed,
-		UseShippedSkills:     true,
-		UseDefaultPrompt:     true,
-		DelegateMaxSteps:     defaultDelegateMaxSteps,
-		DelegateFanOutRounds: defaultDelegateFanOutRounds,
-		DelegateMaxDepth:     defaultDelegateMaxDepth,
-		DelegateMaxTokens:    defaultDelegateMaxTokens,
-		DelegateTimeout:      defaultDelegateTimeout,
-		StreamIdleTimeout:    defaultStreamIdleTimeout,
-		RestreamBudget:       defaultRestreamBudget,
-		ServerStats:          true,
-		AutoTitle:            true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
+		UndoSnapshots:         true,
+		SubAgentsChoice:       SubAgentsChoiceFixed,
+		UseShippedSkills:      true,
+		UseDefaultPrompt:      true,
+		DelegateMaxSteps:      defaultDelegateMaxSteps,
+		DelegateFanOutRounds:  defaultDelegateFanOutRounds,
+		DelegateMaxDepth:      defaultDelegateMaxDepth,
+		DelegateMaxTokens:     defaultDelegateMaxTokens,
+		DelegateTimeout:       defaultDelegateTimeout,
+		StreamIdleTimeout:     defaultStreamIdleTimeout,
+		RestreamBudget:        defaultRestreamBudget,
+		WorkflowRetries:       domain.DefaultWorkflowRetries,
+		WorkflowContinuations: domain.DefaultWorkflowContinuations,
+		WorkflowWake:          true,
+		ServerStats:           true,
+		AutoTitle:             true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -576,19 +593,22 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ToolUseEnforcer": true, "EmptyResponseRecovery": true, "ToolCallRepair": true,
 		"ToolCallSalvage": true,
 		"ToolLoopBreaker": true, "ToolResultCap": true, "ReadCache": true,
-		"ContextFillNotice":    true,
-		"UndoSnapshots":        true,
-		"DelegateMaxSteps":     true,
-		"DelegateFanOutRounds": true,
-		"DelegateMaxDepth":     true,
-		"DelegateMaxTokens":    true,
-		"DelegateTimeout":      true,
-		"StreamIdleTimeout":    true,
-		"RestreamBudget":       true,
-		"ServerStats":          true,
-		"UseShippedSkills":     true,
-		"UseDefaultPrompt":     true,
-		"AutoTitle":            true, "RememberModel": true,
+		"ContextFillNotice":     true,
+		"UndoSnapshots":         true,
+		"DelegateMaxSteps":      true,
+		"DelegateFanOutRounds":  true,
+		"DelegateMaxDepth":      true,
+		"DelegateMaxTokens":     true,
+		"DelegateTimeout":       true,
+		"StreamIdleTimeout":     true,
+		"RestreamBudget":        true,
+		"WorkflowRetries":       true,
+		"WorkflowContinuations": true,
+		"WorkflowWake":          true,
+		"ServerStats":           true,
+		"UseShippedSkills":      true,
+		"UseDefaultPrompt":      true,
+		"AutoTitle":             true, "RememberModel": true,
 		"ContextWindow": true, "WorkingWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
@@ -638,20 +658,23 @@ func everyKeyFileConfig() fileConfig {
 		ToolCallRepair: boolptr(false), ToolCallSalvage: boolptr(false),
 		ToolLoopBreaker: boolptr(false),
 		ToolResultCap:   boolptr(false), ReadCache: boolptr(false),
-		ContextFillNotice:    boolptr(true),
-		UndoSnapshots:        boolptr(false),
-		UseShippedSkills:     boolptr(false),
-		UseDefaultPrompt:     boolptr(false),
-		DelegateMaxSteps:     countptr(12),
-		DelegateFanOutRounds: countptr(3),
-		DelegateMaxDepth:     2,
-		DelegateMaxTokens:    countptr(5_000_000),
-		DelegateTimeout:      strptr("30m"),
-		StreamIdleTimeout:    strptr("30s"),
-		RestreamBudget:       countptr(1),
-		ServerStats:          boolptr(false),
-		RememberModel:        boolptr(false),
-		ContextWindow:        64000, WorkingWindow: 32000, ResponseReserve: 0.3,
+		ContextFillNotice:     boolptr(true),
+		UndoSnapshots:         boolptr(false),
+		UseShippedSkills:      boolptr(false),
+		UseDefaultPrompt:      boolptr(false),
+		DelegateMaxSteps:      countptr(12),
+		DelegateFanOutRounds:  countptr(3),
+		DelegateMaxDepth:      2,
+		DelegateMaxTokens:     countptr(5_000_000),
+		DelegateTimeout:       strptr("30m"),
+		StreamIdleTimeout:     strptr("30s"),
+		RestreamBudget:        countptr(1),
+		WorkflowRetries:       countptr(3),
+		WorkflowContinuations: countptr(4),
+		WorkflowWake:          "off",
+		ServerStats:           boolptr(false),
+		RememberModel:         boolptr(false),
+		ContextWindow:         64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
@@ -2079,6 +2102,9 @@ func TestApplyConfigCountKeysRefuseAFraction(t *testing.T) {
 		{"delegate-max-tokens", topLevelKey("delegate-max-tokens"), func(o Options) int { return o.DelegateMaxTokens }},
 		{"delegate-max-depth", topLevelKey("delegate-max-depth"), func(o Options) int { return o.DelegateMaxDepth }},
 		{"re-stream-budget", topLevelKey("re-stream-budget"), func(o Options) int { return o.RestreamBudget }},
+		{"workflow-retries", topLevelKey("workflow-retries"), func(o Options) int { return o.WorkflowRetries }},
+		{"workflow-continuations", topLevelKey("workflow-continuations"),
+			func(o Options) int { return o.WorkflowContinuations }},
 		{"working-window", topLevelKey("working-window"), func(o Options) int { return o.WorkingWindow }},
 		{
 			"sessions.max-count",
@@ -2479,6 +2505,64 @@ func TestApplyConfigRestreamBudget(t *testing.T) {
 	}
 }
 
+// The three workflow keys parse off the file the way the engine will read them: each count lands as
+// written, an absent key takes the engine's own default, an explicit 0 is a value (no second chance)
+// rather than "unset", and a negative count resolves to the default (the delegate-* keys' file
+// posture: the rows are file-only, so no settings hook refuses one). `workflow-wake:` takes its
+// two words only — `off` lands as off, while a YAML `true`, which a *bool field would have taken, is
+// refused rather than read as a switch the key does not spell. The opts → Config.Workflow threading
+// is the composition root's (projectConfig).
+func TestApplyConfigWorkflowKeys(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name              string
+		file              string
+		wantRetries       int
+		wantContinuations int
+		wantWake          bool
+		wantErr           string
+	}{
+		{name: "absent keys take the defaults", file: "",
+			wantRetries: 1, wantContinuations: 2, wantWake: true},
+		{name: "stated values land", file: "workflow-retries: 3\nworkflow-continuations: 5\nworkflow-wake: off\n",
+			wantRetries: 3, wantContinuations: 5, wantWake: false},
+		{name: "an explicit 0 is no second chance, not absent",
+			file:        "workflow-retries: 0\nworkflow-continuations: 0\nworkflow-wake: on\n",
+			wantRetries: 0, wantContinuations: 0, wantWake: true},
+		{name: "a negative count resolves to the default", file: "workflow-retries: -1\nworkflow-continuations: -2\n",
+			wantRetries: 1, wantContinuations: 2, wantWake: true},
+		{name: "a YAML true is not a wake word", file: "workflow-wake: true\n",
+			wantErr: `workflow-wake is one of on, off, not "true"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ApplyConfig error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.WorkflowRetries != tt.wantRetries {
+				t.Errorf("opts.WorkflowRetries = %d; want %d", opts.WorkflowRetries, tt.wantRetries)
+			}
+			if opts.WorkflowContinuations != tt.wantContinuations {
+				t.Errorf("opts.WorkflowContinuations = %d; want %d", opts.WorkflowContinuations, tt.wantContinuations)
+			}
+			if opts.WorkflowWake != tt.wantWake {
+				t.Errorf("opts.WorkflowWake = %v; want %v", opts.WorkflowWake, tt.wantWake)
+			}
+		})
+	}
+}
+
 // The file pass refuses through the registry rows: a string-spelled key whose value the row's Set
 // admits nothing of is refused at the pass itself, so startup (ApplyConfig) and a live re-read of
 // the same file (LoadFileConfig — every `/settings` apply under a running session) refuse it in
@@ -2495,6 +2579,7 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 		{name: "delegate-timeout", file: "delegate-timeout: 5x\n", wantErr: `apogee: invalid delegate-timeout "5x": want a length of time like 2h or 30m, or 0 to let a delegation run unbounded`},
 		{name: "stream-idle-timeout", file: "stream-idle-timeout: 5x\n", wantErr: `apogee: invalid stream-idle-timeout "5x": want a length of time like 10m or 30s, or 0 to wait for as long as the server takes`},
 		{name: "re-stream-budget", file: "re-stream-budget: -1\n", wantErr: `apogee: invalid re-stream-budget "-1": want a count of 0 or more (0 never re-streams; 3 is the default)`},
+		{name: "workflow-wake", file: "workflow-wake: maybe\n", wantErr: `apogee: workflow-wake is one of on, off, not "maybe"`},
 		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`},
 		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)`},
 	} {

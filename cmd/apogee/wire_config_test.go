@@ -17,7 +17,7 @@ import (
 // that dropped any one of them on the way to its Config is told which.
 func projectionOptions(t *testing.T) config.Options {
 	t.Helper()
-	return config.Options{
+	opts := config.Options{
 		Mode:                 "ask-before",
 		Workspace:            t.TempDir(),
 		ConfigDir:            t.TempDir(),
@@ -47,6 +47,12 @@ func projectionOptions(t *testing.T) config.Options {
 			{Name: "box", Endpoint: "http://box.example/v1", APIKeyEnv: "BOX_KEY"},
 		},
 	}
+	// The workflow keys away from their defaults, a 0 among them: a fold that dropped one would
+	// read as the engine's own default, which none of these is.
+	opts.WorkflowRetries = 4
+	opts.WorkflowContinuations = 0
+	opts.WorkflowWake = false
+	return opts
 }
 
 // assertCarriesProjection asserts that a Driver's Config carries every key the projection filled,
@@ -119,6 +125,16 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	// default and hide a fold-in that dropped the key.
 	if got.RestreamBudget == nil || want.RestreamBudget == nil || *got.RestreamBudget != *want.RestreamBudget {
 		t.Errorf("Config.RestreamBudget = %v, want %v (both non-nil)", got.RestreamBudget, want.RestreamBudget)
+	}
+	// Pointers at the engine too, RestreamBudget's reason: every field must arrive non-nil.
+	gotFlow, wantFlow := got.Workflow, want.Workflow
+	if gotFlow.Retries == nil || gotFlow.Continuations == nil || gotFlow.Wake == nil ||
+		gotFlow.ResolvedRetries() != wantFlow.ResolvedRetries() ||
+		gotFlow.ResolvedContinuations() != wantFlow.ResolvedContinuations() ||
+		gotFlow.ResolvedWake() != wantFlow.ResolvedWake() {
+		t.Errorf("Config.Workflow = (%v, %v, %v), want (%d, %d, %v) with every field non-nil",
+			gotFlow.Retries, gotFlow.Continuations, gotFlow.Wake,
+			wantFlow.ResolvedRetries(), wantFlow.ResolvedContinuations(), wantFlow.ResolvedWake())
 	}
 	if got.Floor != want.Floor {
 		t.Errorf("Config.Floor = %+v, want %+v", got.Floor, want.Floor)
@@ -198,5 +214,30 @@ func TestEveryDriverCarriesTheProjectedConfig(t *testing.T) {
 
 			assertCarriesProjection(t, got, want)
 		})
+	}
+}
+
+// The three workflow keys reach the engine as the loader read them: projectConfig folds each as a
+// POINTER at the Options' own reading, so a stated 0 or off survives as the human's value and never
+// falls back to the engine default a nil would read as.
+func TestProjectConfigFoldsTheWorkflowKeys(t *testing.T) {
+	t.Parallel()
+
+	opts := projectionOptions(t)
+	roots := firingRoots(t)
+	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+	flow := projectConfig(opts, roots, fenceableHost, domain.ModeAuto, provider).Workflow
+
+	if flow.Retries == nil || flow.Continuations == nil || flow.Wake == nil {
+		t.Fatalf("Config.Workflow = %+v; want every field folded in, none left to the engine default", flow)
+	}
+	if got := flow.ResolvedRetries(); got != 4 {
+		t.Errorf("Config.Workflow retries = %d, want the 4 the options carry", got)
+	}
+	if got := flow.ResolvedContinuations(); got != 0 {
+		t.Errorf("Config.Workflow continuations = %d, want the stated 0, not the default", got)
+	}
+	if flow.ResolvedWake() {
+		t.Error("Config.Workflow wake = on, want the stated off")
 	}
 }

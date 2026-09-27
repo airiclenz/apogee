@@ -22,10 +22,10 @@ import (
 // default lands. A block the file carries is judged where it always was — the block's validator
 // at ResolveOptions, the Set admission at the settings pane and the env pass — so a file edit
 // that leaves one neighbour of a key out of range still loads, as it did before the descriptor.
-// The exceptions are the keys the file spells as TEXT a parse can fail on (fileText): the five
-// whose file pass has always landed through the row's Set (sub-agents-choice, delegate-timeout,
-// stream-idle-timeout, re-stream-budget, cursor-shape), so a bad value refuses at the pass in the
-// row's own sentence; `ui.stall-after`, refused at the pass by the block's own duration parser;
+// The exceptions are the keys the file spells as TEXT a parse can fail on (fileText): the six
+// whose file pass lands through the row's Set (sub-agents-choice, delegate-timeout,
+// stream-idle-timeout, re-stream-budget, workflow-wake, cursor-shape), so a bad value refuses at
+// the pass in the row's own sentence; `ui.stall-after`, refused at the pass by the block's own duration parser;
 // and `sessions.max-age`, whose unparseable text is carried as written for the block's validator
 // to refuse at ResolveOptions.
 //

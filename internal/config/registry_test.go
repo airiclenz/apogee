@@ -140,6 +140,23 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		}
 	})
 
+	t.Run("workflow-wake", func(t *testing.T) {
+		t.Parallel()
+		// Parsed in THIS package, sub-agents-choice's reason below; the row is file-only, so
+		// ParseWorkflowWake is what a value is admitted by. Both directions, as above.
+		values := enumValues(t, "workflow-wake")
+		for _, v := range values {
+			if _, err := ParseWorkflowWake(v); err != nil {
+				t.Errorf("registry offers workflow-wake %q but ParseWorkflowWake rejects it: %v", v, err)
+			}
+		}
+		for _, w := range []string{WorkflowWakeOn, WorkflowWakeOff} {
+			if !slices.Contains(values, w) {
+				t.Errorf("%q is a wake word the config knows but the registry does not offer it", w)
+			}
+		}
+	})
+
 	t.Run("sub-agents-choice", func(t *testing.T) {
 		t.Parallel()
 		// The one enum whose parse site is in THIS package: who picks a delegation's seat is a fact
@@ -901,8 +918,10 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"delegate-max-depth": "DelegateMaxDepth", "delegate-max-tokens": "DelegateMaxTokens",
 		"delegate-timeout": "DelegateTimeout", "stream-idle-timeout": "StreamIdleTimeout",
 		"re-stream-budget": "RestreamBudget", "undo-snapshots": "UndoSnapshots",
-		"server-stats": "ServerStats",
-		"auto-title":   "AutoTitle", "remember-model": "RememberModel",
+		"workflow-retries": "WorkflowRetries", "workflow-wake": "WorkflowWake",
+		"workflow-continuations": "WorkflowContinuations",
+		"server-stats":           "ServerStats",
+		"auto-title":             "AutoTitle", "remember-model": "RememberModel",
 		"context-window": "ContextWindow", "working-window": "WorkingWindow",
 		"response-reserve":  "ResponseReserve",
 		"present.auto-open": "Present", "present.command": "Present", "present.port": "Present",

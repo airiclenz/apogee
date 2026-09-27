@@ -416,6 +416,12 @@ type Config struct {
 	// human's to stop, a delegate's is nobody's.
 	Delegation DelegationConfig
 
+	// Workflow bounds the second chances an engine-run Workflow gives an item and says whether a
+	// background workflow's end wakes the agent (ADR 0087, ADR 0089). Its zero value is the
+	// documented defaults, so an embedder's bare Config runs a workflow the way the file-less host
+	// does.
+	Workflow WorkflowConfig
+
 	// Floor opts individual Floor guards OUT. Like Context and Delegation the guards are
 	// structural — they stay on under Bypass — and, being Disable… bools, the ZERO value keeps
 	// every one of them ON: an embedder that constructs a bare Config gets the floor.
@@ -509,6 +515,65 @@ type DelegationConfig struct {
 	// server makes a cheap delegation a long one, and nobody is watching a delegate's clock. The
 	// host folds in the `delegate-timeout:` key (default 2h); an embedder sets it directly.
 	Timeout time.Duration
+}
+
+// DefaultWorkflowRetries and DefaultWorkflowContinuations are the built-in second chances a
+// Workflow item gets: one fresh restart after a fault, a missing receipt or a cap its continuations
+// did not clear, and two continuations of a capped child within one attempt. The `workflow-retries:`
+// and `workflow-continuations:` rows advertise them and a zero WorkflowConfig resolves to them, so
+// the host's default and the engine's cannot drift apart.
+const (
+	DefaultWorkflowRetries       = 1
+	DefaultWorkflowContinuations = 2
+)
+
+// WorkflowConfig carries the host's workflow keys to the engine. Every field is a POINTER, for
+// Config.RestreamBudget's reason: nil is the documented default — so an embedder's zero Config, and
+// every test Config, run a workflow with one retry, two continuations and the wake on — while a
+// pointer to 0 (or to false) is a value the human chose. Read it through the Resolved… methods, never
+// the fields, so the nil rule has one home.
+type WorkflowConfig struct {
+	// Retries is how many times a Workflow item restarts with a fresh child after a fault, a missing
+	// receipt, or a cap its continuations did not clear; 0 never restarts one. The host folds in the
+	// `workflow-retries:` key (default 1); an embedder sets it directly.
+	Retries *int
+	// Continuations is how many times a capped Workflow child is continued within one attempt, each
+	// continuation a fresh child seeded with the rounds before it; 0 never continues one. The host
+	// folds in the `workflow-continuations:` key (default 2); an embedder sets it directly.
+	Continuations *int
+	// Wake says whether a background workflow's end wakes the agent with a turn of its own (ADR
+	// 0089); false leaves the finish note waiting for the user's next message. The host folds in the
+	// `workflow-wake:` key (`on` by default); an embedder sets it directly.
+	Wake *bool
+}
+
+// ResolvedRetries is the retry bound a Workflow runs under: DefaultWorkflowRetries when the field is
+// nil, the stated count otherwise. A negative count — which the config layer never folds in —
+// reads as 0, no restart, rather than as a bound every item has already spent.
+func (c WorkflowConfig) ResolvedRetries() int {
+	if c.Retries == nil {
+		return DefaultWorkflowRetries
+	}
+	return max(0, *c.Retries)
+}
+
+// ResolvedContinuations is the continuation bound a Workflow runs under: DefaultWorkflowContinuations
+// when the field is nil, the stated count otherwise, a negative one reading as 0 for
+// ResolvedRetries's reason.
+func (c WorkflowConfig) ResolvedContinuations() int {
+	if c.Continuations == nil {
+		return DefaultWorkflowContinuations
+	}
+	return max(0, *c.Continuations)
+}
+
+// ResolvedWake reports whether a background workflow's end wakes the agent: on when the field is
+// nil, the stated switch otherwise.
+func (c WorkflowConfig) ResolvedWake() bool {
+	if c.Wake == nil {
+		return true
+	}
+	return *c.Wake
 }
 
 // ContextConfig governs the structural context reducers — Budget, Compaction and Pruning —

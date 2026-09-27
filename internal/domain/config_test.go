@@ -246,6 +246,45 @@ func TestFloorConfigZeroValueKeepsEveryGuardOn(t *testing.T) {
 	}
 }
 
+// TestWorkflowConfigZeroValueResolvesToTheDocumentedDefaults pins the nil rule the three workflow
+// fields share: a bare Config — an embedder's, every test's — runs a workflow with one retry, two
+// continuations and the wake on, the defaults the host's keys document, while a stated 0 or false is
+// the human's value rather than "unset" and a negative count reads as no second chance at all.
+func TestWorkflowConfigZeroValueResolvesToTheDocumentedDefaults(t *testing.T) {
+	t.Parallel()
+
+	var zero domain.Config
+	if got := zero.Workflow.ResolvedRetries(); got != 1 {
+		t.Errorf("zero WorkflowConfig retries = %d, want 1", got)
+	}
+	if got := zero.Workflow.ResolvedContinuations(); got != 2 {
+		t.Errorf("zero WorkflowConfig continuations = %d, want 2", got)
+	}
+	if !zero.Workflow.ResolvedWake() {
+		t.Error("zero WorkflowConfig wake = off, want on")
+	}
+
+	none, off, negative := 0, false, -3
+	stated := domain.WorkflowConfig{Retries: &none, Continuations: &none, Wake: &off}
+	if got := stated.ResolvedRetries(); got != 0 {
+		t.Errorf("a stated 0 retries resolved to %d, want 0", got)
+	}
+	if got := stated.ResolvedContinuations(); got != 0 {
+		t.Errorf("a stated 0 continuations resolved to %d, want 0", got)
+	}
+	if stated.ResolvedWake() {
+		t.Error("a stated wake off resolved to on")
+	}
+
+	below := domain.WorkflowConfig{Retries: &negative, Continuations: &negative}
+	if got := below.ResolvedRetries(); got != 0 {
+		t.Errorf("a negative retry count resolved to %d, want 0", got)
+	}
+	if got := below.ResolvedContinuations(); got != 0 {
+		t.Errorf("a negative continuation count resolved to %d, want 0", got)
+	}
+}
+
 // TestResolvedSkillBlock pins the one skill block both doors onto the catalog hand the model —
 // the loop for an attached "/id", load_skill for a query: the `<skill: name>` opener alone on the
 // first line (the TUI reads the display name back out of it), the files: sentence only when the

@@ -929,6 +929,23 @@ type fileConfig struct {
 	// `re-stream-budget: 0` is the documented spelling of "never re-stream", which a plain int could
 	// not tell from an absent key (the built-in 3). It feeds domain.Config.RestreamBudget.
 	RestreamBudget *WholeCount `yaml:"re-stream-budget"`
+	// WorkflowRetries is how many times an engine-run Workflow restarts an item with a fresh child
+	// after a fault, a missing receipt, or a cap its continuations did not clear (default 1).
+	// File-only (no flag/env), and a pointer for DelegateMaxSteps's reason: an explicit
+	// `workflow-retries: 0` is the documented spelling of "never restart", which a plain int could
+	// not tell from an absent key; a negative one resolves to the default. It feeds
+	// domain.Config.Workflow.Retries.
+	WorkflowRetries *WholeCount `yaml:"workflow-retries"`
+	// WorkflowContinuations is how many times a capped Workflow child is continued within one
+	// attempt (default 2). File-only (no flag/env), and a pointer for WorkflowRetries's reason: `0`
+	// is "never continue". It feeds domain.Config.Workflow.Continuations.
+	WorkflowContinuations *WholeCount `yaml:"workflow-continuations"`
+	// WorkflowWake says whether a background workflow's end wakes the agent (ADR 0089): `on` (the
+	// default) or `off`. File-only (no flag/env), and TEXT rather than a *bool, sub-agents-choice's
+	// posture: the key is a two-word enum, so a `true` — which YAML would happily decode into a bool
+	// — is refused at the file pass by the row's parse (ParseWorkflowWake) instead of being read as
+	// a switch nobody spelled. It feeds domain.Config.Workflow.Wake.
+	WorkflowWake string `yaml:"workflow-wake"`
 	// ServerStats gates the per-server stats store (ADR 0085): with it on, the Drivers append one
 	// line per upstream HTTP attempt to ~/.apogee/server-stats.jsonl and the server pickers read a
 	// summary back; off, the file is neither written nor read, while the UpstreamAttemptEvents

@@ -289,6 +289,22 @@ type Options struct {
 	// its ADDRESS into apogee.Config.RestreamBudget, whose nil keeps the engine's own default.
 	RestreamBudget int
 
+	// workflowRetries is how many times an engine-run Workflow restarts an item with a fresh child
+	// (default 1; 0 = never), loaded from the config file only, delegate-fanout-rounds's posture:
+	// the loader lands the default when the key is absent or negative. The composition root folds
+	// its ADDRESS into
+	// apogee.Config.Workflow.Retries, whose nil keeps the engine's own default.
+	WorkflowRetries int
+
+	// workflowContinuations is how many times a capped Workflow child is continued within one
+	// attempt (default 2; 0 = never), loaded from the config file only; folded as workflowRetries is.
+	WorkflowContinuations int
+
+	// workflowWake says whether a background workflow's end wakes the agent (ADR 0089; default on),
+	// loaded from the config file's `on` | `off` only (ParseWorkflowWake); folded into
+	// apogee.Config.Workflow.Wake as workflowRetries is.
+	WorkflowWake bool
+
 	// serverStats gates the per-server stats store (ADR 0085): on, the Drivers record every
 	// upstream HTTP attempt into ~/.apogee/server-stats.jsonl; off, that file is neither written
 	// nor read. Loaded from the config file only (default true). The composition root opens or
@@ -406,6 +422,36 @@ type Options struct {
 	// whose value this run is not taking from the file. ApplyConfig fills it (overrideSources);
 	// absent from the map ⇒ the file or the built-in default, which is the majority of keys.
 	Overrides map[string]Source
+}
+
+// The two words `workflow-wake:` takes (ADR 0089). They are words rather than a YAML bool because
+// the key names a behaviour — the agent is woken, or it is not — and the file should say which.
+const (
+	WorkflowWakeOn  = "on"
+	WorkflowWakeOff = "off"
+)
+
+// ParseWorkflowWake resolves the file's spelling of `workflow-wake:` into the switch it names,
+// refusing any word outside the two — `true` and `false` included, since a YAML bool is not how the
+// key is spelled. The EMPTY string is the key left out and resolves to on, the default.
+func ParseWorkflowWake(value string) (bool, error) {
+	switch value {
+	case "", WorkflowWakeOn:
+		return true, nil
+	case WorkflowWakeOff:
+		return false, nil
+	}
+	return false, fmt.Errorf("apogee: invalid workflow-wake: %q — it takes %q (a background "+
+		"workflow's end wakes the agent) or %q (its note waits for your next message)",
+		value, WorkflowWakeOn, WorkflowWakeOff)
+}
+
+// workflowWakeValue spells the switch the way the file does.
+func workflowWakeValue(wake bool) string {
+	if wake {
+		return WorkflowWakeOn
+	}
+	return WorkflowWakeOff
 }
 
 // SubAgentsChoice is who gets to pick the server a delegation runs on (ADR 0069) — the `fixed` |

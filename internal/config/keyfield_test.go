@@ -252,6 +252,7 @@ func TestFieldLoadFileConfigKeepsItsRefusals(t *testing.T) {
 		"delegate-timeout: soon\n",
 		"stream-idle-timeout: soon\n",
 		"re-stream-budget: -1\n",
+		"workflow-wake: true\n",
 		"sub-agents-choice: anyone\n",
 		"cursor-shape: triangle\n",
 		"ui:\n  stall-after: soon\n",

@@ -177,6 +177,16 @@ func projectConfig(
 		// "never" — the loader has already landed the file's number (the default when the key is
 		// absent), so what is folded in is always the file's reading.
 		RestreamBudget: &opts.RestreamBudget,
+		// The second chances an engine-run Workflow gives an item and whether a background one
+		// wakes the agent when it ends: the `workflow-retries` (default 1), `workflow-continuations`
+		// (default 2) and `workflow-wake` (default on) keys. Folded in as POINTERS for
+		// RestreamBudget's reason: the engine reads a nil field as its own default, and the loader
+		// has already landed the file's reading (the default when a key is absent).
+		Workflow: apogee.WorkflowConfig{
+			Retries:       &opts.WorkflowRetries,
+			Continuations: &opts.WorkflowContinuations,
+			Wake:          &opts.WorkflowWake,
+		},
 		// Which Floor guards this run goes WITHOUT (ADR 0071). The seven keys are positive in the
 		// file and negative at the engine, and floorFromOptions is the one place that turns one
 		// spelling into the other — so a guard the human took away, in the file or in `/settings`,

@@ -400,7 +400,25 @@ NOTES (2026-09-27): a faulted item child still pays for `finishAtFault`'s engine
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ && go test -race -count=1 ./internal/tools/`
 **Commit:** `feat(agent): workflow children report through a checked finish tool`
 
-## 13. Workflow configuration keys
+## 13. Workflow configuration keys — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the regression guard asks for a validator on `workflow-wake`, but TestRegistryValidateHooksSitOnEditableKeys refuses a Validate hook on a non-editable row — the row lands through checkedField(ParseWorkflowWake), so the kind's on|off vocabulary and ParseWorkflowWake are its refusal at the file pass (`true` is refused there), and TestRegistryEnumValuesMatchParseSites gains a workflow-wake subtest against ParseWorkflowWake.
+
+NOTES (2026-09-27): the two counts take the delegate-* file posture (intField + atLeast(0)): a negative count resolves to the default rather than being refused, because TestRegistrySetRefusesWhatValidateRefuses forbids a Set refusal no Validate hook or kind check makes, and a non-editable row may carry no hook; the manual says so.
+
+NOTES (2026-09-27): domain.WorkflowConfig holds three pointers plus ResolvedRetries/ResolvedContinuations/ResolvedWake (nil = 1/2/on) and exports DefaultWorkflowRetries/DefaultWorkflowContinuations, which the registry rows take their Default from, so host and engine defaults cannot drift.
+
+NOTES (2026-09-27): consequential edit — internal/config/keyfield.go: made necessary by workflow-wake joining the rows whose file pass lands through the row's Set (the doc comment enumerated them).
+
+NOTES (2026-09-27): consequential edit — internal/config/config_test.go: made necessary by the new Options/fileConfig fields (wantDefaults, TestEveryConfigKeyReachesTheOptions, everyKeyFileConfig, TestResolvePrecedence, the count-fraction table, TestFilePassRefusesThroughTheRows) plus the new TestApplyConfigWorkflowKeys; gofmt realigned the neighbouring lines of those literals.
+
+NOTES (2026-09-27): consequential edit — internal/config/registry_test.go: made necessary by the new rows (TestRegistrySetIsTheInverseOfRead ownership map, enum parse-site subtest).
+
+NOTES (2026-09-27): consequential edit — internal/config/keyfield_test.go: made necessary by workflow-wake refusing at the file pass (added to the refused-file list).
+
+NOTES (2026-09-27): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by TestSettingsRowsFormatEffectiveValues pinning one value per registry key.
+
+NOTES (2026-09-27): consequential edit — cmd/apogee/wire_config_test.go: made necessary by the new Config.Workflow fold (projectionOptions sets the keys, assertCarriesProjection compares them, TestProjectConfigFoldsTheWorkflowKeys pins a stated 0/off surviving the fold).
 
 **What:**
 **Goal:** file-only keys `workflow-retries` (default 1), `workflow-continuations` (default 2) and `workflow-wake` (`on|off`, default `on`) exist, reach a `domain.WorkflowConfig` on the engine config, are listed in `docs/manual/configuration.md` and the starter template.

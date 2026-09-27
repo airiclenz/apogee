@@ -229,6 +229,8 @@ var (
 	// the CONFIG rather than about the agent loop, so the two words live here (options.go) and this
 	// list is spelled out of them.
 	subAgentsChoiceValues = []string{string(SubAgentsChoiceFixed), string(SubAgentsChoiceModel)}
+	// workflow-wake's two words, which live beside Options for sub-agents-choice's reason.
+	workflowWakeValues = []string{WorkflowWakeOn, WorkflowWakeOff}
 )
 
 // KeyRegistry is the table: one row per leaf key of fileConfig, plus one row per structured
@@ -686,6 +688,42 @@ var KeyRegistry = bindRows([]Key{
 				text := strconv.Itoa(int(*fc.RestreamBudget))
 				return &text
 			}),
+	},
+	{
+		// A count, delegate-fanout-rounds's posture on disk — a pointer, because 0 is a VALUE here
+		// (never restart) — but FILE-ONLY, so no Validate hook (a non-editable row runs none): a
+		// negative count resolves to the default, as it does for the delegate-* keys. Its default is
+		// the engine's own (domain.DefaultWorkflowRetries), so the host's and an embedder's zero
+		// Config agree.
+		Path: "workflow-retries", Kind: KindInt, Default: strconv.Itoa(domain.DefaultWorkflowRetries),
+		Desc: "How many times a workflow restarts an item with a fresh sub-agent after a fault, a " +
+			"missing receipt, or a cap its continuations did not clear; 0 never restarts one; takes " +
+			"effect at the next start.",
+		field: intField(func(o *Options) *int { return &o.WorkflowRetries },
+			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.WorkflowRetries)) }),
+	},
+	{
+		// workflow-retries's posture exactly, for the continuation bound.
+		Path: "workflow-continuations", Kind: KindInt,
+		Default: strconv.Itoa(domain.DefaultWorkflowContinuations),
+		Desc: "How many times a workflow continues a capped sub-agent within one attempt, each " +
+			"continuation seeded with the rounds before it; 0 never continues one; takes effect at " +
+			"the next start.",
+		field: intField(func(o *Options) *int { return &o.WorkflowContinuations },
+			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.WorkflowContinuations)) }),
+	},
+	{
+		// A two-word enum, sub-agents-choice's pattern, landed through the row at the file pass so
+		// a word outside `on` | `off` — a YAML `true` among them — is refused there by the key's own
+		// admission (the kind's vocabulary, then ParseWorkflowWake) rather than read as a switch
+		// nobody spelled. File-only, so no Validate hook: a non-editable row carries none.
+		Path: "workflow-wake", Kind: KindEnum, Default: WorkflowWakeOn,
+		EnumValues: workflowWakeValues,
+		Desc: "Whether a background workflow's end wakes the agent: on = it takes a turn to read " +
+			"the result; off = the note waits for your next message; takes effect at the next start.",
+		field: checkedField(ParseWorkflowWake, workflowWakeValue,
+			func(o *Options) *bool { return &o.WorkflowWake },
+			func(fc fileConfig) *string { return nonEmpty(fc.WorkflowWake) }),
 	},
 	{
 		// A switch, undo-snapshots's shape — but live: the per-server stats store is opened or
