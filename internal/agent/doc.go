@@ -80,7 +80,11 @@
 // subagent.go is the sub-agent
 // orchestrator — a nested Agent whose privileges are the parent's verbatim or stricter, with a
 // tool set that is a subset and never an expansion (ADR 0013), composed per spawn as one
-// delegation value the constructor copies once. approvalcache.go is the Session's
+// delegation value the constructor copies once. workflowspawn.go is that same recursion point for
+// a Workflow's items (ADR 0087): the workflow.Spawner whose children report through a checked
+// `finish` receipt, carry the finish block in the delegate report block's place, close a capped
+// run on finish alone, and book no ledger row, retention entry or generated name.
+// approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.
 //

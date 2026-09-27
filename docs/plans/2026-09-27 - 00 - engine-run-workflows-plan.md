@@ -377,7 +377,17 @@ NOTES (2026-09-27): items.md starts with `# workflow <id>`. Under it, each fanou
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): result lines and item listing`
 
-## 12. The finish tool and the workflow child spawner
+## 12. The finish tool and the workflow child spawner — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): re-derived from the assumption that the workflow-child flag and the finish block fit in the listed files: the flag (`Agent.workflowItem`) is a field of the Agent struct, declared in internal/agent/agent.go, and the delegate report block is rendered by `delegateReportBlock` in internal/agent/delegatereport.go, where the finish block now takes its place. The finish block reuses the delegate block's first sentence, so the existing `delegateReportFence` still guards it and standingblocks.go is unchanged.
+
+NOTES (2026-09-27): a workflow child's `outputPath`/`outputTarget` stay empty (no `resolveOutputPath`). Otherwise `wrapUpOutput` would make the wrap-up row in resolve refuse the closing Turn's `finish` call. The spawner names the output file in the task instead, adding a line when the rendered brief does not already contain the path.
+
+NOTES (2026-09-27): a stage's `prompt:` file is read from the spawner's `prompts fs.FS`, or from `os.DirFS(Config.WorkspaceDir)` when that is nil. It is rendered with the `{item}`/`{out}` placeholders copied locally from workflow's unexported `renderBrief`, because internal/workflow is outside this item's files. Callers in items 15, 20 and 25 pass the recipe's own FS where they need one.
+
+NOTES (2026-09-27): a stage's `tools:` list is checked through `requestedChildTools`, so an unknown name makes Spawn fail as a fault. `context:` files reach the child as `UserInput.FileRefs`. A continuation (`ItemSpec.Prior`) is seeded through `continuationTask`, each round's report shown as an engine summary headed by the receipt that round left.
+
+NOTES (2026-09-27): a faulted item child still pays for `finishAtFault`'s engine summary call, which exists for retention. Workflow children are never retained, so a later item could skip that call for them.
 
 **What:** Depends on item 8.
 **Goal:** `internal/agent` implements `workflow.Spawner`: each item child is spawned through the recursion point (`runDelegation` path, run id minted, phase events emitted) with a `finish` tool whose schema is built from the stage's `ReceiptSpec`; a malformed `finish` is refused with a specific error and the child keeps running; a valid `finish` ends the child; a capped child's closing Turn offers only `finish`; the child's conversation is written to the item's `transcript.jsonl`.

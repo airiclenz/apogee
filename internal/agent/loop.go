@@ -255,6 +255,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	if a.dispatchTools(ctx, turn, calls) == dispatchSettled {
 		return a.turns.end(t, endSettled), nil
 	}
+	if a.workflowFinished() {
+		// A workflow item's child whose finish call was accepted (workflowspawn.go) has handed
+		// back its receipt, and the receipt is the whole of what the item owes: the Exchange ends
+		// here, on the dispatched round, and no further request is made. A refused finish leaves
+		// no receipt, so the child reads the refusal on its next Turn and keeps running.
+		return a.turns.end(t, endExchangeDone), nil
+	}
 	if a.turns.wrappingUp() {
 		// The wrap-up's one kept write has been dispatched — run against the output path, refused
 		// with a result naming it anywhere else (resolve's wrap-up row) — and the Turn still ENDS
@@ -1656,6 +1663,11 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	// — for a delegation spawned with an `output_path` a write elsewhere is refused by resolve's
 	// wrap-up row, never run.
 	if a.turns.wrappingUp() {
+		// A workflow item's child closes on its receipt, never a report: its capped closing Turn
+		// offers finish alone (finishMenu, workflowspawn.go), ahead of the write_file exception.
+		if a.workflowItem != nil {
+			return a.finishMenu()
+		}
 		writer, ok := a.wrapUpWriter()
 		if !ok {
 			return nil

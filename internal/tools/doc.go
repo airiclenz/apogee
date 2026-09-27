@@ -299,7 +299,9 @@
 // drives a nested Agent and deliberately carries none of the disposition markers.
 // task_list.go is task_list, the model's own checklist (ADR 0072): a whole-list replace over the
 // list the engine holds and reaches the call through (internal/tasklist), read-only because
-// writing down what you mean to do touches nothing the host owns.
+// writing down what you mean to do touches nothing the host owns. finish.go is finish, the receipt
+// a workflow item's child hands back (ADR 0087): never in the default registry, built per child with
+// its schema and check drawn from the stage's workflow.ReceiptSpec, read-only for the same reason.
 //
 // # The package spine, one line each
 //

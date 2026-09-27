@@ -67,5 +67,10 @@ func (a *Agent) delegateReportBlock() string {
 	if !a.isDelegate() {
 		return ""
 	}
+	// A workflow item's child reports through finish, not its final reply, so it carries the finish
+	// instructions in this block's place (workflowFinishBlock, workflowspawn.go).
+	if a.workflowItem != nil {
+		return workflowFinishBlock
+	}
 	return DelegateReportBlock
 }

@@ -490,6 +490,13 @@ type Agent struct {
 	// was spawned is never reported as a draft the child wrote.
 	outputBefore outputBaseline
 
+	// workflowItem marks a WORKFLOW ITEM's child (workflowspawn.go, ADR 0087) and holds the finish
+	// tool's receipt once one is accepted; nil on every other Agent. Set by the spawner on the CHILD
+	// before its Run, it is the flag the finish-only paths branch on: the finish block in place of
+	// the delegate report block, the Exchange ending on an accepted receipt (step), and the capped
+	// closing Turn that offers finish alone (toolMenu, wrapUpCalls, wrapUpDirective).
+	workflowItem *workflowChild
+
 	// midExchangeCompaction lifts shouldAutoCompact's Exchange-boundary-only gate (S2) for this
 	// Agent, so the estimate-driven fold may also run at a quiescent TURN boundary — the top of
 	// step(), where the previous Turn's tool results are already committed. It is a DELEGATE

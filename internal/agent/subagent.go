@@ -564,6 +564,10 @@ const (
 // may write a file the menu then withholds — the output-path clause where the spawn named a path,
 // the plain one-write clause otherwise.
 func (a *Agent) wrapUpDirective() string {
+	// A workflow item's child is asked for its receipt through finish instead (workflowspawn.go).
+	if a.workflowItem != nil {
+		return a.wrapUpFinishDirective()
+	}
 	var directive string
 	switch a.capHit {
 	case boundTokens:
@@ -619,6 +623,10 @@ func (a *Agent) wrapUpWriter() (domain.Tool, bool) {
 // but the output path — it is merely dispatched, so the refusal reaches the transcript instead of
 // vanishing with the dropped calls.
 func (a *Agent) wrapUpCalls(calls []domain.ToolCall) []domain.ToolCall {
+	// A workflow item's child keeps its finish calls and nothing else (workflowspawn.go).
+	if a.workflowItem != nil {
+		return finishCalls(calls)
+	}
 	writer, ok := a.wrapUpWriter()
 	if !ok {
 		return nil
