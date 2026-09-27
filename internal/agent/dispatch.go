@@ -589,7 +589,8 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // the coordinator that asked for more than the ceiling is told so in its own results, in the same
 // words every time, and decides what to delegate again once the round it did get has reported.
 // The rounds and the stated width are read once, here, so the text names the very ceiling that
-// refused the call.
+// refused the call; whether fan_out is on this Agent's roster is read here too, so the pointer to
+// it is offered only to a model that can act on it.
 func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
 	if !isSubAgentCall(slot.call) {
 		return false
@@ -601,7 +602,8 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 	}
 	slot.run = false
 	slot.ceilingRefused = true
-	slot.result = a.skipDelegation(turn, slot, fanOutCeilingResult(slot.call.ID, group, rounds, width))
+	_, fanOutOffered := a.lookupTool(tools.FanOutToolName)
+	slot.result = a.skipDelegation(turn, slot, fanOutCeilingResult(slot.call.ID, group, rounds, width, fanOutOffered))
 	return true
 }
 
@@ -908,11 +910,23 @@ func skippedDelegationResult(callID string) domain.ToolResult {
 // ceiling is R rounds of) and C again (how many of the N ran).
 const fanOutCeilingResultFormat = "sub-agent not started: this reply fanned out %d delegations and the ceiling is %d (%d rounds × width %d) — the first %d ran; delegate the rest again once their results are in"
 
+// fanOutCeilingFanOutPointer closes the ceiling refusal while fan_out is on the refusing Agent's
+// roster: fan_out runs one brief over a whole list of items as a Workflow (ADR 0087), so a model
+// that hit the per-reply ceiling is told where the larger fan-out lives. Without fan_out the
+// refusal stays exactly fanOutCeilingResultFormat — a pointer to a tool the model cannot call
+// would teach it a lie about its own menu.
+const fanOutCeilingFanOutPointer = " — for more items, use " + tools.FanOutToolName
+
 // fanOutCeilingResult renders the ceiling refusal for one call of a reply of `group` delegations, the
-// ceiling computed by the one formula that refused it (fanOutCeilingOf).
-func fanOutCeilingResult(callID string, group, rounds, width int) domain.ToolResult {
+// ceiling computed by the one formula that refused it (fanOutCeilingOf), ending with
+// fanOutCeilingFanOutPointer when fanOutOffered says fan_out is on the roster.
+func fanOutCeilingResult(callID string, group, rounds, width int, fanOutOffered bool) domain.ToolResult {
 	ceiling := fanOutCeilingOf(rounds, width)
-	return errorToolResult(callID, fmt.Sprintf(fanOutCeilingResultFormat, group, ceiling, rounds, width, ceiling))
+	content := fmt.Sprintf(fanOutCeilingResultFormat, group, ceiling, rounds, width, ceiling)
+	if fanOutOffered {
+		content += fanOutCeilingFanOutPointer
+	}
+	return errorToolResult(callID, content)
 }
 
 // interjectionPending answers whether a user message is waiting for this Agent's next boundary —

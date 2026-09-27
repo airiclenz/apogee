@@ -1516,6 +1516,19 @@ func manyFanOutParent(
 	reactions ...domain.Reaction,
 ) *Agent {
 	t.Helper()
+	return manyFanOutParentOffering(t, sink, sessionCap, rounds, n, nil, reactions...)
+}
+
+// manyFanOutParentOffering is manyFanOutParent with extra tools registered on the parent's roster
+// beside sub_agent — the ceiling test that needs fan_out on the menu passes it here.
+func manyFanOutParentOffering(
+	t *testing.T,
+	sink domain.EventSink,
+	sessionCap, rounds, n int,
+	extra []domain.Tool,
+	reactions ...domain.Reaction,
+) *Agent {
+	t.Helper()
 	pairs := make([][2]string, 0, n)
 	for i := 1; i <= n; i++ {
 		pairs = append(pairs, [2]string{fmt.Sprintf("c%d", i), fmt.Sprintf("task %d", i)})
@@ -1527,7 +1540,7 @@ func manyFanOutParent(
 		up.route(fmt.Sprintf("task %d", i), nil, contentScript(fmt.Sprintf("child %d done", i)))
 	}
 
-	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, extra...)
 	cfg.ParallelAgents = sessionCap
 	cfg.Delegation.FanOutRounds = rounds
 	cfg.Reactions = reactions
@@ -1748,6 +1761,34 @@ func TestFanOut_CeilingRefusesTheCallsPastIt(t *testing.T) {
 			t.Errorf("ledger row %d cause = %q, want the refusal's head line", spawn, r.cause)
 		}
 	}
+}
+
+// TestFanOut_CeilingRefusalPointsToFanOut pins the refusal's second exact text: with fan_out on
+// the parent's roster, a delegation refused past the ceiling carries the same refusal followed by
+// the pointer to fan_out — and nothing else about the refused slot changes. The text without the
+// pointer is pinned by TestFanOut_CeilingRefusesTheCallsPastIt, whose roster has no fan_out.
+func TestFanOut_CeilingRefusalPointsToFanOut(t *testing.T) {
+	sink := &recordingSink{}
+	var seen []string
+	var mu sync.Mutex
+
+	a := manyFanOutParentOffering(t, sink, 1, 2, 3, []domain.Tool{tools.NewFanOut()}, preToolExecWatcher(&seen, &mu))
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3 (the refused slot still commits)", len(results))
+	}
+	const want = "sub-agent not started: this reply fanned out 3 delegations and the ceiling is 2 (2 rounds × width 1) — the first 2 ran; delegate the rest again once their results are in — for more items, use fan_out"
+	mu.Lock()
+	fired := slices.Clone(seen)
+	mu.Unlock()
+	if results[2].CallID != "c3" {
+		t.Fatalf("refused result committed as %q; want c3", results[2].CallID)
+	}
+	assertCeilingRefusal(t, sink.events, fired, results[2], want)
 }
 
 // TestFanOut_CeilingOffRunsEveryCall pins the off switch: rounds 0 is no ceiling, so ten

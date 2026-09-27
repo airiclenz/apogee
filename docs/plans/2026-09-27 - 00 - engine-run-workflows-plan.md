@@ -492,7 +492,15 @@ A blocking fan_out stopped by a cancel uses item 2's guard: a quit or daemon-shu
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(agent): fan_out runs a blocking workflow`
 
-## 16. The fan-out ceiling points to fan_out
+## 16. The fan-out ceiling points to fan_out — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the pointer is decided per refusal from the refusing Agent's own roster (`lookupTool(tools.FanOutToolName)` in refusePastCeiling), so a delegate whose roster lacks fan_out gets the unchanged text; `fanOutCeilingResult` gained a `fanOutOffered bool` parameter and the suffix is the new constant `fanOutCeilingFanOutPointer`.
+
+NOTES (2026-09-27): test helper `manyFanOutParentOffering` added (manyFanOutParent now delegates to it) so the new pin can put fan_out on the roster; the no-fan_out text stays pinned by TestFanOut_CeilingRefusesTheCallsPastIt and TestDispatchSerially_CeilingAppliesAtDepthOne, the fan_out text by the new TestFanOut_CeilingRefusalPointsToFanOut.
+
+NOTES (2026-09-27): consequential edit — CONTEXT.md: made necessary by the refusal's new conditional suffix (the Fan-out ceiling entry quotes the refusal text verbatim).
+
+NOTES (2026-09-27): consequential edit — docs/manual/configuration.md: made necessary by the refusal's new conditional suffix (the delegate-fanout-rounds paragraph describes what the refusal says).
 
 **What:** Depends on item 15.
 **Goal:** while `fan_out` is on the roster, the ceiling refusal for `sub_agent` ends with `— for more items, use fan_out`; without it the refusal text is unchanged.

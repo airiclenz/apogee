@@ -362,7 +362,8 @@ the seat last moved, else the session server's **Parallel agents** cap, and **1*
 The first `rounds × width` `sub_agent` calls in emitted order run as any group does; every later
 one in the reply commits, in call order, the tool result `sub-agent not started: this reply fanned
 out N delegations and the ceiling is C (R rounds × width W) — the first C ran; delegate the rest
-again once their results are in` with a finished phase and no started one — the **Interjection**
+again once their results are in` — followed by ` — for more items, use fan_out` while `fan_out`
+is on the refusing Agent's roster — with a finished phase and no started one — the **Interjection**
 skip's shape — takes a `refused` row in the **delegate ledger**, and leaves the group without a
 width line (the refusal already names the width). Leaf tools in the same reply are never counted.
 Relative to the width because the width is what one round costs in time: two rounds is two rounds

@@ -871,7 +871,8 @@ agent blind for as long as fifty delegations take, and an Esc stops every one st
 the ceiling on that group, counted in **rounds** of the width: at the default of **2**, a
 reply on a width-4 server may fan out 8, and every `sub_agent` call past the eighth is
 refused with a result that says so — how many the reply fanned out, what the ceiling is and
-why — for your agent to delegate again once the first eight have reported. It is relative
+why — for your agent to delegate again once the first eight have reported; when your agent
+has the `fan_out` tool, the result also points it there for more items. It is relative
 to the width rather than a fixed count because the width is what one round costs in time:
 two rounds is two rounds on any server. A server with no width has width 1 (an unkeyed
 local server, or a sub-agent's own delegations, which run one at a time), so its ceiling is
