@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/config"
 )
 
 func TestRecordAndCaptureUsageErrorsExitTwo(t *testing.T) {
@@ -41,6 +43,32 @@ func TestRecordAndCaptureUsageErrorsExitTwo(t *testing.T) {
 				t.Errorf("exit code: want %d, got %d (%v)", exitBadUsage, got, err)
 			}
 		})
+	}
+}
+
+func TestApogeeEnvStripsEveryApogeeOverride(t *testing.T) {
+	t.Parallel()
+	overrides := []string{
+		config.EnvEndpoint, config.EnvServer, config.EnvModel, config.EnvMode,
+		config.EnvBypass, config.EnvAPIKey, config.EnvConfig, config.EnvWorkspace,
+	}
+	environ := []string{"PATH=/usr/bin", "HOME=/home/dev"}
+	for _, name := range overrides {
+		environ = append(environ, name+"=ambient-"+name)
+	}
+
+	got := apogeeEnv(environ)
+
+	for _, entry := range got {
+		name, _, _ := strings.Cut(entry, "=")
+		for _, override := range overrides {
+			if name == override {
+				t.Errorf("a take's environment carries the parent's %s", entry)
+			}
+		}
+	}
+	if len(got) != 2 || got[0] != "PATH=/usr/bin" || got[1] != "HOME=/home/dev" {
+		t.Errorf("unrelated variables not kept in order: got %q", got)
 	}
 }
 

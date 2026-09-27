@@ -439,7 +439,7 @@ NOTES (2026-09-27): a workspace whose add errors on every capture (for example, 
 **Acceptance:** `go test -race -count=1 ./internal/snapshot/ && go test -race -count=1 ./internal/undo/`
 **Commit:** `fix(snapshot): rebuild the index when a capture's add fails`
 
-## 26. demorig strips the ambient API key from a take
+## 26. demorig strips the ambient API key from a take — ✅ DONE (2026-09-27)
 
 **What:** Fixes the audit's High "A developer's ambient API key is forwarded unfiltered into a recorded demo take".
 **Goal:** `ambientApogeeEnv` in `cmd/demorig/record.go` lists every `config.Env*` constant, including `config.EnvAPIKey`; a test fails if a take's environment built by `apogeeEnv` carries `APOGEE_API_KEY` from the parent.

@@ -320,11 +320,12 @@ func endTake(ctx context.Context, term *Terminal) *Take {
 
 // ambientApogeeEnv are the APOGEE_* variables that would steer the apogee a take launches away
 // from the rig: another config file or workspace, another server, endpoint or model than the
-// one the cassette was captured from, another starting mode, bypass. The rig's config.yaml is
-// the whole of what a take runs on, so none of them reaches it.
+// one the cassette was captured from, another starting mode, bypass — and the developer's own
+// API key, which would otherwise ride along into a recorded take. The rig's config.yaml is the
+// whole of what a take runs on, so none of them reaches it. It lists every config.Env* name.
 var ambientApogeeEnv = []string{
 	config.EnvConfig, config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode,
-	config.EnvBypass, config.EnvWorkspace,
+	config.EnvBypass, config.EnvWorkspace, config.EnvAPIKey,
 }
 
 // apogeeEnv is environ less every variable in ambientApogeeEnv.
