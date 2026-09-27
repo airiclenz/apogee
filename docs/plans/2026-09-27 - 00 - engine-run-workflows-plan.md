@@ -233,7 +233,13 @@ NOTES (2026-09-27): Validate parses every stage's `when:`. It type-checks only a
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): receipt conditions`
 
-## 6. Item sources
+## 6. Item sources — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): these calls were made here because they are not settled elsewhere. `Item` is `{Label, Units}`: Units are the source's entries in order (a literal, a line, a path, or a split part's files), and a batch concatenates N entries or N whole parts. Label is the single entry, or `first … last (n)` when there are several. `SplitBudget` is in BYTES. `NewSplitBudget(contextLimit)` returns (ContextLimit − 4096-token brief reserve) × 4 bytes/token, or 0 when the limit is at or below the reserve. The 4 bytes/token matches internal/context.DefaultCharsPerToken, but is a local constant because the package imports only internal/domain.
+
+NOTES (2026-09-27): grep's excluded-directory set is copied into items.go as `skippedDirs`, because internal/workflow may not import internal/tools (ADR 0087 D10, item 4's import guard). The walk start is exempt, so `files: build/*.go` still walks build/. Symlinks are skipped (regular files only), so a walk never leaves the fs.FS tree. Unreadable entries are returned as errors, not skipped the way find_files skips them. A `files:` glob under a directory that does not exist yields nothing, which is the "yields no items" error.
+
+NOTES (2026-09-27): only `split:` reads the budget, so a budget ≤ 0 is an error for split alone. A literal list or a glob still expands when the window is unknown. `stage:` (a pick's items) is refused by Expand with an error naming it: those items exist only after the pick has run, and item 10 owns that. `split:` on a file (not a directory) is an error that points to `files:`. `lines:` trims each line. Expand checks exactly-one-source and a negative batch itself, as well as Validate.
 
 **What:** Depends on item 4.
 **Goal:** `workflow.Expand(ItemSource, fs.FS, SplitBudget) ([]Item, error)` yields items from a literal list, `files: <glob>` (workspace-relative, `**` supported), `lines: <path>` (non-blank lines), and `split: <dir>` — contiguous parts whose summed size fits `SplitBudget` (a child's context window in tokens at 4 bytes/token, minus a fixed brief reserve); `batch: N` groups items N per child. Items are stable-ordered.

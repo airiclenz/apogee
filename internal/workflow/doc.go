@@ -20,5 +20,8 @@
 // the stage and field and says how to fix it, a stage's `when:` included.
 // cond.go is ParseCond, Cond.Check and Cond.Eval: the `when:` condition language over receipt
 // fields (`field op value` terms, and / or / not, parentheses), type-checked against a ReceiptSpec.
+// items.go is Expand, Item and SplitBudget: a fanout's items from a literal list, a `files:` glob
+// (`**` included), a file's non-blank `lines:`, or a `split:` directory cut into contiguous parts
+// sized to a child's context window, batched N per child.
 // And doc.go this map.
 package workflow
