@@ -22,8 +22,10 @@
 // embedder-registered tool — which is exactly the coverage the funnel journal cannot have.
 // Its boundary is git's own add pipeline (ADR 0074 decision 12): a path the workspace's own
 // .gitignore excludes, a nested repository git will not descend into, a path a filter driver
-// rewrites. That residue is a rule rather than a list, and the funnel's pre-image stays
-// authoritative for every path in it. The operator's global core.excludesFile is deliberately
+// rewrites, and a path git cannot read at that moment. That residue is a rule rather than a
+// list, and the funnel's pre-image stays authoritative for every path in it: a path a capture
+// could not read is recorded beside the objects and [Store.Diff] leaves it out, so an absence
+// that only means "unreadable" never reads as a creation a revert would delete. The operator's global core.excludesFile is deliberately
 // disabled during a capture (decision 11) so what undo covers is a property of the workspace
 // the human can see, not of a dotfile in their home directory.
 //

@@ -61,7 +61,8 @@ writes fall inside its parent's pair, so one `/undo` still takes back one instru
 the fan-out.
 
 **4 — Revert is diff-scoped, and skip-and-report is untouched.** A revert writes only the paths
-that **differ between that Exchange's pre and post trees**. Everything else in the workspace —
+that **differ between that Exchange's pre and post trees**, less the paths either capture could
+not read (decision 12). Everything else in the workspace —
 including every file the human changed by hand outside the diff — is not read, not written, not
 considered. Within that scope ADR 0051 decision 5 holds verbatim: a path whose current content no
 longer matches the post snapshot is left exactly as it is and named, with its reason, in both the
@@ -141,8 +142,16 @@ time — permissions, a file locked by another process — is residue too, and r
 **absent** from that image, never frozen at an older one: the store's private index persists
 between captures, so when the add reports any error the capture restages into a fresh, throwaway
 index rather than write a tree that still carries the entry an earlier capture staged for the
-failing path. Nothing in that residue loses cover it had before: decision 10 stands, and for every
-such path the funnel journal is what `/undo` uses.
+failing path. Absent is not "did not exist", though: a file the pre-image could not read and the
+exchange made readable is in the post-image, and a bare tree diff would call it created — so
+`/undo` would delete a file that was there all along (and, mirrored, a redo would delete one the
+post-image could not read). So the paths a capture could still not stage — what git lists as
+untracked against that fresh index, plus every directory the capture cannot open, which git only
+warns about and lists nowhere — are recorded beside the objects, keyed by the tree, and the
+diff decision 4 scopes a revert to leaves out every path either image recorded. The record is a
+union and survives the process with the objects, so a reloaded journal rebuilds the same diff.
+Nothing in that residue loses cover it had before: decision 10 stands, and for every such path
+the funnel journal is what `/undo` uses.
 
 **13 — State class: persisted host state, keyed by session id, outside the session record.**
 [ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md) §8 holds unchanged —

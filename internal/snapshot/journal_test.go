@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -339,5 +340,148 @@ func TestDirNamesTheSessionStoreAndNothingElse(t *testing.T) {
 	}
 	if got := Dir("/home/.apogee", ""); got != "" {
 		t.Errorf("Dir with no session = %q, want empty", got)
+	}
+}
+
+// requireUnreadableFiles skips where a mode-000 file cannot make `git add` fail: Windows ignores
+// the POSIX permission bits, and root reads the file regardless of them.
+func requireUnreadableFiles(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits cannot make a file unreadable on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file, so git add cannot be made to fail")
+	}
+}
+
+// A file that EXISTED when the exchange began but could not be read by the pre-image capture is
+// missing from that image, and a diff against a post-image that could read it calls it added.
+// `/undo` must not take that for a file the exchange created and delete it — in this process or
+// in the next one, which rebuilds the diff from the recorded trees. The exchange is the second
+// of the session, so the persistent index already staged the file once (the case item 25's fresh
+// index widened this to).
+func TestUndoNeverDeletesAFileTheCaptureCouldNotReadAtTheStart(t *testing.T) {
+	requireGit(t)
+	requireUnreadableFiles(t)
+	home, workspace := newHomeAndWorkspace(t)
+	writeFile(t, workspace, "locked.txt", "the human's own file\n")
+	requireUndoKeepsWhatTheCaptureCouldNotRead(t, home, workspace,
+		[]string{filepath.Join(workspace, "locked.txt")},
+		map[string]string{"locked.txt": "the human's own file\n"})
+}
+
+// A directory the pre-image capture could not open is worse than a file it could not read: git
+// only warns about it, so nothing — not the failed add, not `ls-files --others` — names what is
+// inside. With an erroring file beside it forcing the fresh index, every file inside the
+// directory is missing from the pre-image, and `/undo` must leave each of them alone once the
+// exchange made the directory readable again.
+func TestUndoNeverDeletesTheFilesOfADirectoryTheCaptureCouldNotOpen(t *testing.T) {
+	requireGit(t)
+	requireUnreadableFiles(t)
+	home, workspace := newHomeAndWorkspace(t)
+	writeFile(t, workspace, "locked.txt", "the human's own file\n")
+	writeFile(t, workspace, "dir/inner.txt", "inside the closed directory\n")
+	writeFile(t, workspace, "dir/sub/deep.txt", "deeper inside it\n")
+	requireUndoKeepsWhatTheCaptureCouldNotRead(t, home, workspace,
+		[]string{filepath.Join(workspace, "locked.txt"), filepath.Join(workspace, "dir")},
+		map[string]string{
+			"locked.txt":       "the human's own file\n",
+			"dir/inner.txt":    "inside the closed directory\n",
+			"dir/sub/deep.txt": "deeper inside it\n",
+		})
+}
+
+// requireUndoKeepsWhatTheCaptureCouldNotRead runs two exchanges over workspace: the first
+// captures every path readable, the second begins with each of locked at mode 000 and gives
+// each its mode back while it writes a file of its own. The step `/undo` would take — live and
+// from a reopened journal — must delete none of survivors, the revert must leave each with its
+// content, and the exchange's own file must go.
+func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace string, locked []string, survivors map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	modes := make(map[string]os.FileMode, len(locked))
+	for _, path := range locked {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modes[path] = info.Mode().Perm()
+		t.Cleanup(func() { _ = os.Chmod(path, modes[path]) })
+	}
+
+	journal, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	if err != nil || reason != "" {
+		t.Fatalf("OpenJournal: reason %q, err %v", reason, err)
+	}
+	exchange := func(during func()) {
+		t.Helper()
+		journal.BeginGroup()
+		if err := journal.MarkPre(ctx); err != nil {
+			t.Fatalf("MarkPre: %v", err)
+		}
+		during()
+		if err := journal.Close(ctx); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+	exchange(func() { writeFile(t, workspace, "first.txt", "exchange one\n") })
+
+	for _, path := range locked {
+		if err := os.Chmod(path, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exchange(func() {
+		for _, path := range locked {
+			if err := os.Chmod(path, modes[path]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeFile(t, workspace, "second.txt", "exchange two\n")
+	})
+
+	requireNoDelete := func(label string, step undo.Step) {
+		t.Helper()
+		for _, change := range step.Changes {
+			rel, err := filepath.Rel(workspace, change.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := survivors[filepath.ToSlash(rel)]; ok && change.Action == undo.ActionDelete {
+				t.Fatalf("%s: step %+v deletes %s, a file that existed before the exchange", label, step.Changes, rel)
+			}
+		}
+	}
+	step, ok := journal.Preview()
+	if !ok {
+		t.Fatal("no step to preview after the second exchange")
+	}
+	requireNoDelete("live preview", step)
+
+	reopened, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	if err != nil || reason != "" {
+		t.Fatalf("re-OpenJournal: reason %q, err %v", reason, err)
+	}
+	step, ok = reopened.Preview()
+	if !ok {
+		t.Fatal("no step to preview in the reopened journal")
+	}
+	requireNoDelete("reopened preview", step)
+
+	if _, err := reopened.Revert(); err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	for rel, want := range survivors {
+		data, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("%s after /undo: %v", rel, err)
+		}
+		if string(data) != want {
+			t.Errorf("%s after /undo = %q, want the human's content untouched", rel, data)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "second.txt")); !os.IsNotExist(err) {
+		t.Errorf("second.txt after /undo: stat err %v, want it removed with the exchange that wrote it", err)
 	}
 }

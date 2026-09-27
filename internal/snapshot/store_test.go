@@ -500,3 +500,63 @@ func TestCaptureLeavesOutAnUnreadablePathInsteadOfItsStaleContent(t *testing.T) 
 		t.Fatalf("ListBlobs = %v, want kept.txt captured", blobs)
 	}
 }
+
+// A path a capture could not read is absent from that image whether or not the file existed, so
+// a diff that named it would read the absence as a creation or a deletion. Diff leaves it out on
+// either side — the pre-image that could not read it and the post-image that could not — and
+// keeps every other change.
+func TestDiffLeavesOutAPathEitherCaptureCouldNotRead(t *testing.T) {
+	requireGit(t)
+	requireUnreadableFiles(t)
+	store, workspace := newStore(t)
+	ctx := context.Background()
+	locked := filepath.Join(workspace, "locked.txt")
+	writeFile(t, workspace, "locked.txt", "there all along\n")
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
+
+	readable := mustCapture(t, store)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, workspace, "one.txt", "changed while locked\n")
+	unreadable := mustCapture(t, store)
+	if err := os.Chmod(locked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, workspace, "two.txt", "changed once readable again\n")
+	readableAgain := mustCapture(t, store)
+
+	for _, pair := range []struct {
+		name string
+		a, b Tree
+		want string
+	}{
+		{"unreadable in the post-image", readable, unreadable, "one.txt"},
+		{"unreadable in the pre-image", unreadable, readableAgain, "two.txt"},
+	} {
+		t.Run(pair.name, func(t *testing.T) {
+			diff, err := store.Diff(ctx, pair.a, pair.b)
+			if err != nil {
+				t.Fatalf("Diff: %v", err)
+			}
+			if strings.Join(diff, ",") != pair.want {
+				t.Errorf("Diff = %v, want only %s — locked.txt could not be read, so it is residue", diff, pair.want)
+			}
+		})
+	}
+}
+
+// An unread record covers the path it names and, for the directory git lists a nested repository
+// as, every path beneath it — never a sibling that merely shares the prefix.
+func TestWithoutUnreadDropsCoveredPathsOnly(t *testing.T) {
+	t.Parallel()
+	paths := []string{"a.txt", "locked.txt", "nested", "nested/n.txt", "nestedsibling.txt", "sub/locked.txt"}
+	got := withoutUnread(paths, []string{"locked.txt", "nested/"})
+	want := []string{"a.txt", "nestedsibling.txt", "sub/locked.txt"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("withoutUnread = %v, want %v", got, want)
+	}
+	if got := withoutUnread(paths, nil); strings.Join(got, ",") != strings.Join(paths, ",") {
+		t.Errorf("withoutUnread with no record = %v, want every path", got)
+	}
+}

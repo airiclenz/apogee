@@ -22,6 +22,10 @@ const sha256HexLen = 2 * sha256.Size
 // takes an image of the workspace, says which paths differ between two images, reads an
 // image out as path → blob id, and produces the bytes one image holds for one path.
 //
+// Diff is the whole scope a revert reaches past the funnel, so it must leave out any path
+// either image could not read (ADR 0074 decision 12): that path is absent from the image
+// without having been absent from the disk, and a diff naming it would have a step delete it.
+//
 // It is an interface, and its tree ids are plain strings, so this package keeps the imports
 // ADR 0051 gave it — internal/security and the standard library — and the object store that
 // implements it (internal/snapshot) depends on the journal rather than the other way round.

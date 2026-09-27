@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,6 +30,14 @@ const storeDirPerm = 0o700
 // indexFileName is the private index the captures stage into, kept inside the store directory
 // so no index of ours is ever written under the workspace.
 const indexFileName = "index"
+
+// unreadDirName is the directory inside the store that records, per tree, the paths its capture
+// could not read (see [Store.Capture]); unreadFilePerm is each record's mode, owner-only like
+// everything else the store holds, since a record names workspace paths.
+const (
+	unreadDirName  = "unread"
+	unreadFilePerm = 0o600
+)
 
 // headFileName is the file whose presence says the store directory already holds a repository,
 // which is what makes Open reopen rather than re-initialise.
@@ -74,7 +83,8 @@ func (t Tree) validate() error {
 // Store is one session's object database: a bare repository directory, the workspace it takes
 // images of, and the private index the captures stage into. It holds no mutable state of its
 // own, so a Store is safe to share between goroutines — git's own index lock serialises
-// concurrent captures.
+// concurrent captures, and the per-tree record of paths a capture could not read is only ever
+// appended to.
 type Store struct {
 	dir       string // the bare GIT_DIR the session owns, outside the workspace
 	workspace string // the work-tree a capture stages, never written to
@@ -177,10 +187,18 @@ func Remove(dir string) error {
 // absent — the residue ADR 0074 decision 12 hands to the funnel journal — and never its old
 // bytes. The persistent index is left alone rather than deleted, so a capture running beside
 // this one never sees it vanish between its own add and write-tree.
+//
+// Absent is not the same as "did not exist", and the image alone cannot tell them apart: a file
+// this capture could not read, made readable by the exchange, is in the next image and would
+// diff as created — a revert would delete a file that was there all along. So the paths the
+// fresh add still could not stage are recorded beside the objects, keyed by the tree, and
+// [Store.Diff] leaves them out of every diff that tree takes part in. A capture that cannot
+// write that record fails rather than return an image whose absences read as deletions.
 func (s *Store) Capture(ctx context.Context) (Tree, error) {
 	out, addErr, err := s.stageAndWrite(ctx, s.index)
+	var unread []string
 	if err == nil && addErr != nil {
-		out, addErr, err = s.captureFresh(ctx)
+		out, unread, addErr, err = s.captureFresh(ctx)
 	}
 	if err != nil {
 		if addErr != nil {
@@ -188,19 +206,136 @@ func (s *Store) Capture(ctx context.Context) (Tree, error) {
 		}
 		return "", fmt.Errorf("apogee: snapshot: capture: %w", err)
 	}
-	return ParseTree(strings.TrimSpace(out))
+	tree, err := ParseTree(strings.TrimSpace(out))
+	if err != nil {
+		return "", err
+	}
+	if err := s.recordUnread(tree, unread); err != nil {
+		return "", fmt.Errorf("apogee: snapshot: capture: record the paths it could not read: %w", err)
+	}
+	return tree, nil
 }
 
 // captureFresh stages the work-tree into a new, empty index in a scratch directory inside the
 // store and writes the tree from it, so no entry from an earlier capture can reach the image.
-// The scratch directory goes with the call.
-func (s *Store) captureFresh(ctx context.Context) (out string, addErr, err error) {
+// When that add fails too, unread lists what it left out: every path git still reports as
+// untracked against the fresh index, which — since the add was asked to stage them all under
+// the same excludes — is exactly what it could not read, plus every directory git could not
+// open, which it only warns about and so lists nowhere. The scratch directory goes with the
+// call.
+func (s *Store) captureFresh(ctx context.Context) (out string, unread []string, addErr, err error) {
 	scratch, err := os.MkdirTemp(s.dir, "rebuild-")
 	if err != nil {
-		return "", nil, fmt.Errorf("fresh index: %w", err)
+		return "", nil, nil, fmt.Errorf("fresh index: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
-	return s.stageAndWrite(ctx, filepath.Join(scratch, indexFileName))
+
+	index := filepath.Join(scratch, indexFileName)
+	out, addErr, err = s.stageAndWrite(ctx, index)
+	if err != nil || addErr == nil {
+		return out, nil, addErr, err
+	}
+	listing, err := s.streamWith(ctx, s.envWithIndex(index),
+		"-c", "core.excludesFile=", "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return "", nil, addErr, fmt.Errorf("list the paths the fresh index left out: %w", err)
+	}
+	dirs, err := unopenableDirs(s.workspace)
+	if err != nil {
+		return "", nil, addErr, fmt.Errorf("list the directories the fresh index left out: %w", err)
+	}
+	return out, append(splitRecords(listing), dirs...), addErr, nil
+}
+
+// unopenableDirs walks workspace and returns every directory beneath it that cannot be opened,
+// workspace-relative with a trailing slash so an unread record covers everything inside it. git
+// only warns about such a directory and stages none of it, and `ls-files --others` cannot list
+// what it cannot open either, so without this a file inside it that the exchange made readable
+// would diff as created. A .git entry is skipped, as git skips it, and a directory that vanished
+// mid-walk is simply gone. A workspace root that cannot be walked is an error, so the capture
+// fails rather than record nothing.
+func unopenableDirs(workspace string) ([]string, error) {
+	var dirs []string
+	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
+		switch {
+		case walkErr != nil && path == workspace:
+			return walkErr
+		case walkErr != nil && errors.Is(walkErr, fs.ErrNotExist):
+			return nil
+		case walkErr != nil:
+			rel, err := filepath.Rel(workspace, path)
+			if err != nil {
+				return err
+			}
+			dirs = append(dirs, filepath.ToSlash(rel)+"/")
+			return filepath.SkipDir
+		case entry.IsDir() && entry.Name() == ".git" && path != workspace:
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return dirs, err
+}
+
+// recordUnread appends paths to the record of what the capture of tree could not read. The
+// record is a union: the same tree id can come out of more than one capture, and a path any of
+// them could not read stays out of that tree's diffs — the direction that can cost a revert a
+// path, never delete one. It is one NUL-terminated write to a file opened for appending, so two
+// captures recording at once interleave whole records rather than tear one.
+func (s *Store) recordUnread(tree Tree, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	dir := filepath.Join(s.dir, unreadDirName)
+	if err := os.MkdirAll(dir, storeDirPerm); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filepath.Join(dir, tree.String()), os.O_WRONLY|os.O_CREATE|os.O_APPEND, unreadFilePerm)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.WriteString(strings.Join(paths, "\x00") + "\x00")
+	return errors.Join(writeErr, file.Close())
+}
+
+// unreadOf reads back what [Store.recordUnread] recorded for tree; a tree whose capture read
+// everything has no record and answers none.
+func (s *Store) unreadOf(tree Tree) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, unreadDirName, tree.String()))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("apogee: snapshot: read the paths the capture of %s could not read: %w", tree, err)
+	}
+	return splitRecords(data), nil
+}
+
+// withoutUnread drops from paths every path an unread record covers. git lists a nested
+// repository it would not descend into as its directory with a trailing slash, so a record
+// covers the path it names and everything beneath it.
+func withoutUnread(paths, unread []string) []string {
+	if len(unread) == 0 {
+		return paths
+	}
+	kept := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !coveredBy(path, unread) {
+			kept = append(kept, path)
+		}
+	}
+	return kept
+}
+
+// coveredBy reports whether path is one of records or lies beneath one of them.
+func coveredBy(path string, records []string) bool {
+	for _, record := range records {
+		record = strings.TrimSuffix(record, "/")
+		if path == record || strings.HasPrefix(path, record+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // stageAndWrite runs one `add -A --ignore-errors` into index and then `write-tree` from it,
@@ -218,6 +353,11 @@ func (s *Store) stageAndWrite(ctx context.Context, index string) (out string, ad
 // Diff returns the workspace-relative paths that differ between two captures — added, removed
 // and modified alike — in git's own tree order. It is the scope a revert is confined to (ADR
 // 0074 decision 4): a path outside it is not read, not written and not considered.
+//
+// A path either capture could not read is left out (see [Store.Capture]): its absence from one
+// image says nothing about whether the file existed, so a diff naming it would have a revert
+// delete a file that was there all along, or restore one over bytes the image never saw. It is
+// residue, and the funnel journal is what reverts it (ADR 0074 decision 12).
 func (s *Store) Diff(ctx context.Context, a, b Tree) ([]string, error) {
 	if err := a.validate(); err != nil {
 		return nil, err
@@ -230,7 +370,15 @@ func (s *Store) Diff(ctx context.Context, a, b Tree) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("apogee: snapshot: diff %s %s: %w", a, b, err)
 	}
-	return splitRecords(out), nil
+	unreadA, err := s.unreadOf(a)
+	if err != nil {
+		return nil, err
+	}
+	unreadB, err := s.unreadOf(b)
+	if err != nil {
+		return nil, err
+	}
+	return withoutUnread(splitRecords(out), append(unreadA, unreadB...)), nil
 }
 
 // ListBlobs returns every file in one capture as path → blob id. The ids are what a conflict
@@ -325,8 +473,13 @@ func (s *Store) envWithIndex(index string) []string {
 // path (gitexec.Run) would silently truncate at 256 KiB, which for a blob being restored or a
 // wide Exchange's path list is a corrupt answer rather than a short one.
 func (s *Store) stream(ctx context.Context, args ...string) ([]byte, error) {
+	return s.streamWith(ctx, s.env(), args...)
+}
+
+// streamWith is stream with env in place of the persistent private index's redirection.
+func (s *Store) streamWith(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	var out bytes.Buffer
-	if err := gitexec.RunTo(ctx, s.workspace, s.env(), snapshotTimeout, &out, args...); err != nil {
+	if err := gitexec.RunTo(ctx, s.workspace, env, snapshotTimeout, &out, args...); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
