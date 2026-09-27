@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -10,6 +12,14 @@ import (
 // namePattern is the spelling of a stage name and of a declared receipt field: lower-case, led by
 // a letter, so it reads the same in a condition, a folder name and a result line.
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+// subjectSeparator joins a stage's name and one of its fields in a condition that reads an earlier
+// stage: `find.blocked`, `split.parts`, `scope.answer`.
+const subjectSeparator = "."
+
+// tallyFields are the fields a condition reads off a fanout stage: its items counted by receipt
+// status, each an int.
+var tallyFields = []string{string(StatusOK), string(StatusPartial), string(StatusBlocked)}
 
 // stageField ties one Stage key to the kinds that read it, so a key set on any other kind is a
 // problem instead of a silent no-op.
@@ -295,6 +305,9 @@ func pickProblems(stages []Stage, index int) []Problem {
 		if stage.From != "" {
 			return problem("from", "from is read only with field; remove it, the file names itself")
 		}
+		if cleaned := path.Clean(stage.File); strings.Contains(stage.File, `\`) || !filepath.IsLocal(filepath.FromSlash(cleaned)) {
+			return problem("file", "file is a path inside the workflow folder; write it without a leading / or .. climbing out")
+		}
 		return nil
 	}
 	if stage.From == "" {
@@ -392,11 +405,10 @@ func receiptSpecProblems(stage Stage) []Problem {
 	return problems
 }
 
-// conditionProblems reports a `when:` that does not parse, and a verify stage's `when:` that does
-// not type-check against the ReceiptSpec of the fanout it works over — the per-item receipts its
-// condition selects from. Every other kind's condition reads an earlier stage's receipt rather than
-// its own, so it is checked for syntax here. A blank `when:` is no condition (a repeat's missing one
-// is repeatProblems').
+// conditionProblems reports a `when:` that does not parse or does not type-check. A verify stage's
+// condition is typed against the ReceiptSpec of the fanout it works over — the per-item receipts it
+// selects from. Every other kind's condition reads earlier stages (stageConditionError). A blank
+// `when:` is no condition (a repeat's missing one is repeatProblems').
 func conditionProblems(stages []Stage, index int) []Problem {
 	stage := stages[index]
 	if strings.TrimSpace(stage.When) == "" {
@@ -411,6 +423,9 @@ func conditionProblems(stages []Stage, index int) []Problem {
 		return problem(err)
 	}
 	if stage.Kind != StageVerify {
+		if err := stageConditionError(stages, index, cond); err != nil {
+			return problem(err)
+		}
 		return nil
 	}
 	source, found := sourceFanout(stages, index)
@@ -419,6 +434,109 @@ func conditionProblems(stages []Stage, index int) []Problem {
 	}
 	if err := cond.Check(source.Returns); err != nil {
 		return problem(err)
+	}
+	return nil
+}
+
+// stageConditionError type-checks a condition that reads earlier stages rather than one item's
+// receipt: a skip `when:`, or a repeat's loop condition. Each field names its stage,
+// `<stage>.<field>`, and that stage is a script, ask or merge stage — whose one receipt it reads —
+// or a fanout, whose tally (ok, partial, blocked) it reads; a fanout's per-item fields are a verify
+// stage's to read, and every other kind leaves nothing to read. A repeat's condition may leave the
+// stage off a field of the stage it repeats. A field that resolves is then typed like any receipt
+// field (Cond.Check).
+func stageConditionError(stages []Stage, index int, cond Cond) error {
+	stage := stages[index]
+	spec := ReceiptSpec{}
+	for _, term := range condTerms(cond.root) {
+		name := term.field.text
+		subjectName, field, isQualified := strings.Cut(name, subjectSeparator)
+		var subject Stage
+		switch {
+		case isQualified:
+			found, message := earlierStage(stages, index, subjectName)
+			if message != "" {
+				return term.field.errorf(message)
+			}
+			subject = found
+		case stage.Kind == StageRepeat:
+			target, message := earlierStage(stages, index, stage.Repeat)
+			if stage.Repeat == "" || message != "" || target.Kind == StageRepeat {
+				// repeatProblems reports the missing or unfit target.
+				return nil
+			}
+			subject, field = target, name
+		default:
+			return term.field.errorf(fmt.Sprintf(
+				"a condition names the stage it reads; write %s as <stage>%s%s", name, subjectSeparator, name,
+			))
+		}
+		spelling, message := subjectFieldType(subject, field)
+		if message != "" {
+			return term.field.errorf(message)
+		}
+		if name != FieldStatus && name != FieldSummary {
+			spec[name] = spelling
+		}
+	}
+	return cond.Check(spec)
+}
+
+// subjectFieldType returns the type spelling of the field a stage condition reads off subject, or a
+// fix message when subject has no such field or is no stage a condition may read.
+func subjectFieldType(subject Stage, field string) (string, string) {
+	switch subject.Kind {
+	case StageFanout:
+		if slices.Contains(tallyFields, field) {
+			return string(FieldInt), ""
+		}
+		return "", fmt.Sprintf(
+			"stage %q is a fanout; a condition reads its tally (%s), and only a verify stage's when reads its items' fields",
+			subject.Name, strings.Join(tallyFields, ", "),
+		)
+	case StageScript, StageMerge, StageAsk:
+		spec := subject.Returns
+		if subject.Kind == StageAsk {
+			spec = ReceiptSpec{AskAnswerField: askAnswerSpelling(subject)}
+		}
+		switch field {
+		case FieldStatus:
+			return strings.Join(statuses, "|"), ""
+		case FieldSummary:
+			return string(FieldText), ""
+		}
+		if spelling, declared := spec[field]; declared {
+			return spelling, ""
+		}
+		return "", fmt.Sprintf("stage %q has no receipt field %s; its fields are %s", subject.Name, field, knownFields(spec))
+	}
+	return "", fmt.Sprintf(
+		"stage %q is a %s stage, which leaves no receipt to read; a condition reads a script, ask or merge stage's receipt or a fanout's tally",
+		subject.Name, subject.Kind,
+	)
+}
+
+// askAnswerSpelling is the type of an ask stage's answer: an enum of its options, or text when it
+// takes a free answer (or its options do not make an enum).
+func askAnswerSpelling(stage Stage) string {
+	spelling := strings.Join(stage.Options, "|")
+	if _, err := ParseFieldType(spelling); len(stage.Options) < 2 || err != nil {
+		return string(FieldText)
+	}
+	return spelling
+}
+
+// condTerms lists a condition's `field op value` terms in the order written.
+func condTerms(node condNode) []termNode {
+	switch typed := node.(type) {
+	case andNode:
+		return append(condTerms(typed.left), condTerms(typed.right)...)
+	case orNode:
+		return append(condTerms(typed.left), condTerms(typed.right)...)
+	case notNode:
+		return condTerms(typed.inner)
+	case termNode:
+		return []termNode{typed}
 	}
 	return nil
 }

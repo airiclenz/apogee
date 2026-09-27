@@ -177,6 +177,65 @@ func TestValidateTypesAVerifyConditionAgainstItsFanout(t *testing.T) {
 	}
 }
 
+// conditionStages is a script, an ask and the fanout find, which stage conditions read.
+func conditionStages(extra ...Stage) []Stage {
+	return append([]Stage{
+		{Name: "split", Kind: StageScript, Run: "./split.sh", Returns: ReceiptSpec{"parts": "int", "groups": "list"}},
+		{Name: "scope", Kind: StageAsk, Question: "Tests too?", Options: []string{"yes", "no"}, Default: "no"},
+		fanoutStage("find"),
+		{Name: "paths", Kind: StagePick, From: "find", Field: "paths"},
+	}, extra...)
+}
+
+func TestValidateTypesAStageConditionAgainstTheStageItNames(t *testing.T) {
+	t.Parallel()
+
+	stages := conditionStages(
+		Stage{Name: "prep", Kind: StageScript, When: "split.parts > 0 and split.status == ok", Run: "true"},
+		Stage{Name: "more", Kind: StageFanout, When: "scope.answer == yes or find.blocked == 0", Task: "t", Over: &ItemSource{List: []string{"a"}}},
+		Stage{Name: "report", Kind: StageMerge, From: "find", When: "not find.partial > 2", Task: "merge", Returns: ReceiptSpec{"sections": "int"}},
+		Stage{Name: "again", Kind: StageRepeat, Repeat: "find", When: "ok < 3 and split.parts > 1", Max: 2},
+		Stage{Name: "redo", Kind: StageRepeat, Repeat: "report", When: "status != ok or sections < 1", Max: 2},
+		Stage{Name: "files", Kind: StagePick, When: "report.sections > 0", File: "stages/find/list.txt"},
+	)
+
+	problems := Validate(Plan{Stages: stages})
+
+	if len(problems) != 0 {
+		t.Errorf("Validate = %v, want no problems", problems)
+	}
+}
+
+func TestValidateRefusesAStageConditionOnAnotherSubject(t *testing.T) {
+	t.Parallel()
+
+	fanout := func(when string) Stage {
+		return Stage{Name: "more", Kind: StageFanout, When: when, Task: "t", Over: &ItemSource{List: []string{"a"}}}
+	}
+	cases := []problemCase{
+		{name: "a per-item field of a fanout", stages: conditionStages(fanout("find.findings > 0")), wantStage: "more", wantField: "when", wantMessage: "only a verify stage's when reads its items' fields"},
+		{name: "a field that names no stage", stages: conditionStages(fanout("parts > 0")), wantStage: "more", wantField: "when", wantMessage: "write parts as <stage>.parts"},
+		{name: "a pick stage", stages: conditionStages(fanout("paths.ok > 0")), wantStage: "more", wantField: "when", wantMessage: "leaves no receipt to read"},
+		{name: "a field the script does not return", stages: conditionStages(fanout("split.files > 0")), wantStage: "more", wantField: "when", wantMessage: "no receipt field files"},
+		{name: "a list field", stages: conditionStages(fanout("split.groups == a")), wantStage: "more", wantField: "when", wantMessage: "cannot compare a list"},
+		{name: "an answer outside the options", stages: conditionStages(fanout("scope.answer == maybe")), wantStage: "more", wantField: "when", wantMessage: "one of yes, no"},
+		{name: "a later stage", stages: conditionStages(fanout("later.ok > 0"), Stage{Name: "later", Kind: StageScript, Run: "true"}), wantStage: "more", wantField: "when", wantMessage: "does not come before"},
+		{name: "a repeat reading its fanout's items", stages: conditionStages(Stage{Name: "again", Kind: StageRepeat, Repeat: "find", When: "findings > 0", Max: 2}), wantStage: "again", wantField: "when", wantMessage: "only a verify stage's when"},
+		{name: "a repeat reading a fanout's status", stages: conditionStages(Stage{Name: "again", Kind: StageRepeat, Repeat: "find", When: "status == ok", Max: 2}), wantStage: "again", wantField: "when", wantMessage: "reads its tally"},
+		{name: "a pick file climbing out", stages: withStage(Stage{Name: "p", Kind: StagePick, File: "../secrets.txt"}), wantStage: "p", wantField: "file", wantMessage: "inside the workflow folder"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			problems := Validate(Plan{Stages: c.stages})
+
+			assertOneProblem(t, c, problems)
+		})
+	}
+}
+
 func TestValidateModelPlanKeepsTheFanOutShape(t *testing.T) {
 	t.Parallel()
 

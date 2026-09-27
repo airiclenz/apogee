@@ -93,16 +93,21 @@ type RunStatus struct {
 	Stages   []StageStatus `json:"stages"`
 }
 
-// StageStatus is one stage's line in status.json, in the plan's stage order.
+// StageStatus is one stage's line in status.json, in the plan's stage order. Note is the stage's
+// one-line note (why it was skipped, what a pick picked, that an ask took its default) and Round
+// the repeat round its items come from (0 for the stage's own run).
 type StageStatus struct {
 	Name  string       `json:"name"`
 	Kind  StageKind    `json:"kind"`
 	Phase Phase        `json:"phase"`
+	Note  string       `json:"note,omitempty"`
+	Round int          `json:"round,omitempty"`
 	Items []ItemStatus `json:"items,omitempty"`
 }
 
 // ItemStatus is one item's line in status.json: its key (the folder name under items/), its label,
-// its phase, and the receipt its child handed back once it has one.
+// its phase, and the receipt its child handed back once it has one. A script or ask stage's one
+// line has no key: it runs no child and keeps no item folder, so its receipt lives here alone.
 type ItemStatus struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
@@ -338,8 +343,8 @@ func (s *Store) itemDir(id, key string) (string, error) {
 	return itemDir, nil
 }
 
-// ItemKey is the SHA-256 (lower-case hex) that names an item's folder: over the rendered brief, the
-// item, and the path and contents of every context file read from the workspace fsys, in the order
+// ItemKey is the SHA-256 (lower-case hex) that names an item's folder: over the brief (the Runner
+// passes the stage's child-facing fields and its repeat round), the item, and the path and contents of every context file read from the workspace fsys, in the order
 // given. The same work gets the same key, so a re-issued workflow skips it; a changed context file
 // gives a new key, so stale work is redone. A context file that cannot be read is an error.
 func ItemKey(brief string, item Item, contextFiles []string, fsys fs.FS) (string, error) {

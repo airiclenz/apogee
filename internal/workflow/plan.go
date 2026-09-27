@@ -72,8 +72,11 @@ type Stage struct {
 	// Name identifies the stage; later stages refer to it by this name. Required, unique.
 	Name string    `yaml:"name" json:"name"`
 	Kind StageKind `yaml:"kind" json:"kind"`
-	// When is a condition on receipt fields. On a verify stage it selects the items to check; on
-	// every other kind it skips the stage when false; on a repeat it is the loop condition.
+	// When is a condition on receipt fields. On a verify stage it selects the items to check, reading
+	// each item's receipt; on every other kind it skips the stage when false; on a repeat it is the
+	// loop condition. Outside a verify each field names the earlier stage it reads — `split.parts`,
+	// `find.blocked` — a script, ask or merge stage's receipt or a fanout's tally; a repeat may leave
+	// the stage off a field of the stage it repeats.
 	When string `yaml:"when,omitempty" json:"when,omitempty"`
 
 	// Task is the brief written inline, with {item} and {out} placeholders; Prompt is the brief
@@ -96,8 +99,8 @@ type Stage struct {
 	// From names the earlier stage this one reads: the fanout a verify or merge works over
 	// (default: the nearest earlier fanout), or the stage whose receipt `list` field a pick takes.
 	From string `yaml:"from,omitempty" json:"from,omitempty"`
-	// Field is the `list` receipt field a pick takes its items from; File is an output file whose
-	// non-blank lines a pick takes instead. Exactly one.
+	// Field is the `list` receipt field a pick takes its items from; File is an output file in the
+	// workflow folder (a path local to it) whose non-blank lines a pick takes instead. Exactly one.
 	Field string `yaml:"field,omitempty" json:"field,omitempty"`
 	File  string `yaml:"file,omitempty" json:"file,omitempty"`
 	// Cap keeps at most this many picked items (0: all); Batch groups them this many per child.

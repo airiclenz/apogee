@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -75,25 +77,54 @@ func verifyReturns() ReceiptSpec {
 	)}
 }
 
-// runStage runs plan's stage at index by its kind. result holds the stages already run; a verify
-// folds its verdicts into its source fanout's items there, and a merge sets the report fields.
+// runStage runs plan's stage at index, or skips it: when its `when:` is false, or when the stage
+// it works over was skipped. result holds the stages already run, one per earlier stage in plan
+// order; a verify folds its verdicts into its source fanout's items there, a merge sets the report
+// fields, and a repeat replaces the result of the stage it re-runs.
 func (s *runState) runStage(ctx context.Context, plan Plan, index int, stageItems map[int][]Item, result *Result) (StageResult, error) {
+	note, err := skipReason(plan, index, result)
+	if err != nil {
+		return StageResult{}, err
+	}
+	if note != "" {
+		return s.settleStage(index, plan.Stages[index], PhaseSkipped, note, nil)
+	}
+	return s.runRound(ctx, plan, index, 0, stageItems, result)
+}
+
+// runRound runs plan's stage at index by its kind, in the given repeat round (0 for its own run).
+func (s *runState) runRound(ctx context.Context, plan Plan, index, round int, stageItems map[int][]Item, result *Result) (StageResult, error) {
 	stage := plan.Stages[index]
+	s.startRound(index, round)
+	var (
+		stageResult StageResult
+		err         error
+	)
 	switch stage.Kind {
 	case StageVerify:
-		return s.runVerify(ctx, plan, index, stageItems, result)
+		stageResult, err = s.runVerify(ctx, plan, index, round, stageItems, result)
 	case StageMerge:
-		return s.runMerge(ctx, plan, index, result)
+		stageResult, err = s.runMerge(ctx, plan, index, round, result)
+	case StagePick:
+		stageResult, err = s.runPick(plan, index, stageItems, result)
+	case StageScript:
+		stageResult, err = s.runScript(ctx, index, stage)
+	case StageAsk:
+		stageResult, err = s.runAsk(ctx, index, stage)
+	case StageRepeat:
+		stageResult, err = s.runRepeat(ctx, plan, index, stageItems, result)
 	default:
-		return s.runFanout(ctx, index, stage, stageItems[index])
+		stageResult, err = s.runFanout(ctx, index, round, stage, fanoutItems(plan, index, stageItems))
 	}
+	stageResult.Round = round
+	return stageResult, err
 }
 
 // runVerify runs one adversarial child per item of the source fanout that the stage's `when:`
 // selects (every finished item when it has none), through the fanout's wave path. Each child's
 // brief leads with the engine's verify brief — refute the item's claim — and its receipt carries
 // the verdict, which is folded into the source item's result and both stages' tallies.
-func (s *runState) runVerify(ctx context.Context, plan Plan, index int, stageItems map[int][]Item, result *Result) (StageResult, error) {
+func (s *runState) runVerify(ctx context.Context, plan Plan, index, round int, stageItems map[int][]Item, result *Result) (StageResult, error) {
 	stage := plan.Stages[index]
 	sourceIndex, source, err := sourceStage(plan, index, result)
 	if err != nil {
@@ -105,7 +136,7 @@ func (s *runState) runVerify(ctx context.Context, plan Plan, index int, stageIte
 	}
 	child := stage
 	child.Returns = verifyReturns()
-	keyBrief, err := stageKeyBrief(child)
+	keyBrief, err := stageKeyBrief(child, round)
 	if err != nil {
 		return StageResult{}, err
 	}
@@ -132,7 +163,7 @@ func (s *runState) runVerify(ctx context.Context, plan Plan, index int, stageIte
 // path — written into the workflow folder, and hands it report.md there as its output. A merge
 // that leaves no report (its child blocked or stopped, or claimed a report it never wrote) ends
 // the stage failed and says why in result.ReportMissing; the items' results are untouched.
-func (s *runState) runMerge(ctx context.Context, plan Plan, index int, result *Result) (StageResult, error) {
+func (s *runState) runMerge(ctx context.Context, plan Plan, index, round int, result *Result) (StageResult, error) {
 	stage := plan.Stages[index]
 	_, source, err := sourceStage(plan, index, result)
 	if err != nil {
@@ -152,7 +183,7 @@ func (s *runState) runMerge(ctx context.Context, plan Plan, index int, result *R
 	if err != nil {
 		return StageResult{}, err
 	}
-	keyBrief, err := stageKeyBrief(stage)
+	keyBrief, err := stageKeyBrief(stage, round)
 	if err != nil {
 		return StageResult{}, err
 	}
@@ -322,4 +353,460 @@ func reportMissing(item ItemResult, path string) (string, error) {
 		return "", fmt.Errorf("workflow: read the merge report %q: %w", path, err)
 	}
 	return "", nil
+}
+
+// ScriptRunner runs a script stage's command. The agent implements it under the Mode and approval
+// rules of its own shell tool (ADR 0087 D6); tests script a fake. RunScript blocks until the
+// command ends and honours ctx. An error is a command that could not run at all — refused, not
+// found — which the stage records as a blocked receipt; a command that ran and failed is a
+// non-zero ExitCode instead.
+type ScriptRunner interface {
+	RunScript(ctx context.Context, spec ScriptSpec) (ScriptOutput, error)
+}
+
+// ScriptSpec is one script stage's run: which workflow and stage it serves, the command as the
+// recipe wrote it, and the workflow folder, where a script writes the files a later pick reads.
+type ScriptSpec struct {
+	Workflow string
+	Stage    string
+	Command  string
+	Dir      string
+}
+
+// ScriptOutput is how a script ended: what it printed on stdout and its exit code.
+type ScriptOutput struct {
+	Stdout   string
+	ExitCode int
+}
+
+// Asker puts an ask stage's question to the user and returns the answer. The Driver implements it;
+// a Driver with no human passes none, and the stage takes its default (ADR 0087 D10). Ask blocks
+// until the user answers and honours ctx.
+type Asker interface {
+	Ask(ctx context.Context, question Question) (string, error)
+}
+
+// Question is one ask stage's question: the stage it comes from, its text, the options to choose
+// from (empty for a free answer) and the default an empty answer takes.
+type Question struct {
+	Workflow string
+	Stage    string
+	Text     string
+	Options  []string
+	Default  string
+}
+
+// noOneToAskNote is the note an ask stage's result carries when the Runner has no Asker.
+const noOneToAskNote = "(default taken: no one to ask)"
+
+// startRound marks the stage at index as running in the given repeat round, its earlier note
+// cleared. The stage's next status write persists it.
+func (s *runState) startRound(index, round int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	line := &s.status.Stages[index]
+	line.Round, line.Note = round, ""
+}
+
+// settleStage records a stage that runs no child — skipped, a pick, a script, an ask, a repeat —
+// at its final phase with its note, tells the Observer, and returns its result. A non-nil receipt
+// is a script or ask stage's: it becomes the stage's one item, in the result and in status.json.
+func (s *runState) settleStage(index int, stage Stage, phase Phase, note string, receipt *Receipt) (StageResult, error) {
+	stageResult := StageResult{Name: stage.Name, Kind: stage.Kind, Phase: phase, Note: note}
+	var lines []ItemStatus
+	if receipt != nil {
+		stageResult.Items = []ItemResult{{Label: stage.Name, Phase: PhaseDone, Receipt: receipt}}
+		stageResult.Tally = tallyOf(stageResult.Items)
+		lines = []ItemStatus{{Label: stage.Name, Phase: PhaseDone, Receipt: receipt}}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	line := &s.status.Stages[index]
+	line.Phase, line.Note = phase, note
+	if lines != nil {
+		line.Items = lines
+	}
+	s.notifyStage(stage, phase)
+	return stageResult, s.writeStatus()
+}
+
+// skipReason returns the note a stage is skipped with, or "" when it runs: the stage it works over
+// was skipped, or its `when:` is false against the stages run so far. A verify's `when:` selects
+// its items and a repeat's is its loop condition, so neither skips the stage.
+func skipReason(plan Plan, index int, result *Result) (string, error) {
+	stage := plan.Stages[index]
+	if source := sourceName(plan, index); source != "" {
+		if sourceResult := stageResultNamed(result, source); sourceResult != nil && sourceResult.Phase == PhaseSkipped {
+			return fmt.Sprintf("skipped: stage %s was skipped", source), nil
+		}
+	}
+	if stage.Kind == StageVerify || stage.Kind == StageRepeat || strings.TrimSpace(stage.When) == "" {
+		return "", nil
+	}
+	cond, err := ParseCond(stage.When)
+	if err != nil {
+		return "", fmt.Errorf("workflow: stage %q, field \"when\": %w", stage.Name, err)
+	}
+	if cond.Eval(conditionReceipt(plan, index, result)) {
+		return "", nil
+	}
+	return fmt.Sprintf("skipped: %s is false", strings.TrimSpace(stage.When)), nil
+}
+
+// sourceName names the earlier stage the stage at index works over, or "" for one that reads none:
+// a verify's or merge's fanout, a pick's `from`, a fanout's pick, a repeat's target.
+func sourceName(plan Plan, index int) string {
+	stage := plan.Stages[index]
+	switch stage.Kind {
+	case StageVerify, StageMerge:
+		source, _ := sourceFanout(plan.Stages, index)
+		return source.Name
+	case StagePick:
+		return stage.From
+	case StageFanout:
+		return stage.Over.Stage
+	case StageRepeat:
+		return stage.Repeat
+	}
+	return ""
+}
+
+// stageResultNamed returns the result of the stage called name among those run, or nil.
+func stageResultNamed(result *Result, name string) *StageResult {
+	at := slices.IndexFunc(result.Stages, func(candidate StageResult) bool { return candidate.Name == name })
+	if at < 0 {
+		return nil
+	}
+	return &result.Stages[at]
+}
+
+// conditionReceipt gathers what a skip or repeat condition reads into one Receipt for Cond.Eval:
+// every stage run so far under `<stage>.<field>` — a script, ask or merge stage's receipt fields,
+// a fanout's tally — and, for a repeat, the repeated stage's fields unqualified as well. A skipped
+// or unfinished stage contributes nothing, so a term on it is false.
+func conditionReceipt(plan Plan, index int, result *Result) Receipt {
+	receipt := Receipt{Fields: map[string]any{}}
+	for position, stageResult := range result.Stages {
+		for name, value := range subjectValues(plan.Stages[position], stageResult) {
+			receipt.Fields[plan.Stages[position].Name+subjectSeparator+name] = value
+		}
+	}
+	stage := plan.Stages[index]
+	if stage.Kind != StageRepeat {
+		return receipt
+	}
+	target := slices.IndexFunc(plan.Stages, func(candidate Stage) bool { return candidate.Name == stage.Repeat })
+	if target < 0 || target >= len(result.Stages) {
+		return receipt
+	}
+	for name, value := range subjectValues(plan.Stages[target], result.Stages[target]) {
+		switch name {
+		case FieldStatus:
+			receipt.Status = Status(fieldText(value))
+		case FieldSummary:
+			receipt.Summary = fieldText(value)
+		default:
+			receipt.Fields[name] = value
+		}
+	}
+	return receipt
+}
+
+// subjectValues is what a condition may read off one stage's result: a fanout's tally by receipt
+// status, or a script, ask or merge stage's receipt — status, summary and its typed fields. A
+// skipped stage, an unfinished one and every other kind yield nothing.
+func subjectValues(stage Stage, stageResult StageResult) map[string]any {
+	if stageResult.Phase == PhaseSkipped {
+		return nil
+	}
+	switch stage.Kind {
+	case StageFanout:
+		return map[string]any{
+			string(StatusOK):      stageResult.Tally.OK,
+			string(StatusPartial): stageResult.Tally.Partial,
+			string(StatusBlocked): stageResult.Tally.Blocked,
+		}
+	case StageScript, StageAsk, StageMerge:
+		if len(stageResult.Items) != 1 || stageResult.Items[0].Phase != PhaseDone || stageResult.Items[0].Receipt == nil {
+			return nil
+		}
+		receipt := stageResult.Items[0].Receipt
+		values := map[string]any{FieldStatus: string(receipt.Status), FieldSummary: receipt.Summary}
+		for name, value := range receipt.Fields {
+			values[name] = value
+		}
+		return values
+	}
+	return nil
+}
+
+// fanoutItems returns the items of the fanout at index: its own expanded source, or the items its
+// pick stage picked, which it records as its own so a verify over it finds them.
+func fanoutItems(plan Plan, index int, stageItems map[int][]Item) []Item {
+	stage := plan.Stages[index]
+	if stage.Over.Stage == "" {
+		return stageItems[index]
+	}
+	pick := slices.IndexFunc(plan.Stages, func(candidate Stage) bool { return candidate.Name == stage.Over.Stage })
+	items := stageItems[pick]
+	stageItems[index] = items
+	return items
+}
+
+// runPick turns an earlier stage's `list` receipt field — unioned across a fanout's items, in item
+// order, each entry once — or the non-blank lines of a file in the workflow folder into items for
+// the fanout that reads it: the first `cap:` entries (all when 0), `batch:` to a child. A file that
+// cannot be read fails the stage with no items; the workflow goes on.
+func (s *runState) runPick(plan Plan, index int, stageItems map[int][]Item, result *Result) (StageResult, error) {
+	stage := plan.Stages[index]
+	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+		return StageResult{}, err
+	}
+	entries, failure := s.pickEntries(stage, result)
+	if failure != "" {
+		stageItems[index] = nil
+		return s.settleStage(index, stage, PhaseFailed, failure, nil)
+	}
+
+	picked := entries
+	if stage.Cap > 0 && len(picked) > stage.Cap {
+		picked = picked[:stage.Cap]
+	}
+	items := batchItems(singletons(picked), stage.Batch)
+	stageItems[index] = items
+	note := fmt.Sprintf("picked %d entries into %d items", len(picked), len(items))
+	if len(picked) < len(entries) {
+		note = fmt.Sprintf("picked %d of %d entries (cap %d) into %d items", len(picked), len(entries), stage.Cap, len(items))
+	}
+	return s.settleStage(index, stage, PhaseDone, note, nil)
+}
+
+// pickEntries reads a pick stage's entries, or says why it could not.
+func (s *runState) pickEntries(stage Stage, result *Result) ([]string, string) {
+	if stage.File != "" {
+		dir, err := s.runner.Store.Dir(s.status.ID)
+		if err != nil {
+			return nil, err.Error()
+		}
+		lines, err := nonBlankLines(os.DirFS(dir), path.Clean(stage.File))
+		if err != nil {
+			return nil, fmt.Sprintf("cannot read %s in the workflow folder: %v", stage.File, err)
+		}
+		return lines, ""
+	}
+
+	source := stageResultNamed(result, stage.From)
+	if source == nil {
+		return nil, fmt.Sprintf("stage %s has not run", stage.From)
+	}
+	var entries []string
+	seen := map[string]bool{}
+	for _, item := range source.Items {
+		if item.Phase != PhaseDone || item.Receipt == nil {
+			continue
+		}
+		for _, entry := range stringList(item.Receipt.Fields[stage.Field]) {
+			entry = strings.TrimSpace(entry)
+			if entry == "" || seen[entry] {
+				continue
+			}
+			seen[entry] = true
+			entries = append(entries, entry)
+		}
+	}
+	return entries, ""
+}
+
+// stringList reads a list receipt field in either shape it arrives in; anything else is empty.
+func stringList(value any) []string {
+	switch list := value.(type) {
+	case []string:
+		return list
+	case []any:
+		entries := make([]string, 0, len(list))
+		for _, element := range list {
+			if text, isString := element.(string); isString {
+				entries = append(entries, text)
+			}
+		}
+		return entries
+	}
+	return nil
+}
+
+// runScript runs a script stage's command through the ScriptRunner and turns its output into the
+// stage's receipt (scriptReceipt). A command that could not run, or whose receipt is blocked,
+// fails the stage; the workflow goes on, and a later `when:` may read `<stage>.status`.
+func (s *runState) runScript(ctx context.Context, index int, stage Stage) (StageResult, error) {
+	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+		return StageResult{}, err
+	}
+	dir, err := s.runner.Store.Dir(s.status.ID)
+	if err != nil {
+		return StageResult{}, err
+	}
+	output, runErr := s.runner.Scripts.RunScript(ctx, ScriptSpec{
+		Workflow: s.status.ID, Stage: stage.Name, Command: stage.Run, Dir: dir,
+	})
+	if ctx.Err() != nil {
+		return s.settleStage(index, stage, PhaseStopped, "", nil)
+	}
+
+	var receipt Receipt
+	if runErr != nil {
+		receipt = Receipt{
+			Status:  StatusBlocked,
+			Summary: clampWords("the script could not run: "+firstLine(runErr.Error()), SummaryMaxWords),
+		}
+	} else {
+		receipt = scriptReceipt(output, stage.Returns)
+	}
+	phase := PhaseDone
+	if receipt.Status == StatusBlocked {
+		phase = PhaseFailed
+	}
+	return s.settleStage(index, stage, phase, "", &receipt)
+}
+
+// scriptReceipt reads a script's receipt off its output. Each stdout line `KEY=value` whose key —
+// lower-cased — the stage's `returns:` declares becomes that field: an int parsed, a list gaining
+// one entry per line, text or an enum as written (the last line wins). A `summary=` line sets the
+// summary, which is otherwise the exit code; every other line is ignored. The status is ok on exit
+// 0, blocked otherwise — and blocked, saying why, when an ok receipt's fields do not pass the
+// declaration.
+func scriptReceipt(output ScriptOutput, spec ReceiptSpec) Receipt {
+	receipt := Receipt{Status: StatusOK, Summary: fmt.Sprintf("the script exited %d", output.ExitCode)}
+	fields := map[string]any{}
+	for _, line := range strings.Split(output.Stdout, "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found {
+			continue
+		}
+		key, value = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(value)
+		if key == FieldSummary {
+			if value != "" {
+				receipt.Summary = clampWords(value, SummaryMaxWords)
+			}
+			continue
+		}
+		fieldType, declared := spec.Field(key)
+		if !declared || key == FieldStatus {
+			continue
+		}
+		switch fieldType.Kind {
+		case FieldInt:
+			if number, err := strconv.Atoi(value); err == nil {
+				fields[key] = number
+			} else {
+				fields[key] = value
+			}
+		case FieldList:
+			if value != "" {
+				list, _ := fields[key].([]string)
+				fields[key] = append(list, value)
+			}
+		default:
+			fields[key] = value
+		}
+	}
+	if len(fields) > 0 {
+		receipt.Fields = fields
+	}
+
+	if output.ExitCode != 0 {
+		receipt.Status = StatusBlocked
+		return receipt
+	}
+	if problems := spec.Check(receipt); len(problems) > 0 {
+		receipt.Status = StatusBlocked
+		receipt.Summary = clampWords("the script's output: "+problems[0].String(), SummaryMaxWords)
+	}
+	return receipt
+}
+
+// runAsk puts an ask stage's question through the Asker and stores the answer in the `answer`
+// field of an ok receipt. The default is taken — and the stage's note says why — when there is no
+// Asker, when asking fails, when the answer is empty, or when it is not one of the options.
+func (s *runState) runAsk(ctx context.Context, index int, stage Stage) (StageResult, error) {
+	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+		return StageResult{}, err
+	}
+	answer, note := stage.Default, noOneToAskNote
+	if asker := s.runner.Asker; asker != nil {
+		given, err := asker.Ask(ctx, Question{
+			Workflow: s.status.ID, Stage: stage.Name, Text: stage.Question,
+			Options: append([]string(nil), stage.Options...), Default: stage.Default,
+		})
+		given = strings.TrimSpace(given)
+		switch {
+		case ctx.Err() != nil:
+			return s.settleStage(index, stage, PhaseStopped, "", nil)
+		case err != nil:
+			note = "(default taken: the question could not be asked: " + firstLine(err.Error()) + ")"
+		case given == "":
+			note = "(default taken: no answer)"
+		case len(stage.Options) > 0 && !slices.Contains(stage.Options, given):
+			note = fmt.Sprintf("(default taken: %q is not one of the options)", given)
+		default:
+			answer, note = given, ""
+		}
+	}
+
+	summary := "answered " + answer
+	if note != "" {
+		summary = "took the default " + answer
+	}
+	receipt := Receipt{
+		Status:  StatusOK,
+		Summary: clampWords(summary, SummaryMaxWords),
+		Fields:  map[string]any{AskAnswerField: answer},
+	}
+	return s.settleStage(index, stage, PhaseDone, note, &receipt)
+}
+
+// runRepeat re-runs the stage its `repeat:` names while its `when:` holds, at most `max:` times,
+// each re-run a round of its own (its items keyed apart, so they are spawned afresh) whose result
+// replaces the stage's in result. The condition is read before every round. A cancel stops the
+// repeat and the workflow.
+func (s *runState) runRepeat(ctx context.Context, plan Plan, index int, stageItems map[int][]Item, result *Result) (StageResult, error) {
+	stage := plan.Stages[index]
+	cond, err := ParseCond(stage.When)
+	if err != nil {
+		return StageResult{}, fmt.Errorf("workflow: stage %q, field \"when\": %w", stage.Name, err)
+	}
+	target := slices.IndexFunc(plan.Stages, func(candidate Stage) bool { return candidate.Name == stage.Repeat })
+	if target < 0 || target >= len(result.Stages) {
+		return StageResult{}, fmt.Errorf("workflow: stage %q: the stage it repeats, %q, has not run", stage.Name, stage.Repeat)
+	}
+	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+		return StageResult{}, err
+	}
+
+	rounds := 0
+	for rounds < stage.Max && cond.Eval(conditionReceipt(plan, index, result)) {
+		if ctx.Err() != nil {
+			return s.settleStage(index, stage, PhaseStopped, repeatNote(stage, rounds, false), nil)
+		}
+		rounds++
+		rerun, err := s.runRound(ctx, plan, target, rounds, stageItems, result)
+		if err != nil {
+			return StageResult{}, err
+		}
+		result.Stages[target] = rerun
+		if rerun.Phase == PhaseStopped {
+			return s.settleStage(index, stage, PhaseStopped, repeatNote(stage, rounds, false), nil)
+		}
+	}
+	isStillHolding := rounds == stage.Max && cond.Eval(conditionReceipt(plan, index, result))
+	return s.settleStage(index, stage, PhaseDone, repeatNote(stage, rounds, isStillHolding), nil)
+}
+
+// repeatNote says how many rounds a repeat ran, and whether its condition still held at the bound.
+func repeatNote(stage Stage, rounds int, isStillHolding bool) string {
+	note := fmt.Sprintf("re-ran %s in %d of at most %d rounds", stage.Repeat, rounds, stage.Max)
+	if isStillHolding {
+		note += "; its condition still held"
+	}
+	return note
 }

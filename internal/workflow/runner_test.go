@@ -407,9 +407,9 @@ func TestRunnerRefusesWhatItCannotRunYet(t *testing.T) {
 	withScript := fanPlan("a")
 	withScript.Stages = append(withScript.Stages, Stage{Name: "check", Kind: StageScript, Run: "make test"})
 	cases := map[string]Plan{
-		"invalid plan":            {Name: "empty"},
-		"not yet a stage it runs": withScript,
-		"empty item source":       {Name: "x", Stages: []Stage{{Name: "f", Kind: StageFanout, Task: "t", Over: &ItemSource{Files: "none/*.go"}}}},
+		"invalid plan":                {Name: "empty"},
+		"script with no ScriptRunner": withScript,
+		"empty item source":           {Name: "x", Stages: []Stage{{Name: "f", Kind: StageFanout, Task: "t", Over: &ItemSource{Files: "none/*.go"}}}},
 	}
 	for name, plan := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -319,7 +319,29 @@ NOTES (2026-09-27): runner_test.go's TestRunnerRefusesWhatItCannotRunYet had a "
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): verify and merge stages`
 
-## 10. Runner: recipe-only stages
+## 10. Runner: recipe-only stages — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): runner.go is edited as well, though the item does not list it. Run and expandStages refused every recipe-only kind and fanouts over a pick until now. The changes: `Runner` gains `Scripts ScriptRunner` and `Asker Asker`. Run refuses a plan that has a script stage when no ScriptRunner is set. expandStages skips everything except a fanout with its own source. `runFanout` and `stageKeyBrief` take the repeat round. `StageResult` gains `Note` and `Round`. `notifyStage` is factored out of setStagePhase.
+
+NOTES (2026-09-27): condition subjects. Outside a verify, every field in a `when:` names its stage as `<stage>.<field>`: `split.parts`, `scope.answer`, `find.blocked`. The stage must be a script, ask or merge stage (fields status, summary and its returns; for ask, `answer`, typed as an enum of its options) or a fanout (tally fields ok, partial and blocked, as ints). A repeat's condition may leave the stage off for a field of the stage it repeats (`ok < 3`). Validate (stageConditionError) refuses an unqualified field, a fanout's per-item field, a verify, pick or repeat stage as the subject, and a later stage. At run time, a skipped or unfinished stage contributes no fields, so a term that reads it is false.
+
+NOTES (2026-09-27): skip rules. A false `when:` skips a fanout, merge, pick, script or ask stage (PhaseSkipped, Note `skipped: <when> is false`). A stage whose source stage was skipped is skipped as well (Note `skipped: stage X was skipped`). The source is a verify's or merge's fanout, a pick's `from`, a fanout's pick, or a repeat's target. This keeps a merge from running a child over an empty manifest.
+
+NOTES (2026-09-27): pick. `file:` is a path inside the workflow folder, where split.sh writes its output (item 23), and Validate refuses `..` and absolute paths. `field:` unions the list field across the source stage's finished items in item order, each entry once. Cap, then batch. If the file cannot be read, the pick fails (PhaseFailed, with a Note) and yields no items. The fanout over it then runs zero items and the workflow goes on. The Note gives the counts.
+
+NOTES (2026-09-27): script. `ScriptRunner.RunScript(ctx, ScriptSpec{Workflow, Stage, Command, Dir=workflow folder}) (ScriptOutput{Stdout, ExitCode}, error)`. Keys are lower-cased and only declared `returns:` keys are read. An int is parsed, a list gains one entry per line, text and enum values are kept as written, and `summary=` sets the summary. Exit 0 gives ok, and anything else gives blocked. An ok receipt that fails ReceiptSpec.Check becomes blocked, and the summary names the problem. A RunScript error gives a blocked receipt. A blocked script fails the stage and the workflow goes on. A script or ask stage has one ItemResult (labelled with the stage name), and its receipt is inline in status.json on an ItemStatus with no key. Neither is skipped on resume; both run fresh.
+
+NOTES (2026-09-27): ask. `Asker.Ask(ctx, Question{Workflow, Stage, Text, Options, Default}) (string, error)`. The default is taken, and the Note says why, when there is no Asker (`(default taken: no one to ask)`), when the answer is empty, when the answer is not one of the options, or when Ask returns an error.
+
+NOTES (2026-09-27): repeat. Before each round, the condition is read against the latest results. The target is re-run with round n. Its StageResult in Result.Stages and its status.json line are replaced by the new round's (Round=n). The repeat's Note gives the number of rounds and whether the condition still held at max. The round goes into the item key through stageKeyBrief. It is omitted at round 0, so a stage's own run keeps the key it had before this item.
+
+NOTES (2026-09-27): store.go's StageStatus gains `note` and `round`. The ItemStatus and ItemKey doc comments now describe the keyless script and ask line and the round-carrying brief.
+
+NOTES (2026-09-27): consequential edit — internal/workflow/runner_test.go: made necessary by script stages now running; the refusal case is relabelled "script with no ScriptRunner" and still refuses.
+
+NOTES (2026-09-27): consequential edit — internal/workflow/plan.go: made necessary by the condition-subject rule and pick's folder-local file; the Stage.When and Stage.File doc comments now say so.
+
+NOTES (2026-09-27): consequential edit — internal/workflow/doc.go: made necessary by stages.go now carrying every kind beyond the fanout; its map line says so.
 
 **What:** Depends on item 9.
 **Goal:** `pick` turns a stage's receipt `list` field or the lines of a named output file into the next stage's items (with `cap:` and `batch:`); `script` runs a script through an injected `ScriptRunner` and reads `KEY=value` stdout lines as receipt fields; `ask` asks through an injected `Asker` (question, options, default) and stores the answer as a field; `repeat` re-runs a named stage while its condition holds, at most `max:` times; any stage's `when:` skips it.

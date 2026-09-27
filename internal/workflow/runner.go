@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -148,6 +149,11 @@ type Runner struct {
 	Retries int
 	// Continuations is how many times a capped child is continued within one attempt.
 	Continuations int
+	// Scripts runs a script stage's command. Required when the plan has a script stage.
+	Scripts ScriptRunner
+	// Asker puts an ask stage's question to the user. Nil means no one is there to ask (an
+	// unattended Driver): every ask stage takes its default and its result says so.
+	Asker Asker
 	// Observer, when set, receives every stage and item phase change.
 	Observer Observer
 	// Now is the clock status.json is stamped with; nil means time.Now.
@@ -172,14 +178,21 @@ type Result struct {
 // Stopped reports whether a cancel ended the run before every item finished.
 func (r Result) Stopped() bool { return r.Phase == PhaseStopped }
 
-// StageResult is one stage's items, in item order, and their tally. Phase is done or stopped, or
-// failed for a merge stage that left no report.
+// StageResult is one stage's items, in item order, and their tally. Phase is done or stopped;
+// skipped for a stage its `when:` turned off; failed for a merge that left no report, a script
+// that ended blocked, or a pick that could not read its file. A script or ask stage has one item,
+// labelled with the stage's name, carrying its receipt; a pick has none (its items are the next
+// fanout's). Note says in one line what the stage came to when its items do not — why it was
+// skipped, what a pick picked, that an ask took its default. Round is the repeat round the result
+// comes from: 0 for the stage's own run, n for a repeat stage's n-th re-run of it.
 type StageResult struct {
 	Name  string
 	Kind  StageKind
 	Phase Phase
 	Items []ItemResult
 	Tally Tally
+	Note  string
+	Round int
 }
 
 // ItemResult is one item's end: its phase (done, or stopped/pending when a cancel left it
@@ -224,6 +237,9 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if problems := Validate(plan); len(problems) > 0 {
 		return Result{}, fmt.Errorf("workflow: invalid plan: %s", joinProblems(problems))
 	}
+	if r.Scripts == nil && slices.ContainsFunc(plan.Stages, func(stage Stage) bool { return stage.Kind == StageScript }) {
+		return Result{}, errors.New("workflow: the plan has a script stage and the runner has no ScriptRunner")
+	}
 	stageItems, allItems, err := r.expandStages(plan)
 	if err != nil {
 		return Result{}, err
@@ -266,21 +282,14 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 
 // expandStages expands every fanout's items up front, so an unreadable source fails the run before
 // a folder exists and the PlanHash covers the work. It returns them per stage index and flattened.
-// A verify or merge stage has no source of its own — it works over a fanout's results. Only fanout,
-// verify and merge run today: every other stage kind, and a fanout over a pick stage's items, is
-// refused until the Runner learns it.
+// Only a fanout with a source of its own is expanded here: a fanout over a pick stage's items gets
+// them when the pick has run, and every other kind works over earlier stages' results.
 func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
 	perStage := make(map[int][]Item, len(plan.Stages))
 	var all []Item
 	for index, stage := range plan.Stages {
-		if stage.Kind == StageVerify || stage.Kind == StageMerge {
+		if stage.Kind != StageFanout || stage.Over.Stage != "" {
 			continue
-		}
-		if stage.Kind != StageFanout {
-			return nil, nil, fmt.Errorf("workflow: stage %q: the runner does not run %s stages yet", stage.Name, stage.Kind)
-		}
-		if stage.Over.Stage != "" {
-			return nil, nil, fmt.Errorf("workflow: stage %q: the runner does not take a pick stage's items yet", stage.Name)
 		}
 		items, err := Expand(*stage.Over, r.Workspace, r.Split)
 		if err != nil {
@@ -331,9 +340,9 @@ type runState struct {
 	status RunStatus
 }
 
-// runFanout runs one fanout stage's items and returns the stage's result.
-func (s *runState) runFanout(ctx context.Context, stageIndex int, stage Stage, items []Item) (StageResult, error) {
-	keyBrief, err := stageKeyBrief(stage)
+// runFanout runs one fanout stage's items in the given repeat round and returns the stage's result.
+func (s *runState) runFanout(ctx context.Context, stageIndex, round int, stage Stage, items []Item) (StageResult, error) {
+	keyBrief, err := stageKeyBrief(stage, round)
 	if err != nil {
 		return StageResult{}, err
 	}
@@ -618,10 +627,15 @@ func (s *runState) setStagePhase(stageIndex int, stage Stage, phase Phase) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status.Stages[stageIndex].Phase = phase
+	s.notifyStage(stage, phase)
+	return s.writeStatus()
+}
+
+// notifyStage tells the Observer of a stage's phase. The caller holds mu.
+func (s *runState) notifyStage(stage Stage, phase Phase) {
 	if observer := s.runner.Observer; observer != nil {
 		observer.StagePhase(StageEvent{Workflow: s.status.ID, Stage: stage.Name, Kind: stage.Kind, Phase: phase})
 	}
-	return s.writeStatus()
 }
 
 // setWorkflowPhase records the workflow's final phase in status.json.
@@ -651,9 +665,12 @@ func (s *runState) writeStatus() error {
 }
 
 // stageKeyBrief is the brief an item key is taken over: every field of the stage a child's work
-// depends on, the task as a template. The rendered brief cannot serve — its {out} is inside the
-// item's folder, which the key names.
-func stageKeyBrief(stage Stage) (string, error) {
+// depends on, the task as a template, and the repeat round. The rendered brief cannot serve — its
+// {out} is inside the item's folder, which the key names. The round (0 for the stage's own run,
+// left out of the encoding) gives a repeat's re-run of the stage keys of its own, so it spawns its
+// items afresh instead of finding the earlier round's receipts, while a resume of the same round
+// still finds them.
+func stageKeyBrief(stage Stage, round int) (string, error) {
 	encoded, err := json.Marshal(struct {
 		Stage   string      `json:"stage"`
 		Task    string      `json:"task,omitempty"`
@@ -661,7 +678,8 @@ func stageKeyBrief(stage Stage) (string, error) {
 		Out     string      `json:"out,omitempty"`
 		Returns ReceiptSpec `json:"returns,omitempty"`
 		Tools   []string    `json:"tools,omitempty"`
-	}{stage.Name, stage.Task, stage.Prompt, stage.Out, stage.Returns, stage.Tools})
+		Round   int         `json:"round,omitempty"`
+	}{stage.Name, stage.Task, stage.Prompt, stage.Out, stage.Returns, stage.Tools, round})
 	if err != nil {
 		return "", fmt.Errorf("workflow: stage %q: encode the item key brief: %w", stage.Name, err)
 	}
