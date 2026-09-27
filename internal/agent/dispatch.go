@@ -944,7 +944,7 @@ func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolR
 // returns its stopped result like any other (runSubAgent); a call the cancel reached before its
 // child was built returns dispatchCancelled, and is answered here with the not-started result
 // (cancelledQueuedDelegationContent), carried
-// on its finished phase with Cancelled false like every other (ADR 0088 D2, superseding ADR 0075
+// on its finished phase like every other (ADR 0088 D2, superseding ADR 0075
 // decision 12) — the slot commits it, so no delegation ends without a result.
 //
 // The recover that keeps a child's panic from crossing a pool worker's top frame — which would
@@ -1006,11 +1006,8 @@ func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
 // interjection, or refused past the reply's fan-out ceiling, reports a finished phase alone
 // (skipDelegation): it never started.
 //
-// The caller fills what the phase carries — Phase, and Result or Cancelled on a finished one,
-// StepCap and CapRequested on a started one (stepCapFor) — and this stamps the identity.
-// Cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
-// (ADR 0075 decision 12). It rides the event so an observer can tell the two apart; a started phase
-// is never cancelled.
+// The caller fills what the phase carries — Phase, and Result on a finished one, StepCap and
+// CapRequested on a started one (stepCapFor) — and this stamps the identity.
 func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, runID string, event domain.SubAgentPhaseEvent) {
 	event.EventBase = a.childBase(turn, call.ID, runID)
 	a.cfg.Events.Emit(event)

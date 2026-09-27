@@ -5012,7 +5012,7 @@ func TestSubAgent_AShutdownCancelSkipsTheFold(t *testing.T) {
 // TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted pins the one delegation a
 // cancel still leaves unstarted rather than stopped (ADR 0088 D2): a call whose context is already
 // cancelled when it would build its child builds none — it takes the not-started result, carried on
-// a finished phase with Cancelled false, books no audit record and a `cancelled` ledger row — and a
+// its finished phase, books no audit record and a `cancelled` ledger row — and a
 // continuation reached so gives the entry it took back.
 func TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted(t *testing.T) {
 	sink := &recordingSink{}
@@ -5035,7 +5035,7 @@ func TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted(t *test
 		t.Errorf("slot result = %+v, want the error-shaped %q", slot.result, cancelledQueuedDelegationContent)
 	}
 	phases := phasesFor(sink.events, "c1")
-	if n := len(phases); n == 0 || phases[n-1].Phase != domain.SubAgentFinished || phases[n-1].Cancelled ||
+	if n := len(phases); n == 0 || phases[n-1].Phase != domain.SubAgentFinished ||
 		phases[n-1].Result.Content != cancelledQueuedDelegationContent {
 		t.Errorf("phases = %+v, want a closing finished phase carrying the not-started result", phases)
 	}

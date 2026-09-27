@@ -213,7 +213,7 @@ func (m Model) foldStats(e domain.Event) Model {
 //     boundary and its report is in the record. Under a fan-out its siblings run on, so this is a
 //     progress point of its own rather than the Turn's end. A delegation the human's cancel reached
 //     is one too: the cancel settles it with a result (its report, its stopped partial, or the
-//     not-started result — ADR 0088), and the engine no longer sets the phase's Cancelled flag.
+//     not-started result — ADR 0088).
 //   - A SubAgentNamedEvent: a running delegation has just been given its generated name (ADR 0068),
 //     and what a run is CALLED is part of the run rather than view state — so a record saved
 //     before the rename, and resumed after it, would paint the task's first line the session had

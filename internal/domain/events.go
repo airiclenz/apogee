@@ -227,15 +227,13 @@ const (
 //
 // Result is the child's ToolResult on SubAgentFinished and the zero value on SubAgentStarted.
 //
-// Cancelled is false on every phase this engine emits. A cancel no longer rolls a delegation back
-// (ADR 0088, superseding ADR 0075 decision 12): it SETTLES every delegation of the group with a
-// result — a finished child its report, a running child the stopped partial result the human's stop
-// gives it, a child the cancel reached before it started the not-started result — so every finished
-// phase carries its Result and the delegation's ToolResultEvent follows, as for any other outcome.
-// The field is kept for a consumer reading a log recorded before that change, where true marked a
-// finished phase with the zero Result and no ToolResultEvent after it. The wire keeps it too: the
-// `sub_agent_phase` line (internal/eventjson) still carries `data.cancelled`, now always false, so
-// the line's shape is unchanged for a reader that parses it. No first-party Driver reads it any more.
+// A cancel settles every delegation of the group with a result rather than rolling it back
+// (ADR 0088, superseding ADR 0075 decision 12) — a finished child its report, a running child the
+// stopped partial result the human's stop gives it, a child the cancel reached before it started
+// the not-started result — so every finished phase carries its Result and the delegation's
+// ToolResultEvent follows, as for any other outcome. The rolled-back phase's old Cancelled flag is
+// gone; the `sub_agent_phase` wire line (internal/eventjson) keeps its `data.cancelled` key as a
+// constant false so the v2 line's shape is unchanged.
 //
 // StepCap and CapRequested are the child's step-cap facts, set on SubAgentStarted only and zero on
 // every finished phase: StepCap is the cap the child actually runs under (the configured
@@ -248,7 +246,6 @@ type SubAgentPhaseEvent struct {
 	EventBase
 	Phase        SubAgentPhase
 	Result       ToolResult
-	Cancelled    bool
 	StepCap      int
 	CapRequested int
 }

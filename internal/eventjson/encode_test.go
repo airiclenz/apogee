@@ -144,16 +144,18 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"cancelled":false}`,
 		},
 		{
-			name: "sub_agent_phase cancelled at depth 1",
+			// A cancel settles a delegation with a result (ADR 0088), so the finished phase carries
+			// it; `cancelled` has no source and stays on the v2 line as a constant false.
+			name: "sub_agent_phase finished on a cancel's stopped result at depth 1",
 			event: domain.SubAgentPhaseEvent{
 				EventBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
 				Phase:     domain.SubAgentFinished,
-				Cancelled: true,
+				Result:    domain.ToolResult{CallID: "call-9", Content: "stopped", IsError: true},
 			},
 			wantKind: "sub_agent_phase",
 			wantBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
-			wantData: `{"phase":"finished","result":{"call_id":"","content":"","is_error":false},` +
-				`"cancelled":true}`,
+			wantData: `{"phase":"finished","result":{"call_id":"call-9","content":"stopped","is_error":true},` +
+				`"cancelled":false}`,
 		},
 		{
 			name: "sub_agent_named",

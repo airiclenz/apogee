@@ -415,7 +415,7 @@ func TestStopChild_AQueuedPooledDelegationNeverStarts(t *testing.T) {
 		t.Errorf("queued-stop content = %q, want %q", stoppedQueuedDelegationContent, wantContent)
 	}
 	phases := phasesFor(sink.events, "c3")
-	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Cancelled ||
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished ||
 		phases[0].Result.Content != stoppedQueuedDelegationContent {
 		t.Errorf("c3 phases = %+v, want one finished phase carrying the queued-stop result", phases)
 	}

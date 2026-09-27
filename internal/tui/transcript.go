@@ -1637,8 +1637,7 @@ func (t *transcript) addToolResult(result domain.ToolResult, spawnRunID string, 
 // A delegation the human's cancel reached finishes like any other (ADR 0088): a finished child on
 // its report, a running one on the stopped partial result (which reads `stopped by you`), a queued
 // one on the not-started result — and its ToolResultEvent follows. So the finished phase folds the
-// same way for all of them; the engine no longer rolls a cancelled delegation back, and never sets
-// the event's Cancelled flag (domain.SubAgentPhaseEvent), which this fold therefore does not read.
+// same way for all of them; the engine no longer rolls a cancelled delegation back.
 func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 	run := runOf(e.EventBase)
 	if e.Phase == domain.SubAgentFinished {

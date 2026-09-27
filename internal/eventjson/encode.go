@@ -108,9 +108,8 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 		}, true
 	case domain.SubAgentPhaseEvent:
 		return kindSubAgentPhase, e.EventBase, subAgentPhaseData{
-			Phase:     string(e.Phase),
-			Result:    toolResultOf(e.Result),
-			Cancelled: e.Cancelled,
+			Phase:  string(e.Phase),
+			Result: toolResultOf(e.Result),
 		}, true
 	case domain.SubAgentNamedEvent:
 		return kindSubAgentNamed, e.EventBase, subAgentNamedData{Name: e.Name}, true
@@ -242,10 +241,11 @@ type toolResultData struct {
 }
 
 // subAgentPhaseData is the sub_agent_phase line: one delegation crossing a lifecycle boundary.
-// Cancelled is always false from this engine: a cancel settles every delegation with a result
-// instead of rolling it back (ADR 0088, superseding ADR 0075 decision 12), so every finished phase
-// reports one. The key stays on the line so its shape does not change under a reader that parses
-// it; in a log written before that change, true marked a finished phase with no result.
+// Cancelled has no source any more and is always false: a cancel settles every delegation with a
+// result instead of rolling it back (ADR 0088, superseding ADR 0075 decision 12), so every finished
+// phase reports one, and domain.SubAgentPhaseEvent no longer carries a flag for it. The key stays
+// on the line because removing a member bumps the contract's `v` (ADR 0075); in a log written
+// before that change, true marked a finished phase with no result.
 type subAgentPhaseData struct {
 	Phase     string     `json:"phase"`
 	Result    toolResult `json:"result"`

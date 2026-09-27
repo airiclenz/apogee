@@ -496,8 +496,8 @@ func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 			phases = append(phases, pe)
 		}
 	}
-	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Depth != 2 || phases[0].Cancelled {
-		t.Errorf("c2 phases = %+v, want exactly one finished phase at Depth 2, not Cancelled", phases)
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Depth != 2 {
+		t.Errorf("c2 phases = %+v, want exactly one finished phase at Depth 2", phases)
 	}
 
 	// And the remark still lands at the child's next boundary, exactly as without a delegation.

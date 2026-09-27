@@ -33,7 +33,7 @@ func subAgentPhases(events []domain.Event) []domain.SubAgentPhaseEvent {
 
 // assertStoppedBracket pins the bracket of a delegation the user's cancel found running (ADR 0088
 // D2, superseding ADR 0075 decision 12): exactly one started and one finished phase, the finished
-// one NOT flagged Cancelled and carrying the stopped result the delegation's ToolResultEvent then
+// one carrying the stopped result the delegation's ToolResultEvent then
 // repeats, stamped with the same run identity its started carried.
 func assertStoppedBracket(t *testing.T, events []domain.Event, callIDs ...string) {
 	t.Helper()
@@ -52,9 +52,6 @@ func assertStoppedBracket(t *testing.T, events []domain.Event, callIDs ...string
 		if len(started) != 1 || len(finished) != 1 {
 			t.Errorf("call %s: %d started / %d finished phases, want exactly one of each", id, len(started), len(finished))
 			continue
-		}
-		if finished[0].Cancelled {
-			t.Errorf("call %s: finished phase flagged Cancelled; a stopped delegation reports its result", id)
 		}
 		if !strings.HasPrefix(finished[0].Result.Content, stoppedResultHead) || finished[0].Result.IsError {
 			t.Errorf("call %s: finished phase result = %+v, want the non-error stopped result", id, finished[0].Result)

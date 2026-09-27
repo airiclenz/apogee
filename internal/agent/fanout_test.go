@@ -371,7 +371,7 @@ func TestFanOut_CancelKeepsFinishedSiblingsAndStopsRunningOnes(t *testing.T) {
 // TestFanOut_ASlotDequeuedAfterTheCancelIsNeverStarted pins the pool's dequeue under a cancel (ADR
 // 0088 D2): with both workers busy when the human presses Esc, the third delegation is only
 // dequeued after it, so it is never started — no started phase, one finished phase carrying the not-started
-// result with Cancelled false, the not-started result committed in its place, no audit record and a
+// result, the not-started result committed in its place, no audit record and a
 // `cancelled` ledger row — while the two running children are stopped.
 func TestFanOut_ASlotDequeuedAfterTheCancelIsNeverStarted(t *testing.T) {
 	sink := &recordingSink{}
@@ -418,7 +418,7 @@ func TestFanOut_ASlotDequeuedAfterTheCancelIsNeverStarted(t *testing.T) {
 		t.Errorf("queued child's result = %+v, want the error-shaped %q", results[2], cancelledQueuedDelegationContent)
 	}
 	phases := phasesFor(sink.events, "c3")
-	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Cancelled ||
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished ||
 		phases[0].Result.Content != cancelledQueuedDelegationContent {
 		t.Errorf("queued child's phases = %+v, want one finished phase carrying the not-started result", phases)
 	}
@@ -1124,8 +1124,8 @@ func assertSkippedDelegation(t *testing.T, events []domain.Event, result domain.
 	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished {
 		t.Fatalf("%s phases = %+v, want exactly one finished phase and no started one", result.CallID, phases)
 	}
-	if phases[0].Cancelled || phases[0].Result.Content != skippedDelegationContent {
-		t.Errorf("%s finished phase = %+v, want the skip result and not Cancelled", result.CallID, phases[0])
+	if phases[0].Result.Content != skippedDelegationContent {
+		t.Errorf("%s finished phase = %+v, want the skip result", result.CallID, phases[0])
 	}
 	for _, ae := range auditEvents(events) {
 		if ae.CallID == result.CallID {
@@ -1599,8 +1599,8 @@ func assertCeilingRefusal(t *testing.T, events []domain.Event, seen []string, re
 	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished {
 		t.Fatalf("%s phases = %+v, want exactly one finished phase and no started one", result.CallID, phases)
 	}
-	if phases[0].Cancelled || phases[0].Result.Content != want {
-		t.Errorf("%s finished phase = %+v, want the refusal result and not Cancelled", result.CallID, phases[0])
+	if phases[0].Result.Content != want {
+		t.Errorf("%s finished phase = %+v, want the refusal result", result.CallID, phases[0])
 	}
 	for _, ae := range auditEvents(events) {
 		if ae.CallID == result.CallID {
