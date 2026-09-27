@@ -1,0 +1,3 @@
+You are merging a workflow's items into one report. The manifest at {manifest} lists every item: its number and label, its receipt's status and summary, a verify verdict where one was given, and the path of its detail output.
+Read the manifest and each output it lists, then write the merged report to {out}. An item marked unfinished has no output to read; say in the report that it is missing.
+Then call finish with a one-line summary of the report.

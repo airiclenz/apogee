@@ -54,12 +54,16 @@ type ItemSpec struct {
 	// Workflow is the workflow's id (its folder name under the store).
 	Workflow string
 	// Stage is the stage the child runs for: its Returns, Context, Tools and Prompt are the child's.
+	// A verify child's Returns is the engine's `verdict` field, never the author's.
 	Stage Stage
 	// Item is the child's share of the stage, and Key the item's folder name.
 	Item Item
 	Key  string
-	// Brief is the stage's `task:` with {item} and {out} rendered; empty when the stage names its
-	// brief as a `prompt:` file instead, which the Spawner reads and renders the same way.
+	// Brief is the stage's `task:` with {item} and {out} rendered. A verify or merge child's Brief
+	// leads with the engine's own brief for the stage kind (verify refutes the item's claim, merge
+	// writes the report), the stage's brief after it. When the stage names its brief as a `prompt:`
+	// file instead, Brief holds only that engine lead (empty for a fanout), and the Spawner reads and
+	// renders the file the same way and puts it after the lead.
 	Brief string
 	// Output is the path the child writes its detail output to: the rendered `out:` when the stage
 	// sets one, else an absolute path inside the item's folder.
@@ -151,18 +155,25 @@ type Runner struct {
 }
 
 // Result is a run's outcome: the workflow's id and folder, its final phase — done, or stopped when
-// a cancel ended it — and every stage's items and tallies in plan order.
+// a cancel ended it — every stage's items and tallies in plan order, and the merge stage's report.
 type Result struct {
 	ID     string
 	Dir    string
 	Phase  Phase
 	Stages []StageResult
+	// Report is the path of the report.md a merge stage wrote; empty when the plan has no merge or
+	// the merge did not write one.
+	Report string
+	// ReportMissing says why a merge stage that ran left no report — its child blocked, stopped, or
+	// claimed a report it never wrote. The items' results stand either way.
+	ReportMissing string
 }
 
 // Stopped reports whether a cancel ended the run before every item finished.
 func (r Result) Stopped() bool { return r.Phase == PhaseStopped }
 
-// StageResult is one stage's items, in item order, and their tally.
+// StageResult is one stage's items, in item order, and their tally. Phase is done or stopped, or
+// failed for a merge stage that left no report.
 type StageResult struct {
 	Name  string
 	Kind  StageKind
@@ -173,7 +184,8 @@ type StageResult struct {
 
 // ItemResult is one item's end: its phase (done, or stopped/pending when a cancel left it
 // unfinished), the receipt it ended on, where its detail output is, how many fresh children and
-// continuations it took, and whether an earlier run of the same workflow had already finished it.
+// continuations it took, whether an earlier run of the same workflow had already finished it, and
+// — once a verify stage checked it — the verdict (empty when no verify stage selected it).
 type ItemResult struct {
 	Key           string
 	Label         string
@@ -183,16 +195,21 @@ type ItemResult struct {
 	Attempts      int
 	Continuations int
 	Resumed       bool
+	Verdict       Verdict
 }
 
 // Tally counts a stage's items by how they ended: receipts by status, Unfinished for items a
-// cancel left without one, and Resumed for the finished items an earlier run supplied.
+// cancel left without one, Resumed for the finished items an earlier run supplied, and the verify
+// verdicts the items carry.
 type Tally struct {
 	OK         int
 	Partial    int
 	Blocked    int
 	Unfinished int
 	Resumed    int
+	Confirmed  int
+	Refuted    int
+	Unclear    int
 }
 
 // Run runs plan. It validates the plan, expands every fanout's items, and resumes the newest
@@ -226,12 +243,12 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 
 	state := &runState{runner: r, status: status}
 	result := Result{ID: status.ID, Dir: dir, Phase: PhaseDone, Stages: make([]StageResult, 0, len(plan.Stages))}
-	for index, stage := range plan.Stages {
+	for index := range plan.Stages {
 		if ctx.Err() != nil {
 			result.Phase = PhaseStopped
 			break
 		}
-		stageResult, err := state.runFanout(ctx, index, stage, stageItems[index])
+		stageResult, err := state.runStage(ctx, plan, index, stageItems, &result)
 		if err != nil {
 			return result, err
 		}
@@ -247,14 +264,18 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	return result, nil
 }
 
-// expandStages expands every stage's items up front, so an unreadable source fails the run before
+// expandStages expands every fanout's items up front, so an unreadable source fails the run before
 // a folder exists and the PlanHash covers the work. It returns them per stage index and flattened.
-// Only a fanout over its own source runs today: every other stage kind, and a fanout over a pick
-// stage's items, is refused until the Runner learns it.
+// A verify or merge stage has no source of its own — it works over a fanout's results. Only fanout,
+// verify and merge run today: every other stage kind, and a fanout over a pick stage's items, is
+// refused until the Runner learns it.
 func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
 	perStage := make(map[int][]Item, len(plan.Stages))
 	var all []Item
 	for index, stage := range plan.Stages {
+		if stage.Kind == StageVerify || stage.Kind == StageMerge {
+			continue
+		}
 		if stage.Kind != StageFanout {
 			return nil, nil, fmt.Errorf("workflow: stage %q: the runner does not run %s stages yet", stage.Name, stage.Kind)
 		}
@@ -310,15 +331,34 @@ type runState struct {
 	status RunStatus
 }
 
-// runFanout runs one fanout stage's items, at most Width at a time in item order, and returns the
-// stage's result. A cancel stops the stage from starting more items; the running ones end stopped.
+// runFanout runs one fanout stage's items and returns the stage's result.
 func (s *runState) runFanout(ctx context.Context, stageIndex int, stage Stage, items []Item) (StageResult, error) {
-	jobs, err := s.prepareItems(stageIndex, stage, items)
+	keyBrief, err := stageKeyBrief(stage)
 	if err != nil {
 		return StageResult{}, err
 	}
-	if err := s.setStagePhase(stageIndex, stage, PhaseRunning); err != nil {
+	drafts := make([]itemDraft, len(items))
+	for index, item := range items {
+		drafts[index] = itemDraft{item: item, keyBrief: keyBrief}
+	}
+	results, err := s.runItems(ctx, stageIndex, stage, drafts)
+	if err != nil {
 		return StageResult{}, err
+	}
+	return s.endStage(ctx, stageIndex, stage, results, PhaseDone)
+}
+
+// runItems runs a stage's items as fresh children, at most Width at a time in item order, and
+// returns their results in item order — the wave path every child-running stage shares. A cancel
+// stops the stage from starting more items; the running ones end stopped. The stage's phase is left
+// running for the caller's endStage.
+func (s *runState) runItems(ctx context.Context, stageIndex int, stage Stage, drafts []itemDraft) ([]ItemResult, error) {
+	jobs, err := s.prepareItems(stageIndex, stage, drafts)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.setStagePhase(stageIndex, stage, PhaseRunning); err != nil {
+		return nil, err
 	}
 
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -361,10 +401,16 @@ func (s *runState) runFanout(ctx context.Context, stageIndex int, stage Stage, i
 	}
 	wait.Wait()
 	if firstErr != nil {
-		return StageResult{}, firstErr
+		return nil, firstErr
 	}
+	return results, nil
+}
 
-	phase := PhaseDone
+// endStage settles a stage whose items have run: stopped when a cancel left an item unfinished,
+// else finished — the phase the caller judged the stage to end in (done, or failed for a merge
+// that left no report). It records the phase and returns the stage's result with its tally.
+func (s *runState) endStage(ctx context.Context, stageIndex int, stage Stage, results []ItemResult, finished Phase) (StageResult, error) {
+	phase := finished
 	if ctx.Err() != nil && hasUnfinished(results) {
 		phase = PhaseStopped
 	}
@@ -374,32 +420,44 @@ func (s *runState) runFanout(ctx context.Context, stageIndex int, stage Stage, i
 	return StageResult{Name: stage.Name, Kind: stage.Kind, Phase: phase, Items: results, Tally: tallyOf(results)}, nil
 }
 
-// itemJob is one item made ready to run: its key, output path, and the result it starts from —
-// pending, or done and Resumed when the store already holds its ok or partial receipt.
+// itemDraft is an item before it is keyed: the item, the text its key covers beside the item and
+// the stage's context files, the engine's lead that comes before the stage's own rendered brief
+// (a verify or merge; rendered once the output path is known, nil for a fanout), and a fixed output
+// path (a merge's report; empty lets outputPath choose).
+type itemDraft struct {
+	item     Item
+	keyBrief string
+	lead     func(output string) string
+	output   string
+}
+
+// itemJob is one item made ready to run: its key, the brief its children get, and the result it
+// starts from — pending, or done and Resumed when the store already holds its ok or partial
+// receipt.
 type itemJob struct {
 	item   Item
 	key    string
+	brief  string
 	result ItemResult
 }
 
-// prepareItems keys every item, resolves its output path, looks for a receipt an earlier run of
-// the workflow stored, and writes the stage's items into status.json.
-func (s *runState) prepareItems(stageIndex int, stage Stage, items []Item) ([]itemJob, error) {
-	keyBrief, err := stageKeyBrief(stage)
-	if err != nil {
-		return nil, err
-	}
+// prepareItems keys every item, resolves its output path and brief, looks for a receipt an earlier
+// run of the workflow stored, and writes the stage's items into status.json.
+func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft) ([]itemJob, error) {
 	store, id := s.runner.Store, s.status.ID
-	jobs := make([]itemJob, len(items))
-	statuses := make([]ItemStatus, len(items))
-	for index, item := range items {
-		key, err := ItemKey(keyBrief, item, stage.Context, s.runner.Workspace)
+	jobs := make([]itemJob, len(drafts))
+	statuses := make([]ItemStatus, len(drafts))
+	for index, draft := range drafts {
+		item := draft.item
+		key, err := ItemKey(draft.keyBrief, item, stage.Context, s.runner.Workspace)
 		if err != nil {
 			return nil, fmt.Errorf("workflow: stage %q, item %q: %w", stage.Name, item.Label, err)
 		}
-		output, err := outputPath(store, id, stage, item, key)
-		if err != nil {
-			return nil, err
+		output := draft.output
+		if output == "" {
+			if output, err = outputPath(store, id, stage, item, key); err != nil {
+				return nil, err
+			}
 		}
 		result := ItemResult{Key: key, Label: item.Label, Phase: PhasePending, Output: output}
 		receipt, found, err := store.ReadReceipt(id, key)
@@ -409,7 +467,11 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, items []Item) ([]it
 		if found && (receipt.Status == StatusOK || receipt.Status == StatusPartial) {
 			result.Phase, result.Receipt, result.Resumed = PhaseDone, &receipt, true
 		}
-		jobs[index] = itemJob{item: item, key: key, result: result}
+		brief := renderBrief(stage.Task, item, output)
+		if draft.lead != nil {
+			brief = joinBrief(draft.lead(output), brief)
+		}
+		jobs[index] = itemJob{item: item, key: key, brief: brief, result: result}
 		statuses[index] = ItemStatus{Key: key, Label: item.Label, Phase: result.Phase, Receipt: result.Receipt}
 	}
 
@@ -443,7 +505,7 @@ func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, ind
 		}
 		spec := ItemSpec{
 			Workflow: s.status.ID, Stage: stage, Item: job.item, Key: job.key,
-			Brief: renderBrief(stage.Task, job.item, result.Output), Output: result.Output,
+			Brief: job.brief, Output: result.Output,
 			Attempt: attempt, Prior: append([]Round(nil), prior...),
 		}
 		outcome, err := runner.Spawner.Spawn(ctx, spec)
@@ -627,6 +689,15 @@ func renderBrief(task string, item Item, output string) string {
 	).Replace(task)
 }
 
+// joinBrief puts the engine's lead before the stage's rendered brief, a blank line between them;
+// either may be empty.
+func joinBrief(lead, brief string) string {
+	if lead == "" || brief == "" {
+		return lead + brief
+	}
+	return lead + "\n\n" + brief
+}
+
 // hasUnfinished reports whether any item ended without a receipt.
 func hasUnfinished(results []ItemResult) bool {
 	for _, result := range results {
@@ -643,6 +714,14 @@ func tallyOf(results []ItemResult) Tally {
 	for _, result := range results {
 		if result.Resumed {
 			tally.Resumed++
+		}
+		switch result.Verdict {
+		case VerdictConfirmed:
+			tally.Confirmed++
+		case VerdictRefuted:
+			tally.Refuted++
+		case VerdictUnclear:
+			tally.Unclear++
 		}
 		if result.Receipt == nil || result.Phase != PhaseDone {
 			tally.Unfinished++

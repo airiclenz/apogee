@@ -30,5 +30,9 @@
 // fresh children at most Width at a time, a capped child continued (ItemSpec.Prior) and a faulted
 // or receipt-less one retried within configured bounds, each receipt stored as it lands, so a
 // cancel keeps finished items and returns a stopped Result.
+// stages.go is the verify and merge stages over a fanout's results, on runner.go's wave path: verify
+// runs one adversarial child per item its `when:` selects, the engine's briefs/verify.txt leading
+// the stage's brief, and folds each verdict into the item; merge runs one child over a manifest of
+// every item's output, briefs/merge.txt leading, and has it write report.md in the folder.
 // And doc.go this map.
 package workflow

@@ -294,7 +294,19 @@ NOTES (2026-09-27): if a cancel lands before an item's child starts, the item st
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): the fan-out runner`
 
-## 9. Runner: verify and merge stages
+## 9. Runner: verify and merge stages — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): runner.go is edited as well, though the item lists only stages.go. Verify reuses the fan-out wave path, so runFanout is split into `runItems`, the shared wave, and `endStage`, which settles the stage. `prepareItems` now takes `itemDraft`s, which carry a key brief, an engine-lead func and a fixed output. `itemJob` carries the rendered brief. Run dispatches by kind through `runStage`, and `expandStages` now lets verify and merge through.
+
+NOTES (2026-09-27): added result fields. `ItemResult.Verdict` holds the verdict (confirmed|refuted|unclear) and is folded into the source fanout's item. `Tally` gains Confirmed, Refuted and Unclear, and the source fanout's tally is recomputed after the fold. `Result.Report` holds the report.md path. `Result.ReportMissing` gives the reason when a merge left no report, and in that case the merge stage ends `PhaseFailed` while the workflow stays done. A merge whose receipt is ok but whose report.md is missing also counts as failed.
+
+NOTES (2026-09-27): verify rules. A verify child gets a copy of its stage with `Returns` set to the engine's `verdict: confirmed|refuted|unclear`. A blocked receipt or an unreadable verdict counts as unclear. A verify with no `when:` checks every finished item. The verify item key also covers the source item's key and its claim, so a source item that is redone gets checked again.
+
+NOTES (2026-09-27): merge rules. The manifest is written to `stages/<merge>/manifest.md`. The merge child's Item is `{Label: stage name, Units: [manifest path]}` and its Output is `<folder>/report.md`. A merge's `when:` is not read yet; item 10 owns skip conditions.
+
+NOTES (2026-09-27): changed the ItemSpec.Brief contract, which item 12 must follow. On verify and merge, Brief leads with the engine brief and the stage's rendered task follows after a blank line. When the stage uses a `prompt:` file, Brief holds only the engine lead, and the Spawner puts the rendered file after it.
+
+NOTES (2026-09-27): runner_test.go's TestRunnerRefusesWhatItCannotRunYet had a "merge is refused" case that this item makes false. It now uses a script stage (a kind item 10 lifts) as the still-refused example.
 
 **What:** Depends on item 8.
 **Goal:** a `verify` stage runs one adversarial child per item selected by its condition, with a fixed engine brief (refute the item's claim; receipt `verdict: confirmed|refuted|unclear`) followed by the stage's own brief, and folds verdicts into the item's result; a `merge` stage runs one child over a manifest of every item's output path and writes `report.md` in the workflow folder.

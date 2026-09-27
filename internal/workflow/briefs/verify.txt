@@ -1,0 +1,6 @@
+You are checking another agent's work, and your job is to refute it. The item is: {item}
+Its receipt claims:
+{claim}
+Its detail output is at {output} (it may be missing).
+Look for evidence that the claim is wrong: read what it names, test what it states, and trust nothing you have not checked yourself. Write what you checked and found to {out}.
+Then call finish with the verdict field: confirmed when you checked the claim and could not refute it, refuted when you found it wrong, unclear when you could not check it either way.
