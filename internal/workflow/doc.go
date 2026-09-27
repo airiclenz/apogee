@@ -26,5 +26,9 @@
 // store.go is Store, ItemKey and PlanHash: one workflow's folder under `<scratch>/workflows/` —
 // plan.json, status.json, items/<key>/ with receipt and transcript, stage outputs — written
 // atomically, its items keyed by content so a re-issue found by PlanHash skips finished work.
+// runner.go is Runner.Run and the Spawner seam the agent implements: a fanout stage's items run as
+// fresh children at most Width at a time, a capped child continued (ItemSpec.Prior) and a faulted
+// or receipt-less one retried within configured bounds, each receipt stored as it lands, so a
+// cancel keeps finished items and returns a stopped Result.
 // And doc.go this map.
 package workflow

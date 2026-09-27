@@ -271,7 +271,17 @@ NOTES (2026-09-27): these store methods are beyond the goal's literal list: `Dir
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): on-disk workflow folder with resumable item keys`
 
-## 8. Runner: one fan-out stage
+## 8. Runner: one fan-out stage — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): Runner has three fields the plan's list does not name: `Workspace fs.FS` and `Split SplitBudget`, because Expand and ItemKey need them, and a `Now` clock for status.json. Run passes nil inputs to PlanHash, since recipe inputs arrive with items 19/20. `Spawner.Spawn` returns `Outcome{Ending (completed|capped|faulted|stopped), Receipt *Receipt, Report, Transcript}`. A Spawn error that is not a cancel counts as a fault. `Observer` has two callbacks, `StagePhase(StageEvent)` and `ItemPhase(ItemEvent)`, and the Runner serialises the calls under its status lock.
+
+NOTES (2026-09-27): "waves of Width" is built as a pool capped at Width. Items start in order, and each finished child's slot starts the next item, so no more than Width children ever run at once.
+
+NOTES (2026-09-27): retry and continuation rules. A capped child is final if its receipt is ok or blocked. If its receipt is partial, or it has none, it is continued up to Continuations times within one attempt, and `ItemSpec.Prior` grows by one Round {receipt, report, output} each time. A retry starts a fresh child with an empty Prior and a fresh continuation budget. When every chance is used up, the item ends on the last capped partial receipt if there is one. Otherwise the Runner writes a `blocked` receipt of at most 20 words that says why, and stores it.
+
+NOTES (2026-09-27): the item key is not hashed over the rendered brief. It is hashed over the stage's child-facing fields as JSON (name, task template, prompt, out, returns, tools), because the rendered {out} is a path inside the item's own key-named folder. ItemSpec.Brief is the task with {item} (units joined ", ") and {out} filled in. When the stage uses a `prompt:` file, Brief is left empty and the Spawner (item 12) reads and renders the file. A custom `out:` gets {item} filled with the item's label. The default output is `items/<key>/output.md` in the folder.
+
+NOTES (2026-09-27): if a cancel lands before an item's child starts, the item stays `pending`; if the child was running, the item becomes `stopped`. Neither stores a receipt, so a resume restarts both fresh. For now Run refuses non-fanout stages and fanouts over a pick stage's items, until items 9/10 add them. A fanout's `when:` is not read yet; item 10 owns recipe-only stage behaviour.
 
 **What:** Depends on items 5, 6, 7.
 **Goal:** `workflow.Runner.Run(ctx, Plan) (Result, error)` runs a `fanout` stage over its items in waves of `Width`, skipping items with a stored `ok`/`partial` receipt, retrying a faulted child or one that ended without a receipt `Retries` times, continuing a capped child `Continuations` times, and returns per-item receipts and tallies; a cancelled ctx stops running items, keeps finished ones and returns `Stopped`.
