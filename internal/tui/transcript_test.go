@@ -2060,9 +2060,9 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 // TestSubAgentStreamResidueIsNotAttributedToTheParent pins the committed side: a delegate that
 // streamed and then never sent its MessageEvent (faulted, abandoned, cancelled) leaves text in the
 // buffer, and the parent's next event must not adopt it. The parent's event PARKS the text under
-// the run that streamed it (displace), and the run's own finished phase commits it — here the
-// cancelled exit, which no ToolResultEvent ever follows — so the residue lands inside the run
-// rather than as a permanent top-level answer in the main transcript.
+// the run that streamed it (displace), and the run's own finished phase commits it — here a stop's
+// (ADR 0088), whose result says the child never finished its sentence — so the residue lands inside
+// the run rather than as a permanent top-level answer in the main transcript.
 func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{}
@@ -2073,7 +2073,7 @@ func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
 	tr.apply(domain.SubAgentPhaseEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 		Phase:     domain.SubAgentFinished,
-		Cancelled: true,
+		Result:    domain.ToolResult{CallID: "s1", Content: "[stopped by the user — engine summary follows]"},
 	})
 
 	committed := 0
@@ -2112,7 +2112,7 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 	tr.apply(domain.SubAgentPhaseEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 		Phase:     domain.SubAgentFinished,
-		Cancelled: true,
+		Result:    domain.ToolResult{CallID: "s1", Content: "[stopped by the user — engine summary follows]"},
 	})
 
 	var child, parent *entry

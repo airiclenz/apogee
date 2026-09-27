@@ -714,42 +714,87 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 	}
 }
 
-// A delegation the human CANCELLED now closes its lifecycle bracket on the stream (ADR 0075
-// decision 12), and that finished phase must change nothing on screen. The Turn was rolled back:
-// the child reported nothing, so the head keeps reading as unreported — no done ✓, no report folded
-// into its body — and it is closeInterruptedCalls that settles it, exactly as before the phase
-// existed. Recording the phase is what would break it: subAgentReported answers from the phase, so
-// a cancelled head would tick finished on the strength of a rollback.
-func TestSubAgentCancelledFinishedLeavesTheHeadInterrupted(t *testing.T) {
+// A cancel during a two-child group keeps what finished (ADR 0088): the member that had already
+// reported keeps its report state — its ✓, its finished phase, the report folded into its head —
+// and the member still running is stopped, its row reading `stopped by you` without a ✓. Nothing
+// on screen is rolled back: both calls pair with the results the cancel settled them with, so no
+// row is left open for a replay to close as interrupted, live or after a round trip.
+func TestSubAgentCancelKeepsTheFinishedMembersReport(t *testing.T) {
 	t.Parallel()
 
-	const report = "a report no cancelled delegation ever produced"
+	const (
+		width  = 100
+		report = "all clear\nnothing else to report"
+		// What the engine's cancel gives the running member: the ^x stop's partial result.
+		stopped = "[stopped by the user — engine summary follows]\n[engine summary]\nThe delegate read b.go."
+		slot    = "1 tool call · stopped by you"
+	)
+	finished := func(tr *transcript, id, content string) domain.ToolResult {
+		result := domain.ToolResult{CallID: id, Content: content}
+		tr.apply(domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: id},
+			Phase:     domain.SubAgentFinished,
+			Result:    result,
+		})
+		return result
+	}
 
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey", 0)
+	subAgentCall(tr, "s2", "build", 0)
 	subAgentStarted(tr, "s1", 1)
-	readCall(tr, "r1", "a.go", 1, 5, 1)
-	tr.apply(domain.SubAgentPhaseEvent{
-		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
-		Phase:     domain.SubAgentFinished,
-		Result:    domain.ToolResult{CallID: "s1", Content: report},
-		Cancelled: true,
-	})
+	subAgentStarted(tr, "s2", 1)
+	for _, c := range []struct{ spawn, id, path string }{{"s1", "r1", "a.go"}, {"s2", "r2", "b.go"}} {
+		openChildCall(tr, c.spawn, c.id, c.path)
+		tr.apply(domain.ToolResultEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: c.spawn},
+			Result:    domain.ToolResult{CallID: c.id, Content: "package main"},
+		})
+	}
+	first := finished(tr, "s1", report)
 
-	head := tr.entries[0].painted()
-	if subAgentReported(head) {
-		t.Error("subAgentReported = true after a cancelled finished; the delegation was rolled back, not reported")
-	}
-	if subAgentFinished(head) {
-		t.Error("subAgentFinished = true after a cancelled finished; a rolled-back run wears no ✓")
+	// The member that finished before the cancel already reads as done while its sibling runs.
+	if head := tr.entries[headIndex(t, tr, "s1")].painted(); !subAgentFinished(head) {
+		t.Fatalf("the finished member does not read as finished before the cancel:\n%s", renderPlain(tr, width))
 	}
 
-	painted := renderPlain(tr, 80)
-	if strings.Contains(painted, glyphDone) {
-		t.Errorf("the cancelled run wears the done ✓:\n%s", painted)
+	// The cancel: the running member finishes on its stopped result, then the group's burst lands.
+	second := finished(tr, "s2", stopped)
+	tr.apply(domain.ToolResultEvent{Result: first})
+	tr.apply(domain.ToolResultEvent{Result: second})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
 	}
-	if strings.Contains(painted, report) {
-		t.Errorf("the cancelled finished enriched the head with a result:\n%s", painted)
+	entries, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if closed := closeInterruptedCalls(entries); closed != 0 {
+		t.Errorf("a replay closed %d calls as interrupted; a cancel leaves none open", closed)
+	}
+	for name, view := range map[string]*transcript{"live": tr, "replayed": {entries: entries}} {
+		if s1 := view.entries[headIndex(t, view, "s1")]; !s1.done || !subAgentFinished(s1.painted()) {
+			t.Errorf("%s: the finished member lost its report state (done %v)", name, s1.done)
+		}
+		if subAgentFinished(view.entries[headIndex(t, view, "s2")].painted()) {
+			t.Errorf("%s: the stopped member wears the done ✓", name)
+		}
+		painted := renderPlain(view, width)
+		if strings.Contains(painted, interruptedSummary) {
+			t.Errorf("%s: a member reads as interrupted:\n%s", name, painted)
+		}
+		rows := strings.Split(painted, "\n")
+		if len(rows) < 3 {
+			t.Fatalf("%s: want an umbrella header and two member rows:\n%s", name, painted)
+		}
+		if !strings.Contains(rows[1], "survey") || !strings.Contains(rows[1], glyphDone) {
+			t.Errorf("%s: the finished member row = %q; want its ✓", name, rows[1])
+		}
+		if !strings.Contains(rows[2], slot) || strings.Contains(rows[2], glyphDone) {
+			t.Errorf("%s: the stopped member row = %q; want %q and no ✓", name, rows[2], slot)
+		}
 	}
 }
 

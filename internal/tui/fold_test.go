@@ -179,15 +179,15 @@ func foldCases() []foldCase {
 			wantProgressSave: true,
 		},
 		{
-			name: "a CANCELLED finished phase fires no progress save",
-			// The bracket closes for a log reader (ADR 0075 decision 12), but the delegation was
-			// rolled back with its parent Turn: no report reached the record, so there is nothing
-			// the save would write that the record does not already hold.
+			name: "a finished phase the human's cancel stopped fires the save too",
+			// A cancel settles a running delegation with its stopped result (ADR 0088) rather than
+			// rolling it back, so what it did reached the record like any other report.
 			event: domain.SubAgentPhaseEvent{
 				EventBase: domain.EventBase{Depth: 1, CallID: "1"},
 				Phase:     domain.SubAgentFinished,
-				Cancelled: true,
+				Result:    domain.ToolResult{CallID: "1", Content: "[stopped by the user — engine summary follows]"},
 			},
+			wantProgressSave: true,
 		},
 		{
 			name: "SubAgentNamedEvent moves nothing on a Model with no run to rename, but fires the save",

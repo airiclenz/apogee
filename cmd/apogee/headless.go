@@ -200,7 +200,7 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 //	← <tool> ok                  its result
 //	← <tool> error: <first line> its result, when the tool failed
 //	sub-agent <name>: started    a delegation's child began running
-//	sub-agent <name>: finished   ... reached its boundary (cancelled, when the human cancelled it)
+//	sub-agent <name>: finished   ... reached its boundary, the human's cancel included (ADR 0088)
 //
 // Depth gating is per line family. Tool lines print at Depth 0 only: a child's calls are its own
 // business, and the sub-agent lines stand in for them. The sub-agent lines print at Depth 1 —
@@ -282,11 +282,7 @@ func (s *narrationSink) narrate(e domain.Event) {
 		if ev.Depth != 1 {
 			return
 		}
-		word := string(ev.Phase)
-		if ev.Cancelled {
-			word = "cancelled"
-		}
-		_, _ = fmt.Fprintf(s.out, "sub-agent %s: %s\n", s.subAgentName(ev.CallID), word)
+		_, _ = fmt.Fprintf(s.out, "sub-agent %s: %s\n", s.subAgentName(ev.CallID), ev.Phase)
 	case domain.SubAgentNamedEvent:
 		if ev.Depth != 1 {
 			return

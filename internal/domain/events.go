@@ -233,7 +233,9 @@ const (
 // gives it, a child the cancel reached before it started the not-started result — so every finished
 // phase carries its Result and the delegation's ToolResultEvent follows, as for any other outcome.
 // The field is kept for a consumer reading a log recorded before that change, where true marked a
-// finished phase with the zero Result and no ToolResultEvent after it.
+// finished phase with the zero Result and no ToolResultEvent after it. The wire keeps it too: the
+// `sub_agent_phase` line (internal/eventjson) still carries `data.cancelled`, now always false, so
+// the line's shape is unchanged for a reader that parses it. No first-party Driver reads it any more.
 //
 // StepCap and CapRequested are the child's step-cap facts, set on SubAgentStarted only and zero on
 // every finished phase: StepCap is the cap the child actually runs under (the configured

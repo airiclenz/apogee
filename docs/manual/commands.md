@@ -93,25 +93,31 @@ the status line says `press esc again to cancel` for as long as it is armed — 
 `esc` inside that window cancels the run. Let the window lapse and the gesture disarms
 itself, so a stray `esc` never kills a turn that is under way; a run that ends on its
 own inside the window disarms it too, so the hint never outlives what it offered to
-cancel. A cancel keeps what the run had finished: the steps completed before it — the tool
-calls and their results — stay in the conversation and in the saved session, only the step
-under way is dropped, and the model is told at its next request that you cut the run short
-there, so it neither redoes that work nor mistakes its silence for an answer. One thing a
-cancel does not keep: a group of delegations still in flight is dropped **whole**, the
-sub-agents that had already finished along with the ones still running, because the whole
-group is one step of your agent's until the last of them returns. While such a group is
-running the first `esc`'s hint says what the second would cost and names the alternative —
-`press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them` (or
+cancel. A cancel stops and keeps finished work; undo file changes with git or `/undo`. It
+never rewinds: the steps completed before it — the tool calls and their results — stay in the
+conversation and in the saved session, and so does the step under way once the model's reply had
+asked for tools. A call in it that had finished keeps its result, one still running ends with
+`cancelled by the user while it ran`, and one that had not started yet gets `not run: cancelled by
+the user`. The model is told at its next request that you cut the run short there, so it neither
+redoes that work nor mistakes its silence for an answer. Delegations are kept the same way: a
+sub-agent that had already finished keeps its report, one still working is stopped exactly as `^x`
+stops it (see the run view below) and its row reads `stopped by you`, and one still waiting for a
+slot is told it was never started. Stopping a working sub-agent means apogee summarizes what it had
+done, for up to 20 seconds per sub-agent — one that cannot be summarized in time is kept with
+`[engine summary unavailable — …]` — and a second `esc` twice while those summaries run skips the
+rest at once. Nothing a cancel does reverts a file: what the run wrote stays written. While a group
+of delegations is running the first `esc`'s hint says what the second would do and names the
+alternative — `press esc again to cancel — keeps 3 finished delegations, stops the rest` (or
 `1 finished delegation`), or, when none has finished yet and some are still waiting for a
 slot, `press esc again to cancel — ⏎ a message instead skips the 5 queued`. Either long form
 shows only where the status line has room for the whole sentence; on a row too narrow for it
 the hint falls back to the plain `press esc again to cancel`, never a truncated half. Sending a message
-instead of the second `esc` keeps everything: the running sub-agents finish, the ones not yet
+instead of the second `esc` lets the running sub-agents finish: the ones not yet
 started are skipped and the model is told so, and your message lands once the running ones
 finish — the queue rule above. To end **one** delegation and let the rest of the turn go on,
-stop it with `^x` instead (see the run view below). A cancel that
-finds nothing finished — the model had not completed a single step — leaves nothing behind
-instead: the prompt itself comes back out of the conversation, as if it had never been sent.
+stop it with `^x` instead (see the run view below). A cancel that lands before the model's first
+reply has finished arriving leaves nothing behind instead: no step of the run had begun, so the
+prompt itself comes back out of the conversation, as if it had never been sent.
 Only `/clear` throws a cancelled exchange away. The box
 advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;

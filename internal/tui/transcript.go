@@ -1065,8 +1065,10 @@ func (t *transcript) userTexts() []string {
 // is the one an open Exchange always belongs to — a prompt is committed at submit and the next one
 // cannot be sent until the Exchange it opened has closed. Its two callers are the two folds that
 // settle an Exchange, foldCancelled and foldLoopError, and each calls it only when the settle
-// reported the Exchange DROPPED — a lone opening with no finished Turn to keep. A settled Exchange
-// that kept its Turns is not marked (the engine holds it, so the prompt is a fork point), and
+// reported the Exchange DROPPED — a lone opening with no finished Turn to keep, which since ADR 0088
+// is only a cancel that landed before the first reply finished streaming: a first Turn cancelled on
+// its tool calls is settled with a result for each and kept. A settled Exchange that kept its Turns
+// is not marked (the engine holds it, so the prompt is a fork point), and
 // neither is a faulted Exchange that closed on its own (an exchangeDoneMsg with Faulted set): the
 // engine kept its opening (turn.go endAbandoned) and the prompt did reach the wire. No-op on a
 // transcript without a prompt — a cancelled /compact reaches foldCancelled too, but its caller
@@ -1616,12 +1618,11 @@ func (t *transcript) addToolResult(result domain.ToolResult, spawnRunID string, 
 //
 // The finished phase is also where the run's streamed RESIDUE is committed — what the child streamed
 // and never committed, parked when another run took the buffer (displace) — as one assistant entry
-// inside the run (commitResidue). Every finished phase does it, cancelled or not, because the phase
-// is the one boundary every delegation crosses: a fan-out group is dropped whole when ANY member is
-// cancelled and no ToolResultEvent follows for any slot, so a sibling that FAULTED mid-stream (its
-// phase came earlier, Cancelled=false) would never reach closeRun; keyed on the cancelled exit
-// alone, its words would be lost. The residue is placed BEFORE the head is looked up: place may
-// insert, and an insertion invalidates every pointer into the entries slice.
+// inside the run (commitResidue). Every finished phase does it, whatever the outcome, because the
+// phase is the one boundary every delegation crosses at the moment it ends — a faulted, capped or
+// stopped child included — while the group's result burst waits for the last sibling. The residue is
+// placed BEFORE the head is looked up: place may insert, and an insertion invalidates every
+// pointer into the entries slice.
 //
 // Beyond that residue nothing is appended: a phase is a fact about a block the transcript already
 // holds, and an event naming no such block (a phase for a run this view never saw) folds nothing
@@ -1633,19 +1634,15 @@ func (t *transcript) addToolResult(result domain.ToolResult, spawnRunID string, 
 // rather than a signal of their own because the phase is the moment they become true — a queued
 // delegation has no cap yet, and a finished one has nothing left to be capped.
 //
-// A CANCELLED finished folds nothing onto the head either, and deliberately does not even record the
-// phase. That phase exists to close the bracket for a log reader (ADR 0075 decision 12); on screen
-// the delegation was rolled back, so it carries no report to enrich with and must keep reading as
-// interrupted. Storing the phase is what would break that: subAgentReported and childPhaseOf both
-// answer from it, so a cancelled head would tick ✓ and lose its live star — the interrupted mark
-// closeInterruptedCalls gives it is the honest one.
+// A delegation the human's cancel reached finishes like any other (ADR 0088): a finished child on
+// its report, a running one on the stopped partial result (which reads `stopped by you`), a queued
+// one on the not-started result — and its ToolResultEvent follows. So the finished phase folds the
+// same way for all of them; the engine no longer rolls a cancelled delegation back, and never sets
+// the event's Cancelled flag (domain.SubAgentPhaseEvent), which this fold therefore does not read.
 func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 	run := runOf(e.EventBase)
 	if e.Phase == domain.SubAgentFinished {
 		t.commitResidue(run)
-	}
-	if e.Cancelled {
-		return
 	}
 	if i, ok := runHeadAt(t.entries, run); ok {
 		en := &t.entries[i]
@@ -2288,7 +2285,7 @@ const unstartedDelegationPrefix = "sub-agent not started:"
 // unstartedDelegationPrefix. Such a
 // head is neither finished work nor a queued job, whatever its phase says: the engine closes it
 // through its finished phase alone (skipDelegation), so a count that read the phase would take a
-// refused delegation for a report a stop discards. The result's head line is the first line of the
+// refused delegation for a report a stop keeps. The result's head line is the first line of the
 // body the failure laid out (absorbFailure): a sub_agent head carries no body of its own before its
 // result, and the prompt an expanded row shows above the result is composed at paint time
 // (subAgentPromptDetails), never stored.
@@ -2301,8 +2298,8 @@ func (e entry) neverStarted() bool {
 }
 
 // inFlightFanOut counts the open Turn's POOLED delegations by what a stop would do to them: the
-// members that have finished and handed their report back (their result not yet paired, so a
-// stop's rollback still discards it), and the members still queued behind the Parallel agents cap
+// members that have finished and handed their report back (their result not yet paired; a stop
+// keeps it, ADR 0088), and the members still queued behind the Parallel agents cap
 // (a queued user message would skip those instead of stopping the run — preemptDelegation). ok
 // is false wherever no such group is in flight: no top-level delegation at all, a lone one (the
 // group floor is two, as everywhere — ownGroup), or a group whose result burst has already

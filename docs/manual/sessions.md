@@ -3,13 +3,14 @@
 Every conversation is a session, saved continuously: after each completed turn the
 session is written to `~/.apogee/sessions/` (asynchronously, best-effort), so a
 crash or `kill -9` costs at most the turn in flight. Cancelling a run with `esc` twice
-costs only the step under way: the steps that finished before the cancel are saved with
-the session as it goes idle. A closing save also runs when you
+costs nothing that finished: the steps that finished before the cancel, and the step under way
+with the results the cancel gave its tool calls and sub-agents, are saved with the session as it
+goes idle. A closing save also runs when you
 quit — `⌃c` twice mid-answer included, which waits for the worker to unwind and then
 writes what it had — and when `/clear` or `/new` closes the session into history. A turn that hands work to a
 sub-agent is saved as that work runs — a **progress save** fires when the
 delegation is issued, each time the sub-agent finishes a tool, when a sub-agent finishes
-(unless its bracket was cancelled and rolled back, which lands nothing to save), and when
+(one your cancel stopped included — it finishes on the summary the stop gave it), and when
 a delegation's generated name arrives — so a long
 delegation is on disk while it happens, not only once its turn ends. A saved
 session stores the engine's conversation **and** the TUI scrollback, so
@@ -115,8 +116,8 @@ still remembers.
   saying the sub-agent's unfinished work was not kept: `/continue` re-runs the step that
   started it, and a new message discards that step alone. A run you cancelled yourself with
   `esc` twice is different: it is saved closed, with every step that finished before the
-  cancel, so it resumes as an ordinary session with nothing to pick back up. The cancel leaves
-  no mark in the saved session — the note that tells the model the run was cut short lives in
+  cancel and the results the cancel gave the step under way, so it resumes as an ordinary
+  session with nothing to pick back up. The cancel leaves no mark in the saved session — the note that tells the model the run was cut short lives in
   the running session only. A single delegation you stopped with `^x` is not interrupted work
   either: its result — the engine's summary of what it had done — is saved like any other.
 - The delegations your agent can **continue** — every one its call named, and every one

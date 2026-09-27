@@ -302,7 +302,8 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // paint-time acts on facts the entry keeps whole — the same discipline the body's truncation follows
 // (collapsedDetails), and the reason expanding shows the report the run actually returned.
 // A run is live until its REPORT lands, and its span is asked as well as its head: a report that
-// never arrived (a child cancelled mid-tool) leaves the head open, and — the mirror case — a head
+// never arrived (a record saved while the child ran, which a replay closes as interrupted — a cancel
+// no longer leaves one, ADR 0088) leaves the head open, and — the mirror case — a head
 // already reported over a call that never got its result leaves work still standing behind the
 // star. Either way the block still contains an open call, which is exactly what layout.md makes the
 // star's rule.

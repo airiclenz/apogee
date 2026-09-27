@@ -17,7 +17,7 @@ import (
 // invokes the ask_user tool; uiAsker hands the question to the single-threaded Update loop
 // via the program and blocks on a buffered reply channel until the human types an answer —
 // or until ctx is cancelled (a user stop), which unblocks it with an empty answer and
-// ctx.Err() so the loop rolls the Turn back (ADR 0007). It is the public Asker analogue of
+// ctx.Err() so the loop settles the Turn, the call answered as cancelled (ADR 0088). It is the public Asker analogue of
 // the Approval rendezvous (phase-2 §3 C3), reusing the same late-bound program seam.
 type uiAsker struct {
 	prog *programRef
@@ -32,8 +32,8 @@ var _ domain.Asker = (*uiAsker)(nil)
 //
 // The abandoned answer this gate chooses is the empty AskAnswer, which is the zero value here
 // rather than a named verdict: a question has no safe default to substitute, so an abandoned
-// one yields no text at all. The engine rolls the Turn back to a quiescent boundary with
-// StatusCancelled; fail-safe by construction, since the gate never hangs past ctx and a
+// one yields no text at all. The engine settles the Turn at a quiescent boundary with
+// StatusCancelled, the call's result saying it was cancelled while it ran; fail-safe by construction, since the gate never hangs past ctx and a
 // non-interactive shutdown therefore unblocks it.
 func (a *uiAsker) Ask(ctx context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
 	return parkCall(ctx, a.prog,

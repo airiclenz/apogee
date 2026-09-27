@@ -153,7 +153,35 @@ Owner's ratified call (2026-09-27): a cancel's stop-summary (fold) of each runni
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ && go test -race -count=1 -run Cancel ./cmd/apogee/ && go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/schedule/`
 **Commit:** `feat(agent): a cancelled delegation pool keeps finished children and stops running ones`
 
-## 3. The TUI and manual follow the settle rule
+## 3. The TUI and manual follow the settle rule — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): re-derived from the assumption that closeInterruptedCalls lives in transcript.go: it is in internal/tui/transcriptbridge.go. Its behaviour is unchanged, because records saved mid-delegation and records written before ADR 0088 still carry open calls. Only its doc comment changed.
+
+NOTES (2026-09-27): escStopHintDropsFormat is reworded, not retired. It is now escStopHintKeepsFormat, "press esc again to cancel — keeps %d finished %s, stops the rest", and keeps its precedence over the queued-skip form. inFlightFanOut's finished count stays as the count this form states. layout.md's copy of the hint changed with it.
+
+NOTES (2026-09-27): SubAgentPhaseEvent.Cancelled is never set since item 2, so addSubAgentPhase, progressSaveTrigger and headless narrate no longer read it. They fold a stopped child's finished phase like any other, so narration prints `finished`, not `cancelled`. The wire keeps `data.cancelled` (always false) so the sub_agent_phase line's shape is unchanged. events.go, eventjson/encode.go and headless.md say so.
+
+NOTES (2026-09-27): TestSubAgentCancelledFinishedLeavesTheHeadInterrupted pinned the rollback display. It is replaced by TestSubAgentCancelKeepsTheFinishedMembersReport, which covers a two-child group with one member finished and the other stopped, live and after a round trip. The Turn-0 mid-tool test, TestCancelMidToolOnTheFirstTurnKeepsThePrompt (model_test.go), drives a real engine through the seam, because the fake engine's settle answer would make it vacuous. TestEscStopHintNamesWhatASecondEscDiscards is renamed TestEscStopHintNamesWhatASecondEscDoes and also asserts that no "drops" wording is shown.
+
+NOTES (2026-09-27): consequential edit — internal/tui/transcriptbridge.go: made necessary by a cancel settling its Turn (closeInterruptedCalls doc comment)
+
+NOTES (2026-09-27): consequential edit — internal/tui/activity.go: made necessary by removing the Cancelled branch from the TUI folds (comment named a rolled-back child)
+
+NOTES (2026-09-27): consequential edit — internal/tui/asker.go: made necessary by a cancel settling its Turn (comments said the loop rolls the Turn back)
+
+NOTES (2026-09-27): consequential edit — internal/tui/sessionsave.go: made necessary by a cancel settling its Turn (progressSave comment said a resume re-attempts the Turn "as a cancelled one does")
+
+NOTES (2026-09-27): consequential edit — internal/eventjson/encode.go: made necessary by the events.go wire statement (subAgentPhaseData comment described a rolled-back bracket)
+
+NOTES (2026-09-27): consequential edit — layout.md: made necessary by the reworded armed-esc hint
+
+NOTES (2026-09-27): consequential edit — docs/manual/configuration.md: made necessary by the manual rule (":868 said an Esc drops the lot")
+
+NOTES (2026-09-27): consequential edit — internal/tui/fold_test.go: made necessary by progressSaveTrigger no longer reading Cancelled (the cancelled-finished case now fires the save on a stopped result)
+
+NOTES (2026-09-27): consequential edit — internal/tui/transcript_test.go: made necessary by addSubAgentPhase no longer reading Cancelled (two residue tests now finish on a stopped result, and a comment is restated)
+
+NOTES (2026-09-27): consequential edit — cmd/apogee/headless_test.go: made necessary by narrate no longer reading Cancelled (TestNarrationSinkNamesTheSubAgent's stopped child reads `finished`)
 
 **What:** Depends on item 2.
 **Goal:** the TUI transcript after a cancel shows the kept tool results and stopped children (no rolled-back rows), and `docs/manual/commands.md` describes `esc×2` as "stops and keeps finished work; undo file changes with git or `/undo`".

@@ -214,7 +214,7 @@ moment, and the case difference is the signal.
 | `message` | a completed assistant message |
 | `tool_call` | a tool call the model requested, with its arguments and any resolved path |
 | `tool_result` | that call's outcome after execution, with `data.tool` — the tool it ran under, as the pre-tool-exec Reactions left the call — and `data.write_target`, the resolved path the call wrote (the same resolution `tool_call`'s `resolved_path` comes from; `""` for a call that is not a write, and a value that is a *changed* file only together with `is_error: false`) |
-| `sub_agent_phase` | one delegation crossing a lifecycle boundary; `data.cancelled` marks a `finished` that closes a rolled-back bracket rather than reporting a result |
+| `sub_agent_phase` | one delegation crossing a lifecycle boundary; a `finished` carries the delegation's result, a cancelled run's included (a finished child's report, a running one's stopped summary, a queued one's not-started result). `data.cancelled` is always `false` — a cancel no longer rolls a delegation back — and stays on the line only so its shape is unchanged |
 | `sub_agent_named` | the name a delegated run was given |
 | `child_interjection` | input steered into a running delegation, whether it landed, and — as `data.reason` on one that did not — why: `completed`, `capped`, `faulted`, `stopped` or `cancelled` (the child ended that way before the boundary the message waited for — `stopped` is a delegation the human stopped singly while the parent's turn went on) or `refused` (the child, still running, refused it there); `""` on a landed message. The set is open: read an unknown value as `completed` |
 | `approval` | an approval request: its phase, the request, the decision |

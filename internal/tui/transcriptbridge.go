@@ -106,8 +106,9 @@ func decodeTranscript(data []byte) ([]entry, error) {
 // the engine that was running it. A resume that replayed those as stored would paint a dead child as
 // running, with no later fold able to correct it: the result those calls are waiting for is never
 // coming, because a resumed record re-attempts the delegating Turn from its boundary rather than
-// rejoining it (ADR 0007). It also covers records the cancelled-Turn path has always written with
-// open calls.
+// rejoining it (ADR 0007). It also covers records written before a cancel settled its Turn (ADR
+// 0088): the cancelled Turn's calls were stored open then, where a cancel now pairs every one of
+// them with a result before the record is written.
 //
 // It runs over the TUI's OWN entries rather than the wire's, which is why it is a pass here and not
 // a codec step in internal/session (which decodes what was stored and closes nothing): the caller

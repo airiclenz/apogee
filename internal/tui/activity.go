@@ -456,7 +456,7 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	case domain.SubAgentPhaseEvent:
 		// The delegation is OVER: its slot goes, and the top-level phrase falls back to whatever is
 		// still running — a sibling, the merged count, or the parent's own word (runningPhrase). A
-		// CANCELLED finished drops the slot too: the child was rolled back, which is just as over.
+		// child the human's cancel stopped finishes the same way, on its stopped result (ADR 0088).
 		// Its start is deliberately not folded: a child that has produced nothing has nothing to
 		// say, and its first real event opens the slot.
 		if e.Phase == domain.SubAgentFinished {

@@ -242,8 +242,10 @@ type toolResultData struct {
 }
 
 // subAgentPhaseData is the sub_agent_phase line: one delegation crossing a lifecycle boundary.
-// Cancelled separates a finished phase that CLOSES A ROLLED-BACK bracket from one that reports a
-// result, so a reader folds Result only when it is false (ADR 0075 decision 12).
+// Cancelled is always false from this engine: a cancel settles every delegation with a result
+// instead of rolling it back (ADR 0088, superseding ADR 0075 decision 12), so every finished phase
+// reports one. The key stays on the line so its shape does not change under a reader that parses
+// it; in a log written before that change, true marked a finished phase with no result.
 type subAgentPhaseData struct {
 	Phase     string     `json:"phase"`
 	Result    toolResult `json:"result"`

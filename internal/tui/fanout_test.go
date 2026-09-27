@@ -428,11 +428,11 @@ func TestNestedChildStreamMidSiblingCommitsTheSiblingOnce(t *testing.T) {
 	}
 }
 
-// TestFaultedSiblingResidueCommitsAtItsFinishedPhase is the parked text's exit for a group that
-// never reports. A fan-out is dropped whole when any member is cancelled: no ToolResultEvent follows
-// for any slot, so closeRun never runs for any of them. A sibling that FAULTED mid-sentence got its
-// finished phase earlier, with Cancelled=false — that phase, not the cancelled exit alone, is what
-// commits its residue inside its run; the cancelled member's phase does the same for its own words.
+// TestFaultedSiblingResidueCommitsAtItsFinishedPhase is the parked text's exit at the moment a
+// member ends rather than when the group reports: the result burst waits for the last sibling, so
+// a sibling that FAULTED mid-sentence commits its residue inside its run at its own finished phase.
+// A member the human's cancel stopped does the same for its own words: a cancel settles it with its
+// stopped result (ADR 0088), and its finished phase is where its half-sentence lands.
 func TestFaultedSiblingResidueCommitsAtItsFinishedPhase(t *testing.T) {
 	t.Parallel()
 
@@ -448,11 +448,11 @@ func TestFaultedSiblingResidueCommitsAtItsFinishedPhase(t *testing.T) {
 		Phase:     domain.SubAgentFinished,
 		Result:    domain.ToolResult{CallID: "s1", Content: "upstream: 502", IsError: true},
 	})
-	// The human stops the group: s2's bracket closes cancelled, and no result burst ever comes.
+	// The human cancels the group: s2 is stopped and finishes on its stopped result.
 	tr.apply(domain.SubAgentPhaseEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
 		Phase:     domain.SubAgentFinished,
-		Cancelled: true,
+		Result:    domain.ToolResult{CallID: "s2", Content: "[stopped by the user — engine summary follows]"},
 	})
 
 	for _, tc := range []struct{ spawn, want string }{

@@ -2224,16 +2224,22 @@ func (m Model) foldHookNotice(msg hookNoticeMsg) (tea.Model, tea.Cmd) {
 }
 
 // foldCancelled folds the worker's return from a cancel: the interrupted Exchange is settled — its
-// finished Turns kept, only the cancelled one gone — the streamed partial is committed, the
-// "cancelled" note lands behind it, and a staged queue is held rather than flushed.
+// finished Turns kept, and the cancelled one too once it had issued tool calls — the streamed
+// partial is committed, the "cancelled" note lands behind it, and a staged queue is held rather
+// than flushed.
 //
 // The worker cancelled at a quiescent boundary and has returned, so the engine is the Update loop's
 // to touch again (C1). Settle the interrupted Exchange so the engine leaves its open-Exchange
 // state: without this the Agent stays inExchange after a cancel and the next /clear or message is
 // rejected with ErrInputPending — the post-Esc wedge. Settling ([Engine.SettleExchange]) rather
 // than aborting is what keeps the work done before the stop: the tool Turns that finished stay in
-// the conversation with the cut marked on the last of them, and only an Exchange with no finished
-// Turn falls back to the rollback that drops its opening prompt. The model's memory and the screen
+// the conversation with the cut marked on the last of them. The cancelled Turn is one of them when
+// its reply had issued tool calls: the engine settled it (ADR 0088), so every call on screen has
+// already paired with the result the cancel gave it — a finished call its own, a running one
+// `cancelled by the user while it ran`, an unstarted one `not run: cancelled by the user`, a
+// running delegation the stopped partial result that reads `stopped by you` — and nothing on
+// screen is rolled back. Only an Exchange cancelled before its first reply finished streaming has
+// no Turn to keep, and falls back to the rollback that drops its opening prompt. The model's memory and the screen
 // then agree about the kept Turns; the cancelled Turn's partial reached the screen only, which is
 // why it is COMMITTED ([transcript.commitCancelled]) rather than left as the live preview it was —
 // a preview belongs to no entry, so the next user message would render above it; committed, the
@@ -3934,11 +3940,11 @@ func (m Model) runningPhrase(view runRef, now time.Time, quiet bool) string {
 // two longer forms below where the row has no room for them.
 const escStopHintPlain = "press esc again to cancel"
 
-// escStopHintDropsFormat is the armed-esc hint while a pooled fan-out holds finished delegations
-// whose reports the stop's rollback would discard (its arguments: the count, and `delegation` or
-// `delegations` for it): what a second esc throws away, and that a queued message keeps it — the
-// message waits for the group to join and the reports land with the Turn (ADR 0025, ADR 0039).
-const escStopHintDropsFormat = "press esc again to cancel — drops %d finished %s; ⏎ a message keeps them"
+// escStopHintKeepsFormat is the armed-esc hint while a pooled fan-out holds finished delegations
+// (its arguments: the count, and `delegation` or `delegations` for it): what a second esc does to
+// the group — the finished reports stay with the settled Turn and the members still working are
+// stopped, each folded to a partial result, the queued ones never started (ADR 0088 D2).
+const escStopHintKeepsFormat = "press esc again to cancel — keeps %d finished %s, stops the rest"
 
 // escStopHintSkipsFormat is the armed-esc hint while a pooled fan-out holds no finished delegation
 // yet but does hold QUEUED ones (its argument: how many): a queued message pre-empts those
@@ -3947,11 +3953,11 @@ const escStopHintDropsFormat = "press esc again to cancel — drops %d finished 
 const escStopHintSkipsFormat = "press esc again to cancel — ⏎ a message instead skips the %d queued"
 
 // escStopHint words the armed-esc hint for the room the slot has. While a pooled sub_agent group
-// is in flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would
-// discard and what queuing a message does instead — the finished form first, since discarding
-// finished work is the costlier fact, and the queued form only when nothing has finished — and it
+// is in flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would do
+// to it: with members finished, that their reports are kept and the rest stopped (a cancel settles,
+// ADR 0088); with none finished but some queued, that queuing a message skips those instead. It
 // says so only where the whole sentence fits: a long form the slot would drop whole (statusLine)
-// or the row would truncate to "drops 3 fin…" states neither fact, so a row too tight for it falls
+// or the row would truncate to "keeps 3 fin…" states neither fact, so a row too tight for it falls
 // back to the plain hint, exactly as the quiet qualifier falls back to the plain running phrase
 // (statusLeft). At width 1 the queued form can name a single queued head; that is true there too.
 func (m Model) escStopHint(room int) string {
@@ -3962,9 +3968,9 @@ func (m Model) escStopHint(room int) string {
 	var long string
 	switch {
 	case finished == 1:
-		long = fmt.Sprintf(escStopHintDropsFormat, finished, "delegation")
+		long = fmt.Sprintf(escStopHintKeepsFormat, finished, "delegation")
 	case finished > 1:
-		long = fmt.Sprintf(escStopHintDropsFormat, finished, "delegations")
+		long = fmt.Sprintf(escStopHintKeepsFormat, finished, "delegations")
 	case queued >= 1:
 		long = fmt.Sprintf(escStopHintSkipsFormat, queued)
 	default:

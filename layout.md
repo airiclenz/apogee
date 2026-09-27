@@ -1519,8 +1519,8 @@ the mouse-copy flash. The gauge is the fill of the run the reader is looking at:
 session's own agent, inside a run view the viewed run's — its latest reading against the window that
 run filled — and never the parent's there, since a parent's fill above a child's transcript is a
 number about someone else. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
-sub-agent group is in flight in the open Turn it says what the second press would cost: `press esc
-again to cancel — drops 3 finished delegations; ⏎ a message keeps them` where members have already
+sub-agent group is in flight in the open Turn it says what the second press would do: `press esc
+again to cancel — keeps 3 finished delegations, stops the rest` where members have already
 reported (`1 finished delegation` for one), or `press esc again to cancel — ⏎ a message instead skips
 the 5 queued` where none has and members are still queued behind the cap. Either long form is
 composed only where the row has room for the whole sentence — a row too tight for it falls back to

@@ -865,7 +865,8 @@ key). A reply that spawns sub-agents spawns them as a group: they run side by si
 at once as the server's width allows (`parallel-agents:`, under [The servers you run models
 on](#the-servers-you-run-models-on) further down this page), and the group returns to your
 agent together — so a reply that asks for fifty delegations on a width-4 server keeps your
-agent blind for as long as fifty delegations take, and an Esc drops the lot. This key is
+agent blind for as long as fifty delegations take, and an Esc stops every one still running
+(the finished ones keep their reports). This key is
 the ceiling on that group, counted in **rounds** of the width: at the default of **2**, a
 reply on a width-4 server may fan out 8, and every `sub_agent` call past the eighth is
 refused with a result that says so — how many the reply fanned out, what the ceiling is and

@@ -3824,8 +3824,8 @@ func TestNarrationSinkWordsTheResult(t *testing.T) {
 
 // TestNarrationSinkNamesTheSubAgent pins the sub-agent line and what it calls the delegation: the
 // `name` the sub_agent call gave, replaced by the name the out-of-band naming call hands it
-// (SubAgentNamedEvent), and the call id when neither has landed; `cancelled` over the phase word
-// when the human cancelled the child. The phase and named Events are stamped the way the engine
+// (SubAgentNamedEvent), and the call id when neither has landed. A child the human's cancel stopped
+// finishes on its stopped result like any other (ADR 0088), so its line reads `finished` too. The phase and named Events are stamped the way the engine
 // stamps them — Depth 1, under the Depth-0 call's id (internal/agent's emitSubAgentPhase) — and a
 // grandchild's phase, one level deeper, prints nothing.
 func TestNarrationSinkNamesTheSubAgent(t *testing.T) {
@@ -3850,14 +3850,16 @@ func TestNarrationSinkNamesTheSubAgent(t *testing.T) {
 		EventBase: domain.EventBase{Depth: 2, CallID: "grandchild"}, Phase: domain.SubAgentStarted,
 	})
 	sink.Emit(domain.SubAgentPhaseEvent{EventBase: child, Phase: domain.SubAgentFinished})
-	sink.Emit(domain.SubAgentPhaseEvent{EventBase: unnamed, Phase: domain.SubAgentFinished, Cancelled: true})
+	sink.Emit(domain.SubAgentPhaseEvent{EventBase: unnamed, Phase: domain.SubAgentFinished, Result: domain.ToolResult{
+		CallID: "call_2", Content: "[stopped by the user — engine summary follows]\n[engine summary]\nIt counted two files.",
+	}})
 
 	want := "→ sub_agent scout the config keys\n" +
 		"→ sub_agent count the tests\n" +
 		"sub-agent scout config: started\n" +
 		"sub-agent call_2: started\n" +
 		"sub-agent readthe keys: finished\n" +
-		"sub-agent call_2: cancelled\n"
+		"sub-agent call_2: finished\n"
 	if got := errOut.String(); got != want {
 		t.Errorf("printed\n%s\nwant\n%s", got, want)
 	}

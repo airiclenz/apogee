@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -750,6 +752,85 @@ func TestCancelOnALoneOpeningStillMarksAborted(t *testing.T) {
 	}
 }
 
+// TestCancelMidToolOnTheFirstTurnKeepsThePrompt drives a REAL engine through the seam and cancels
+// the Exchange's very first Turn at its write_file approval — the esc×2 path (stopWorker) while the
+// gate waits. The engine settles that Turn instead of rolling it back (ADR 0088 D1): the call gets
+// `not run: cancelled by the user`, the Turn is kept, and so the settle reports nothing dropped. The
+// prompt row therefore stays un-aborted and is a fork point, the call's row pairs with its result,
+// and nothing was written.
+func TestCancelMidToolOnTheFirstTurnKeepsThePrompt(t *testing.T) {
+	t.Parallel()
+	srv := scriptedModel(t)
+	workspace := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bridge := NewBridge()
+	h := newUIHarness()
+	bridge.Bind(h)
+	eng := newE2EEngine(t, srv.URL, "test-model", "", workspace, bridge.Sink(), bridge.Approver())
+	m := step(t, newModel(ctx, eng, e2eOptions(srv.URL, workspace), nil), tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	const prompt = "create a greeting file"
+	m.transcript.addUser(prompt, nil)
+	box := newInterjectBox()
+	cmd, stop := startExchange(ctx, eng, domain.UserInput{Text: prompt}, box, nil, nil)
+	defer stop(nil)
+	m.worker.start(stop, box) // an Exchange worker: the mailbox is what arms the aborted mark
+	m.state = stateRunning
+	go func() { h.Send(cmd()) }()
+
+	var term tea.Msg
+	for term == nil {
+		msg := <-h.inbox
+		m = step(t, m, msg)
+		switch msg.(type) {
+		case approvalReqMsg:
+			m.stopWorker() // esc×2 while the first Turn's only call waits at its gate
+		case exchangeDoneMsg, cancelledMsg, errMsg:
+			term = msg
+		}
+	}
+
+	if _, ok := term.(cancelledMsg); !ok {
+		t.Fatalf("terminal Msg = %T, want cancelledMsg", term)
+	}
+	var user *entry
+	for i := range m.transcript.entries {
+		if e := &m.transcript.entries[i]; e.kind == entryUser && e.text == prompt {
+			user = e
+		}
+	}
+	if user == nil {
+		t.Fatalf("the prompt row is gone:\n%s", plainTranscript(m))
+	}
+	if user.aborted {
+		t.Error("the prompt row is marked aborted; a Turn cancelled mid-tool is settled and kept")
+	}
+	if got := len(m.transcript.forkPoints()); got != 1 {
+		t.Errorf("forkPoints = %d, want the settled prompt as the one fork point", got)
+	}
+	var call *entry
+	for i := range m.transcript.entries {
+		if e := &m.transcript.entries[i]; e.kind == entryToolCall && e.callID == "call_1" {
+			call = e
+		}
+	}
+	if call == nil || !call.done {
+		t.Fatalf("the write_file row did not pair with the result the cancel gave it:\n%s", plainTranscript(m))
+	}
+	var body []string
+	for _, line := range call.tool.Details.all() {
+		body = append(body, line.Text)
+	}
+	if !strings.Contains(strings.Join(body, "\n"), "not run: cancelled by the user") {
+		t.Errorf("the write_file row's body = %q; want the not-run result", body)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, greetingFileName)); !os.IsNotExist(err) {
+		t.Errorf("the cancelled call wrote %s (stat err %v)", greetingFileName, err)
+	}
+}
+
 // TestLoopErrorSettlesTheExchange: the fault fold takes the same close as the cancel fold — the
 // finished Turns are kept and the prompt stays a fork point — and no abort is made.
 func TestLoopErrorSettlesTheExchange(t *testing.T) {
@@ -1131,11 +1212,12 @@ func fanOutOf(finished, running, queued int) func(tr *transcript) {
 	}
 }
 
-// TestEscStopHintNamesWhatASecondEscDiscards pins the armed-esc hint's three wordings: while a
-// pooled fan-out holds finished delegations the hint says how many reports a second esc drops and
-// that a queued message keeps them; while it holds only queued ones it says a queued message skips
-// them instead; and a lone delegation, or a model with nothing delegated, keeps the plain hint.
-func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
+// TestEscStopHintNamesWhatASecondEscDoes pins the armed-esc hint's three wordings: while a pooled
+// fan-out holds finished delegations the hint says how many reports a second esc keeps and that it
+// stops the rest (a cancel settles, ADR 0088 — it announces no drop); while it holds only queued
+// ones it says a queued message skips them instead; and a lone delegation, or a model with nothing
+// delegated, keeps the plain hint.
+func TestEscStopHintNamesWhatASecondEscDoes(t *testing.T) {
 	t.Parallel()
 	const wide = 200
 	cases := []struct {
@@ -1143,10 +1225,10 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 		build func(tr *transcript)
 		want  string
 	}{
-		{"finished 3 / running 4 / queued 1 drops the three", fanOutOf(3, 4, 1),
-			"press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them"},
+		{"finished 3 / running 4 / queued 1 keeps the three", fanOutOf(3, 4, 1),
+			"press esc again to cancel — keeps 3 finished delegations, stops the rest"},
 		{"finished 1 reads the singular", fanOutOf(1, 2, 0),
-			"press esc again to cancel — drops 1 finished delegation; ⏎ a message keeps them"},
+			"press esc again to cancel — keeps 1 finished delegation, stops the rest"},
 		{"finished 0 / queued 5 reads the skips wording", fanOutOf(0, 2, 5),
 			"press esc again to cancel — ⏎ a message instead skips the 5 queued"},
 		{"finished 0 / queued 0 is the plain hint", fanOutOf(0, 3, 0), "press esc again to cancel"},
@@ -1157,8 +1239,12 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			m := armedEscModel(t, wide, tc.build)
-			if got := plainSlot(m.statusRight(m.width)); got != tc.want {
+			got := plainSlot(m.statusRight(m.width))
+			if got != tc.want {
 				t.Errorf("statusRight = %q, want %q", got, tc.want)
+			}
+			if strings.Contains(got, "drops") {
+				t.Errorf("statusRight = %q announces a drop; a cancel keeps finished work", got)
 			}
 		})
 	}
@@ -1167,11 +1253,11 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 	t.Run("the long form lands on a wide status line", func(t *testing.T) {
 		t.Parallel()
 		m := armedEscModel(t, wide, fanOutOf(3, 4, 1))
-		assertStatusRightTail(t, m, "press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them"+bodyIndent)
+		assertStatusRightTail(t, m, "press esc again to cancel — keeps 3 finished delegations, stops the rest"+bodyIndent)
 	})
 
 	// A group whose result burst has landed is over: the Turn it belonged to is not the one a
-	// stop would discard, however the phases read.
+	// stop would reach, however the phases read.
 	t.Run("a burst group is the plain hint", func(t *testing.T) {
 		t.Parallel()
 		m := armedEscModel(t, wide, func(tr *transcript) {
@@ -1192,7 +1278,7 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 func TestEscStopHintFallsBackWhereTheLongFormDoesNotFit(t *testing.T) {
 	t.Parallel()
 	m := armedEscModel(t, 80, fanOutOf(3, 4, 1))
-	if got := statusCells(t, m); strings.Contains(got, "drops 3") {
+	if got := statusCells(t, m); strings.Contains(got, "keeps 3") {
 		t.Fatalf("the long form was composed onto an 80-column row:\n%s", got)
 	}
 	assertStatusRightTail(t, m, "press esc again to cancel"+bodyIndent)
@@ -1213,7 +1299,7 @@ func TestEscStopHintIgnoresDelegationsThatNeverStarted(t *testing.T) {
 	if !ok || finished != 3 || queued != 0 {
 		t.Errorf("inFlightFanOut = (%d, %d, %v), want (3, 0, true): the two refused heads must count as neither", finished, queued, ok)
 	}
-	if got := plainSlot(m.statusRight(m.width)); got != "press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them" {
+	if got := plainSlot(m.statusRight(m.width)); got != "press esc again to cancel — keeps 3 finished delegations, stops the rest" {
 		t.Errorf("statusRight = %q", got)
 	}
 }

@@ -145,9 +145,11 @@ func (m *Model) cacheBoundaryAtIdle() {
 // LAST quiescent-boundary snapshot (cacheBoundary): the engine is mid-Step while a delegation runs
 // and ADR 0007 admits no snapshot there, so the alternative to an older engine half is none at all.
 // The transcript half is live — the assistant message that delegated, the prompt it carried, and
-// the child's tool boundaries as they land. A resume therefore re-attempts the open Turn exactly as
-// a cancelled one does: the engine resumes from the boundary the Turn started at, the record's open
-// tool calls are closed as interrupted at replay, and the unfinished work is not kept.
+// the child's tool boundaries as they land. A resume of a process that died mid-Turn therefore
+// re-attempts the open Turn: the engine resumes from the boundary the Turn started at, the record's
+// open tool calls are closed as interrupted at replay, and the unfinished work is not kept. (A
+// cancel is not that case: it settles the Turn, ADR 0088, and the idle save after it writes every
+// call closed.)
 func (m *Model) progressSave() tea.Cmd {
 	if !m.hasBoundary {
 		return nil
