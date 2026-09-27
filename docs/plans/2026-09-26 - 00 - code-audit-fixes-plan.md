@@ -425,7 +425,10 @@ NOTES (2026-09-27): consequential edit — cmd/apogee/wire_settings_test.go: mad
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/ && go vet ./cmd/apogee/`
 **Commit:** `fix(config): server-entry count keys refuse a fractional value`
 
-## 25. Snapshot capture never freezes a stale index entry
+## 25. Snapshot capture never freezes a stale index entry — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): re-staging on an add error goes into a fresh, throwaway index in a scratch directory inside the store, which is removed after the call. The plan said to remove `s.index` and re-run the add. Deleting the shared persistent index could let a concurrent capture's `write-tree` land between its own add and the deletion and write an empty tree, which would break the "Store is safe to share between goroutines" contract. The goal is unchanged: a path that fails to stage is absent, never stale. The persistent index is kept as it is.
+NOTES (2026-09-27): a workspace whose add errors on every capture (for example, one holding a commit-less nested repository) now pays a second full `add -A` into the fresh index on each capture. This cost comes from the item's own design.
 
 **What:** Fixes the audit's High "A failed git add silently freezes a stale index entry into an undo snapshot".
 **Goal:** when `git add -A --ignore-errors` reports an error during `Store.Capture`, the captured tree contains no index entry left over from an earlier capture: a path that failed to stage is absent (the ADR 0074 decision-12 residue case), never its old content.

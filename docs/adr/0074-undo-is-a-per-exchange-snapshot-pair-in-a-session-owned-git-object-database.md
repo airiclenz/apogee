@@ -136,8 +136,13 @@ the funnel pre-image stays authoritative for it.** A rule, not a list, because t
 simply *what `git add` would do*: a path a filter driver rewrites (a git-lfs pointer stored in
 place of the bytes), a nested repository, or a commit-less one, that the pipeline will not descend into, and a
 workspace `.gitignore` match are all outside — and so is any filter or configuration nobody
-anticipated, which is the point of stating it as a rule. Nothing in that residue loses cover it had
-before: decision 10 stands, and for every such path the funnel journal is what `/undo` uses.
+anticipated, which is the point of stating it as a rule. A path `git add` cannot read at capture
+time — permissions, a file locked by another process — is residue too, and residue means
+**absent** from that image, never frozen at an older one: the store's private index persists
+between captures, so when the add reports any error the capture restages into a fresh, throwaway
+index rather than write a tree that still carries the entry an earlier capture staged for the
+failing path. Nothing in that residue loses cover it had before: decision 10 stands, and for every
+such path the funnel journal is what `/undo` uses.
 
 **13 — State class: persisted host state, keyed by session id, outside the session record.**
 [ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md) §8 holds unchanged —

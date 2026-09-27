@@ -464,3 +464,39 @@ func TestAvailableReportsGitOnPath(t *testing.T) {
 		t.Fatal("Available() = false with git on PATH")
 	}
 }
+
+// A path git cannot read at the second capture must be ABSENT from that image, never frozen at
+// the content an earlier capture staged: a stale index entry would let a revert "restore" bytes
+// the file no longer held when the exchange began (ADR 0074 decision 12).
+func TestCaptureLeavesOutAnUnreadablePathInsteadOfItsStaleContent(t *testing.T) {
+	requireGit(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits cannot make a file unreadable on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file, so git add cannot be made to fail")
+	}
+	store, workspace := newStore(t)
+	writeFile(t, workspace, "kept.txt", "kept\n")
+	writeFile(t, workspace, "locked.txt", "old content\n")
+	mustCapture(t, store)
+
+	writeFile(t, workspace, "locked.txt", "new content, not the old one\n")
+	locked := filepath.Join(workspace, "locked.txt")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
+
+	blobs, err := store.ListBlobs(context.Background(), mustCapture(t, store))
+	if err != nil {
+		t.Fatalf("ListBlobs: %v", err)
+	}
+	if id, ok := blobs["locked.txt"]; ok {
+		t.Fatalf("ListBlobs holds locked.txt as %s (old content is %s), want the unreadable path absent",
+			id, blobID([]byte("old content\n")))
+	}
+	if _, ok := blobs["kept.txt"]; !ok {
+		t.Fatalf("ListBlobs = %v, want kept.txt captured", blobs)
+	}
+}

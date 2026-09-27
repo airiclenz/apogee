@@ -169,11 +169,19 @@ func Remove(dir string) error {
 // repository: git stages everything it could and exits 1. So the add's status is not fatal on
 // its own — write-tree decides whether there is an image — and the add's error is folded into
 // the failure message only when write-tree also fails, where it is the likely explanation.
+//
+// A failed add is not harmless to the persistent index, though: a path git could not read this
+// time keeps whatever entry an EARLIER capture staged for it, and write-tree would freeze that
+// stale content into the image as if the file still held it. So when the add reports an error
+// the image is staged again into a fresh, throwaway index, where a path that fails is simply
+// absent — the residue ADR 0074 decision 12 hands to the funnel journal — and never its old
+// bytes. The persistent index is left alone rather than deleted, so a capture running beside
+// this one never sees it vanish between its own add and write-tree.
 func (s *Store) Capture(ctx context.Context) (Tree, error) {
-	_, addErr := gitexec.Run(ctx, s.workspace, s.env(), snapshotTimeout,
-		"-c", "core.excludesFile=", "add", "-A", "--ignore-errors")
-
-	out, err := gitexec.Run(ctx, s.workspace, s.env(), snapshotTimeout, "write-tree")
+	out, addErr, err := s.stageAndWrite(ctx, s.index)
+	if err == nil && addErr != nil {
+		out, addErr, err = s.captureFresh(ctx)
+	}
 	if err != nil {
 		if addErr != nil {
 			return "", fmt.Errorf("apogee: snapshot: capture: %w (staging: %v)", err, addErr)
@@ -181,6 +189,30 @@ func (s *Store) Capture(ctx context.Context) (Tree, error) {
 		return "", fmt.Errorf("apogee: snapshot: capture: %w", err)
 	}
 	return ParseTree(strings.TrimSpace(out))
+}
+
+// captureFresh stages the work-tree into a new, empty index in a scratch directory inside the
+// store and writes the tree from it, so no entry from an earlier capture can reach the image.
+// The scratch directory goes with the call.
+func (s *Store) captureFresh(ctx context.Context) (out string, addErr, err error) {
+	scratch, err := os.MkdirTemp(s.dir, "rebuild-")
+	if err != nil {
+		return "", nil, fmt.Errorf("fresh index: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+	return s.stageAndWrite(ctx, filepath.Join(scratch, indexFileName))
+}
+
+// stageAndWrite runs one `add -A --ignore-errors` into index and then `write-tree` from it,
+// returning write-tree's output. The add's error is returned beside that output rather than
+// instead of it: see [Store.Capture] for why it is not fatal on its own.
+func (s *Store) stageAndWrite(ctx context.Context, index string) (out string, addErr, err error) {
+	env := s.envWithIndex(index)
+	_, addErr = gitexec.Run(ctx, s.workspace, env, snapshotTimeout,
+		"-c", "core.excludesFile=", "add", "-A", "--ignore-errors")
+
+	out, err = gitexec.Run(ctx, s.workspace, env, snapshotTimeout, "write-tree")
+	return out, addErr, err
 }
 
 // Diff returns the workspace-relative paths that differ between two captures — added, removed
@@ -277,10 +309,15 @@ func (s *Store) Content(tree Tree, path string) (data []byte, exists bool, err e
 // work-tree, and a private index inside the store. gitexec appends it to the hardened,
 // allowlisted environment, so it adds a destination without weakening anything.
 func (s *Store) env() []string {
+	return s.envWithIndex(s.index)
+}
+
+// envWithIndex is env with index as the staging file in place of the persistent private index.
+func (s *Store) envWithIndex(index string) []string {
 	return []string{
 		"GIT_DIR=" + s.dir,
 		"GIT_WORK_TREE=" + s.workspace,
-		"GIT_INDEX_FILE=" + s.index,
+		"GIT_INDEX_FILE=" + index,
 	}
 }
 
