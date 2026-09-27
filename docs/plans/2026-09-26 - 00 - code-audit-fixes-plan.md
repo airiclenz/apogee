@@ -313,7 +313,10 @@ NOTES (2026-09-27): the throttle applies to every profile, the native no-op stri
 **Acceptance:** `go test -race -count=1 ./internal/agent/ && go test -race -count=1 ./internal/processing/`
 **Commit:** `fix(agent): throttle live stream stripping on large replies`
 
-## 18. Console output is capped while it accumulates
+## 18. Console output is capped while it accumulates — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the cap moved out of `renderConsoleTail` onto its two sources — `consoleTail` (console_read, console_close) now calls `capConsoleOutput` before rendering, and `collectConsoleWindow` returns its `CappedBuffer`'s string — so a window result is capped once rather than re-capped; `renderConsoleTail` renders what it is handed.
+NOTES (2026-09-27): of the new tests only `TestCollectConsoleWindow_HoldsNoMoreThanTheCeiling` fails against the pre-item tree (the collector returned the full ~3 MB string with no marker); `TestConsoleOpen_/TestConsoleSend_FloodCarriesOneTruncationMarker` and `TestConsoleRead_OneReadPastTheCeilingIsStillCapped` are regression pins that pass on both trees by design (they catch a double marker or a dropped single-read cap).
 
 **What:** Fixes the audit's High "Console output has no size cap while it accumulates".
 **Regression guard.** Keep `capConsoleOutput`'s real truncation for the `consoleTail`/`console_read` path unchanged — `console_read`'s `Execute` reads via a single `c.Read()` that can return up to `ringCapacity` (1 MiB, 4x `maxSubprocessOutputBytes`) and relies on that real cap to stay bounded. Only `collectConsoleWindow`'s own `CappedBuffer`-sourced output (`consoleWindowTail`/`consoleOpenTail`) skips the second capping. Add a >256 KiB single-read `console_read` case asserting it is still capped at `maxSubprocessOutputBytes`.

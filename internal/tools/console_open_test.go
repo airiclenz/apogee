@@ -104,6 +104,26 @@ func TestConsoleOpen_ExitedProgramIsReportedNotHidden(t *testing.T) {
 	}
 }
 
+// TestConsoleOpen_FloodCarriesOneTruncationMarker pins the open result over a program that floods
+// its terminal inside the window: the collector's own capped buffer bounds it, and the model reads
+// exactly one truncation marker ahead of the exit line.
+func TestConsoleOpen_FloodCarriesOneTruncationMarker(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, _ := consoleTestCtx(t)
+	tool := NewConsoleOpen(t.TempDir(), nil)
+
+	res, err := tool.Execute(ctx, consoleOpenCall("c1", "yes | head -c 2000000", 10_000))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	cutTruncationMarker(t, res.Content)
+	if !strings.HasSuffix(res.Content, "exited with code 0") {
+		t.Errorf("result did not end with the exit status: %q", lastLine(res.Content))
+	}
+}
+
 // TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal asserts on the spec the tool hands the
 // registry: the console's program runs in the operator's environment minus apogee's own key, and
 // is told it is talking to a dumb terminal so it spends none of the model's context on escape

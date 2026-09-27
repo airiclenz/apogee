@@ -132,9 +132,13 @@ func consoleInputBytes(input string, raw bool) []byte {
 
 // consoleTail renders what a Console has to say, returning as soon as SOME output arrives — the
 // polling shape console_read wants, where the question is "has anything happened yet".
+//
+// Its one read can hand back everything the ring holds (up to 1 MiB, four times the model's
+// ceiling), so the string is capped here, after the fact: the ring already bounds what that read
+// held in memory, and the cap bounds what the model reads.
 func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) string {
 	output, dropped := c.Read(wait)
-	return renderConsoleTail(c, output, dropped, true, confinementBox(ctx))
+	return renderConsoleTail(c, capConsoleOutput(output), dropped, true, confinementBox(ctx))
 }
 
 // consoleWindowTail renders what a Console produces over the WHOLE window rather than stopping
@@ -164,13 +168,20 @@ const consoleExitPollInterval = 5 * time.Millisecond
 // process exits, whichever comes first, reporting the bytes its buffer dropped over the same
 // span. Each read parks until output arrives, so a quiet Console costs a waiting goroutine rather
 // than a poll loop.
+//
+// What it keeps is capped AS it accumulates, at the ceiling every execution tool's output has
+// (maxSubprocessOutputBytes): a program flooding its terminal for a whole 30-second window would
+// otherwise pile up every byte it printed before the cap ever saw them. Past the ceiling it keeps
+// draining — the window still ends when it was going to, and the ring still never overflows on
+// the collector's account — but only counts what it no longer stores, and the returned output
+// carries the one truncation marker that count renders to.
 func collectConsoleWindow(c *console.Console, wait time.Duration) (string, int) {
 	deadline := time.Now().Add(wait)
-	var collected strings.Builder
+	collected := subprocess.CappedBuffer{Limit: maxSubprocessOutputBytes}
 	dropped := 0
 	for {
 		chunk, lost := c.Read(time.Until(deadline))
-		collected.WriteString(chunk)
+		_, _ = collected.Write([]byte(chunk))
 		dropped += lost
 		switch {
 		case !c.Alive() || time.Until(deadline) <= 0:
@@ -200,9 +211,11 @@ func awaitConsoleExit(c *console.Console, deadline time.Time) {
 
 // renderConsoleTail assembles one Console result: the fence label when the kill-on-denial watch
 // stopped this Console, the dropped-bytes note when its buffer overflowed, the output itself,
-// and a closing line saying whether the process is still running. The output is capped at the
-// ceiling every execution tool's is (maxSubprocessOutputBytes) with the same truncation marker,
-// so one flooding program cannot fill the model's context from a single read.
+// and a closing line saying whether the process is still running. The output arrives already
+// capped at the ceiling every execution tool's is (maxSubprocessOutputBytes), marker included —
+// by capConsoleOutput on the single-read path, by collectConsoleWindow's own buffer on the window
+// path — so one flooding program cannot fill the model's context from a single call, and a
+// result never carries a second marker from capping a capped string again.
 //
 // withAlive is false only for console_open, whose first line already says the Console is open.
 //
@@ -221,7 +234,7 @@ func renderConsoleTail(c *console.Console, output string, dropped int, withAlive
 	if dropped > 0 {
 		lines = append(lines, fmt.Sprintf(consoleDroppedFormat, dropped))
 	}
-	if text := strings.TrimRight(capConsoleOutput(output), "\r\n"); text != "" {
+	if text := strings.TrimRight(output, "\r\n"); text != "" {
 		lines = append(lines, text)
 	}
 	if status := consoleStatus(c); withAlive || status != consoleAliveStatus {

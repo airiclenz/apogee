@@ -209,3 +209,52 @@ func lastLine(content string) string {
 	}
 	return content
 }
+
+// TestConsoleRead_OneReadPastTheCeilingIsStillCapped pins the single-read path the window
+// collector's own cap does not cover: one Read can hand back everything the ring holds — up to
+// four times the model's ceiling — so console_read still caps what it renders, with exactly one
+// truncation marker and no bytes past maxSubprocessOutputBytes before it.
+func TestConsoleRead_OneReadPastTheCeilingIsStillCapped(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, _ := consoleTestCtx(t)
+	// 600 KB of "y\n" is past the 256 KiB ceiling and, with the terminal's \r\n, still inside the
+	// 1 MiB ring — so the one read below holds all of it and the ring drops nothing.
+	id, target := openUndrainedConsole(t, ctx, "yes | head -c 600000")
+	waitForConsoleExit(t, target)
+
+	res, err := NewConsoleRead().Execute(ctx, consoleReadCall("c1", id, 0))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if strings.Contains(res.Content, "bytes of earlier output dropped") {
+		t.Fatalf("the ring overflowed (%q); the test needs one read that holds the whole output", lastLine(res.Content))
+	}
+	body, more := cutTruncationMarker(t, res.Content)
+	if len(body) != maxSubprocessOutputBytes {
+		t.Errorf("output before the marker = %d bytes, want exactly the %d-byte ceiling", len(body), maxSubprocessOutputBytes)
+	}
+	if more <= 0 {
+		t.Errorf("marker counts %d more bytes, want the overflow past the ceiling", more)
+	}
+}
+
+// truncationMarkerPrefix is how the capped buffer's truncation marker begins.
+const truncationMarkerPrefix = "\n… [output truncated: "
+
+// cutTruncationMarker splits a Console result at its one truncation marker, returning what came
+// before it and the byte count it announces. It fails the test unless exactly one marker is
+// present: a result capped twice would carry two, and an uncapped one none.
+func cutTruncationMarker(t *testing.T, content string) (string, int) {
+	t.Helper()
+	if count := strings.Count(content, truncationMarkerPrefix); count != 1 {
+		t.Fatalf("result carries %d truncation markers, want exactly one (tail %q)", count, lastLine(content))
+	}
+	body, rest, _ := strings.Cut(content, truncationMarkerPrefix)
+	var more int
+	if _, err := fmt.Sscanf(rest, "%d more bytes]", &more); err != nil {
+		t.Fatalf("truncation marker %q does not parse: %v", lastLine(content), err)
+	}
+	return body, more
+}

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -310,5 +311,49 @@ func TestConsoleSend_AnswersOnlyToTheRunThatOpenedIt(t *testing.T) {
 				return NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "echo hi", false, 500))
 			})
 		})
+	}
+}
+
+// TestCollectConsoleWindow_HoldsNoMoreThanTheCeiling is the window collector's memory bound: a
+// program flooding its terminal for the whole window leaves the collector holding the model's
+// ceiling and nothing past it, while it keeps draining to the end and counts what it no longer
+// stores into the one truncation marker.
+func TestCollectConsoleWindow_HoldsNoMoreThanTheCeiling(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, _ := consoleTestCtx(t)
+	_, target := openUndrainedConsole(t, ctx, "yes | head -c 2000000")
+
+	output, _ := collectConsoleWindow(target, 20*time.Second)
+
+	body, more := cutTruncationMarker(t, output)
+	if len(body) != maxSubprocessOutputBytes {
+		t.Errorf("collected %d bytes before the marker, want exactly the %d-byte ceiling", len(body), maxSubprocessOutputBytes)
+	}
+	if more <= 0 {
+		t.Errorf("marker counts %d more bytes, want the overflow the collector drained past the ceiling", more)
+	}
+	if target.Alive() {
+		t.Error("collector returned while the program was still running; it must drain to the end of the output")
+	}
+}
+
+// TestConsoleSend_FloodCarriesOneTruncationMarker pins the rendered send result over a flood: the
+// window's own capped buffer is the only cap it passes through, so the model reads one marker —
+// never a second one from capping the already-capped string again.
+func TestConsoleSend_FloodCarriesOneTruncationMarker(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, _ := consoleTestCtx(t)
+	id := openTestConsole(t, ctx, "sh")
+
+	res, err := NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "yes | head -c 2000000; exit 0", false, 20000))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	cutTruncationMarker(t, res.Content)
+	if !strings.HasSuffix(res.Content, "exited with code 0") {
+		t.Errorf("result did not end with the exit status: %q", lastLine(res.Content))
 	}
 }
