@@ -207,7 +207,7 @@
 //
 // # The tool files, one line each
 //
-// Thirty-three files carry the built-ins, grouped by what a call to them can do — which is
+// Thirty-four files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
 // always a single tool: the two-tool file_ops.go and the six-tool git.go each keep a
 // family's shared argument shape and error wording in one place.
@@ -296,7 +296,10 @@
 // load_skill.go is load_skill over the host's SkillLookup — the model's own door onto the skill
 // catalog (ADR 0065), rendering a found body the way the loop renders an attached one and a miss
 // as candidate ids to ask again with. sub_agent.go is sub_agent — the recursion point that
-// drives a nested Agent and deliberately carries none of the disposition markers.
+// drives a nested Agent and deliberately carries none of the disposition markers. fan_out.go is
+// fan_out, the Workflow the model asks for (ADR 0087): a placeholder like sub_agent that dispatch
+// runs itself, registered default-off, publishing `run_on` under the seat-choice gate and
+// `background` only while the workflow tool is on the roster.
 // task_list.go is task_list, the model's own checklist (ADR 0072): a whole-list replace over the
 // list the engine holds and reaches the call through (internal/tasklist), read-only because
 // writing down what you mean to do touches nothing the host owns. finish.go is finish, the receipt

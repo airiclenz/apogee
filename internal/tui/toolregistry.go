@@ -501,6 +501,17 @@ var toolRegistry = map[string]toolPresenter{
 		failure: delegationFailure, // a failed delegation reads red, and still says it was steered
 		solo:    true,              // heads a run, never a row in a list — even a refused delegation
 	},
+	// fan_out asks the engine for a Workflow (ADR 0087): one brief over a list of items, answered
+	// with one line per item plus a report path. It ships default-off, so this row is the plain
+	// floor — the brief's first line as the target, the answer's first line as the detail — and it
+	// heads a run like sub_agent, never a row in a list.
+	"fan_out": {
+		label:  "Fan-Out",
+		verb:   "fanning out",
+		target: firstLineArg("task"),
+		detail: firstLineDetail,
+		solo:   true,
+	},
 	// task_list is the model's own checklist, held as engine session state (ADR 0072). No target:
 	// its one argument IS the list, so the list is the target — the same reason git_status carries
 	// none — and the rendered list the tool echoes back is both the branch row and the body under

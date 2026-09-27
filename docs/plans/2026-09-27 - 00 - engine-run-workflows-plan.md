@@ -431,7 +431,21 @@ NOTES (2026-09-27): consequential edit — cmd/apogee/wire_config_test.go: made 
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/ && go test -race -count=1 ./internal/domain/ && go test -race -count=1 -run 'Setting|Settings' ./cmd/apogee/`
 **Commit:** `feat(config): workflow retry, continuation and wake keys`
 
-## 14. The fan_out tool schema
+## 14. The fan_out tool schema — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): internal/tools/registry_test.go (listed in Files) needed no change: its menu-order and count pins read the default menu, which fan_out (default-off) does not reach, and KnownToolNames/TestKnownToolNamesCoversTheComposedSet derive from the build list with no hand-kept name list to update. The TestDefaultToolsHonourTheRoster default-off repin lives in roster_test.go, as the Regression guard says.
+
+NOTES (2026-09-27): the `background` gate reads the roster ladder's verdict for the name "workflow" through a new RosterDeltas.lifts helper; EffectiveRoster's per-name verdict loop was moved into rosterVerdicts so both read one ladder. The name is an unexported workflowToolName constant in fan_out.go until item 27 registers the tool.
+
+NOTES (2026-09-27): fan_out declares `task`, `verify` and `merge` as delegation prompts (ArgRolePrompt); the path-bearing `over`, `out`, `context` and the recipe `inputs` stay fully inspected. No top-level `required`: `task`/`over` are needed unless `recipe` is set, which the descriptions say and item 15's ValidateModelPlan refusal enforces.
+
+NOTES (2026-09-27): consequential edit — internal/tui/toolregistry.go: made necessary by registering fan_out; TestToolRegistryCoversEveryBuiltInTool walks KnownToolNames and fails on a built-in with no toolRegistry row, so fan_out gets a minimal plain row (task first line as target, first-line detail, solo).
+
+NOTES (2026-09-27): consequential edit — internal/tools/registry.go: the HostTools.SubAgentSeatChoice and HostToolsOf doc comments now say the gate shapes fan_out's schema too.
+
+NOTES (2026-09-27): consequential edit — internal/tools/doc.go: "Thirty-three files carry the built-ins" -> "Thirty-four" for fan_out.go. The count was already approximate before this item: item 12 added finish.go without moving it.
+
+NOTES (2026-09-27): README.md's "34 built-in tools" is now one short. Left alone because item 38 (not yet done) owns the README counts and repins them to 36 after items 14 and 27.
 
 **What:** Depends on item 4.
 **Goal:** a default-off `fan_out` tool is in the registry with fields `task` (brief with `{item}`/`{out}`), `over`, `batch`, `context`, `returns`, `out`, `verify{when, task}`, `merge{task}`, `tools`, `recipe` + `inputs`, `run_on` (only under `sub-agents-choice: model`, as `sub_agent`'s) and `background` (only while `workflow` is on the roster); the default menu is byte-identical to the base.

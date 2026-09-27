@@ -46,6 +46,9 @@ var writeCapableNonFileBuiltins = map[string]bool{
 	"http_request": true,
 	"web_search":   true,
 	"sub_agent":    true,
+	// fan_out (ADR 0087) is a placeholder dispatch runs as a Workflow: like sub_agent it writes
+	// nothing itself, and each helper's own writes are classified at their call sites one level down.
+	"fan_out": true,
 	// The Console family's write-capable half (ADR 0059): what a Console writes is whatever the
 	// model typed into a live shell, so no NAME in the call classifies it — the same reason
 	// terminal sits here. Its read-only half (console_read, console_close) never reaches this

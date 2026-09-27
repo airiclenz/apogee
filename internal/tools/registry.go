@@ -87,11 +87,11 @@ type HostTools struct {
 	// (isSecretEnv), and a name matching nothing in the environment is simply not there to drop.
 	SecretEnvVars []string
 
-	// SubAgentSeatChoice offers the model the `run_on` argument on sub_agent — the host's
-	// `sub-agents-choice: model` gate (ADR 0069). False is the default and the whole of
-	// `sub-agents-choice: fixed`: the plain variant is registered and the schema is byte-identical
-	// to the one built before seat choice existed, so a model that cannot pick a seat is never
-	// told about one.
+	// SubAgentSeatChoice offers the model the `run_on` argument on sub_agent, and on fan_out where a
+	// roster lifts it (ADR 0087 D9) — the host's `sub-agents-choice: model` gate (ADR 0069). False
+	// is the default and the whole of `sub-agents-choice: fixed`: the plain variant is registered
+	// and the schema is byte-identical to the one built before seat choice existed, so a model that
+	// cannot pick a seat is never told about one.
 	//
 	// It shapes the tool this build carries rather than whether it carries it, which is why it is
 	// not a roster delta: sub_agent is offered either way, and the two variants differ only in the
@@ -158,8 +158,8 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // execution tools' credential scrub (`api-key-env:`, ADR 0047); empty ⇒ apogee's own alone.
 //
 // seatChoice is the one policy Config does NOT carry: `sub-agents-choice:` shapes the sub_agent
-// schema this build publishes (ADR 0069), and the engine reads no config of its own (ADR 0031), so
-// the engine passes false and the composition root passes the configured value.
+// and fan_out schemas this build publishes (ADR 0069), and the engine reads no config of its own
+// (ADR 0031), so the engine passes false and the composition root passes the configured value.
 func HostToolsOf(cfg domain.Config, seatChoice bool) HostTools {
 	return HostTools{
 		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
@@ -291,6 +291,14 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
 		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice}),
+		// fan_out (ADR 0087) is registered DEFAULT-OFF beside the recursion point it spawns through,
+		// so it reaches no default menu. It publishes `run_on` under the same seat-choice gate as
+		// sub_agent, and `background` only while the workflow tool is on the roster (ADR 0089) — a
+		// question the configuration rungs answer, since that tool ships default-off too.
+		NewFanOutWith(FanOutOptions{
+			SeatChoice: host.SubAgentSeatChoice,
+			Background: host.rosterDeltas().lifts(workflowToolName),
+		}),
 		// task_list (ADR 0072) is the last DEFAULT-ON slot: it holds the model's own checklist as
 		// engine state, so it is offered to every model and `tools.disabled:` is what turns it off.
 		NewTaskList(),
@@ -405,19 +413,7 @@ type RosterConflict struct {
 // human wrote: a stray space around a name is a spelling of that name, not a different tool.
 func EffectiveRoster(all []domain.Tool, deltas RosterDeltas) ([]domain.Tool, []RosterConflict) {
 	conflicts := RosterConflicts(deltas)
-
-	// One verdict per NAMED tool, written in ladder order: enabled first and disabled second
-	// within a scope (so disabled wins the same-scope tie), global before profile (so the profile
-	// has the last word). A tool no list names keeps its build default below.
-	verdict := make(map[string]bool)
-	for _, scope := range []domain.ToolRosterDelta{deltas.Global, deltas.Profile} {
-		for _, name := range trimmedNames(scope.Enabled) {
-			verdict[name] = true
-		}
-		for _, name := range trimmedNames(scope.Disabled) {
-			verdict[name] = false
-		}
-	}
+	verdict := rosterVerdicts(deltas)
 
 	kept := make([]domain.Tool, 0, len(all))
 	for _, tool := range all {
@@ -433,6 +429,30 @@ func EffectiveRoster(all []domain.Tool, deltas RosterDeltas) ([]domain.Tool, []R
 		return all, conflicts
 	}
 	return kept, conflicts
+}
+
+// rosterVerdicts returns one verdict per NAMED tool, written in ladder order: enabled first and
+// disabled second within a scope (so disabled wins the same-scope tie), global before profile (so
+// the profile has the last word). A tool no list names is absent and keeps its build default.
+func rosterVerdicts(deltas RosterDeltas) map[string]bool {
+	verdict := make(map[string]bool)
+	for _, scope := range []domain.ToolRosterDelta{deltas.Global, deltas.Profile} {
+		for _, name := range trimmedNames(scope.Enabled) {
+			verdict[name] = true
+		}
+		for _, name := range trimmedNames(scope.Disabled) {
+			verdict[name] = false
+		}
+	}
+	return verdict
+}
+
+// lifts reports whether the ladder puts name ON the menu for a tool the build registers
+// DEFAULT-OFF — the answer EffectiveRoster would give that tool, asked by name. It lets one tool's
+// published schema depend on whether another default-off tool is offered (fan_out's `background`
+// on the workflow tool) without constructing the other tool first.
+func (d RosterDeltas) lifts(name string) bool {
+	return rosterVerdicts(d)[name]
 }
 
 // RosterConflicts returns every tool named in both directions of one scope, global rung first and
