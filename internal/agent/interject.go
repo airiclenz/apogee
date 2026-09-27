@@ -84,3 +84,21 @@ func (a *Agent) Interject(ctx context.Context, in domain.UserInput) error {
 	a.conv.Append(a.composeUserMessage(ctx, a.turns.index, in, true))
 	return nil
 }
+
+// TakeWorkflowNotes hands the Driver the finish notes of the background workflows that ended while
+// the OPEN Exchange runs (ADR 0089 D3), as one interjection for it to commit with Interject at the
+// same between-Steps boundary — the drain its human remarks go through (ADR 0025), so the engine
+// consumes no slot of its own for them. The notes are taken: a second call returns nothing until
+// another workflow ends. It reports false, and takes nothing, when no Exchange is open (the idle
+// agent is woken on them instead — Wake — or the next opening message carries them) or no note is
+// held. Call it where Interject is called: on the goroutine driving Step, between Steps.
+func (a *Agent) TakeWorkflowNotes() (domain.UserInput, bool) {
+	if !a.turns.inExchange {
+		return domain.UserInput{}, false
+	}
+	notes := a.background.takeNotes()
+	if len(notes) == 0 {
+		return domain.UserInput{}, false
+	}
+	return domain.UserInput{Text: renderWorkflowNotes(notes)}, true
+}

@@ -110,7 +110,14 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		a.retained.markExchange()
 		// The message itself — skill blocks, @file blocks, then the text — is composed by the
 		// helper an interjection shares (composeUserMessage), so both doors read identically.
-		a.conv.Append(a.composeUserMessage(ctx, turn, *in, false))
+		// The finish notes of background workflows no drain or wake took yet follow the text
+		// (ADR 0089 D3: under `workflow-wake: off` this is how they arrive), after a recipe's
+		// result lines too, so the leading "/<id>" a launch keys on is untouched.
+		opening := a.composeUserMessage(ctx, turn, *in, false)
+		if notes := a.background.takeNotes(); len(notes) > 0 {
+			opening.Content += workflowNoteSeparator + renderWorkflowNotes(notes)
+		}
+		a.conv.Append(opening)
 	}
 
 	// The history-rewrite Moment: reactions edit conversation state before it is projected

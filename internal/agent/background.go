@@ -27,6 +27,18 @@ package agent
 // Agent.ResumeWorkflows starts it once the Driver has bound the engine (it reads the live scratch
 // directory and recipe catalog, which a Resume has not re-supplied yet when restoreState runs).
 //
+// Finish notes and the wake (ADR 0089 D3). A background workflow's end — finished, stopped or
+// failed — leaves one line for the parent (finishNote), which the manager HOLDS before the
+// WorkflowPhaseEvent that ends the workflow is emitted, so a Driver reacting to that event always
+// finds it. The engine never delivers it on its own; the held note is consumed by whichever comes
+// first: the Driver's between-Steps drain while an Exchange runs (Agent.TakeWorkflowNotes, committed
+// through Interject), the wake that opens an Exchange on it while the agent is idle (Agent.Wake —
+// refused under `workflow-wake: off`), or the next Exchange a message opens, whose opening message
+// carries it after the human's text (step). Every form reads the same: a fixed plain header, then
+// one line per note (renderWorkflowNotes) — recorded text, so a snapshot keeps it. Held notes are
+// live state only: a snapshot does not carry them, and stopping the whole set (Close,
+// RestoreSession) drops them with the session they were meant for.
+//
 // Resume re-asks, by decision (plan 2026-09-27 - 00, item 25). A resumed workflow re-opens its
 // folder and skips every fan-out item whose receipt is already there, but it keeps nothing else of
 // the earlier run: its script stages run again and its `ask` stages put their questions again.
@@ -58,6 +70,22 @@ const backgroundCallPrefix = "workflow-"
 const (
 	unknownWorkflowFormat        = "apogee: no background workflow %q is running or queued"
 	workflowAlreadyRunningFormat = "apogee: workflow %s is already running in the background"
+)
+
+// The words a finish note (finishNote) and its delivery (renderWorkflowNotes) are built from. The
+// header is plain text, not an engine-note fence, because the note is recorded history: it must
+// survive the session record, which strips every fence (domain.AdviceSpan).
+const (
+	workflowNoteHeader    = "Background workflow report (a note from apogee, not from the user):"
+	finishLeadFormat      = "workflow %s %s"
+	finishFailedFormat    = "workflow %s failed — %s"
+	finishSeparator       = " — "
+	finishTallySeparator  = " · "
+	finishReportPrefix    = "report: "
+	finishListingPrefix   = "items: "
+	finishPhaseFinished   = "finished"
+	finishPhaseStopped    = "stopped"
+	workflowNoteSeparator = "\n\n"
 )
 
 // errDelegateBackground refuses a background launch on a delegate: background workflows belong to
@@ -93,13 +121,15 @@ type workflowEntryJSON struct {
 
 // backgroundManager is one top-level Agent's background workflows: the live ones (running, or
 // queued behind another on their server) in launch order, the snapshot's set a restore loaded and
-// ResumeWorkflows has not started yet, and the questions and approvals the running ones wait on.
+// ResumeWorkflows has not started yet, the questions and approvals the running ones wait on, and the
+// finish notes of the ended ones no one has taken yet, oldest first.
 // The zero value is ready to use; mu guards every field, and is never held while a workflow runs.
 type backgroundManager struct {
 	mu       sync.Mutex
 	runs     []*backgroundRun
 	restored []workflowEntryJSON
 	prompts  []*backgroundPrompt
+	notes    []string
 }
 
 // backgroundRun is one live background workflow. Everything but running and cancel is fixed at
@@ -368,10 +398,12 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 }
 
 // driveBackground runs one background workflow to its end, reporting its phases as a blocking
-// workflow's are reported, then hands its server to the next in line.
+// workflow's are reported, then hands its server to the next in line. The finish note is held
+// before the end is reported, so a Driver that wakes on that event finds it.
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	observer := a.observeWorkflow(run.runner, run.turn, run.plan.Name)
 	result, err := run.runner.Run(ctx, run.plan)
+	a.background.hold(finishNote(run.plan.Name, result, err))
 	observer.end(result, err)
 	a.endBackground(run)
 }
@@ -414,6 +446,9 @@ func (a *Agent) stopAllBackground() {
 	for _, done := range ending {
 		<-done
 	}
+	// The whole set stops only when its session ends (Close, RestoreSession), so the notes held for
+	// that session — the ones these stops just left included — have no one left to read them.
+	a.background.takeNotes()
 }
 
 // backgroundWidth is how many children a background workflow runs at once: the width of the server
@@ -677,4 +712,137 @@ func (m *backgroundManager) withdraw(prompt *backgroundPrompt) bool {
 	}
 	m.prompts = slices.Delete(m.prompts, index, index+1)
 	return true
+}
+
+// Wake opens an Exchange on the finish notes of the background workflows that ended while the agent
+// was idle — the wake (ADR 0089 D3, ADR 0007 as amended): the notes are taken and queued as the
+// Exchange's opening message (renderWorkflowNotes), which the Driver then Steps exactly as it Steps
+// a Submitted one, so the reply is bounded by the Mode and the approval rules like any other. It
+// reports whether it opened one.
+//
+// It opens nothing, and leaves the notes held, when there is nothing to wake on or no reason to
+// wake: ctx is already done (its error is returned); `workflow-wake: off` is set (the notes ride
+// the next message instead); this is a delegate; no note is held; or an Exchange is running or
+// input is queued — the running Exchange takes the notes through the Driver's drain
+// (TakeWorkflowNotes), the queued input when it opens its Exchange. With no model bound it refuses
+// as Submit does. Call it from the goroutine that Submits, at an idle boundary — typically on the
+// WorkflowPhaseEvent that ends a background workflow, or when an Exchange ends with notes held.
+func (a *Agent) Wake(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !a.cfg.Workflow.ResolvedWake() || a.isDelegate() {
+		return false, nil
+	}
+	if a.cfg.Model == "" {
+		return false, errNoModelBound
+	}
+	notes := a.background.takeNotes()
+	if len(notes) == 0 {
+		return false, nil
+	}
+	if err := a.turns.submit(domain.UserInput{Text: renderWorkflowNotes(notes)}); err != nil {
+		a.background.putBack(notes)
+		if errors.Is(err, domain.ErrInputPending) {
+			return false, nil // the running Exchange or the queued input takes them instead
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// finishNote is the one line a background workflow's end leaves for the parent (ADR 0089 D3): its
+// name and how it ended, its items counted by status across its fan-outs (with the unfinished ones
+// and the verify verdicts when there are any), and where to read more — the report a merge wrote,
+// else the full item listing. A run that could not proceed says so with its cause instead.
+func finishNote(name string, result workflow.Result, runErr error) string {
+	name = oneLine(name)
+	if runErr != nil {
+		return fmt.Sprintf(finishFailedFormat, name, oneLine(runErr.Error()))
+	}
+	phase := finishPhaseFinished
+	if result.Stopped() {
+		phase = finishPhaseStopped
+	}
+	parts := []string{fmt.Sprintf(finishLeadFormat, name, phase), finishTally(result)}
+	switch {
+	case result.Report != "":
+		parts = append(parts, finishReportPrefix+result.Report)
+	case result.Listing != "":
+		parts = append(parts, finishListingPrefix+result.Listing)
+	}
+	return strings.Join(parts, finishSeparator)
+}
+
+// finishTally counts result's fan-out items by status — `items N · ok A · partial B · blocked C` —
+// adding the unfinished count and the verify verdicts only when there are any.
+func finishTally(result workflow.Result) string {
+	var tally workflow.Tally
+	for _, stage := range result.Stages {
+		if stage.Kind != workflow.StageFanout || stage.Phase == workflow.PhaseSkipped {
+			continue
+		}
+		tally.OK += stage.Tally.OK
+		tally.Partial += stage.Tally.Partial
+		tally.Blocked += stage.Tally.Blocked
+		tally.Unfinished += stage.Tally.Unfinished
+		tally.Confirmed += stage.Tally.Confirmed
+		tally.Refuted += stage.Tally.Refuted
+		tally.Unclear += stage.Tally.Unclear
+	}
+	total := tally.OK + tally.Partial + tally.Blocked + tally.Unfinished
+	parts := []string{
+		fmt.Sprintf("items %d", total),
+		fmt.Sprintf("ok %d", tally.OK),
+		fmt.Sprintf("partial %d", tally.Partial),
+		fmt.Sprintf("blocked %d", tally.Blocked),
+	}
+	if tally.Unfinished > 0 {
+		parts = append(parts, fmt.Sprintf("unfinished %d", tally.Unfinished))
+	}
+	if tally.Confirmed+tally.Refuted+tally.Unclear > 0 {
+		parts = append(parts,
+			fmt.Sprintf("confirmed %d", tally.Confirmed),
+			fmt.Sprintf("refuted %d", tally.Refuted),
+			fmt.Sprintf("unclear %d", tally.Unclear),
+		)
+	}
+	return strings.Join(parts, finishTallySeparator)
+}
+
+// oneLine folds every run of whitespace in text, line breaks included, into one space, so a note
+// stays the one line ADR 0089 D3 promises whatever a name or an error spells.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+// renderWorkflowNotes is the recorded text notes reach the model as — the fixed header, then one
+// line per note — whether it opens a wake, is interjected into a running Exchange, or follows the
+// human's own message.
+func renderWorkflowNotes(notes []string) string {
+	return workflowNoteHeader + "\n" + strings.Join(notes, "\n")
+}
+
+// hold keeps note until the Driver's drain, a wake or the next opening message takes it.
+func (m *backgroundManager) hold(note string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notes = append(m.notes, note)
+}
+
+// takeNotes takes every held note, oldest first; nil when none is held.
+func (m *backgroundManager) takeNotes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	notes := m.notes
+	m.notes = nil
+	return notes
+}
+
+// putBack returns notes a taker could not deliver to the front of the held ones, ahead of any held
+// since, so the order they ended in is kept.
+func (m *backgroundManager) putBack(notes []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notes = append(slices.Clone(notes), m.notes...)
 }

@@ -736,7 +736,17 @@ NOTES (2026-09-27): "sharing the slot on a width-1 server" needs no code of its 
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(agent): background workflows`
 
-## 26. Finish notes and the wake
+## 26. Finish notes and the wake — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): engine API. `Agent.Wake(ctx) (bool, error)` queues the held notes as the opening message of a new Exchange, which the Driver then Steps the same way it Steps a Submitted message. It reports whether it opened an Exchange. It opens nothing and keeps the notes held in these cases: ctx is done (returns ctx's error); `workflow-wake: off` is set (Wake checks the config itself, so every Driver gets the setting); the Agent is a delegate; no note is held; an Exchange is running or input is queued. With no model bound it returns errNoModelBound, as Submit does. `Agent.TakeWorkflowNotes() (domain.UserInput, bool)` in interject.go is the call item 28 plumbs beside Wake. It hands over the held notes as one interjection only while an Exchange is open, and takes nothing otherwise, so an idle Driver cannot lose a note to Interject's ErrNoOpenExchange.
+
+NOTES (2026-09-27): note shape. The line is `workflow <name> finished|stopped — items N · ok A · partial B · blocked C[ · unfinished U][ · confirmed x · refuted y · unclear z] — report: <path>`. When the workflow wrote no report, the last part is `items: <items.md>` instead. A run that could not proceed gives `workflow <name> failed — <cause>`. Counts are summed across the fan-out stages that were not skipped. The name and the cause are folded onto one line. The note is always recorded text, `Background workflow report (a note from apogee, not from the user):` followed by one line per note. The same text opens a wake, is interjected mid-Exchange, and follows the human's text (and a recipe's result lines) in an opening message. A stopped or failed background workflow leaves a note as well.
+
+NOTES (2026-09-27): the note is held before observer.end emits the WorkflowPhaseEvent that ends the workflow, so a Driver that wakes on that event always finds it. step() consumes held notes only when an Exchange opens, never mid-Exchange (ADR 0025's rejected engine slot is untouched). finishTally repeats the tally words of internal/workflow's unexported totalsLine rather than exporting that function, because format.go is outside this item's files.
+
+NOTES (2026-09-27): held notes are live state only. A snapshot does not carry an undelivered note, and stopAllBackground (Close, RestoreSession) drops the held notes along with the session they belonged to. A note held when the session is saved and resumed is therefore lost. Only the wake opener's recorded text survives a snapshot.
+
+NOTES (2026-09-27): consequential edit — internal/agent/doc.go: made necessary by the finish notes and Wake added to background.go and TakeWorkflowNotes added to interject.go (the package map's roles for both files).
 
 **What:** Depends on items 13, 25.
 **Goal:** when a background workflow ends, a one-line note (name, item counts by status, headline tallies, report path) reaches the parent at the next between-Steps boundary if an Exchange is running; otherwise the engine emits `WorkflowPhaseEvent{Finished}` and holds the note, and `Agent.Wake(ctx)` opens an Exchange on the held note (ADR 0007 as amended); with `workflow-wake: off` the note joins the next user message.

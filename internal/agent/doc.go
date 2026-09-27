@@ -93,13 +93,16 @@
 // the background workflow manager (ADR 0089): the Workflows that run outside any Turn at the
 // server's width minus one, one per server at a time with the rest queued, their gates and
 // questions waiting in its queue, stopped by StopWorkflow and Close, and carried across a session
-// snapshot as identifiers that ResumeWorkflows starts again.
+// snapshot as identifiers that ResumeWorkflows starts again; it holds each ended one's one-line
+// finish note until a Driver's drain, the Wake that opens an Exchange on it, or the next opening
+// message takes it (ADR 0089 D3).
 // approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.
 //
 // The mid-session doors. interject.go commits the human's remark into the OPEN Exchange at a
-// between-Steps boundary. children.go is that same door one level down: the registry a parent
+// between-Steps boundary, and TakeWorkflowNotes hands a Driver the held finish notes to commit
+// there the same way. children.go is that same door one level down: the registry a parent
 // publishes its RUNNING sub-agents in, the mailbox each child drains at its own between-Steps
 // boundaries, and InterjectChild, which addresses a child by its run id (ADR 0063, ADR 0086). rebind.go swaps every per-model binding together when the Upstream's
 // loaded model changes, and moves the session to another server (ADR 0024); serverbinding.go is

@@ -56,7 +56,10 @@ import (
 // methods (Submit / Step / Run / Interject / Mode / Snapshot / Close) are the public
 // stepping surface; construct one with New or Resume. Interject commits a user message
 // into the OPEN Exchange and is valid only between Steps of the goroutine driving it
-// (ADR 0025). See internal/agent for the contract.
+// (ADR 0025). When a background workflow ends, its one-line finish note is held for the
+// Driver (ADR 0089 D3): TakeWorkflowNotes hands it over between Steps of a running Exchange
+// for Interject to commit, Wake opens an Exchange on it while the agent is idle, and
+// otherwise the next opening message carries it. See internal/agent for the contract.
 type Agent = agent.Agent
 
 // New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0012)
