@@ -91,11 +91,12 @@
 // Workflow on the opening Step, its script stages through the terminal's own Resolution, and the
 // opening message carries the user's line plus the result lines (ADR 0087 D6). background.go is
 // the background workflow manager (ADR 0089): the Workflows that run outside any Turn at the
-// server's width minus one, one per server at a time with the rest queued, their gates and
-// questions waiting in its queue, stopped by StopWorkflow and Close, and carried across a session
-// snapshot as identifiers that ResumeWorkflows starts again; it holds each ended one's one-line
-// finish note until a Driver's drain, the Wake that opens an Exchange on it, or the next opening
-// message takes it (ADR 0089 D3).
+// server's width minus one, one per server at a time with the rest queued, each running off a
+// snapshot of the Agent taken at launch (backgroundHost) so the idle-only mutators never race it,
+// their gates and questions waiting in its queue, stopped by StopWorkflow and Close, and carried
+// across a session snapshot as identifiers that ResumeWorkflows starts again; it holds each ended
+// one's one-line finish note until a Driver's drain, the Wake that opens an Exchange on it, or the
+// next opening message takes it (ADR 0089 D3).
 // approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.

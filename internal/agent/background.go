@@ -13,6 +13,19 @@ package agent
 // (backgroundServer), and only ONE background workflow runs per server at a time: a second one
 // launched onto a busy server waits in line (queued) and starts when the one ahead of it ends.
 //
+// A launch-time snapshot (backgroundHost). A background workflow runs beside the conversation, so
+// what it reads of the Agent must not be what the idle-only mutators write — Rebind, SwitchUpstream,
+// SwapTools, SetProfile, SetJournal and the session boundary's context-file reload assume no Step
+// runs, and a background workflow's children and script stages are exactly that. So the workflow
+// never runs off the live Agent: at launch it takes a host, a detached Agent holding the Config,
+// Upstream, tool set, profile parsers, context files, journal and every live setting as they stand,
+// and its Runner's children, scripts, phase events and width all read that host. The handles the
+// tree shares on purpose stay shared — the run-id minter, the Consoles, the Delegation-target latch,
+// the prompt slot and the approver seam, and the registry its running children are addressable in —
+// and the live mode is a tighten-only view of the top-level Agent's, as a delegate's is (ADR 0013).
+// A move the human makes after the launch therefore reaches the next workflow, not a running one:
+// it finishes on the model, server and tools it started with, as a delegate does.
+//
 // Every background workflow's child and script stage runs under a context that marks it as
 // background (withBackgroundPrompts). A gate one of them reaches, and a question an `ask` stage
 // puts, never reach the Driver's prompt directly — the conversation may be showing one of its own —
@@ -57,6 +70,7 @@ import (
 	"sync"
 	"time"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -133,14 +147,16 @@ type backgroundManager struct {
 }
 
 // backgroundRun is one live background workflow. Everything but running and cancel is fixed at
-// launch; those two are set when it starts, under the manager's lock. done closes when it has ended
-// — run to its end, stopped, or dropped from the queue.
+// launch — host is the snapshot of the Agent it runs off (backgroundHost); those two are set when it
+// starts, under the manager's lock. done closes when it has ended — run to its end, stopped, or
+// dropped from the queue.
 type backgroundRun struct {
 	id     string
 	recipe string
 	server string
 	plan   workflow.Plan
 	runner *workflow.Runner
+	host   *Agent
 	turn   int
 
 	running bool
@@ -317,9 +333,12 @@ func (a *Agent) startBackgroundRecipe(recipe workflow.Recipe, text string) (stri
 
 // startBackground opens launch's workflow folder and hands the workflow to the manager: it starts at
 // once when no background workflow runs on its server, and waits in line otherwise. It returns the
-// workflow's id. The Runner is rebuilt around the folder's id — its children bracketed under the
-// `workflow-<id>` call, its ask stages put through the manager's queue — and gets its width when it
-// starts. A workflow already live under the same id (the same plan launched twice) is refused.
+// workflow's id. The Runner is rebuilt around the folder's id and the launch-time host
+// (backgroundHost) — its children spawned off the host and bracketed under the `workflow-<id>` call
+// yet addressable through this Agent, its scripts run through the host's Resolution, its ask stages
+// put through the manager's queue — and gets its width when it starts. A workflow already live under
+// the same id (the same plan launched twice) is refused. It runs where the idle-only mutators cannot
+// (an idle boundary, or a Step), which is what lets the host be read off this Agent unguarded.
 func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	if a.isDelegate() {
 		return "", errDelegateBackground
@@ -328,14 +347,20 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	host := a.backgroundHost()
 	call := domain.ToolCall{ID: backgroundCallPrefix + status.ID, Tool: launch.tool}
-	launch.runner.Spawner = a.newWorkflowSpawner(launch.turn, call, launch.prompts)
+	spawner := host.newWorkflowSpawner(launch.turn, call, launch.prompts)
+	spawner.children = &a.children
+	launch.runner.Spawner = spawner
+	if scripts, ok := launch.runner.Scripts.(*recipeScripts); ok {
+		scripts.agent = host
+	}
 	if launch.runner.Asker != nil {
 		launch.runner.Asker = backgroundAsker{scope: backgroundScope{manager: &a.background, workflow: status.ID}}
 	}
 	run := &backgroundRun{
-		id: status.ID, recipe: launch.recipe, server: a.backgroundServer(),
-		plan: launch.plan, runner: launch.runner, turn: launch.turn, done: make(chan struct{}),
+		id: status.ID, recipe: launch.recipe, server: host.backgroundServer(),
+		plan: launch.plan, runner: launch.runner, host: host, turn: launch.turn, done: make(chan struct{}),
 	}
 
 	m := &a.background
@@ -386,22 +411,23 @@ func openWorkflowFolder(runner *workflow.Runner, plan workflow.Plan) (workflow.R
 	return runner.Store.Create(plan, planHash, time.Now())
 }
 
-// startRunLocked starts run on a goroutine of its own, at the background width, under a context
-// that nothing but the manager cancels and that routes its gates and questions to the manager's
-// queue. The caller holds the manager's lock.
+// startRunLocked starts run on a goroutine of its own, at the background width its host states,
+// under a context that nothing but the manager cancels and that routes its gates and questions to
+// the manager's queue. The caller holds the manager's lock; it may be a previous workflow's
+// goroutine (endBackground), which is why nothing here reads this Agent beyond the manager.
 func (a *Agent) startRunLocked(run *backgroundRun) {
 	scope := backgroundScope{manager: &a.background, workflow: run.id}
 	ctx, cancel := context.WithCancel(withBackgroundPrompts(context.Background(), scope))
 	run.running, run.cancel = true, cancel
-	run.runner.Width = a.backgroundWidth()
+	run.runner.Width = run.host.backgroundWidth()
 	go a.driveBackground(ctx, run)
 }
 
-// driveBackground runs one background workflow to its end, reporting its phases as a blocking
-// workflow's are reported, then hands its server to the next in line. The finish note is held
-// before the end is reported, so a Driver that wakes on that event finds it.
+// driveBackground runs one background workflow to its end, reporting its phases through its host as
+// a blocking workflow's are reported, then hands its server to the next in line. The finish note is
+// held before the end is reported, so a Driver that wakes on that event finds it.
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
-	observer := a.observeWorkflow(run.runner, run.turn, run.plan.Name)
+	observer := run.host.observeWorkflow(run.runner, run.turn, run.plan.Name)
 	result, err := run.runner.Run(ctx, run.plan)
 	a.background.hold(finishNote(run.plan.Name, result, err))
 	observer.end(result, err)
@@ -449,6 +475,61 @@ func (a *Agent) stopAllBackground() {
 	// The whole set stops only when its session ends (Close, RestoreSession), so the notes held for
 	// that session — the ones these stops just left included — have no one left to read them.
 	a.background.takeNotes()
+}
+
+// backgroundHost is the snapshot of this top-level Agent a background workflow runs off (see the file
+// comment): a detached Agent that nothing mutates once it is returned. The idle-only fields — the
+// Config, the Upstream, the tool set, the profile's parsers, the context files, the journal and the
+// effort dialect — are copied as they stand; the lock-guarded live settings are read through their
+// accessors and frozen, all but the mode, which the host holds as a tighten-only view of this
+// Agent's (liveMode), the way a delegate holds its parent's. The tree's shared handles are shared.
+// The host owns no Upstream and no tool set (it never closes or recomposes either), runs no Turn of
+// its own — its conversation stays empty and its Turn lifecycle idle — and starts its own token
+// estimator, so a Step calibrating this Agent's never races it. Call it where the idle-only
+// mutators cannot run: at an idle boundary or inside a Step.
+func (a *Agent) backgroundHost() *Agent {
+	a.parallelAgentsMu.RLock()
+	parallelAgents, farWidth := a.parallelAgents, a.farWidth
+	a.parallelAgentsMu.RUnlock()
+	host := &Agent{
+		cfg:                a.cfg,
+		upstream:           a.upstream,
+		dial:               a.dial,
+		builtins:           a.builtinLadder(),
+		armed:              a.armed,
+		tools:              a.tools,
+		guards:             a.guards,
+		textParser:         a.textParser,
+		stripper:           a.stripper,
+		mode:               a.Mode(),
+		confineToWorkspace: a.ConfineToWorkspace(),
+		scratchDir:         a.ScratchDir(),
+		gen:                a.Generation(),
+		compaction:         a.compactionEnabled(),
+		prune:              a.pruneEnabled(),
+		contextFileNames:   a.contextFileList(),
+		parallelAgents:     parallelAgents,
+		farWidth:           farWidth,
+		delegation:         a.delegation,
+		seat:               a.subAgentsSeat(),
+		effortOverride:     a.effortOverrideValue(),
+		effortDialect:      a.effortDialect,
+		liveMode:           a.effectiveMode,
+		tokens:             apogeectx.NewTokenEstimator(),
+		prompts:            a.prompts,
+		now:                a.now,
+		contextFiles:       a.contextFiles,
+		journal:            a.journal,
+		undoNote:           a.undoNote,
+		consoles:           a.consoles,
+		runIDs:             a.runIDs,
+		tasks:              a.tasks,
+		tree:               a.tree,
+		depth:              a.depth,
+		cancelFoldBound:    a.cancelFoldBound,
+	}
+	host.turns = &turnLifecycle{conv: &host.conv, observer: host}
+	return host
 }
 
 // backgroundWidth is how many children a background workflow runs at once: the width of the server

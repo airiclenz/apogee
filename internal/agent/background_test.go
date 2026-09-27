@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -135,6 +136,55 @@ func TestBackground_RunsAtTheServerWidthMinusOne(t *testing.T) {
 
 			if peak := probe.peakInFlight(); peak != tc.wantPeak {
 				t.Errorf("peak children in flight = %d, want %d on a cap-%d server", peak, tc.wantPeak, tc.cap)
+			}
+		})
+	}
+}
+
+// TestBackground_TheIdleOnlyMutatorsDoNotRaceARunningWorkflow runs each idle-only mutator over and
+// over while a background workflow spawns its children one after another. Nothing orders the two
+// goroutines, so under -race a child built off the live Agent's fields is a reported race; built
+// off the launch-time host (backgroundHost) it is not, and every item still finishes on the Upstream
+// and tools the workflow started with.
+func TestBackground_TheIdleOnlyMutatorsDoNotRaceARunningWorkflow(t *testing.T) {
+	t.Parallel()
+
+	items := []string{"m1", "m2", "m3", "m4"}
+	for _, tc := range []struct {
+		name   string
+		mutate func(a *Agent) error
+	}{
+		{"Rebind", func(a *Agent) error { return a.Rebind(RebindSpec{Model: "moved-model"}) }},
+		{"SwitchUpstream", func(a *Agent) error { return a.SwitchUpstream(UpstreamSpec{Endpoint: "http://127.0.0.1:1"}) }},
+		{"SwapTools", func(a *Agent) error { return a.SwapTools(domain.NewToolRegistry()) }},
+		{"SetProfile", func(a *Agent) error { return a.SetProfile(domain.ModelProfile{}) }},
+		{"SetJournal", func(a *Agent) error { a.SetJournal(undo.New(), ""); return nil }},
+		{"reloadContextFiles", func(a *Agent) error { a.reloadContextFiles(); return nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := recipeConfig(t, newLockedSink(), sweepRecipe("sweep", items...))
+			cfg.ParallelAgents = 2 // a background width of 1: the children spawn one after another
+			up := &workflowResponder{}
+			for _, item := range items {
+				up.route("sweep "+item, nil, finishScript("f-"+item, item+" is fine"))
+			}
+			a := newBackgroundParent(t, cfg, up)
+			id := launchBackground(t, a, "sweep")
+
+			for range 20 {
+				if err := tc.mutate(a); err != nil {
+					t.Fatalf("%s while the workflow runs: %v", tc.name, err)
+				}
+			}
+			a.background.waitAll()
+
+			phases := itemPhases(workflowInfo(t, a, id))
+			for _, item := range items {
+				if phases[item] != workflow.PhaseDone {
+					t.Errorf("item phases = %v, want every item done on the launch-time host", phases)
+					break
+				}
 			}
 		})
 	}

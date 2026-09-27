@@ -158,17 +158,21 @@ func (a *Agent) wrapUpFinishDirective() string {
 // workflowSpawner runs one workflow's item children for the Agent that runs the workflow, under
 // the call that asked for it: turn and call stamp every child's phase events and head its block,
 // so a Driver brackets the children under that one call as it brackets a sub_agent's. prompts is
-// where a stage's `prompt:` file is read from; nil reads it from the workspace.
+// where a stage's `prompt:` file is read from; nil reads it from the workspace. children is the
+// registry a running child is addressable and stoppable through — the parent's own, except for a
+// background workflow, whose parent is a launch-time snapshot (backgroundHost) while its children
+// stay listed on the top-level Agent the Driver addresses.
 type workflowSpawner struct {
-	parent  *Agent
-	turn    int
-	call    domain.ToolCall
-	prompts fs.FS
+	parent   *Agent
+	turn     int
+	call     domain.ToolCall
+	prompts  fs.FS
+	children *childRegistry
 }
 
 // newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn.
 func (a *Agent) newWorkflowSpawner(turn int, call domain.ToolCall, prompts fs.FS) *workflowSpawner {
-	return &workflowSpawner{parent: a, turn: turn, call: call, prompts: prompts}
+	return &workflowSpawner{parent: a, turn: turn, call: call, prompts: prompts, children: &a.children}
 }
 
 var _ workflow.Spawner = (*workflowSpawner)(nil)
@@ -229,7 +233,7 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	sub.tools = withFinish(sub.tools, narrowed, tools.NewFinish(spec.Stage.Returns, item.accept))
 	var ending workflow.Ending
 	defer func() {
-		a.children.unregister(runID)
+		s.children.unregister(runID)
 		sub.reportUndelivered(sub.turns.index, sub.mailbox.close(), undeliveredWorkflowReason(ending))
 		_ = sub.Close()
 	}()
@@ -239,12 +243,12 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	}
 	// Addressable and stoppable while it runs, as a sub_agent child is (ADR 0063, ADR 0086 D4): a
 	// human's stop of one item ends that child as stopped, and the Runner restarts it on resume.
-	a.children.register(runID, sub)
+	s.children.register(runID, sub)
 	childCtx, stopRun := context.WithCancelCause(ctx)
 	defer stopRun(nil)
-	a.children.arm(runID, childCtx, stopRun)
+	s.children.arm(runID, childCtx, stopRun)
 	res, runErr := sub.Run(childCtx)
-	a.children.disarm(runID)
+	s.children.disarm(runID)
 
 	stopped := runErr == nil && (res.Status == domain.StatusCancelled || (res.Faulted && sub.capFold == "")) &&
 		(ctx.Err() != nil || errors.Is(context.Cause(childCtx), errDelegationStopped))
