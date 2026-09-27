@@ -33,7 +33,11 @@ flip a click on a large Tools umbrella records the same way; the consented move
 of a `servers:` entry's retired `sub-agents: true` flag onto `sub-agents-server:`; and the
 one-time migration of a config still written in the retired schema — which copies the file
 aside first and says so on startup. "Your edits are never overwritten" stands: nothing is
-rewritten at upgrade, and no line you wrote is touched at any other time.
+rewritten at upgrade, and no line you wrote is touched at any other time. Each of those writes
+holds `config.yaml.lock`, a small file apogee keeps beside `config.yaml` (created on the first
+write, never removed), so two apogee windows saving at the same moment both land their change
+rather than one silently undoing the other; a write that still cannot get the lock after five
+seconds is refused, naming the config, and changes nothing.
 
 **And that file is watched.** While apogee runs it polls `~/.apogee/config.yaml`, and a save
 applies itself to the session you are in — whoever wrote it: the `/settings` pane's `⏎` jump, a

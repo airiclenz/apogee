@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -121,6 +122,31 @@ func migrateLegacyConfig(path string, data []byte, now time.Time, mayMigrate boo
 	if lc.isEmpty() && !rc.needsRewrite() {
 		return data, "", nil
 	}
+	return rewriteLegacyConfig(path, data, lc, rc, now)
+}
+
+// rewriteLegacyConfig is migrateLegacyConfig's writing half, reached once the read has decided a fold
+// is due and allowed. It holds the config's sidecar lock (lockConfig, configsplice.go) from a re-read
+// of the file through the rename, like every other config writer: data was read before the lock was
+// taken, so the file is read again under it, and when another writer changed it in between the
+// decision is made afresh from what it says now — folding the stale bytes would rename away that
+// writer's edit. The re-decision runs after this hold is released, because the lock is not reentrant.
+func rewriteLegacyConfig(path string, data []byte, lc legacyFileConfig, rc legacyReactionsConfig,
+	now time.Time) ([]byte, string, error) {
+	release, err := lockConfig(path)
+	if err != nil {
+		return nil, "", migrationRefusal(path, lc, err)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		release()
+		return nil, "", migrationRefusal(path, lc, fmt.Errorf("the config could not be re-read (%v)", err))
+	}
+	if !bytes.Equal(current, data) {
+		release()
+		return migrateLegacyConfig(path, current, now, true)
+	}
+	defer release()
 
 	// Both folds are applied to the bytes BEFORE anything is written, so a file carrying two
 	// retired shapes is backed up once and rewritten once — two passes would leave the second
@@ -144,17 +170,10 @@ func migrateLegacyConfig(path string, data []byte, now time.Time, mayMigrate boo
 	// exactly as it found it — "no write at all" includes the copy.
 	backup, err := backUpConfig(path, data, now)
 	if err != nil {
-		if lc.isEmpty() {
-			return nil, "", reactionsRefusal(path, err)
-		}
-		return nil, "", legacyRefusal(path, lc, err)
+		return nil, "", migrationRefusal(path, lc, err)
 	}
 	if err := writeConfigAtomically(path, updated); err != nil {
-		wrapped := fmt.Errorf("the rewrite could not be written (%v)", err)
-		if lc.isEmpty() {
-			return nil, "", reactionsRefusal(path, wrapped)
-		}
-		return nil, "", legacyRefusal(path, lc, wrapped)
+		return nil, "", migrationRefusal(path, lc, fmt.Errorf("the rewrite could not be written (%v)", err))
 	}
 
 	var notes []string
@@ -165,6 +184,17 @@ func migrateLegacyConfig(path string, data []byte, now time.Time, mayMigrate boo
 		notes = append(notes, fold.note(path, backup))
 	}
 	return updated, strings.Join(notes, "\n"), nil
+}
+
+// migrationRefusal words a failure to WRITE a fold that was already made — a lock, a backup or a
+// rename that did not go through — as the refusal of the fold it belongs to: the legacy-keys one when
+// the file carried the retired quadruple, the reactions one otherwise. Either way nothing was
+// written, and the refusal carries the replacement the user can paste by hand.
+func migrationRefusal(path string, lc legacyFileConfig, err error) error {
+	if lc.isEmpty() {
+		return reactionsRefusal(path, err)
+	}
+	return legacyRefusal(path, lc, err)
 }
 
 // foldLegacyKeys builds the migrated file: the four legacy lines removed, the entry they describe

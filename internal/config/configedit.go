@@ -13,11 +13,11 @@ import (
 // ----------------------------------------------------------------------------
 //
 // Every edit apogee makes to config.yaml runs the same transaction, and it is written here once:
-// seed the file from the embedded template if it is not there yet and read it, splice the text the
-// caller located, re-parse the result, hold it against the config it started from, and replace the
-// file atomically with its mode preserved — or refuse, leaving the file exactly as it was. That is
-// configsplice.go's contract (ADR 0035) stated as a sequence rather than as a habit six writers
-// were each trusted to keep.
+// take the config's sidecar lock, seed the file from the embedded template if it is not there yet
+// and read it, splice the text the caller located, re-parse the result, hold it against the config
+// it started from, and replace the file atomically with its mode preserved — or refuse, leaving the
+// file exactly as it was. That is configsplice.go's contract (ADR 0035) stated as a sequence rather
+// than as a habit six writers were each trusted to keep.
 //
 // What a writer keeps for itself is a triple and nothing else: LOCATE — which key or entry it
 // addresses, and what the file already says about it; SPLICE — the text it cuts in;
@@ -49,8 +49,8 @@ import (
 type editSplice func(before fileConfig, data []byte) ([]byte, error)
 
 // editRead is the transaction's read step, named so a writer can bring its own. Almost every writer
-// wants ReadConfigForWrite (configsplice.go), which seeds an absent file from the embedded template
-// before reading it. The server-entry key-source edits want the read that deliberately does NOT seed
+// wants readConfigForWrite (configsplice.go), which seeds an absent file from the embedded template
+// before reading it. A read step runs inside the transaction's lock, so it must not take it again. The server-entry key-source edits want the read that deliberately does NOT seed
 // (readConfigForEntryEdit, configwrite_keysource.go): they address an entry the file must already
 // carry, and a seeded template names no server for them to rewrite.
 type editRead func(path string) ([]byte, error)
@@ -71,13 +71,24 @@ type editVerify func(before, after fileConfig, updated []byte) error
 // key cannot hold — belong before this call, where they are refused without the file having been
 // opened at all, so "refused" and "written" can never be the same outcome.
 func edit(path string, splice editSplice, verify editVerify) error {
-	return editFrom(path, ReadConfigForWrite, splice, verify)
+	return editFrom(path, readConfigForWrite, splice, verify)
 }
 
 // editFrom is edit with the read step the caller names — the seam a writer whose file must already
 // exist reaches for (editRead above). Everything after the read is the same transaction, so which
 // bytes an edit starts from is the only part of it a caller decides.
+//
+// The whole transaction — read through rename — runs under the config's sidecar lock (lockConfig,
+// configsplice.go), so a second writer, in this process or another, splices from the file this one
+// wrote rather than from the one they both read. A writer that cannot get the lock within its wait is
+// refused, naming the config, and nothing is written.
 func editFrom(path string, read editRead, splice editSplice, verify editVerify) error {
+	release, err := lockConfig(path)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	data, err := read(path)
 	if err != nil {
 		return err

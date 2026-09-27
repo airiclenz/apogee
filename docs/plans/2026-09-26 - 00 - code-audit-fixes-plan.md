@@ -378,7 +378,13 @@ NOTES (2026-09-27): consequential edit — internal/platform/doc.go: made necess
 **Acceptance:** `go test -race -count=1 ./internal/platform/ && GOOS=windows go vet ./internal/platform/`
 **Commit:** `feat(platform): blocking file-lock acquisition with a timeout`
 
-## 22. config.yaml writers serialise on a sidecar lock
+## 22. config.yaml writers serialise on a sidecar lock — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the lock helper is `lockConfig`/`lockConfigWithin` in configsplice.go (5 s via `platform.AcquireLockWait`), taken once in `editFrom` rather than by each writer, since every `configwrite*.go` writer and configmigrate.go's entry edit already reach the file through `edit`/`editFrom`; it creates the config's directory (0700) first because the lock file lives there, and an empty path takes no lock so the read step refuses it in its own words.
+NOTES (2026-09-27): the lock is not reentrant, so `ReadConfigForWrite` became the locked exported wrapper (its one outside caller, cmd/apogee/settingsedit.go's `$EDITOR` spec, keeps its signature) over a new unlocked `readConfigForWrite` that `edit` reads through inside the lock it already holds.
+NOTES (2026-09-27): `migrateLegacyConfig` receives bytes its caller read before any lock, so its writing half moved into `rewriteLegacyConfig`, which takes the lock only once a fold is due, re-reads the file under it and, when another writer changed it in between, releases and re-decides from the fresh bytes; the lock/backup/rename refusals share a new `migrationRefusal` helper. A read that needs no fold takes no lock.
+NOTES (2026-09-27): `SeedDefaultConfig` returns early without locking when config.yaml already exists (seedConfig re-checks under the lock), so an ordinary start writes nothing — not even the lock file — keeping the read-only home pledge `assertHomeHoldsOnlyConfig` pins in cmd/apogee.
+NOTES (2026-09-27): both `onlyFileIn` assertions now require exactly `config.yaml` + `config.yaml.lock` (via a shared `configAndItsLock`), pinning the never-removed invariant rather than merely tolerating the lock; new tests `TestConcurrentSaveConfigSettingLandsEveryKey` (7 goroutines x 5 rounds, fails with the lock stubbed out — verified) and `TestConfigLockTimeoutNamesTheConfig`.
 
 **What:** Depends on item 21. Fixes the audit's High "Two apogee processes writing config.yaml at once can silently drop one writer's edit".
 **Regression guard.** Update both `onlyFileIn` assertions (`internal/config/configedit_test.go:87`, `:177`) to also allow `config.yaml.lock` beside `config.yaml`, on both a successful seed-and-write and a refused edit. Keep the lock file un-removed on release: `internal/platform/lock.go:74-81` documents `AcquireLock`'s file as never removed, precisely what prevents the double-fire this item's `config.yaml.lock` sidecar relies on the same way — the item yields to that invariant rather than deleting the lock file to satisfy the old assertion.

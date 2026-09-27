@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +49,12 @@ func acceptEdit(fileConfig, fileConfig, []byte) error { return nil }
 // onlyFileIn lists the directory, so a case can say that the write left nothing beside the config —
 // writeConfigAtomically goes through a temp file in the same directory, and a temp file surviving
 // the transaction is a half-written config the next reader could find.
+// configAndItsLock is what a config directory holds once an edit has run, whether it wrote or
+// refused: the config and the sidecar lock every writer takes (lockConfig, configsplice.go). The lock
+// file is never removed — platform.AcquireLock's own invariant — so its presence is the expected
+// state, not a leftover.
+var configAndItsLock = []string{"config.yaml", "config.yaml" + configLockSuffix}
+
 func onlyFileIn(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -84,8 +93,8 @@ func TestEditSeedsAnAbsentConfig(t *testing.T) {
 	if !strings.HasPrefix(written, string(defaultConfigYAML)) || !strings.HasSuffix(written, "mode: plan\n") {
 		t.Errorf("the seeded config is not the template plus the splice:\n%s", written)
 	}
-	if got := onlyFileIn(t, dir); len(got) != 1 || got[0] != "config.yaml" {
-		t.Errorf("the directory holds %v, want the config alone", got)
+	if got := onlyFileIn(t, dir); !slices.Equal(got, configAndItsLock) {
+		t.Errorf("the directory holds %v, want the config and its lock alone", got)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -174,8 +183,8 @@ func TestEditRefusalsWriteNothing(t *testing.T) {
 			if got := readTestConfig(t, path); got != editTestConfig {
 				t.Errorf("a refused edit changed the file:\n%s", got)
 			}
-			if got := onlyFileIn(t, dir); len(got) != 1 || got[0] != "config.yaml" {
-				t.Errorf("a refused edit left %v beside the config", got)
+			if got := onlyFileIn(t, dir); !slices.Equal(got, configAndItsLock) {
+				t.Errorf("a refused edit left %v beside the config and its lock", got)
 			}
 		})
 	}
@@ -534,5 +543,75 @@ func TestSameApartFromTwoPaths(t *testing.T) {
 				t.Errorf(`sameApartFrom(..., "servers", "server") = %v, want %v`, got, tt.want)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Two writers at once
+// ----------------------------------------------------------------------------
+
+// Two apogee processes — two windows, a TUI and a `apogee config` — may each save a setting at the
+// same moment. Every writer reads the whole file, splices one key and renames the result into place,
+// so without the sidecar lock the later rename silently drops the earlier writer's key. The goroutines
+// here contend exactly as two processes do: each takes the lock on a descriptor of its own.
+func TestConcurrentSaveConfigSettingLandsEveryKey(t *testing.T) {
+	t.Parallel()
+	settings := map[string]string{
+		"mode":                 "auto",
+		"editor":               "code -w",
+		"context-window":       "32768",
+		"ui.spinner":           "glitter",
+		"present.port":         "8080",
+		"cursor-shape":         "underline",
+		"context-files.enable": "false",
+	}
+	const rounds = 5
+
+	for round := range rounds {
+		path := writeTestConfig(t, "# settings\n")
+		var wg sync.WaitGroup
+		errs := make(chan error, len(settings))
+		for key, value := range settings {
+			wg.Go(func() { errs <- SaveConfigSetting(path, key, value) })
+		}
+		wg.Wait()
+		close(errs)
+
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: a concurrent save failed: %v", round, err)
+			}
+		}
+		written := []byte(readTestConfig(t, path))
+		for key, want := range settings {
+			got, isSet, err := scalarAtPath(written, key)
+			if err != nil || !isSet || got != want {
+				t.Errorf("round %d: %s reads %q (set %v, err %v), want %q; file:\n%s",
+					round, key, got, isSet, err, want, written)
+			}
+		}
+	}
+}
+
+// A writer that cannot get the lock in time is refused rather than let through: an edit that went
+// ahead anyway is exactly the lost write the lock exists to prevent. The refusal names the config,
+// not only the lock file, because the config is what the user knows they were changing.
+func TestConfigLockTimeoutNamesTheConfig(t *testing.T) {
+	t.Parallel()
+	path := writeTestConfig(t, editTestConfig)
+	holder, err := lockConfigWithin(path, 0)
+	if err != nil {
+		t.Fatalf("take the lock: %v", err)
+	}
+	defer holder()
+
+	release, err := lockConfigWithin(path, 20*time.Millisecond)
+
+	if err == nil {
+		release()
+		t.Fatal("a second writer took a held config lock")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("refusal = %v, want it to name the config %q", err, path)
 	}
 }

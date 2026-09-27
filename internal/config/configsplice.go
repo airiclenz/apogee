@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // ----------------------------------------------------------------------------
@@ -27,7 +30,8 @@ import (
 //
 // What lives here is the part of that write which belongs to no one writer: read the file (seeding
 // it from the template first), parse it for positions, find a key in the node tree, cut and rejoin
-// the text around it, verify the result against the original, and put it on disk atomically. What
+// the text around it, verify the result against the original, and put it on disk atomically — all of
+// it under the sidecar lock (lockConfig) that keeps two processes' writes from interleaving. What
 // each writer keeps for itself is its ADDRESSING — which keys it may touch at all, and how it names
 // the place one of them sits in — and the rendering of the value. Nothing in this file knows the
 // name of a single config key.
@@ -228,17 +232,82 @@ func writeConfigAtomically(path string, data []byte) error {
 	return nil
 }
 
+const (
+	// configLockSuffix names the sidecar lock beside the config: config.yaml.lock. Like every
+	// platform lock file it is never removed (platform.AcquireLock), so it outlives the write.
+	configLockSuffix = ".lock"
+
+	// configLockTimeout bounds how long a writer queues behind another. A holder keeps the lock for
+	// one read-splice-rename — milliseconds — so a writer still waiting after this long is facing a
+	// stuck holder, and refusing is better than blocking the surface that asked for the write.
+	configLockTimeout = 5 * time.Second
+)
+
+// lockConfig takes the sidecar lock that serialises every write to the config at path, waiting up
+// to configLockTimeout for another holder to finish, and returns its release. Every writer holds it
+// from its read of the file through the rename that replaces it — editFrom, the legacy fold
+// (configmigrate.go) and the template seed (defaults.go) — because each of them rewrites the WHOLE
+// file from what it read: two writers interleaving would each rename in a file missing the other's
+// change, and the later rename would silently drop the earlier one's edit. The lock is advisory and
+// per OS descriptor, so it serialises two goroutines of one process exactly as it does two processes.
+//
+// The config's directory is created first when absent (owner-only, as seedConfig creates it), since
+// the lock file lives in it. An empty path names no file to guard, so it takes no lock and returns a
+// release that does nothing: the read step that follows refuses it in its own words.
+//
+// The lock is NOT reentrant: a holder that calls anything here which locks again waits out its own
+// hold and is refused. Hence the unlocked readConfigForWrite and seedConfig the locked paths call.
+//
+// Errors: a refusal naming the config path (wrapping the *platform.LockHeldError) when another
+// holder still has the lock once the wait runs out; a wrapped error naming the path when the
+// directory or the lock file could not be made.
+func lockConfig(path string) (release func(), err error) {
+	return lockConfigWithin(path, configLockTimeout)
+}
+
+// lockConfigWithin is lockConfig with the wait the caller names — the seam a test uses to meet a
+// held lock without sitting out the full timeout.
+func lockConfigWithin(path string, timeout time.Duration) (release func(), err error) {
+	if path == "" {
+		return func() {}, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), configDirPerm); err != nil {
+		return nil, fmt.Errorf("apogee: create config directory: %w", err)
+	}
+	release, err = platform.AcquireLockWait(path+configLockSuffix, timeout)
+	var held *platform.LockHeldError
+	switch {
+	case errors.As(err, &held):
+		return nil, fmt.Errorf("apogee: config %q is still being written by another process after %s; "+
+			"try again: %w", path, timeout, err)
+	case err != nil:
+		return nil, fmt.Errorf("apogee: lock config %q: %w", path, err)
+	}
+	return release, nil
+}
+
 // ReadConfigForWrite seeds the config from the embedded template if it is not there yet and reads
-// it back — the state the setting writers splice from: SaveConfigSetting and ResetConfigSetting
+// it back, under the sidecar lock (lockConfig) so the seed cannot interleave with another writer.
+// Its one caller does not splice: externalEdit.spec (cmd/apogee/settingsedit.go) reads for the seed
+// and for the bytes it locates the key's line in, so the file the human is about to open in $EDITOR
+// exists and the return trip's baseline — taken after the seed — does not report the whole template
+// back as an edit they made. The splicing writers read through readConfigForWrite inside the lock
+// editFrom already holds.
+func ReadConfigForWrite(path string) ([]byte, error) {
+	release, err := lockConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return readConfigForWrite(path)
+}
+
+// readConfigForWrite is ReadConfigForWrite without the lock, for a caller already holding it — the
+// state the setting writers splice from: SaveConfigSetting and ResetConfigSetting
 // (configwrite_scalar.go) and SaveServerEntrySetting (configwrite.go). The server-entry key-source
 // edits are the one exception among the splicers: they start from readConfigForEntryEdit
 // (configwrite_keysource.go), which deliberately does not seed.
-//
-// One caller does not splice at all, and completes the list: externalEdit.spec
-// (cmd/apogee/settingsedit.go) reads for the seed and for the bytes it locates the key's line in,
-// so the file the human is about to open in $EDITOR exists and the return trip's baseline — taken
-// after the seed — does not report the whole template back as an edit they made.
-func ReadConfigForWrite(path string) ([]byte, error) {
+func readConfigForWrite(path string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("apogee: cannot write a setting: no config file path is known")
 	}
