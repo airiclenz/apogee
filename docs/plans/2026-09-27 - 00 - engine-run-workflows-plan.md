@@ -354,7 +354,17 @@ NOTES (2026-09-27): consequential edit — internal/workflow/doc.go: made necess
 **Acceptance:** `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): pick, script, ask and repeat stages`
 
-## 11. Result lines and the report
+## 11. Result lines and the report — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): `Store.WriteItems(id, Result)` returns `(string, error)`, where the string is items.md's absolute path. `Result` gains `Listing`, which is that path. `Run` sets it after `setWorkflowPhase` on both a done run and a stopped one. Format stays pure: it prints `items:` only when there are more than 40 items and `Listing` is set, and `report:` only when `Result.Report` is set. The merge sets `Report` only once it has found report.md on disk.
+
+NOTES (2026-09-27): shape details the item left open. Items are numbered from 1 within each fanout stage (matching ItemEvent.Index). When a Result has more than one fanout, each fanout gets a `<stage>:` header and its own totals line. The 40-item cap counts every fanout's items together. An unfinished item reads `— stopped|pending — no receipt`. Typed fields are listed in key order. A list is joined with commas. A text value is quoted when it is empty or contains a space or `=`. A float64 read back from JSON prints as written.
+
+NOTES (2026-09-27): additions to the ratified shape, all only when non-zero or set. Each item line ends with ` verdict=<v>`. The totals line gains `· unfinished U`, `· resumed R`, and `· confirmed X · refuted Y · unclear Z` (the verdict tallies are the Goal's "verdict tallies when verified", placed on the same totals line).
+
+NOTES (2026-09-27): each note line reads `<kind> <stage>: …`, e.g. `merge report: no report — <ReportMissing>`, `ask scope: ok — took the default no answer=no (default taken: no one to ask)`, `fanout deep: skipped: …`. The kind comes first so that a stage named `report` or `items` cannot be mistaken for the `report:` or `items:` line. A stopped Result starts with `stopped by the user: K of N done`. K and N count only the fanout items of stages that ran.
+
+NOTES (2026-09-27): items.md starts with `# workflow <id>`. Under it, each fanout has a `## <stage>` heading, then every item line followed by `   output: <path>`, then its totals. The note lines and `report:` come after the last fanout.
 
 **What:** Depends on items 9, 10.
 **Goal:** `workflow.Format(Result)` renders the ratified result shape — one line per item `#<n> <item> — <status> — <summary>[ k=v…]`, a totals line `items N · ok A · partial B · blocked C`, verdict tallies when verified, `report: <path>` — and past 40 items lists only non-ok lines plus `items: <path>` to a full `items.md`.

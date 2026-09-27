@@ -161,7 +161,8 @@ type Runner struct {
 }
 
 // Result is a run's outcome: the workflow's id and folder, its final phase — done, or stopped when
-// a cancel ended it — every stage's items and tallies in plan order, and the merge stage's report.
+// a cancel ended it — every stage's items and tallies in plan order, the merge stage's report, and
+// the full item listing. Format renders it as the lines the parent reads.
 type Result struct {
 	ID     string
 	Dir    string
@@ -173,6 +174,9 @@ type Result struct {
 	// ReportMissing says why a merge stage that ran left no report — its child blocked, stopped, or
 	// claimed a report it never wrote. The items' results stand either way.
 	ReportMissing string
+	// Listing is the path of items.md, the full item listing the Runner writes as the run ends;
+	// Format points to it once there are too many items to list.
+	Listing string
 }
 
 // Stopped reports whether a cancel ended the run before every item finished.
@@ -228,7 +232,8 @@ type Tally struct {
 // Run runs plan. It validates the plan, expands every fanout's items, and resumes the newest
 // workflow folder with the same PlanHash — skipping each item whose stored receipt is ok or
 // partial — or creates a new one. A cancelled ctx stops the running children, keeps the finished
-// items' receipts, and returns a Result whose Phase is PhaseStopped. The error is for a run that
+// items' receipts, and returns a Result whose Phase is PhaseStopped. Either way the run ends by
+// writing items.md (Store.WriteItems) into the folder. The error is for a run that
 // could not proceed: an invalid plan, an unreadable item source, a store that cannot be written.
 func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
@@ -277,6 +282,11 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if err := state.setWorkflowPhase(result.Phase); err != nil {
 		return result, err
 	}
+	listing, err := r.Store.WriteItems(result.ID, result)
+	if err != nil {
+		return result, err
+	}
+	result.Listing = listing
 	return result, nil
 }
 

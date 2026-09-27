@@ -27,6 +27,7 @@ const (
 	itemsDirName   = "items"
 	receiptName    = "receipt.json"
 	transcriptName = "transcript.jsonl"
+	listingName    = "items.md"
 )
 
 // Permissions: the folder holds the model's working notes and a child's whole conversation, so it
@@ -291,6 +292,16 @@ func (s *Store) WriteFile(id, name string, data []byte) error {
 		return err
 	}
 	return atomicWrite(target, data)
+}
+
+// WriteItems atomically writes items.md in the workflow's folder — the full listing of result,
+// every item line with its output path (see Format) — and returns its absolute path. The Runner
+// writes it as a run ends, stopped or done, so Format's `items:` line past 40 items points at it.
+func (s *Store) WriteItems(id string, result Result) (string, error) {
+	if err := s.WriteFile(id, listingName, []byte(renderListing(result))); err != nil {
+		return "", err
+	}
+	return s.Path(id, listingName)
 }
 
 // Find returns the newest workflow whose status.json carries planHash — the workflow a re-issue

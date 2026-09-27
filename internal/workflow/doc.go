@@ -24,8 +24,9 @@
 // (`**` included), a file's non-blank `lines:`, or a `split:` directory cut into contiguous parts
 // sized to a child's context window, batched N per child.
 // store.go is Store, ItemKey and PlanHash: one workflow's folder under `<scratch>/workflows/` —
-// plan.json, status.json, items/<key>/ with receipt and transcript, stage outputs — written
-// atomically, its items keyed by content so a re-issue found by PlanHash skips finished work.
+// plan.json, status.json, items/<key>/ with receipt and transcript, stage outputs, the items.md
+// listing a run ends with — written atomically, its items keyed by content so a re-issue found by
+// PlanHash skips finished work.
 // runner.go is Runner.Run and the Spawner seam the agent implements: a fanout stage's items run as
 // fresh children at most Width at a time, a capped child continued (ItemSpec.Prior) and a faulted
 // or receipt-less one retried within configured bounds, each receipt stored as it lands, so a
@@ -38,5 +39,8 @@
 // folder file into the next fanout's items, script runs through the ScriptRunner seam, ask through
 // the Asker seam (its default taken when there is none), and repeat re-runs a stage in rounds keyed
 // apart; any stage's `when:`, read off earlier stages, skips it.
+// format.go is Format: the result lines the parent reads — one `#<n> <item> — <status> — <summary>`
+// line per item, a totals line, the stages' notes, `report:` — listing only the non-ok items past
+// 40 and pointing to the full items.md the Store writes as the run ends.
 // And doc.go this map.
 package workflow
