@@ -2068,6 +2068,65 @@ func TestRunViewChildDeliveryClearsTheBand(t *testing.T) {
 	}
 }
 
+// TestRunViewChildDeliveryMatchesTheRunIDNotTheCallID pins the band's reconciliation key (ADR 0086):
+// two sibling delegations of one reply share the spawn call id "s1", each has a message staged, and
+// the delivery report for the SECOND run clears that run's row alone — the first sibling's row,
+// older and matching on call id, stays standing until its own report arrives.
+func TestRunViewChildDeliveryMatchesTheRunIDNotTheCallID(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+
+	first := stampedDelegation(&m.transcript, runRef{}, "s1", "run-a", "scout-a")
+	stampedPhase(&m.transcript, first, domain.SubAgentStarted, "")
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	m.input.SetValue("for scout a")
+	m = step(t, m, keyEnter())
+	m = step(t, m, keyEsc())
+	if m.inRunView() {
+		t.Fatal("setup: esc did not back out of the first delegation's view")
+	}
+
+	second := stampedDelegation(&m.transcript, runRef{}, "s1", "run-b", "scout-b")
+	stampedPhase(&m.transcript, second, domain.SubAgentStarted, "")
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	m.input.SetValue("for scout b")
+	m = step(t, m, keyEnter())
+
+	got := eng.childInterjections()
+	if len(got) != 2 || got[0].runID != "run-a" || got[1].runID != "run-b" {
+		t.Fatalf("setup: InterjectChild calls = %+v; want one to run-a, then one to run-b", got)
+	}
+	if n := len(m.pendingInterjections); n != 2 {
+		t.Fatalf("setup: staged rows = %d; want one per sibling", n)
+	}
+
+	deliver := func(m Model, run runRef, text string) Model {
+		return step(t, m, eventMsg{Event: domain.ChildInterjectionEvent{
+			EventBase: stampedBase(run),
+			Input:     domain.UserInput{Text: text},
+			Landed:    true,
+		}})
+	}
+
+	m = deliver(m, second, "for scout b")
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d after run-b's report; want run-a's row alone", n)
+	}
+	if row := m.pendingInterjections[0]; row.runID != "run-a" || row.input.Text != "for scout a" {
+		t.Errorf("standing row = {runID:%q text:%q}; run-b's report cleared its sibling's row", row.runID, row.input.Text)
+	}
+
+	m = deliver(m, first, "for scout a")
+	if n := len(m.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d after both reports; each sibling's report clears its own row", n)
+	}
+}
+
 // TestRunViewChildGoneKeepsTheDraft is the race the engine reports: the child ended between the
 // frame that invited the message and the ⏎ that sent it. Nothing was queued, so nothing is shown as
 // queued — and the line stays in the box, because a draft silently swallowed there is the one

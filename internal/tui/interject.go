@@ -16,7 +16,7 @@ import (
 
 // queuedInterjection is one message the human typed while the model was working, staged for
 // delivery into the running Exchange — or, inside a run view, one addressed to the child on screen
-// (ADR 0063). It carries five things because five different consumers need different halves of it:
+// (ADR 0063). It carries seven things because different consumers need different halves of it:
 //
 //   - id names the row across the two copies of the queue — the Model's display slice and the
 //     mailbox the worker drains — so the delivery fold can remove exactly the rows that landed
@@ -41,6 +41,11 @@ import (
 //     spawn can collide with a sibling's, so the band's label is resolved from run instead
 //     ([Model.runLabel]). Zero on a row for the human's own conversation, exactly as spawn is empty
 //     there.
+//   - runID is the run id the child was addressed by — the head's, read at staging exactly as
+//     [Engine.InterjectChild] was called with it — and the key the delivery fold matches a child's
+//     report on ([Model.foldChildDelivery]). It is kept apart from run.id because a view opened on
+//     a redirected head holds a ref whose id is still "" after the head adopts one at its started
+//     phase, and the band's label is resolved from run, not from this.
 //
 // A child row therefore only ever waits out the window between the ⏎ and the child's own account
 // of it, and that window closes strictly inside the Exchange: the delegation's scope reports every
@@ -54,6 +59,7 @@ type queuedInterjection struct {
 	skillSpans []skillSpan
 	spawn      string
 	run        runRef
+	runID      string
 }
 
 // interjectBox is the per-Exchange mailbox: the Update goroutine pushes staged rows into it and
@@ -384,6 +390,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 		skillSpans: parsed.skillSpans,
 		spawn:      spawn,
 		run:        run,
+		runID:      head.spawnRunID,
 	})
 	m.spendSkillHints() // the line has left the human's hands: the suggestion band is spent as at idle
 	m.promptEditor.reset()
@@ -425,9 +432,14 @@ func (m Model) refuseChildMessage(note string) (tea.Model, tea.Cmd) {
 // event itself carries no row id (the engine has no use for one — the wire-silent boundary,
 // ADR 0031). What the event says about the message's fate is the transcript's business, not the
 // band's: landed or not, the row is accounted for and leaves.
+//
+// The run is named by its RUN ID, the one address sibling delegations never share (ADR 0086): two
+// sub_agent calls of one reply can carry the same call id, and matching on it would clear the
+// wrong sibling's row. The call id is the fallback only where a run id is missing on either side
+// ([childDeliveryMatches]).
 func (m *Model) foldChildDelivery(e domain.ChildInterjectionEvent) {
 	for i, row := range m.pendingInterjections {
-		if row.spawn != e.CallID {
+		if !childDeliveryMatches(row, e) {
 			continue
 		}
 		// A fresh slice rather than an in-place splice: the Model is value-copied on every Update
@@ -439,6 +451,19 @@ func (m *Model) foldChildDelivery(e domain.ChildInterjectionEvent) {
 		m.pendingInterjections = kept
 		return
 	}
+}
+
+// childDeliveryMatches reports whether e is the delivery report for the child row: the run ids
+// agree when both sides carry one, and only when either is empty does the spawn call id decide.
+// A row for the human's own conversation (no spawn) never matches.
+func childDeliveryMatches(row queuedInterjection, e domain.ChildInterjectionEvent) bool {
+	if row.spawn == "" {
+		return false
+	}
+	if row.runID != "" && e.RunID != "" {
+		return row.runID == e.RunID
+	}
+	return row.spawn == e.CallID
 }
 
 // popInterjection lifts the NEWEST staged row back into the editor, reporting whether it did — and

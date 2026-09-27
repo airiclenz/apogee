@@ -479,7 +479,9 @@ NOTES (2026-09-27): new test TestProbeModelRefusesAKeyCommandInsideTheWorkspace 
 **Acceptance:** `go test -race -count=1 -run ProbeModel ./cmd/apogee/ && go test -race -count=1 ./internal/config/ && ! grep -q "refuses nothing" docs/manual/configuration.md`
 **Commit:** `fix(probe): probe model fences api-key-cmd against the workspace`
 
-## 29. Child delivery rows match by run id
+## 29. Child delivery rows match by run id — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the match lives in a new `childDeliveryMatches` helper, which also refuses a row with no spawn call id (a top-level row) outright, so an event arriving with an empty call id can never clear the human's own queued message through the call-id fallback.
 
 **What:** Fixes the audit's Medium "Concurrent sibling sub-agents sharing a call id can have the wrong delegation status row updated".
 **Goal:** `foldChildDelivery` updates only the `pendingInterjections` row whose stored run id equals the event's `RunID`, falling back to call id only when either id is empty; two siblings sharing a call id each clear their own row.
