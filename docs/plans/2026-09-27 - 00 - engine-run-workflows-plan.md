@@ -684,7 +684,17 @@ NOTES (2026-09-27): improvement idea — a re-run with the same scope and inputs
 **Acceptance:** `go test -race -count=1 ./internal/skills/ && go test -race -count=1 -run TestShippedSkillAnnouncesOnlyReadableAddresses ./internal/agent/ && go test -race -count=1 -run 'TestE2EHostileSurfacesKeepTheirOwnRows|TestE2ESmokeInProcess' ./cmd/apogee/`
 **Commit:** `feat(skills): the shipped audit recipe skeleton`
 
-## 24. The audit recipe's prompts
+## 24. The audit recipe's prompts — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): a brief renders only {item} and {out} and cannot include another file, and a prompt body gets no {{SKILL_DIR}} expansion, so a lens child could not reach `_shared.md` on its own. `_shared.md` is the canonical copy of the shared lens rules and every lens-*.md carries it verbatim at its end (so the brief closes on the finish section); the new test fails when a lens copy drifts from `_shared.md`.
+
+NOTES (2026-09-27): `_report-format.md` was folded into report.md (its only reader), and the source's all-lenses.md (small-scope single agent) and chat-summary OUT file were not ported: the recipe always fans the lenses, and the engine's result lines plus `report:` path replace the chat summary.
+
+NOTES (2026-09-27): children find the workflow folder by their item: a lens's {item} is a part folder (bundle.md and tools.md one folder up), rollup and enumerate take a group folder, ground-truth and machine-checks the workflow folder, the report the folder {out} is in, and verify derives it from {out} (`<workflow folder>/items/<key>/output.md`), since its {item} is the claim line itself. Enumerate hands claims back as `<severity> | <file:line> | <claim> | <source ids>` in the `claims` list field and writes the same lines to claims.md.
+
+NOTES (2026-09-27): the step budget is restated for apogee: aim to be done at about half the child step limit (80 steps by default, delegate-max-steps), with the draft of {out} due after the third scope file or the tenth step; the capped wrap-up turn allows only finish, so the write-first rule stands.
+
+NOTES (2026-09-27): SKILL.md gains one body paragraph naming `{{SKILL_DIR}}/prompts/_shared.md` and the finish hand-back; TestShippedSkillAnnouncesOnlyReadableAddresses reads the new address through the shipped mount and passes. The recipe's stages and `returns:` are unchanged from item 23.
 
 **What:** Depends on item 23.
 **Goal:** `internal/skills/shipped/audit/prompts/` holds shared rules, ground-truth, machine-checks, the five lenses, rollup, claim enumeration, verify and report prompts, each ending in a `finish` call with the stage's receipt fields instead of a text receipt; no prompt names a Claude Code tool or a `~/.claude` path.

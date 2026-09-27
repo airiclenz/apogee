@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -1160,6 +1161,103 @@ func TestShippedAuditRecipeLoads(t *testing.T) {
 	if last := stages[len(stages)-1]; last.Kind != workflow.StageMerge {
 		t.Errorf("the last stage = %+v, want the report merge", last)
 	}
+}
+
+// auditPromptsDir is the shipped audit skill's prompt folder inside the embedded tree.
+const auditPromptsDir = shippedDir + "/audit/prompts"
+
+// auditForbiddenPromptText is what an audit prompt ported from a coordinator-driven host must no
+// longer carry: that host's delegation and task tools, its six-line text receipt, and its home
+// skill folder. A workflow child hands its receipt back through `finish`, and the engine — not the
+// child — spawns and stages.
+var auditForbiddenPromptText = []string{"Agent(", "Task(", "TodoWrite", "subagent_type", "STATUS:", "~/.claude"}
+
+// The shipped audit recipe's stage prompts (ADR 0087 D6): every prompt a stage names is in the
+// embedded skill folder and ends on its receipt handed back through `finish`; every lens brief
+// carries the shared rules verbatim, since a brief renders only {item} and {out} and cannot
+// include another file; and no prompt in the folder carries another host's tools, text receipt or
+// home path.
+func TestShippedAuditPromptsAreEmbeddedAndFinishShaped(t *testing.T) {
+	t.Parallel()
+	cat, _ := Load(Sources{UseShippedSkills: true})
+	sk, ok := cat.Get("audit")
+	if !ok || sk.Recipe == nil {
+		t.Fatalf("the shipped audit skill did not load with its recipe: %+v", cat.Skipped())
+	}
+
+	folder := ShippedMountPrefix + "audit/"
+	var named []string
+	for _, stage := range sk.Recipe.Stages {
+		if stage.Prompt == "" {
+			continue
+		}
+		rel, under := strings.CutPrefix(stage.Prompt, folder)
+		if !under {
+			t.Errorf("stage %q names prompt %q, outside the skill's own folder %s", stage.Name, stage.Prompt, folder)
+			continue
+		}
+		body, err := fs.ReadFile(shippedFiles, shippedDir+"/audit/"+rel)
+		if err != nil {
+			t.Errorf("stage %q names prompt %s, which the embedded skill folder does not carry: %v", stage.Name, rel, err)
+			continue
+		}
+		named = append(named, path.Base(rel))
+		if heading, tail := lastHeading(string(body)); !strings.Contains(heading, "Finish") ||
+			!strings.Contains(tail, "call `finish`") {
+			t.Errorf("prompt %s does not end on its finish call; its last section is %q", rel, heading)
+		}
+	}
+	wantNamed := []string{
+		"enumerate.md", "ground-truth.md", "lens-concurrency.md", "lens-correctness.md", "lens-intent.md",
+		"lens-security.md", "lens-tests.md", "machine-checks.md", "report.md", "rollup.md", "verify.md",
+	}
+	slices.Sort(named)
+	if !slices.Equal(named, wantNamed) {
+		t.Errorf("the recipe names prompts %v, want %v", named, wantNamed)
+	}
+
+	shared, err := fs.ReadFile(shippedFiles, auditPromptsDir+"/_shared.md")
+	if err != nil {
+		t.Fatalf("the shared lens rules are not embedded: %v", err)
+	}
+	entries, err := fs.ReadDir(shippedFiles, auditPromptsDir)
+	if err != nil {
+		t.Fatalf("read the embedded prompt folder: %v", err)
+	}
+	lenses := 0
+	for _, entry := range entries {
+		body, err := fs.ReadFile(shippedFiles, auditPromptsDir+"/"+entry.Name())
+		if err != nil {
+			t.Fatalf("read prompt %s: %v", entry.Name(), err)
+		}
+		for _, forbidden := range auditForbiddenPromptText {
+			if strings.Contains(string(body), forbidden) {
+				t.Errorf("prompt %s carries %q, which no workflow child's brief may name", entry.Name(), forbidden)
+			}
+		}
+		if strings.HasPrefix(entry.Name(), "lens-") {
+			lenses++
+			if !strings.Contains(string(body), string(shared)) {
+				t.Errorf("lens prompt %s does not carry _shared.md verbatim; copy the shared rules into it again", entry.Name())
+			}
+		}
+	}
+	if lenses != 5 {
+		t.Errorf("the prompt folder holds %d lens briefs, want the five lenses", lenses)
+	}
+}
+
+// lastHeading returns a markdown body's last heading line (any level) and the text after it. A
+// heading-shaped line inside a fenced example still counts, so a prompt must close on its own
+// section, after every example block.
+func lastHeading(body string) (heading, tail string) {
+	lines := strings.Split(body, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		if strings.HasPrefix(lines[index], "#") {
+			return lines[index], strings.Join(lines[index+1:], "\n")
+		}
+	}
+	return "", body
 }
 
 // The fixture tree the split tests cut: 360 source lines over three folders, one test file, one

@@ -208,7 +208,11 @@ lockfiles, changelogs, vendored or generated code, fixtures and build output are
 8. **report** — one child deduplicates across lenses, drops what was refuted and the noise,
    keeps about twenty findings, and writes the report the workflow's `report:` line names.
 
-Each stage's brief is the `prompt:` file the recipe names beside it. Everything a run writes stays
+Each stage's brief is the `prompt:` file the recipe names beside it, and each ends by handing the
+stage's receipt back through `finish`. The five lens briefs share one set of rules — the severity
+ladder, the finding budget, the findings format and the receipt — kept in
+`{{SKILL_DIR}}/prompts/_shared.md` and carried in full by every lens brief, so a lens child reads
+one brief and nothing else before it starts. Everything a run writes stays
 in its workflow folder, so a run interrupted part-way resumes where it stopped when started again with the same
 scope and focus.
 
