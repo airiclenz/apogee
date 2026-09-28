@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -392,9 +393,28 @@ func startedUnder(call string) domain.WorkflowPhaseEvent {
 	return e
 }
 
-// feedTwoItems folds two item runs of the Workflow under call, interleaved as siblings running at
-// once arrive, with a host note landing between them mid-run.
+// itemStartedUnder is one item run of testWorkflowID's stage starting under call: the item child's
+// run id, its label, its place in the stage and the attempt it is, in the stage's first round.
+func itemStartedUnder(call, runID, stage, item string, index, attempt int) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowItemStarted)
+	e.Call, e.Run, e.Stage, e.Item, e.Index, e.Round, e.Attempt = call, runID, stage, item, index, 1, attempt
+	return e
+}
+
+// itemFinishedUnder is that item ending on a receipt, naming the run of its latest attempt.
+func itemFinishedUnder(call, runID, stage, item string, index int, status, summary string) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowItemFinished)
+	e.Call, e.Run, e.Stage, e.Item, e.Index, e.Round = call, runID, stage, item, index, 1
+	e.Receipt = domain.WorkflowReceipt{Status: status, Summary: summary}
+	return e
+}
+
+// feedTwoItems folds two item runs of the Workflow under call — alpha (run.1) and beta (run.2),
+// each started before its child says a thing — interleaved as siblings running at once arrive, with
+// a host note landing between them mid-run.
 func feedTwoItems(tr *transcript, call string) {
+	tr.apply(itemStartedUnder(call, "run.1", "items", "alpha", 0, 1))
+	tr.apply(itemStartedUnder(call, "run.2", "items", "beta", 1, 1))
 	itemSays(tr, call, "run.1", "alpha first")
 	itemSays(tr, call, "run.2", "beta first")
 	tr.addNote("a host note mid-run")
@@ -450,9 +470,62 @@ func roundTrip(t *testing.T, tr *transcript) []entry {
 	return entries
 }
 
-// A Recipe launch's item runs nest under its workflow block — live and after a save and reopen —
-// in the order each run's entries arrived, and the block, which never collapses, paints them.
-func TestWorkflowBlockHeadsItsItemRuns(t *testing.T) {
+// assertItemRunsBehindTheirHeads fails unless each of feedTwoItems' item runs has its own run head
+// seated beside the block at head — at its depth, under call, heading the run by its id — with the
+// run's entries inside that head's span in the order they arrived.
+func assertItemRunsBehindTheirHeads(t *testing.T, entries []entry, head int, call string) {
+	t.Helper()
+	for runID, texts := range map[string][]string{
+		"run.1": {"alpha first", "alpha second"},
+		"run.2": {"beta first", "beta second"},
+	} {
+		at := workflowItemHeadAt(entries, runID)
+		if at < 0 {
+			t.Fatalf("no item head for %s in %+v", runID, entries)
+		}
+		item := entries[at]
+		if item.depth != entries[head].depth || item.callID != call || item.run() != entries[head].run() {
+			t.Errorf("%s's head = depth %d, call %q, run %+v; want the block's depth %d, call %q and run %+v",
+				runID, item.depth, item.callID, item.run(), entries[head].depth, call, entries[head].run())
+		}
+		if at <= head || at > head+subAgentSpan(entries, head) {
+			t.Errorf("%s's head at %d is outside the block's span (%d + %d)", runID, at, head, subAgentSpan(entries, head))
+		}
+		last := at
+		for _, text := range texts {
+			i := slices.IndexFunc(entries, func(e entry) bool { return e.text == text })
+			if i <= last || i > at+subAgentSpan(entries, at) {
+				t.Errorf("%q at %d is out of order or outside %s's span (%d + %d)", text, i, runID, at, subAgentSpan(entries, at))
+			}
+			last = i
+		}
+	}
+}
+
+// assertItemRowsOnly fails unless the paint shows no item child's own output and paints each item
+// as a row wearing ▶ — the run it heads is read in its own view.
+func assertItemRowsOnly(t *testing.T, painted string, labels ...string) {
+	t.Helper()
+	for _, text := range []string{"alpha first", "beta first", "beta second", "alpha second", "alpha.go"} {
+		if strings.Contains(painted, text) {
+			t.Errorf("an item child's output %q is painted at the top level:\n%s", text, painted)
+		}
+	}
+	lines := strings.Split(painted, "\n")
+	for _, label := range labels {
+		if !slices.ContainsFunc(lines, func(ln string) bool {
+			return strings.Contains(ln, " "+label+" ") && strings.Contains(ln, glyphCollapsed)
+		}) {
+			t.Errorf("item %q paints no row wearing %s:\n%s", label, glyphCollapsed, painted)
+		}
+	}
+}
+
+// A Recipe launch's item runs each get a run head of their own inside its workflow block's span —
+// live and after a save and reopen — with the item's work behind it, and the transcript paints one
+// row per item rather than the items' output. A later stage's item started after a host note has
+// landed still seats inside the span, with the note below it.
+func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 	t.Parallel()
 	const call = "recipe-audit-1"
 	tr := &transcript{}
@@ -460,63 +533,52 @@ func TestWorkflowBlockHeadsItsItemRuns(t *testing.T) {
 	tr.apply(startedUnder(call))
 	feedTwoItems(tr, call)
 
-	head := -1
-	for i, e := range tr.entries {
-		if e.kind == entryWorkflow {
-			head = i
-		}
-	}
+	head := slices.IndexFunc(tr.entries, func(e entry) bool { return e.kind == entryWorkflow })
 	if head < 0 || tr.entries[head].callID != call {
-		t.Fatalf("workflow block at %d carries call %q; want one recording %q", head, tr.entries[max(head, 0)].callID, call)
+		t.Fatalf("workflow block at %d; want one recording call %q in %+v", head, call, tr.entries)
 	}
 	assertHeadsItemRuns(t, tr.entries, head)
-	live := plainRender(tr)
-	for _, want := range []string{"alpha first", "beta second", "alpha second"} {
-		if !strings.Contains(live, want) {
-			t.Errorf("the workflow block elided its item runs; %q is not painted:\n%s", want, live)
-		}
+	assertItemRunsBehindTheirHeads(t, tr.entries, head, call)
+	assertItemRowsOnly(t, plainRender(tr), "alpha", "beta")
+
+	tr.apply(itemStartedUnder(call, "run.3", "review", "gamma", 0, 1))
+	third := workflowItemHeadAt(tr.entries, "run.3")
+	note := slices.IndexFunc(tr.entries, func(e entry) bool { return e.kind == entryNote })
+	if span := subAgentSpan(tr.entries, head); third <= head || third > head+span {
+		t.Errorf("the second stage's item head at %d is outside the block's span (%d + %d)", third, head, span)
 	}
+	if note <= third {
+		t.Errorf("the host note at %d stands above the second stage's item head at %d", note, third)
+	}
+	live := plainRender(tr)
+	assertItemRowsOnly(t, live, "alpha", "beta", "gamma")
 
 	reopened := &transcript{entries: roundTrip(t, tr)}
 	reopened.touch()
-	if got := reopened.entries[head].callID; got != call {
-		t.Errorf("the reopened block carries call %q, want %q", got, call)
-	}
-	assertHeadsItemRuns(t, reopened.entries, head)
+	assertItemRunsBehindTheirHeads(t, reopened.entries, head, call)
 	if got := plainRender(reopened); got != live {
 		t.Errorf("the reopened transcript paints differently:\nlive:\n%s\nreopened:\n%s", live, got)
 	}
 }
 
-// A fan_out call's item runs nest under its card the same way. The card stays the call it is: it
-// keeps its own run, pairs its own result and closes, no item child's phase, name or result folds
-// into it, and its fold — born collapsed — never elides the items beneath it.
-func TestFanOutCardHeadsItsItemRuns(t *testing.T) {
+// A fan_out call's item runs each get a run head of their own inside its card's span the same way.
+// The card stays the call it is — its own closed top-level call with nothing folded in — and its
+// item rows never fold into a "✦ Sub-Agent (N)" list: they are the card's own body.
+func TestFanOutCardSeatsARunHeadPerItem(t *testing.T) {
 	t.Parallel()
 	const call = "f1"
 	tr := &transcript{}
 	tr.addUser("fan it out", nil)
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: call, Tool: fanOutToolName, Arguments: []byte(`{"task":"check {item}"}`)}})
 	tr.apply(startedUnder(call))
-	for _, run := range []string{"run.1", "run.2"} {
-		tr.apply(domain.SubAgentPhaseEvent{EventBase: itemBase(call, run), Phase: domain.SubAgentStarted})
-		tr.apply(domain.SubAgentNamedEvent{EventBase: itemBase(call, run), Name: "item " + run})
-	}
 	feedTwoItems(tr, call)
-	for _, run := range []string{"run.1", "run.2"} {
-		tr.apply(domain.SubAgentPhaseEvent{
-			EventBase: itemBase(call, run), Phase: domain.SubAgentFinished,
-			Result: domain.ToolResult{CallID: call, Content: "item report " + run},
-		})
+	for i, run := range []string{"run.1", "run.2"} {
+		stampedPhase(tr, runRef{depth: 1, spawn: call, id: run}, domain.SubAgentFinished, "item report "+run)
+		tr.apply(itemFinishedUnder(call, run, "items", []string{"alpha", "beta"}[i], i, "ok", "fine"))
 	}
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: call, Content: "#1 alpha — ok — fine"}})
 
-	head := -1
-	for i, e := range tr.entries {
-		if e.kind == entryToolCall && e.tool.name == fanOutToolName {
-			head = i
-		}
-	}
+	head := slices.IndexFunc(tr.entries, func(e entry) bool { return e.kind == entryToolCall && e.tool.name == fanOutToolName })
 	if head < 0 {
 		t.Fatalf("no fan_out card in %+v", tr.entries)
 	}
@@ -529,22 +591,66 @@ func TestFanOutCardHeadsItsItemRuns(t *testing.T) {
 		t.Errorf("workflow blocks = %d; want none beside the fan_out card", n)
 	}
 	assertHeadsItemRuns(t, tr.entries, head)
-	if card.expanded {
-		t.Fatal("the fan_out card was not born collapsed")
+	assertItemRunsBehindTheirHeads(t, tr.entries, head, call)
+	painted := plainRender(tr)
+	assertItemRowsOnly(t, painted, "alpha", "beta")
+	if strings.Contains(painted, subAgentGroupLabel+" (") {
+		t.Errorf("the fan_out card's item rows folded into a sub-agent list:\n%s", painted)
 	}
-	live := plainRender(tr)
-	for _, want := range []string{"alpha first", "beta second", "alpha second"} {
-		if !strings.Contains(live, want) {
-			t.Errorf("the collapsed fan_out card elided its item runs; %q is not painted:\n%s", want, live)
-		}
-	}
-	if strings.Contains(live, "item report") {
-		t.Errorf("an item child's result folded into the card:\n%s", live)
+	if strings.Contains(painted, "item report") {
+		t.Errorf("an item child's report reached the paint:\n%s", painted)
 	}
 
 	reopened := &transcript{entries: roundTrip(t, tr)}
 	reopened.touch()
-	assertHeadsItemRuns(t, reopened.entries, head)
+	assertItemRunsBehindTheirHeads(t, reopened.entries, head, call)
+}
+
+// A retried item keeps ONE row: each attempt has its own head, the earlier one closes on its run's
+// finished phase and carries no receipt, the receipt folds onto the latest attempt's head, the row
+// opens that attempt — and the earlier head replays closed after a save and reopen.
+func TestARetriedItemKeepsOneRow(t *testing.T) {
+	t.Parallel()
+	const call = "recipe-audit-1"
+	m := newTestModel(t)
+	m.transcript.reset()
+	tr := &m.transcript
+	tr.addUser("/audit src", nil)
+	tr.apply(startedUnder(call))
+	tr.apply(itemStartedUnder(call, "run.1", "items", "alpha", 0, 1))
+	itemSays(tr, call, "run.1", "first try")
+	stampedPhase(tr, runRef{depth: 1, spawn: call, id: "run.1"}, domain.SubAgentFinished, "gave up")
+	tr.apply(itemStartedUnder(call, "run.2", "items", "alpha", 0, 2))
+	itemSays(tr, call, "run.2", "second try")
+	stampedPhase(tr, runRef{depth: 1, spawn: call, id: "run.2"}, domain.SubAgentFinished, "fixed it")
+	tr.apply(itemFinishedUnder(call, "run.2", "items", "alpha", 0, "ok", "all fixed"))
+	m.refreshViewport()
+
+	first, second := workflowItemHeadAt(tr.entries, "run.1"), workflowItemHeadAt(tr.entries, "run.2")
+	if e := tr.entries[first]; !e.done || !e.tool.stat.blank() {
+		t.Errorf("the first attempt's head = done %v, verdict %q; want closed with no receipt", e.done, e.tool.stat.spell())
+	}
+	if e := tr.entries[second]; !e.done || e.tool.stat.spell() != "ok" || e.tool.Summary.Text != "all fixed" {
+		t.Errorf("the latest attempt's head = done %v, verdict %q, gist %q; want the receipt folded onto it",
+			e.done, e.tool.stat.spell(), e.tool.Summary.Text)
+	}
+	painted := plainRender(tr)
+	if n := strings.Count(painted, glyphCollapsed); n != 1 {
+		t.Errorf("the retried item paints %d rows, want one:\n%s", n, painted)
+	}
+	if m = enterOnLastBlock(t, m); m.viewedRun().id != "run.2" {
+		t.Errorf("the item row opened %+v; want the latest attempt, run.2", m.viewedRun())
+	}
+
+	reopened := roundTrip(t, tr)
+	if e := reopened[first]; e.kind != entryWorkflowItem || !e.done || e.item.attempt != 1 {
+		t.Errorf("the replayed first attempt = kind %v, done %v, attempt %d; want a closed attempt-1 item head",
+			e.kind, e.done, e.item.attempt)
+	}
+	if e := reopened[second]; !e.tool.Summary.succeeded || e.item.attempt != 2 {
+		t.Errorf("the replayed latest attempt = succeeded %v, attempt %d; want the ok verdict on attempt 2",
+			e.tool.Summary.succeeded, e.item.attempt)
+	}
 }
 
 // A delegation beside a fan_out keeps its own head: its child's entries land in its span, not the

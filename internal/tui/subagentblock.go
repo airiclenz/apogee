@@ -23,10 +23,12 @@ const subAgentToolName = "sub_agent"
 // rails framing it are (railLines).
 //
 // A block that heads a Workflow's item runs ([entry.headsWorkflow] — a Recipe launch's workflow
-// block, a fan_out call's card) has a span by the same rule, since its item runs are recorded
-// behind it the same way; without it every item run would end at the head (runEnd = head+1) and an
-// item's later entries would land in front of its earlier ones. Only the span is shared: framing and
-// eliding stay a delegation's alone ([subAgentFramed]), so such a head never hides what it heads.
+// block, a fan_out call's card) has a span too, and it reaches further: each item run has a head of
+// its own (entryWorkflowItem) seated at the block's own depth, so the span also covers every such
+// head that follows the block ([entry.seatsItemHead]), with the item run behind it. Without it every
+// item head would land at the block (runEnd = head+1) and a later item's head in front of an earlier
+// one's. Framing and eliding stay a run head's alone ([subAgentFramed]), so the block never hides
+// what it heads: the item heads paint as rows of their own, each eliding its own run.
 //
 // It answers 0 for anything that heads no run, and for a run that produced no nested entry at all
 // (a child that failed before its first event) — either way the head is an ordinary tool block with
@@ -37,7 +39,7 @@ func subAgentSpan(entries []entry, i int) int {
 		return 0
 	}
 	n := 0
-	for j := i + 1; j < len(entries) && entries[j].depth > head.depth; j++ {
+	for j := i + 1; j < len(entries) && (entries[j].depth > head.depth || head.seatsItemHead(entries[j])); j++ {
 		n++
 	}
 	return n
@@ -94,10 +96,11 @@ func subAgentFramed(head paintInput, span int) bool {
 // and its view — so opening a view leaves the head collapsed the whole time it is open. The zero
 // root stops the walk at the top of the transcript, which is the rule as it was written.
 //
-// A Workflow's item run is climbed THROUGH ([spanHead]): the block that started the Workflow never
-// elides what it heads (a fan_out card's fold hides its own body alone), so its state answers
-// nothing and the walk goes on to the run that block sits in — a collapsed delegation that called
-// fan_out still elides its items' streaming tails.
+// A Workflow's item run is found by its own head (entryWorkflowItem), which is collapsed like a
+// delegation's. An item run no head stands for yet is climbed THROUGH ([spanHead]): the block that
+// started the Workflow never elides what it heads (a fan_out card's fold hides its own body alone),
+// so its state answers nothing and the walk goes on to the run that block sits in — a collapsed
+// delegation that called fan_out still elides its items' streaming tails.
 func insideCollapsedRun(entries []entry, run, root runRef) bool {
 	if run.isTop() {
 		return insideCollapsedRunAtDepth(entries, run.depth)
@@ -167,10 +170,12 @@ func runHeadAt(entries []entry, run runRef) (int, bool) {
 // spanHeadAt is where the block a run's entries are recorded behind sits — the head its span is
 // measured from ([subAgentSpan]). A delegation's head is asked first ([runHeadAt]); only where the
 // list holds none is the block that started a Workflow asked for ([entry.headsWorkflowRuns]), which
-// heads every item run of that Workflow at once. It is the lookup of the questions about WHERE a run
-// lies — its end (runEnd) and the runs enclosing it (insideCollapsedRun, runUnder) — and never of
+// holds every item run of that Workflow in its span. It is the lookup of the questions about WHERE a
+// run lies — its end (runEnd) and the runs enclosing it (insideCollapsedRun, runUnder) — and never of
 // the folds that write a run's phase, name or result into its head, nor of the breadcrumb trail,
-// which stay a delegation's alone ([runHeadAt]): an item run has no head of its own to fold into.
+// which stay a run head's alone ([runHeadAt]). A Workflow item's run has a head of its own
+// (entryWorkflowItem) from its WorkflowItemStarted on, so the block answers only for an item run
+// whose head is not there yet — which is where that head itself is placed (addWorkflowItem).
 func spanHeadAt(entries []entry, run runRef) (int, bool) {
 	if at, ok := runHeadAt(entries, run); ok {
 		return at, true

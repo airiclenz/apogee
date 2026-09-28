@@ -1330,6 +1330,9 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			"UsageCalls", "UsagePromptTokens", "UsageCachedPromptTokens", "UsageCompletionTokens",
 			"UsageTotalTokens",
 			"SkillSpans", "Tool", "Presented",
+			// Item: a Workflow item's run head's place in its Workflow (enterable-workflow-stages
+			// plan, item 4).
+			"Item",
 		}
 		if got := fields(session.Entry{}); !slices.Equal(got, wantEntry) {
 			t.Errorf("session.Entry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
@@ -2362,5 +2365,35 @@ func TestTranscriptCodecRoundTripsAWorkflowsSpendAndName(t *testing.T) {
 			t.Errorf("entry %d = kind %v, name %q, usage %+v; want kind %v, name %q, usage %+v",
 				i, got[i].kind, got[i].tool.Target, got[i].usage, want.kind, want.name, want.usage)
 		}
+	}
+}
+
+// TestTranscriptCodecRoundTripsAWorkflowItemHead pins a Workflow item's run head through the record:
+// it comes back the same kind, heading the same run under the same call, named for its item, with
+// its receipt's verdict re-derived from the status the record keeps — and its stage and place.
+func TestTranscriptCodecRoundTripsAWorkflowItemHead(t *testing.T) {
+	t.Parallel()
+	const call = "recipe-audit-1"
+	tr := &transcript{}
+	tr.apply(startedUnder(call))
+	tr.apply(itemStartedUnder(call, "run.1", "items", "beta", 1, 1))
+	tr.apply(itemFinishedUnder(call, "run.1", "items", "beta", 1, "blocked", "no access"))
+
+	got := roundTrip(t, tr)
+	at := workflowItemHeadAt(got, "run.1")
+	if at < 0 {
+		t.Fatalf("no item head came back in %+v", got)
+	}
+	e := got[at]
+	if e.callID != call || !e.done || usageAgentName(e) != "beta" {
+		t.Errorf("replayed head = call %q, done %v, name %q; want call %q, closed, named beta",
+			e.callID, e.done, usageAgentName(e), call)
+	}
+	if e.tool.stat.spell() != "blocked" || !e.tool.Summary.failed || e.tool.Summary.succeeded {
+		t.Errorf("replayed verdict = %q (failed %v, succeeded %v); want the blocked verdict in red",
+			e.tool.stat.spell(), e.tool.Summary.failed, e.tool.Summary.succeeded)
+	}
+	if want := (workflowItemPlace{stage: "items", round: 1, index: 1, attempt: 1}); e.item != want {
+		t.Errorf("replayed place = %+v, want %+v", e.item, want)
 	}
 }

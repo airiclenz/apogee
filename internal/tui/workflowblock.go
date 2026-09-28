@@ -23,10 +23,16 @@ import (
 // in the transcript, its children nest under it, and its result IS the result lines. So only a
 // Workflow no open fan_out call of the same run accounts for opens a block here.
 //
-// Either way the block heads the Workflow's item runs: every item child is bracketed under the
-// block's call (domain.WorkflowPhaseEvent.Call), so its entries land inside the block's span
-// (entry.headsWorkflowRuns, spanHeadAt) and paint railed beneath it. The span is never elided — the
-// block paints one way and never collapses, and a fan_out card's own fold hides its body alone.
+// Either way the block heads the Workflow's item runs. Each item run gets a run head of its own
+// (entryWorkflowItem) when its WorkflowItemStarted folds: it is seated at the block's own depth
+// under the block's call (domain.WorkflowPhaseEvent.Call), inside the block's span
+// (entry.seatsItemHead), and the item child's entries land behind it (entry.headsRunFor, by the
+// run id the phase names). That head is a delegation's in every way the view asks — it paints as a
+// delegation row eliding its run, opens as the run's view, and answers ^x, a message and the gauge —
+// but it never groups into a "✦ Sub-Agent (N)" list. The item's receipt folds onto it as its report.
+// A retried item keeps ONE row: each attempt has its own head, and the ones a later attempt
+// superseded are stepped over by the paint (retiredAttempts). The block itself is never elided — it
+// paints one way and never collapses, and a fan_out card's own fold hides its body alone.
 //
 // The block's text is its whole paint and its whole record: every fold re-renders the text from the
 // view (workflowView), the painter draws the text alone, and the record keeps the text — so a
@@ -82,6 +88,12 @@ type workflowItem struct {
 // block by the Workflow's id and re-renders it. A phase for a Workflow with no block (a fan_out's,
 // or one whose start this view never saw) folds nothing.
 func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
+	switch e.Phase {
+	case domain.WorkflowItemStarted:
+		t.addWorkflowItem(e)
+	case domain.WorkflowItemFinished:
+		t.finishWorkflowItem(e)
+	}
 	run := runOf(e.EventBase)
 	if e.Phase == domain.WorkflowStarted {
 		if t.fanOutOpen(run) || t.workflowAt(e.Workflow) >= 0 {
@@ -266,4 +278,141 @@ func renderWorkflowBlock(th theme, text string, width int) []string {
 		lines = append(lines, hangingWrap(th, th.toolDetail, workflowBodyIndent, line, width)...)
 	}
 	return lines
+}
+
+// workflowItemPlace is where one item run's head stands in its Workflow: the stage it belongs to, the
+// 1-based round of that stage, the item's 0-based place in it, and the 1-based attempt the run is
+// (domain.WorkflowPhaseEvent). It is what tells one item's attempts apart from another item's
+// (retiredAttempts), and the record keeps it (session.WorkflowItem).
+type workflowItemPlace struct {
+	stage   string
+	round   int
+	index   int
+	attempt int
+}
+
+// addWorkflowItem seats the run head of the item run a WorkflowItemStarted names: an
+// entryWorkflowItem in the run that started the Workflow, under the Workflow's call, heading the
+// item child's run by its run id. It is placed at the end of that item run ([transcript.placeBehind])
+// — which, with no head of its own standing yet, is the end of the Workflow's block span
+// ([spanHeadAt]) — so a later stage's item head lands inside the span even after a host note has
+// landed below it.
+//
+// It seats nothing for a phase naming no run or no call, for a background workflow's (whose runs
+// stay out of the conversation, ADR 0089), and for a Workflow no block in this view heads — an item
+// head outside any block would stand for nothing the reader launched.
+func (t *transcript) addWorkflowItem(e domain.WorkflowPhaseEvent) {
+	if e.Run == "" || e.Call == "" || e.Background {
+		return
+	}
+	item := runRef{depth: e.Depth + 1, spawn: e.Call, id: e.Run}
+	if _, ok := spanHeadAt(t.entries, item); !ok {
+		return
+	}
+	label := stripEscapes(e.Item)
+	head := inRun(entry{
+		kind:       entryWorkflowItem,
+		callID:     e.Call,
+		spawnRunID: e.Run,
+		tool:       workflowItemView(label),
+		item: workflowItemPlace{
+			stage:   stripEscapes(e.Stage),
+			round:   e.Round,
+			index:   e.Index,
+			attempt: e.Attempt,
+		},
+	}, runOf(e.EventBase))
+	t.placeBehind(head, item)
+}
+
+// workflowItemView is the card an item run's head wears: a delegation's label under the item's
+// label, which is also the run's name — what the breadcrumb, the status line and the view's legend
+// call it (usageAgentName). It carries no task row: the phase names the item, not the instructions
+// its child was handed.
+func workflowItemView(label string) toolView {
+	delegation := toolRegistry[subAgentToolName]
+	return toolView{Label: delegation.label, Verb: delegation.verb, Target: label, agentName: label}
+}
+
+// finishWorkflowItem folds an item's receipt onto the head of the run the WorkflowItemFinished
+// names — the item's latest attempt — as that run's report: the summary as the row's gist, the
+// status as its verdict. It closes the head, which pairs no ToolResultEvent. A phase naming no run
+// (a resumed item, one whose child was never built) or a run with no head folds nothing here.
+func (t *transcript) finishWorkflowItem(e domain.WorkflowPhaseEvent) {
+	i := workflowItemHeadAt(t.entries, e.Run)
+	if i < 0 {
+		return
+	}
+	en := &t.entries[i]
+	status := stripEscapes(e.Receipt.Status)
+	en.tool.stat = plainStat(status)
+	en.tool.Summary = workflowItemSummary(status, stripEscapes(firstLine(e.Receipt.Summary)))
+	en.done = true
+	t.touch()
+}
+
+// workflowItemHeadAt is the index of the item head of the run id names, or −1.
+func workflowItemHeadAt(entries []entry, id string) int {
+	if id == "" {
+		return -1
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if e := entries[i]; e.kind == entryWorkflowItem && e.spawnRunID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// workflowItemSummary is the outcome slot a receipt words: its summary quoted, since the words are
+// the child's, and the verdict its status carries — `ok` the finished green and done ✓
+// (subAgentFinished), `blocked` the failure red. It is re-derived on decode from the status the
+// record keeps as the stat, so a replayed row reads as the live one did.
+func workflowItemSummary(status, summary string) branchSummary {
+	s := quotedSummary(detailLine{Text: summary})
+	s.succeeded = status == workflowStatusOK
+	s.failed = status == workflowStatusBlock
+	return s
+}
+
+// workflowItemKey names ONE item of a Workflow across its attempts: the run its head stands in, the
+// Workflow's call, and the item's stage, round and place.
+type workflowItemKey struct {
+	run  runRef
+	call string
+	workflowItemPlace
+}
+
+// retiredAttempts marks, by index, every item head a later attempt of the same item superseded —
+// the heads the paint steps over, so an item keeps the one row its latest attempt heads. It answers
+// nil when no item was ever retried, which is every transcript but one holding a retry.
+func retiredAttempts(entries []entry) map[int]bool {
+	var latest map[workflowItemKey]int
+	var retired map[int]bool
+	for i := range entries {
+		e := &entries[i]
+		if e.kind != entryWorkflowItem {
+			continue
+		}
+		key := workflowItemKey{run: e.run(), call: e.callID, workflowItemPlace: e.item}
+		key.attempt = 0
+		if latest == nil {
+			latest = make(map[workflowItemKey]int)
+		}
+		prev, seen := latest[key]
+		switch {
+		case !seen:
+			latest[key] = i
+			continue
+		case entries[prev].item.attempt > e.item.attempt:
+			prev = i
+		default:
+			latest[key] = i
+		}
+		if retired == nil {
+			retired = make(map[int]bool)
+		}
+		retired[prev] = true
+	}
+	return retired
 }

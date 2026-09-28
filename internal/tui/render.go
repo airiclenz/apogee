@@ -372,6 +372,9 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	// once per block. A block's records live until the next block is resolved, and its paint is
 	// drawn (or served) before that.
 	var records []paintInput
+	// The item runs a retry superseded (retiredAttempts): each is stepped over whole, head and run,
+	// because an item keeps ONE row — the one its latest attempt heads.
+	retired := retiredAttempts(t.entries)
 	for i := root.first; i < root.last; {
 		// The preview is painted the moment the walk reaches its run's end. The test is >= rather
 		// than == because the walk SKIPS index ranges — a collapsed run's span, a folded tool run's
@@ -379,6 +382,10 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		if previewAt >= 0 && i >= previewAt {
 			paintPreview(i)
 			previewAt = -1
+		}
+		if retired[i] {
+			i += 1 + subAgentSpan(t.entries, i)
+			continue
 		}
 		// The entry the walk stands on, stated once as the record the painters read ([paintInput]):
 		// the resolver hands THAT to its painter and to its key, so what a block paints and what its
@@ -753,10 +760,11 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// members, and a delegation standing here stands alone.
 	//
 	// A block heading a Workflow's item runs (a workflow block, a fan_out card) has a span too
-	// (subAgentSpan), but framing is a delegation's alone (subAgentFramed), so it never reaches this
-	// branch: it paints as the block it is, and its item runs paint railed beneath it, each by the
-	// walk's own rules — the workflow block never collapses, and a collapsed fan_out card folds its
-	// own body and nothing it heads.
+	// (subAgentSpan), but framing is a run head's alone (subAgentFramed), so it never reaches this
+	// branch: it paints as the block it is, and the walk goes on to the item runs' heads behind it —
+	// each a run head (entryWorkflowItem) that reaches this branch and elides its own run. The
+	// workflow block never collapses, and a collapsed fan_out card folds its own body and nothing it
+	// heads.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
 		ins := root.appendInputs(buf[:0], t.entries[head:head+span+1])
 		return resolvedBlock{
@@ -1049,6 +1057,10 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		return plainPaint(railLines(th, renderStartupBox(th, in.startup, inner), in.depth))
 	case entryWorkflow:
 		return plainPaint(railLines(th, renderWorkflowBlock(th, in.text, inner), in.depth))
+	case entryWorkflowItem:
+		// A Workflow item's head with no run behind it yet — its child has not recorded a thing — is
+		// still the delegation row it will be, never a tool block: it has no call to show.
+		return renderSubAgentRun(th, in, nil, width, blink)
 	default:
 		return blockPaint{}
 	}

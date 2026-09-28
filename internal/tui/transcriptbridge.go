@@ -137,8 +137,10 @@ func closeInterruptedCalls(entries []entry) (closed int) {
 // attached only for the kinds that carry them, so every other kind serializes without an empty
 // sub-object. A firing block (entrySchedule) is one of the kinds that carry a view: it borrows the
 // toolView slot whole, so it borrows the wire's tool slot whole too rather than growing a second one
-// that would have to be kept in step with it. A block or finish line carrying a Workflow's spend
-// (entry.carriesWorkflowSpend) borrows the slot for the Workflow's name alone.
+// that would have to be kept in step with it, and so is a Workflow item's run head
+// (entryWorkflowItem), whose card is a delegation row's; its place in the Workflow rides the wire's
+// Item. A block or finish line carrying a Workflow's spend (entry.carriesWorkflowSpend) borrows the
+// slot for the Workflow's name alone.
 func toWireEntry(e *entry, kind string) session.Entry {
 	w := session.Entry{
 		Kind:        kind,
@@ -164,7 +166,7 @@ func toWireEntry(e *entry, kind string) session.Entry {
 		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
 	switch {
-	case e.kind == entryToolCall || e.kind == entrySchedule:
+	case e.kind == entryToolCall || e.kind == entrySchedule || e.kind == entryWorkflowItem:
 		w.Tool = toWireToolView(e.tool)
 	case e.carriesWorkflowSpend():
 		// A workflow block or a background workflow's finish line that carries a Workflow's spend
@@ -174,6 +176,14 @@ func toWireEntry(e *entry, kind string) session.Entry {
 	}
 	if e.kind == entryPresented {
 		w.Presented = toWirePresented(e.presented)
+	}
+	if e.kind == entryWorkflowItem {
+		w.Item = &session.WorkflowItem{
+			Stage:   e.item.stage,
+			Round:   e.item.round,
+			Index:   e.item.index,
+			Attempt: e.item.attempt,
+		}
 	}
 	return w
 }
@@ -323,7 +333,22 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 	if w.Presented != nil {
 		e.presented = fromWirePresented(w.Presented)
 	}
+	if kind == entryWorkflowItem {
+		fromWireWorkflowItem(&e, w.Item)
+	}
 	return e, true
+}
+
+// fromWireWorkflowItem restores what a Workflow item's run head keeps beside its card: its place in
+// the Workflow, and the receipt's verdict, re-derived from the status the record keeps as the stat
+// (workflowItemSummary) — the quoted summary the wire carries holds no verdict of its own.
+func fromWireWorkflowItem(e *entry, w *session.WorkflowItem) {
+	if w != nil {
+		e.item = workflowItemPlace{stage: w.Stage, round: w.Round, index: w.Index, attempt: w.Attempt}
+	}
+	if status := e.tool.stat.spell(); status != "" {
+		e.tool.Summary = workflowItemSummary(status, e.tool.Summary.Text)
+	}
 }
 
 // fromWireSkillSpans rebuilds the skill-token spans from the wire, verbatim. Nothing is validated

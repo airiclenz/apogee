@@ -172,7 +172,14 @@ internal/agent/construct_test.go — TestHostToolsThreadsTheSkillLookupOntoTheDe
 
 **Commit:** `feat(apogee): the facade can opt into background fan_out and the workflow tool`
 
-## 4. Each workflow item run gets its own run head, shown as an enterable delegation row
+## 4. Each workflow item run gets its own run head, shown as an enterable delegation row — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the item head is `entryWorkflowItem`, persisted as `workflow_item`. `session.Entry` gains `Item *WorkflowItem` (stage, round, index, attempt). The card rides the existing `Tool` slot. The receipt status is kept as the card's stat, and the verdict (ok = succeeded, blocked = failed) is re-derived from it on decode (fromWireWorkflowItem). The wire-member enumeration in transcriptbridge_test.go now lists `Item`.
+NOTES (2026-09-28): entryWorkflowItem is never paint-cached (entrykind.go row, paintcache.go banner). The receipt rewrites the card after the done/phase bits the key reads may already have settled at SubAgentFinished. It also carries no block state, since its row opens only the run view.
+NOTES (2026-09-28): the card has no tool name and borrows sub_agent's registry label and verb. Its Target and agentName are the item label, and it has no task row because the phase carries no instructions. An item head is seated only when a block in the view heads the Workflow (spanHeadAt), and never for a background phase.
+NOTES (2026-09-28): an item keeps one row because the paint walk steps over every head a later attempt of the same (run, call, stage, round, index) superseded (retiredAttempts in workflowblock.go, used in renderView). A retry's head is placed at the end of the Workflow's span, so the item's one row moves to the end of the block's rows.
+NOTES (2026-09-28): inFlightFanOut now finds its latest depth-0 head with subAgentHeads instead of headsRun. This keeps its count unchanged now that item heads also answer headsRun. continuesOpenRun accepts an open item head as the enclosing block.
+NOTES (2026-09-28): consequential edit — internal/tui/doc.go: made necessary by the new entryWorkflowItem head (the workflowblock.go line of the file map said the block heads the item runs directly)
 
 **What:** Recast at the regression check (2026-09-28).
 **Goal:** Every item child of a foreground workflow or fan_out has its own run-head entry inside the workflow head's span. This entry:

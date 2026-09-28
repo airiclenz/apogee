@@ -392,6 +392,40 @@ func TestDecodeTranscriptStripsEscapesEverywhereItCanBePainted(t *testing.T) {
 	}
 }
 
+// TestTranscriptRoundTripsAWorkflowItemHead pins a Workflow item's run head through the codec: its
+// kind, its card and its place in the Workflow come back as written, and the stage — display text
+// a tampered file could smuggle an escape in — comes back stripped.
+func TestTranscriptRoundTripsAWorkflowItemHead(t *testing.T) {
+	t.Parallel()
+	in := []Entry{{
+		Kind: EntryKindWorkflowItem, CallID: "recipe-audit-1", SpawnRunID: "run.2", Done: true,
+		Tool: &ToolView{Label: "Sub-Agent", Target: "alpha", Stat: "ok"},
+		Item: &WorkflowItem{Stage: "items", Round: 2, Index: 3, Attempt: 2},
+	}}
+	data, err := EncodeTranscript(in)
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	got, err := DecodeTranscript(data)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if len(got) != 1 || got[0].Kind != EntryKindWorkflowItem || got[0].Item == nil || *got[0].Item != *in[0].Item ||
+		got[0].Tool == nil || got[0].Tool.Target != "alpha" || got[0].Tool.Stat != "ok" || !got[0].Done {
+		t.Fatalf("round trip = %#v; want %#v", got, in)
+	}
+
+	const esc = `\u001b[31m`
+	tampered, err := DecodeTranscript([]byte(`{"version":1,"entries":[{"kind":"workflow_item",` +
+		`"item":{"stage":"` + esc + `items","index":1}}]}`))
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if len(tampered) != 1 || tampered[0].Item == nil || containsESC(tampered[0].Item.Stage) {
+		t.Errorf("the item's stage came back with an escape sequence in it: %#v", tampered)
+	}
+}
+
 // containsESC reports whether s still carries an ESC byte.
 func containsESC(s string) bool {
 	for i := range len(s) {

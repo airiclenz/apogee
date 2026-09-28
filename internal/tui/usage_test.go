@@ -822,6 +822,30 @@ func TestForegroundWorkflowSpendReachesUsage(t *testing.T) {
 	}
 }
 
+// A Workflow whose item runs each have a run head of their own (WorkflowItemStarted) still reports
+// ONE /usage row, named for the Workflow and summing its runs: the item heads wear their runs' fill
+// and are never listed as sub-agents of their own.
+func TestSeatedWorkflowItemsReportOneWorkflowRow(t *testing.T) {
+	t.Parallel()
+	m := usageModel(t, mainTotals, 0)
+	for _, e := range []domain.Event{
+		fanOutCall(),
+		startedUnder("f1"),
+		itemStartedUnder("f1", "run.1", "items", "alpha", 0, 1),
+		itemStartedUnder("f1", "run.2", "items", "beta", 1, 1),
+		workflowRunUsage(itemBase("f1", "run.1"), 1, 1000, 100),
+		workflowRunUsage(itemBase("f1", "run.2"), 1, 2000, 200),
+	} {
+		m = m.foldEvent(e)
+	}
+
+	want := domain.Usage{Calls: 2, PromptTokens: 3000, CompletionTokens: 300, TotalTokens: 3300}
+	assertDelegateRows(t, m, want, workflowRow("check {item}", want))
+	if head := m.transcript.entries[workflowItemHeadAt(m.transcript.entries, "run.2")]; head.ctxUsed != 2200 {
+		t.Errorf("beta's item head fill = %d, want its run's own 2200", head.ctxUsed)
+	}
+}
+
 // A run an item spawned through sub_agent keeps its own head: its reading is that head's row and
 // never also the Workflow's, so the session counts it once.
 func TestWorkflowItemsSubAgentCountsOnceUnderItsOwnHead(t *testing.T) {

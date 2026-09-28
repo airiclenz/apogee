@@ -407,6 +407,9 @@ type entry struct {
 	// which each fold re-renders into text. View-only and never persisted — the text is the record —
 	// so a replayed block carries none and no later event finds it.
 	workflow workflowView
+	// entryWorkflowItem only: where the item run this entry heads stands in its Workflow — its
+	// stage, round, place and attempt (workflowblock.go). Persisted (session.Entry.Item).
+	item workflowItemPlace
 	// the head of a sub-agent run only: the child's latest context reading and the CHILD's own
 	// window it filled (the Delegation target's where the run was routed), frozen together when
 	// the reading folded (applyUsage)
@@ -530,8 +533,16 @@ type startupView struct {
 // the standing assumption that the list only ever grows at the end (paintcache.go), and everything
 // from the insertion point on has just moved up one. dropFrom is that assumption's guard.
 func (t *transcript) place(e entry) {
+	t.placeBehind(e, e.run())
+}
+
+// placeBehind is place with the stretch named apart from the entry: e lands at the end of run,
+// which is e's own run for every entry but a Workflow item's run head. That head stands in the run
+// that started the Workflow and lands at the end of the item run it heads — the end of the
+// Workflow's block span, which it then extends (addWorkflowItem).
+func (t *transcript) placeBehind(e entry, run runRef) {
 	e = t.stamp(e)
-	at := t.runEnd(e.run())
+	at := t.runEnd(run)
 	if at >= len(t.entries) {
 		at = t.tailBeforeHostNotes(e)
 	}
@@ -638,7 +649,8 @@ func (t *transcript) continuesOpenRun(e entry, at int) bool {
 	switch {
 	case e.depth > 0:
 		head := enclosingBlock(t.entries, at, e.depth)
-		return (subAgentHeads(t.entries, head) || workflowHeads(t.entries, head)) && !t.entries[head].done
+		return (subAgentHeads(t.entries, head) || workflowHeads(t.entries, head) || workflowItemHeads(t.entries, head)) &&
+			!t.entries[head].done
 	case e.headsRun():
 		head := prevSiblingAt(t.entries, at, e.depth)
 		return subAgentHeads(t.entries, head) && !t.entries[head].done
@@ -1296,8 +1308,9 @@ func (t *transcript) apply(e domain.Event) {
 // so a nested run's reading stops at the nested head and says nothing about its parent's fill. A
 // reading that matches no open run — one that arrived after its report, or before its call — folds
 // nothing at all, as it did before this entry field existed. The one exception is a Workflow's item
-// run, which no sub_agent call spawned: its totals fold into the block that started its Workflow
-// instead (foldWorkflowSpend), so a fan_out's or a Recipe's spend reaches /usage and the record.
+// run, which no sub_agent call spawned: its fill folds into its own item head, but its totals fold
+// into the block that started its Workflow as well (foldWorkflowSpend) — and there alone once that
+// head has closed — so a fan_out's or a Recipe's spend reaches /usage and the record.
 //
 // The reading is the LATEST total and never a running sum: every Turn reports the whole context
 // it filled, so the newest number IS the fill. A total the server omitted falls back to
@@ -1336,12 +1349,19 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	if !fills && !counted {
 		return
 	}
-	head := t.openSubAgentHead(runOf(usage.EventBase))
+	run := runOf(usage.EventBase)
+	head := t.openSubAgentHead(run)
 	if head == nil {
 		if counted {
-			t.foldWorkflowSpend(runOf(usage.EventBase), reading)
+			t.foldWorkflowSpend(run, reading)
 		}
 		return
+	}
+	// A Workflow item's head wears its run's fill as a delegation's does, but the Workflow's spend
+	// is still its block's to report (foldWorkflowSpend), so the totals reach both. /usage lists
+	// the block and never the item head (delegateUsageHeads), so nothing is counted twice.
+	if head.kind == entryWorkflowItem && counted {
+		t.foldWorkflowSpend(run, reading)
 	}
 	t.touch() // head is a pointer into entries, and at least one of the two readings writes through it
 	if fills {
@@ -1359,7 +1379,8 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	}
 }
 
-// foldWorkflowSpend folds a delegated reading no open sub_agent head took into the block that
+// foldWorkflowSpend folds a delegated reading no open sub_agent head took — or one an item's own head
+// took beside it (applyUsage) — into the block that
 // started the Workflow run is an item of ([entry.headsWorkflowRuns]) — a Recipe launch's workflow
 // block or a fan_out call's card — keeping it as that run's latest reading beside its siblings' and
 // the block's usage as their sum. A run one of the items spawned has a sub_agent head of its own, so
@@ -1725,6 +1746,11 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 		}
 		if e.Phase == domain.SubAgentFinished && !en.done {
 			en.tool.enrichWithResult(e.Result, t.ws)
+		}
+		// A Workflow item's head pairs no ToolResultEvent, so its run's finished phase is what
+		// closes it: an attempt a retry superseded closes here and replays closed.
+		if e.Phase == domain.SubAgentFinished && en.kind == entryWorkflowItem {
+			en.done = true
 		}
 	}
 }
@@ -2205,12 +2231,13 @@ func subAgentHeads(entries []entry, i int) bool {
 
 // headsRun reports whether e is a delegation's call block — the head a sub-agent run hangs off, and
 // the entry every other question about a run is asked of ([subAgentSpan], [subAgentFramed],
-// [subAgentReported]). It is [subAgentHeads] asked of an entry rather than of a position — what
-// place asks of an entry it has not committed yet — and it reads the card's own rule
-// ([toolView.headsRun]), so the block and the entry carrying it can never disagree about what a
-// delegation is.
+// [subAgentReported]). For a call block it reads the card's own rule ([toolView.headsRun]), so the
+// block and the entry carrying it can never disagree about what a delegation is. A Workflow item's
+// run head (entryWorkflowItem) heads a run too: its row, its view, its stop and its gauge are a
+// delegation's. It never groups with its neighbours, because [subAgentHeads] asks for a sub_agent
+// call and nothing else.
 func (e entry) headsRun() bool {
-	return e.kind == entryToolCall && e.tool.headsRun()
+	return (e.kind == entryToolCall && e.tool.headsRun()) || e.kind == entryWorkflowItem
 }
 
 // opensRun is [entry.headsRun] narrowed to a run still OPEN, and reading `done` for that — rather
@@ -2246,8 +2273,9 @@ func (e entry) headsRunFor(run runRef) bool {
 }
 
 // headsWorkflow reports whether e is a block that heads a Workflow's item runs: a Recipe launch's
-// workflow block, or a fan_out call's card. Its item runs are recorded behind it ([subAgentSpan])
-// but it is no delegation — nothing folds into it, and it never elides what it heads.
+// workflow block, or a fan_out call's card. Its item runs' heads, each with the run behind it, are
+// recorded behind it ([subAgentSpan]), but it is no delegation — nothing folds into it, and it
+// never elides what it heads (each item head elides its own run).
 func (e entry) headsWorkflow() bool {
 	return e.kind == entryWorkflow || (e.kind == entryToolCall && e.tool.name == fanOutToolName)
 }
@@ -2256,9 +2284,25 @@ func (e entry) headsWorkflow() bool {
 // a block that heads Workflow runs ([entry.headsWorkflow]) whose call is the run's spawning call —
 // the call every item child is bracketed under (domain.WorkflowPhaseEvent.Call, which a workflow
 // block records as its callID) — standing one level above it. It matches on the call alone, never
-// on a run id: one head carries every item run of its Workflow.
+// on a run id: one block holds every item run of its Workflow in its span, which is where an item's
+// own head is placed ([spanHeadAt]).
 func (e entry) headsWorkflowRuns(run runRef) bool {
 	return e.headsWorkflow() && e.callID != "" && e.callID == run.spawn && e.depth == run.depth-1
+}
+
+// seatsItemHead reports whether item is the run head of one of the Workflow runs e heads
+// ([entry.headsWorkflowRuns]): a Workflow item's head bracketed under e's call and standing in e's
+// own run. Such a head stands at e's own depth, so [subAgentSpan] asks this to carry e's span over
+// it and over the item run behind it.
+func (e entry) seatsItemHead(item entry) bool {
+	return e.headsWorkflow() && item.kind == entryWorkflowItem && e.callID != "" && item.callID == e.callID &&
+		item.run() == e.run()
+}
+
+// workflowItemHeads reports whether entries[i] is a Workflow item's run head (entryWorkflowItem); an
+// index outside the list answers false.
+func workflowItemHeads(entries []entry, i int) bool {
+	return i >= 0 && i < len(entries) && entries[i].kind == entryWorkflowItem
 }
 
 // carriesWorkflowSpend reports whether e holds a Workflow's token spend: a block that heads a
@@ -2408,7 +2452,7 @@ func (e entry) neverStarted() bool {
 func (t *transcript) inFlightFanOut() (finished, queued int, ok bool) {
 	head := -1
 	for i := len(t.entries) - 1; i >= 0; i-- {
-		if e := &t.entries[i]; e.depth == 0 && e.headsRun() {
+		if e := &t.entries[i]; e.depth == 0 && subAgentHeads(t.entries, i) {
 			head = i
 			break
 		}

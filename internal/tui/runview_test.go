@@ -1345,3 +1345,43 @@ func TestRunViewHintOffersTheStopWhileTheRunRuns(t *testing.T) {
 		}
 	})
 }
+
+// TestWorkflowItemRowOpensAsARunView pins a Workflow item's row to a delegation's reaches: ⏎ on it
+// roots the view at that item's child, the breadcrumb names the item, the gauge reads the child's
+// fill, a message typed there goes to the child by its run id, and ^x stops that run alone.
+func TestWorkflowItemRowOpensAsARunView(t *testing.T) {
+	t.Parallel()
+	const call = "recipe-audit-1"
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("/audit src")
+	m, _ = stepCmd(t, m, keyEnter())
+	item := runRef{depth: 1, spawn: call, id: "run.1"}
+	m.transcript.apply(startedUnder(call))
+	m.transcript.apply(itemStartedUnder(call, item.id, "items", "alpha", 0, 1))
+	stampedPhase(&m.transcript, item, domain.SubAgentStarted, "")
+	itemSays(&m.transcript, call, item.id, "alpha is looking")
+	m.transcript.applyUsage(workflowRunUsage(stampedBase(item), 1, 1000, 100), 8000, "")
+	m.refreshViewport()
+
+	m = enterOnLastBlock(t, m)
+	if got := m.viewedRun(); got != item {
+		t.Fatalf("⏎ on the item row opened %+v; want the item's run %+v", got, item)
+	}
+	if got := breadcrumbTrail(m.transcript.entries, m.viewedRun()); !strings.HasSuffix(got, breadcrumbSep+" alpha") {
+		t.Errorf("breadcrumb = %q; want it to end on the item's name", got)
+	}
+	if got := strip(m.contextGauge()); !strings.Contains(got, format.Tokens(1100)) {
+		t.Errorf("gauge = %q; want the item child's own fill", got)
+	}
+
+	m.input.SetValue("check the tests too")
+	m = step(t, m, keyEnter())
+	if got := eng.childInterjections(); len(got) != 1 || got[0].runID != item.id {
+		t.Errorf("InterjectChild calls = %+v; want one, addressed to %s", got, item.id)
+	}
+	m = step(t, m, keyCtrlX())
+	if got := eng.stoppedChildren(); !slices.Equal(got, []string{item.id}) {
+		t.Errorf("StopChild calls = %v; want only the item's run, %s", got, item.id)
+	}
+}

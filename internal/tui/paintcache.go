@@ -25,7 +25,8 @@ package tui
 // of that pairing, `phase` (transcript.addSubAgentPhase) — which the key reads; and
 // transcript.refreshStartup rewrites
 // entries[0].startup with NO flag change at all, which is why an entryStartup block is never
-// cached. The remaining case is wholesale replacement — transcript.reset drops every entry and
+// cached — and a Workflow item's run head (entryWorkflowItem) is never cached either, because the
+// item's receipt rewrites its card after the phase and done bits the key reads may have settled. The remaining case is wholesale replacement — transcript.reset drops every entry and
 // the caller re-fills the list inside the same Update — and reset clears the cache outright,
 // because a head index that is re-used by a different session's entry would otherwise match a key
 // that is no longer about it.
@@ -142,7 +143,7 @@ func (e entry) painted() paintInput {
 // where a painter can reach them, so the block and the entry carrying it cannot disagree about what
 // a delegation is.
 func (in paintInput) headsRun() bool {
-	return in.kind == entryToolCall && in.tool.headsRun()
+	return (in.kind == entryToolCall && in.tool.headsRun()) || in.kind == entryWorkflowItem
 }
 
 // paintKey is everything one block's paint depends on besides the immutable content of its

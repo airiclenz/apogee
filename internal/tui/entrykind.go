@@ -30,6 +30,7 @@ const (
 	entrySchedule
 	entryCompacted
 	entryWorkflow
+	entryWorkflowItem
 )
 
 // entryKindRule is one kind's answer to every question the view asks ABOUT A KIND. Each field is
@@ -120,6 +121,12 @@ var entryKindRules = map[entryKind]entryKindRule{
 	// PLACE as the Workflow's events fold, touching no field the paint key reads. It is not a host
 	// note: the run it reports is the conversation's own, the work the human's line asked for.
 	entryWorkflow: {persistedName: session.EntryKindWorkflow},
+	// "workflow_item" — the run head of one item run of a Workflow (workflowblock.go) — joined on
+	// the same additive terms. It heads a run as a delegation's call block does, so its header can
+	// still be waiting. It carries no block state, because the one thing its row opens is its run
+	// view. It is never cached, because its card is rewritten in place when the item's receipt
+	// lands, which can come after the phase and done bits the paint key reads have settled.
+	entryWorkflowItem: {persistedName: session.EntryKindWorkflowItem, hasLiveStar: true},
 }
 
 // entryKindByName is the decode-side inverse of the table's persistedName column, built once at

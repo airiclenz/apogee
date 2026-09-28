@@ -52,7 +52,7 @@ var ErrTranscriptVersion = errors.New("apogee: unsupported transcript version")
 // codec when a Driver hands it a blob from anywhere else. The caller degrades to a no-replay note.
 var ErrTranscriptTooLarge = errors.New("apogee: transcript exceeds the 256 MiB limit")
 
-// The eleven persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
+// The twelve persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
 // own iota, so a future reordering of that Driver's constants can never re-interpret an old file.
 // A Driver kind with no name here — the TUI's one-time start-up box, say — is simply never written,
 // and a name this build does not know decodes as an entry of an unrecognised kind.
@@ -65,18 +65,23 @@ var ErrTranscriptTooLarge = errors.New("apogee: transcript exceeds the 256 MiB l
 //
 // EntryKindWorkflow is the block a Workflow a human launched reports its run in (ADR 0087): its
 // progress, one result line per finished item and the end it came to, all held in Text.
+//
+// EntryKindWorkflowItem is the run head of one item run of such a Workflow, or of a fan_out call's:
+// the row the item paints as and the head its child's entries are recorded behind. Its card rides
+// Tool and its place in the Workflow rides Item.
 const (
-	EntryKindUser        = "user"
-	EntryKindAssistant   = "assistant"
-	EntryKindToolCall    = "toolCall"
-	EntryKindToolResult  = "toolResult"
-	EntryKindError       = "error"
-	EntryKindNote        = "note"
-	EntryKindPresented   = "presented"
-	EntryKindInterjected = "interjected"
-	EntryKindSchedule    = "schedule"
-	EntryKindCompacted   = "compacted"
-	EntryKindWorkflow    = "workflow"
+	EntryKindUser         = "user"
+	EntryKindAssistant    = "assistant"
+	EntryKindToolCall     = "toolCall"
+	EntryKindToolResult   = "toolResult"
+	EntryKindError        = "error"
+	EntryKindNote         = "note"
+	EntryKindPresented    = "presented"
+	EntryKindInterjected  = "interjected"
+	EntryKindSchedule     = "schedule"
+	EntryKindCompacted    = "compacted"
+	EntryKindWorkflow     = "workflow"
+	EntryKindWorkflowItem = "workflow_item"
 )
 
 // envelope is the top-level serialized form of the scrollback: a version tag plus the committed
@@ -165,6 +170,19 @@ type Entry struct {
 	SkillSpans              []SkillSpan `json:"skillSpans,omitempty"`
 	Tool                    *ToolView   `json:"tool,omitempty"`
 	Presented               *Presented  `json:"presented,omitempty"`
+	// Item is an EntryKindWorkflowItem entry's place in its Workflow, absent on every other kind.
+	Item *WorkflowItem `json:"item,omitempty"`
+}
+
+// WorkflowItem is where one item run's head stands in its Workflow: the stage it belongs to, the
+// 1-based round of that stage (one more for each time a repeat re-ran it), the item's 0-based place
+// in the stage, and the 1-based attempt the run was (a retry or a continuation is a new one). Stage
+// is display text and is stripped on decode like every other such field.
+type WorkflowItem struct {
+	Stage   string `json:"stage,omitempty"`
+	Round   int    `json:"round,omitempty"`
+	Index   int    `json:"index,omitempty"`
+	Attempt int    `json:"attempt,omitempty"`
 }
 
 // SkillSpan is the byte range one invoked "/token" occupies in the entry's own Text. Offsets travel
@@ -381,6 +399,9 @@ func stripEntry(e *Entry) {
 	e.CtxModel = sanitize.StripEscapes(e.CtxModel)
 	if e.Tool != nil {
 		stripToolView(e.Tool)
+	}
+	if e.Item != nil {
+		e.Item.Stage = sanitize.StripEscapes(e.Item.Stage)
 	}
 	if e.Presented != nil {
 		p := e.Presented
