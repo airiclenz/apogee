@@ -1139,7 +1139,8 @@ func repeatedArgumentKeysResult(call domain.ToolCall) (domain.ToolResult, bool) 
 // write-target check (the one I/O-tainted fact — resolve() does
 // none), the sub-agent depth bound, whether an Approver is configured, and the confinement box
 // a Confine verdict would run inside. It is dispatch's fact-gathering; the verdict logic lives
-// entirely in resolve().
+// entirely in resolve(). The one fact it never gathers is workflowScriptDir: only runScriptCall
+// (recipe.go) knows a call is a recipe's script stage, and it sets the field on what this returns.
 func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard security.PreCheck) resolutionInput {
 	target := a.classifyWriteTarget(tool, call)
 	return resolutionInput{

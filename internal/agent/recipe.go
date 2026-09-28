@@ -434,7 +434,8 @@ type recipeScripts struct {
 
 // RunScript renders the stage's command and runs it through the Agent's terminal Resolution: a
 // refused or denied command is an error (the stage ends blocked), one that ran reports its output
-// and exit code.
+// and exit code. The call carries the stage's workflow folder, the one place a Plan-mode script
+// may write (runScriptCall).
 func (s *recipeScripts) RunScript(ctx context.Context, spec workflow.ScriptSpec) (workflow.ScriptOutput, error) {
 	command, err := s.render(spec)
 	if err != nil {
@@ -449,7 +450,7 @@ func (s *recipeScripts) RunScript(ctx context.Context, spec workflow.ScriptSpec)
 		Tool:      shellToolName,
 		Arguments: arguments,
 	}
-	result, err := s.agent.runScriptCall(ctx, s.turn, call)
+	result, err := s.agent.runScriptCall(ctx, s.turn, call, spec.Dir)
 	if err != nil {
 		return workflow.ScriptOutput{}, err
 	}
@@ -517,13 +518,20 @@ func stageSkillFile(files fs.FS, rel, dest string) error {
 // exactly as they decide a model's call (prepareCall), and the verdict's arm runs it (runCall).
 // No ToolCallEvent, Moment or history entry is produced: the call is the workflow's, reported
 // through its stage. A refusal is the error.
-func (a *Agent) runScriptCall(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, error) {
+//
+// workflowDir is the stage's workflow folder. The Resolution is told it (workflowScriptDir), and
+// it is the one difference from a model's call: in Plan, which refuses a model's terminal call,
+// the stage runs confined with that folder as its only writable root, or is refused where nothing
+// can confine it (ADR 0012 amendment 2026-09-27). Every other mode reads nothing from it.
+func (a *Agent) runScriptCall(ctx context.Context, turn int, call domain.ToolCall, workflowDir string) (domain.ToolResult, error) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		return domain.ToolResult{}, fmt.Errorf("no %s tool is registered to run it", call.Tool)
 	}
 	guard := a.tightenForStagedSecrets(ctx, call, a.guards.PreExecute(call, tool, a.guardExemptions()))
-	verdict := a.applyGates(ctx, turn, call, resolve(a.resolutionInput(tool, call, guard)))
+	in := a.resolutionInput(tool, call, guard)
+	in.workflowScriptDir = workflowDir
+	verdict := a.applyGates(ctx, turn, call, resolve(in))
 	var result domain.ToolResult
 	switch verdict.kind {
 	case resolveRefuse:

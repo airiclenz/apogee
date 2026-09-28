@@ -397,6 +397,8 @@ the same way. **Nothing else loosens:** every other target is refused in Plan an
 Ask-Before exactly as before; the **terminal / subprocess route** into the scratch dir stays
 `classSubprocess` — refused in Plan, gated in Ask-Before; a per-project `confine-writable-paths`
 entry is *not* a scratch dir and does not join; the middle rung and Auto are untouched.
+(*Superseded for one route by the [Amendment (2026-09-27)](#amendment-2026-09-27--plan-runs-a-recipes-script-stage-confined-to-its-workflow-folder)
+below: a Recipe's script stage, run confined to its own workflow folder.*)
 
 **(b) This is a LOOSEN — the second — and the core invariant still holds.** *"Never both
 unsupervised and unbounded"* is answered on the bounded half, at the same standing the first
@@ -458,3 +460,41 @@ obfuscation at all, which is the class of mistake the floor exists to catch.
 The mechanism is in `internal/security/dangerous.go` (`inspectableText`, `collectArgs`); the
 contract's §4 "What the floor never sees" carries the dated note, and CONTEXT.md's
 **Dangerous-action guard** entry and the manual's "The dangerous-action guard" section the prose.
+
+## Amendment (2026-09-27) — Plan runs a recipe's script stage, confined to its workflow folder
+
+**Why now.** A Recipe's `script` stage (ADR 0087 D6) runs as a `terminal` call the engine builds
+and puts through the same Resolution a model's call meets — so Plan refused it, as it refuses every
+`classSubprocess` call. The shipped `audit` recipe opens with such a stage (its `split`), and Plan
+is the default mode of a headless run and a daemon Firing, so the one recipe apogee ships could
+not run where ADR 0087 D4 says it must: "a read-only audit works in Plan mode".
+
+**Decision.** The one further loosen of amendment (a)'s "Nothing else loosens" is an
+**engine-built recipe script stage in Plan**, and it runs **confined so it can write only its own
+workflow folder**:
+
+- The Plan row resolves that call to **`Confine`** when the backend can fence the filesystem
+  (`fsConfineAvailable`), with a deliberately narrower box — the workflow folder is the
+  `WorkspaceRoot` and the `ScratchDir`, `WritablePaths` is empty, `NetworkAllow` is kept — so a
+  write anywhere else, the workspace included, fails inside the sandbox. With no backend it is
+  **refused** (`plan mode runs a recipe script only inside a sandbox, and this host cannot confine
+  one`); a box that cannot be established at run time falls back to that refusal too, never to a
+  gate or an unconfined re-run.
+- The rule keys on **Plan and the call carrying its workflow folder** (`workflowScriptDir`, set by
+  `runScriptCall` alone), never on the folder alone: the other three modes resolve a script stage
+  exactly as before, the Auto box and its forced-gate demote included.
+- The dangerous-action guard still runs first. A Tier-1 match refuses as in every mode; a
+  **Tier-2** match, which elsewhere forces an Approval, **refuses** in Plan — Plan runs the script
+  only confined and on no one's approval.
+
+**What does not move.** A model's own `terminal` call in Plan is refused exactly as before, and the
+Plan menu still never offers it; every other subprocess route into the scratch dir stays refused
+in Plan and gated in Ask-Before; amendment (a)'s scratch-dir writers are untouched. The invariant
+is answered on the **bounded** half at OS strength: the stage is unsupervised in Plan but never
+unbounded, because the box — not path-safety — is what fences it, and where no box exists it does
+not run.
+
+The mechanism is in `internal/agent/resolution.go` (`planScriptStage`, `planScriptBox`, the Plan
+row of `resolveLadder`, `applyOverlays`' Tier-2 branch, `confineFallback`) and
+`internal/agent/recipe.go` (`runScriptCall`); ADR 0087's dated amendment under D4 cites this one,
+and the contract's §4 ladder, CONTEXT.md's **Scratch dir** entry and the manual carry the prose.

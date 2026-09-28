@@ -6,7 +6,9 @@ import (
 	"errors"
 	"iter"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -184,10 +186,14 @@ func (s *scriptedAsker) Ask(_ context.Context, req domain.AskRequest) (domain.As
 }
 
 // shellTool stands in for the terminal tool: a subprocess tool whose run is the test's.
+// When the call carries a confinement handle, it hands the backend a command and records the box,
+// as the real terminal does before it spawns: a backend that cannot confine is the error it
+// returns, and the command does not run.
 type shellTool struct {
-	mu   sync.Mutex
-	runs []string
-	run  func(command string) domain.ToolResult
+	mu    sync.Mutex
+	runs  []string
+	boxes []domain.ConfinementBox
+	run   func(command string) domain.ToolResult
 }
 
 func (s *shellTool) Name() string            { return shellToolName }
@@ -196,12 +202,20 @@ func (s *shellTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"
 func (s *shellTool) ReadOnly() bool          { return false }
 func (s *shellTool) Subprocess() bool        { return true }
 
-func (s *shellTool) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+func (s *shellTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	var args struct {
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return domain.ToolResult{}, err
+	}
+	if conf, ok := domain.ConfinementFromContext(ctx); ok {
+		if err := conf.Confiner.Confine(ctx, conf.Box, exec.Command("sh", "-c", args.Command)); err != nil {
+			return domain.ToolResult{}, err
+		}
+		s.mu.Lock()
+		s.boxes = append(s.boxes, conf.Box)
+		s.mu.Unlock()
 	}
 	s.mu.Lock()
 	s.runs = append(s.runs, args.Command)
@@ -381,11 +395,16 @@ func TestRecipe_InterjectRefusesALaunch(t *testing.T) {
 	}
 }
 
-func TestRecipe_AScriptStageIsRefusedInPlanMode(t *testing.T) {
-	t.Parallel()
-
-	cfg := recipeConfig(t, &recordingSink{}, scriptRecipe("sh {{SKILL_DIR}}/bin/count.sh > /tmp/out"))
-	cfg.Mode = domain.ModePlan
+// runScriptRecipe runs the tally recipe under cfg's mode and confiner with a shell that prints
+// COUNT=3 and an Approver that allows, and returns the config, the shell and the result lines the
+// parent's first request carried.
+func runScriptRecipe(t *testing.T, mode domain.Mode, confiner domain.Confiner) (domain.Config, *shellTool, string) {
+	t.Helper()
+	cfg := recipeConfig(t, &recordingSink{}, scriptRecipe("sh {{SKILL_DIR}}/bin/count.sh {workflow_dir}"))
+	cfg.Mode = mode
+	cfg.Confiner = confiner
+	cfg.ConfineToWorkspace = true
+	cfg.Approver = &gateApprover{decision: domain.ApprovalAllow}
 	shell := &shellTool{run: func(string) domain.ToolResult { return domain.ToolResult{Content: "COUNT=3\n"} }}
 	_ = cfg.Tools.Register(shell)
 	up := &requestLog{inner: (&workflowResponder{}).route("/tally", nil, contentScript("ok"))}
@@ -393,16 +412,82 @@ func TestRecipe_AScriptStageIsRefusedInPlanMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-
 	runInput(t, a, domain.UserInput{Text: "/tally", SkillIDs: []string{"tally"}})
+	return cfg, shell, up.first(t, "/tally")
+}
 
-	got := up.first(t, "/tally")
-	if !strings.Contains(got, "script count: blocked") || !strings.Contains(got, "plan mode") {
-		t.Errorf("the script stage was not refused by Plan mode:\n%s", got)
+// TestRecipe_AScriptStageInPlanModeRunsOnlyConfined pins both halves of the Plan rule (ADR 0012
+// amendment 2026-09-27): with a backend the stage runs inside a box whose one writable root is its
+// workflow folder; with none — or a box that cannot be established at run time — it is refused
+// and the shell never runs, whatever the Approver would have said.
+func TestRecipe_AScriptStageInPlanModeRunsOnlyConfined(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a backend runs it boxed to the workflow folder", func(t *testing.T) {
+		t.Parallel()
+		cfg, shell, got := runScriptRecipe(t, domain.ModePlan, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}})
+		if !strings.Contains(got, "script count: ok") {
+			t.Fatalf("the script stage did not run in Plan mode:\n%s", got)
+		}
+		if len(shell.boxes) != 1 {
+			t.Fatalf("the shell ran %d times confined, want once (runs %q)", len(shell.boxes), shell.runs)
+		}
+		box := shell.boxes[0]
+		folder := box.WorkspaceRoot
+		if filepath.Dir(folder) != filepath.Join(cfg.ScratchDir, "workflows") || box.ScratchDir != folder || len(box.WritablePaths) != 0 {
+			t.Errorf("box = %+v, want the workflow folder under %s as its one writable root", box, cfg.ScratchDir)
+		}
+		if !strings.Contains(shell.runs[0], folder) {
+			t.Errorf("the command %q does not name the box's folder %s", shell.runs[0], folder)
+		}
+	})
+
+	for name, confiner := range map[string]domain.Confiner{
+		"no backend refuses it":                    nil,
+		"a box that cannot be established refuses": &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, shell, got := runScriptRecipe(t, domain.ModePlan, confiner)
+			if !strings.Contains(got, "script count: blocked") || !strings.Contains(got, "plan mode runs a recipe script only inside a sandbox") {
+				t.Errorf("the script stage was not refused for want of a sandbox:\n%s", got)
+			}
+			if len(shell.runs) != 0 {
+				t.Errorf("the shell ran %q in Plan mode", shell.runs)
+			}
+		})
 	}
-	if len(shell.runs) != 0 {
-		t.Errorf("the shell ran %q in Plan mode", shell.runs)
-	}
+}
+
+// TestRecipe_AnAutoScriptStageKeepsItsBoxAndDemote pins that the Plan rule reads nothing outside
+// Plan: in Auto a script stage is confined to the workspace and scratch dir as a model's terminal
+// call is, and a box that cannot be established demotes to the forced gate, whose allow re-runs it
+// unconfined.
+func TestRecipe_AnAutoScriptStageKeepsItsBoxAndDemote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("confined to the workspace and scratch dir", func(t *testing.T) {
+		t.Parallel()
+		cfg, shell, got := runScriptRecipe(t, domain.ModeAuto, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}})
+		if !strings.Contains(got, "script count: ok") || len(shell.boxes) != 1 {
+			t.Fatalf("the Auto script stage did not run confined once (boxes %+v):\n%s", shell.boxes, got)
+		}
+		box := shell.boxes[0]
+		if box.WorkspaceRoot != cfg.WorkspaceDir || box.ScratchDir != cfg.ScratchDir || !slices.Contains(box.WritablePaths, cfg.ScratchDir) {
+			t.Errorf("box = %+v, want the workspace %s with the scratch dir %s writable", box, cfg.WorkspaceDir, cfg.ScratchDir)
+		}
+	})
+
+	t.Run("a failed box demotes to the forced gate", func(t *testing.T) {
+		t.Parallel()
+		cfg, shell, got := runScriptRecipe(t, domain.ModeAuto, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true})
+		if !strings.Contains(got, "script count: ok") || len(shell.runs) != 1 || len(shell.boxes) != 0 {
+			t.Errorf("the demoted stage did not re-run unconfined on allow (runs %q, boxes %+v):\n%s", shell.runs, shell.boxes, got)
+		}
+		if approver := cfg.Approver.(*gateApprover); len(approver.requests) != 1 || approver.requests[0].Reason != confineDemoteGateReason {
+			t.Errorf("approvals = %+v, want the one forced demote gate", approver.requests)
+		}
+	})
 }
 
 func TestRecipe_AShippedScriptIsStagedAndRun(t *testing.T) {

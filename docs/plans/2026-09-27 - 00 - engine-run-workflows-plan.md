@@ -1189,7 +1189,25 @@ NOTES (2026-09-28): `sub_agent{tools: "read-only"}` (requestedChildTools, subage
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/`
 **Commit:** `fix(agent): plan mode offers fan_out beside sub_agent`
 
-## 42. Plan mode runs a recipe's script stages confined to the workflow folder
+## 42. Plan mode runs a recipe's script stages confined to the workflow folder — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): runScriptCall gains a `workflowDir string` parameter (RunScript passes `spec.Dir`) and sets `workflowScriptDir` on the input `resolutionInput()` returns, so the dispatch.go builder is unchanged apart from its doc comment. Two helpers key the rule: `planScriptStage` (Plan AND a non-empty folder) and `planScriptBox`, which takes the input box and clears the fields in one line.
+
+NOTES (2026-09-28): a Tier-2 match in Plan refuses with `plan mode runs a recipe script only confined and never on an approval, and the dangerous-action guard asks for one: <rule reason>` and keeps the guard's audit fields, so it is recorded like any other blocked dangerous call. The runtime refusal fallback also keeps the audit fields, as the existing no-Approver fallback does.
+
+NOTES (2026-09-28): ADR 0012's new `## Amendment (2026-09-27)` is appended after its 2026-09-26 amendment so the dated amendments stay in order. Amendment (a) gets a one-line italic pointer to it at "Nothing else loosens". ADR 0087 gets its `> **Amended 2026-09-27.**` note under D4 and a clause on D6's "Script stages obey the Mode and approval rules" sentence.
+
+NOTES (2026-09-28): consequential edit — docs/manual/workflows.md: made necessary by the Plan script rule (its "a script runs under exactly the mode … rules the model's own shell calls meet" is now false in Plan)
+
+NOTES (2026-09-28): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the Plan script rule (the §4 ladder's subproc/Plan `refuse` cell gains a dated note for the engine's script-stage call)
+
+NOTES (2026-09-28): consequential edit — internal/domain/confinement.go: made necessary by planScriptBox (Config.ConfinementBox's doc said no narrower-box caller exists today)
+
+NOTES (2026-09-28): the repo-wide grep also hits README.md:200 ("its own per-session scratch directory is the one place it writes"). It is left as is because it stays true: the workflow folder is inside the scratch dir.
+
+NOTES (2026-09-28): the Plan runtime-refusal fallback goes through executeConfineFallback, which first emits its existing ErrorEvent "confinement unavailable at run time: demoting subprocess call to Approval" and only then refuses. The no-Approver fallback already behaves this way, and the wording is left as is.
+
+NOTES (2026-09-28): the test `shellTool` fake (recipe_test.go) now hands a confinement handle's backend a command and records the box, so the recipe-level tests can see the box and the runtime demote. The tests that existed before do not install a confiner and are unaffected.
 
 **What:** Depends on items 20, 41. Fixes a run finding. `runScriptCall` (recipe.go) puts a script stage through the terminal's own Resolution, and Plan refuses every `ClassSubprocess` call. So the shipped `audit` recipe's `split.sh` is blocked in Plan, which is also the default mode of headless runs and daemon firings (items 35, 36). That contradicts ADR 0087 D4 ("a read-only audit works in Plan mode"). Decided here: a confine-to-the-workflow-folder rule for engine-built script calls only, recorded as a dated amendment of ADR 0087 D4/D6.
 **Goal:** in Plan mode, a recipe's script stage runs inside the Confinement box when the backend can confine, with the workflow folder as its only writable root. A write anywhere else (the workspace included) fails inside the sandbox. With no confinement backend the stage is refused with a reason saying Plan runs a recipe script only inside a sandbox. A model's own `terminal` call in Plan stays refused, and every other mode resolves script stages exactly as at the header base.

@@ -68,6 +68,16 @@ const (
 	// because an Approval prompt has room for a sentence, not a paragraph. It is a bare sentence: the
 	// "Fix: " label a Driver paints in front of it is presentation, not engine (ADR 0031).
 	confineUnavailableRemedy = "/confine off runs commands unconfined this session (disposable machines only)"
+	// planScriptUnconfinedReason refuses a recipe's script stage in Plan where no box can hold it
+	// — no confinement backend on this host, or a box that could not be established at run time.
+	// Plan runs a recipe script only confined to its workflow folder (ADR 0012 amendment
+	// 2026-09-27), so there is no gate or unconfined run to fall back to.
+	planScriptUnconfinedReason = "plan mode runs a recipe script only inside a sandbox, and this host cannot confine one"
+	// planScriptForcedReasonFormat refuses a recipe's script stage in Plan that the
+	// dangerous-action guard would force to Approval: Plan runs a recipe script only confined, on
+	// no one's approval, so a Tier-2 match refuses where every other mode gates. The verb is the
+	// matched rule's reason.
+	planScriptForcedReasonFormat = "plan mode runs a recipe script only confined and never on an approval, and the dangerous-action guard asks for one: %s"
 )
 
 // resolutionKind is the class of verdict resolve() computes for one tool call. It is the
@@ -247,12 +257,20 @@ type resolutionInput struct {
 	// dir. It is the one target Plan writes and the one write Ask-Before does not gate (ADR 0012
 	// second loosen, 2026-09-14); it is always false with no scratch dir set, and it says nothing
 	// about any other tool class — the terminal route into the scratch dir is still refused in
-	// Plan and gated in Ask-Before.
+	// Plan and gated in Ask-Before. (The one subprocess Plan runs is a recipe's script stage,
+	// confined to its workflow folder — workflowScriptDir, not this fact.)
 	writeTargetInScratch bool
 	// scratchDir is the live session scratch dir as ScratchDir() spells it, or "" when none is
 	// set. The Plan refusal names it, so the model is told WHERE a write would have run; the
 	// box (ConfinementBox) folds the same dir into WritablePaths but does not carry it apart.
 	scratchDir string
+	// workflowScriptDir is the workflow folder of a recipe's script stage — set by runScriptCall
+	// alone, for the `terminal` call the engine built from the stage (never one a model sent), and
+	// "" for every other call. In Plan it is what lets that one call run at all: confined, with the
+	// folder as its only writable root (ADR 0012 amendment 2026-09-27, ADR 0087 D4). Every rule
+	// that reads it keys on Plan as well (planScriptStage), so in every other mode a script stage
+	// resolves exactly as a model's own terminal call does.
+	workflowScriptDir string
 	// atDepthBound is true when spawning a sub-agent here would reach the recursion bound
 	// (Agent.maxDepth, the `delegate-max-depth` key); maxDepth is that bound, for the refusal
 	// to name.
@@ -433,6 +451,25 @@ func planOffersDelegation(tool domain.Tool, scratchSet bool) bool {
 	return false
 }
 
+// planScriptStage reports whether in is a recipe's script stage resolving in Plan — the one
+// subprocess route Plan runs, and only confined to the stage's workflow folder (ADR 0012
+// amendment 2026-09-27). It keys on the mode AND the folder, never on the folder alone, so the
+// narrowed box, the Tier-2 refusal and the refusal fallback apply in Plan only; every other mode
+// resolves a script stage on its ordinary row.
+func planScriptStage(in resolutionInput) bool {
+	return in.mode == domain.ModePlan && in.workflowScriptDir != ""
+}
+
+// planScriptBox is the box a Plan script stage runs inside: the deliberately NARROWER box
+// Config.ConfinementBox documents, whose one writable root is the workflow folder — the workspace
+// and the declared writable paths drop out, the folder stands in for the scratch dir the
+// toolchain's temp and cache variables are seeded beneath, and the network list is kept.
+func planScriptBox(in resolutionInput) domain.ConfinementBox {
+	box := in.box
+	box.WorkspaceRoot, box.ScratchDir, box.WritablePaths = in.workflowScriptDir, in.workflowScriptDir, nil
+	return box
+}
+
 // planScratchRefusalReason is returned to the model when Plan mode refuses a tool while a
 // session scratch dir is set: it names the dir, in the spelling ScratchDir() returns, because the
 // menu offered the writers for that one target and the refusal has to say which target that is.
@@ -457,6 +494,16 @@ func resolveLadder(in resolutionInput) resolution {
 		// only, as before: a host-registered tool called without being offered.
 		if planAdmits(in.tool) || (class == tools.ClassWorkspaceWrite && in.writeTargetInScratch) {
 			return resolution{kind: resolveRun}
+		}
+		// The one subprocess Plan runs: a recipe's script stage, the engine's own call, confined
+		// so it writes nothing but its workflow folder (ADR 0012 amendment 2026-09-27) — and with
+		// no backend to confine it, refused rather than gated or run unconfined. A model's own
+		// terminal call never carries the folder, so it falls through to the refusal below.
+		if planScriptStage(in) && class == tools.ClassSubprocess {
+			if in.fsConfineAvailable {
+				return resolution{kind: resolveConfine}
+			}
+			return resolution{kind: resolveRefuse, reason: planScriptUnconfinedReason}
 		}
 		if in.scratchDir != "" {
 			return resolution{kind: resolveRefuse, reason: planScratchRefusalReason(in.scratchDir)}
@@ -566,6 +613,18 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 	// continuation therefore executes as the Confine would have (confineOnAllow), demote
 	// contingency included. A Run or Gate leaf had no fence to keep, so its upgrade is the
 	// bare forced gate.
+	//
+	// A recipe's script stage in Plan is the exception: Plan runs it only confined and on no
+	// one's approval (ADR 0012 amendment 2026-09-27), so the upgrade would loosen what Plan
+	// allows — it is refused instead, with the matched rule named and the guard's audit kept.
+	if in.guard.Outcome == security.GuardForceApproval && leaf.kind != resolveRefuse && planScriptStage(in) {
+		return resolution{
+			kind:          resolveRefuse,
+			reason:        fmt.Sprintf(planScriptForcedReasonFormat, in.guard.Reason),
+			auditDecision: in.guard.Audit,
+			auditReason:   in.guard.Reason,
+		}
+	}
 	if in.guard.Outcome == security.GuardForceApproval && leaf.kind != resolveRefuse {
 		if leaf.kind == resolveConfine {
 			leaf = resolution{
@@ -759,9 +818,13 @@ func argumentsDigest(call domain.ToolCall) (string, bool) {
 }
 
 // finishConfine completes a Confine leaf: it attaches the prebuilt box and the precomputed
-// runtime-demote fallback (D4), and carries the guard's audit metadata for the executed run.
+// runtime-demote fallback (D4), and carries the guard's audit metadata for the executed run. A
+// recipe's script stage in Plan takes the narrowed box instead (planScriptBox).
 func finishConfine(in resolutionInput, confine resolution) resolution {
 	confine.box = in.box
+	if planScriptStage(in) {
+		confine.box = planScriptBox(in)
+	}
 	confine.auditDecision = in.guard.Audit
 	confine.auditReason = in.guard.Reason
 	confine.fallback = confineFallback(in)
@@ -774,7 +837,19 @@ func finishConfine(in resolutionInput, confine resolution) resolution {
 // fallback never carries its own fallback — the demote is a single, bounded step. The gate
 // carries the same remedy as the caps-insufficient ladder cell: the two prompts differ only in
 // WHEN the host's incapacity was discovered, and the way out of both is the same one command.
+//
+// A recipe's script stage in Plan falls back to a refusal whatever the Approver: Plan runs it
+// only confined (ADR 0012 amendment 2026-09-27), so neither a gate nor an unconfined re-run is
+// a way out for it.
 func confineFallback(in resolutionInput) *resolution {
+	if planScriptStage(in) {
+		return &resolution{
+			kind:          resolveRefuse,
+			reason:        planScriptUnconfinedReason,
+			auditDecision: in.guard.Audit,
+			auditReason:   in.guard.Reason,
+		}
+	}
 	if !in.approverPresent {
 		return &resolution{
 			kind:          resolveRefuse,

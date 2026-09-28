@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1192,4 +1193,118 @@ func TestMCPServerAlias(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ----------------------------------------------------------------------------
+// A recipe's script stage in Plan (ADR 0012 amendment 2026-09-27)
+// ----------------------------------------------------------------------------
+
+// TestResolve_PlanScriptStage pins the one subprocess route Plan runs: the `terminal` call a
+// recipe's script stage builds, marked with its workflow folder (workflowScriptDir). With a
+// backend it is Confined inside a box whose only writable root is that folder, and it falls back
+// to a refusal; with none, or on a Tier-2 match, it is refused. A model's own terminal call in
+// Plan is refused as before, and every other mode resolves a script stage exactly as it resolves
+// the same call without the folder.
+func TestResolve_PlanScriptStage(t *testing.T) {
+	t.Parallel()
+	const folder = "/scratch/workflows/wf-1"
+	sub := &subprocTool{name: "terminal"}
+	forceGuard := security.PreCheck{Outcome: security.GuardForceApproval, Reason: "curl | bash", Audit: security.AuditDangerousForceApproval}
+
+	input := func(mode domain.Mode, caps, approver bool, dir string) resolutionInput {
+		return resolutionInput{
+			mode:               mode,
+			call:               domain.ToolCall{ID: "c1", Tool: sub.Name()},
+			tool:               sub,
+			guard:              proceed,
+			confineToWorkspace: true,
+			fsConfineAvailable: caps,
+			scratchDir:         "/scratch",
+			approverPresent:    approver,
+			workflowScriptDir:  dir,
+			box: domain.ConfinementBox{
+				WorkspaceRoot: "/ws",
+				WritablePaths: []string{"/cache", "/scratch"},
+				NetworkAllow:  []string{"example.com"},
+				ScratchDir:    "/scratch",
+			},
+		}
+	}
+
+	t.Run("a backend confines it to the workflow folder", func(t *testing.T) {
+		t.Parallel()
+		for _, approver := range []bool{true, false} {
+			got := resolve(input(domain.ModePlan, true, approver, folder))
+			if got.kind != resolveConfine {
+				t.Fatalf("approver=%v: kind = %s, want confine", approver, got.kind)
+			}
+			want := domain.ConfinementBox{WorkspaceRoot: folder, ScratchDir: folder, NetworkAllow: []string{"example.com"}}
+			if !reflect.DeepEqual(got.box, want) {
+				t.Errorf("approver=%v: box = %+v, want the narrowed %+v", approver, got.box, want)
+			}
+			if got.fallback == nil || got.fallback.kind != resolveRefuse || got.fallback.reason != planScriptUnconfinedReason {
+				t.Errorf("approver=%v: fallback = %+v, want a refusal carrying %q (never a gate or an unconfined run)",
+					approver, got.fallback, planScriptUnconfinedReason)
+			}
+		}
+	})
+
+	t.Run("no backend refuses it", func(t *testing.T) {
+		t.Parallel()
+		got := resolve(input(domain.ModePlan, false, true, folder))
+		if got.kind != resolveRefuse || got.reason != planScriptUnconfinedReason {
+			t.Errorf("got %s %q, want refuse %q", got.kind, got.reason, planScriptUnconfinedReason)
+		}
+	})
+
+	t.Run("a model's own terminal call is still refused", func(t *testing.T) {
+		t.Parallel()
+		got := resolve(input(domain.ModePlan, true, true, ""))
+		if got.kind != resolveRefuse || got.reason != planScratchRefusalReason("/scratch") {
+			t.Errorf("got %s %q, want the Plan refusal naming the scratch dir", got.kind, got.reason)
+		}
+	})
+
+	t.Run("a Tier-2 match refuses rather than gates", func(t *testing.T) {
+		t.Parallel()
+		in := input(domain.ModePlan, true, true, folder)
+		in.guard = forceGuard
+		got := resolve(in)
+		if got.kind != resolveRefuse {
+			t.Fatalf("kind = %s, want refuse", got.kind)
+		}
+		if want := fmt.Sprintf(planScriptForcedReasonFormat, forceGuard.Reason); got.reason != want {
+			t.Errorf("reason = %q, want %q", got.reason, want)
+		}
+		if got.auditDecision != forceGuard.Audit || got.auditReason != forceGuard.Reason {
+			t.Errorf("audit = %q/%q, want the guard's %q/%q", got.auditDecision, got.auditReason, forceGuard.Audit, forceGuard.Reason)
+		}
+	})
+
+	t.Run("a Tier-1 match refuses as in every mode", func(t *testing.T) {
+		t.Parallel()
+		in := input(domain.ModePlan, true, true, folder)
+		in.guard = security.PreCheck{Outcome: security.GuardRefuse, Reason: "rm -rf /", Audit: security.AuditDangerousRefused}
+		if got := resolve(in); got.kind != resolveRefuse || got.reason != guardRefusalMessage(in.guard) {
+			t.Errorf("got %s %q, want the guard's refusal", got.kind, got.reason)
+		}
+	})
+
+	t.Run("every other mode resolves it as a model's call", func(t *testing.T) {
+		t.Parallel()
+		for _, mode := range []domain.Mode{domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto} {
+			for _, caps := range []bool{true, false} {
+				for _, guard := range []security.PreCheck{proceed, forceGuard} {
+					with := input(mode, caps, true, folder)
+					with.guard = guard
+					without := input(mode, caps, true, "")
+					without.guard = guard
+					if got, want := resolve(with), resolve(without); !reflect.DeepEqual(got, want) {
+						t.Errorf("%s caps=%v guard=%v: script stage resolved %+v, want the model call's %+v",
+							mode, caps, guard.Outcome, got, want)
+					}
+				}
+			}
+		}
+	})
 }

@@ -169,8 +169,10 @@ type ConfinementBox struct {
 // slice so the append can never scribble on the host's ConfineWritablePaths backing array; either
 // way the box is read-only policy, never mutated by its readers. A caller that wants a
 // deliberately NARROWER box calls this and then clears the field it does not want, keeping the
-// divergence visible in one line (no such caller exists today — the retired `library` row's exec
-// fence, built in internal/agent's deriveDeps, was the last one and retired with it, ADR 0071).
+// divergence visible in one line — today a recipe's script stage in Plan mode, fenced to its
+// workflow folder alone (internal/agent's planScriptBox, ADR 0012 amendment 2026-09-27); the
+// retired `library` row's exec fence, built in internal/agent's deriveDeps, was the one before
+// it and retired with it (ADR 0071).
 func (c Config) ConfinementBox() ConfinementBox {
 	writable := c.ConfineWritablePaths
 	if c.ScratchDir != "" {

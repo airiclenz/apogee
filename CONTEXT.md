@@ -1247,7 +1247,9 @@ allows, named to the model via the **`{{scratch}}`** prompt placeholder — for 
 and by the **Orientation block** that rides on every standing system message in every mode,
 **Plan** included: since ADR 0012's second loosen (2026-09-14) the scratch dir is the one place Plan
 writes and the one native write Ask-Before does not gate, so the bullet is true on every rung (the
-terminal route into it stays refused in Plan and gated in Ask-Before).
+terminal route into it stays refused in Plan and gated in Ask-Before; the one subprocess Plan runs is
+a Recipe's script stage, the engine's own call, confined so it writes only its own workflow folder —
+ADR 0012 amendment 2026-09-27).
 Writable, and readable by every read tool: the announced path is a live read root for
 `read_file`, `grep`, `list_dir`, `find_files`, `copy_file`'s source and `present_document`
 (the `Scratch` mount of the one `Config.ReadMounts` value, 2026-09-15 — a mount of its own beside

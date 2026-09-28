@@ -223,7 +223,11 @@ is led by apogee's own, which names the item's receipt and output to check, or t
 read and where the report goes; yours adds what to look for.
 
 A **script** runs as a `terminal` call — under exactly the mode, guard, confinement and approval
-rules the model's own shell calls meet, so in Ask-Before you approve it. A stdout line whose key
+rules the model's own shell calls meet, so in Ask-Before you approve it. Plan is the one
+exception, because Plan refuses the model's shell outright: there a script stage runs inside
+the confinement box with its own workflow folder as the only place it may write (a write to the
+workspace fails in the sandbox), and on a host with no confinement backend it is refused — so a
+read-only `audit` works in Plan, the default mode of headless runs and daemon firings. A stdout line whose key
 the stage's `returns:` declares becomes that field (`summary=` sets the summary); every other line
 is ignored. The status is `ok` on exit 0 and `blocked` otherwise. Its `run:` may use three
 placeholders beside the inputs: `{{SKILL_DIR}}` (the skill's folder — a copy staged into the

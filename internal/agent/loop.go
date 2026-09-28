@@ -1653,7 +1653,9 @@ func (a *Agent) maxOutputTokens() int {
 
 // toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In
 // Plan mode it offers only the tools Plan can actually run — the model is never shown a call
-// it cannot make on any target (ADR 0012: Plan is read-only except for the session scratch dir).
+// it cannot make on any target (ADR 0012: Plan is read-only except for the session scratch dir;
+// the one subprocess it runs, a recipe's script stage confined to its workflow folder, is the
+// engine's own call and never a menu entry — amendment 2026-09-27).
 // A sub-agent's registry is already the narrowed one its spawn built — the parent's minus the
 // human-seat tools no child gets, minus whatever the call's `tools` argument took away
 // (defaultSubAgentTools, requestedChildTools) — so the child's menu reads that set and needs no

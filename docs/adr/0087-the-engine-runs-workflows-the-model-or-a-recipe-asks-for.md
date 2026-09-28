@@ -68,6 +68,15 @@ mid-conversation, and ADR 0007's suspended-sub-agent slot stays empty. Reuse acr
 (incremental re-runs a week later) is deferred: it needs a per-workspace folder and a fence rule of
 its own.
 
+> **Amended 2026-09-27 ([ADR 0012](0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md) amendment 2026-09-27; D6).** "No new fence rule" held for the folder's writes
+> but not for a Recipe's `script` stage, a `terminal` call Plan refused like any subprocess — so
+> the shipped `audit`'s `split` could not run in Plan, the default of headless runs and daemon
+> Firings. One rule is added, for that engine-built call only: in Plan it runs inside the
+> Confinement box with its own workflow folder as the only writable root (a write anywhere else,
+> the workspace included, fails in the sandbox), and with no confinement backend it is refused.
+> A model's own `terminal` call in Plan stays refused, and the other modes run script stages as
+> before.
+
 **D5 — ADR 0022 D8 is amended for workflow items.** A workflow item's conversation is saved in its
 workflow folder, for `/workflows` inspection. It is still never a Session record, and a plain
 `sub_agent` child stays ephemeral.
@@ -77,7 +86,8 @@ named stages of seven kinds — `fanout`, `merge`, `pick` (a stage's output or a
 the next stage's items), `verify`, `script`, `ask` (a question to the user) and `repeat` (bounded) —
 with `when:` conditions on receipt fields between them. Anything computed is a `script` stage,
 never a language feature; the owner's skills already split the work this way (`split.sh`). Script
-stages obey the Mode and approval rules of the agent's own shell tool. The user starts a recipe by
+stages obey the Mode and approval rules of the agent's own shell tool — except in Plan, where they
+run confined to their workflow folder rather than being refused (amended 2026-09-27, see D4). The user starts a recipe by
 invoking its skill, whether or not `fan_out` is enabled. Rejected: recipes as programs in an embedded
 scripting language (the Claude Code workflow shape). That means a new runtime and safety surface, and
 plans that cannot be checked before they run. apogee ships a built-in recipe, `audit` (a user's own `code-audit` skill keeps its name), as the

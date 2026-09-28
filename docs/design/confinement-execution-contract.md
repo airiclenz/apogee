@@ -709,6 +709,11 @@ on both sides, and `internal/agent/planmenu_test.go` pins the agreement over the
 **Scoped 2026-09-06 (the RO-subproc class):** this covers `diagnostics` alone now — `git_diff_range`,
 with `git_status` and `git_log`, carries the `readOnlySubprocess` marker and takes the **RO-subproc**
 row, so Plan both offers and runs it.
+**Amended 2026-09-27 (a recipe's script stage):** the subproc row's Plan `refuse` binds every call a
+model sends. The one subprocess call Plan runs is the engine's own — a Recipe's `script` stage
+(`runScriptCall`, which marks the call with its workflow folder): **confine** with caps sufficient,
+inside a narrowed box whose only writable root is that folder, and **refuse** with caps insufficient,
+on a Tier-2 match, and as the runtime fallback (ADR 0012 amendment 2026-09-27).
 `confine=false` is global-config-only, VM-only, prints a per-session startup warning, and **never**
 escapes the dangerous-action floor.
 
