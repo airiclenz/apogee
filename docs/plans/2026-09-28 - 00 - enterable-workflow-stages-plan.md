@@ -371,7 +371,11 @@ internal/agent/workflowcall.go — package doc (plan-hash resume); internal/tui/
 
 **Commit:** `feat(tui): a resumed session reopens its workflow stages`
 
-## 8. The context gauge shows an estimate before the first usage reading
+## 8. The context gauge shows an estimate before the first usage reading — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): Agent.ContextEstimate lives in internal/agent/contextcost.go beside ContextCost (ContextCost().Tokens + the budget's EstimateTokens over domain.PromptChars(conv.Messages(), nil)), not in agent.go; its tests are in agent_test.go.
+NOTES (2026-09-28): internal/tui/usage.go and usage_test.go were not touched — the /usage table keeps real readings only; all TUI tests went into model_test.go (estimate shown, replaced by a depth-0 reading, /clear, /compact, errored `enter dismiss`).
+NOTES (2026-09-28): the estimate is taken by Model.takeContextEstimate (model.go) only while ctxUsed == 0, called in launchExchange, runContinue (before both branches) and wakeIfIdle; layout.md's right-slot prose is left to item 10, which owns the gauge doc sweep.
 
 **What:** Recast at the regression check (2026-09-28).
 **Goal:** While the session has no depth-0 usage reading, which is the case during a foreground recipe that is the first line or follows `/clear` or `/compact`, the status line's right slot shows the context gauge in its usual format with the value prefixed `~`. The value is the engine's estimate of the next request. The first real reading replaces it.

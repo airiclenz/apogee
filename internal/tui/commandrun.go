@@ -119,6 +119,7 @@ func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 // dies with the Exchange (finishWorker clears it), so a row can never be delivered into an
 // Exchange other than the one it was typed during.
 func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
+	m.takeContextEstimate() // on this goroutine, before the worker owns the engine
 	box := newInterjectBox()
 	cmd, cancel := startExchange(m.parent, m.eng, in, box, m.notify, m.flushEvents)
 	batch := m.enterRunning(cmd, cancel, box, actThinking)
@@ -550,6 +551,7 @@ func actuationVerb(verb string) commandRun {
 // and nothing is silently borrowed from it here. The order is the typed prompt's: follow-the-tail
 // re-armed, then the user block, then the launch.
 func (m Model) runContinue() (tea.Model, tea.Cmd) {
+	m.takeContextEstimate() // on this goroutine, before either worker below owns the engine
 	if m.eng.InExchange() {
 		box := newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
 		cmd, cancel := startResume(m.parent, m.eng, box, m.notify, m.flushEvents)
@@ -600,8 +602,9 @@ func (m Model) runHelp() (tea.Model, tea.Cmd) {
 // foldCompactDone folds the /compact worker's terminal Msg: note what the fold did, return to
 // idle, and flush anything staged while it ran.
 //
-// On success the history shrank, so reset the gauge to hidden — the next Turn's UsageEvent
-// re-measures the smaller fill (foldStats). A skip (conversation too small to fold) touched nothing,
+// On success the history shrank, so reset the gauge to hidden — reading and estimate alike: the
+// next Turn start estimates the folded history (takeContextEstimate) and its UsageEvent re-measures
+// the smaller fill (foldStats). A skip (conversation too small to fold) touched nothing,
 // so leave the gauge as it was and say so plainly rather than claiming a compaction. A failure
 // surfaces its reason as a note. Either way the worker is done: return to idle.
 //
@@ -617,7 +620,7 @@ func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	case msg.Skipped:
 		m.transcript.addNote("nothing to compact")
 	default:
-		m.ctxUsed = 0
+		m.ctxUsed, m.ctxEstimate = 0, 0 // the next Turn start takes a fresh estimate of the folded history
 		// Under its own kind, so the record can find the fold (transcript.addCompacted). The
 		// maintenance reading the summary call emitted has already folded through foldStats, which
 		// skipped its note because this worker was running — this is the one note /compact leaves.

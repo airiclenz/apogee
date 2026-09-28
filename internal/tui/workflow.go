@@ -593,6 +593,7 @@ func (m Model) wakeIfIdle() (Model, tea.Cmd) {
 	}
 	m.detached = false
 	m.transcript.addUser(wakePromptText, nil)
+	m.takeContextEstimate() // on this goroutine, before the worker owns the engine
 	box := newInterjectBox()
 	cmd, cancel := startWake(m.parent, m.eng, box, m.notify, m.flushEvents)
 	batch := m.enterRunning(cmd, cancel, box, actThinking)

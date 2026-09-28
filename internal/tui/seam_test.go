@@ -139,6 +139,7 @@ type fakeEngine struct {
 
 	contextReport  domain.ContextFilesReport // the value ContextFilesReport returns (the zero value: no context files)
 	contextReports int                       // how many times ContextFilesReport was read (once per session boundary)
+	ctxEstimate    int                       // the value ContextEstimate returns (0: no estimate, so the gauge stays dark until usage)
 
 	interjected []domain.UserInput // records Interject calls (the worker's between-Steps delivery), in order
 
@@ -532,6 +533,14 @@ func (f *fakeEngine) ContextFilesReport() domain.ContextFilesReport {
 	defer f.mu.Unlock()
 	f.contextReports++
 	return f.contextReport
+}
+
+// ContextEstimate answers with whatever the test scripted — 0 for every test that does not care,
+// so a fixture's right slot keeps its hints until a UsageEvent lights the gauge.
+func (f *fakeEngine) ContextEstimate() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ctxEstimate
 }
 
 // contextReads reports how many times the UI read the context-files report.

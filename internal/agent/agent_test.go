@@ -505,3 +505,60 @@ func TestFinishAtFaultIsATopLevelExemption(t *testing.T) {
 		t.Errorf("ErrorEvents = %+v, want exactly the loop's one", errs)
 	}
 }
+
+// TestContextEstimateCountsTheStandingSurfaceAndGrowsWithHistory pins the next-request estimate a
+// Driver shows before any usage reading: a fresh Agent already estimates its standing blocks and
+// tool surface (more than zero, at least ContextCost's total), and a Turn's history raises it.
+func TestContextEstimateCountsTheStandingSurfaceAndGrowsWithHistory(t *testing.T) {
+	t.Parallel()
+
+	a := newProfileAgent(t, contextCostConfig(t, &recordingSink{}), echoResponder(t, "a reply long enough to count"))
+
+	fresh := a.ContextEstimate()
+	if fresh <= 0 {
+		t.Fatalf("fresh ContextEstimate = %d, want > 0 (the standing blocks and the tool menu)", fresh)
+	}
+	if standing := a.ContextCost().Tokens; fresh < standing {
+		t.Errorf("fresh ContextEstimate = %d, want at least ContextCost's %d", fresh, standing)
+	}
+
+	stepOnce(t, a, "please describe the workspace conventions in some detail")
+
+	if grown := a.ContextEstimate(); grown <= fresh {
+		t.Errorf("ContextEstimate after a Turn = %d, want > the fresh %d (the history term)", grown, fresh)
+	}
+}
+
+// TestContextEstimateFollowsACompaction pins that the estimate reads the conversation the Agent
+// now holds: a /compact shrinks it below the uncompacted estimate, while the summary it keeps
+// leaves it above a fresh Agent's — the compacted history, not a fresh session's.
+func TestContextEstimateFollowsACompaction(t *testing.T) {
+	t.Parallel()
+
+	const window = 8192
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = window
+	fresh, err := newAgent(cfg, &windowResponder{window: window, reply: "FOLDED-SUMMARY"})
+	if err != nil {
+		t.Fatalf("newAgent (fresh): %v", err)
+	}
+	a, err := newAgent(cfg, &windowResponder{window: window, reply: "FOLDED-SUMMARY"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedLargeConv(a)
+	before := a.ContextEstimate()
+
+	skipped, err := a.Compact(context.Background())
+	if err != nil || skipped {
+		t.Fatalf("Compact = (skipped %v, err %v), want a real fold", skipped, err)
+	}
+
+	after := a.ContextEstimate()
+	if after >= before {
+		t.Errorf("ContextEstimate after /compact = %d, want < the uncompacted %d", after, before)
+	}
+	if base := fresh.ContextEstimate(); after <= base {
+		t.Errorf("ContextEstimate after /compact = %d, want > a fresh Agent's %d (the kept summary)", after, base)
+	}
+}

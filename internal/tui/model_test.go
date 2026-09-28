@@ -8088,3 +8088,107 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 		}
 	}
 }
+
+// estimateGauge is the `~` gauge's used/limit prefix for an estimate of n tokens against the test
+// window, styling stripped — what the right slot shows before any depth-0 usage reading.
+func estimateGauge(n int) string {
+	return "~" + format.Tokens(n) + "/" + format.Tokens(testOpts.ContextWindow)
+}
+
+// sendLine types text into the box and submits it — a Turn start, which takes the estimate.
+func sendLine(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	m.input.SetValue(text)
+	return step(t, m, keyEnter())
+}
+
+// TestContextGaugeShowsEstimateUntilFirstReading pins the `~` gauge: a Turn started with no
+// depth-0 reading takes the engine's estimate and the right slot shows it in the gauge's usual
+// format, prefixed `~`; the first depth-0 UsageEvent replaces it with the real reading.
+func TestContextGaugeShowsEstimateUntilFirstReading(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{ctxEstimate: 3000}
+	m := newTestModelEng(t, eng, testOpts)
+	if g := m.contextGauge(); g != "" {
+		t.Fatalf("gauge lit before any Turn started: %q", ansi.Strip(g))
+	}
+
+	m = sendLine(t, m, "hello")
+
+	if got := statusCells(t, m); !strings.Contains(got, estimateGauge(3000)) {
+		t.Errorf("status line %q, want the estimate gauge %q", got, estimateGauge(3000))
+	}
+
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
+
+	got := statusCells(t, m)
+	if strings.Contains(got, "~") {
+		t.Errorf("status line %q still shows the `~` estimate after a real reading", got)
+	}
+	if want := format.Tokens(1200) + "/" + format.Tokens(testOpts.ContextWindow); !strings.Contains(got, want) {
+		t.Errorf("status line %q, want the real reading %q", got, want)
+	}
+}
+
+// TestContextGaugeEstimateAfterClear pins /clear: the idle line right after it shows no stale `~`
+// value, and the next Turn takes a fresh estimate of the cleared conversation.
+func TestContextGaugeEstimateAfterClear(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{ctxEstimate: 3000}
+	m := newTestModelEng(t, eng, testOpts)
+	m.ctxEstimate = 3000 // a previous Turn's estimate stands on the idle line
+
+	m = sendLine(t, m, "/clear")
+
+	if got := statusCells(t, m); strings.Contains(got, "~") {
+		t.Errorf("idle status line after /clear = %q, want no stale `~` estimate", got)
+	}
+
+	eng.ctxEstimate = 2000
+	m = sendLine(t, m, "fresh start")
+
+	if got := statusCells(t, m); !strings.Contains(got, estimateGauge(2000)) {
+		t.Errorf("status line %q, want the fresh estimate %q", got, estimateGauge(2000))
+	}
+}
+
+// TestContextGaugeEstimateAfterCompact pins /compact: a landed fold zeroes the estimate with the
+// reading, and the next Turn shows a fresh `~` estimate of the folded history.
+func TestContextGaugeEstimateAfterCompact(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{ctxEstimate: 3000}
+	m := newTestModelEng(t, eng, testOpts)
+	startStubWorker(t, &m) // the /compact worker is in flight
+	m.ctxUsed, m.ctxEstimate = 4200, 3000
+
+	m = step(t, m, compactDoneMsg{})
+
+	if m.ctxUsed != 0 || m.ctxEstimate != 0 {
+		t.Errorf("after /compact ctxUsed, ctxEstimate = %d, %d, want 0, 0", m.ctxUsed, m.ctxEstimate)
+	}
+	if g := m.contextGauge(); g != "" {
+		t.Errorf("gauge after /compact = %q, want dark until the next Turn", ansi.Strip(g))
+	}
+
+	eng.ctxEstimate = 1500
+	m = sendLine(t, m, "carry on")
+
+	if got := statusCells(t, m); !strings.Contains(got, estimateGauge(1500)) {
+		t.Errorf("status line %q, want the fresh estimate %q", got, estimateGauge(1500))
+	}
+}
+
+// TestContextGaugeEstimateYieldsToEnterDismiss pins the precedence: an errored first Turn with an
+// estimate taken still ends the right slot with `enter dismiss`, never the `~` gauge.
+func TestContextGaugeEstimateYieldsToEnterDismiss(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{ctxEstimate: 3000}, testOpts)
+	m = sendLine(t, m, "hello")
+
+	m = step(t, m, errMsg{Err: errors.New("upstream unreachable")})
+
+	if m.state != stateErrored {
+		t.Fatalf("state = %v, want errored", m.state)
+	}
+	assertStatusRightTail(t, m, "enter dismiss"+bodyIndent)
+}

@@ -930,6 +930,12 @@ type Engine interface {
 	// notice. Like InExchange it is a boundary-only read: called at idle, right after the boundary
 	// that started the session (startup, /clear|/new, a restore), never while a worker drives a Step.
 	ContextFilesReport() domain.ContextFilesReport
+	// ContextEstimate estimates, in tokens, the request the engine would send next — its standing
+	// blocks, tool surface and conversation history (0 with no engine bound). The status line's
+	// context gauge shows it, prefixed `~`, while no depth-0 usage reading exists. It is an idle-only
+	// read like ContextFilesReport: taken on the Update goroutine at Turn start, just before the
+	// worker is dispatched (launchExchange, runContinue, wakeIfIdle), never while a worker drives a Step.
+	ContextEstimate() int
 	// Compact triggers generative Compaction on demand (the /compact command): it summarizes
 	// the conversation and replaces the folded history with the summary. A real upstream call,
 	// so the TUI drives it on a worker goroutine. Called only at idle. skipped is true when the

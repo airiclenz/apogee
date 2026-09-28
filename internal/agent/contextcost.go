@@ -67,3 +67,17 @@ func (a *Agent) ContextCost() domain.ContextCost {
 	report.Tokens = budget.EstimateTokens(report.Bytes)
 	return report
 }
+
+// ContextEstimate is the token estimate of the request this Agent would send next: ContextCost's
+// standing blocks and tool surface plus the conversation history, measured the way requestExceedsWindow
+// measures the history on an unknown window (domain.PromptChars over the messages, through the
+// Budget's chars→token ratio). ContextCost alone counts only what seeds Turn 1; the history term is
+// what the conversation has added since, so a compacted conversation estimates as its compacted
+// history, never as a fresh session's.
+//
+// It is what a Driver shows in place of the server's reading while none exists yet (the TUI's `~`
+// gauge). Like ContextCost it is an idle-only read — it renders the prompt, composes the menu and
+// reads the conversation — so a Driver takes it with no worker driving the Agent.
+func (a *Agent) ContextEstimate() int {
+	return a.ContextCost().Tokens + a.budget().EstimateTokens(domain.PromptChars(a.conv.Messages(), nil))
+}

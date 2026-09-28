@@ -412,6 +412,16 @@ func (e *lateEngine) ContextFilesReport() apogee.ContextFilesReport {
 	return agent.ContextFilesReport()
 }
 
+// ContextEstimate estimates the next request's tokens. Unbound it is 0, which the gauge reads as
+// "no estimate" and leaves the slot to its hints.
+func (e *lateEngine) ContextEstimate() int {
+	agent := e.bound()
+	if agent == nil {
+		return 0
+	}
+	return agent.ContextEstimate()
+}
+
 // Compact folds the conversation through the upstream; unbound there is neither.
 func (e *lateEngine) Compact(ctx context.Context) (bool, error) {
 	agent := e.bound()

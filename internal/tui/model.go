@@ -491,9 +491,9 @@ type Model struct {
 	thinking thinkingBoard
 
 	// liveStats is what the status line reports about the conversation the session is holding right
-	// now: the context gauge's fill, the generation clock, and the last completion's throughput. It
-	// is EMBEDDED anonymously (the promptEditor posture), so m.ctxUsed, m.genStart and m.tokPerSec
-	// read exactly as they always did while the three of them gain one owner — and with it the one
+	// now: the context gauge's fill and its estimate, the generation clock, and the last completion's
+	// throughput. It is EMBEDDED anonymously (the promptEditor posture), so m.ctxUsed, m.genStart and
+	// m.tokPerSec read exactly as they always did while the four of them gain one owner — and with it the one
 	// reset every session boundary spells out by hand (liveStats.reset).
 	liveStats
 
@@ -647,30 +647,48 @@ type Model struct {
 // on a re-stream or once usage lands); tokPerSec is the last completion's throughput — the server's
 // completion tokens, reasoning included, over that whole window, timed against the Update clock.
 // A window shorter than throughputWindowFloor is left unmeasured (tokPerSec 0), so the suffix
-// renders nothing rather than a number scheduling jitter made up. All three are plain values, so
+// renders nothing rather than a number scheduling jitter made up. All four are plain values, so
 // the whole group rides the value-copied Model (ADR 0011).
 //
+// ctxEstimate is the engine's estimate of the next request's tokens (Engine.ContextEstimate), which
+// the gauge shows prefixed `~` while ctxUsed is still 0 — the first line of a session, the Turns
+// after /clear or /compact, a foreground recipe whose depth-0 agent reports nothing until it ends,
+// and every Turn on a server that omits usage. It is taken at Turn start ([Model.takeContextEstimate])
+// only while no reading exists, and the first real reading replaces it on the gauge.
+//
 // Its lifetime is one CONVERSATION, which is what separates it from [Model.usage] beside it: these
-// three describe the exchange history the engine is still carrying, so the boundaries that discard
-// that history WHOLE drop all three together (reset), while the cumulative accounting is the
+// describe the exchange history the engine is still carrying, so the boundaries that discard
+// that history WHOLE drop all four together (reset), while the cumulative accounting is the
 // session's own running total and outlives any single reading.
 type liveStats struct {
-	ctxUsed   int
-	genStart  time.Time
-	tokPerSec float64
+	ctxUsed     int
+	ctxEstimate int
+	genStart    time.Time
+	tokPerSec   float64
 }
 
-// reset drops the whole live reading: the gauge goes dark, the generation clock stops and the
-// throughput is forgotten. It is what the two session boundaries call — /clear (startNewSession) and
-// a /sessions restore (resumeLoaded) — so neither has to keep the list of what "the stats fall with
-// the discarded conversation" means in its own body. A restore then relights ctxUsed from the record
-// it is reopening; /clear has nothing to reopen at and stays at zero. The partial boundaries stay
-// their own line: a compaction zeroes the gauge alone (foldCompactDone) and the end of an Exchange
-// the generation clock alone (finishWorker), because neither of them discards the conversation.
+// reset drops the whole live reading: the gauge goes dark (the estimate with the reading), the
+// generation clock stops and the throughput is forgotten. It is what the two session boundaries
+// call — /clear (startNewSession) and a /sessions restore (resumeLoaded) — so neither has to keep
+// the list of what "the stats fall with the discarded conversation" means in its own body. A
+// restore then relights ctxUsed from the record it is reopening; /clear has nothing to reopen at
+// and stays at zero. The partial boundaries stay their own line: a compaction zeroes the gauge
+// alone — reading and estimate (foldCompactDone) — and the end of an Exchange the generation clock
+// alone (finishWorker), because neither of them discards the conversation.
 //
 // It deliberately does NOT reach [Model.usage]: see the reset sites for the asymmetry that is.
 func (s *liveStats) reset() {
 	*s = liveStats{}
+}
+
+// takeContextEstimate refreshes the `~` gauge's value from the engine while no depth-0 reading
+// exists, and leaves it alone once one does (the reading owns the gauge from then on). It is called
+// on the Update goroutine at the three Turn starts — launchExchange, runContinue and wakeIfIdle —
+// just before the worker is dispatched, so the idle-only Engine.ContextEstimate never races a Step.
+func (m *Model) takeContextEstimate() {
+	if m.ctxUsed == 0 {
+		m.ctxEstimate = m.eng.ContextEstimate()
+	}
 }
 
 // pendingDecision is what the human owes an answer to while an Exchange is blocked, and everything
@@ -4180,9 +4198,11 @@ const quietQualifier = " · quiet"
 
 // statusRight is the status line's right slot: the live context gauge when token usage is
 // known — the viewed run's inside a run view, never the parent's (contextGauge) — else a
-// state-appropriate key hint. The gauge is empty only until the first UsageEvent
-// folds a turn's total into ctxUsed (or after /clear and /compact zero it) — so the hint shows
-// before any usage is measured and the gauge takes the slot the moment it is. Every branch
+// state-appropriate key hint. Until the first UsageEvent folds a turn's total into ctxUsed (and
+// again after /clear and /compact zero it) the gauge shows the engine's `~` estimate once a Turn
+// start has taken one, and is empty before that — so the hint shows before anything is measured or
+// estimated, and the gauge takes the slot the moment either is. An estimate never takes it from
+// stateErrored's `enter dismiss` (contextGauge); a real reading does, as it always has. Every branch
 // returns its occupant flush — statusLine appends the trailing margin at one seam, so the whole
 // slot moves together and no branch has to remember an inset of its own. room is the columns the
 // slot may spend (statusLine), read by the two occupants that have a longer form to offer
@@ -4230,8 +4250,11 @@ func (m Model) statusRight(room int) string {
 // decides WHOSE fill the chrome states: the run the human is looking at.
 //
 // At the top level that is the session's own agent: Used is the latest top-level UsageEvent's
-// total-token count (foldStats); until the first turn reports usage — or on a server that omits it
-// — Used is 0 and the gauge renders nothing, the static window showing in the footer instead.
+// total-token count (foldStats). Until the first turn reports usage — or all session on a server
+// that omits it — the gauge shows the engine's estimate of the next request instead, in the same
+// format prefixed `~` (ctxEstimate, taken at each Turn start), except in stateErrored, where the
+// slot keeps `enter dismiss`. With neither a reading nor an estimate it renders nothing, the static
+// window showing in the footer instead.
 //
 // Inside a run view (ADR 0063 D4, amended 2026-09-24) it is the viewed run's: its head's fill as
 // [transcript.applyUsage] froze it, against the window that run actually filled (childWindow) —
@@ -4243,6 +4266,9 @@ func (m Model) statusRight(room int) string {
 // ([Model.viewedChild] answers none there).
 func (m Model) contextGauge() string {
 	if !m.inRunView() {
+		if m.ctxUsed == 0 && m.state != stateErrored {
+			return contextUsage{Used: m.ctxEstimate, Limit: m.opts.ContextWindow, Estimated: true}.view(m.th)
+		}
 		return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view(m.th)
 	}
 	head, ok := m.viewedChild()
@@ -4256,11 +4282,13 @@ func (m Model) contextGauge() string {
 	return contextUsage{Used: head.ctxUsed, Limit: limit}.view(m.th)
 }
 
-// contextUsage is the live context-window gauge's data: tokens Used out of the window Limit.
+// contextUsage is the live context-window gauge's data: tokens Used out of the window Limit, and
+// whether Used is an estimate rather than a server reading (Estimated: the value is prefixed `~`).
 // It is self-hiding — view renders nothing until usage is known.
 type contextUsage struct {
-	Used  int
-	Limit int
+	Used      int
+	Limit     int
+	Estimated bool
 }
 
 // gaugeWidth is the bar strip's width in terminal cells. Eighth-block glyphs give eight fill
@@ -4271,7 +4299,8 @@ const gaugeWidth = 10
 // granularity that makes the fill edge advance smoothly (llama-launcher's bar look).
 var gaugeEighths = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 
-// view renders the gauge as "<used>/<limit> <pct>% <bar>", or "" when usage is unknown. The
+// view renders the gauge as "<used>/<limit> <pct>% <bar>" — "~<used>/…" for an estimate — or ""
+// when usage is unknown. The
 // gauge names the window it is measured against — the fill only means something beside the
 // limit it fills — so the window is a fact this row states rather than one read off elsewhere.
 // The numeric prefix is faint-on-black status text; the bar is a solid two-tone strip
@@ -4288,7 +4317,11 @@ func (c contextUsage) view(th theme) string {
 		return ""
 	}
 	pct := min(c.Used*100/c.Limit, 100)
-	prefix := th.statusBar.Render(fmt.Sprintf("%s/%s %d%% ", format.Tokens(c.Used), format.Tokens(c.Limit), pct))
+	approx := ""
+	if c.Estimated {
+		approx = "~"
+	}
+	prefix := th.statusBar.Render(fmt.Sprintf("%s%s/%s %d%% ", approx, format.Tokens(c.Used), format.Tokens(c.Limit), pct))
 	return prefix + renderGaugeBar(th, c.Used, c.Limit)
 }
 
