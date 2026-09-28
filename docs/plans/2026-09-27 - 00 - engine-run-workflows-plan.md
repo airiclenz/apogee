@@ -1133,7 +1133,13 @@ NOTES (2026-09-28): AGENTS.md:32 still cites "34 tools, 30 on the default menu" 
 **Acceptance:** `test -s docs/manual/workflows.md && grep -q "(workflows.md)" docs/manual/README.md && grep -q "36 built-in tools" README.md && go test -race -count=1 -run Manual ./internal/tools/`
 **Commit:** `docs(manual): workflows and recipes`
 
-## 39. The bench experiment design
+## 39. The bench experiment design — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the doc adds a third experiment (background + `workflow` vs `fan_out` alone, run only after a superior `fan_out` verdict) beside the Goal's two, because the Goal names `background` and `workflow` among the switches it gates and ADR 0087 D8's two experiments cover `fan_out` only.
+
+NOTES (2026-09-28): "context tokens at the orchestrator" and "completion rate" are pre-registered secondaries, not gate endpoints — ADR 0009 gates on the ordinal mean only and apogee-sim ADR 0015 §3 keeps efficiency secondary; "findings confirmed" (seeded-defect recall, 0 for a run with no report) is Experiment 1's primary ordinal.
+
+NOTES (2026-09-28): the doc names instrument prerequisites outside this repo's scope (apogee-sim: a roster/launch-route arm axis, a seeded-defect audit pool with matchers, a wake-capable Driver loop, a depth-0 usage read) and one in apogee: the facade offers no opt-in for fan_out's `background` field or the `workflow` tool (construct.go defaultRoster passes offersBackground false; an out-of-module embedder cannot import internal/tools), so Experiment 3 cannot run through apogee-sim's facade-only coreagent yet.
 
 **What:**
 **Goal:** `docs/design/workflow-bench-experiment.md` states the experiments that gate turning `fan_out`, `background` and `workflow` on per model class: `audit` three ways on a small model (prose orchestrator via the user's `code-audit` skill, prose-sequential, recipe), and a task set with `fan_out` on vs off, with metrics (findings confirmed, context tokens at the orchestrator, completion rate) under ADR 0009's decision rule.
