@@ -480,7 +480,11 @@ internal/tui/render.go — workflow-head branch comment; internal/tui/tui.go —
 
 **Commit:** `docs(adr): 0090 workflow stages are enterable views`
 
-## 11. AGENTS.md states the current tool count and IDEAS.md ticks the shipped ideas
+## 11. AGENTS.md states the current tool count and IDEAS.md ticks the shipped ideas — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): IDEAS.md is gitignored (`.gitignore:14`), so its two `[x]` ticks (context gauge -> item 8; enterable steps -> ADR 0090), each with a pointer to this plan by file name, are made in the working tree only and left off FILES — `git add` refuses an ignored path; the Acceptance grep prints 2.
+NOTES (2026-09-28): the counts were read from the tree, not from the plan: `KnownToolNames()` returns 36 names; the default menu is 27 without host tools plus `load_skill`, `ask_user` and `present_document` = 30 (the console family, `fan_out` and `workflow` are off by default) — matching README.md's "36 built-in tools (30 on the default menu)".
+NOTES (2026-09-28): pre-existing — the AGENTS.md bullet still says each README count "is pinned by a test or a literal in `internal/tools/registry.go`", but no test or literal pins the tool count (the plan's own regression guard says so); the sentence was left as written, outside this item's count-only goal.
 
 **What:**
 **Goal:**
