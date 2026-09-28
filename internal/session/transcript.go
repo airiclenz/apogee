@@ -64,7 +64,10 @@ var ErrTranscriptTooLarge = errors.New("apogee: transcript exceeds the 256 MiB l
 // not know.
 //
 // EntryKindWorkflow is the block a Workflow a human launched reports its run in (ADR 0087): its
-// progress, one result line per finished item and the end it came to, all held in Text.
+// progress, one result line per finished item and the end it came to, all held in Text. Its
+// structure — one row per stage and every finished item's receipt — rides Workflow, so a Driver can
+// paint the block's stage rows again and open them; a record written before that member existed
+// carries Text alone.
 //
 // EntryKindWorkflowItem is the run head of one item run of such a Workflow, or of a fan_out call's:
 // the row the item paints as and the head its child's entries are recorded behind. Its card rides
@@ -172,6 +175,58 @@ type Entry struct {
 	Presented               *Presented  `json:"presented,omitempty"`
 	// Item is an EntryKindWorkflowItem entry's place in its Workflow, absent on every other kind.
 	Item *WorkflowItem `json:"item,omitempty"`
+	// Workflow is an EntryKindWorkflow entry's structure as it stood when the record was written,
+	// absent on every other kind and on a record written before it existed.
+	Workflow *Workflow `json:"workflow,omitempty"`
+}
+
+// The states a Workflow's stage row can stand in (WorkflowStage.State), spelled as a STRING enum for
+// the reason the entry kinds are: a Driver's own iota could be reordered under an old file. A state
+// this build does not know reads as pending.
+const (
+	WorkflowStagePending = "pending"
+	WorkflowStageRunning = "running"
+	WorkflowStageDone    = "done"
+	WorkflowStageFailed  = "failed"
+	WorkflowStageStopped = "stopped"
+)
+
+// Workflow is the structure of one Workflow's block: its name, the end it came to (a
+// domain.WorkflowPhase — "finished", "stopped" or "failed" — and "" for a Workflow still running when
+// the record was written), a failed Workflow's cause, one row per stage of its Plan in its order, and
+// every item that finished, in the order it finished. Every string but End and the stage states is
+// display text and is stripped on decode.
+type Workflow struct {
+	Name   string               `json:"name,omitempty"`
+	End    string               `json:"end,omitempty"`
+	Cause  string               `json:"cause,omitempty"`
+	Stages []WorkflowStage      `json:"stages,omitempty"`
+	Items  []WorkflowItemResult `json:"items,omitempty"`
+}
+
+// WorkflowStage is one stage row: the stage's name, the 1-based round it shows (0 before any phase
+// named it) and the most rounds a repeat can run it (0 when none re-runs it), that round's item count
+// and how many of them ended on a receipt, whether one of those receipts was not ok, whether one of
+// the round's item runs started (so the row has a run to open), and its state (the WorkflowStage*
+// constants).
+type WorkflowStage struct {
+	Name     string `json:"name,omitempty"`
+	Round    int    `json:"round,omitempty"`
+	Rounds   int    `json:"rounds,omitempty"`
+	Items    int    `json:"items,omitempty"`
+	Finished int    `json:"finished,omitempty"`
+	Troubled bool   `json:"troubled,omitempty"`
+	Entered  bool   `json:"entered,omitempty"`
+	State    string `json:"state,omitempty"`
+}
+
+// WorkflowItemResult is one finished item of a Workflow: the stage it belongs to, its label, and its
+// receipt's status and first summary line.
+type WorkflowItemResult struct {
+	Stage   string `json:"stage,omitempty"`
+	Label   string `json:"label,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 // WorkflowItem is where one item run's head stands in its Workflow: the stage it belongs to, the
@@ -403,6 +458,9 @@ func stripEntry(e *Entry) {
 	if e.Item != nil {
 		e.Item.Stage = sanitize.StripEscapes(e.Item.Stage)
 	}
+	if e.Workflow != nil {
+		stripWorkflow(e.Workflow)
+	}
 	if e.Presented != nil {
 		p := e.Presented
 		p.Title = sanitize.StripEscapes(p.Title)
@@ -411,6 +469,24 @@ func stripEntry(e *Entry) {
 		p.Reason = sanitize.StripEscapes(p.Reason)
 		// Method is a closed enum matched against domain constants; an unrecognised value falls to a
 		// consumer's baseline wording rather than reaching the terminal as text.
+	}
+}
+
+// stripWorkflow strips a Workflow block's structure: its name, cause, stage names and every finished
+// item's words. End and the stage states are closed enums a consumer maps to its own wording, so an
+// unrecognised value never reaches the terminal as text.
+func stripWorkflow(w *Workflow) {
+	w.Name = sanitize.StripEscapes(w.Name)
+	w.Cause = sanitize.StripEscapes(w.Cause)
+	for i := range w.Stages {
+		w.Stages[i].Name = sanitize.StripEscapes(w.Stages[i].Name)
+	}
+	for i := range w.Items {
+		item := &w.Items[i]
+		item.Stage = sanitize.StripEscapes(item.Stage)
+		item.Label = sanitize.StripEscapes(item.Label)
+		item.Status = sanitize.StripEscapes(item.Status)
+		item.Summary = sanitize.StripEscapes(item.Summary)
 	}
 }
 

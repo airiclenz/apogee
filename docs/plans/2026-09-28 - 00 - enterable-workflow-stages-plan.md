@@ -332,7 +332,17 @@ internal/tui/transcript_test.go — TestTranscriptWritersBumpTheGeneration; inte
 
 **Commit:** `feat(tui): a workflow stage opens as a stage view or its item's run view`
 
-## 7. A resumed session reopens its workflow blocks
+## 7. A resumed session reopens its workflow blocks — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): re-derived from the Approach's "`workflowAt` finds a restored block's view" (the regression guard overrides it). A restored view carries no Workflow id and has a `replayed` flag. Where it paints: `workflowView.drawsStages()` replaces `live()` in `renderWorkflowBlock` and in `render.go` `resolveBlock`'s span skip. Stage levels now live in `runview.go` (item 6), so `stageLevel` gains a `block` entry index for replayed blocks, and `stageBlockAt` resolves by that index and never matches a replayed block for a live level.
+NOTES (2026-09-28): the `session.Workflow` record keeps name, end, cause, stages (name, round, rounds, items, finished, troubled, entered, state as a string enum) and every finished item (stage, label, status, summary), not just the stages and states the Approach named. The item receipts are what the trouble lines and totals are painted from. The live id, running stage and ask question are not kept.
+NOTES (2026-09-28): `closeInterruptedCalls` closes a replayed, unended workflow block. Its running stages become stopped, the Workflow ends stopped, the text's header line is rewritten to match, and it counts the stopped stages, or 1 when no stage was running. Open `workflow_item` heads are closed and counted the same way as tool calls.
+NOTES (2026-09-28): consequential edit — internal/tui/transcript.go: made necessary by persisting the view (the `workflow` field comment said "never persisted").
+NOTES (2026-09-28): consequential edit — internal/tui/entrykind.go: made necessary by persisting the view (the entryWorkflow rule comment said "live view (never persisted)").
+NOTES (2026-09-28): consequential edit — internal/tui/paintcache.go: made necessary by persisting the view (the workflowView comment said a replayed block paints its text).
+NOTES (2026-09-28): consequential edit — internal/tui/blocktarget.go: made necessary by replayed blocks drawing stage rows (the targetStage comment said "live workflow block").
+NOTES (2026-09-28): TestTranscriptCodecPersistsANamedDelegationAsItsTarget's wire-member pin gains "Workflow". TestWorkflowBlockSeatsARunHeadPerItem's reopened block now asserts stage rows instead of item rows. The old text-only replay is pinned by the new TestWorkflowBlockFromAnOlderRecordPaintsItsText.
+NOTES (2026-09-28): retry fix — `fromWireWorkflow` reads the record's `end` through `workflowEndOf`: "", finished, stopped and failed pass through, and any other value reads as stopped, so no recorded string reaches the header (`stripWorkflow` leaves End alone as a closed enum). Pinned by TestWorkflowBlockFromARecordWithAForeignEndPaintsItStopped.
 
 **What:**
 **Goal:** After save and restore, a finished foreground workflow's block paints the same stage rows, trouble lines and totals. Its stage rows and item rows open read-only views over the restored item entries, and no item output paints at top level.

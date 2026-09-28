@@ -120,15 +120,28 @@ func decodeTranscript(data []byte) ([]entry, error) {
 //
 // It mutates the entries in place, which is what a decoded slice is for: it is the caller's own
 // freshly built scrollback, not yet handed to the transcript.
+//
+// A Workflow's item heads (entryWorkflowItem) are closed on the same terms as the calls, and a
+// workflow block replayed with its structure is closed by its view (workflowView.interrupted): its
+// running stages are stopped and counted, and its text's header says it stopped, so a resumed block
+// paints — and a later save keeps — no stage running that nothing runs.
 func closeInterruptedCalls(entries []entry) (closed int) {
 	for i := range entries {
 		e := &entries[i]
-		if e.kind != entryToolCall || e.done {
-			continue
+		switch {
+		case e.kind == entryWorkflow && !e.done:
+			var stopped int
+			e.workflow, stopped = e.workflow.interrupted()
+			if stopped > 0 {
+				e.done = true
+				e.text = e.workflow.retitled(e.text)
+			}
+			closed += stopped
+		case (e.kind == entryToolCall || e.kind == entryWorkflowItem) && !e.done:
+			e.done = true
+			e.tool.Summary = namedSummary(detailLine{Text: interruptedSummary})
+			closed++
 		}
-		e.done = true
-		e.tool.Summary = namedSummary(detailLine{Text: interruptedSummary})
-		closed++
 	}
 	return closed
 }
@@ -140,7 +153,8 @@ func closeInterruptedCalls(entries []entry) (closed int) {
 // that would have to be kept in step with it, and so is a Workflow item's run head
 // (entryWorkflowItem), whose card is a delegation row's; its place in the Workflow rides the wire's
 // Item. A block or finish line carrying a Workflow's spend (entry.carriesWorkflowSpend) borrows the
-// slot for the Workflow's name alone.
+// slot for the Workflow's name alone. A workflow block's view rides the wire's Workflow, so a
+// reopened block paints its stage rows again (toWireWorkflow).
 func toWireEntry(e *entry, kind string) session.Entry {
 	w := session.Entry{
 		Kind:        kind,
@@ -184,6 +198,51 @@ func toWireEntry(e *entry, kind string) session.Entry {
 			Index:   e.item.index,
 			Attempt: e.item.attempt,
 		}
+	}
+	if e.kind == entryWorkflow {
+		w.Workflow = toWireWorkflow(e.workflow)
+	}
+	return w
+}
+
+// workflowStageStateNames spells each stage state on the wire (session.WorkflowStage.State).
+var workflowStageStateNames = map[workflowStageState]string{
+	stagePending: session.WorkflowStagePending,
+	stageRunning: session.WorkflowStageRunning,
+	stageDone:    session.WorkflowStageDone,
+	stageFailed:  session.WorkflowStageFailed,
+	stageStopped: session.WorkflowStageStopped,
+}
+
+// toWireWorkflow projects a workflow block's view onto the wire: its name, end and cause, its stage
+// rows and its finished items. The live run's own state — its id, the stage running and an `ask`
+// stage's question — is not kept: the Workflow does not run in the session that reopens it. A view
+// with nothing to draw from (one replayed from an older record) writes nothing, so its block stays
+// the text it came back as.
+func toWireWorkflow(v workflowView) *session.Workflow {
+	if !v.drawsStages() {
+		return nil
+	}
+	w := &session.Workflow{Name: v.name, End: string(v.end), Cause: v.cause}
+	for _, s := range v.stages {
+		w.Stages = append(w.Stages, session.WorkflowStage{
+			Name:     s.name,
+			Round:    s.round,
+			Rounds:   s.rounds,
+			Items:    s.items,
+			Finished: s.finished,
+			Troubled: s.troubled,
+			Entered:  s.entered,
+			State:    workflowStageStateNames[s.state],
+		})
+	}
+	for _, item := range v.items {
+		w.Items = append(w.Items, session.WorkflowItemResult{
+			Stage:   item.stage,
+			Label:   item.label,
+			Status:  item.status,
+			Summary: item.summary,
+		})
 	}
 	return w
 }
@@ -336,7 +395,63 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 	if kind == entryWorkflowItem {
 		fromWireWorkflowItem(&e, w.Item)
 	}
+	if kind == entryWorkflow && w.Workflow != nil {
+		e.workflow = fromWireWorkflow(w.Workflow)
+	}
 	return e, true
+}
+
+// fromWireWorkflow rebuilds a workflow block's view from the wire as a REPLAYED one: it draws the
+// stage rows the live one drew, and carries no Workflow id, so no phase of a run in this session —
+// a run of the same Workflow id included — ever folds into it (workflowAt). A stage state this build
+// does not know reads as pending, an end it does not know reads as stopped (workflowEndOf), and an
+// item's result line is not rebuilt: the entry's text keeps it, and only a fold re-renders the text.
+func fromWireWorkflow(w *session.Workflow) workflowView {
+	v := workflowView{replayed: true, name: w.Name, end: workflowEndOf(w.End), cause: w.Cause}
+	for _, s := range w.Stages {
+		v.stages = append(v.stages, workflowStage{
+			name:     s.Name,
+			round:    s.Round,
+			rounds:   s.Rounds,
+			items:    s.Items,
+			finished: s.Finished,
+			troubled: s.Troubled,
+			entered:  s.Entered,
+			state:    workflowStageStateOf(s.State),
+		})
+	}
+	for _, item := range w.Items {
+		v.items = append(v.items, workflowItem{
+			stage:   item.Stage,
+			label:   item.Label,
+			status:  item.Status,
+			summary: item.Summary,
+		})
+	}
+	return v
+}
+
+// workflowEndOf reads a Workflow's end off the wire as one of the three ends the header paints: ""
+// for a Workflow still running when the record was written, and stopped for an end this build does
+// not know — a Workflow the record says ended, so it is not reopened as running — so no recorded
+// string reaches the header as text (session stripWorkflow leaves End alone as a closed enum).
+func workflowEndOf(end string) domain.WorkflowPhase {
+	switch phase := domain.WorkflowPhase(end); phase {
+	case "", domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
+		return phase
+	default:
+		return domain.WorkflowStopped
+	}
+}
+
+// workflowStageStateOf reads a stage state off the wire, pending for a name this build does not know.
+func workflowStageStateOf(name string) workflowStageState {
+	for state, spelled := range workflowStageStateNames {
+		if spelled == name {
+			return state
+		}
+	}
+	return stagePending
 }
 
 // fromWireWorkflowItem restores what a Workflow item's run head keeps beside its card: its place in

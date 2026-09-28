@@ -426,6 +426,66 @@ func TestTranscriptRoundTripsAWorkflowItemHead(t *testing.T) {
 	}
 }
 
+// TestTranscriptRoundTripsAWorkflowBlock pins a Workflow block's structure through the codec: its
+// stage rows and finished items come back as written.
+func TestTranscriptRoundTripsAWorkflowBlock(t *testing.T) {
+	t.Parallel()
+	in := []Entry{{
+		Kind: EntryKindWorkflow, CallID: "recipe-audit-1", Text: "Workflow audit — finished", Done: true,
+		Workflow: &Workflow{
+			Name: "audit",
+			End:  "finished",
+			Stages: []WorkflowStage{
+				{Name: "plan", Round: 1, Items: 1, Finished: 1, Entered: true, State: WorkflowStageDone},
+				{Name: "build", Round: 2, Rounds: 3, Items: 2, Finished: 2, Troubled: true, Entered: true, State: WorkflowStageDone},
+			},
+			Items: []WorkflowItemResult{{Stage: "build", Label: "beta", Status: "partial", Summary: "half of it"}},
+		},
+	}}
+
+	data, err := EncodeTranscript(in)
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	got, err := DecodeTranscript(data)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Workflow, in[0].Workflow) {
+		t.Fatalf("round trip = %#v; want %#v", got, in)
+	}
+}
+
+// TestDecodeStripsTheWorkflowRecord pins the escape defence over a Workflow block's structure: its
+// name, its cause, every stage name and every finished item's words are display text a tampered
+// file could smuggle an escape in, so each comes back stripped.
+func TestDecodeStripsTheWorkflowRecord(t *testing.T) {
+	t.Parallel()
+	const esc = `\u001b[31m`
+	blob := `{"version":1,"entries":[{"kind":"workflow","workflow":{` +
+		`"name":"` + esc + `audit","end":"failed","cause":"` + esc + `boom",` +
+		`"stages":[{"name":"` + esc + `build","state":"failed"}],` +
+		`"items":[{"stage":"` + esc + `build","label":"` + esc + `beta","status":"` + esc + `blocked","summary":"` + esc + `no"}]}}]}`
+
+	got, err := DecodeTranscript([]byte(blob))
+
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if len(got) != 1 || got[0].Workflow == nil || len(got[0].Workflow.Stages) != 1 || len(got[0].Workflow.Items) != 1 {
+		t.Fatalf("decoded = %#v; want one workflow block with one stage and one item", got)
+	}
+	w := got[0].Workflow
+	item := w.Items[0]
+	for _, field := range []string{w.Name, w.Cause, w.Stages[0].Name, item.Stage, item.Label, item.Status, item.Summary} {
+		if containsESC(field) {
+			t.Errorf("the workflow record came back with an escape sequence in it: %#v", w)
+			break
+		}
+	}
+}
+
 // containsESC reports whether s still carries an ESC byte.
 func containsESC(s string) bool {
 	for i := range len(s) {

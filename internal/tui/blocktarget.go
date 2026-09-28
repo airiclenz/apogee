@@ -47,7 +47,7 @@ package tui
 // shared `ui.tools-open` preference (Model.toggleToolsFold), a small one its own head flag alone
 // (transcript.setUmbrellaFolded), with every child's state left as it stood beneath either fold.
 //
-// targetStage is one stage row of a live workflow block (renderWorkflowStages): the row a Recipe's
+// targetStage is one stage row of a workflow block that draws them (renderWorkflowStages): the row a Recipe's
 // stage stands on, one per stage of its Plan. It names the block's entry like every other kind, and
 // the STAGE too — the row's place in the block's stage list ([lineTarget.stage]) — because one
 // block paints a row per stage and each is a surface of its own. A pending stage's row wears it as

@@ -116,8 +116,8 @@ var entryKindRules = map[entryKind]entryKindRule{
 	// compacted" note did before it had a kind of its own, and inside a run it stays that run's.
 	entryCompacted: {persistedName: session.EntryKindCompacted, cacheable: true, isHostNote: true},
 	// "workflow" — a Recipe's Workflow block (workflowblock.go) — joined [session.TranscriptVersion] 1
-	// on the same additive terms; its text is its whole record, and its live view (never persisted)
-	// what it paints one row per stage from. It is the one kind besides the start-up box that is
+	// on the same additive terms; its text is its record in words, and its view — kept beside the
+	// text as session.Workflow — what it paints one row per stage from. It is the one kind besides the start-up box that is
 	// never cached, for the start-up box's reason: its view and text are re-rendered IN PLACE as the
 	// Workflow's events fold, touching no field the paint key reads. It is not a host note: the run
 	// it reports is the conversation's own, the work the human's line asked for.

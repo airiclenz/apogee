@@ -515,40 +515,65 @@ func TestFanOutWorkflowDrawsNoBlock(t *testing.T) {
 	}
 }
 
-// The block survives the session record as its text: the replayed block carries no view, so it
-// paints the text its record keeps — the item lines and the totals — where the live one painted its
-// stage rows, and no later event reaches it.
+// The block survives the session record whole: the replayed block carries its view's structure —
+// though no Workflow id, so it is not live — and paints the same stage rows, trouble lines and totals
+// the live one painted. No later event reaches it.
 func TestWorkflowBlockSurvivesTheRecord(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	m.transcript.apply(startedWith("items"))
-	m.transcript.apply(stageStarted("items", 1, 1, 0))
+	m.transcript.apply(startedWith("items", "check"))
+	m.transcript.apply(stageStarted("items", 1, 2, 0))
 	m.transcript.apply(itemFinished(0, "alpha", "ok", "alpha is fine", nil))
+	m.transcript.apply(itemFinished(1, "beta", "partial", "beta is half done", nil))
 	m.transcript.apply(stageFinished("items", 1))
 	m.transcript.apply(workflowPhase(domain.WorkflowFinished))
-	if live := workflowPaint(m); stageRowIn(live, "items") == "" {
-		t.Fatalf("the live block paints no stage row:\n%s", plainTranscript(m))
+	live := workflowPaint(m)
+	if stageRowIn(live, "items") == "" || stageRowIn(live, "check") == "" {
+		t.Fatalf("the live block paints no stage rows:\n%s", plainTranscript(m))
 	}
-	text := workflowEntries(m)[0].text
 
-	data, err := encodeTranscript(&m.transcript)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
+	replayed := newTestModel(t)
+	replayed.transcript.entries = roundTrip(t, &m.transcript)
+	replayed.transcript.touch()
+
+	if got := workflowEntries(replayed); len(got) != 1 || got[0].workflow.live() || !got[0].workflow.drawsStages() {
+		t.Fatalf("replayed workflow blocks = %+v; want one carrying a replayed view", got)
 	}
-	entries, err := decodeTranscript(data)
+	painted := workflowPaint(replayed)
+	if painted != live {
+		t.Errorf("the replayed block paints\n%s\nwhere the live one painted\n%s", painted, live)
+	}
+	for _, line := range []string{"items · beta — partial — beta is half done", "items 2 · ok 1 · partial 1 · blocked 0"} {
+		if !strings.Contains(painted, line) {
+			t.Errorf("the replayed block does not paint %q:\n%s", line, painted)
+		}
+	}
+	replayed.transcript.apply(itemFinished(2, "gamma", "ok", "late", nil))
+	if got := workflowPaint(replayed); got != painted {
+		t.Errorf("a late event moved a replayed block:\n%s", got)
+	}
+}
+
+// A block replayed from a record written before the structure was kept comes back as its text: it
+// carries no view, paints the item lines and totals its record's text holds, and no stage row.
+func TestWorkflowBlockFromAnOlderRecordPaintsItsText(t *testing.T) {
+	t.Parallel()
+	const text = "Workflow audit — finished\n#1 alpha — ok — alpha is fine\nitems 1 · ok 1 · partial 0 · blocked 0"
+	blob := `{"version":1,"entries":[{"kind":"workflow","callID":"w1","done":true,"text":` + strconv.Quote(text) + `}]}`
+
+	entries, err := decodeTranscript([]byte(blob))
+
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	replayed := newTestModel(t)
-	replayed.transcript.entries = entries
-	replayed.transcript.touch()
-
-	if got := workflowEntries(replayed); len(got) != 1 || got[0].workflow.live() {
-		t.Fatalf("replayed workflow blocks = %+v; want one carrying no live view", got)
+	m := newTestModel(t)
+	m.transcript.entries = entries
+	m.transcript.touch()
+	if got := workflowEntries(m); len(got) != 1 || got[0].workflow.drawsStages() {
+		t.Fatalf("replayed workflow blocks = %+v; want one carrying no view", got)
 	}
-	painted := workflowPaint(replayed)
-	_, body, _ := strings.Cut(text, "\n")
-	for _, line := range strings.Split(body, "\n") {
+	painted := workflowPaint(m)
+	for _, line := range strings.Split(text, "\n")[1:] {
 		if !strings.Contains(painted, line) {
 			t.Errorf("the replayed block does not paint its record's line %q:\n%s", line, painted)
 		}
@@ -556,9 +581,126 @@ func TestWorkflowBlockSurvivesTheRecord(t *testing.T) {
 	if row := stageRowIn(painted, "items"); row != "" {
 		t.Errorf("the replayed block paints a stage row %q with no view to paint it from", row)
 	}
-	replayed.transcript.apply(itemFinished(1, "beta", "ok", "late", nil))
-	if got := workflowPaint(replayed); got != painted {
-		t.Errorf("a late event moved a replayed block:\n%s", got)
+}
+
+// A record whose end is not one of the three ends a Workflow comes to — an escape sequence planted
+// in the file — replays as a stopped block: the recorded string never reaches the header as text.
+func TestWorkflowBlockFromARecordWithAForeignEndPaintsItStopped(t *testing.T) {
+	t.Parallel()
+	const planted = `"\u001b]0;pwned\u0007\u001b[31mowned"` // JSON-escaped, as a record file carries it
+	blob := `{"version":1,"entries":[{"kind":"workflow","callID":"w1","done":true,` +
+		`"text":"Workflow audit — finished","workflow":{"name":"audit","end":` + planted +
+		`,"stages":[{"name":"items","round":1,"items":1,"finished":1,"state":"done"}]}}]}`
+
+	entries, err := decodeTranscript([]byte(blob))
+
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	m := newTestModel(t)
+	m.transcript.entries = entries
+	m.transcript.touch()
+	got := workflowEntries(m)
+	if len(got) != 1 || !got[0].workflow.drawsStages() {
+		t.Fatalf("replayed workflow blocks = %+v; want one carrying a replayed view", got)
+	}
+	if end := got[0].workflow.end; end != domain.WorkflowStopped {
+		t.Errorf("the replayed view's end = %q; want %q", end, domain.WorkflowStopped)
+	}
+	header := got[0].workflow.header()
+	if strings.ContainsRune(header, '\x1b') || strings.Contains(header, "owned") {
+		t.Errorf("the replayed header %q carries the recorded end", header)
+	}
+	painted := workflowPaint(m)
+	if strings.Contains(painted, "owned") || !strings.Contains(painted, workflowLineSep+string(domain.WorkflowStopped)) {
+		t.Errorf("the replayed block paints\n%s\nwant a stopped header and none of the recorded end", painted)
+	}
+}
+
+// resumedRecipe is modelWithRecipeStages' Workflow run to its end — beta ends partial — saved to the
+// session record, and replayed into a fresh idle model as a resume replays it.
+func resumedRecipe(t *testing.T) Model {
+	t.Helper()
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	tr := &m.transcript
+	tr.apply(itemFinishedUnder(recipeCall, "run.a", "build", "alpha", 0, "ok", "built alpha"))
+	tr.apply(itemFinishedUnder(recipeCall, "run.b", "build", "beta", 1, "partial", "half of beta"))
+	tr.apply(stageFinished("build", 1))
+	tr.apply(workflowPhase(domain.WorkflowFinished))
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	resumed := newTestModelEng(t, &fakeEngine{}, recallOpts(&fakeRecallHost{}))
+	resumed.transcript.reset()
+	resumed.replayScrollback(data, "audit", false)
+	resumed.refreshViewport()
+	return resumed
+}
+
+// A resumed block's stage rows open read-only views over the replayed item entries: a multi-item
+// stage opens its stage view listing both items, each of which opens its run, and a one-item stage
+// opens its item's run directly. No item's own output paints at the top level.
+func TestResumedStageRowsOpenTheirViews(t *testing.T) {
+	t.Parallel()
+	m := resumedRecipe(t)
+	if painted := plainTranscript(m); strings.Contains(painted, "is at work") ||
+		!strings.Contains(painted, "build · beta — partial — half of beta") {
+		t.Fatalf("the resumed top level paints item output, or no trouble line:\n%s", painted)
+	}
+	block := slices.IndexFunc(m.transcript.entries, func(e entry) bool { return e.kind == entryWorkflow })
+
+	m = clickLine(t, m, stageRowLine(t, m, 1))
+
+	if got, want := m.viewedStage(), (stageLevel{call: recipeCall, place: 2, block: block + 1}); got != want {
+		t.Fatalf("the resumed build row opened stage %+v; want %+v", got, want)
+	}
+	alpha, beta := workflowItemHeadAt(m.transcript.entries, "run.a"), workflowItemHeadAt(m.transcript.entries, "run.b")
+	if got := openedHeads(m); !slices.Equal(got, []int{alpha, beta}) {
+		t.Errorf("the resumed stage view offers %v to open; want its two items %v", got, []int{alpha, beta})
+	}
+	m = clickLine(t, m, headerLineOf(t, m, beta))
+	if got := m.viewedRun(); got != itemRef("run.b") {
+		t.Errorf("the beta row opened %+v; want its run", got)
+	}
+	if painted := plainTranscript(m); !strings.Contains(painted, "beta is at work") {
+		t.Errorf("the resumed item view does not paint the item's replayed output:\n%s", painted)
+	}
+
+	m = step(t, step(t, m, keyEsc()), keyEsc())
+	m = clickLine(t, m, stageRowLine(t, m, 0))
+	if got := m.viewedRun(); got != itemRef("run.p") {
+		t.Errorf("the resumed one-item plan row opened %+v; want the planner's run", got)
+	}
+}
+
+// After a resume, a run of the same Workflow id under the same call opens a block of its own: no
+// phase of it reaches the replayed block, whose stage rows still open the replayed stage.
+func TestResumedBlockIgnoresARunOfTheSameWorkflow(t *testing.T) {
+	t.Parallel()
+	m := resumedRecipe(t)
+	before := workflowEntries(m)[0].workflow
+	started := startedUnder(recipeCall)
+	started.Stages = []string{"plan", "build", "check"}
+
+	m.transcript.apply(started)
+	m.transcript.apply(stageStarted("plan", 1, 1, 0))
+	startItem(&m.transcript, "run.q", "plan", "planner", 1, 0, 1)
+	m.transcript.apply(itemFinishedUnder(recipeCall, "run.q", "plan", "planner", 0, "blocked", "no plan"))
+	m.refreshViewport()
+
+	blocks := workflowEntries(m)
+	if len(blocks) != 2 || !blocks[1].workflow.live() {
+		t.Fatalf("workflow blocks = %d; want the replayed one and a live one", len(blocks))
+	}
+	if !reflect.DeepEqual(blocks[0].workflow, before) {
+		t.Errorf("the new run moved the replayed block's view:\n%+v\nwant\n%+v", blocks[0].workflow, before)
+	}
+	block := slices.IndexFunc(m.transcript.entries, func(e entry) bool { return e.kind == entryWorkflow })
+	m = clickLine(t, m, stageRowLine(t, m, 1))
+	if at, ok := stageBlockAt(m.transcript.entries, m.viewedRun(), m.viewedStage()); !ok || at != block {
+		t.Errorf("the replayed build row opened the stage of the block at %d; want the replayed block at %d", at, block)
 	}
 }
 
@@ -745,8 +887,8 @@ func assertStageRowsOnly(t *testing.T, painted string, stages ...string) {
 
 // A Recipe launch's item runs each get a run head of their own inside its workflow block's span —
 // live and after a save and reopen — with the item's work behind it. The live block paints one row
-// per stage and steps over the item heads; the reopened one, which has no view, paints its text and
-// one row per item. A later stage's item started after a host note has landed still seats inside the
+// per stage and steps over the item heads, and so does the reopened one, whose record kept its
+// stages. A later stage's item started after a host note has landed still seats inside the
 // span, with the note below it.
 func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 	t.Parallel()
@@ -778,7 +920,7 @@ func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 	reopened := &transcript{entries: roundTrip(t, tr)}
 	reopened.touch()
 	assertItemRunsBehindTheirHeads(t, reopened.entries, head, call)
-	assertItemRowsOnly(t, plainRender(reopened), "alpha", "beta", "gamma")
+	assertStageRowsOnly(t, plainRender(reopened), "items", "review")
 }
 
 // A fan_out call's item runs each get a run head of their own inside its card's span the same way.

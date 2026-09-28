@@ -44,9 +44,15 @@ type runView struct {
 // records (domain.WorkflowPhaseEvent.Call), and the stage's place in the block's stage list, stored
 // one up so the zero value is no stage at all. The block is found in the run the level's ref names
 // ([stageBlockAt]), so a call alone never has to be unique across runs.
+//
+// A block replayed from a record is named by its entry index as well: a resumed session can run the
+// same Recipe under the same call again, and the call alone would then name the new block. The
+// replayed entries are the head of the list and nothing is ever placed among them, so the index
+// holds for the session.
 type stageLevel struct {
 	call  string // the workflow block's call
 	place int    // the stage's place in the block's stage list plus one; 0 is no stage
+	block int    // a replayed block's entry index plus one; 0 for a live block, found by its call
 }
 
 // isStage reports whether s names a stage at all.
@@ -484,6 +490,9 @@ func (m Model) openStageAt(index, stage int) (Model, bool) {
 	}
 	block := entries[index]
 	level := stageLevel{call: block.callID, place: stage + 1}
+	if block.workflow.replayed {
+		level.block = index + 1
+	}
 	if at, ok := stageBlockAt(entries, block.run(), level); !ok || at != index {
 		return m, false
 	}
@@ -498,16 +507,24 @@ func (m Model) openStageAt(index, stage int) (Model, bool) {
 }
 
 // stageBlockAt is where the workflow block a stage level lists a stage of sits: the block standing
-// in run under the level's call, whose stage list still holds the level's stage. −1 and false where
-// the list holds no such block — a level naming no stage, a block a reset took away, one replayed
-// from a record that carries no stage list.
+// in run under the level's call, whose stage list still holds the level's stage — the replayed block
+// at the level's entry index, or else the latest live one. −1 and false where the list holds no such
+// block — a level naming no stage, a block a reset took away, one replayed from a record that
+// carries no stage list.
 func stageBlockAt(entries []entry, run runRef, level stageLevel) (int, bool) {
 	if !level.isStage() || level.call == "" {
 		return -1, false
 	}
+	stands := func(e entry) bool { return e.kind == entryWorkflow && e.callID == level.call && e.run() == run }
+	if level.block > 0 {
+		at := level.block - 1
+		if at >= len(entries) || !stands(entries[at]) || !entries[at].workflow.replayed {
+			return -1, false
+		}
+		return at, level.index() < len(entries[at].workflow.stages)
+	}
 	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
-		if e.kind == entryWorkflow && e.callID == level.call && e.run() == run {
+		if e := entries[i]; stands(e) && !e.workflow.replayed {
 			return i, level.index() < len(e.workflow.stages)
 		}
 	}

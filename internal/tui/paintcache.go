@@ -122,8 +122,9 @@ type paintInput struct {
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView
-	// a workflow block's live view (workflowblock.go), from which its stage rows are painted; the
-	// zero value on every other kind, and on a block replayed from a record, which paints its text.
+	// a workflow block's view (workflowblock.go) — live, or replayed from a record that kept it —
+	// from which its stage rows are painted; the zero value on every other kind, and on a block
+	// replayed from an older record, which paints its text.
 	// It is no term of the key: the kind is never cached (entryKindRules)
 	workflowView workflowView
 

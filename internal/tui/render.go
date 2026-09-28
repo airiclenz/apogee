@@ -919,12 +919,13 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
 	// kind's own answers (entrykind.go); everything else keys as settled and marks no stop.
 	//
-	// A workflow block carrying its live view paints one row per stage (renderWorkflowStages), and
-	// those rows are where its item runs are entered — so the item heads behind it, and their runs,
-	// are stepped over with it. A block with no view (one replayed from an old record) paints its
-	// text, and the walk goes on to the item rows its span holds, which are then the only way in.
+	// A workflow block carrying a view — its live one, or one replayed from a record that kept it —
+	// paints one row per stage (renderWorkflowStages), and those rows are where its item runs are
+	// entered — so the item heads behind it, and their runs, are stepped over with it. A block with
+	// no view (one replayed from an older record) paints its text, and the walk goes on to the item
+	// rows its span holds, which are then the only way in.
 	next := head + 1
-	if in.kind == entryWorkflow && in.workflowView.live() {
+	if in.kind == entryWorkflow && in.workflowView.drawsStages() {
 		next += subAgentSpan(t.entries, head)
 	}
 	live := in.kind.hasLiveStar() && !in.done

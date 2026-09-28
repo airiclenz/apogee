@@ -34,16 +34,20 @@ import (
 // delegation row eliding its run, opens as the run's view, and answers ^x, a message and the gauge —
 // but it never groups into a "✦ Sub-Agent (N)" list. The item's receipt folds onto it as its report.
 // A retried item keeps ONE row: each attempt has its own head, and the ones a later attempt
-// superseded are stepped over by the paint (retiredAttempts). Under a live workflow block the item
-// heads are not painted at all: the block's stage rows stand for them (each marked targetStage), so
-// the walk steps over the block's span whole (transcript.resolveBlock). A fan_out card has one stage,
-// and paints its item rows. The block itself never collapses, and a fan_out card's own fold hides
-// its body alone.
+// superseded are stepped over by the paint (retiredAttempts). Under a workflow block that draws its
+// stage rows — a live one, or one replayed with its structure — the item heads are not painted at
+// all: the block's stage rows stand for them (each marked targetStage), so the walk steps over the
+// block's span whole (transcript.resolveBlock). A fan_out card has one stage, and paints its item
+// rows. The block itself never collapses, and a fan_out card's own fold hides its body alone.
 //
-// The block's text is its whole record and its view its live paint: every fold re-renders the text
-// from the view (workflowView), the painter draws the view's stage rows while the view lives, and
-// the record keeps the text alone. A block replayed from a record carries no view, so it paints its
-// text, and the item rows its span holds stay painted as the way into its runs. Because the view
+// The block's text is its whole record in words and its view its paint: every fold re-renders the
+// text from the view (workflowView), and the painter draws the view's stage rows. The record keeps
+// both — the text, and the view's structure (session.Workflow) — so a block replayed from a record
+// paints the same stage rows, trouble lines and totals, and its rows open read-only views over the
+// item entries replayed beside it. A replayed view carries no Workflow id (workflowView.replayed):
+// its Workflow is not running in this session, so no phase ever finds it (workflowAt). A block
+// replayed from a record written before the structure was kept carries no view at all, so it paints
+// its text, and the item rows its span holds stay painted as the way into its runs. Because the view
 // and the text MOVE after the entry is committed, the kind is never memoised by the paint cache
 // (entryKindRules).
 
@@ -74,11 +78,12 @@ const (
 	workflowRowSep       = " · " // what a stage row's slot and a trouble line join their parts with
 )
 
-// workflowView is the live state of one Workflow's block, folded from its WorkflowPhaseEvents. It is
-// view-only and never persisted: the entry's text, rendered from it on every fold, is what the
-// record keeps.
+// workflowView is the state of one Workflow's block, folded from its WorkflowPhaseEvents. The record
+// keeps its structure (toWireWorkflow) beside the text rendered from it on every fold; the id, the
+// running stage and an `ask` stage's question are the live run's alone and are not kept.
 type workflowView struct {
 	id        string               // the Workflow's id — what tells two Workflows' events apart
+	replayed  bool                 // the view came back from a record: it paints, and no phase folds into it
 	name      string               // the Workflow's name (a Recipe's name)
 	stage     string               // the stage running now; "" before the first and once it ended
 	stages    []workflowStage      // one row per stage of the Plan, in its order (workflowStagesOf)
@@ -89,9 +94,14 @@ type workflowView struct {
 	cause     string               // a failed Workflow's cause
 }
 
-// live reports whether the view was folded in this session. A block replayed from a record carries
-// the zero view, and paints its text.
+// live reports whether the view was folded in this session. A block replayed from a record is never
+// live: its view is a replayed one, or — from a record older than the structure — the zero view.
 func (v workflowView) live() bool { return v.id != "" }
+
+// drawsStages reports whether the block paints its stage rows from the view: a live view, or one
+// replayed from a record that kept the structure. Only the zero view of an older record paints the
+// block's text instead.
+func (v workflowView) drawsStages() bool { return v.live() || v.replayed }
 
 // workflowItem is one finished item: the stage it belongs to, its label, its receipt's status and
 // summary, and its result line.
@@ -185,7 +195,8 @@ func (t *transcript) fanOutOpen(run runRef) bool {
 }
 
 // workflowAt is the index of the live block of the Workflow id names, or −1. A block replayed from
-// a record carries no view, so it is never found: its Workflow is not running in this session.
+// a record carries no Workflow id, so it is never found: its Workflow is not running in this
+// session, and a run of the same Workflow id opens a block of its own.
 func (t *transcript) workflowAt(id string) int {
 	if id == "" {
 		return -1
@@ -273,6 +284,38 @@ func (v workflowView) withStage(e domain.WorkflowPhaseEvent, apply func(*workflo
 	apply(row)
 	v.stages = stages
 	return v
+}
+
+// interrupted closes a replayed view of a Workflow that was still running when its record was
+// written — the progress save (ADR 0022's 2026-08-25 addendum) — and reports how much it closed. The
+// Workflow died with the engine that ran it, so each stage still running is stopped, the Workflow
+// ends stopped, and closed counts the stages it stopped, or the Workflow itself where none was
+// running. A view that ended, or one folded in this session, is handed back as it is, closing
+// nothing.
+func (v workflowView) interrupted() (workflowView, int) {
+	if !v.replayed || v.end != "" {
+		return v, 0
+	}
+	closed := 0
+	for _, stage := range v.stages {
+		if stage.state == stageRunning {
+			closed++
+		}
+	}
+	v.stages = endRunningStages(v.stages, stageStopped)
+	v.end, v.stage, v.question = domain.WorkflowStopped, "", ""
+	return v, max(closed, 1)
+}
+
+// retitled is text with its header line — the first — replaced by the view's own (header), the rest
+// kept as it stands: what a replayed block's text becomes once its view was closed (interrupted),
+// whose item lines the view alone could not render again.
+func (v workflowView) retitled(text string) string {
+	_, body, found := strings.Cut(text, "\n")
+	if !found {
+		return v.header()
+	}
+	return v.header() + "\n" + body
 }
 
 // endState is how a stage that ended stands: stopped when an item it counted never finished — the
@@ -394,17 +437,17 @@ func (v workflowView) totals() string {
 	}, workflowTotalSep)
 }
 
-// renderWorkflowBlock paints a workflow block: from its view while the view lives
-// (renderWorkflowStages), and from its text for a block replayed from a record, whose view was never
-// persisted (renderWorkflowText).
+// renderWorkflowBlock paints a workflow block: from its view where it has one to draw
+// (renderWorkflowStages), and from its text for a block replayed from a record older than the kept
+// structure (renderWorkflowText).
 func renderWorkflowBlock(th theme, view workflowView, text string, width int) blockPaint {
-	if view.live() {
+	if view.drawsStages() {
 		return renderWorkflowStages(th, view, width)
 	}
 	return plainPaint(renderWorkflowText(th, text, width))
 }
 
-// renderWorkflowStages paints a live workflow block: the header under the star in the tool label's
+// renderWorkflowStages paints a workflow block from its view: the header under the star in the tool label's
 // tone, one row per stage (workflowView.stageRow) marked as that stage's surface, then the body lines
 // (workflowView.stageBody) hung beneath them in the detail tone.
 func renderWorkflowStages(th theme, v workflowView, width int) blockPaint {
@@ -507,7 +550,7 @@ func (v workflowView) stageBody() []string {
 
 // renderWorkflowText paints a workflow block from its text: the header under the star in the tool
 // label's tone, each body line hung beneath it in the detail tone. It reads the text alone, which is
-// what lets a replayed block — whose view was never persisted — paint as the live one's record did.
+// what lets a block replayed from an older record — which kept no view — paint as its record did.
 func renderWorkflowText(th theme, text string, width int) []string {
 	header, body, _ := strings.Cut(text, "\n")
 	lines := hangingWrap(th, th.toolLabel, glyphAssistant+" ", header, width)

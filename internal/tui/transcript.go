@@ -408,9 +408,9 @@ type entry struct {
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
-	// entryWorkflow only: the live state of the Workflow the block reports (workflowblock.go),
-	// which each fold re-renders into text. View-only and never persisted — the text is the record —
-	// so a replayed block carries none and no later event finds it.
+	// entryWorkflow only: the state of the Workflow the block reports (workflowblock.go), which each
+	// fold re-renders into text. Its structure is persisted beside the text (session.Entry.Workflow),
+	// so a replayed block carries it back — without the Workflow's id, so no later event finds it.
 	workflow workflowView
 	// entryWorkflowItem only: where the item run this entry heads stands in its Workflow — its
 	// stage, round, place and attempt (workflowblock.go). Persisted (session.Entry.Item).

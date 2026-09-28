@@ -294,6 +294,59 @@ func TestTranscriptCodecClosesEveryInterruptedToolCall(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecClosesAnInterruptedWorkflow pins the replay rule for a Workflow the record caught
+// mid-run: its open item heads are closed as interrupted calls are, its running stage is stopped, and
+// the block ends stopped — each head and the stage counted in what the caller's note reports.
+func TestTranscriptCodecClosesAnInterruptedWorkflow(t *testing.T) {
+	t.Parallel()
+	m := modelWithRecipeStages(t, &fakeEngine{}) // build runs alpha and beta; plan is done; check pending
+	got := roundTrip(t, &m.transcript)
+
+	closed := closeInterruptedCalls(got)
+
+	if closed != 3 {
+		t.Errorf("closed = %d, want 3 (the two open item heads and the running build stage)", closed)
+	}
+	for _, runID := range []string{"run.a", "run.b"} {
+		if head := got[workflowItemHeadAt(got, runID)]; !head.done || head.tool.Summary.Text != interruptedSummary {
+			t.Errorf("%s's head came back done=%v summary=%q; want it closed as %q",
+				runID, head.done, head.tool.Summary.Text, interruptedSummary)
+		}
+	}
+	if planner := got[workflowItemHeadAt(got, "run.p")]; planner.tool.Summary.Text == interruptedSummary {
+		t.Error("the planner's head, finished before the save, was worded as interrupted")
+	}
+	block := got[slices.IndexFunc(got, func(e entry) bool { return e.kind == entryWorkflow })]
+	states := []workflowStageState{stageDone, stageStopped, stagePending}
+	for i, want := range states {
+		if block.workflow.stages[i].state != want {
+			t.Errorf("stage %q = %v, want %v", block.workflow.stages[i].name, block.workflow.stages[i].state, want)
+		}
+	}
+	if !block.done || block.workflow.end != domain.WorkflowStopped ||
+		!strings.HasPrefix(block.text, workflowTitle+"audit"+workflowLineSep+string(domain.WorkflowStopped)) {
+		t.Errorf("the block came back done=%v end=%q text=%q; want it stopped", block.done, block.workflow.end, block.text)
+	}
+}
+
+// A resume of a record caught mid-Workflow says so once: the closed item heads and stage raise the
+// progress-saved note.
+func TestResumeOfAnInterruptedWorkflowSaysSo(t *testing.T) {
+	t.Parallel()
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	data, err := encodeTranscript(&m.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	resumed := newTestModel(t)
+
+	resumed.replayScrollback(data, "audit", false)
+
+	if !slices.ContainsFunc(resumed.transcript.entries, func(e entry) bool { return e.text == progressSavedNote }) {
+		t.Errorf("the resume does not say its interrupted work was not kept:\n%s", plainTranscript(resumed))
+	}
+}
+
 // TestTranscriptCodecInterruptedPassLeavesAFiringBlockAlone keeps the two replay rules apart: the
 // firing block is closed per entry on the way in, with the account only it can give
 // (scheduleInterruptedSummary), and the general pass must not word over it. It never sees it — a
@@ -1333,6 +1386,9 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			// Item: a Workflow item's run head's place in its Workflow (enterable-workflow-stages
 			// plan, item 4).
 			"Item",
+			// Workflow: a workflow block's stage rows and finished items, so a resumed block paints
+			// and opens its stages (enterable-workflow-stages plan, item 7).
+			"Workflow",
 		}
 		if got := fields(session.Entry{}); !slices.Equal(got, wantEntry) {
 			t.Errorf("session.Entry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
