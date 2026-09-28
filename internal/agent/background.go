@@ -36,6 +36,9 @@ package agent
 // human is free to answer.
 //
 // Lifetime. Agent.StopWorkflow stops one workflow and keeps its finished items (ADR 0088);
+// Agent.RerunFailed launches a finished one again in its own folder, as a new run of the same
+// workflow that skips every item whose receipt is ok or partial, so only its blocked and faulted
+// items run again;
 // Agent.Close stops them all, on the top-level Agent only (a finishing delegate's Close must never
 // reach them); RestoreSession stops the outgoing session's set before the incoming one's is
 // resumed. The live set rides the session snapshot as the additive `workflows` key — identifiers
@@ -88,6 +91,9 @@ const backgroundCallPrefix = domain.BackgroundWorkflowCallPrefix
 const (
 	unknownWorkflowFormat        = "apogee: no background workflow %q is running or queued"
 	workflowAlreadyRunningFormat = "apogee: workflow %s is already running in the background"
+	rerunUnfinishedFormat        = "apogee: workflow %s has not finished (%s) — a re-run takes the blocked and faulted items of a finished workflow"
+	rerunNothingFormat           = "apogee: workflow %s has no blocked or faulted items to re-run"
+	rerunMovedFormat             = "apogee: workflow %s no longer matches its items — launch it afresh"
 )
 
 // The words a finish note (finishNote) and its delivery (renderWorkflowNotes) are built from. The
@@ -169,8 +175,9 @@ type backgroundRun struct {
 
 // backgroundLaunch is what startBackground needs of a workflow: its plan (inputs already bound),
 // the recipe it comes from ("" for a fan_out's plan), the Runner built for it, where its stages'
-// prompt files are read from (nil: the workspace), the tool its children are bracketed under, and
-// the Turn that launched it.
+// prompt files are read from (nil: the workspace), the tool its children are bracketed under, the
+// Turn that launched it, and — for a re-run — the folder it must run in again ("" finds or creates
+// one, openWorkflowFolder).
 type backgroundLaunch struct {
 	plan    workflow.Plan
 	recipe  string
@@ -178,6 +185,7 @@ type backgroundLaunch struct {
 	prompts fs.FS
 	tool    string
 	turn    int
+	folder  string
 }
 
 // Workflows lists the session's Workflows — every folder in its `<scratch>/workflows/` store, read
@@ -248,6 +256,54 @@ func (a *Agent) StopWorkflow(id string) error {
 	return markStopped(run)
 }
 
+// RerunFailed runs the finished workflow id again, in the background and in its own folder, as a new
+// run of the same workflow: the Runner skips every fan-out item whose receipt is ok or partial, so
+// only the blocked ones — a child that declared itself blocked, or one whose faults outlasted its
+// retries — run again, and the script and ask stages run afresh as any re-issue of finished work's
+// do (workflow.Runner.Run). It is launched as a resumed one is (resumeBackground) — the plan read
+// back from the folder, a recipe's prompt files and scripts from the recipe skill its status.json
+// names — and waits in line behind another workflow on its server like any background launch. It
+// does not wait for the run: the WorkflowPhaseEvents report it.
+//
+// Refused: a workflow this Agent runs or queues, one that has not finished (stopped, or cut off
+// while running — its unfinished items would run too), one with nothing blocked, and one whose items
+// no longer hash to its folder (the workspace moved under a source), which would otherwise run
+// everything in a new folder. Like StartRecipe's background launch it reads the Agent for the
+// launch-time snapshot, so a Driver calls it only at idle.
+func (a *Agent) RerunFailed(id string) error {
+	if a.background.isLive(id) {
+		return fmt.Errorf(workflowAlreadyRunningFormat, id)
+	}
+	store, err := workflow.NewStore(a.ScratchDir())
+	if err != nil {
+		return err
+	}
+	status, err := store.ReadStatus(id)
+	if err != nil {
+		return fmt.Errorf("apogee: re-run workflow %s: %w", id, err)
+	}
+	if status.Phase != workflow.PhaseDone {
+		return fmt.Errorf(rerunUnfinishedFormat, id, status.Phase)
+	}
+	if !hasBlockedItem(status) {
+		return fmt.Errorf(rerunNothingFormat, id)
+	}
+	return a.resumeBackground(workflowEntryJSON{ID: id, Recipe: status.Recipe}, id)
+}
+
+// hasBlockedItem reports whether any item of status ended on a blocked receipt — the items a re-run
+// runs again.
+func hasBlockedItem(status workflow.RunStatus) bool {
+	for _, stage := range status.Stages {
+		for _, item := range stage.Items {
+			if item.Receipt != nil && item.Receipt.Status == workflow.StatusBlocked {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ResumeWorkflows starts the background workflows the restored snapshot carried (its `workflows`
 // key), each from its folder under the live `<scratch>/workflows/`: the plan is read back from the
 // folder, a recipe's prompt files and scripts from the recipe skill the entry names, and the
@@ -269,15 +325,16 @@ func (a *Agent) ResumeWorkflows() error {
 		if m.isLive(entry.ID) {
 			continue
 		}
-		if err := a.resumeBackground(entry); err != nil {
+		if err := a.resumeBackground(entry, ""); err != nil {
 			errs = append(errs, fmt.Errorf("apogee: resume workflow %s: %w", entry.ID, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// resumeBackground launches the workflow entry names from its folder.
-func (a *Agent) resumeBackground(entry workflowEntryJSON) error {
+// resumeBackground launches the workflow entry names from its folder. folder is the folder the
+// launch must run in (a re-run, RerunFailed), or "" to find or create it by plan hash (a resume).
+func (a *Agent) resumeBackground(entry workflowEntryJSON, folder string) error {
 	store, err := workflow.NewStore(a.ScratchDir())
 	if err != nil {
 		return err
@@ -287,7 +344,7 @@ func (a *Agent) resumeBackground(entry workflowEntryJSON) error {
 		return err
 	}
 	turn := a.turns.snapshot().index
-	launch := backgroundLaunch{plan: plan, tool: tools.FanOutToolName, turn: turn}
+	launch := backgroundLaunch{plan: plan, tool: tools.FanOutToolName, turn: turn, folder: folder}
 	if entry.Recipe == "" {
 		runner, refusal := a.newWorkflowRunner(turn, domain.ToolCall{})
 		if refusal != "" {
@@ -354,7 +411,7 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	if a.isDelegate() {
 		return "", errDelegateBackground
 	}
-	status, err := openWorkflowFolder(launch.runner, launch.plan)
+	status, err := openWorkflowFolder(launch.runner, launch.plan, launch.folder)
 	if err != nil {
 		return "", err
 	}
@@ -396,8 +453,10 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 // Runner's own Run does (workflow.Runner.Run: every fanout with a source of its own expanded, the
 // PlanHash over them, the newest folder with that hash, else a new one), so the Run that follows
 // resumes this very folder. It is opened at launch rather than at start so a queued workflow already
-// has the id and status path it is listed and stopped by.
-func openWorkflowFolder(runner *workflow.Runner, plan workflow.Plan) (workflow.RunStatus, error) {
+// has the id and status path it is listed and stopped by. A non-empty folder is the one a re-run
+// must find: a plan whose hash leads anywhere else — no folder, or a newer one — is refused, and
+// nothing is created.
+func openWorkflowFolder(runner *workflow.Runner, plan workflow.Plan, folder string) (workflow.RunStatus, error) {
 	if problems := workflow.Validate(plan); len(problems) > 0 {
 		texts := make([]string, 0, len(problems))
 		for _, problem := range problems {
@@ -421,8 +480,14 @@ func openWorkflowFolder(runner *workflow.Runner, plan workflow.Plan) (workflow.R
 		return workflow.RunStatus{}, err
 	}
 	status, found, err := runner.Store.Find(planHash)
-	if err != nil || found {
+	if err != nil {
 		return status, err
+	}
+	if folder != "" && (!found || status.ID != folder) {
+		return workflow.RunStatus{}, fmt.Errorf(rerunMovedFormat, folder)
+	}
+	if found {
+		return status, nil
 	}
 	return runner.Store.Create(plan, planHash, time.Now())
 }

@@ -156,6 +156,10 @@ type Runner struct {
 	Asker Asker
 	// Observer, when set, receives every stage and item phase change.
 	Observer Observer
+	// Recipe is the id of the recipe skill the plan comes from, "" for a fan_out's plan. Run records
+	// it in status.json (RunStatus.Recipe), so a later re-run of the folder finds the prompt files and
+	// scripts its stages read.
+	Recipe string
 	// Now is the clock status.json is stamped with; nil means time.Now.
 	Now func() time.Time
 }
@@ -337,6 +341,7 @@ func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, repla
 		status.Stages = append(status.Stages, StageStatus{Name: stage.Name, Kind: stage.Kind, Phase: PhasePending})
 	}
 	status.Phase = PhaseRunning
+	status.Recipe = r.Recipe
 	status.Updated = now
 	return status, replay, r.Store.WriteStatus(status)
 }

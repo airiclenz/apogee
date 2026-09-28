@@ -28,7 +28,10 @@ import (
 // reads their status.json (ADR 0087 D5) — one row each, with its state and item counts. ⏎ opens one
 // to its stages and their items; ⏎ on an item opens that item's detail: its receipt, its detail
 // output and its child's conversation, read-only. esc goes one level up, and closes the pane from the
-// list. Every read runs off the Update loop through a tea.Cmd and folds into plain values on the Model
+// list. In a workflow's detail two chords act on it (workflowsVerb): ^x stops it, keeping its
+// finished items, and ^r re-runs its blocked and faulted items as a new run of the same workflow.
+// They are chords by the rule the /sessions browser ratified (sessionBrowserKey): no letter of a
+// list pane is a verb. Every read runs off the Update loop through a tea.Cmd and folds into plain values on the Model
 // (ADR 0011) — the listing on open and again on every WorkflowPhaseEvent while the pane is up, the
 // item's detail on open and again with each re-list — so render and height read Model state only.
 
@@ -42,7 +45,7 @@ const maxWorkflowItemRows = 16
 // The legends at the foot of each level.
 const (
 	workflowsListHint   = "↑/↓ select · ⏎ open · esc close"
-	workflowsDetailHint = "↑/↓ select · ⏎ open item · esc back"
+	workflowsDetailHint = "↑/↓ select · ⏎ open item · ^x stop · ^r re-run failed · esc back"
 	workflowsItemHint   = "↑/↓ scroll · esc back"
 )
 
@@ -59,6 +62,13 @@ const (
 	workflowOutputFailed  = " — could not read: "
 	workflowNoTranscript  = "conversation: none saved yet"
 	workflowTranscriptBad = "conversation: could not read: "
+	workflowRerunNotIdle  = "a re-run starts only while the agent is idle — press ^r again once it is"
+)
+
+// The chords a workflow's detail answers (workflowsVerb).
+const (
+	workflowStopKey  = "ctrl+x"
+	workflowRerunKey = "ctrl+r"
 )
 
 // The two queued/running states the engine's manager holds a background workflow in; every other
@@ -132,10 +142,18 @@ type workflowItemMsg struct {
 	seq   uint64
 }
 
+// workflowStoppedMsg carries an off-loop Engine.StopWorkflow answer back to the Update loop: nil once
+// the stop is under way (the WorkflowPhaseEvent that ends the workflow refreshes the pane), else the
+// engine's refusal.
+type workflowStoppedMsg struct {
+	err error
+}
+
 // Compile-time assertions that the view's Msgs are valid tea.Msgs (mirroring messages.go).
 var (
 	_ tea.Msg = workflowsListMsg{}
 	_ tea.Msg = workflowItemMsg{}
+	_ tea.Msg = workflowStoppedMsg{}
 )
 
 // openWorkflows is the /workflows verb: it reads the listing off the Update loop, and the pane opens
@@ -256,7 +274,8 @@ func (p *workflowsPane) cursor() *listCursor {
 }
 
 // workflowsKey routes a keypress while the pane is up: ↑/↓ walk the level's rows, ⏎ opens what the
-// highlight names, esc goes one level up. It swallows every other key — the pane is modal.
+// highlight names, esc goes one level up, and a workflow's detail answers its two chords
+// (workflowsVerb). It swallows every other key — the pane is modal.
 func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	wrap := listWrapsAround
 	if m.workflowsPane.level == workflowsAtItem {
@@ -267,10 +286,43 @@ func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.workflowsBack(), nil
 	case listAccepts:
 		return m.workflowsAccept()
-	case listSwallowed, listUnclaimed:
-		// Spent, or of no use to a modal with no verbs of its own: swallowed either way.
+	case listUnclaimed:
+		if m.workflowsPane.level == workflowsAtDetail {
+			return m.workflowsVerb(msg)
+		}
+	case listSwallowed:
+		// Spent by the cursor.
 	}
 	return m, nil
+}
+
+// workflowsVerb answers a chord in a workflow's detail, on the workflow it shows. ^x stops it off the
+// Update loop (a queued one's stop writes its status.json); the engine refuses one it neither runs
+// nor queues, and that refusal is noted. ^r re-runs its failed items: the launch reads the engine
+// for its snapshot, so it goes only at idle, off the loop and under the /bg launch latch
+// (bgLaunching), and folds as a /bg launch does (foldBgStarted). Any other key is swallowed.
+func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	id, eng := m.workflowsPane.shown, m.eng
+	switch msg.String() {
+	case workflowStopKey:
+		return m, func() tea.Msg { return workflowStoppedMsg{err: eng.StopWorkflow(id)} }
+	case workflowRerunKey:
+		if m.busy() || m.bgLaunching {
+			m.transcript.addNote(workflowRerunNotIdle)
+			return m, nil
+		}
+		m.bgLaunching = true
+		return m, func() tea.Msg { return bgStartedMsg{id: id, err: eng.RerunFailed(id)} }
+	}
+	return m, nil
+}
+
+// foldWorkflowStopped notes a refused stop; a stop under way needs no word — the pane re-reads as the
+// workflow's end is reported.
+func (m *Model) foldWorkflowStopped(msg workflowStoppedMsg) {
+	if msg.err != nil {
+		m.transcript.addNote(msg.err.Error())
+	}
 }
 
 // workflowsBack is esc: the item level returns to its workflow, the workflow to the list, and the

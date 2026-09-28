@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
@@ -253,6 +255,102 @@ func TestBackground_StopKeepsTheFinishedItems(t *testing.T) {
 	}
 	if err := a.StopWorkflow(id); err == nil || !strings.Contains(err.Error(), id) {
 		t.Errorf("a second stop = %v, want the no-such-workflow error naming %s", err, id)
+	}
+}
+
+// blockedScript is a child's finish call declaring its item blocked.
+func blockedScript(id, summary string) []provider.Delta {
+	return toolCallScript(id, tools.FinishToolName, `{"status":"blocked","summary":"`+summary+`","count":0}`)
+}
+
+// itemReceipts maps each item of the workflow's first stage to its receipt's status ("" for none).
+func itemReceipts(info WorkflowInfo) map[string]workflow.Status {
+	statuses := map[string]workflow.Status{}
+	if len(info.Status.Stages) == 0 {
+		return statuses
+	}
+	for _, item := range info.Status.Stages[0].Items {
+		statuses[item.Label] = ""
+		if item.Receipt != nil {
+			statuses[item.Label] = item.Receipt.Status
+		}
+	}
+	return statuses
+}
+
+func TestBackground_RerunFailedRunsOnlyTheBlockedAndFaultedItems(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("trio", "alpha", "beta", "gamma"))
+	// gamma has no route on the first run: every attempt faults, and its retries end it blocked.
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
+		route("sweep beta", nil, blockedScript("b1", "beta is stuck"))
+	a := newBackgroundParent(t, cfg, up)
+	id := launchBackground(t, a, "trio")
+	a.background.waitAll()
+
+	first := workflowInfo(t, a, id)
+	if first.Status.Recipe != "trio" {
+		t.Errorf("status.json recipe = %q, want the launching recipe %q", first.Status.Recipe, "trio")
+	}
+	want := map[string]workflow.Status{"alpha": workflow.StatusOK, "beta": workflow.StatusBlocked, "gamma": workflow.StatusBlocked}
+	if got := itemReceipts(first); !maps.Equal(got, want) {
+		t.Fatalf("first run receipts = %v, want %v", got, want)
+	}
+
+	up.route("sweep beta", nil, finishScript("f2", "beta is fine")).
+		route("sweep gamma", nil, finishScript("f3", "gamma is fine"))
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed: %v", err)
+	}
+	a.background.waitAll()
+
+	for key, runs := range map[string]int{"sweep alpha": 1, "sweep beta": 2, "sweep gamma": 1} {
+		if n := up.askedCount(key); n != runs {
+			t.Errorf("%q ran %d times over both runs, want %d — the re-run touches only the failed items", key, n, runs)
+		}
+	}
+	second := workflowInfo(t, a, id)
+	want = map[string]workflow.Status{"alpha": workflow.StatusOK, "beta": workflow.StatusOK, "gamma": workflow.StatusOK}
+	if got := itemReceipts(second); !maps.Equal(got, want) || second.Status.Phase != workflow.PhaseDone {
+		t.Errorf("after the re-run = %v (%s), want every item ok and the workflow done", got, second.Status.Phase)
+	}
+	if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 1 {
+		t.Errorf("workflow folders = %v, want the one folder run again", folders)
+	}
+	if err := a.RerunFailed(id); err == nil || !strings.Contains(err.Error(), "no blocked or faulted items") {
+		t.Errorf("a re-run with nothing failed = %v, want the nothing-to-re-run refusal", err)
+	}
+}
+
+func TestBackground_RerunFailedRefusesALiveOrUnfinishedWorkflow(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("pair", "alpha", "beta"))
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, blockedScript("b1", "alpha is stuck")).
+		route("sweep beta", signalThenWait(started, nil), cancelledScript())
+	a := newBackgroundParent(t, cfg, up)
+	id := launchBackground(t, a, "pair")
+	awaitClosed(t, started, "beta's child")
+
+	if err := a.RerunFailed(id); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Errorf("a re-run of a running workflow = %v, want the already-running refusal", err)
+	}
+	if err := a.StopWorkflow(id); err != nil {
+		t.Fatalf("StopWorkflow: %v", err)
+	}
+	a.background.waitAll()
+	if err := a.RerunFailed(id); err == nil || !strings.Contains(err.Error(), "has not finished") {
+		t.Errorf("a re-run of a stopped workflow = %v, want the not-finished refusal", err)
+	}
+	if a.background.isLive(id) {
+		t.Error("a refused re-run left the workflow live")
+	}
+	if err := a.RerunFailed("20260101-000000-nothing"); err == nil {
+		t.Error("a re-run of an unknown workflow succeeded")
 	}
 }
 

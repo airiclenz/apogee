@@ -838,6 +838,26 @@ func (e *lateEngine) Workflows() ([]workflow.Info, error) {
 	return agent.Workflows()
 }
 
+// StopWorkflow stops one background workflow on the bound Agent; unbound no workflow can be running,
+// and the refusal is errNoServerBound for StopChild's reason.
+func (e *lateEngine) StopWorkflow(id string) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.StopWorkflow(id)
+}
+
+// RerunFailed re-runs a finished workflow's failed items on the bound Agent; unbound there is no
+// server for its children to run on, so it is errNoServerBound.
+func (e *lateEngine) RerunFailed(id string) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.RerunFailed(id)
+}
+
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.
 func (e *lateEngine) Close() error {
 	agent := e.bound()

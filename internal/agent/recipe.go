@@ -378,7 +378,9 @@ func shellQuote(value string) string {
 
 // newRecipeRunner builds the Runner a recipe runs under: fan_out's store, workspace, split budget,
 // width and second chances (newWorkflowRunner), children whose prompt files are read from the
-// skill's folder, this Agent's script runner, and — when a human can be asked — its Asker.
+// skill's folder, this Agent's script runner, and — when a human can be asked — its Asker. It names
+// the recipe, so the folder's status.json records where a re-run reads those files from
+// (Agent.RerunFailed).
 func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.Recipe) (*workflow.Runner, error) {
 	scratch := a.ScratchDir()
 	if scratch == "" {
@@ -401,6 +403,7 @@ func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.
 		Retries:       a.cfg.Workflow.ResolvedRetries(),
 		Continuations: a.cfg.Workflow.ResolvedContinuations(),
 		Scripts:       &recipeScripts{agent: a, turn: turn, recipe: recipe, split: split},
+		Recipe:        recipe.ID,
 	}
 	if a.cfg.Asker != nil {
 		runner.Asker = recipeAsker{agent: a}

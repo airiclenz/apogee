@@ -345,3 +345,103 @@ func TestWorkflowsViewClickOpensAnItemAndAClickOutsideCloses(t *testing.T) {
 		t.Error("a click outside the pane left it open")
 	}
 }
+
+// workflowsVerbStep presses key on m and folds every message its Cmd produced — a stop's answer, a
+// re-run's launch answer — and what those folds hand back.
+func workflowsVerbStep(t *testing.T, m Model, key tea.KeyPressMsg) Model {
+	t.Helper()
+	m, cmd := stepCmd(t, m, key)
+	for _, msg := range cmdMsgs(cmd) {
+		m, _ = stepCmd(t, m, msg)
+	}
+	return m
+}
+
+// In a workflow's detail ^x stops the workflow it shows, and the pane stays where it was; a stop the
+// engine refuses is noted in its own words.
+func TestWorkflowsViewCtrlXStopsTheShownWorkflow(t *testing.T) {
+	t.Parallel()
+	m := workflowsPaneModel(t, workflowsAtDetail)
+	eng := m.eng.(*fakeEngine)
+	id := m.workflowsPane.shown
+
+	m = workflowsVerbStep(t, m, keyCtrl('x'))
+
+	if stops, reruns := eng.workflowActions(); !slices.Equal(stops, []string{id}) || len(reruns) != 0 {
+		t.Errorf("stops = %v, reruns = %v; want one stop of %s and no re-run", stops, reruns, id)
+	}
+	if !m.workflowsPane.open || m.workflowsPane.level != workflowsAtDetail {
+		t.Errorf("after ^x: pane open %v at level %d, want the detail kept", m.workflowsPane.open, m.workflowsPane.level)
+	}
+
+	eng.mu.Lock()
+	eng.stopWorkflowFn = func(string) error { return errors.New("apogee: no background workflow is running") }
+	eng.mu.Unlock()
+	m = workflowsVerbStep(t, m, keyCtrl('x'))
+	if note := lastNote(m); note != "apogee: no background workflow is running" {
+		t.Errorf("a refused stop noted %q, want the engine's refusal", note)
+	}
+}
+
+// In a workflow's detail ^r re-runs its failed items: at idle the launch goes off the loop under the
+// /bg latch and folds as a /bg launch does; while a Turn runs it is refused with a note and the
+// engine is not reached.
+func TestWorkflowsViewCtrlRRerunsTheFailedItems(t *testing.T) {
+	t.Parallel()
+	if workflowRerunKey != "ctrl+r" || workflowStopKey != "ctrl+x" {
+		t.Fatalf("the detail's chords are %q and %q, want ctrl+r and ctrl+x", workflowRerunKey, workflowStopKey)
+	}
+	m := workflowsPaneModel(t, workflowsAtDetail)
+	eng := m.eng.(*fakeEngine)
+	id := m.workflowsPane.shown
+
+	pressed, cmd := stepCmd(t, m, keyCtrl('r'))
+	if !pressed.bgLaunching {
+		t.Error("^r did not latch the launch while the re-run reads the engine")
+	}
+	for _, msg := range cmdMsgs(cmd) {
+		pressed, _ = stepCmd(t, pressed, msg)
+	}
+	if stops, reruns := eng.workflowActions(); !slices.Equal(reruns, []string{id}) || len(stops) != 0 {
+		t.Errorf("reruns = %v, stops = %v; want one re-run of %s and no stop", reruns, stops, id)
+	}
+	if pressed.bgLaunching {
+		t.Error("the re-run's answer did not release the launch latch")
+	}
+	if note, want := lastNote(pressed), "started "+id+" in the background"; note != want {
+		t.Errorf("the re-run noted %q, want %q", note, want)
+	}
+
+	busy := m
+	busy.state = stateRunning
+	busy = workflowsVerbStep(t, busy, keyCtrl('r'))
+	if _, reruns := eng.workflowActions(); len(reruns) != 1 {
+		t.Errorf("a ^r mid-Turn reached the engine: reruns = %v", reruns)
+	}
+	if note := lastNote(busy); note != workflowRerunNotIdle {
+		t.Errorf("a ^r mid-Turn noted %q, want %q", note, workflowRerunNotIdle)
+	}
+}
+
+// The verbs are chords, never letters, and only a workflow's detail answers them: a bare r or x does
+// nothing there, and ^x and ^r on the list or an item's reading reach no engine call.
+func TestWorkflowsViewVerbsAreDetailChordsOnly(t *testing.T) {
+	t.Parallel()
+	for _, level := range []workflowsLevel{workflowsAtList, workflowsAtDetail, workflowsAtItem} {
+		m := workflowsPaneModel(t, level)
+		eng := m.eng.(*fakeEngine)
+		keys := []tea.KeyPressMsg{keyRune('r'), keyRune('x')}
+		if level != workflowsAtDetail {
+			keys = append(keys, keyCtrl('x'), keyCtrl('r'))
+		}
+		for _, key := range keys {
+			m = workflowsVerbStep(t, m, key)
+		}
+		if stops, reruns := eng.workflowActions(); len(stops) != 0 || len(reruns) != 0 {
+			t.Errorf("level %d: stops = %v, reruns = %v; want no engine call", level, stops, reruns)
+		}
+		if !m.workflowsPane.open || m.workflowsPane.level != level || m.bgLaunching {
+			t.Errorf("level %d: pane open %v at level %d, latch %v; want it untouched", level, m.workflowsPane.open, m.workflowsPane.level, m.bgLaunching)
+		}
+	}
+}

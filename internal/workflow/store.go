@@ -82,12 +82,14 @@ const (
 	PhaseStopped Phase = "stopped"
 )
 
-// RunStatus is a workflow's status.json: its identity, the PlanHash a resume matches on, and every
-// stage's and item's phase with the receipts inline, so a reader (the /workflows view, a resume)
-// never opens an item's own files.
+// RunStatus is a workflow's status.json: its identity, the recipe skill its plan comes from ("" for
+// a fan_out's plan, and for a folder no Run has opened yet), the PlanHash a resume matches on, and
+// every stage's and item's phase with the receipts inline, so a reader (the /workflows view, a
+// resume, a re-run) never opens an item's own files.
 type RunStatus struct {
 	ID       string        `json:"id"`
 	Name     string        `json:"name,omitempty"`
+	Recipe   string        `json:"recipe,omitempty"`
 	PlanHash string        `json:"plan_hash"`
 	Phase    Phase         `json:"phase"`
 	Created  time.Time     `json:"created"`

@@ -153,6 +153,25 @@ func TestRunnerSkipsFinishedItemsOnResume(t *testing.T) {
 	}
 }
 
+func TestRunnerRecordsTheRecipeInStatus(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	runner.Recipe = "audit"
+
+	result := runPlan(t, runner, context.Background(), fanPlan("a"))
+
+	status, err := runner.Store.ReadStatus(result.ID)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if status.Recipe != "audit" {
+		t.Errorf("status.json recipe = %q, want the runner's %q", status.Recipe, "audit")
+	}
+}
+
 func TestRunnerRetriesThenBlocked(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

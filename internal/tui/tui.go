@@ -1050,6 +1050,19 @@ type Engine interface {
 	// It reads the disk, so the TUI calls it only from a tea.Cmd (the /workflows view,
 	// workflows.go); goroutine-safe.
 	Workflows() ([]workflow.Info, error)
+	// StopWorkflow stops the background workflow id — a running one's children cancelled, a queued
+	// one dropped from its line — and keeps its finished items (ADR 0088). It does not wait: the
+	// WorkflowPhaseEvent that ends the workflow reports it. An id the engine neither runs nor queues
+	// is an error. Called from a tea.Cmd (the /workflows view's ctrl+x, workflows.go), since a queued
+	// workflow's stop writes its status.json; goroutine-safe.
+	StopWorkflow(id string) error
+	// RerunFailed runs the finished workflow id again in the background, in its own folder, as a new
+	// run of the same workflow: every item whose receipt is ok or partial is skipped, so only its
+	// blocked and faulted items run again. A live workflow, an unfinished one, one with nothing
+	// blocked and one whose items no longer lead to its folder are refused. Like StartRecipe's
+	// background launch it reads the engine for the launch-time snapshot, so it is called ONLY at
+	// idle, from a tea.Cmd, under the /bg launch latch (the view's ctrl+r, workflows.go).
+	RerunFailed(id string) error
 }
 
 // ----------------------------------------------------------------------------

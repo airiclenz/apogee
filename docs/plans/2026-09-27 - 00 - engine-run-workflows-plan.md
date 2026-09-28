@@ -956,7 +956,23 @@ NOTES (2026-09-28): not in this item: item 30's notes name /workflows as "the ot
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/`
 **Commit:** `feat(tui): the /workflows view`
 
-## 32. /workflows actions: stop and re-run failed
+## 32. /workflows actions: stop and re-run failed — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): re-derived from "`Agent.RerunFailed(id)` resetting those items' store state and resuming". No reset is needed: the Runner already re-runs every item without an ok or partial receipt, and blocked items include faulted ones, whose exhausted retries end on a blocked receipt. A resume, though, needs the recipe id, and the snapshot entry carries it only while the workflow is live. So `workflow.RunStatus` gains `recipe` (omitempty) and `workflow.Runner` gains `Recipe`, which openStatus records and newRecipeRunner sets. `RerunFailed` then relaunches through `resumeBackground(entry, folder)`, and `openWorkflowFolder` takes the folder the re-run must find. It refuses a plan whose hash now leads to no folder or to a newer one, and creates nothing in that case. Files outside the plan's list: internal/workflow/runner.go, internal/workflow/store.go, internal/workflow/runner_test.go, internal/agent/recipe.go.
+
+NOTES (2026-09-28): `StopWorkflow` already existed on the Agent (item 25). This item adds it to tui.Engine, lateEngine and fakeEngine only.
+
+NOTES (2026-09-28): a re-run is refused for a workflow whose phase is not `done` (stopped, or cut off while running). Re-running one of those would also run its unfinished items, which breaks the Goal's "only". A finished workflow's re-run is a new run in the Runner's sense: script and ask stages run afresh, as any re-issue of finished work does.
+
+NOTES (2026-09-28): ^x runs StopWorkflow in a tea.Cmd, because a queued workflow's stop writes its status.json. Its answer is a new `workflowStoppedMsg`, which needs a case in internal/tui/model.go's Update switch; that file is not in the plan's list. ^r goes only at idle: it sets the /bg launch latch (`bgLaunching`), because RerunFailed takes the launch-time snapshot. It then folds through the existing `bgStartedMsg`, whose note is `started <id> in the background`. Mid-Turn, ^r is refused with a note.
+
+NOTES (2026-09-28): the plan's test "a bare `r` types into the filter" does not apply. Item 31 built the pane on per-level `listCursor`s with no filter. The test now pins that a bare `r` or `x` does nothing, and that ^x and ^r act only in the detail (TestWorkflowsViewVerbsAreDetailChordsOnly).
+
+NOTES (2026-09-28): consequential edit — internal/tui/doc.go: made necessary by the detail's two new chords (the workflows.go line).
+
+NOTES (2026-09-28): consequential edit — internal/agent/doc.go: made necessary by the new Agent.RerunFailed (the background.go summary).
+
+NOTES (2026-09-28): consequential edit — docs/manual/commands.md: made necessary by the new user-visible ^x and ^r in the /workflows detail.
 
 **What:** Depends on item 31.
 **Goal:** in the `/workflows` detail, `ctrl+x` stops a running workflow (finished items kept) and `ctrl+r` re-runs its blocked and faulted items only, as a new run of the same workflow.

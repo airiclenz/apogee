@@ -184,6 +184,11 @@ type fakeEngine struct {
 	workflowInfos    []workflow.Info // what Workflows lists, oldest first
 	workflowsErr     error           // what Workflows fails with (nil ⇒ it lists workflowInfos)
 	workflowListings int             // records Workflows calls
+
+	workflowStops  []string           // records StopWorkflow calls (^x in the /workflows detail), in order
+	stopWorkflowFn func(string) error // scripted StopWorkflow error (nil ⇒ stopped)
+	workflowReruns []string           // records RerunFailed calls (^r in the /workflows detail), in order
+	rerunFn        func(string) error // scripted RerunFailed error (nil ⇒ started)
 }
 
 // workflowPromptAnswer is one recorded AnswerWorkflowPrompt call: the prompt's id and the answer.
@@ -362,6 +367,39 @@ func (f *fakeEngine) InterjectChild(runID string, in domain.UserInput) error {
 		return fn(runID, in)
 	}
 	return nil
+}
+
+// StopWorkflow records the workflow the view asked to stop and answers with whatever the test
+// scripted (nil ⇒ stopped). It is called from a tea.Cmd, so it takes the mutex.
+func (f *fakeEngine) StopWorkflow(id string) error {
+	f.mu.Lock()
+	f.workflowStops = append(f.workflowStops, id)
+	fn := f.stopWorkflowFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	return nil
+}
+
+// RerunFailed records the workflow the view asked to re-run and answers with whatever the test
+// scripted (nil ⇒ started). It is called from a tea.Cmd, so it takes the mutex.
+func (f *fakeEngine) RerunFailed(id string) error {
+	f.mu.Lock()
+	f.workflowReruns = append(f.workflowReruns, id)
+	fn := f.rerunFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	return nil
+}
+
+// workflowActions returns copies of the ids StopWorkflow and RerunFailed were called with, in order.
+func (f *fakeEngine) workflowActions() (stops, reruns []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.workflowStops), slices.Clone(f.workflowReruns)
 }
 
 // StopChild records the run the UI asked to stop and answers with whatever the test scripted

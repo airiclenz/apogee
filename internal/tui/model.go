@@ -1348,6 +1348,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.foldWorkflowItem(msg)
 		return m, nil
 
+	case workflowStoppedMsg:
+		// A /workflows ^x stop returned off the Update loop: note the engine's refusal, if any
+		// (workflows.go).
+		m.foldWorkflowStopped(msg)
+		return m, nil
+
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
 		// over the metas, or note the empty/error case with no overlay (sessions.go).
