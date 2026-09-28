@@ -16,7 +16,6 @@ import (
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
-	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // maxPostResponseRetries caps how many times an Outcome{Retry} post-response decision may
@@ -1671,7 +1670,9 @@ func (a *Agent) maxOutputTokens() int {
 // mechanism (the git read set: git_status, git_log, git_diff_range, git_show), which Plan offers
 // and runs (contract §4 amendment 2026-09-06). A third passes iff a session scratch dir is set:
 // tools.ClassWorkspaceWrite — Apogee's own writers, which Plan runs on that one target and
-// refuses elsewhere with a reason naming it (ADR 0012 second loosen, 2026-09-14).
+// refuses elsewhere with a reason naming it (ADR 0012 second loosen, 2026-09-14). Beside the
+// classes, the delegation seats pass by name (planOffersDelegation): sub_agent always, fan_out
+// and workflow iff a scratch dir is set, since resolve() refuses both in Plan without one.
 //
 // The mode and the scratch dir are each read ONCE, before the loop: a mid-build tighten or
 // session move must not compose a menu from two different states (both are live — agent.go).
@@ -1710,11 +1711,13 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	all := a.tools.All()
 	menu := make([]domain.ToolDef, 0, len(all))
 	for _, t := range all {
-		// EXCEPT the sub_agent recursion point, which is bounded one level down (a Plan
-		// sub-agent inherits Plan, so its children are bounded the same way). It is not a leaf
-		// tool at all — resolve() Delegates it before the ladder — so hiding it would wrongly deny
-		// a Plan-mode parent the ability to delegate read/research work (ADR 0013).
-		if planMode && !planOffers(t, scratchSet) && t.Name() != tools.SubAgentToolName {
+		// EXCEPT the delegation seats (planOffersDelegation): the sub_agent recursion point, which
+		// is bounded one level down (a Plan sub-agent inherits Plan, so its children are bounded
+		// the same way), and — with a scratch dir set — fan_out and workflow, whose workflow folder
+		// lives in that dir (ADR 0087 D4) and whose item children inherit Plan the same way. None
+		// is a leaf tool — resolve() answers each ahead of the ladder — so hiding them would
+		// wrongly deny a Plan-mode parent the ability to delegate read/research work (ADR 0013).
+		if planMode && !planOffers(t, scratchSet) && !planOffersDelegation(t, scratchSet) {
 			continue
 		}
 		menu = append(menu, domain.ToolDef{

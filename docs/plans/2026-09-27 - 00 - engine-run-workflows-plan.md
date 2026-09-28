@@ -1171,7 +1171,11 @@ NOTES (2026-09-28): a workflow child that asked for `sub-agents-server` with not
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/`
 **Commit:** `fix(agent): fan_out honours run_on and refuses a mistyped recipe`
 
-## 41. Plan mode offers fan_out beside sub_agent
+## 41. Plan mode offers fan_out beside sub_agent — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the Plan no-scratch refusal row in resolve() carries the guard's audit fields, as the depth-bound refusal on the same row does; a `workflow` control call refused there reads fanOutNoScratch's text verbatim ("fan_out was not run: …"), as the item specifies.
+
+NOTES (2026-09-28): `sub_agent{tools: "read-only"}` (requestedChildTools, subagent.go) still keeps only sub_agent among the delegation seats — fan_out is not on a read-only-narrowed child's roster; left as is (outside this item's files), an improvement idea only.
 
 **What:** Depends on items 16, 27. Fixes two run findings. `toolMenu` (loop.go) keeps `sub_agent` in Plan through a name exception but withholds fan_out (`planOffers` rejects its class), while `resolve` still runs a fan_out call in Plan (the `resolveWorkflow` row sits ahead of the ladder). And `refusePastCeiling` decides its `— for more items, use fan_out` pointer with `lookupTool`, so in Plan the refusal names a tool the menu does not offer. ADR 0087 D4 decides it: the workflow folder lives in the scratch dir, which Plan writes, so "a read-only audit works in Plan mode". A Plan fan_out's children inherit Plan, as a Plan sub_agent's do (ADR 0013).
 **Goal:** in Plan mode with a session scratch dir set, the menu offers `fan_out` (and `workflow`, when it is on the roster and the Driver offers background — item 27) whenever the roster carries it. Without a scratch dir it offers neither, because fan_out is refused there on every call. The fan-out ceiling's pointer names fan_out exactly when the refusing Agent's menu offers it.

@@ -45,7 +45,9 @@ func (stubPresenter) IsExecutionCapable() bool { return false }
 // in-process writer — and the two RO-declaring-marker-carrying shapes a host could register.
 // Together they span all eight tools.ToolClass values — the RO-subproc one is occupied by the
 // shipped git read set (the trio plus git_show), whose marker is unexported and therefore
-// unfakeable here.
+// unfakeable here. fan_out is registered too although it ships default-off: it is a delegation
+// seat resolve() answers ahead of the ladder, as sub_agent is, and the agreement must hold for it
+// with and without a scratch dir.
 func planMenuTools(ws string) []domain.Tool {
 	all := tools.DefaultToolsWithHost(ws, tools.HostTools{
 		Asker:     stubAsker{},
@@ -59,6 +61,7 @@ func planMenuTools(ws string) []domain.Tool {
 		// register them: a read-only DECLARATION over an unfakeable marker.
 		externalTool{name: "ro_declared_net", kind: domain.EffectNetwork, readOnly: true},
 		&subprocTool{name: "ro_declared_subproc", readOnly: true},
+		tools.NewFanOut(),
 	)
 }
 
@@ -166,6 +169,56 @@ func TestPlanToolMenuWithoutAScratchDirIsReadOnly(t *testing.T) {
 		if offered[name] {
 			t.Errorf("Plan menu offers %s with no scratch dir set; there is no target Plan writes", name)
 		}
+	}
+}
+
+// TestPlanToolMenuOffersTheWorkflowToolsOnlyWithAScratchDir pins the delegation seats a
+// background-capable Driver registers (fan_out publishing `background`, and the workflow control
+// tool): Plan offers both with a session scratch dir set, because the workflow folder lives there
+// (ADR 0087 D4), and neither without one, where resolve() refuses each with fanOutNoScratch's text
+// — so the menu and the ladder agree on both sides of the boundary.
+func TestPlanToolMenuOffersTheWorkflowToolsOnlyWithAScratchDir(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	workflowTools := []domain.Tool{tools.NewFanOutWith(tools.FanOutOptions{Background: true}), tools.NewWorkflow()}
+	toolset := append([]domain.Tool{tools.NewSubAgent()}, workflowTools...)
+	tests := []struct {
+		name    string
+		scratch string
+	}{
+		{"with a scratch dir", t.TempDir()},
+		{"without a scratch dir", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			a := planMenuAgent(t, domain.ModePlan, toolset)
+			a.SetScratchDir(tt.scratch)
+			offered := offeredNames(a.toolMenu())
+			if !offered[tools.SubAgentToolName] {
+				t.Errorf("Plan menu %v drops sub_agent; the recursion point is offered with or without a scratch dir", offered)
+			}
+			for _, tool := range workflowTools {
+				name := tool.Name()
+				if want := tt.scratch != ""; offered[name] != want || a.offersTool(name) != want {
+					t.Errorf("Plan menu offers %s = %t (offersTool %t), want %t", name, offered[name], a.offersTool(name), want)
+				}
+				got := resolve(resolutionInput{
+					mode:       domain.ModePlan,
+					call:       domain.ToolCall{ID: "c1", Tool: name},
+					tool:       tool,
+					guard:      proceed,
+					scratchDir: tt.scratch,
+					box:        domain.ConfinementBox{WorkspaceRoot: ws},
+				})
+				if runnable := got.kind != resolveRefuse; runnable != offered[name] {
+					t.Errorf("Plan menu offers %s = %t, but the ladder resolves it to %s", name, offered[name], got.kind)
+				}
+				if tt.scratch == "" && got.reason != fanOutNoScratch {
+					t.Errorf("Plan %s with no scratch dir refused with %q, want %q", name, got.reason, fanOutNoScratch)
+				}
+			}
+		})
 	}
 }
 

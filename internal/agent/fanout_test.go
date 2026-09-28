@@ -1791,6 +1791,53 @@ func TestFanOut_CeilingRefusalPointsToFanOut(t *testing.T) {
 	assertCeilingRefusal(t, sink.events, fired, results[2], want)
 }
 
+// TestFanOut_PlanCeilingRefusalPointsToFanOutOnlyWhereTheMenuOffersIt pins the pointer against the
+// refusing Agent's live menu rather than its roster: in Plan, fan_out is offered only with a session
+// scratch dir set (planOffersDelegation), so the same roster yields the pointer with a scratch dir
+// and the bare refusal without one — never a pointer to a tool the model cannot call.
+func TestFanOut_PlanCeilingRefusalPointsToFanOutOnlyWhereTheMenuOffersIt(t *testing.T) {
+	const refusal = "sub-agent not started: this reply fanned out 3 delegations and the ceiling is 2 (2 rounds × width 1) — the first 2 ran; delegate the rest again once their results are in"
+	tests := []struct {
+		name    string
+		scratch bool
+		want    string
+	}{
+		{"with a scratch dir", true, refusal + " — for more items, use fan_out"},
+		{"without a scratch dir", false, refusal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			var seen []string
+			var mu sync.Mutex
+
+			a := manyFanOutParentOffering(t, sink, 1, 2, 3, []domain.Tool{tools.NewFanOut()}, preToolExecWatcher(&seen, &mu))
+			a.SetMode(domain.ModePlan)
+			if tt.scratch {
+				a.SetScratchDir(t.TempDir())
+			}
+			if offered := slices.ContainsFunc(a.toolMenu(), func(d domain.ToolDef) bool { return d.Name == tools.FanOutToolName }); offered != tt.scratch {
+				t.Fatalf("Plan menu offers fan_out = %t, want %t", offered, tt.scratch)
+			}
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			results := subAgentResults(sink.events)
+			if len(results) != 3 {
+				t.Fatalf("depth-0 tool results = %d, want 3 (the refused slot still commits)", len(results))
+			}
+			mu.Lock()
+			fired := slices.Clone(seen)
+			mu.Unlock()
+			if results[2].CallID != "c3" {
+				t.Fatalf("refused result committed as %q; want c3", results[2].CallID)
+			}
+			assertCeilingRefusal(t, sink.events, fired, results[2], tt.want)
+		})
+	}
+}
+
 // TestFanOut_CeilingOffRunsEveryCall pins the off switch: rounds 0 is no ceiling, so ten
 // delegations at width 4 all run and all report.
 func TestFanOut_CeilingOffRunsEveryCall(t *testing.T) {

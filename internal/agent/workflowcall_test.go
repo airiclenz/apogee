@@ -272,6 +272,47 @@ func TestWorkflowCall_AChildsMenuDoesNotOfferFanOut(t *testing.T) {
 	}
 }
 
+// TestWorkflowCall_PlanItemChildrenInheritPlan pins that a Plan parent's fan_out (offered with its
+// scratch dir set, planOffersDelegation) spawns item children that run in Plan too, as a Plan
+// sub_agent's do (ADR 0013): a child's write_file aimed into the workspace is refused and writes
+// nothing, while the item still finishes on its receipt.
+func TestWorkflowCall_PlanItemChildrenInheritPlan(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink)
+	cfg.Mode = domain.ModePlan
+	_ = cfg.Tools.Register(tools.NewWriteFile(cfg.WorkspaceDir))
+	target := filepath.Join(cfg.WorkspaceDir, "out.txt")
+	writeArgs, _ := json.Marshal(map[string]string{"path": target, "content": "written"})
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, fanOutArgsJSON("alpha"))).
+		route("please fan out", nil, contentScript("all done")).
+		route("check alpha", nil, toolCallScript("w1", "write_file", string(writeArgs))).
+		route("check alpha", nil, finishScript("f1", "alpha is fine"))
+
+	runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+	if got := callResult(t, sink.events, "fo1"); got.IsError || !strings.Contains(got.Content, "#1 alpha — ok — alpha is fine") {
+		t.Fatalf("fan_out result = %+v, want the item's ok line (Plan runs the workflow with a scratch dir)", got)
+	}
+	var write *domain.ToolResult
+	for _, e := range sink.events {
+		if re, ok := e.(domain.ToolResultEvent); ok && re.Depth == 1 && re.Result.CallID == "w1" {
+			write = &re.Result
+		}
+	}
+	if write == nil {
+		t.Fatal("the item child's write_file call was never answered")
+	}
+	if !write.IsError || !strings.HasPrefix(write.Content, "plan mode:") {
+		t.Errorf("the item child's write_file result = %+v, want a Plan refusal", *write)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat %s: %v; want no file — a Plan item child writes nothing outside the scratch dir", target, err)
+	}
+}
+
 func TestWorkflowCall_AnInvalidPlanIsAFixableError(t *testing.T) {
 	t.Parallel()
 
@@ -985,7 +1026,7 @@ func (recipeLookup) LookupSkill(string) domain.SkillLookupResult {
 // TestWorkflowCall_LoadSkillNamesHowARecipeStartsFromTheCallersMenu drives ONE load_skill instance
 // from a parent that offers fan_out and from its delegate, which at the depth bound does not: the
 // recipe line is decided per call, so the parent is told to start the recipe with fan_out and the
-// child that the user starts it.
+// child that the user starts it. A Plan parent is told fan_out exactly when its scratch dir is set.
 func TestWorkflowCall_LoadSkillNamesHowARecipeStartsFromTheCallersMenu(t *testing.T) {
 	t.Parallel()
 
@@ -1018,6 +1059,32 @@ func TestWorkflowCall_LoadSkillNamesHowARecipeStartsFromTheCallersMenu(t *testin
 	}
 	if want := "this is a recipe: the user starts it with /review"; !strings.Contains(child.Content, want) {
 		t.Errorf("the child's load_skill result lacks %q:\n%s", want, child.Content)
+	}
+
+	// The Plan case: a Plan parent's menu offers fan_out exactly when a scratch dir is set
+	// (planOffersDelegation), so its recipe line names fan_out with one and the user without.
+	for _, plan := range []struct {
+		scratch bool
+		want    string
+	}{
+		{true, `this is a recipe: start it with fan_out{recipe: "review"}`},
+		{false, "this is a recipe: the user starts it with /review"},
+	} {
+		sink := &recordingSink{}
+		cfg := workflowConfig(t, sink, tools.NewLoadSkill(recipeLookup{}))
+		cfg.Mode = domain.ModePlan
+		if !plan.scratch {
+			cfg.ScratchDir = ""
+		}
+		up := (&workflowResponder{}).
+			route("please load it", nil, toolCallScript("p1", "load_skill", `{"query":"review"}`)).
+			route("please load it", nil, contentScript("all done"))
+
+		runWorkflowParent(t, context.Background(), cfg, up, "please load it")
+
+		if got := callResult(t, sink.events, "p1"); !strings.Contains(got.Content, plan.want) {
+			t.Errorf("Plan (scratch dir %t) load_skill result lacks %q:\n%s", plan.scratch, plan.want, got.Content)
+		}
 	}
 }
 

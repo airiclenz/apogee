@@ -589,8 +589,9 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // the coordinator that asked for more than the ceiling is told so in its own results, in the same
 // words every time, and decides what to delegate again once the round it did get has reported.
 // The rounds and the stated width are read once, here, so the text names the very ceiling that
-// refused the call; whether fan_out is on this Agent's roster is read here too, so the pointer to
-// it is offered only to a model that can act on it.
+// refused the call; whether fan_out is on this Agent's live menu (offersTool — in Plan, only with
+// a scratch dir set) is read here too, so the pointer to it is offered only to a model that can
+// act on it.
 func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
 	if !isSubAgentCall(slot.call) {
 		return false
@@ -602,8 +603,7 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 	}
 	slot.run = false
 	slot.ceilingRefused = true
-	_, fanOutOffered := a.lookupTool(tools.FanOutToolName)
-	slot.result = a.skipDelegation(turn, slot, fanOutCeilingResult(slot.call.ID, group, rounds, width, fanOutOffered))
+	slot.result = a.skipDelegation(turn, slot, fanOutCeilingResult(slot.call.ID, group, rounds, width, a.offersTool(tools.FanOutToolName)))
 	return true
 }
 
@@ -1409,13 +1409,17 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 }
 
 // offersTool reports whether name is on this Agent's live menu: registered, and not filtered out
-// by Plan mode (toolMenu's filter).
+// by Plan mode (toolMenu's filter — planOffers, or planOffersDelegation for the delegation seats).
 func (a *Agent) offersTool(name string) bool {
 	tool, ok := a.lookupTool(name)
 	if !ok {
 		return false
 	}
-	return a.Mode() != domain.ModePlan || planOffers(tool, a.ScratchDir() != "")
+	if a.Mode() != domain.ModePlan {
+		return true
+	}
+	scratchSet := a.ScratchDir() != ""
+	return planOffers(tool, scratchSet) || planOffersDelegation(tool, scratchSet)
 }
 
 // unknownToolResult renders the registry miss prepareCall answers with at every width, so a pooled

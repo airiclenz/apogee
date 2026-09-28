@@ -37,7 +37,8 @@ import (
 // classifyTool here), and it is the ONLY classification in the engine: the Plan-mode tool
 // menu (loop.go) keys on it through planOffers (planAdmits plus the scratch-dir writers) rather
 // than re-deriving one of its own, so the menu can never offer a tool the ladder would refuse
-// on every target (2026-08-02; scratch writers 2026-09-14).
+// on every target (2026-08-02; scratch writers 2026-09-14). The delegation seats resolve()
+// answers ahead of the ladder are offered by name instead (planOffersDelegation, 2026-09-28).
 
 // Model-facing refusal text and human-facing Approval reasons carried on a resolution. They
 // reproduce today's exact strings (dispatch.go / disposition.go) so the rewire in item 2 is
@@ -294,6 +295,9 @@ type resolutionInput struct {
 //     same recursion point, and at the depth bound it is refused with the same reason, so no
 //     child starts a nested workflow past `delegate-max-depth` (ADR 0087). A `workflow` control
 //     call (ADR 0089 D4) is a Workflow verdict too, but spawns nothing, so no depth bound applies.
+//     In Plan with no session scratch dir, a fan_out or workflow call is refused first with
+//     fanOutNoScratch's text: the workflow folder lives in the scratch dir (ADR 0087 D4), so there
+//     is nowhere Plan may keep one, and the menu offers neither (planOffersDelegation).
 //  4. An unknown tool refuses (not audit-recorded today, D8).
 //  5. The autonomy-ladder × blast-radius table produces the leaf verdict, then the leaf
 //     overlays apply: a Tier-2 force upgrades a non-Refuse leaf to a forced Gate; a Gate with
@@ -320,7 +324,17 @@ func resolve(in resolutionInput) resolution {
 	}
 
 	// 3. The sub_agent recursion point and the fan_out Workflow (Tier-2 is intentionally NOT
-	// applied here — D3), then the workflow control call, which spawns nothing.
+	// applied here — D3), then the workflow control call, which spawns nothing. A Plan call to
+	// either Workflow tool with no scratch dir is refused ahead of both: Plan writes nothing but
+	// the scratch dir, and the workflow folder would have to live there.
+	if in.mode == domain.ModePlan && in.scratchDir == "" && (isFanOutCall(in.call) || isWorkflowControlCall(in.call)) {
+		return resolution{
+			kind:          resolveRefuse,
+			reason:        fanOutNoScratch,
+			auditDecision: in.guard.Audit,
+			auditReason:   in.guard.Reason,
+		}
+	}
 	if isWorkflowControlCall(in.call) {
 		return resolution{
 			kind:          resolveWorkflow,
@@ -380,10 +394,11 @@ func resolve(in resolutionInput) resolution {
 // requestedChildTools): the child's inherited tools this predicate admits, so "read-only" on a
 // sub_agent call and "read-only" in Plan mode are one definition rather than two.
 //
-// The sub_agent recursion point is NOT a leaf tool and never reaches this predicate: resolve()
-// Delegates it before the ladder (D3/ADR 0013), and toolMenu keeps it in the Plan menu for the
-// same reason — a Plan sub-agent inherits Plan, so its children are read-only too (each with the
-// same one scratch-dir exception, ADR 0012 second loosen).
+// The delegation seats are NOT leaf tools and never reach this predicate: resolve() Delegates
+// sub_agent and answers fan_out and workflow with a Workflow verdict before the ladder (D3/ADR
+// 0013, ADR 0087), and toolMenu keeps them in the Plan menu through planOffersDelegation for the
+// same reason — a Plan sub-agent or workflow item child inherits Plan, so its children are
+// read-only too (each with the same one scratch-dir exception, ADR 0012 second loosen).
 func planAdmits(tool domain.Tool) bool {
 	class := tools.Classify(tool)
 	return class == tools.ClassReadOnly || class == tools.ClassReadOnlySubprocess
@@ -399,6 +414,23 @@ func planAdmits(tool domain.Tool) bool {
 // off the menu and Plan is the read-only floor it always was.
 func planOffers(tool domain.Tool, scratchSet bool) bool {
 	return planAdmits(tool) || (scratchSet && tools.Classify(tool) == tools.ClassWorkspaceWrite)
+}
+
+// planOffersDelegation reports whether Plan mode offers tool as a delegation seat — a tool
+// resolve() answers ahead of the ladder, so neither planAdmits nor planOffers ever sees its class.
+// The sub_agent recursion point is offered always: a Plan sub-agent inherits Plan (ADR 0013).
+// fan_out and the workflow control tool are offered iff a session scratch dir is set, because the
+// workflow folder lives there (ADR 0087 D4: a read-only audit works in Plan mode) and resolve()
+// refuses both in Plan without one. The workflow tool is on the roster only where the Driver
+// offers background workflows (tools.HostTools.OffersBackground), so no second check is needed.
+func planOffersDelegation(tool domain.Tool, scratchSet bool) bool {
+	switch tool.Name() {
+	case tools.SubAgentToolName:
+		return true
+	case tools.FanOutToolName, tools.WorkflowToolName:
+		return scratchSet
+	}
+	return false
 }
 
 // planScratchRefusalReason is returned to the model when Plan mode refuses a tool while a
