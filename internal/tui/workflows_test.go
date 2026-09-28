@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -443,5 +445,202 @@ func TestWorkflowsViewVerbsAreDetailChordsOnly(t *testing.T) {
 		if !m.workflowsPane.open || m.workflowsPane.level != level || m.bgLaunching {
 			t.Errorf("level %d: pane open %v at level %d, latch %v; want it untouched", level, m.workflowsPane.open, m.workflowsPane.level, m.bgLaunching)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// ^s — saving a fan_out's workflow as a recipe skill
+// ----------------------------------------------------------------------------
+
+// savePaneModel is one workflow of plan, run for recipe ("" for a fan_out's), open in the view's
+// detail, with an apogee home to save into and a catalog that already serves the skill `audit`. It
+// returns the home and the count of skill re-scans the save fires.
+func savePaneModel(t *testing.T, plan workflow.Plan, recipe string) (Model, string, *int) {
+	t.Helper()
+	store, err := workflow.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := store.Create(plan, "hash", time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status.Recipe = recipe
+	dir, err := store.Dir(status.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, reloads := reloadOpts()
+	opts.ConfigHome = t.TempDir()
+	current := []skills.Skill{{ID: "audit", DisplayName: "Audit", Summary: "audit", Body: "AUDIT"}}
+	opts.Skills = reloadableCatalog{skills: &current}
+	eng := &fakeEngine{workflowInfos: []workflow.Info{{Status: status, Dir: dir}}}
+	m := openWorkflowsLine(t, newTestModelEng(t, eng, opts))
+	m = workflowsKeyStep(t, m, keyEnter())
+	if m.workflowsPane.level != workflowsAtDetail {
+		t.Fatalf("precondition: the view is at level %d, want the detail", m.workflowsPane.level)
+	}
+	m.layout()
+	return m, opts.ConfigHome, reloads
+}
+
+// saveFanOutPlan is a plan of a fan_out's shape, its items a files glob.
+func saveFanOutPlan() workflow.Plan {
+	return workflow.Plan{Name: "scan the handlers", Stages: []workflow.Stage{
+		{Name: "fanout", Kind: workflow.StageFanout, Task: "scan {item}", Over: &workflow.ItemSource{Files: "internal/**/*.go"}},
+		{Name: "merge", Kind: workflow.StageMerge, Task: "merge the findings"},
+	}}
+}
+
+// typeName types name into the open name row a key at a time and presses ⏎, running the save the
+// press starts and every Cmd its fold hands back.
+func typeName(t *testing.T, m Model, name string) Model {
+	t.Helper()
+	for _, r := range name {
+		m = step(t, m, keyRune(r))
+	}
+	m, cmd := stepCmd(t, m, keyEnter())
+	for cmd != nil {
+		var next tea.Cmd
+		for _, msg := range cmdMsgs(cmd) {
+			var more tea.Cmd
+			m, more = stepCmd(t, m, msg)
+			next = tea.Batch(next, more)
+		}
+		cmd = next
+	}
+	return m
+}
+
+// errorTexts is every error entry of m's transcript, in order.
+func errorTexts(m Model) []string {
+	var out []string
+	for _, e := range m.transcript.entries {
+		if e.kind == entryError {
+			out = append(out, e.text)
+		}
+	}
+	return out
+}
+
+// ^s in a fan_out's detail opens the name row; the name typed into it — a bare s included — is
+// the skill the workflow is saved as: <home>/skills/<name>/SKILL.md, a recipe of the workflow's
+// stages with its files glob as the scope input, loadable at once through the re-scan the save fires.
+func TestWorkflowsViewCtrlSSavesAFanOutAsARecipe(t *testing.T) {
+	t.Parallel()
+	if workflowSaveKey != "ctrl+s" {
+		t.Fatalf("the save chord is %q, want ctrl+s", workflowSaveKey)
+	}
+	plan := saveFanOutPlan()
+	m, home, reloads := savePaneModel(t, plan, "")
+
+	m = step(t, m, keyCtrlS())
+	if !m.workflowsPane.naming {
+		t.Fatal("^s did not open the name row")
+	}
+	m = step(t, m, keyRune('s'))
+	assertPaneHas(t, m, workflowSavePrompt+"s", workflowsNamingHint)
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = typeName(t, m, "scan-handlers")
+
+	if m.workflowsPane.naming || !m.workflowsPane.open || m.workflowsPane.level != workflowsAtDetail {
+		t.Errorf("after the save: naming %v, open %v, level %d; want the detail back", m.workflowsPane.naming, m.workflowsPane.open, m.workflowsPane.level)
+	}
+	dir := filepath.Join(home, "skills", "scan-handlers")
+	if note, want := lastNote(m), `recipe "scan-handlers" written to `+dir+" — /scan-handlers runs it"; note != want {
+		t.Errorf("the save noted %q, want %q (errors: %v)", note, want, errorTexts(m))
+	}
+	if *reloads != 1 {
+		t.Errorf("the save fired %d skill re-scans, want 1", *reloads)
+	}
+	catalog, _ := skills.Load(skills.Sources{Home: home})
+	skill, ok := catalog.Get("scan-handlers")
+	if !ok || skill.Recipe == nil {
+		t.Fatal("the saved skill does not load as a recipe")
+	}
+	if got := skill.Recipe.Stages; len(got) != 2 || got[0].Over == nil || got[0].Over.Files != "{scope}" ||
+		got[0].Task != plan.Stages[0].Task || got[1].Task != plan.Stages[1].Task {
+		t.Errorf("the saved recipe runs %+v; want the plan's stages over {scope}", got)
+	}
+	if len(skill.Inputs) != 1 || skill.Inputs[0].Default != "internal/**/*.go" {
+		t.Errorf("the saved recipe declares %+v; want scope defaulting to the glob", skill.Inputs)
+	}
+}
+
+// A bare s in the detail is no verb: it opens no name row and writes nothing. esc closes an open
+// name row and saves nothing.
+func TestWorkflowsViewBareSOrEscSavesNothing(t *testing.T) {
+	t.Parallel()
+	m, home, _ := savePaneModel(t, saveFanOutPlan(), "")
+
+	m = step(t, m, keyRune('s'))
+	if m.workflowsPane.naming {
+		t.Error("a bare s opened the name row; the verb is the ^s chord")
+	}
+	m = step(t, m, keyCtrlS())
+	for _, r := range "kept" {
+		m = step(t, m, keyRune(r))
+	}
+	m = step(t, m, keyEsc())
+	if m.workflowsPane.naming || m.workflowsPane.level != workflowsAtDetail {
+		t.Errorf("esc: naming %v at level %d; want the name row closed on the detail", m.workflowsPane.naming, m.workflowsPane.level)
+	}
+	if _, err := os.Stat(filepath.Join(home, "skills")); !os.IsNotExist(err) {
+		t.Errorf("nothing was saved, yet the library exists: %v", err)
+	}
+}
+
+// A name that is a path or carries a space, one a skill or a command already answers to, and one a
+// folder in the library already holds are each refused with an error entry, and nothing is
+// overwritten.
+func TestWorkflowsViewSaveRefusesATakenOrMalformedName(t *testing.T) {
+	t.Parallel()
+	m, home, _ := savePaneModel(t, saveFanOutPlan(), "")
+	existing := filepath.Join(home, "skills", "mine", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(existing), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existing, []byte("edited"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, want string }{
+		{"../x", "not a skill name"},
+		{"two words", "not a skill name"},
+		{"audit", `a skill is already named "audit"`},
+		{"workflows", `a command is already named "workflows"`},
+		{"mine", "already exists"},
+	} {
+		m = step(t, m, keyCtrlS())
+		m = typeName(t, m, tc.name)
+		errs := errorTexts(m)
+		if len(errs) == 0 || !strings.Contains(errs[len(errs)-1], tc.want) {
+			t.Errorf("saving as %q: errors %v, want the last to say %q", tc.name, errs, tc.want)
+		}
+	}
+	if data, _ := os.ReadFile(existing); string(data) != "edited" {
+		t.Errorf("the existing skill now holds %q; it was overwritten", data)
+	}
+	if _, err := os.Stat(filepath.Join(home, "x")); !os.IsNotExist(err) {
+		t.Errorf("../x reached outside the library: %v", err)
+	}
+	for _, name := range []string{"audit", "workflows", "two words"} {
+		if _, err := os.Stat(filepath.Join(home, "skills", name)); !os.IsNotExist(err) {
+			t.Errorf("a refused %q left a folder: %v", name, err)
+		}
+	}
+}
+
+// A recipe's workflow is already a recipe: ^s says which and opens no name row.
+func TestWorkflowsViewSaveRefusesARecipesWorkflow(t *testing.T) {
+	t.Parallel()
+	m, _, _ := savePaneModel(t, saveFanOutPlan(), "audit")
+
+	m = step(t, m, keyCtrlS())
+	if m.workflowsPane.naming {
+		t.Error("^s opened the name row on a recipe's workflow")
+	}
+	if note, want := lastNote(m), fmt.Sprintf(workflowSaveRecipe, "audit"); note != want {
+		t.Errorf("^s noted %q, want %q", note, want)
 	}
 }

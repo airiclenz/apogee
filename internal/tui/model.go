@@ -1354,6 +1354,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.foldWorkflowStopped(msg)
 		return m, nil
 
+	case workflowSavedMsg:
+		// A /workflows ^s save returned off the Update loop: note the folder written and re-scan the
+		// skills, or report why nothing was (workflows.go).
+		return m, m.foldWorkflowSaved(msg)
+
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
 		// over the metas, or note the empty/error case with no overlay (sessions.go).

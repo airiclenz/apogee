@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/sanitize"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -31,7 +32,10 @@ import (
 // list. In a workflow's detail two chords act on it (workflowsVerb): ^x stops it, keeping its
 // finished items, and ^r re-runs its blocked and faulted items as a new run of the same workflow.
 // They are chords by the rule the /sessions browser ratified (sessionBrowserKey): no letter of a
-// list pane is a verb. Every read runs off the Update loop through a tea.Cmd and folds into plain values on the Model
+// list pane is a verb. A third, ^s, saves a fan_out's workflow as a recipe skill: it asks for a name
+// on the pane's own name row (workflowsNameKey) and writes <ConfigHome>/skills/<name>/SKILL.md off
+// the Update loop (saveWorkflowRecipe), refusing a name a skill or a command already answers to and
+// never overwriting a folder that is there. Every read runs off the Update loop through a tea.Cmd and folds into plain values on the Model
 // (ADR 0011) — the listing on open and again on every WorkflowPhaseEvent while the pane is up, the
 // item's detail on open and again with each re-list — so render and height read Model state only.
 
@@ -45,7 +49,8 @@ const maxWorkflowItemRows = 16
 // The legends at the foot of each level.
 const (
 	workflowsListHint   = "↑/↓ select · ⏎ open · esc close"
-	workflowsDetailHint = "↑/↓ select · ⏎ open item · ^x stop · ^r re-run failed · esc back"
+	workflowsDetailHint = "↑/↓ select · ⏎ open item · ^x stop · ^r re-run failed · ^s save as recipe · esc back"
+	workflowsNamingHint = "type a skill name · ⏎ save · esc cancel"
 	workflowsItemHint   = "↑/↓ scroll · esc back"
 )
 
@@ -63,12 +68,21 @@ const (
 	workflowNoTranscript  = "conversation: none saved yet"
 	workflowTranscriptBad = "conversation: could not read: "
 	workflowRerunNotIdle  = "a re-run starts only while the agent is idle — press ^r again once it is"
+	workflowSavePrompt    = "save as recipe — skill name: "
+	workflowSaveRecipe    = "only a fan_out workflow saves as a recipe — this one already runs the recipe /%s"
+	workflowSaveTaken     = "a %s is already named %q — pick another name"
+	workflowSavedNote     = "recipe %q written to %s — /%s runs it"
 )
+
+// workflowSaveCaret is the glyph the save row's name field draws where the next keystroke lands —
+// the narrow bar the /sessions rename row draws, the other name typed inside a list pane.
+const workflowSaveCaret = "▏"
 
 // The chords a workflow's detail answers (workflowsVerb).
 const (
 	workflowStopKey  = "ctrl+x"
 	workflowRerunKey = "ctrl+r"
+	workflowSaveKey  = "ctrl+s"
 )
 
 // The two queued/running states the engine's manager holds a background workflow in; every other
@@ -121,6 +135,8 @@ type workflowsPane struct {
 	shown   string          // the workflow the detail and item levels show
 	ref     workflowItemRef // the item the item level shows
 	lines   []string        // that item's rows; nil until its load lands
+	naming  bool            // the detail's ^s name row is up and takes every key
+	nameBuf lineEditor      // the skill name typed so far; the zero field while not naming
 	listSeq uint64
 	itemSeq uint64
 }
@@ -149,11 +165,20 @@ type workflowStoppedMsg struct {
 	err error
 }
 
+// workflowSavedMsg carries an off-loop save of a workflow as a recipe skill back to the Update loop:
+// the name it was saved under and the folder written, or why nothing was.
+type workflowSavedMsg struct {
+	name string
+	dir  string
+	err  error
+}
+
 // Compile-time assertions that the view's Msgs are valid tea.Msgs (mirroring messages.go).
 var (
 	_ tea.Msg = workflowsListMsg{}
 	_ tea.Msg = workflowItemMsg{}
 	_ tea.Msg = workflowStoppedMsg{}
+	_ tea.Msg = workflowSavedMsg{}
 )
 
 // openWorkflows is the /workflows verb: it reads the listing off the Update loop, and the pane opens
@@ -277,6 +302,9 @@ func (p *workflowsPane) cursor() *listCursor {
 // highlight names, esc goes one level up, and a workflow's detail answers its two chords
 // (workflowsVerb). It swallows every other key — the pane is modal.
 func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.workflowsPane.naming {
+		return m.workflowsNameKey(msg)
+	}
 	wrap := listWrapsAround
 	if m.workflowsPane.level == workflowsAtItem {
 		wrap = listStopsAtEnds // a reading scrolls; it does not cycle
@@ -300,7 +328,8 @@ func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // Update loop (a queued one's stop writes its status.json); the engine refuses one it neither runs
 // nor queues, and that refusal is noted. ^r re-runs its failed items: the launch reads the engine
 // for its snapshot, so it goes only at idle, off the loop and under the /bg launch latch
-// (bgLaunching), and folds as a /bg launch does (foldBgStarted). Any other key is swallowed.
+// (bgLaunching), and folds as a /bg launch does (foldBgStarted). ^s opens the name row that saves it
+// as a recipe (openWorkflowSave). Any other key is swallowed.
 func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	id, eng := m.workflowsPane.shown, m.eng
 	switch msg.String() {
@@ -313,8 +342,103 @@ func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.bgLaunching = true
 		return m, func() tea.Msg { return bgStartedMsg{id: id, err: eng.RerunFailed(id)} }
+	case workflowSaveKey:
+		return m.openWorkflowSave(), nil
 	}
 	return m, nil
+}
+
+// openWorkflowSave is ^s in a workflow's detail: it opens the name row the workflow is saved under.
+// Only a fan_out's workflow saves — a recipe's already is one, and saying which is the answer — and
+// only with an apogee home resolved to hold the library.
+func (m Model) openWorkflowSave() Model {
+	info, ok := m.workflowsPane.shownInfo()
+	switch {
+	case !ok:
+		return m
+	case info.Status.Recipe != "":
+		m.transcript.addNote(fmt.Sprintf(workflowSaveRecipe, sanitize.StripEscapesToLine(info.Status.Recipe)))
+		return m
+	case m.opts.ConfigHome == "":
+		m.transcript.addError(skillsSource, noSkillExporterNote, runRef{})
+		return m
+	}
+	m.workflowsPane.naming = true
+	m.workflowsPane.nameBuf = newPopupField(m.opts.CursorShape, m.th.surface, workflowSaveCaret, "")
+	return m
+}
+
+// workflowsNameKey drives the save row's name field: printable text and backspace edit it, esc
+// closes it and saves nothing, and ⏎ saves the workflow under the name typed (an empty one is a
+// no-op). The field takes every other key too — it is a modal surface of its own.
+func (m Model) workflowsNameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	pane := &m.workflowsPane
+	switch msg.String() {
+	case "esc":
+		pane.naming, pane.nameBuf = false, lineEditor{}
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(pane.nameBuf.value())
+		pane.naming, pane.nameBuf = false, lineEditor{}
+		if name == "" {
+			return m, nil
+		}
+		return m.saveWorkflowRecipe(name)
+	case "backspace":
+		return m, pane.nameBuf.editKey(msg)
+	}
+	if msg.Text != "" { // a printable keypress carries its rune(s) in Text
+		return m, pane.nameBuf.editKey(msg)
+	}
+	return m, nil
+}
+
+// saveWorkflowRecipe saves the shown workflow's plan as the recipe skill name. A name a skill of the
+// catalog or a command verb already answers to is refused here — the new `/name` would be shadowed
+// by one or shadow the other; the rest runs off the Update loop: plan.json read, the recipe
+// rendered (workflow.PlanToRecipe), and the folder claimed and written by skills.WriteNew, which
+// refuses a name that is a path and never overwrites a folder already there.
+func (m Model) saveWorkflowRecipe(name string) (tea.Model, tea.Cmd) {
+	info, ok := m.workflowsPane.shownInfo()
+	if !ok {
+		m.transcript.addNote(workflowsGone)
+		return m, nil
+	}
+	if _, isCommand := commandByName(name); isCommand {
+		m.transcript.addError(skillsSource, fmt.Sprintf(workflowSaveTaken, "command", name), runRef{})
+		return m, nil
+	}
+	if m.opts.Skills != nil {
+		if _, isSkill := m.opts.Skills.Get(name); isSkill {
+			m.transcript.addError(skillsSource, fmt.Sprintf(workflowSaveTaken, "skill", name), runRef{})
+			return m, nil
+		}
+	}
+	dir, library := info.Dir, filepath.Join(m.opts.ConfigHome, "skills")
+	return m, func() tea.Msg {
+		plan, err := workflow.ReadFolderPlan(dir)
+		if err != nil {
+			return workflowSavedMsg{name: name, err: err}
+		}
+		content, err := workflow.PlanToRecipe(plan)
+		if err != nil {
+			return workflowSavedMsg{name: name, err: err}
+		}
+		written, err := skills.WriteNew(name, library, content)
+		return workflowSavedMsg{name: name, dir: written, err: err}
+	}
+}
+
+// foldWorkflowSaved reports a save: the refusal as an error entry, since nothing was written, or the
+// folder written and the command that now runs it — with the catalog re-scanned off the loop, so the
+// new skill is loadable at once.
+func (m *Model) foldWorkflowSaved(msg workflowSavedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.transcript.addError(skillsSource, msg.err.Error(), runRef{})
+		return nil
+	}
+	m.transcript.addNote(fmt.Sprintf(workflowSavedNote, msg.name, msg.dir, msg.name))
+	return m.reloadSkillsCmd()
 }
 
 // foldWorkflowStopped notes a refused stop; a stop under way needs no word — the pane re-reads as the
@@ -387,6 +511,9 @@ func (m Model) workflowsRows() ([]popupRow, bool) {
 		if !ok {
 			return singleCellRows([]string{workflowsGone}), false
 		}
+		if pane.naming {
+			return singleCellRows([]string{workflowSavePrompt + pane.nameBuf.textWithCaret()}), false
+		}
 		rows, _ := workflowDetailRows(info)
 		if len(rows) == 0 {
 			return singleCellRows([]string{workflowsNoStages}), false
@@ -424,6 +551,9 @@ func (m Model) workflowsListContent() (listContent, bool) {
 		c.title, c.hint, c.rowCap = "workflow  "+sanitize.StripEscapesToLine(pane.shown), workflowsDetailHint, maxWorkflowRows
 		if info, ok := pane.shownInfo(); ok {
 			c.title = "workflow  " + workflowName(info) + "  (" + workflowState(info) + ")"
+		}
+		if pane.naming {
+			c.hint = workflowsNamingHint
 		}
 	default:
 		c.title, c.hint, c.rowCap = workflowItemTitle(pane), workflowsItemHint, maxWorkflowItemRows

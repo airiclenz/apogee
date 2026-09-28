@@ -48,5 +48,8 @@
 // format.go is Format: the result lines the parent reads — one `#<n> <item> — <status> — <summary>`
 // line per item, a totals line, the stages' notes, `report:` — listing only the non-ok items past
 // 40 and pointing to the full items.md the Store writes as the run ends.
+// torecipe.go is PlanToRecipe and ReadFolderPlan: a fan_out's plan rendered (yaml.v3) as a recipe
+// skill's SKILL.md — its briefs inline, its path source the `scope` input defaulting to that path —
+// for the /workflows view to save under a name the human picks.
 // And doc.go this map.
 package workflow

@@ -150,3 +150,33 @@ func copyTree(src fs.FS, dest string) error {
 		return os.WriteFile(target, data, exportedFilePerm)
 	})
 }
+
+// WriteNew writes content as the SKILL.md of a new skill named id in <libraryDir>/<id>/, and
+// returns the directory it wrote — the way a skill apogee composes (a fan_out saved as a recipe)
+// reaches the user's global library. It holds ExportShipped's two rules: id is a name, never a path
+// (validShippedID), and an existing <libraryDir>/<id> is never overwritten, the os.Mkdir that
+// creates the folder being the one operation that both checks for it and claims it.
+func WriteNew(id, libraryDir string, content []byte) (string, error) {
+	if libraryDir == "" {
+		return "", errors.New("apogee: no skills directory to write into")
+	}
+	if !validShippedID(id) {
+		return "", fmt.Errorf("apogee: %q is not a skill name — one word, no path, no leading dot", id)
+	}
+	if err := os.MkdirAll(libraryDir, exportedDirPerm); err != nil {
+		return "", fmt.Errorf("apogee: create skills directory %q: %w", libraryDir, err)
+	}
+	dest := filepath.Join(libraryDir, id)
+	if err := os.Mkdir(dest, exportedDirPerm); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("apogee: skill %q already exists — pick another name", dest)
+		}
+		return "", fmt.Errorf("apogee: create skill directory %q: %w", dest, err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, skillFileName), content, exportedFilePerm); err != nil {
+		// A folder without its SKILL.md would block the retry that fixes it (ExportShipped's cleanup).
+		_ = os.RemoveAll(dest)
+		return "", fmt.Errorf("apogee: write skill %q: %w", dest, err)
+	}
+	return dest, nil
+}

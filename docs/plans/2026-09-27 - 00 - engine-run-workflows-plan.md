@@ -985,7 +985,19 @@ NOTES (2026-09-28): consequential edit — docs/manual/commands.md: made necessa
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(tui): stop and re-run failed workflow items`
 
-## 33. Save a fan_out as a recipe
+## 33. Save a fan_out as a recipe — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the name rule and the Mkdir claim are exposed as a new `skills.WriteNew(id, libraryDir, content)` in internal/skills/export.go beside ExportShipped (validShippedID is unexported and the TUI cannot reach it) — internal/skills/export.go is outside the item's Files list.
+
+NOTES (2026-09-28): `workflow.ReadFolderPlan(dir)` added in torecipe.go so the TUI reads a workflow's plan.json by its listed folder (Info.Dir) without a Store; torecipe.go imports gopkg.in/yaml.v3 (external module, not from the tree — the boundary test allows it; doc.go line says so).
+
+NOTES (2026-09-28): consequential edit — internal/tui/model.go: made necessary by the new off-loop workflowSavedMsg, which the Update switch must dispatch to foldWorkflowSaved.
+
+NOTES (2026-09-28): consequential edit — docs/manual/commands.md: made necessary by the new `^s` chord in the /workflows detail (the row lists the detail's chords).
+
+NOTES (2026-09-28): the /workflows pane has no filter (it is a listCursor pane), so the "bare `s` types into the filter" test is recast as: a bare `s` in the detail opens no name row, and inside the open name row a bare `s` types into the name.
+
+NOTES (2026-09-28): a plan whose text already spells `{scope}` keeps its path literal and declares no input (binding would rewrite that text); a plan with a `prompt:` file, or one Validate refuses, is refused by PlanToRecipe; a recipe's own workflow is refused with a note naming its recipe.
 
 **What:** Recast at the regression check (2026-09-27). Depends on items 18, 31.
 **Goal:** in the `/workflows` detail of a `fan_out` workflow, `ctrl+s` asks for a skill name and writes `~/.apogee/skills/<name>/SKILL.md` whose recipe reproduces the workflow's plan, with `scope` as an input where the `over` source was a path; an existing name is refused, never overwritten; the new skill is loadable at once.
