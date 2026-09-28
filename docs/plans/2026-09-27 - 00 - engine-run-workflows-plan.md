@@ -1051,7 +1051,13 @@ Held notes: `n` on `/clear` leaves the manager (running set and held notes) unto
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/agent/ && go test -race -count=1 -run Workflow ./cmd/apogee/`
 **Commit:** `feat(tui): /clear, quit and resume respect running workflows`
 
-## 35. Headless --recipe
+## 35. Headless --recipe — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): run.Once launches Spec.Recipe through the Agent's own StartRecipe rather than a spelled "/<id>" message, so an unknown recipe or an unbound required input is refused before anything is sent (exit 2, zero Turns) instead of reaching the model as a refusal line; the record's title and replayed scrollback use the "/<id> <text>" launch line (Spec.line).
+
+NOTES (2026-09-28): exit 1 also covers a --recipe workflow that never started (the launch could not run) or ended `failed`, beside the plan's stopped and all-blocked cases — each leaves the model answering over no usable work; the outcome rides run.Result.Workflow (WorkflowOutcome), read off the first top-level workflow_phase stream of a recipe Firing.
+
+NOTES (2026-09-28): `make lint` reports one ineffassign at internal/tui/commandrun_test.go:334, introduced by item 34's commit ad3fee2b — untouched here.
 
 **What:** Depends on items 17, 20.
 **Goal:** `apogee headless --recipe <id> [text]` runs the recipe blocking (no background), `ask` stages take their defaults and the result says so, `--format json` streams `workflow_phase` events, and the exit status is non-zero when the workflow is stopped or every item blocked.

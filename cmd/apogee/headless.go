@@ -422,6 +422,7 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 	var noSave bool
 	var outputFormat string
 	var seams bool
+	var recipe string
 
 	cmd := &cobra.Command{
 		Use:   "headless [prompt]",
@@ -446,9 +447,16 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 			"fill on a stderr line of its own, ahead of the closing summary — each child\n" +
 			"fills a window the run's own figures say nothing about. Pass --format json to\n" +
 			"make stdout the versioned JSONL Event lines instead — one object per engine\n" +
-			"event, bracketed by a run_started/run_finished pair. Exit codes: 0 the run\n" +
+			"event, bracketed by a run_started/run_finished pair.\n\n" +
+			"--recipe <id> runs that recipe skill as a blocking workflow instead: the\n" +
+			"argument, when given, is the text its inputs bind from (stdin is not read),\n" +
+			"a required input it leaves unbound refuses the run, and every ask stage takes\n" +
+			"its default, which its result line says. The model then answers over the\n" +
+			"result lines.\n\n" +
+			"Exit codes: 0 the run\n" +
 			"completed, 1 the run started and failed (model or tool error, cancellation, a\n" +
-			"record that would not save), 2 the run never started (usage, configuration, a\n" +
+			"record that would not save, a --recipe workflow that did not run, stopped,\n" +
+			"failed or blocked on every item), 2 the run never started (usage, configuration, a\n" +
 			"refused mode, a server that did not answer), 3 the run started but its final\n" +
 			"turn was abandoned (stdout holds its last text, not an answer; the record is\n" +
 			"saved).",
@@ -456,7 +464,7 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHeadless(cmd, args, &opts, noSave, outputFormat, seams, deps)
+			return runHeadless(cmd, args, &opts, noSave, recipe, outputFormat, seams, deps)
 		},
 	}
 
@@ -492,6 +500,8 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 		"what stdout carries: text (the answer) | json (the JSONL Event lines, ADR 0075)")
 	flags.BoolVar(&seams, "seams", false,
 		"also emit seam_closed lines (--format json only)")
+	flags.StringVar(&recipe, "recipe", "",
+		"run this recipe skill as a blocking workflow; the argument is the text its inputs bind from")
 
 	return cmd
 }
@@ -512,8 +522,9 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // and — under json — writes the closing frame on whichever path the body left by.
 //
 // The funnel exists because ADR 0075 decision 5 promises EXACTLY ONE `run_finished` on every exit
-// path, and the body has fifteen of them: eleven `notStarted` refusals, a failed run, an abandoned
-// final Turn and a success. Writing the frame at each would be fifteen chances to forget one, and
+// path, and the body has sixteen of them: eleven `notStarted` refusals, a failed run, a --recipe
+// workflow that failed, an abandoned final Turn and a success. Writing the frame at each would be
+// sixteen chances to forget one, and
 // a consumer would meet the omission as an empty stdout it has to interpret. Funnelling makes the
 // promise structural instead, and leaves the body's own control flow — and therefore the text
 // path's every byte — exactly as it was.
@@ -532,6 +543,7 @@ func runHeadless(
 	args []string,
 	opts *config.Options,
 	noSave bool,
+	recipe string,
 	outputFormat string,
 	seams bool,
 	deps headlessDeps,
@@ -541,7 +553,7 @@ func runHeadless(
 		if seams {
 			return notStarted(errors.New("apogee headless: --seams needs --format json"))
 		}
-		_, err := runHeadlessBody(cmd, args, opts, noSave, nil, deps)
+		_, err := runHeadlessBody(cmd, args, opts, noSave, recipe, nil, deps)
 		return err
 	case formatJSON:
 		// Disarmed BEFORE the first line is written, and only on this branch: from here on a
@@ -562,7 +574,7 @@ func runHeadless(
 			},
 			Seams: seams,
 		})
-		res, err := runHeadlessBody(cmd, args, opts, noSave, lines, deps)
+		res, err := runHeadlessBody(cmd, args, opts, noSave, recipe, lines, deps)
 		lines.RunFinished(runFinishedFrame(res, err))
 		return err
 	default:
@@ -698,6 +710,7 @@ func runHeadlessBody(
 	args []string,
 	opts *config.Options,
 	noSave bool,
+	recipe string,
 	lines *eventjson.Writer,
 	deps headlessDeps,
 ) (run.Result, error) {
@@ -710,10 +723,21 @@ func runHeadlessBody(
 	// func(string) that knows nothing about this Driver and every line reads exactly as it did.
 	cmd.SetErr(&serialWriter{w: cmd.ErrOrStderr()})
 
-	// Before anything is resolved or constructed: with no prompt there is no run to configure.
-	prompt, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
-	if err != nil {
-		return run.Result{}, notStarted(err)
+	// Before anything is resolved or constructed: with no prompt there is no run to configure. A
+	// recipe run is the exception — its argument is only the text the recipe's inputs bind from, so
+	// an absent one is empty text rather than a missing prompt, and stdin is never read for it: a
+	// required input left unbound is the launch's own refusal (run.Spec.Recipe).
+	prompt := ""
+	if recipe != "" {
+		if len(args) > 0 {
+			prompt = strings.TrimSpace(args[0])
+		}
+	} else {
+		resolved, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
+		if err != nil {
+			return run.Result{}, notStarted(err)
+		}
+		prompt = resolved
 	}
 
 	// The same resolution a session performs (flag > env > file > default), so a headless run
@@ -1006,6 +1030,7 @@ func runHeadlessBody(
 		roots:    roots,
 		confiner: confiner,
 		mode:     mode,
+		recipe:   recipe,
 		report:   reportReaction,
 		runner:   deps.runner,
 		// The per-server stats recorder (ADR 0085): every upstream attempt this run makes is
@@ -1138,6 +1163,16 @@ func runHeadlessBody(
 		}
 		return res, runFailed(runErr)
 	}
+	// A recipe whose workflow did not end in usable work is a run that failed, though the Firing
+	// itself went on to its answer: the answer speaks over result lines that record the stop, the
+	// failure or a blocked receipt on every item, and a script reading only the exit status would
+	// otherwise take that for a completed run. Like the failure above it outranks a fault.
+	if err := recipeWorkflowFailure(recipe, res.Workflow); err != nil {
+		if res.SessionID != "" {
+			err = fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))
+		}
+		return res, runFailed(err)
+	}
 	// An abandoned final Turn is exit 3, and it is decided AFTER the failure branch above on
 	// purpose: a run that errored is exit 1 whether or not it also faulted, because the error is
 	// the more actionable of the two. What reaches here is a run that returned no error and still
@@ -1151,6 +1186,28 @@ func runHeadlessBody(
 		return res, exitError{code: exitRunFaulted, err: err}
 	}
 	return res, nil
+}
+
+// recipeWorkflowFailure reports why a --recipe run's workflow counts as a failed run, nil when it
+// does not — no recipe was named, or its workflow finished with at least one item not blocked (or
+// with no items at all: a recipe of steps alone has nothing to block).
+func recipeWorkflowFailure(recipe string, outcome run.WorkflowOutcome) error {
+	if recipe == "" {
+		return nil
+	}
+	switch {
+	case outcome.ID == "":
+		return fmt.Errorf("apogee headless: recipe /%s did not run", recipe)
+	case outcome.End == domain.WorkflowStopped:
+		return fmt.Errorf("apogee headless: recipe /%s's workflow %s was stopped before every item finished",
+			recipe, outcome.ID)
+	case outcome.End == domain.WorkflowFailed:
+		return fmt.Errorf("apogee headless: recipe /%s's workflow %s failed", recipe, outcome.ID)
+	case outcome.Items > 0 && outcome.Blocked == outcome.Items:
+		return fmt.Errorf("apogee headless: every item of recipe /%s's workflow %s blocked (%d of %d)",
+			recipe, outcome.ID, outcome.Blocked, outcome.Items)
+	}
+	return nil
 }
 
 // serialWriter guards one io.Writer with a mutex, so goroutines that narrate at the same time can

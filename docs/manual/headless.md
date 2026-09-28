@@ -24,6 +24,19 @@ either way. `/id` tokens are
 **skill references** on the same terms: a token naming a skill in this run's catalog
 attaches that skill's instructions to the message exactly as typing it into a session
 would, and any other slash word — a path, a typo — stays plain text.
+
+`--recipe <id>` runs a **recipe** skill — one whose header declares the stages the engine
+runs as a workflow, like the shipped `audit` — instead of a prompt: `apogee headless
+--recipe audit internal/`. The argument, when given, is the text the recipe's inputs bind
+from, in order or as `key=value`; with none the text is empty, which suits a recipe whose
+inputs are all optional, and stdin is never read. The workflow runs to its end before the
+model is asked anything (never in the background), then the model answers over its result
+lines exactly as it would after `/<id>` in a session. Nobody is there to ask, so a required
+input the text leaves unbound refuses the run before anything is sent — `missing input:
+<name>`, exit `2` — and every `ask` stage takes its declared default, which its result line
+records as `(default taken: no one to ask)`. Under `--format json` the workflow's progress
+arrives as `workflow_phase` lines. A workflow that could not run, was stopped, failed, or
+ended with every item blocked exits `1` whatever the model then said.
 `--endpoint`, `--model`, `--server`, `--bypass`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from
@@ -156,7 +169,7 @@ thing happened:
 | Exit | Means |
 |---|---|
 | `0` | the run completed |
-| `1` | the run started and failed — model or tool error, cancellation, a record that would not save |
+| `1` | the run started and failed — model or tool error, cancellation, a record that would not save, a `--recipe` workflow that did not run, was stopped, failed or blocked on every item |
 | `2` | the run never started — usage, configuration, a refused mode, a server that did not answer |
 | `3` | the run started and reached its boundary, but its final turn was abandoned (a model or upstream fault the loop could not recover) — stdout holds the run's last text, not an answer; the record is saved |
 

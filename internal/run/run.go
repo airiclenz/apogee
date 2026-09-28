@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // ErrMode is returned when a Spec names an autonomy mode a Firing may not run in. A Firing
@@ -36,8 +38,18 @@ type Spec struct {
 	// once the run is over. Everything else is used as given.
 	Config domain.Config
 
-	// Prompt is the single user message the Firing submits.
+	// Prompt is the single user message the Firing submits — or, with Recipe set, the text the
+	// recipe's inputs bind from (the line after "/<id>"), empty when the recipe needs none.
 	Prompt string
+
+	// Recipe is the id of a recipe skill this Firing launches instead of submitting Prompt as a
+	// message (ADR 0087 D6): the Agent's own StartRecipe binds its inputs from Prompt and opens the
+	// Exchange, whose first Step runs the recipe as a blocking Workflow and hands the model the
+	// launch line plus the result lines. With no Asker (see the package doc) a required input
+	// Prompt leaves unbound fails the launch before anything is sent, and an `ask` stage takes its
+	// declared default, which its result line says. Empty ⇒ Prompt is an ordinary message, and a
+	// prompt that opens with a recipe's "/<id>" still launches it through the loop's own grammar.
+	Recipe string
 
 	// ScheduleID and ScheduleName are the Schedule identity stamped onto the saved record's
 	// browsable Meta (ADR 0033). Both empty ⇒ the record is an ordinary session, which is
@@ -199,6 +211,27 @@ type Result struct {
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
 	// record then failed to save (that failure is the returned error only).
 	Err error
+	// Workflow is how the Workflow Spec.Recipe launched ended, read off its workflow_phase events;
+	// the zero value on a Firing that launched no recipe. It is a REPORT like every field here: the
+	// run's error does not carry a stopped or all-blocked workflow, because the Firing itself went
+	// on to its answer, and what such an ending means to its caller is the Driver's to decide.
+	Workflow WorkflowOutcome
+}
+
+// WorkflowOutcome is how a Firing's recipe Workflow ended: its id, the phase it ended on, and how
+// many of its items finished on a receipt and how many of those were blocked. Only item stages
+// (fanout, verify, …) count items; a script, ask or pick stage is a step, never an item.
+type WorkflowOutcome struct {
+	// ID is the Workflow's id, empty when none started — no Spec.Recipe, or a launch that could not
+	// run (its refusal is the line the model read instead of the result lines).
+	ID string
+	// End is the phase the Workflow ended on — domain.WorkflowFinished, WorkflowStopped or
+	// WorkflowFailed — and empty while it had not ended.
+	End domain.WorkflowPhase
+	// Items is how many items finished on a receipt, a resumed one included.
+	Items int
+	// Blocked is how many of those items ended on a blocked receipt.
+	Blocked int
 }
 
 // Usage is one agent's CUMULATIVE token accounting for a whole run — domain.Usage under the
@@ -341,7 +374,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		model:  spec.Config.Model,
 		// The scrollback is seeded with the prompt about to be submitted: the engine reports no
 		// event for a submission, so the fold cannot learn the run's first line from the stream.
-		scrollback: newTranscriptFold(spec.Prompt),
+		scrollback: newTranscriptFold(spec.line()),
+		isRecipe:   spec.Recipe != "",
 	}
 	cfg := spec.Config
 	cfg.Approver = den
@@ -445,7 +479,17 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// it, the submit-failure exit included.
 	contextCost := a.ContextCost()
 
-	if err := a.Submit(in); err != nil {
+	if spec.Recipe != "" {
+		// The Driver named the recipe itself, so the launch is the Agent's own StartRecipe rather
+		// than a message spelled to look like one: an unknown id or an input the text cannot bind
+		// is refused HERE, before a byte is sent, where a spelled "/<id>" line would hand the
+		// refusal to the model as its opening message.
+		launch := domain.RecipeLaunch{SkillID: spec.Recipe, Text: spec.Prompt}
+		if _, err := a.StartRecipe(ctx, launch); err != nil {
+			return Result{ContextFiles: contextFiles, ContextCost: contextCost},
+				fmt.Errorf("apogee: start the firing's recipe: %w", err)
+		}
+	} else if err := a.Submit(in); err != nil {
 		return Result{ContextFiles: contextFiles, ContextCost: contextCost},
 			fmt.Errorf("apogee: submit the firing's prompt: %w", err)
 	}
@@ -472,6 +516,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		Wrote:        a.WroteFiles(),
 		UndoNote:     reason,
 		Err:          runErr,
+		Workflow:     tap.workflowOutcome(),
 	}
 	if spec.Store == nil {
 		return res, runErr
@@ -581,7 +626,21 @@ func (s Spec) title(now time.Time) string {
 	// caller's clock happened to be located in. title.Derive formats what it is given and never
 	// relocates it, so this line is the whole of the zone choice for this path. Its cap is the
 	// browser's own, so a Firing's row is no wider than any other session's.
-	return title.Derive(s.Prompt, title.MaxRunes, now.Local())
+	return title.Derive(s.line(), title.MaxRunes, now.Local())
+}
+
+// line is the user line this Firing opens with: the Prompt, or — for a recipe launch — the
+// "/<id> <text>" line the Agent's StartRecipe submits, so the record's title and its replayed
+// scrollback read the launch as a session that typed it would.
+func (s Spec) line() string {
+	if s.Recipe == "" {
+		return s.Prompt
+	}
+	line := "/" + s.Recipe
+	if text := strings.TrimSpace(s.Prompt); text != "" {
+		line += " " + text
+	}
+	return line
 }
 
 // denier is a Firing's Approver: it refuses every gated action immediately and counts the
@@ -680,6 +739,11 @@ type eventTap struct {
 	// ([runKey]); runs is the finished ones in finish order.
 	open map[runKey]*openSubAgent
 	runs []SubAgentUsage
+	// isRecipe is set when the Firing launched a recipe (Spec.Recipe): only then is the first
+	// top-level Workflow the one workflow tracks.
+	isRecipe bool
+	// workflow is the recipe Workflow's outcome so far (Result.Workflow).
+	workflow WorkflowOutcome
 	// fanOuts holds the fan_out calls in flight, keyed by the depth and call id their item
 	// children are stamped with, each with the brief's first line those children run under. A
 	// fan_out spawns many children under one call, so its ToolCallEvent names no run: each item
@@ -740,6 +804,8 @@ func (t *eventTap) Emit(e domain.Event) {
 		t.nameSubAgentRun(ev.EventBase, ev.Name)
 	case domain.SubAgentPhaseEvent:
 		t.noteItemPhase(ev)
+	case domain.WorkflowPhaseEvent:
+		t.noteWorkflowPhase(ev)
 	case domain.ToolResultEvent:
 		// The run the result answers is what identifies it as the delegation's: only the result
 		// closing the run that opened the bracket closes it.
@@ -749,6 +815,41 @@ func (t *eventTap) Emit(e domain.Event) {
 	if t.inner != nil {
 		t.inner.Emit(e)
 	}
+}
+
+// noteWorkflowPhase folds one workflow_phase event into the recipe Workflow's outcome. The
+// recipe runs on the Firing's first Step, before the model is asked anything, so the first
+// top-level Workflow to start is the recipe's; a fan_out the model calls later starts another,
+// which this ignores. A background Workflow never runs in a Firing (ADR 0089 D1), and an event from
+// one is skipped all the same.
+func (t *eventTap) noteWorkflowPhase(ev domain.WorkflowPhaseEvent) {
+	if !t.isRecipe || ev.Depth != 0 || ev.Background {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.workflow.ID == "" && ev.Phase == domain.WorkflowStarted {
+		t.workflow.ID = ev.Workflow
+	}
+	if t.workflow.ID == "" || ev.Workflow != t.workflow.ID {
+		return
+	}
+	switch ev.Phase {
+	case domain.WorkflowItemFinished:
+		t.workflow.Items++
+		if ev.Receipt.Status == string(workflow.StatusBlocked) {
+			t.workflow.Blocked++
+		}
+	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
+		t.workflow.End = ev.Phase
+	}
+}
+
+// workflowOutcome is the recipe Workflow's outcome as the tap last saw it (Result.Workflow).
+func (t *eventTap) workflowOutcome() WorkflowOutcome {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.workflow
 }
 
 // noteUsage files one accounting event under the agent that reported it: the Firing's own at

@@ -60,6 +60,10 @@ type firingInputs struct {
 	model string
 	// mode is the mode the run executes in — plan or auto, the two an unattended run may use.
 	mode domain.Mode
+	// recipe is the id of the recipe skill this run launches (run.Spec.Recipe), the prompt raise
+	// is handed then being the text its inputs bind from. Empty — every Driver but `apogee headless
+	// --recipe` — runs the prompt as an ordinary message.
+	recipe string
 	// skills is the catalog the run resolves attached skill IDs through and mounts the read roots
 	// of; nil builds a fresh Provider from roots. A session passes its LIVE provider so a
 	// `use-project-skills` flip keeps following its Firings (design call 5); headless and the
@@ -841,6 +845,7 @@ func raise(
 	spec := run.Spec{
 		Config:   cfg,
 		Prompt:   prompt,
+		Recipe:   in.recipe,
 		Store:    store,
 		RecordID: in.recordID,
 		// The clock the id above was minted from, so CreatedAt and the id prefix agree.

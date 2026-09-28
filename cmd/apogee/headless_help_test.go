@@ -23,7 +23,8 @@ var manualExitRow = regexp.MustCompile("(?m)^\\| `(\\d+)` \\|")
 // TestHeadlessHelpNamesEveryExitCode holds the command's Long text to the const block — one
 // `N the run` phrase per code — and the manual's exit table to the same list: exactly one row per
 // code and no row for a code the binary never returns. The unanswered-server clause is asserted on
-// both, since it is the one exit-2 cause the help text used to leave out.
+// both, since it is the one exit-2 cause the help text used to leave out, and so is the --recipe
+// workflow's exit-1 clause, a cause a run that reached an answer still exits on.
 func TestHeadlessHelpNamesEveryExitCode(t *testing.T) {
 	t.Parallel()
 
@@ -52,6 +53,14 @@ func TestHeadlessHelpNamesEveryExitCode(t *testing.T) {
 	}
 	if len(rows) != len(headlessExitCodes) {
 		t.Errorf("%s's exit table has %d rows for %d exit codes", manualHeadlessPath, len(rows), len(headlessExitCodes))
+	}
+
+	const recipeCause = "blocked on every item"
+	if !strings.Contains(long, recipeCause) {
+		t.Errorf("headless --help does not name %q among the exit-1 causes", recipeCause)
+	}
+	if !strings.Contains(page, recipeCause) {
+		t.Errorf("%s does not name %q among the exit-1 causes", manualHeadlessPath, recipeCause)
 	}
 
 	const unanswered = "a server that did not answer"

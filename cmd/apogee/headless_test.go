@@ -35,6 +35,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // stubRunner stands in for internal/run.Once: it records the Spec the command composed and
@@ -2660,6 +2661,57 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 			t.Errorf("fault = %v; want the reason the engine reported", data["fault"])
 		}
 	})
+
+	// A --recipe run whose workflow did not end in usable work is exit 1 even though the Firing
+	// reached an answer and returned no error: the verdict is read off run.Result.Workflow.
+	recipeExits := []struct {
+		name     string
+		workflow run.WorkflowOutcome
+		want     int
+		says     string
+	}{
+		{"a --recipe workflow that stopped exits 1",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowStopped, Items: 2, Blocked: 0},
+			exitRunFailed, "was stopped"},
+		{"a --recipe workflow with every item blocked exits 1",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished, Items: 2, Blocked: 2},
+			exitRunFailed, "blocked (2 of 2)"},
+		{"a --recipe workflow that failed exits 1",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFailed},
+			exitRunFailed, "failed"},
+		{"a --recipe that never ran a workflow exits 1",
+			run.WorkflowOutcome{},
+			exitRunFailed, "did not run"},
+		{"a --recipe workflow with one item not blocked exits 0",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished, Items: 2, Blocked: 1},
+			0, ""},
+	}
+	for _, tc := range recipeExits {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{res: run.Result{
+				SessionID: "s-4", FinalText: "the model's answer", Turns: 1, Workflow: tc.workflow,
+			}}
+			out, _, err := headlessRun(t, stub, "--format", "json", "--recipe", "sweep", "src")
+			_, data := finishedFrame(t, jsonEventLines(t, out))
+			wantExitCode(t, data, tc.want)
+			if tc.want == 0 {
+				if err != nil {
+					t.Fatalf("a workflow with an item not blocked failed the run: %v", err)
+				}
+				return
+			}
+			if err == nil || exitCodeFor(err) != tc.want {
+				t.Fatalf("err = %v; want exit %d", err, tc.want)
+			}
+			text, _ := data["error"].(string)
+			if !strings.Contains(text, "/sweep") || !strings.Contains(text, tc.says) {
+				t.Errorf("error = %v; want the recipe named and %q", data["error"], tc.says)
+			}
+			if !strings.Contains(text, "partial run saved as s-4") {
+				t.Errorf("error = %v; want the saved record named", data["error"])
+			}
+		})
+	}
 }
 
 // TestHeadlessFormatJSONCarriesContextCost pins where the Context cost report rides the stream
@@ -4093,4 +4145,212 @@ func TestHeadlessFoldsARetiredHooksBlockOnStart(t *testing.T) {
 		strings.Contains(got, "name: record") {
 		t.Errorf("the home file was not rewritten to the live schema:\n%s", got)
 	}
+}
+
+// sweepRecipeSkill is a recipe skill for the --recipe tests: an `ask` stage with a declared
+// default, then one fanout item whose brief names the recipe's `scope` input. scopeDecl is the
+// input's declaration lines, so a test states whether the input is optional or required.
+func sweepRecipeSkill(scopeDecl string) string {
+	return "---\nid: sweep\nsummary: sweep a list\ninputs:\n  - name: scope\n" + scopeDecl +
+		"recipe:\n" +
+		"  - name: pace\n    kind: ask\n    question: \"How fast?\"\n    options: [fast, slow]\n    default: fast\n" +
+		"  - name: items\n    kind: fanout\n    over:\n      list: [alpha]\n    task: \"check {item} in {scope}\"\n" +
+		"---\nRun the sweep.\n"
+}
+
+// sweepUpstream scripts the two requests a sweep run makes: the item child's, answered by a
+// `finish` call carrying status, then the Firing's own, answered with "swept".
+func sweepUpstream(t *testing.T, status string) *stubllm.Server {
+	t.Helper()
+	return stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+	}, Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: "check alpha in src"}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_1", Name: tools.FinishToolName,
+			Arguments: `{"status":"` + status + `","summary":"alpha checked"}`,
+		}}},
+		{Text: "swept"},
+	}})
+}
+
+// recipeHeadless runs `apogee headless` through the real run.Once against upstream, with the
+// sweep recipe skill written into the apogee home, and returns both streams and the error.
+func recipeHeadless(t *testing.T, upstream *stubllm.Server, skill string, args ...string) (out, errOut string, err error) {
+	t.Helper()
+	assertNoAmbientApogeeConfig(t)
+	t.Setenv(config.EnvMode, "")
+
+	home := eventLinesHome(t, upstream.URL, headlessBeatModel)
+	skillDir := filepath.Join(home, "skills", "sweep")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create the skill folder: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skill), 0o600); err != nil {
+		t.Fatalf("write the recipe skill: %v", err)
+	}
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
+	var outBuf, errBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader("stdin is never read for a recipe run"))
+	cmd.SetArgs(append([]string{"--config", home, "--workspace", e2eWorkspace(t), "--mode", "plan"}, args...))
+	err = cmd.ExecuteContext(context.Background())
+	return outBuf.String(), errBuf.String(), err
+}
+
+// launchRequest is the Firing's own request: the one whose last message is the recipe's launch
+// line, "/sweep …" followed by the result lines.
+func launchRequest(t *testing.T, upstream *stubllm.Server) stubllm.Request {
+	t.Helper()
+	for _, req := range upstream.Requests() {
+		if n := len(req.Messages); n > 0 && strings.HasPrefix(req.Messages[n-1].Content, "/sweep") {
+			return req
+		}
+	}
+	t.Fatalf("no request carried the recipe's launch line; saw %d request(s)", len(upstream.Requests()))
+	return stubllm.Request{}
+}
+
+// TestHeadlessRecipeRunsBlockingWithDefaults drives `--recipe` through the real engine: the recipe
+// runs as a blocking workflow before the model is asked anything, its `ask` stage takes the
+// declared default and the result lines the model reads say so, ask_user is not on the run's menu
+// (ADR 0033 decision 2: a Firing's Asker is nil), and a run with no text binds the optional input
+// to its default — stdin is never read for it.
+func TestHeadlessRecipeRunsBlockingWithDefaults(t *testing.T) {
+	upstream := sweepUpstream(t, "ok")
+	out, errOut, err := recipeHeadless(t, upstream, sweepRecipeSkill("    default: src\n"), "--recipe", "sweep")
+	if err != nil {
+		t.Fatalf("headless --recipe: %v (stderr: %q)", err, errOut)
+	}
+	upstream.AssertConsumed(t)
+	if un := upstream.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate", len(un))
+	}
+	if strings.TrimSpace(out) != "swept" {
+		t.Errorf("stdout = %q; want the model's answer alone", out)
+	}
+
+	req := launchRequest(t, upstream)
+	launch := req.Messages[len(req.Messages)-1].Content
+	if !strings.HasPrefix(launch, "/sweep\n\n") {
+		t.Errorf("the launch line is not the bare /sweep an empty text makes:\n%s", launch)
+	}
+	if !strings.Contains(launch, "#1 alpha — ok — alpha checked") {
+		t.Errorf("the model's message does not carry the item's result line:\n%s", launch)
+	}
+	if !strings.Contains(launch, "default taken: no one to ask") {
+		t.Errorf("the result lines do not say the ask stage took its default:\n%s", launch)
+	}
+	if slices.Contains(req.Tools, tools.AskUserToolName) {
+		t.Errorf("ask_user is on a --recipe run's menu: %v", req.Tools)
+	}
+}
+
+// Under --format json the recipe's workflow streams its workflow_phase lines — started, the item
+// finished on its receipt, finished — and the closing frame is a success.
+func TestHeadlessRecipeStreamsWorkflowPhases(t *testing.T) {
+	upstream := sweepUpstream(t, "ok")
+	out, errOut, err := recipeHeadless(t, upstream, sweepRecipeSkill("    required: true\n"),
+		"--format", "json", "--recipe", "sweep", "src")
+	if err != nil {
+		t.Fatalf("headless --recipe: %v (stderr: %q)", err, errOut)
+	}
+	lines := jsonEventLines(t, out)
+	var phases []string
+	for _, line := range lines {
+		if line["event"] != "workflow_phase" {
+			continue
+		}
+		data, _ := line["data"].(map[string]any)
+		phase, _ := data["phase"].(string)
+		phases = append(phases, phase)
+	}
+	for _, want := range []string{"started", "item_finished", "finished"} {
+		if !slices.Contains(phases, want) {
+			t.Errorf("the stream's workflow_phase lines are %v; want a %q among them", phases, want)
+		}
+	}
+	_, data := finishedFrame(t, lines)
+	wantExitCode(t, data, 0)
+}
+
+// A recipe whose every item blocked is a failed run, exit 1, though the model went on to answer.
+func TestHeadlessRecipeWithEveryItemBlockedExits1(t *testing.T) {
+	upstream := sweepUpstream(t, "blocked")
+	out, errOut, err := recipeHeadless(t, upstream, sweepRecipeSkill("    required: true\n"), "--recipe", "sweep", "src")
+	if err == nil {
+		t.Fatalf("an all-blocked workflow exited 0 (stderr: %q)", errOut)
+	}
+	if code := exitCodeFor(err); code != exitRunFailed {
+		t.Errorf("exit code = %d; want %d", code, exitRunFailed)
+	}
+	if !strings.Contains(err.Error(), "every item of recipe /sweep") {
+		t.Errorf("err = %q; want the blocked workflow named", err.Error())
+	}
+	if strings.TrimSpace(out) != "swept" {
+		t.Errorf("stdout = %q; the model's answer is still the product", out)
+	}
+}
+
+// A required input the text leaves unbound refuses the run before anything is sent: no one is
+// there to ask for it, so it is item 20's `missing input` refusal, exit 2.
+func TestHeadlessRecipeMissingRequiredInputNeverStarts(t *testing.T) {
+	upstream := sweepUpstream(t, "ok")
+	_, errOut, err := recipeHeadless(t, upstream, sweepRecipeSkill("    required: true\n"), "--recipe", "sweep")
+	if err == nil {
+		t.Fatalf("a recipe missing a required input ran (stderr: %q)", errOut)
+	}
+	if code := exitCodeFor(err); code != exitNotStarted {
+		t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+	}
+	if !strings.Contains(err.Error(), "missing input: scope") {
+		t.Errorf("err = %q; want the missing input named", err.Error())
+	}
+	if n := len(upstream.Requests()); n != 0 {
+		t.Errorf("the upstream saw %d request(s); a refused launch sends nothing", n)
+	}
+}
+
+// The recipe id and its text reach run.Spec through firingInputs: Recipe names the recipe, Prompt
+// is the argument, and with no argument Prompt is empty — no stdin read, no empty-prompt refusal.
+func TestHeadlessRecipeFlowsToTheRunnerSpec(t *testing.T) {
+	t.Run("with text", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{Turns: 1, Workflow: run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished}}}
+		if _, _, err := headlessRun(t, stub, "--recipe", "sweep", "  src  "); err != nil {
+			t.Fatalf("headless --recipe: %v", err)
+		}
+		if stub.spec.Recipe != "sweep" || stub.spec.Prompt != "src" {
+			t.Errorf("spec.Recipe = %q, spec.Prompt = %q; want sweep and the trimmed text", stub.spec.Recipe, stub.spec.Prompt)
+		}
+	})
+	t.Run("without text", func(t *testing.T) {
+		srv := headlessBeatServer(t)
+		stub := &stubRunner{res: run.Result{Turns: 1, Workflow: run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished}}}
+		t.Setenv(config.EnvMode, "")
+		cmd := newHeadlessCommandWith(headlessDeps{
+			runner:   stub.once,
+			confiner: func() apogee.Confiner { return fenceableHost },
+		})
+		var outBuf, errBuf bytes.Buffer
+		cmd.SetOut(&outBuf)
+		cmd.SetErr(&errBuf)
+		cmd.SetIn(strings.NewReader("this is not the recipe's text"))
+		cmd.SetArgs([]string{"--config", testConfigHomeOn(t, srv, ""), "--workspace", t.TempDir(), "--recipe", "sweep"})
+		if err := cmd.ExecuteContext(context.Background()); err != nil {
+			t.Fatalf("headless --recipe with no text: %v", err)
+		}
+		if !stub.called || stub.spec.Recipe != "sweep" || stub.spec.Prompt != "" {
+			t.Errorf("called = %v, spec.Recipe = %q, spec.Prompt = %q; want the run with empty text",
+				stub.called, stub.spec.Recipe, stub.spec.Prompt)
+		}
+	})
+	t.Run("a plain prompt names no recipe", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{Turns: 1}}
+		if _, _, err := headlessRun(t, stub, "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if stub.spec.Recipe != "" {
+			t.Errorf("spec.Recipe = %q; a plain prompt launches no recipe", stub.spec.Recipe)
+		}
+	})
 }
