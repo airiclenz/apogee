@@ -1348,15 +1348,20 @@ func TestRunViewHintOffersTheStopWhileTheRunRuns(t *testing.T) {
 
 // TestWorkflowItemRowOpensAsARunView pins a Workflow item's row to a delegation's reaches: ⏎ on it
 // roots the view at that item's child, the breadcrumb names the item, the gauge reads the child's
-// fill, a message typed there goes to the child by its run id, and ^x stops that run alone.
+// fill, a message typed there goes to the child by its run id, and ^x stops that run alone. The row
+// is a fan_out card's, whose item rows stand in the transcript; a Recipe block's stand behind its
+// stage rows.
 func TestWorkflowItemRowOpensAsARunView(t *testing.T) {
 	t.Parallel()
-	const call = "recipe-audit-1"
+	const call = "f1"
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
 	m.input.SetValue("/audit src")
 	m, _ = stepCmd(t, m, keyEnter())
 	item := runRef{depth: 1, spawn: call, id: "run.1"}
+	m.transcript.apply(domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: call, Tool: fanOutToolName, Arguments: []byte(`{"task":"check {item}"}`)},
+	})
 	m.transcript.apply(startedUnder(call))
 	m.transcript.apply(itemStartedUnder(call, item.id, "items", "alpha", 0, 1))
 	stampedPhase(&m.transcript, item, domain.SubAgentStarted, "")

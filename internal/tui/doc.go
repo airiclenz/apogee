@@ -1092,7 +1092,8 @@
 // workflowblock.go the block a launched Recipe's Workflow reports its run in (ADR 0087), folded
 // from its WorkflowPhaseEvents and grown in place, which — like a fan_out call's card — heads the
 // Workflow's item runs by the call they are bracketed under, each under a run head of its own
-// (entryWorkflowItem) that paints and opens as a delegation's; workflow.go the session's background
+// (entryWorkflowItem) that opens as a delegation's — painted as a fan_out card's rows, and stood for
+// by one row per stage under a live Recipe block; workflow.go the session's background
 // workflows (ADR 0089) — the rule that keeps their events out of the transcript, the activity board and the
 // stall clock, the finish line their end writes, the wake that opens an Exchange on it once the
 // session is idle, the status line's running and waiting readout, and the waiting approval or

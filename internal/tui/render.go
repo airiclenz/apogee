@@ -110,6 +110,16 @@ func (p *blockPaint) addFor(member int, lines []string, kind targetKind) {
 	p.padCells()
 }
 
+// addStage appends one stage row of a workflow block, marked as that stage's own surface
+// ([targetStage]) on the block's head: the row and its mark are one act here as in addFor.
+func (p *blockPaint) addStage(stage int, lines []string) {
+	p.lines = append(p.lines, lines...)
+	for range lines {
+		p.targets = append(p.targets, lineMark{kind: targetStage, stage: stage})
+	}
+	p.padCells()
+}
+
 // join appends another paint whole — its lines and its own target marks — so a block composed of
 // sub-paints (a tool block of one branch or of many) keeps their marks without re-deriving them.
 func (p *blockPaint) join(q blockPaint) {
@@ -262,7 +272,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 			target := lineTarget{}
 			if i < len(block.targets) && block.targets[i].kind != targetNone {
 				mark := block.targets[i]
-				target = lineTarget{kind: mark.kind, entry: head + mark.member}
+				target = lineTarget{kind: mark.kind, entry: head + mark.member, stage: mark.stage}
 			}
 			targets = append(targets, target)
 			cell := -1
@@ -761,10 +771,10 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	//
 	// A block heading a Workflow's item runs (a workflow block, a fan_out card) has a span too
 	// (subAgentSpan), but framing is a run head's alone (subAgentFramed), so it never reaches this
-	// branch: it paints as the block it is, and the walk goes on to the item runs' heads behind it —
-	// each a run head (entryWorkflowItem) that reaches this branch and elides its own run. The
-	// workflow block never collapses, and a collapsed fan_out card folds its own body and nothing it
-	// heads.
+	// branch. A fan_out card paints as the block it is, and the walk goes on to the item runs' heads
+	// behind it — each a run head (entryWorkflowItem) that reaches this branch and elides its own
+	// run; a collapsed card folds its own body and nothing it heads. A live workflow block is the
+	// exception below: its stage rows stand for its item runs, so it steps over its span whole.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
 		ins := root.appendInputs(buf[:0], t.entries[head:head+span+1])
 		return resolvedBlock{
@@ -830,6 +840,15 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	}
 	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
 	// kind's own answers (entrykind.go); everything else keys as settled and marks no stop.
+	//
+	// A workflow block carrying its live view paints one row per stage (renderWorkflowStages), and
+	// those rows are where its item runs are entered — so the item heads behind it, and their runs,
+	// are stepped over with it. A block with no view (one replayed from an old record) paints its
+	// text, and the walk goes on to the item rows its span holds, which are then the only way in.
+	next := head + 1
+	if in.kind == entryWorkflow && in.workflowView.live() {
+		next += subAgentSpan(t.entries, head)
+	}
 	live := in.kind.hasLiveStar() && !in.done
 	ins := append(buf[:0], in)
 	return resolvedBlock{
@@ -839,7 +858,7 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 		draw: func(th theme) blockPaint {
 			return renderEntryLines(th, ins[0], width, blink)
 		},
-		next: head + 1,
+		next: next,
 		// A prompt stop, but only the human's OWN: a message addressed to a running sub-agent is
 		// an entryUser too (transcript.addUserAt), and it is the depth that parts the two. The
 		// prompt the on-screen work belongs to is the top-level one whatever a delegate is being
@@ -1056,7 +1075,7 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 	case entryStartup:
 		return plainPaint(railLines(th, renderStartupBox(th, in.startup, inner), in.depth))
 	case entryWorkflow:
-		return plainPaint(railLines(th, renderWorkflowBlock(th, in.text, inner), in.depth))
+		return renderWorkflowBlock(th, in.workflowView, in.text, inner).railed(th, in.depth)
 	case entryWorkflowItem:
 		// A Workflow item's head with no run behind it yet — its child has not recorded a thing — is
 		// still the delegation row it will be, never a tool block: it has no call to show.

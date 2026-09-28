@@ -1194,3 +1194,50 @@ func TestRowlessTaskListCardKeepsTheOrdinaryShape(t *testing.T) {
 		}
 	})
 }
+
+// A live workflow block marks each stage row — and only its stage rows — as that stage's own
+// surface (targetStage), naming the block's entry and the row's place in the block's stage list: a
+// pending row as much as a running one. Its header, its trouble lines and its failure's cause are no
+// surface at all.
+func TestWorkflowStageRowsAreStageTargets(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addNote("before the launch")
+	for _, e := range []domain.Event{
+		startedWith("scan", "fix", "report"),
+		stageStarted("scan", 1, 2, 0),
+		stageItemStarted("scan", 1, 0),
+		stageItemFinished("scan", 1, 0, "blocked"),
+		workflowPhase(domain.WorkflowFailed),
+	} {
+		tr.apply(e)
+	}
+	const head = 1
+	if tr.entries[head].kind != entryWorkflow {
+		t.Fatalf("setup: entry %d is %v, want the workflow block", head, tr.entries[head].kind)
+	}
+
+	rendered := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint)
+
+	var got []lineTarget
+	var rows []string
+	for i, target := range rendered.targets {
+		if target.kind != targetNone {
+			got = append(got, target)
+			rows = append(rows, ansi.Strip(rendered.lines[i]))
+		}
+	}
+	want := []lineTarget{
+		{kind: targetStage, entry: head, stage: 0},
+		{kind: targetStage, entry: head, stage: 1},
+		{kind: targetStage, entry: head, stage: 2},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("marks = %+v on rows %q; want %+v", got, rows, want)
+	}
+	for i, name := range []string{"scan", "fix", "report"} {
+		if !strings.Contains(rows[i], " "+name+" ") {
+			t.Errorf("stage %d's mark is on %q, not on %q's row", i, rows[i], name)
+		}
+	}
+}

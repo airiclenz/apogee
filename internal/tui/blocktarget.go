@@ -46,6 +46,12 @@ package tui
 // moves is answered by the umbrella's size (transcript.umbrellaIsLarge): a LARGE one follows the
 // shared `ui.tools-open` preference (Model.toggleToolsFold), a small one its own head flag alone
 // (transcript.setUmbrellaFolded), with every child's state left as it stood beneath either fold.
+//
+// targetStage is one stage row of a live workflow block (renderWorkflowStages): the row a Recipe's
+// stage stands on, one per stage of its Plan. It names the block's entry like every other kind, and
+// the STAGE too — the row's place in the block's stage list ([lineTarget.stage]) — because one
+// block paints a row per stage and each is a surface of its own. A pending stage's row wears it as
+// well: which stage a row is does not wait on the stage starting.
 type targetKind int
 
 const (
@@ -55,6 +61,7 @@ const (
 	targetUmbrella
 	targetBreadcrumb
 	targetTask
+	targetStage
 )
 
 // lineTarget is one rendered line's click surface: what the line is, and the index into
@@ -62,9 +69,14 @@ const (
 // (transcript.toggleExpanded) — the block's head for every shape but a grouped run, where it is the
 // member the row belongs to. The zero value is "no target", which is what every line outside a
 // toggleable block carries, so a lookup needs no second sentinel.
+//
+// stage is the stage row's place in its workflow block's stage list on a targetStage line, and 0 on
+// every other kind: two stage rows of one block are two surfaces, so the pair alone would read them
+// as one.
 type lineTarget struct {
 	kind  targetKind
 	entry int
+	stage int
 }
 
 // lineMark is what one painted line is to a click as the block's OWN painter states it: the kind,
@@ -76,8 +88,10 @@ type lineTarget struct {
 // The offset is relative for the reason the kinds carry no entry index at all: a painter knows the
 // shape it is drawing and not where in the scrollback it sits, and [transcript.renderView] alone
 // turns the pair into an absolute entry. The zero value is "the head, no target", which is what
-// every line outside a click surface carries.
+// every line outside a click surface carries. stage is [lineTarget.stage] as the painter states it,
+// carried through the resolve untouched: a stage's place in its block is the painter's own fact.
 type lineMark struct {
 	kind   targetKind
 	member int
+	stage  int
 }

@@ -68,7 +68,7 @@ type entryKindRule struct {
 	// rewrites the start-up box's facts in place without touching a single field the key reads, so
 	// a cached box would keep saying "connecting" after the model bound late. The box is one small
 	// block at the very top of the scrollback and is not what the cache is for. The Workflow block's
-	// text grows in place the same way as its events fold (workflowblock.go).
+	// view and text grow in place the same way as its events fold (workflowblock.go).
 	cacheable bool
 
 	// hasLiveStar reports whether the kind's header can still be WAITING for something, and so is
@@ -116,10 +116,11 @@ var entryKindRules = map[entryKind]entryKindRule{
 	// compacted" note did before it had a kind of its own, and inside a run it stays that run's.
 	entryCompacted: {persistedName: session.EntryKindCompacted, cacheable: true, isHostNote: true},
 	// "workflow" — a Recipe's Workflow block (workflowblock.go) — joined [session.TranscriptVersion] 1
-	// on the same additive terms; its text is its whole record. It is the one kind besides the
-	// start-up box that is never cached, for the start-up box's reason: its text is re-rendered IN
-	// PLACE as the Workflow's events fold, touching no field the paint key reads. It is not a host
-	// note: the run it reports is the conversation's own, the work the human's line asked for.
+	// on the same additive terms; its text is its whole record, and its live view (never persisted)
+	// what it paints one row per stage from. It is the one kind besides the start-up box that is
+	// never cached, for the start-up box's reason: its view and text are re-rendered IN PLACE as the
+	// Workflow's events fold, touching no field the paint key reads. It is not a host note: the run
+	// it reports is the conversation's own, the work the human's line asked for.
 	entryWorkflow: {persistedName: session.EntryKindWorkflow},
 	// "workflow_item" — the run head of one item run of a Workflow (workflowblock.go) — joined on
 	// the same additive terms. It heads a run as a delegation's call block does, so its header can

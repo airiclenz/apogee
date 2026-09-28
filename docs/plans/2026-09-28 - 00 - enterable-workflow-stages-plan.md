@@ -222,7 +222,14 @@ internal/tui/workflowblock_test.go — feedTwoItems, assertHeadsItemRuns, itemBa
 
 **Commit:** `feat(tui): each workflow item run has its own head and opens as a run view`
 
-## 5. The recipe block paints one row per stage
+## 5. The recipe block paints one row per stage — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): re-derived from "StageFinished tells how the stage ended". The phase carries no outcome, so the TUI works it out: a stage that ended with fewer finished items than its `Items` reads `stopped`, a stage still running when the Workflow fails or stops reads `failed`/`stopped`, and any other ended stage reads `done`. A merge stage that fails on a missing report and a skipped stage both read `done` (see DEFER).
+NOTES (2026-09-28): a started item also moves a pending stage row to running, and a StageFinished for the stage an ask question waits in clears the question, so the header stops reading `waiting for you` once the answer is in. The `round n/m` prefix shows on every round after the first, including once that round has ended.
+NOTES (2026-09-28): TestWorkflowItemRowOpensAsARunView (runview_test.go) and TestARetriedItemKeepsOneRow both entered an item row under a Recipe block, and this item hides that row, so both now use a fan_out card, whose item rows stay. Stage-row entry is item 6's work. TestWorkflowBlockSeatsARunHeadPerItem now checks stage rows on the live block and item rows on the reopened, view-less block, and no longer checks that the two paints are equal.
+NOTES (2026-09-28): consequential edit — internal/tui/doc.go: made necessary by the live Recipe block painting stage rows in place of its item heads.
+NOTES (2026-09-28): consequential edit — internal/tui/runview_test.go: made necessary by the live Recipe block hiding its item rows at the top level.
+NOTES (2026-09-28): transcript.go's headsWorkflow comment ("it never elides what it heads") is now stale for a live Recipe block. It is left to item 10's widened comment grep, as the plan's re-check assigns.
 
 **What:** Recast at the regression check (2026-09-28).
 **Goal:** A recipe workflow's block paints these rows, in order:

@@ -122,6 +122,10 @@ type paintInput struct {
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView
+	// a workflow block's live view (workflowblock.go), from which its stage rows are painted; the
+	// zero value on every other kind, and on a block replayed from a record, which paints its text.
+	// It is no term of the key: the kind is never cached (entryKindRules)
+	workflowView workflowView
 
 	// the mutable half, EMBEDDED so a painter reads in.expanded exactly as it read e.expanded and
 	// the key can be derived from precisely this much of the record
@@ -133,7 +137,7 @@ type paintInput struct {
 // record exists for (see [paintInput]).
 func (e entry) painted() paintInput {
 	return paintInput{
-		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.presented, e.startup,
+		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.presented, e.startup, e.workflow,
 		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel,
 			e.stepCap, e.capRequested},
 	}

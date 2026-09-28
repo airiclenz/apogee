@@ -183,10 +183,10 @@ func workflowPhase(phase domain.WorkflowPhase) domain.WorkflowPhaseEvent {
 	return domain.WorkflowPhaseEvent{Phase: phase, Workflow: testWorkflowID, Name: "audit"}
 }
 
-// itemFinished is one item of the "items" stage finishing on a receipt.
+// itemFinished is one item of the "items" stage finishing on a receipt, in the stage's first round.
 func itemFinished(index int, item, status, summary string, fields map[string]string) domain.WorkflowPhaseEvent {
 	e := workflowPhase(domain.WorkflowItemFinished)
-	e.Stage, e.Item, e.Index = "items", item, index
+	e.Stage, e.Item, e.Index, e.Round = "items", item, index, 1
 	e.Receipt = domain.WorkflowReceipt{Status: status, Summary: summary, Fields: fields}
 	return e
 }
@@ -202,42 +202,122 @@ func workflowEntries(m Model) []entry {
 	return out
 }
 
-// A Workflow's phases grow ONE block in place: the stage running, each item's result line as it
-// finishes, an `ask` stage's question while it waits, then the end and the totals.
+// startedWith is testWorkflowID's started phase naming the Plan's stages.
+func startedWith(stages ...string) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowStarted)
+	e.Stages = stages
+	return e
+}
+
+// stageStarted is one stage of testWorkflowID starting in round, with its item count and — for a
+// stage a repeat re-runs — the most rounds it can run.
+func stageStarted(stage string, round, items, rounds int) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowStageStarted)
+	e.Stage, e.Round, e.Items, e.Rounds = stage, round, items, rounds
+	return e
+}
+
+// stageFinished is one stage of testWorkflowID ending in round.
+func stageFinished(stage string, round int) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowStageFinished)
+	e.Stage, e.Round = stage, round
+	return e
+}
+
+// stageItemStarted is the index'th item of stage starting its first attempt in round, naming no run.
+func stageItemStarted(stage string, round, index int) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowItemStarted)
+	e.Stage, e.Item, e.Index, e.Round, e.Attempt = stage, "item"+strconv.Itoa(index), index, round, 1
+	return e
+}
+
+// stageItemFinished is the index'th item of stage ending in round on a receipt of status.
+func stageItemFinished(stage string, round, index int, status string) domain.WorkflowPhaseEvent {
+	e := itemFinished(index, "item"+strconv.Itoa(index), status, "item"+strconv.Itoa(index)+" says so", nil)
+	e.Stage, e.Round = stage, round
+	return e
+}
+
+// waitingIn is an `ask` stage of testWorkflowID putting question to the human.
+func waitingIn(stage, question string) domain.WorkflowPhaseEvent {
+	e := workflowPhase(domain.WorkflowWaiting)
+	e.Stage, e.Detail = stage, question
+	return e
+}
+
+// stageRowIn is the painted row of the stage named name — the line its branch marker leads — or ""
+// when the paint has none.
+func stageRowIn(painted, name string) string {
+	for _, ln := range strings.Split(painted, "\n") {
+		if strings.Contains(ln, glyphBranch+" "+name+" ") || strings.Contains(ln, glyphBranchLast+" "+name+" ") {
+			return ln
+		}
+	}
+	return ""
+}
+
+// stageSlot is a painted stage row's outcome slot and whether the row wears ▶ and ✓.
+func stageSlot(row string) (slot string, opens, done bool) {
+	opens = strings.Contains(row, glyphCollapsed)
+	done = strings.Contains(row, " "+glyphDone+" ")
+	rest := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(row), glyphCollapsed))
+	_, slot, _ = strings.Cut(rest, glyphLeaderDot+" ")
+	return slot, opens, done
+}
+
+// assertStageRow fails unless the paint's row of stage reads slot in its outcome slot, wearing ▶
+// only when opens and ✓ only when done.
+func assertStageRow(t *testing.T, painted, stage, slot string, opens, done bool) {
+	t.Helper()
+	row := stageRowIn(painted, stage)
+	if row == "" {
+		t.Fatalf("no row for stage %q:\n%s", stage, painted)
+	}
+	gotSlot, gotOpens, gotDone := stageSlot(row)
+	if gotSlot != slot || gotOpens != opens || gotDone != done {
+		t.Errorf("stage %q row %q = slot %q, ▶ %v, ✓ %v; want %q, %v, %v",
+			stage, row, gotSlot, gotOpens, gotDone, slot, opens, done)
+	}
+}
+
+// A Workflow's phases grow ONE block in place: a row per stage of its Plan from the start, a line for
+// each item whose receipt is not ok, an `ask` stage's question while it waits, then the end and the
+// totals. An ok item gets no line of its own, and the stage running is its row, not a line.
 func TestWorkflowBlockShowsProgressAndResultLines(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	stage := workflowPhase(domain.WorkflowStageStarted)
-	stage.Stage = "items"
 	for _, e := range []domain.Event{
-		workflowPhase(domain.WorkflowStarted),
-		stage,
-		itemFinished(0, "alpha", "ok", "alpha is fine", map[string]string{"count": "3", "note": "two words"}),
+		startedWith("items", "ask"),
+		stageStarted("items", 1, 2, 0),
+		itemFinished(0, "alpha", "ok", "alpha is fine", map[string]string{"count": "3"}),
 	} {
 		m.transcript.apply(e)
 	}
 
 	live := plainTranscript(m)
-	for _, want := range []string{
-		"Workflow audit — running",
-		"stage: items",
-		`#1 alpha — ok — alpha is fine count=3 note="two words"`,
-		"items 1 · ok 1 · partial 0 · blocked 0",
-	} {
-		if !strings.Contains(live, want) {
-			t.Errorf("live block missing %q:\n%s", want, live)
+	if !strings.Contains(live, "Workflow audit — running") {
+		t.Errorf("live block missing its header:\n%s", live)
+	}
+	assertStageRow(t, live, "items", "1/2 · running", false, false)
+	assertStageRow(t, live, "ask", "pending", false, false)
+	for _, gone := range []string{"stage: items", "alpha", "items 1 · ok 1"} {
+		if strings.Contains(live, gone) {
+			t.Errorf("live block shows %q:\n%s", gone, live)
 		}
 	}
 
-	waiting := workflowPhase(domain.WorkflowWaiting)
-	waiting.Detail = "which findings matter?"
-	m.transcript.apply(waiting)
-	if got := plainTranscript(m); !strings.Contains(got, "Workflow audit — waiting for you") ||
-		!strings.Contains(got, "waiting for your answer: which findings matter?") {
-		t.Errorf("waiting block does not show the question:\n%s", got)
-	}
-
 	m.transcript.apply(itemFinished(1, "beta", "blocked", "beta could not be read", nil))
+	m.transcript.apply(stageFinished("items", 1))
+	m.transcript.apply(stageStarted("ask", 1, 0, 0))
+	m.transcript.apply(waitingIn("ask", "which findings matter?"))
+	waiting := plainTranscript(m)
+	if !strings.Contains(waiting, "Workflow audit — waiting for you") ||
+		!strings.Contains(waiting, "waiting for your answer: which findings matter?") {
+		t.Errorf("waiting block does not show the question:\n%s", waiting)
+	}
+	assertStageRow(t, waiting, "ask", "waiting for you", false, false)
+
+	m.transcript.apply(stageFinished("ask", 1))
 	m.transcript.apply(workflowPhase(domain.WorkflowFinished))
 
 	blocks := workflowEntries(m)
@@ -250,21 +330,129 @@ func TestWorkflowBlockShowsProgressAndResultLines(t *testing.T) {
 	ended := plainTranscript(m)
 	for _, want := range []string{
 		"Workflow audit — finished",
-		"#2 beta — blocked — beta could not be read",
+		"items · beta — blocked — beta could not be read",
 		"items 2 · ok 1 · partial 0 · blocked 1",
 	} {
 		if !strings.Contains(ended, want) {
 			t.Errorf("finished block missing %q:\n%s", want, ended)
 		}
 	}
-	for _, gone := range []string{"stage: items", "waiting for your answer"} {
+	assertStageRow(t, ended, "items", "done", false, false)
+	assertStageRow(t, ended, "ask", "done", false, true)
+	for _, gone := range []string{"stage: items", "waiting for your answer", "alpha"} {
 		if strings.Contains(ended, gone) {
 			t.Errorf("finished block still shows %q:\n%s", gone, ended)
 		}
 	}
 }
 
-// A failed Workflow says so and names its cause; a stopped one says it stopped.
+// Each stage row says where its stage stands in the round it shows: pending until it starts, its
+// item count while it runs, waiting on the human, done — ✓ when every item ended ok — or the
+// failed or stopped word; ▶ once one of its item runs has started, never on a pending row.
+func TestWorkflowStageRowsSayWhereEachStageStands(t *testing.T) {
+	t.Parallel()
+	running := []domain.Event{
+		startedWith("scan", "fix"),
+		stageStarted("scan", 1, 3, 0),
+		stageItemStarted("scan", 1, 0),
+		stageItemStarted("scan", 1, 1),
+		stageItemStarted("scan", 1, 2),
+		stageItemFinished("scan", 1, 0, "ok"),
+		stageItemFinished("scan", 1, 1, "ok"),
+	}
+	for _, tc := range []struct {
+		name   string
+		events []domain.Event
+		stage  string
+		slot   string
+		opens  bool
+		done   bool
+	}{
+		{name: "a stage not started is pending", events: running, stage: "fix", slot: "pending"},
+		{name: "a running stage counts its items", events: running, stage: "scan", slot: "2/3 · running", opens: true},
+		{
+			name:   "a stage of one item runs uncounted",
+			events: []domain.Event{startedWith("scan"), stageStarted("scan", 1, 1, 0), stageItemStarted("scan", 1, 0)},
+			stage:  "scan", slot: "running", opens: true,
+		},
+		{
+			name:   "a stage whose items all ended ok is done with the mark",
+			events: slices.Concat(running, []domain.Event{stageItemFinished("scan", 1, 2, "ok"), stageFinished("scan", 1)}),
+			stage:  "scan", slot: "done", opens: true, done: true,
+		},
+		{
+			name:   "a stage with an item not ok is done without the mark",
+			events: slices.Concat(running, []domain.Event{stageItemFinished("scan", 1, 2, "partial"), stageFinished("scan", 1)}),
+			stage:  "scan", slot: "done", opens: true,
+		},
+		{
+			name:   "a stage the Workflow failed in is failed",
+			events: slices.Concat(running, []domain.Event{workflowPhase(domain.WorkflowFailed)}),
+			stage:  "scan", slot: "failed", opens: true,
+		},
+		{
+			name:   "a stage a cancel left unfinished is stopped",
+			events: slices.Concat(running, []domain.Event{stageFinished("scan", 1), workflowPhase(domain.WorkflowStopped)}),
+			stage:  "scan", slot: "stopped", opens: true,
+		},
+		{
+			name:   "an ask stage waits for the human",
+			events: []domain.Event{startedWith("ask", "scan"), stageStarted("ask", 1, 0, 0), waitingIn("ask", "which?")},
+			stage:  "ask", slot: "waiting for you",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+			for _, e := range tc.events {
+				tr.apply(e)
+			}
+
+			painted := plainRender(tr)
+
+			assertStageRow(t, painted, tc.stage, tc.slot, tc.opens, tc.done)
+		})
+	}
+}
+
+// A stage a repeat re-runs keeps ONE row, which moves on to each round as it starts and reads
+// `round n/m` from the round's most rounds — `round n` when they are not known — and a late phase of
+// an earlier round folds nothing onto it.
+func TestARepeatedStageKeepsOneRow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		rounds int
+		slot   string
+	}{
+		{rounds: 3, slot: "round 2/3 · running"},
+		{rounds: 0, slot: "round 2 · running"},
+	} {
+		tr := &transcript{}
+		for _, e := range []domain.Event{
+			startedWith("fix", "check", "again"),
+			stageStarted("fix", 1, 1, tc.rounds),
+			stageItemStarted("fix", 1, 0),
+			stageItemFinished("fix", 1, 0, "partial"),
+			stageFinished("fix", 1),
+			stageStarted("fix", 2, 1, tc.rounds),
+			stageItemStarted("fix", 2, 0),
+		} {
+			tr.apply(e)
+		}
+
+		painted := plainRender(tr)
+		assertStageRow(t, painted, "fix", tc.slot, true, false)
+		if n := strings.Count(painted, glyphBranch+" fix ") + strings.Count(painted, glyphBranchLast+" fix "); n != 1 {
+			t.Errorf("rounds %d: the repeated stage paints %d rows, want one:\n%s", tc.rounds, n, painted)
+		}
+
+		tr.apply(stageFinished("fix", 1))
+		assertStageRow(t, plainRender(tr), "fix", tc.slot, true, false)
+	}
+}
+
+// A failed Workflow says so, names its cause and fails the stage it was in; a stopped one says it
+// stopped, and so does the stage it stopped in.
 func TestWorkflowBlockNamesHowItEnded(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -276,7 +464,8 @@ func TestWorkflowBlockNamesHowItEnded(t *testing.T) {
 		{phase: domain.WorkflowFailed, detail: "disk full\nmore", want: []string{"Workflow audit — failed", "failed: disk full"}},
 	} {
 		m := newTestModel(t)
-		m.transcript.apply(workflowPhase(domain.WorkflowStarted))
+		m.transcript.apply(startedWith("items"))
+		m.transcript.apply(stageStarted("items", 1, 2, 0))
 		end := workflowPhase(tc.phase)
 		end.Detail = tc.detail
 		m.transcript.apply(end)
@@ -286,6 +475,7 @@ func TestWorkflowBlockNamesHowItEnded(t *testing.T) {
 				t.Errorf("%s: block missing %q:\n%s", tc.phase, want, got)
 			}
 		}
+		assertStageRow(t, got, "items", string(tc.phase), false, false)
 	}
 }
 
@@ -325,18 +515,21 @@ func TestFanOutWorkflowDrawsNoBlock(t *testing.T) {
 	}
 }
 
-// The block survives the session record: its text is its record, so the replayed block paints as
-// the live one last stood — and, carrying no view, no later event reaches it.
+// The block survives the session record as its text: the replayed block carries no view, so it
+// paints the text its record keeps — the item lines and the totals — where the live one painted its
+// stage rows, and no later event reaches it.
 func TestWorkflowBlockSurvivesTheRecord(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	m.transcript.apply(workflowPhase(domain.WorkflowStarted))
+	m.transcript.apply(startedWith("items"))
+	m.transcript.apply(stageStarted("items", 1, 1, 0))
 	m.transcript.apply(itemFinished(0, "alpha", "ok", "alpha is fine", nil))
+	m.transcript.apply(stageFinished("items", 1))
 	m.transcript.apply(workflowPhase(domain.WorkflowFinished))
-	live := workflowPaint(m)
-	if live == "" {
-		t.Fatalf("the live transcript paints no workflow block:\n%s", plainTranscript(m))
+	if live := workflowPaint(m); stageRowIn(live, "items") == "" {
+		t.Fatalf("the live block paints no stage row:\n%s", plainTranscript(m))
 	}
+	text := workflowEntries(m)[0].text
 
 	data, err := encodeTranscript(&m.transcript)
 	if err != nil {
@@ -349,14 +542,22 @@ func TestWorkflowBlockSurvivesTheRecord(t *testing.T) {
 	replayed := newTestModel(t)
 	replayed.transcript.entries = entries
 	replayed.transcript.touch()
-	if got := workflowPaint(replayed); got != live {
-		t.Errorf("replayed block paints differently:\nlive:\n%s\nreplayed:\n%s", live, got)
-	}
-	if got := workflowEntries(replayed); len(got) != 1 || got[0].workflow.id != "" {
+
+	if got := workflowEntries(replayed); len(got) != 1 || got[0].workflow.live() {
 		t.Fatalf("replayed workflow blocks = %+v; want one carrying no live view", got)
 	}
+	painted := workflowPaint(replayed)
+	_, body, _ := strings.Cut(text, "\n")
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.Contains(painted, line) {
+			t.Errorf("the replayed block does not paint its record's line %q:\n%s", line, painted)
+		}
+	}
+	if row := stageRowIn(painted, "items"); row != "" {
+		t.Errorf("the replayed block paints a stage row %q with no view to paint it from", row)
+	}
 	replayed.transcript.apply(itemFinished(1, "beta", "ok", "late", nil))
-	if got := workflowPaint(replayed); got != live {
+	if got := workflowPaint(replayed); got != painted {
 		t.Errorf("a late event moved a replayed block:\n%s", got)
 	}
 }
@@ -521,10 +722,32 @@ func assertItemRowsOnly(t *testing.T, painted string, labels ...string) {
 	}
 }
 
+// assertStageRowsOnly fails unless the paint shows no item child's own output and no item row, and
+// paints each stage as a row wearing ▶ — a live workflow block's stage rows stand for its item runs.
+func assertStageRowsOnly(t *testing.T, painted string, stages ...string) {
+	t.Helper()
+	for _, text := range []string{"alpha first", "beta first", "beta second", "alpha second", "alpha.go"} {
+		if strings.Contains(painted, text) {
+			t.Errorf("an item child's output %q is painted at the top level:\n%s", text, painted)
+		}
+	}
+	for _, label := range []string{"alpha", "beta", "gamma"} {
+		if strings.Contains(painted, " "+label+" ") {
+			t.Errorf("item %q paints a row at the top level:\n%s", label, painted)
+		}
+	}
+	for _, stage := range stages {
+		if row := stageRowIn(painted, stage); !strings.Contains(row, glyphCollapsed) {
+			t.Errorf("stage %q paints no row wearing %s:\n%s", stage, glyphCollapsed, painted)
+		}
+	}
+}
+
 // A Recipe launch's item runs each get a run head of their own inside its workflow block's span —
-// live and after a save and reopen — with the item's work behind it, and the transcript paints one
-// row per item rather than the items' output. A later stage's item started after a host note has
-// landed still seats inside the span, with the note below it.
+// live and after a save and reopen — with the item's work behind it. The live block paints one row
+// per stage and steps over the item heads; the reopened one, which has no view, paints its text and
+// one row per item. A later stage's item started after a host note has landed still seats inside the
+// span, with the note below it.
 func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 	t.Parallel()
 	const call = "recipe-audit-1"
@@ -539,7 +762,7 @@ func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 	}
 	assertHeadsItemRuns(t, tr.entries, head)
 	assertItemRunsBehindTheirHeads(t, tr.entries, head, call)
-	assertItemRowsOnly(t, plainRender(tr), "alpha", "beta")
+	assertStageRowsOnly(t, plainRender(tr), "items")
 
 	tr.apply(itemStartedUnder(call, "run.3", "review", "gamma", 0, 1))
 	third := workflowItemHeadAt(tr.entries, "run.3")
@@ -550,15 +773,12 @@ func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 	if note <= third {
 		t.Errorf("the host note at %d stands above the second stage's item head at %d", note, third)
 	}
-	live := plainRender(tr)
-	assertItemRowsOnly(t, live, "alpha", "beta", "gamma")
+	assertStageRowsOnly(t, plainRender(tr), "items", "review")
 
 	reopened := &transcript{entries: roundTrip(t, tr)}
 	reopened.touch()
 	assertItemRunsBehindTheirHeads(t, reopened.entries, head, call)
-	if got := plainRender(reopened); got != live {
-		t.Errorf("the reopened transcript paints differently:\nlive:\n%s\nreopened:\n%s", live, got)
-	}
+	assertItemRowsOnly(t, plainRender(reopened), "alpha", "beta", "gamma")
 }
 
 // A fan_out call's item runs each get a run head of their own inside its card's span the same way.
@@ -608,14 +828,17 @@ func TestFanOutCardSeatsARunHeadPerItem(t *testing.T) {
 
 // A retried item keeps ONE row: each attempt has its own head, the earlier one closes on its run's
 // finished phase and carries no receipt, the receipt folds onto the latest attempt's head, the row
-// opens that attempt — and the earlier head replays closed after a save and reopen.
+// opens that attempt — and the earlier head replays closed after a save and reopen. The row is a
+// fan_out card's, whose item rows stand in the transcript; a Recipe block's stand behind its stage
+// rows.
 func TestARetriedItemKeepsOneRow(t *testing.T) {
 	t.Parallel()
-	const call = "recipe-audit-1"
+	const call = "f1"
 	m := newTestModel(t)
 	m.transcript.reset()
 	tr := &m.transcript
-	tr.addUser("/audit src", nil)
+	tr.addUser("fan it out", nil)
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: call, Tool: fanOutToolName, Arguments: []byte(`{"task":"check {item}"}`)}})
 	tr.apply(startedUnder(call))
 	tr.apply(itemStartedUnder(call, "run.1", "items", "alpha", 0, 1))
 	itemSays(tr, call, "run.1", "first try")

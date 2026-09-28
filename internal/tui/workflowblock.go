@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -15,9 +17,10 @@ import (
 // A Recipe the human launches with "/<recipe-skill> <text>" runs as a Workflow BEFORE the model's
 // first request of the Exchange, so nothing the model does can show it: there is no tool call to
 // hang its progress on. The engine reports its life as WorkflowPhaseEvents instead, and this file
-// folds them into ONE block per Workflow (entryWorkflow) that grows in place as the run goes — the
-// stage running now, one result line per item as it finishes on its receipt, the question an `ask`
-// stage is waiting on, and the totals and the end it came to.
+// folds them into ONE block per Workflow (entryWorkflow) that grows in place as the run goes — one
+// row per stage of its Plan, shown from the start (pending, running, waiting on the human, or how it
+// ended), a line for each item whose receipt is not ok, the question an `ask` stage is waiting on,
+// and the totals and the end it came to.
 //
 // A Workflow a fan_out call started is the call block's business instead: that block already stands
 // in the transcript, its children nest under it, and its result IS the result lines. So only a
@@ -31,13 +34,17 @@ import (
 // delegation row eliding its run, opens as the run's view, and answers ^x, a message and the gauge —
 // but it never groups into a "✦ Sub-Agent (N)" list. The item's receipt folds onto it as its report.
 // A retried item keeps ONE row: each attempt has its own head, and the ones a later attempt
-// superseded are stepped over by the paint (retiredAttempts). The block itself is never elided — it
-// paints one way and never collapses, and a fan_out card's own fold hides its body alone.
+// superseded are stepped over by the paint (retiredAttempts). Under a live workflow block the item
+// heads are not painted at all: the block's stage rows stand for them (each marked targetStage), so
+// the walk steps over the block's span whole (transcript.resolveBlock). A fan_out card has one stage,
+// and paints its item rows. The block itself never collapses, and a fan_out card's own fold hides
+// its body alone.
 //
-// The block's text is its whole paint and its whole record: every fold re-renders the text from the
-// view (workflowView), the painter draws the text alone, and the record keeps the text — so a
-// resumed session paints the block exactly as it last stood, with no view to rebuild. Because the
-// text MOVES after the entry is committed, the kind is never memoised by the paint cache
+// The block's text is its whole record and its view its live paint: every fold re-renders the text
+// from the view (workflowView), the painter draws the view's stage rows while the view lives, and
+// the record keeps the text alone. A block replayed from a record carries no view, so it paints its
+// text, and the item rows its span holds stay painted as the way into its runs. Because the view
+// and the text MOVE after the entry is committed, the kind is never memoised by the paint cache
 // (entryKindRules).
 
 // fanOutToolName is the fan_out tool's name: a Workflow its call started is that call's block's.
@@ -60,27 +67,75 @@ const (
 	workflowStatusOK     = "ok"
 	workflowStatusParts  = "partial"
 	workflowStatusBlock  = "blocked"
+	workflowPendingWord  = "pending"
+	workflowDoneWord     = "done"
+	workflowRoundWord    = "round "
+	workflowRoundSep     = "/"
+	workflowRowSep       = " · " // what a stage row's slot and a trouble line join their parts with
 )
 
 // workflowView is the live state of one Workflow's block, folded from its WorkflowPhaseEvents. It is
 // view-only and never persisted: the entry's text, rendered from it on every fold, is what the
 // record keeps.
 type workflowView struct {
-	id       string               // the Workflow's id — what tells two Workflows' events apart
-	name     string               // the Workflow's name (a Recipe's name)
-	stage    string               // the stage running now; "" before the first and once it ended
-	items    []workflowItem       // the items that finished, in the order they finished
-	question string               // an `ask` stage's question while it waits; "" otherwise
-	end      domain.WorkflowPhase // finished, stopped or failed; "" while it runs
-	cause    string               // a failed Workflow's cause
+	id        string               // the Workflow's id — what tells two Workflows' events apart
+	name      string               // the Workflow's name (a Recipe's name)
+	stage     string               // the stage running now; "" before the first and once it ended
+	stages    []workflowStage      // one row per stage of the Plan, in its order (workflowStagesOf)
+	items     []workflowItem       // the items that finished, in the order they finished
+	question  string               // an `ask` stage's question while it waits; "" otherwise
+	waitingOn string               // the stage the question waits in
+	end       domain.WorkflowPhase // finished, stopped or failed; "" while it runs
+	cause     string               // a failed Workflow's cause
 }
 
-// workflowItem is one finished item: the stage it belongs to, its receipt's status, and its result
-// line.
+// live reports whether the view was folded in this session. A block replayed from a record carries
+// the zero view, and paints its text.
+func (v workflowView) live() bool { return v.id != "" }
+
+// workflowItem is one finished item: the stage it belongs to, its label, its receipt's status and
+// summary, and its result line.
 type workflowItem struct {
-	stage  string
-	status string
-	line   string
+	stage   string
+	label   string
+	status  string
+	summary string
+	line    string
+}
+
+// workflowStageState is where one stage row stands in the round it shows.
+type workflowStageState int
+
+const (
+	stagePending workflowStageState = iota // nothing has started the stage yet
+	stageRunning                           // started, and not yet ended
+	stageDone                              // ended with every item it ran finished
+	stageFailed                            // the Workflow failed while the stage ran
+	stageStopped                           // a cancel ended it with an item unfinished
+)
+
+// workflowStage is one stage row: the stage's name and the round it shows — a stage a repeat
+// re-runs keeps ONE row, which moves on to each new round as its first phase arrives — with that
+// round's counts and state. A stage is keyed by (name, round), so a phase of an earlier round than
+// the row shows folds nothing.
+type workflowStage struct {
+	name     string
+	round    int  // the 1-based round the row shows; 0 before any phase named the stage
+	rounds   int  // the most rounds a repeat can run the stage (the phase's Rounds), 0 when none re-runs it
+	items    int  // the round's item count (the phase's Items), 0 for a stage that runs no child
+	finished int  // the round's items that ended on a receipt
+	troubled bool // one of those receipts is not ok
+	entered  bool // one of the round's item runs has started, so the row has a run to open
+	state    workflowStageState
+}
+
+// workflowStagesOf is the pending row of every stage the Plan names, in its order.
+func workflowStagesOf(names []string) []workflowStage {
+	stages := make([]workflowStage, 0, len(names))
+	for _, name := range names {
+		stages = append(stages, workflowStage{name: stripEscapes(name)})
+	}
+	return stages
 }
 
 // addWorkflowPhase folds one WorkflowPhaseEvent. A started phase opens the block — unless an open
@@ -99,7 +154,7 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 		if t.fanOutOpen(run) || t.workflowAt(e.Workflow) >= 0 {
 			return
 		}
-		view := workflowView{id: e.Workflow, name: stripEscapes(e.Name)}
+		view := workflowView{id: e.Workflow, name: stripEscapes(e.Name), stages: workflowStagesOf(e.Stages)}
 		// The call its item children are bracketed under is the block's own: it is what those
 		// children's entries find it by as their head (entry.headsWorkflowRuns), and it is kept
 		// in the record, so the nesting holds after a save and reopen.
@@ -143,28 +198,102 @@ func (t *transcript) workflowAt(id string) int {
 	return -1
 }
 
-// fold returns the view with one phase applied. The view's slice is copied before it grows, so an
-// earlier Model copy holding the same entry never sees an item it did not fold (ADR 0011).
+// fold returns the view with one phase applied. The view's slices are copied before they change, so
+// an earlier Model copy holding the same entry never sees a phase it did not fold (ADR 0011).
 func (v workflowView) fold(e domain.WorkflowPhaseEvent) workflowView {
 	switch e.Phase {
 	case domain.WorkflowStageStarted:
 		v.stage, v.question = stripEscapes(e.Stage), ""
+		v = v.withStage(e, func(s *workflowStage) {
+			s.state, s.items, s.rounds = stageRunning, e.Items, e.Rounds
+		})
+	case domain.WorkflowItemStarted:
+		// The engine starts a stage before its items; a started item still says the stage runs.
+		v = v.withStage(e, func(s *workflowStage) {
+			s.entered = true
+			if s.state == stagePending {
+				s.state = stageRunning
+			}
+		})
 	case domain.WorkflowItemFinished:
 		item := workflowItem{
-			stage:  stripEscapes(e.Stage),
-			status: stripEscapes(e.Receipt.Status),
-			line:   workflowItemLine(e),
+			stage:   stripEscapes(e.Stage),
+			label:   stripEscapes(e.Item),
+			status:  stripEscapes(e.Receipt.Status),
+			summary: stripEscapes(firstLine(e.Receipt.Summary)),
+			line:    workflowItemLine(e),
 		}
 		v.items = append(slices.Clip(v.items), item)
+		v = v.withStage(e, func(s *workflowStage) {
+			s.finished++
+			s.troubled = s.troubled || item.status != workflowStatusOK
+		})
+	case domain.WorkflowStageFinished:
+		if v.waitingOn == stripEscapes(e.Stage) {
+			v.question = ""
+		}
+		v = v.withStage(e, func(s *workflowStage) { s.state = s.endState() })
 	case domain.WorkflowWaiting:
-		v.question = stripEscapes(firstLine(e.Detail))
+		v.question, v.waitingOn = stripEscapes(firstLine(e.Detail)), stripEscapes(e.Stage)
 	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
 		v.end, v.stage, v.question = e.Phase, "", ""
-		if e.Phase == domain.WorkflowFailed {
+		switch e.Phase {
+		case domain.WorkflowFailed:
 			v.cause = stripEscapes(firstLine(e.Detail))
+			v.stages = endRunningStages(v.stages, stageFailed)
+		case domain.WorkflowStopped:
+			v.stages = endRunningStages(v.stages, stageStopped)
 		}
 	}
 	return v
+}
+
+// withStage returns the view with apply run on the row of the stage e names, in e's round: a row
+// showing an earlier round moves on to e's, starting it afresh, and a phase of an earlier round than
+// the row shows applies nothing. A stage the Plan did not name (a Workflow whose start carried no
+// stage list) gets a row of its own at the end. The row list is copied before it changes.
+func (v workflowView) withStage(e domain.WorkflowPhaseEvent, apply func(*workflowStage)) workflowView {
+	name := stripEscapes(e.Stage)
+	if name == "" {
+		return v
+	}
+	stages := slices.Clone(v.stages)
+	i := slices.IndexFunc(stages, func(s workflowStage) bool { return s.name == name })
+	if i < 0 {
+		stages = append(stages, workflowStage{name: name})
+		i = len(stages) - 1
+	}
+	row := &stages[i]
+	switch {
+	case e.Round < row.round:
+		return v
+	case e.Round > row.round:
+		*row = workflowStage{name: name, round: e.Round, rounds: row.rounds}
+	}
+	apply(row)
+	v.stages = stages
+	return v
+}
+
+// endState is how a stage that ended stands: stopped when an item it counted never finished — the
+// engine ends a stage stopped only on a cancel that left one unfinished — and done otherwise.
+func (s workflowStage) endState() workflowStageState {
+	if s.finished < s.items {
+		return stageStopped
+	}
+	return stageDone
+}
+
+// endRunningStages returns stages with every row still running set to state: the stage a Workflow
+// that failed or stopped was in the middle of. The list is copied before it changes.
+func endRunningStages(stages []workflowStage, state workflowStageState) []workflowStage {
+	out := slices.Clone(stages)
+	for i := range out {
+		if out[i].state == stageRunning {
+			out[i].state = state
+		}
+	}
+	return out
 }
 
 // workflowItemLine renders one finished item the way the result lines do:
@@ -265,10 +394,121 @@ func (v workflowView) totals() string {
 	}, workflowTotalSep)
 }
 
-// renderWorkflowBlock paints a workflow block from its text: the header under the star in the tool
-// label's tone, each body line hung beneath it in the detail tone. It reads the text alone, which
-// is what lets a replayed block — whose view was never persisted — paint as the live one did.
-func renderWorkflowBlock(th theme, text string, width int) []string {
+// renderWorkflowBlock paints a workflow block: from its view while the view lives
+// (renderWorkflowStages), and from its text for a block replayed from a record, whose view was never
+// persisted (renderWorkflowText).
+func renderWorkflowBlock(th theme, view workflowView, text string, width int) blockPaint {
+	if view.live() {
+		return renderWorkflowStages(th, view, width)
+	}
+	return plainPaint(renderWorkflowText(th, text, width))
+}
+
+// renderWorkflowStages paints a live workflow block: the header under the star in the tool label's
+// tone, one row per stage (workflowView.stageRow) marked as that stage's surface, then the body lines
+// (workflowView.stageBody) hung beneath them in the detail tone.
+func renderWorkflowStages(th theme, v workflowView, width int) blockPaint {
+	var out blockPaint
+	out.add(hangingWrap(th, th.toolLabel, glyphAssistant+" ", v.header(), width), targetNone)
+	room := toolRowCells(th, width)
+	for i := range v.stages {
+		out.addStage(i, []string{v.stageRow(th, i, width, room)})
+	}
+	for _, line := range v.stageBody() {
+		out.add(hangingWrap(th, th.toolDetail, workflowBodyIndent, line, width), targetNone)
+	}
+	return out
+}
+
+// stageRow paints the i'th stage row in the leader row a delegation's wears: the branch marker, the
+// stage's name — with ✓ once it is done with every item ok — the dotted leader, and its state in the
+// outcome slot (workflowStage.slot), failed in red. A pending row is painted dim whole and opens
+// nothing; a row one of whose item runs has started wears ▶ at the block's edge.
+func (v workflowView) stageRow(th theme, i, width, room int) string {
+	stage := v.stages[i]
+	waiting := v.question != "" && v.waitingOn == stage.name
+	succeeded := stage.succeeded()
+	summary := branchSummary{
+		detailLine: detailLine{Text: stage.slot(waiting)},
+		failed:     stage.state == stageFailed,
+		succeeded:  succeeded,
+	}
+	view := toolView{Target: stage.name, finished: succeeded, Summary: summary}
+	row := leaderRow(th, view, branchMarker(i == len(v.stages)-1), room, false, noRemainder)
+	switch {
+	case stage.state == stagePending && !waiting:
+		return th.toolLeader.Render(ansi.Strip(row))
+	case stage.entered:
+		return indicatorRow(th, row, width, glyphCollapsed)
+	}
+	return row
+}
+
+// succeeded reports whether the stage earned the ✓: it is done, and every item it ran ended ok.
+func (s workflowStage) succeeded() bool {
+	return s.state == stageDone && !s.troubled
+}
+
+// slot is the stage row's outcome slot: `pending`, `running` (`n/m · running` for a stage of more
+// than one item), `waiting for you`, `done`, `failed` or `stopped` — led, on a round a repeat re-ran,
+// by `round n/m` (`round n` when the most rounds are not known).
+func (s workflowStage) slot(waiting bool) string {
+	word := workflowPendingWord
+	switch {
+	case waiting:
+		word = workflowWaitingWord
+	case s.state == stageRunning && s.items > 1:
+		word = strconv.Itoa(s.finished) + workflowRoundSep + strconv.Itoa(s.items) + workflowRowSep + workflowRunningWord
+	case s.state == stageRunning:
+		word = workflowRunningWord
+	case s.state == stageDone:
+		word = workflowDoneWord
+	case s.state == stageFailed:
+		word = string(domain.WorkflowFailed)
+	case s.state == stageStopped:
+		word = string(domain.WorkflowStopped)
+	}
+	if s.round <= 1 {
+		return word
+	}
+	round := workflowRoundWord + strconv.Itoa(s.round)
+	if s.rounds > 0 {
+		round += workflowRoundSep + strconv.Itoa(s.rounds)
+	}
+	return round + workflowRowSep + word
+}
+
+// stageBody is what a live block says beneath its stage rows: one line per item whose receipt is not
+// ok (`stage · item — status — summary`), an `ask` stage's question, and — once it has ended — the
+// totals and a failure's cause.
+func (v workflowView) stageBody() []string {
+	var lines []string
+	for _, item := range v.items {
+		if item.status == workflowStatusOK {
+			continue
+		}
+		summary := item.summary
+		if summary == "" {
+			summary = workflowNoSummary
+		}
+		lines = append(lines, item.stage+workflowRowSep+item.label+workflowLineSep+item.status+workflowLineSep+summary)
+	}
+	if v.question != "" {
+		lines = append(lines, workflowAskPrefix+v.question)
+	}
+	if v.end != "" && len(v.items) > 0 {
+		lines = append(lines, v.totals())
+	}
+	if v.cause != "" {
+		lines = append(lines, workflowFailedPrefix+v.cause)
+	}
+	return lines
+}
+
+// renderWorkflowText paints a workflow block from its text: the header under the star in the tool
+// label's tone, each body line hung beneath it in the detail tone. It reads the text alone, which is
+// what lets a replayed block — whose view was never persisted — paint as the live one's record did.
+func renderWorkflowText(th theme, text string, width int) []string {
 	header, body, _ := strings.Cut(text, "\n")
 	lines := hangingWrap(th, th.toolLabel, glyphAssistant+" ", header, width)
 	if body == "" {
