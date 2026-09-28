@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,8 +17,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A read-only report of what this session has SPENT: one row for the main agent, one for every
-// sub-agent that reported usage, and — where there is more than one agent to add up — a session
-// total. It answers the question the status gauge cannot, because the gauge is a FILL: how full the
+// sub-agent that reported usage, one for every Workflow whose runs did, and — where there is more
+// than one agent to add up — a session total. It answers the question the status gauge cannot, because the gauge is a FILL: how full the
 // window is right now says nothing about the tokens a run burned through and compacted away, and it
 // says nothing at all about a delegate whose window closed with its run.
 //
@@ -187,8 +189,9 @@ func (m Model) usageRows() []popupRow {
 	return append(rows, usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, cached))
 }
 
-// usageSubAgentRows composes one row per delegate that reported a count, in transcript order — the
-// order their blocks stand in, so a reader matches a row to the run above it by position.
+// usageSubAgentRows composes one row per delegate that reported a count: the sub-agents in
+// transcript order — the order their blocks stand in, so a reader matches a row to the run above it
+// by position — then one row per Workflow, named for it (delegateUsageHeads).
 func (m Model) usageSubAgentRows(cached bool) []popupRow {
 	heads := m.delegateUsageHeads()
 	rows := make([]popupRow, 0, len(heads))
@@ -199,25 +202,33 @@ func (m Model) usageSubAgentRows(cached bool) []popupRow {
 	return rows
 }
 
-// delegateUsageHeads are the sub-agent run heads that reported a count, in transcript order. It is
-// the one walk both readers of a delegate's spend take — the pane's rows and the session record's
-// delegate sum — so a run that appears on the /usage pane is exactly a run the record counts.
+// delegateUsageHeads are the delegates that reported a count: the sub-agent run heads in transcript
+// order, then every Workflow's spend — the blocks that head a Workflow's item runs and the finish
+// lines of background workflows that ended, in transcript order, then the live background
+// workflows (backgroundWorkflows.spendEntries). It is the one walk both readers of a delegate's
+// spend take — the pane's rows and the session record's delegate sum — so a run that appears on the
+// /usage pane is exactly a run the record counts. A reading reaches one of them only (applyUsage
+// folds a Workflow's run into its block only where no open sub_agent head takes it), so nothing is
+// counted twice.
 func (m Model) delegateUsageHeads() []entry {
-	var heads []entry
+	var heads, workflows []entry
 	for i := range m.transcript.entries {
 		head := m.transcript.entries[i]
-		if !head.headsRun() || head.usage.Calls <= 0 {
-			continue
+		switch {
+		case head.headsRun() && head.usage.Calls > 0:
+			heads = append(heads, head)
+		case head.carriesWorkflowSpend():
+			workflows = append(workflows, head)
 		}
-		heads = append(heads, head)
 	}
-	return heads
+	heads = append(heads, workflows...)
+	return append(heads, m.workflows.spendEntries()...)
 }
 
 // delegateUsageTotal is what this session's DELEGATES have spent: the sum of the latest reading of
-// every run head that reported one. It is what the session record stores beside the main agent's
-// accounting (savePayload) and what the pane's session row adds to it, so the two never disagree
-// about the same session.
+// every run head that reported one, and of every Workflow's spend (delegateUsageHeads). It is what
+// the session record stores beside the main agent's accounting (savePayload) and what the pane's
+// session row adds to it, so the two never disagree about the same session.
 //
 // Where no live head reports a count it falls back to the delegate sum a RESUMED record carried
 // (Model.delegateUsage), which is the only reading left when a record's scrollback could not be
@@ -232,6 +243,45 @@ func (m Model) delegateUsageTotal() domain.Usage {
 		return m.delegateUsage
 	}
 	return total
+}
+
+// runSpend is a Workflow's spend kept per run: each item run's — and each run one of those spawned —
+// latest cumulative reading, by the run that stamped it. Latest-wins per run for the reason
+// applyUsage gives a head's totals (each child keeps its own running sum), and summed across runs,
+// whose readings are each whole on their own. It is replaced on write, never mutated in place,
+// because the Model is copied by value on every Update and an earlier copy must not see a later
+// reading (ADR 0011). The zero value is empty.
+type runSpend map[runRef]domain.Usage
+
+// with returns s with reading as run's latest, or s itself when the reading counted no call — the
+// absence of accounting, never a fresh zero (domain.Usage.Adopt).
+func (s runSpend) with(run runRef, reading domain.Usage) runSpend {
+	if reading.Calls <= 0 {
+		return s
+	}
+	next := maps.Clone(s)
+	if next == nil {
+		next = make(runSpend, 1)
+	}
+	next[run] = reading
+	return next
+}
+
+// total is the sum of every run's latest reading.
+func (s runSpend) total() domain.Usage {
+	return domain.Sum(slices.Collect(maps.Values(s))...)
+}
+
+// usageSince is what was spent after base was read, when latest is the later reading of the same
+// running sums: counter by counter, latest less base.
+func usageSince(latest, base domain.Usage) domain.Usage {
+	return domain.Usage{
+		Calls:              latest.Calls - base.Calls,
+		PromptTokens:       latest.PromptTokens - base.PromptTokens,
+		CachedPromptTokens: latest.CachedPromptTokens - base.CachedPromptTokens,
+		CompletionTokens:   latest.CompletionTokens - base.CompletionTokens,
+		TotalTokens:        latest.TotalTokens - base.TotalTokens,
+	}
 }
 
 // usageAgentName is what the pane calls a delegate: the short name its call was given, else the

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -41,6 +42,14 @@ import (
 // TUI to idle (leaveWorkflowPrompt) — there is no worker to resume — and esc dismisses it back to
 // the queue, where it waits, still counted, until the next Exchange ends and it is offered again.
 // A workflow that ends while its prompt is open takes the pane with it.
+//
+// Its spend reaches the session's accounting. The usage readings its runs report fold into its view,
+// latest-wins per run (backgroundWorkflow.spend) — never into the gauge or the main agent's totals,
+// though the model a reading names joins the session's served set. /usage lists the live view as a
+// row named for the workflow, and the finish line carries the sum once it ends, so the record's
+// delegate sum counts the workflow alive or finished (delegateUsageHeads). A session boundary
+// rebases a view that runs across it (backgroundWorkflows.rebased): the closed session's record took
+// what it had spent, and the fresh one counts only what comes after.
 
 // The words the finish line, the wake's prompt row and the two failure notes are built from.
 const (
@@ -80,13 +89,17 @@ type backgroundWorkflows struct {
 }
 
 // backgroundWorkflow is one live background workflow: its name, its items so far, counted by the
-// status their receipts ended on, and how many of its prompts wait for the human.
+// status their receipts ended on, how many of its prompts wait for the human, and what its runs
+// have spent — each run's latest reading (spend), less what they had spent when this session began
+// (base, the readings a session boundary rebased the view at).
 type backgroundWorkflow struct {
 	name    string
 	ok      int
 	partial int
 	blocked int
 	waiting int
+	spend   runSpend
+	base    runSpend
 }
 
 // workflowNoteLostMsg reports that the worker's drain took a finish note and the engine refused to
@@ -185,6 +198,51 @@ func (b backgroundWorkflows) answered(prompt domain.WorkflowPrompt) backgroundWo
 	return b.withWorkflow(prompt.Workflow, view)
 }
 
+// withReading returns b with reading as the latest of run, a run of workflow id; a workflow with no
+// live view folds nothing.
+func (b backgroundWorkflows) withReading(id string, run runRef, reading domain.Usage) backgroundWorkflows {
+	view, ok := b.live[id]
+	if !ok {
+		return b
+	}
+	view.spend = view.spend.with(run, reading)
+	return b.withWorkflow(id, view)
+}
+
+// rebased returns b with every live view's base moved to what its runs have spent so far: the
+// session boundary a workflow runs across (resetSessionView, resumeLoaded). The closed session's
+// record already counted that spend, so the view — its /usage row, and the finish line it ends on —
+// counts only what its runs spend from here.
+func (b backgroundWorkflows) rebased() backgroundWorkflows {
+	if len(b.live) == 0 {
+		return b
+	}
+	live := make(map[string]backgroundWorkflow, len(b.live))
+	for id, view := range b.live {
+		view.base = view.spend
+		live[id] = view
+	}
+	b.live = live
+	return b
+}
+
+// spendEntries are the live workflows that spent something this session, as the entries /usage
+// reads a delegate from (delegateUsageHeads): each one's spend, named for it, in id order so the
+// rows stand still between two paints.
+func (b backgroundWorkflows) spendEntries() []entry {
+	ids := slices.Sorted(maps.Keys(b.live))
+	entries := make([]entry, 0, len(ids))
+	for _, id := range ids {
+		view := b.live[id]
+		spent := view.spent()
+		if spent.Calls <= 0 {
+			continue
+		}
+		entries = append(entries, entry{kind: entryNote, tool: toolView{Target: stripEscapes(view.name)}, usage: spent})
+	}
+	return entries
+}
+
 // withDismissed returns b with the prompt id marked dismissed.
 func (b backgroundWorkflows) withDismissed(id uint64) backgroundWorkflows {
 	dismissed := maps.Clone(b.dismissed)
@@ -249,6 +307,11 @@ func (v backgroundWorkflow) count(status string) backgroundWorkflow {
 	return v
 }
 
+// spent is what the workflow's runs have spent since the last session boundary.
+func (v backgroundWorkflow) spent() domain.Usage {
+	return usageSince(v.spend.total(), v.base.total())
+}
+
 // finishLine is the transcript line an end phase writes: how the workflow ended and its items by
 // status, or the cause of a failure.
 func (v backgroundWorkflow) finishLine(e domain.WorkflowPhaseEvent) string {
@@ -260,8 +323,11 @@ func (v backgroundWorkflow) finishLine(e domain.WorkflowPhaseEvent) string {
 }
 
 // foldBackgroundEvent folds one event owns claimed: into the Inspector's rings, which record every
-// wire exchange whatever run it belongs to, and into the workflow's own state — its phases, and the
-// run a background run's delegation spawns, recorded so that run's events are claimed too.
+// wire exchange whatever run it belongs to, and into the workflow's own state — its phases, the run
+// a background run's delegation spawns, recorded so that run's events are claimed too, and the
+// usage its runs report. A reading's served model is a session fact before it is any run's, so it
+// joins the session's set exactly as foldStats folds it ahead of its depth guard; nothing else of
+// the reading reaches the gauge or the main agent's totals.
 func (m Model) foldBackgroundEvent(e domain.Event) Model {
 	m = m.foldWire(e)
 	m = m.foldAttempt(e)
@@ -272,14 +338,22 @@ func (m Model) foldBackgroundEvent(e domain.Event) Model {
 		if id, ok := m.workflows.workflowOf(e.EventBase); ok && e.SpawnRunID != "" {
 			m.workflows = m.workflows.withRun(e.SpawnRunID, id)
 		}
+	case domain.UsageEvent:
+		if e.ServedModel != "" && !slices.Contains(m.servedModels, e.ServedModel) {
+			m.servedModels = append(slices.Clone(m.servedModels), e.ServedModel)
+		}
+		if id, ok := m.workflows.workflowOf(e.EventBase); ok {
+			m.workflows = m.workflows.withReading(id, runOf(e.EventBase), usageReading(e))
+		}
 	}
 	return m
 }
 
 // foldBackgroundPhase folds one phase of a background workflow: a start opens its view, a finished
 // item counts, a waiting prompt counts and asks for the idle offer (promptPending), and an end
-// drops the view — closing its prompt's pane if one is open — writes the finish line and asks for
-// a wake (wakePending). A stage start changes nothing here.
+// drops the view — closing its prompt's pane if one is open — writes the finish line carrying what
+// the workflow spent (transcript.addWorkflowNote) and asks for a wake (wakePending). A stage start
+// changes nothing here.
 func (m Model) foldBackgroundPhase(e domain.WorkflowPhaseEvent) Model {
 	switch e.Phase {
 	case domain.WorkflowStarted:
@@ -298,7 +372,7 @@ func (m Model) foldBackgroundPhase(e domain.WorkflowPhaseEvent) Model {
 		if origin := m.workflowPromptOrigin(); origin != nil && origin.Workflow == e.Workflow {
 			m.closeWorkflowPrompt()
 		}
-		m.transcript.addNote(view.finishLine(e))
+		m.transcript.addWorkflowNote(view.finishLine(e), view.name, view.spent())
 		m.wakePending = true
 	}
 	return m

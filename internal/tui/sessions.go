@@ -660,6 +660,10 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// brings back the run heads that carry their own readings, and those replace this the moment
 	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.
 	m.delegateUsage = domain.Usage(msg.rec.Meta.DelegateUsage)
+	// A background workflow running across the switch spent its runs' readings so far in the session
+	// just left, whose record counted them: the view is rebased, as /clear rebases it, so the
+	// reopened session counts only what it spends from here (backgroundWorkflows.rebased).
+	m.workflows = m.workflows.rebased()
 	// The models that answered the resumed session come back with its tallies, for the same reason
 	// the base does: the host rebuilds Meta from what the renderer hands it on every save, so a set
 	// not carried in here would be dropped by the reopened session's first save.

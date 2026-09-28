@@ -683,3 +683,169 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// A Workflow's spend — its item runs and the runs they spawned (delegateUsageHeads)
+// ----------------------------------------------------------------------------
+
+// workflowRunUsage is one cumulative reading a Workflow's run reports: calls completions spending
+// prompt and completion tokens so far, the reading that restates its running sum.
+func workflowRunUsage(base domain.EventBase, calls, prompt, completion int) domain.UsageEvent {
+	total := prompt + completion
+	return domain.UsageEvent{
+		EventBase:   base,
+		TotalTokens: total,
+		Cumulative:  domain.Usage{Calls: calls, PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+	}
+}
+
+// workflowRow is the /usage row of a delegate named name that spent totals and reported no fill —
+// the row a Workflow gets.
+func workflowRow(name string, totals domain.Usage) popupRow {
+	return usageRow(usageIndent+name, totals, 0, 0, false)
+}
+
+// fanOutCall is the blocking fan_out call f1, whose Workflow's item runs are bracketed under it.
+func fanOutCall() domain.ToolCallEvent {
+	return domain.ToolCallEvent{Call: domain.ToolCall{ID: "f1", Tool: fanOutToolName, Arguments: []byte(`{"task":"check {item}"}`)}}
+}
+
+// assertDelegateRows fails unless the /usage rows below the main agent's are want, in order, then
+// the session row adding delegates to the main agent's totals — and unless the record a save takes
+// now stores delegates as its delegate half, the sum the pane adds.
+func assertDelegateRows(t *testing.T, m Model, delegates domain.Usage, want ...popupRow) {
+	t.Helper()
+	rows := m.usageRows()
+	if len(rows) != len(want)+3 {
+		t.Fatalf("rows = %q, want header, main, %d delegate rows and the session total", rows, len(want))
+	}
+	for i, row := range want {
+		if got := rows[2+i]; !equalRow(got, row) {
+			t.Errorf("delegate row %d = %q, want %q", i, got, row)
+		}
+	}
+	session := usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, false)
+	if got := rows[len(rows)-1]; !equalRow(got, session) {
+		t.Errorf("session row = %q, want %q — the delegates added to the main agent once", got, session)
+	}
+	payload, ok := m.snapshotPayload(domain.Session{})
+	if !ok {
+		t.Fatal("snapshotPayload declined to build a payload")
+	}
+	if got := domain.Usage(payload.delegateUsage); got != delegates {
+		t.Errorf("saved delegate usage = %+v, want the pane's own %+v", got, delegates)
+	}
+}
+
+// A background workflow's spend — each item run's latest reading, and a run one of them spawned —
+// is one /usage row named for the workflow, added into the session row and the record's delegate
+// half, while the main agent's totals stay its own. Once it finishes, its finish line carries the
+// sum, and a save and reopen keeps the row, its name and the session total.
+func TestBackgroundWorkflowSpendReachesUsageAndTheRecord(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.usage = mainTotals
+	nested := domain.EventBase{Depth: 2, Turn: 1, CallID: "c1", RunID: "bg.3"}
+
+	m = foldEvents(t, m,
+		bgPhase(domain.WorkflowStarted),
+		workflowRunUsage(bgChildBase("bg.1"), 1, 1000, 100),
+		workflowRunUsage(bgChildBase("bg.2"), 1, 800, 80),
+		domain.ToolCallEvent{EventBase: bgChildBase("bg.2"), Call: domain.ToolCall{ID: "c1", Tool: "sub_agent"}, SpawnRunID: "bg.3"},
+		workflowRunUsage(nested, 1, 400, 40),
+		workflowRunUsage(bgChildBase("bg.1"), 2, 2500, 300), // restates bg.1's running sum
+	)
+
+	spent := domain.Usage{Calls: 4, PromptTokens: 3700, CompletionTokens: 420, TotalTokens: 4120}
+	if m.usage != mainTotals {
+		t.Errorf("main totals = %+v, want %+v untouched — a background run's reading is not the main agent's", m.usage, mainTotals)
+	}
+	assertDelegateRows(t, m, spent, workflowRow(bgWorkflowName, spent))
+
+	m = foldEvents(t, m, bgItemOK(), bgPhase(domain.WorkflowFinished))
+	assertDelegateRows(t, m, spent, workflowRow(bgWorkflowName, spent))
+
+	payload, ok := m.snapshotPayload(domain.Session{})
+	if !ok {
+		t.Fatal("snapshotPayload declined to build a payload")
+	}
+	reopened := newModel(context.Background(), &fakeEngine{}, Options{
+		Resumed: &ResumedSession{
+			Transcript: payload.transcript, Usage: payload.usage, DelegateUsage: payload.delegateUsage,
+		},
+		UI: testUIPrefs,
+	}, nil)
+	assertDelegateRows(t, reopened, spent, workflowRow(bgWorkflowName, spent))
+}
+
+// A foreground Workflow's item runs fold into the block that started it — a blocking fan_out's card
+// or a Recipe launch's workflow block — each run's latest reading kept and the runs summed into one
+// row named for the Workflow.
+func TestForegroundWorkflowSpendReachesUsage(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		open  []domain.Event
+		call  string
+		label string
+		runs  []string
+		want  domain.Usage
+	}{
+		{
+			name: "a blocking fan_out's two item runs", open: []domain.Event{fanOutCall(), startedUnder("f1")},
+			call: "f1", label: "check {item}", runs: []string{"run.1", "run.2"},
+			want: domain.Usage{Calls: 4, PromptTokens: 5000, CompletionTokens: 600, TotalTokens: 5600},
+		},
+		{
+			name: "a recipe launch's item run", open: []domain.Event{startedUnder("w1")},
+			call: "w1", label: "audit", runs: []string{"run.1"},
+			want: domain.Usage{Calls: 2, PromptTokens: 2500, CompletionTokens: 300, TotalTokens: 2800},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := usageModel(t, mainTotals, 0)
+			for _, e := range tc.open {
+				m = m.foldEvent(e)
+			}
+
+			for _, run := range tc.runs {
+				m = m.foldEvent(workflowRunUsage(itemBase(tc.call, run), 1, 1000, 100))
+				m = m.foldEvent(workflowRunUsage(itemBase(tc.call, run), 2, 2500, 300)) // restates the first
+			}
+
+			if m.usage != mainTotals {
+				t.Errorf("main totals = %+v, want %+v untouched", m.usage, mainTotals)
+			}
+			assertDelegateRows(t, m, tc.want, workflowRow(tc.label, tc.want))
+		})
+	}
+}
+
+// A run an item spawned through sub_agent keeps its own head: its reading is that head's row and
+// never also the Workflow's, so the session counts it once.
+func TestWorkflowItemsSubAgentCountsOnceUnderItsOwnHead(t *testing.T) {
+	t.Parallel()
+	m := usageModel(t, mainTotals, 0)
+	child := domain.EventBase{Depth: 2, CallID: "s1", RunID: "run.3"}
+
+	for _, e := range []domain.Event{
+		fanOutCall(),
+		workflowRunUsage(itemBase("f1", "run.1"), 1, 1000, 100),
+		domain.ToolCallEvent{
+			EventBase:  itemBase("f1", "run.1"),
+			Call:       domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"dig deeper"}`)},
+			SpawnRunID: "run.3",
+		},
+		workflowRunUsage(child, 1, 400, 40),
+	} {
+		m = m.foldEvent(e)
+	}
+
+	item := domain.Usage{Calls: 1, PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100}
+	sub := domain.Usage{Calls: 1, PromptTokens: 400, CompletionTokens: 40, TotalTokens: 440}
+	assertDelegateRows(t, m, domain.Sum(item, sub),
+		usageRow(usageIndent+"dig deeper", sub, 440, m.opts.ContextWindow, false),
+		workflowRow("check {item}", item),
+	)
+}

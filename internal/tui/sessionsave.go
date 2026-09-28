@@ -26,8 +26,9 @@ type savePayload struct {
 	userMsgs   int
 	ctxUsed    int
 	usage      session.Usage // the main agent's cumulative token accounting at snapshot time
-	// delegateUsage is what this session's sub-agents have spent at snapshot time: the sum of every
-	// run head's own latest reading (Model.delegateUsageTotal). It rides beside usage rather than
+	// delegateUsage is what this session's delegates have spent at snapshot time: the sum of every
+	// run head's own latest reading and every Workflow's spend (Model.delegateUsageTotal). It rides
+	// beside usage rather than
 	// inside it so the record keeps the two halves of a session's spend apart, which is what lets
 	// the browser report the whole of it (session.Meta).
 	delegateUsage session.Usage

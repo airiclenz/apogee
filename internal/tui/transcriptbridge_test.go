@@ -2321,3 +2321,46 @@ func TestTranscriptBridgeRoundTripsACompactedNote(t *testing.T) {
 		t.Errorf("replayed text = %q, want %q", got[0].text, compactedNoteText)
 	}
 }
+
+// A Workflow's spend reaches the record on the entries that carry it — a Recipe launch's workflow
+// block and a background workflow's finish line — through the usage members every entry already
+// has, and its name through the tool slot's target, so a reopened /usage row is named as the live
+// one was. A note that carries no spend writes no tool slot at all.
+func TestTranscriptCodecRoundTripsAWorkflowsSpendAndName(t *testing.T) {
+	t.Parallel()
+	spent := domain.Usage{Calls: 3, PromptTokens: 3300, CompletionTokens: 400, TotalTokens: 3700}
+	tr := &transcript{}
+	tr.apply(startedUnder("w1"))
+	tr.applyUsage(workflowRunUsage(itemBase("w1", "run.1"), 3, 3300, 400), 32768, "")
+	tr.addWorkflowNote("background workflow sweep finished", "sweep", spent)
+	tr.addNote("a plain note")
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if got := strings.Count(string(data), `"tool":`); got != 2 {
+		t.Errorf("the blob carries %d tool slots, want 2 — the block's and the finish line's alone:\n%s", got, data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("decoded %d entries, want the block and the two notes: %+v", len(got), got)
+	}
+	for i, want := range []struct {
+		kind  entryKind
+		name  string
+		usage domain.Usage
+	}{
+		{entryWorkflow, "audit", spent},
+		{entryNote, "sweep", spent},
+		{entryNote, "", domain.Usage{}},
+	} {
+		if got[i].kind != want.kind || got[i].tool.Target != want.name || got[i].usage != want.usage {
+			t.Errorf("entry %d = kind %v, name %q, usage %+v; want kind %v, name %q, usage %+v",
+				i, got[i].kind, got[i].tool.Target, got[i].usage, want.kind, want.name, want.usage)
+		}
+	}
+}

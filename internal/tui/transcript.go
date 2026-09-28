@@ -423,7 +423,14 @@ type entry struct {
 	// (domain.Usage, read by usageReading), folded latest-wins from the same readings — including the maintenance
 	// ones the fill above skips. It is what makes a delegate's spend reportable per agent long after
 	// its run closed, where ctxUsed only ever says how full its window was at the end.
+	// On a block that heads a Workflow's item runs ([entry.headsWorkflow]) it is instead the sum of
+	// itemSpend below, and on a background workflow's finish line the spend its view summed
+	// (foldBackgroundPhase) — the Workflow's whole spend, which is what the record keeps of it.
 	usage domain.Usage
+	// itemSpend is a block heading a Workflow's item runs only: each item run's latest cumulative
+	// reading, by run (applyUsage), whose sum usage holds. View-only and never persisted — the sum
+	// in usage is the record — so a replayed block carries none and folds no later reading.
+	itemSpend runSpend
 	// at is the wall clock at which the entry was committed (UTC, [transcript.stamp]), so the
 	// record can say WHEN each thing happened. It is persisted (session.Entry.At) and never
 	// painted: the list order is run order, which is what the scrollback and every grouping rule
@@ -857,6 +864,18 @@ func (t *transcript) addNote(text string) {
 	t.commit(entry{kind: entryNote, text: stripEscapes(text)})
 }
 
+// addWorkflowNote appends a background workflow's finish line carrying what the workflow spent,
+// named for it (tool.Target, which usageAgentName reads and the record keeps) — addNote in every
+// respect the renderer can observe. A workflow that reported no count carries none, and its line is
+// a plain note.
+func (t *transcript) addWorkflowNote(text, name string, spent domain.Usage) {
+	e := entry{kind: entryNote, text: stripEscapes(text)}
+	if spent.Calls > 0 {
+		e.usage, e.tool.Target = spent, stripEscapes(name)
+	}
+	t.commit(e)
+}
+
 // addEphemeralNote appends a note that the human sees but the session record never keeps. It is
 // addNote in every respect the renderer can observe — same kind, same styling, same position in
 // the scrollback — and differs only at the persistence seam, where encodeTranscript skips it.
@@ -1276,7 +1295,9 @@ func (t *transcript) apply(e domain.Event) {
 // head standing at depth N-1. It is never transitive either way: each agent fills its OWN window,
 // so a nested run's reading stops at the nested head and says nothing about its parent's fill. A
 // reading that matches no open run — one that arrived after its report, or before its call — folds
-// nothing at all, as it did before this entry field existed.
+// nothing at all, as it did before this entry field existed. The one exception is a Workflow's item
+// run, which no sub_agent call spawned: its totals fold into the block that started its Workflow
+// instead (foldWorkflowSpend), so a fan_out's or a Recipe's spend reaches /usage and the record.
 //
 // The reading is the LATEST total and never a running sum: every Turn reports the whole context
 // it filled, so the newest number IS the fill. A total the server omitted falls back to
@@ -1317,6 +1338,9 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	}
 	head := t.openSubAgentHead(runOf(usage.EventBase))
 	if head == nil {
+		if counted {
+			t.foldWorkflowSpend(runOf(usage.EventBase), reading)
+		}
 		return
 	}
 	t.touch() // head is a pointer into entries, and at least one of the two readings writes through it
@@ -1333,6 +1357,40 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	if usage.Model != "" && usage.Model != sessionModel {
 		head.ctxModel = stripEscapes(usage.Model)
 	}
+}
+
+// foldWorkflowSpend folds a delegated reading no open sub_agent head took into the block that
+// started the Workflow run is an item of ([entry.headsWorkflowRuns]) — a Recipe launch's workflow
+// block or a fan_out call's card — keeping it as that run's latest reading beside its siblings' and
+// the block's usage as their sum. A run one of the items spawned has a sub_agent head of its own, so
+// its readings never reach here while that head is open; a reading no block heads folds nothing.
+// Only the totals fold: a Workflow's runs fill windows of their own, and a block has no one fill.
+//
+// The block is named for its Workflow on the way (tool.Target, which usageAgentName reads and the
+// record keeps): a fan_out card already carries the brief's first line, the name the engine gave
+// its Workflow, so only a workflow block needs its view's name copied across.
+func (t *transcript) foldWorkflowSpend(run runRef, reading domain.Usage) {
+	head := t.workflowRunsHead(run)
+	if head == nil {
+		return
+	}
+	t.touch() // head is a pointer into entries, and the fold writes through it
+	head.itemSpend = head.itemSpend.with(run, reading)
+	head.usage = head.itemSpend.total()
+	if head.kind == entryWorkflow && head.workflow.name != "" {
+		head.tool.Target = head.workflow.name
+	}
+}
+
+// workflowRunsHead is the block that started the Workflow run is an item of, latest first, or nil
+// when no block in the transcript heads it.
+func (t *transcript) workflowRunsHead(run runRef) *entry {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if t.entries[i].headsWorkflowRuns(run) {
+			return &t.entries[i]
+		}
+	}
+	return nil
 }
 
 // childWindow answers which limit a delegated fill is measured against: the one the reading itself
@@ -2201,6 +2259,13 @@ func (e entry) headsWorkflow() bool {
 // on a run id: one head carries every item run of its Workflow.
 func (e entry) headsWorkflowRuns(run runRef) bool {
 	return e.headsWorkflow() && e.callID != "" && e.callID == run.spawn && e.depth == run.depth-1
+}
+
+// carriesWorkflowSpend reports whether e holds a Workflow's token spend: a block that heads a
+// Workflow's item runs, or a background workflow's finish line, whose usage reported a count. It is
+// the entry /usage lists as a workflow row and the record's delegate sum adds (delegateUsageHeads).
+func (e entry) carriesWorkflowSpend() bool {
+	return (e.headsWorkflow() || e.kind == entryNote) && e.usage.Calls > 0
 }
 
 // workflowHeads is [entry.headsWorkflow] asked of a position; an index outside the list answers

@@ -92,18 +92,19 @@ still remembers.
   and when. A headless run (`apogee headless`, a `/schedule` firing) writes none of
   these three.
 - A record stores what the session spent in two halves — the main agent's tokens
-  and the sum its sub-agents reported — and the browser row shows their **sum**,
-  the whole session's spend. A run that hands most of its work to delegates costs
-  most of its tokens in windows that closed with those runs, so a row reporting
-  only the conversation you steered would understate it by a wide margin; `/usage`
-  is where the two halves are read apart again.
+  and the sum its delegates reported, sub-agents and workflows' runs alike — and
+  the browser row shows their **sum**, the whole session's spend. A run that hands
+  most of its work to delegates costs most of its tokens in windows that closed
+  with those runs, so a row reporting only the conversation you steered would
+  understate it by a wide margin; `/usage` is where the two halves are read apart
+  again.
 - A record also keeps **which models actually answered** — every distinct id the
-  server put on a reply, in the order first seen, a sub-agent's included — beside the
-  profile the session was bound to, because the two can differ: an alias the server
-  resolves, a launcher that swapped what a profile serves, a delegation routed to a
-  server of its own. `/usage` names them on a `served:` line above its rows once a
-  reply has carried one; a server that names no model leaves the record and the pane
-  as they were.
+  server put on a reply, in the order first seen, a sub-agent's or a workflow's
+  included — beside the profile the session was bound to, because the two can
+  differ: an alias the server resolves, a launcher that swapped what a profile
+  serves, a delegation routed to a server of its own. `/usage` names them on a
+  `served:` line above its rows once a reply has carried one; a server that names
+  no model leaves the record and the pane as they were.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
   one — neither deletes; discarding is an explicit `^d` in the browser. The closed
   session keeps its token accounting and the models that answered it; the fresh one

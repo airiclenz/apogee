@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -458,5 +460,83 @@ func TestBackgroundWorkflow_QuitWithAPromptOpenQuitsAtOnce(t *testing.T) {
 	}
 	if len(eng.answers()) != 0 {
 		t.Errorf("answers = %v, want the question left unanswered", eng.answers())
+	}
+}
+
+// A claimed background reading names the model that answered it: that model joins the session's
+// served set, which /usage paints and the record keeps, while the gauge and the main agent's totals
+// stay where they were.
+func TestBackgroundWorkflow_AReadingsServedModelJoinsTheSession(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	reading := servedUsage("routed-model", 1)
+	reading.EventBase = bgChildBase("bg.1")
+
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), reading)
+
+	if !slices.Equal(m.servedModels, []string{"routed-model"}) {
+		t.Errorf("servedModels = %q, want the background run's own model", m.servedModels)
+	}
+	if !strings.Contains(usageContent(m.usageRows(), m.servedModels).body, "routed-model") {
+		t.Errorf("the /usage pane does not name the background run's model on its served: line")
+	}
+	if m.usage != (domain.Usage{}) || m.ctxUsed != 0 {
+		t.Errorf("usage = %+v, fill = %d, want both untouched by a background reading", m.usage, m.ctxUsed)
+	}
+}
+
+// A session boundary a background workflow runs across rebases its spend: the closed session's
+// record took what it had spent, so the fresh session's delegate sum starts at zero and the
+// workflow's stop or finish line carries only what it spent after the clear — nothing after a `y`
+// stopped it, the later readings' growth after an `n` kept it.
+func TestBackgroundWorkflow_SpendAcrossAClearCountsOnlyWhatFollows(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		key   tea.KeyPressMsg
+		after []domain.Event
+		end   domain.WorkflowPhase
+		want  domain.Usage
+	}{
+		{"y stops it", keyRune('y'), nil, domain.WorkflowStopped, domain.Usage{}},
+		{
+			"n keeps it", keyRune('n'),
+			[]domain.Event{workflowRunUsage(bgChildBase("bg.1"), 3, 3200, 330)},
+			domain.WorkflowFinished,
+			domain.Usage{Calls: 1, PromptTokens: 700, CompletionTokens: 30, TotalTokens: 730},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := runningWorkflowModel(t, &fakeEngine{})
+			m = foldEvents(t, m, workflowRunUsage(bgChildBase("bg.1"), 2, 2500, 300))
+			if got := m.delegateUsageTotal(); got.Calls != 2 {
+				t.Fatalf("precondition: the delegate total = %+v, want the workflow's two calls", got)
+			}
+
+			m, _ = typeCommand(t, m, "/clear")
+			m = step(t, m, tc.key)
+
+			if got := m.delegateUsageTotal(); got != (domain.Usage{}) {
+				t.Errorf("delegate total after /clear = %+v, want zero — the closed session's record took it", got)
+			}
+			m = foldEvents(t, m, tc.after...)
+			m = foldEvents(t, m, bgPhase(tc.end))
+			var line entry
+			for _, e := range m.transcript.entries {
+				if e.kind == entryNote && strings.HasPrefix(e.text, "background workflow "+bgWorkflowName) {
+					line = e
+				}
+			}
+			if line.text == "" {
+				t.Fatalf("no end line for the workflow among the notes %q", noteTexts(m))
+			}
+			if line.usage != tc.want {
+				t.Errorf("end line spend = %+v, want %+v — only what followed the clear", line.usage, tc.want)
+			}
+			if got := m.delegateUsageTotal(); got != tc.want {
+				t.Errorf("delegate total = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }

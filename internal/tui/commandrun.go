@@ -385,6 +385,11 @@ func (m *Model) resetSessionView() {
 	m.usage = domain.Usage{}
 	m.usageBase = domain.Usage{}
 	m.delegateUsage = domain.Usage{}
+	// A background workflow the human kept running across the clear (ADR 0089 D5) — or one still
+	// ending on a `y` — spent its runs' readings so far in the closed session, whose record counted
+	// them; its view is rebased so the fresh session's /usage and its stop or finish line carry only
+	// what it spends from here (backgroundWorkflows.rebased).
+	m.workflows = m.workflows.rebased()
 	// The models that answered fall with the tallies they qualify: they were the closed session's
 	// answerers, and its record took them with the same saveAtIdle above.
 	m.servedModels = nil

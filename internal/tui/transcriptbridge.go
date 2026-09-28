@@ -137,7 +137,8 @@ func closeInterruptedCalls(entries []entry) (closed int) {
 // attached only for the kinds that carry them, so every other kind serializes without an empty
 // sub-object. A firing block (entrySchedule) is one of the kinds that carry a view: it borrows the
 // toolView slot whole, so it borrows the wire's tool slot whole too rather than growing a second one
-// that would have to be kept in step with it.
+// that would have to be kept in step with it. A block or finish line carrying a Workflow's spend
+// (entry.carriesWorkflowSpend) borrows the slot for the Workflow's name alone.
 func toWireEntry(e *entry, kind string) session.Entry {
 	w := session.Entry{
 		Kind:        kind,
@@ -162,8 +163,14 @@ func toWireEntry(e *entry, kind string) session.Entry {
 
 		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
-	if e.kind == entryToolCall || e.kind == entrySchedule {
+	switch {
+	case e.kind == entryToolCall || e.kind == entrySchedule:
 		w.Tool = toWireToolView(e.tool)
+	case e.carriesWorkflowSpend():
+		// A workflow block or a background workflow's finish line that carries a Workflow's spend
+		// keeps the Workflow's name in the one slot a name already rides in, so a reopened session's
+		// /usage row is named as the live one was (usageAgentName) without a member of its own.
+		w.Tool = &session.ToolView{Target: e.tool.Target}
 	}
 	if e.kind == entryPresented {
 		w.Presented = toWirePresented(e.presented)
