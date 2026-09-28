@@ -64,11 +64,12 @@ type entryKindRule struct {
 	isHostNote bool
 
 	// cacheable reports whether a block headed by this kind may be stored in the paint cache at
-	// all ([paintKey], paintcache.go). Two kinds may not, for one reason. [transcript.refreshStartup]
+	// all ([paintKey], paintcache.go). Three kinds may not, for one reason. [transcript.refreshStartup]
 	// rewrites the start-up box's facts in place without touching a single field the key reads, so
 	// a cached box would keep saying "connecting" after the model bound late. The box is one small
 	// block at the very top of the scrollback and is not what the cache is for. The Workflow block's
-	// view and text grow in place the same way as its events fold (workflowblock.go).
+	// view and text grow in place the same way as its events fold (workflowblock.go), and a Workflow
+	// item's run head has its card rewritten in place when the item's receipt lands.
 	cacheable bool
 
 	// hasLiveStar reports whether the kind's header can still be WAITING for something, and so is
@@ -117,10 +118,11 @@ var entryKindRules = map[entryKind]entryKindRule{
 	entryCompacted: {persistedName: session.EntryKindCompacted, cacheable: true, isHostNote: true},
 	// "workflow" — a Recipe's Workflow block (workflowblock.go) — joined [session.TranscriptVersion] 1
 	// on the same additive terms; its text is its record in words, and its view — kept beside the
-	// text as session.Workflow — what it paints one row per stage from. It is the one kind besides the start-up box that is
-	// never cached, for the start-up box's reason: its view and text are re-rendered IN PLACE as the
-	// Workflow's events fold, touching no field the paint key reads. It is not a host note: the run
-	// it reports is the conversation's own, the work the human's line asked for.
+	// text as session.Workflow — what it paints one row per stage from. Like the start-up box and a
+	// Workflow item's run head, it is never cached, for the start-up box's reason: its view and text
+	// are re-rendered IN PLACE as the Workflow's events fold, touching no field the paint key reads.
+	// It is not a host note: the run it reports is the conversation's own, the work the human's line
+	// asked for.
 	entryWorkflow: {persistedName: session.EntryKindWorkflow},
 	// "workflow_item" — the run head of one item run of a Workflow (workflowblock.go) — joined on
 	// the same additive terms. It heads a run as a delegation's call block does, so its header can

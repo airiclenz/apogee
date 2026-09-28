@@ -26,10 +26,11 @@ package tui
 // transcript.refreshStartup rewrites
 // entries[0].startup with NO flag change at all, which is why an entryStartup block is never
 // cached — and a Workflow item's run head (entryWorkflowItem) is never cached either, because the
-// item's receipt rewrites its card after the phase and done bits the key reads may have settled. The remaining case is wholesale replacement — transcript.reset drops every entry and
-// the caller re-fills the list inside the same Update — and reset clears the cache outright,
-// because a head index that is re-used by a different session's entry would otherwise match a key
-// that is no longer about it.
+// item's receipt rewrites its card after the phase and done bits the key reads may have settled.
+// The remaining case is wholesale replacement — transcript.reset drops every entry and the caller
+// re-fills the list inside the same Update — and reset clears the cache outright, because a head
+// index that is re-used by a different session's entry would otherwise match a key that is no
+// longer about it.
 //
 // "Append-only" is the standing shape and no longer the whole of it: a concurrent fan-out's entries
 // are placed at the end of their own RUN rather than at the end of the list (transcript.place, ADR

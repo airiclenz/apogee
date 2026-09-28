@@ -206,9 +206,10 @@ func (m Model) usageSubAgentRows(cached bool) []popupRow {
 // order, then every Workflow's spend — the blocks that head a Workflow's item runs and the finish
 // lines of background workflows that ended, in transcript order, then the live background
 // workflows (backgroundWorkflows.spendEntries). A Workflow item's run head is never listed: its
-// spend is its Workflow's, which the block heading it reports (applyUsage folds it there too). It is the one walk both readers of a delegate's
-// spend take — the pane's rows and the session record's delegate sum — so a run that appears on the
-// /usage pane is exactly a run the record counts. A reading reaches one of them only (applyUsage
+// spend is its Workflow's, which the block heading it reports (applyUsage folds it there too).
+// It is the one walk both readers of a delegate's spend take — the pane's rows and the session
+// record's delegate sum — so a run that appears on the /usage pane is exactly a run the record
+// counts. A reading reaches one of them only (applyUsage
 // folds a Workflow's run into its block only where no open sub_agent head takes it), so nothing is
 // counted twice.
 func (m Model) delegateUsageHeads() []entry {
