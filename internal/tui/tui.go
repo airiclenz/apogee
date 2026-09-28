@@ -1025,6 +1025,14 @@ type Engine interface {
 	// worker goroutine, between Steps, where Interject is — which commits what it returns
 	// (deliverWorkflowNotes, worker.go).
 	TakeWorkflowNotes() (domain.UserInput, bool)
+	// StartRecipe starts the recipe launch names (ADR 0087 D6). The TUI makes only its background
+	// form (/bg, ADR 0089 D1): the recipe's inputs are bound from launch.Text alone — a required one
+	// the text leaves unbound is refused as `missing input: <name>`, never asked — it runs as a
+	// background workflow under a context the engine's workflow manager owns, and the id it
+	// returns names it. It fails on an unknown or recipe-less id, an input error, and a workflow
+	// already running under the same id; with no model bound it refuses as Submit does. Called
+	// ONLY at idle, with no worker driving the engine, from a tea.Cmd (runBg).
+	StartRecipe(context.Context, domain.RecipeLaunch) (string, error)
 }
 
 // ----------------------------------------------------------------------------

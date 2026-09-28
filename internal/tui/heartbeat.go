@@ -71,8 +71,9 @@ type heartbeatState struct {
 	// is also what a beat that could not read the server leaves in place.
 	effort provider.EffortSupport
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
-	// lands while a worker owns the engine (applied in finishWorker) or while a launcher verb owns
-	// the server it talks to (applied in foldActuationDone). Latest-wins: a second change inside the
+	// lands while a worker owns the engine (applied in finishWorker), while a launcher verb owns
+	// the server it talks to (applied in foldActuationDone), or while a /bg launch is reading the
+	// Agent off the loop (applied in foldBgStarted). Latest-wins: a second change inside the
 	// same window replaces the first, so only the newest reality is ever bound. nil ⇒ nothing is
 	// deferred. A pointer into a value-copied Model is safe because it is only ever replaced, never
 	// written through (the pendingSave posture, ADR 0011).
@@ -348,10 +349,11 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 		effort:    beat.EffortSupport,
 		quietSeed: firstContact,
 	}
-	if m.busy() || m.actuation.inFlight {
+	if m.busy() || m.actuation.inFlight || m.bgLaunching {
 		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
 		// construction. Stash the intent for the boundary rather than refuse it — finishWorker for a
-		// worker's Exchange, foldActuationDone for a launcher verb — so the switch the human made
+		// worker's Exchange, foldActuationDone for a launcher verb, foldBgStarted for a /bg launch
+		// whose snapshot of the Agent is being taken off the loop — so the switch the human made
 		// upstream lands the moment the engine is quiescent again (latest-wins, so a second change
 		// inside the same window simply supersedes this one).
 		//
@@ -492,11 +494,11 @@ func mandatoryEffortNote(model string) string {
 }
 
 // applyPendingRebind binds a change that was captured while the engine was not the Update loop's to
-// re-point — a worker owned it, or a launcher verb owned the server it talks to. Both terminal folds
-// ARE the boundary Agent.Rebind demands — the same one SettleExchange and the idle save already use —
-// and the Msg travelling through the Bubble Tea channel is what establishes the happens-before in
-// both directions, which is why the engine's per-model bindings need no lock (ADR 0024). A no-op
-// when nothing was deferred.
+// re-point — a worker owned it, a launcher verb owned the server it talks to, or a /bg launch was
+// reading it off the loop. Each terminal fold IS the boundary Agent.Rebind demands — the same one
+// SettleExchange and the idle save already use — and the Msg travelling through the Bubble Tea
+// channel is what establishes the happens-before in both directions, which is why the engine's
+// per-model bindings need no lock (ADR 0024). A no-op when nothing was deferred.
 func (m *Model) applyPendingRebind() {
 	intent := m.hb.pendingRebind
 	if intent == nil {

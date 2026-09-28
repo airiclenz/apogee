@@ -216,11 +216,12 @@ func wakeAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 
 // canWake reports whether the engine is the Update loop's to wake right now: idle, bound, not
 // quitting, and with no idle-only operation in flight — a /sessions load (its restore takes the
-// engine), a queued record write or fork (it snapshots the engine at idle), a held message (the
-// human's next ⏎ sends it, and the note rides with it), or a modal pane the human is answering.
+// engine), a /bg launch (it reads the Agent off the loop), a queued record write or fork (it
+// snapshots the engine at idle), a held message (the human's next ⏎ sends it, and the note rides
+// with it), or a modal pane the human is answering.
 func (m Model) canWake() bool {
 	switch {
-	case m.state != stateIdle, m.prebound(), m.quitting, m.sessionLoading:
+	case m.state != stateIdle, m.prebound(), m.quitting, m.sessionLoading, m.bgLaunching:
 		return false
 	case m.writeBusy, len(m.pendingWrites) > 0, len(m.pendingInterjections) > 0:
 		return false

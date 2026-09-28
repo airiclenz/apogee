@@ -96,12 +96,9 @@ var skillFileRef = regexp.MustCompile(regexp.QuoteMeta(domain.SkillDirToken) + `
 var shellSafeValue = regexp.MustCompile(`^[A-Za-z0-9_./:=@%+,-]+$`)
 
 // RecipeLaunch is a Driver's request to start a recipe: the recipe skill's id, the user's text
-// its inputs bind from (the line after "/<id>"), and whether it runs in the background.
-type RecipeLaunch struct {
-	SkillID    string
-	Text       string
-	Background bool
-}
+// its inputs bind from (the line after "/<id>"), and whether it runs in the background. It is
+// domain.RecipeLaunch, so a Driver's own Engine seam can name it without importing this package.
+type RecipeLaunch = domain.RecipeLaunch
 
 // StartRecipe starts the recipe launch names. It resolves the skill, binds its inputs from
 // launch.Text — asking the user through Config.Asker for a required input the text left unbound,

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 
@@ -171,6 +172,9 @@ type fakeEngine struct {
 	wakeFn        func(context.Context) (bool, error) // scripted Wake answer (nil ⇒ nothing held, no wake)
 	workflowNotes []domain.UserInput                  // what TakeWorkflowNotes hands over, one per call, oldest first
 	notesTaken    int                                 // records TakeWorkflowNotes calls that handed a note over
+
+	recipeLaunches []domain.RecipeLaunch                                      // records StartRecipe calls, in order
+	startRecipeFn  func(context.Context, domain.RecipeLaunch) (string, error) // scripted StartRecipe answer (nil ⇒ no id, no error)
 }
 
 // childInterjection is one recorded InterjectChild call: the run it addressed and the message.
@@ -252,6 +256,26 @@ func (f *fakeEngine) TakeWorkflowNotes() (domain.UserInput, bool) {
 	f.workflowNotes = f.workflowNotes[1:]
 	f.notesTaken++
 	return note, true
+}
+
+// StartRecipe records the launch and answers with whatever the test scripted — nil models a launch
+// that started with an empty id, which no test relies on.
+func (f *fakeEngine) StartRecipe(ctx context.Context, launch domain.RecipeLaunch) (string, error) {
+	f.mu.Lock()
+	f.recipeLaunches = append(f.recipeLaunches, launch)
+	fn := f.startRecipeFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, launch)
+	}
+	return "", nil
+}
+
+// launches reports the StartRecipe calls, in order.
+func (f *fakeEngine) launches() []domain.RecipeLaunch {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.recipeLaunches)
 }
 
 // interjections reports the inputs Interject was handed, in delivery order — empty when the

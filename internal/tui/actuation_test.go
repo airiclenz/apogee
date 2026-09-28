@@ -320,7 +320,8 @@ func startLoad(t *testing.T, m Model, name string) (Model, tea.Cmd) {
 // ----------------------------------------------------------------------------
 
 // While a profile load is in flight every path that would open an Exchange or move the session is
-// refused with one note, and nothing is driven. The latch IS the per-address serialization the
+// refused with one note, and nothing is driven — /bg among them, whose launch reads the engine the
+// completion may re-point. The latch IS the per-address serialization the
 // facade's contract demands of its caller, so a second lifecycle verb can never overlap the first.
 func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 	t.Parallel()
@@ -334,7 +335,7 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 	m, _ = startLoad(t, m, "alpha")
 	want := "profile load in flight — alpha"
 
-	for _, line := range []string{"/model other-model", "/server remote", "/continue", "/compact", "hello"} {
+	for _, line := range []string{"/model other-model", "/server remote", "/continue", "/compact", "/bg /audit internal/", "hello"} {
 		t.Run(line, func(t *testing.T) {
 			next, cmd := typeCommand(t, m, line)
 
@@ -359,9 +360,9 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 	if got := fake.listCount(); got != 1 {
 		t.Errorf("the profile list was read %d times, want only the /model that took the latch", got)
 	}
-	if len(sw.calls) != 0 || len(rb.calls) != 0 || len(eng.submitted) != 0 {
-		t.Errorf("a refused verb still drove a seam: switches %v, rebinds %v, submits %d",
-			sw.calls, rb.calls, len(eng.submitted))
+	if len(sw.calls) != 0 || len(rb.calls) != 0 || len(eng.submitted) != 0 || len(eng.launches()) != 0 {
+		t.Errorf("a refused verb still drove a seam: switches %v, rebinds %v, submits %d, launches %v",
+			sw.calls, rb.calls, len(eng.submitted), eng.launches())
 	}
 }
 

@@ -797,6 +797,16 @@ func (e *lateEngine) TakeWorkflowNotes() (apogee.UserInput, bool) {
 	return agent.TakeWorkflowNotes()
 }
 
+// StartRecipe starts a recipe on the bound Agent. Unbound there is no model for its children to
+// run on, so it is refused as every other conversation-touching call is.
+func (e *lateEngine) StartRecipe(ctx context.Context, launch apogee.RecipeLaunch) (string, error) {
+	agent := e.bound()
+	if agent == nil {
+		return "", errNoServerBound
+	}
+	return agent.StartRecipe(ctx, launch)
+}
+
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.
 func (e *lateEngine) Close() error {
 	agent := e.bound()

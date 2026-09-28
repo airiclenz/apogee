@@ -41,6 +41,7 @@ a typo is visible before you send.
 | `/clear` (or `/new`) | Close this session into history and start a fresh one | ⧖ |
 | `/compact` | Summarise the conversation to reclaim context | ⧖ |
 | `/continue` | Ask the model to keep going | ⧖ |
+| `/bg` | Start a recipe in the background — `/bg /<recipe> <text>`, e.g. `/bg /audit internal/`. Its inputs bind from the text alone: a required one the text leaves out is refused as `missing input: <name>` rather than asked. On start it notes `started <id> in the background`, and the conversation goes on while the workflow runs; its finish note reaches the agent when it ends. A line whose first word is not a recipe skill's `/<id>` is refused with the recipe skills named | ⧖ |
 | `/undo` | Put back what the last exchange changed — every write to your workspace, apogee's own file tools and a `terminal`, Python or MCP write alike; bare previews it, `/undo confirm` applies it, and the record survives a relaunch — see [below](#undoing-the-agents-file-writes--undo-and-redo) | ⧖ |
 | `/redo` | Put back what the last `/undo confirm` took away — same two steps, bare previews, `/redo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo-and-redo) | ⧖ |
 | `/sessions` | Browse saved sessions — resume, rename, or delete | ⧖ |

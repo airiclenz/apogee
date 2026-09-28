@@ -403,9 +403,15 @@ type Model struct {
 	// sessionLoading marks a /sessions load in flight — the record is being read off the loop, and
 	// the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held until it
 	// lands.
+	//
+	// bgLaunching marks a /bg launch in flight (runBg sets it, foldBgStarted clears it): the launch
+	// reads the Agent off the loop where the idle-only mutators must not run (StartRecipe's
+	// launch-time snapshot), so until it lands a heartbeat's rebind is stashed (observeBinding), a
+	// wake is held (canWake), and an idle-only command is queued rather than run (commandRunnable).
 	workflows      backgroundWorkflows
 	wakePending    bool
 	sessionLoading bool
+	bgLaunching    bool
 
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
@@ -1323,6 +1329,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.sessionLoading = false
 		return m, m.resumeLoaded(msg)
 
+	case bgStartedMsg:
+		// A /bg launch returned off the Update loop (commandrun.go, runBg): note the workflow's id,
+		// or why it did not start.
+		return m.foldBgStarted(msg)
+
 	case workflowNoteLostMsg:
 		// The worker's drain could not commit a background workflow's finish note (worker.go,
 		// deliverWorkflowNotes): say so, since the engine cannot take the note back.
@@ -1972,6 +1983,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 			// pair, whose noRecall flag keeps it out of the walk entirely (commandSpec).
 			m, record = m.recordSend(sent)
 		}
+		if !m.commandRunnable(parsed) {
+			// Idle, but a /bg launch holds the engine off the loop (bgLaunching): an idle-only verb
+			// waits for it to land (foldBgStarted drains it), as it waits for a worker.
+			next, cmd := m.queueCommand(parsed)
+			return next, tea.Batch(cmd, record)
+		}
 		next, cmd := m.runCommand(parsed)
 		return next, tea.Batch(cmd, record)
 	}
@@ -2291,8 +2308,13 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	}
 	// The engine is the Update loop's again, which is the boundary a binding change captured
 	// mid-Exchange has been waiting for (ADR 0024). It runs BEFORE the idle save so the session
-	// record is stamped with the model that is now bound, notes and all.
-	m.applyPendingRebind()
+	// record is stamped with the model that is now bound, notes and all. A /bg launch still reading
+	// the Agent off the loop (bgLaunching — a message can open an Exchange beside it) makes this not
+	// that boundary yet: the rebind stays stashed for foldBgStarted, which binds it once the launch
+	// has landed.
+	if !m.bgLaunching {
+		m.applyPendingRebind()
+	}
 	if next == stateIdle {
 		// A completed or cancelled Exchange settled at idle: persist the final conversation state
 		// (the per-Turn saves captured each Turn; this catches the closing boundary, including the

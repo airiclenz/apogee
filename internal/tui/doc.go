@@ -617,7 +617,10 @@
 // pendingRebind and applied at the next quiescent boundary when something else owns the engine:
 // finishWorker when a worker does (the boundary SettleExchange and the idle save use), and the
 // actuation completion fold while a launcher verb owns the server the session talks to, since that
-// completion may re-point the session itself. [Model.applyRebind] then adopts what was actually BOUND
+// completion may re-point the session itself, and foldBgStarted while a /bg launch reads the Agent
+// off the loop (its launch-time snapshot must not meet an idle-only mutator) — the other two leave
+// the stash standing for it while that launch is in flight. [Model.applyRebind] then adopts what
+// was actually BOUND
 // (never merely what was observed), restates the start-up box in place (transcript.refreshStartup —
 // its facts were frozen when it was seeded, and a late-bound session would otherwise keep a
 // "connecting" box at the top of its scrollback), and words the change once: connected / model

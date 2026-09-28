@@ -843,7 +843,37 @@ NOTES (2026-09-27): transcript.go and fold.go are unchanged. The wake row is an 
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/`
 **Commit:** `feat(tui): a finished background workflow wakes the agent`
 
-## 29. The /bg command
+## 29. The /bg command — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-27): re-derived from the assumption that the TUI's Engine seam could name StartRecipe's request type — `RecipeLaunch` lived in internal/agent, which internal/tui does not import (ADR 0010) while `*apogee.Agent` must still satisfy tui.Engine (cmd/apogee/wire.go); it moved to `domain.RecipeLaunch` (ADR 0010's lowest-layer rule) with `agent.RecipeLaunch` kept as an alias, so apogee.go's alias and every caller are unchanged
+
+NOTES (2026-09-27): consequential edit — internal/domain/config.go: made necessary by the tui.Engine StartRecipe method (domain.RecipeLaunch)
+
+NOTES (2026-09-27): consequential edit — internal/agent/recipe.go: made necessary by moving RecipeLaunch to domain (now an alias)
+
+NOTES (2026-09-27): consequential edit — internal/tui/model.go: made necessary by runBg's tea.Cmd — the Update loop folds its bgStartedMsg (foldBgStarted)
+
+NOTES (2026-09-27): consequential edit — internal/tui/mouse_test.go: made necessary by the new /bg row — TestDropdownClickHighlightsThenTheSecondClickAccepts clicked /confine, which the extra row pushed onto the menu's last visible row, where the first click's highlight scrolls the list and the second click lands on another row; the test now clicks /color-scheme (also takes arguments, not run bare), in /confine's old geometry
+
+NOTES (2026-09-27): consequential edit — internal/tui/heartbeat.go: made necessary by the /bg launch latch (observeBinding stashes a rebind while bgLaunching; pendingRebind/applyPendingRebind comments name foldBgStarted)
+
+NOTES (2026-09-27): consequential edit — internal/tui/workflow.go: made necessary by the /bg launch latch (canWake holds a wake while bgLaunching)
+
+NOTES (2026-09-27): consequential edit — internal/tui/doc.go: made necessary by the /bg launch latch (the rebind-stash boundary list names foldBgStarted)
+
+NOTES (2026-09-27): retry per the verifier's FIX — the in-flight /bg launch is latched like sessionLoading: runBg sets Model.bgLaunching, foldBgStarted clears it, applies a stashed rebind and drains the queued commands; observeBinding, canWake and commandRunnable (plus runDeferredCommands and submit's idle command branch, which bypassed commandRunnable) honour it. TestBgLaunchStashesARebindUntilItLands runs the launch Cmd on its own goroutine beside a beat fold and reports a DATA RACE under -race with the observeBinding clause removed (checked); TestBgLaunchQueuesIdleOnlyCommandsUntilItLands and TestBgLaunchHoldsAWakeUntilItLands pin the other two gates
+
+NOTES (2026-09-27): /bg is idle-only (no whileRunning) — a background launch reads the Agent where idle-only mutators cannot run (background.go startBackground); typed mid-run it is queued for idle like /continue (⧖ in commands.md). The engine's refusal is noted verbatim, so `missing input: <name>` is pinned exactly by a real-Agent test (TestBgMissingInputIsRefusedNotAsked)
+
+NOTES (2026-09-27): observed, pre-existing — a first click on the dropdown's last visible row scrolls the list under the pointer, so a second click at the same cell highlights the next row instead of accepting; the click-then-click contract does not hold on that row
+
+NOTES (2026-09-28): retry per the verifier's FIX — the latch closed at its two remaining boundaries: finishWorker and foldActuationDone skip applyPendingRebind while bgLaunching, leaving the stash for foldBgStarted, and /bg's row is touchesServer so an in-flight launcher verb refuses it (actuationBlocked). TestBgLaunchKeepsARebindStashedPastAnExchangeEnd, TestBgLaunchKeepsARebindStashedPastAnActuationEnd (the overlap forced by setting bgLaunching, since the latch now refuses /bg) and a /bg line in TestActuationLatchRefusesEveryMoveWhileHeld each fail with their guard removed (checked); TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs's pinned sets gain bg
+
+NOTES (2026-09-28): consequential edit — internal/tui/actuation.go: made necessary by the bgLaunching guard at foldActuationDone (and actuationBlocked's doc naming /bg)
+
+NOTES (2026-09-28): consequential edit — internal/tui/actuation_test.go: made necessary by /bg joining the actuation latch's refused set
+
+NOTES (2026-09-28): consequential edit — docs/manual/configuration.md: made necessary by /bg joining the actuation latch's refused set (the "one actuation runs at a time" sentence names it)
 
 **What:** Depends on items 22, 25.
 **Goal:** `/bg /<recipe-skill> <text>` starts that recipe as a background workflow and prints `started <id> in the background`; `/bg` with a non-recipe skill or no skill is refused with a line naming the recipe skills.

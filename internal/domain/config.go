@@ -986,6 +986,17 @@ type UserInput struct {
 	RecipeInputs map[string]string `json:",omitempty"`
 }
 
+// RecipeLaunch is a Driver's request to start a recipe (Agent.StartRecipe): the recipe skill's id,
+// the user's text its inputs bind from (the line after "/<id>"), and whether it runs in the
+// background. It lives here rather than beside StartRecipe so a Driver that holds the engine only
+// through a narrow interface of its own (the TUI's Engine seam) can name it without importing the
+// engine (ADR 0010, the lowest-layer rule).
+type RecipeLaunch struct {
+	SkillID    string
+	Text       string
+	Background bool
+}
+
 // SkillResolver maps attached skill IDs to their injectable form. It is implemented by the
 // skills catalog (internal/skills) and injected via Config.Skills; the interface lives in
 // domain so the loop can fulfil the UserInput.SkillIDs seam without importing the skills

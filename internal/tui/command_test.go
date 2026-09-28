@@ -1,14 +1,22 @@
 package tui
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ----------------------------------------------------------------------------
@@ -63,7 +71,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"advice", "clear", "color-scheme", "compact", "confine", "continue", "effort", "fork", "help", "inspect",
+		"advice", "bg", "clear", "color-scheme", "compact", "confine", "continue", "effort", "fork", "help", "inspect",
 		"model", "new", "redo", "rename", "schedule", "schedule-stop", "server", "sessions", "settings", "skills",
 		"stop-server", "sub-agents-server", "thinking", "undo", "unload-model", "usage", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
@@ -400,7 +408,7 @@ func TestOnlyTheCannedTurnAndCompactionOpenAnExchange(t *testing.T) {
 // Drift guard on the server set and on the latch that reads it. actuationBlocked used to carry a
 // six-name list of its own, pinned by nothing: a verb added to the namespace and forgotten there
 // ran straight into a server mid-restart and said nothing about it. Both halves are pinned — the
-// flag's own set, and the six verbs the latch refuses because of the two flags together — because
+// flag's own set, and the seven verbs the latch refuses because of the two flags together — because
 // the second is the one a reader of the latch actually asks about.
 func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) {
 	t.Parallel()
@@ -410,7 +418,7 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 			touching = append(touching, spec.name)
 		}
 	}
-	if want := []string{"model", "server", "stop-server", "unload-model"}; !reflect.DeepEqual(touching, want) {
+	if want := []string{"bg", "model", "server", "stop-server", "unload-model"}; !reflect.DeepEqual(touching, want) {
 		t.Errorf("touchesServer verbs = %v, want exactly %v", touching, want)
 	}
 
@@ -420,7 +428,7 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 			blocked = append(blocked, spec.name)
 		}
 	}
-	want := []string{"compact", "continue", "model", "server", "stop-server", "unload-model"}
+	want := []string{"bg", "compact", "continue", "model", "server", "stop-server", "unload-model"}
 	if !reflect.DeepEqual(blocked, want) {
 		t.Errorf("latch-blocked verbs = %v, want exactly %v — everything else stays live", blocked, want)
 	}
@@ -940,5 +948,338 @@ func TestParseInputBlankIsEmptyMessage(t *testing.T) {
 	got := parseInput("   ", nil)
 	if got.kind != kindMessage || got.text != "" {
 		t.Errorf("parseInput(blank) = {kind:%v text:%q}, want empty message", got.kind, got.text)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /bg — a recipe started in the background (ADR 0089 D1)
+// ----------------------------------------------------------------------------
+
+// runBgLine types line, sends it, and folds back the /bg launch's answer when the send made one —
+// the Cmd's messages run off the loop and the bgStartedMsg among them is stepped in, as the program
+// would.
+func runBgLine(t *testing.T, m Model, line string) Model {
+	t.Helper()
+	m.input.SetValue(line)
+	m, cmd := stepCmd(t, m, keyEnter())
+	for _, msg := range cmdMsgs(cmd) {
+		if started, ok := msg.(bgStartedMsg); ok {
+			m = step(t, m, started)
+		}
+	}
+	return m
+}
+
+// cmdMsgs runs cmd and every Cmd a batch of it carries, returning the messages they produced.
+func cmdMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, cmdMsgs(c)...)
+	}
+	return out
+}
+
+// /bg /<recipe> <text> hands the engine a background launch of that recipe with the text after its
+// token, opens no Exchange, and notes the id the workflow started under.
+func TestBgStartsARecipeInTheBackground(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{startRecipeFn: func(context.Context, domain.RecipeLaunch) (string, error) {
+		return testWorkflowID, nil
+	}}
+	m := newTestModelEng(t, eng, recipeOpts())
+
+	m = runBgLine(t, m, "/bg /audit internal/  deep")
+
+	want := []domain.RecipeLaunch{{SkillID: "audit", Text: "internal/  deep", Background: true}}
+	if got := eng.launches(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("StartRecipe calls = %+v, want %+v", got, want)
+	}
+	if len(eng.submitted) != 0 || m.state != stateIdle {
+		t.Errorf("submitted %v in state %v; want no Exchange opened", eng.submitted, m.state)
+	}
+	assertLastNote(t, m, "started "+testWorkflowID+" in the background")
+}
+
+// /bg with no skill, or with a skill that carries no recipe, is refused with the recipe skills
+// named, and nothing reaches the engine.
+func TestBgRefusesALineWithoutARecipe(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		line string
+		want string
+	}{
+		{"/bg", "/bg starts a recipe in the background — /bg /<recipe> <text>; the recipes: /audit"},
+		{"/bg audit internal/", "/bg starts a recipe in the background — /bg /<recipe> <text>; the recipes: /audit"},
+		{"/bg /review the diff", "/review is not a recipe — /bg starts only a recipe in the background; the recipes: /audit"},
+		{"/bg /nope", "/nope is not a recipe — /bg starts only a recipe in the background; the recipes: /audit"},
+	} {
+		eng := &fakeEngine{}
+		m := newTestModelEng(t, eng, recipeOpts())
+		m = runBgLine(t, m, tc.line)
+		if got := eng.launches(); len(got) != 0 {
+			t.Errorf("%q: StartRecipe calls = %+v, want none", tc.line, got)
+		}
+		assertLastNote(t, m, tc.want)
+	}
+}
+
+// With no recipe in the catalog the refusal says so.
+func TestBgRefusalWithNoRecipesSaysNone(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m = runBgLine(t, m, "/bg /review")
+	assertLastNote(t, m, "/review is not a recipe — /bg starts only a recipe in the background; the recipes: none")
+}
+
+// A recipe whose required input the text leaves unbound is refused by a real engine as
+// `missing input: <name>` — never asked, since the conversation may be busy — and nothing starts.
+func TestBgMissingInputIsRefusedNotAsked(t *testing.T) {
+	t.Parallel()
+	home, workspace := t.TempDir(), t.TempDir()
+	dir := filepath.Join(home, "skills", "review-tree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(recipeSkill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := skills.Load(skills.Sources{Home: home})
+	if err != nil {
+		t.Fatalf("skills.Load: %v", err)
+	}
+	// The one turn is never asked for: the launch is refused before any model call.
+	srv := stubllm.New(t, stubllm.Script{Model: "test-model", Turns: []stubllm.Turn{{Text: "unused"}}})
+	bridge := NewBridge()
+	bridge.Bind(newUIHarness())
+	eng, err := agent.New(domain.Config{
+		Endpoint:     srv.URL,
+		Model:        "test-model",
+		Mode:         domain.ModeAskBefore,
+		Events:       bridge.Sink(),
+		Approver:     bridge.Approver(),
+		Asker:        bridge.Asker(),
+		Skills:       catalog,
+		Tools:        tools.NewDefaultRegistry(workspace),
+		WorkspaceDir: workspace,
+	})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+
+	opts := e2eOptions(srv.URL, workspace)
+	opts.Skills = catalog
+	m := newTestModelEng(t, eng, opts)
+	m = runBgLine(t, m, "/bg /review-tree")
+
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle — no question is put", m.state)
+	}
+	assertLastNote(t, m, "missing input: scope")
+}
+
+// A /bg launch reads the Agent off the loop, so it is latched until its answer folds: a heartbeat
+// that observes a new model meanwhile stashes the rebind instead of driving it beside the launch,
+// and the rebind lands at foldBgStarted. The launch Cmd really runs on its own goroutine here, as
+// the program runs it, and both sides touch one unguarded binding — so under -race a rebind driven
+// during the launch is a reported race, not merely a wrong count.
+func TestBgLaunchStashesARebindUntilItLands(t *testing.T) {
+	t.Parallel()
+	bound := "test-model" // what the engine is bound to: StartRecipe reads it, the rebind writes it
+	entered, release := make(chan struct{}), make(chan struct{})
+	eng := &fakeEngine{startRecipeFn: func(context.Context, domain.RecipeLaunch) (string, error) {
+		entered <- struct{}{}
+		model := bound // the launch-time snapshot's read, unordered with the Update loop's writes
+		<-release
+		if model == "" {
+			return "", nil
+		}
+		return testWorkflowID, nil
+	}}
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		bound = model
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}}
+	opts := recipeOpts()
+	serverSeams(&opts).beat = (&fakeHeartbeat{}).beat
+	serverSeams(&opts).rebind = rb.rebind
+	m := newTestModelEng(t, eng, opts)
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the baseline binding, at idle
+
+	m.input.SetValue("/bg /audit internal/")
+	m, cmd := stepCmd(t, m, keyEnter())
+	done := make(chan []tea.Msg, 1)
+	go func() { done <- cmdMsgs(cmd) }()
+	<-entered
+
+	m = foldBeatMsg(t, m, upBeat("new-model", 16384))
+	if len(rb.calls) != 1 {
+		t.Errorf("rebind calls = %+v, want none driven while the launch reads the engine", rb.calls)
+	}
+	if m.hb.pendingRebind == nil || m.hb.pendingRebind.model != "new-model" {
+		t.Errorf("pendingRebind = %+v, want the observed change stashed for the launch's fold", m.hb.pendingRebind)
+	}
+
+	close(release)
+	for _, msg := range <-done {
+		if started, ok := msg.(bgStartedMsg); ok {
+			m = step(t, m, started)
+		}
+	}
+	if len(rb.calls) != 2 || rb.calls[1].model != "new-model" {
+		t.Fatalf("rebind calls = %+v, want the stashed change bound once the launch landed", rb.calls)
+	}
+	if m.bgLaunching || m.hb.pendingRebind != nil {
+		t.Errorf("latched %v, pending %+v after the launch landed; want both clear", m.bgLaunching, m.hb.pendingRebind)
+	}
+	if !slices.Contains(noteTexts(m), "started "+testWorkflowID+" in the background") {
+		t.Errorf("notes = %q, want the started note", noteTexts(m))
+	}
+}
+
+// While a /bg launch is in flight an idle-only command is queued rather than run — a second /bg
+// among them — and the queue drains, in order, when the launch lands.
+func TestBgLaunchQueuesIdleOnlyCommandsUntilItLands(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{startRecipeFn: func(context.Context, domain.RecipeLaunch) (string, error) {
+		return testWorkflowID, nil
+	}}
+	m := newTestModelEng(t, eng, recipeOpts())
+
+	m.input.SetValue("/bg /audit a")
+	m, first := stepCmd(t, m, keyEnter()) // the launch Cmd is held: the launch is still in flight
+	m.input.SetValue("/bg /audit b")
+	m, second := stepCmd(t, m, keyEnter())
+	m.input.SetValue("/clear")
+	m = step(t, m, keyEnter())
+
+	if eng.clearCalls != 0 || len(cmdMsgs(second)) != 0 {
+		t.Fatalf("clear calls %d, second launch Cmd %v; want both queued behind the launch", eng.clearCalls, second != nil)
+	}
+	if got := []string{m.deferredCommands[0].command, m.deferredCommands[1].command}; !reflect.DeepEqual(got, []string{"bg", "clear"}) || len(m.deferredCommands) != 2 {
+		t.Fatalf("queued commands = %v, want [bg clear]", got)
+	}
+
+	var drained tea.Cmd
+	for _, msg := range cmdMsgs(first) {
+		if started, ok := msg.(bgStartedMsg); ok {
+			m, drained = stepCmd(t, m, started)
+		}
+	}
+
+	// The queued /bg ran and latched again, so the /clear behind it still waits for that launch.
+	if !m.bgLaunching || eng.clearCalls != 0 || len(m.deferredCommands) != 1 {
+		t.Fatalf("latched %v, clear calls %d, queued %d; want the second /bg launching and /clear still queued",
+			m.bgLaunching, eng.clearCalls, len(m.deferredCommands))
+	}
+	for _, msg := range cmdMsgs(drained) {
+		if started, ok := msg.(bgStartedMsg); ok {
+			m = step(t, m, started)
+		}
+	}
+	if m.bgLaunching || eng.clearCalls != 1 || len(m.deferredCommands) != 0 {
+		t.Errorf("latched %v, clear calls %d, queued %d; want the /clear run once the second launch landed",
+			m.bgLaunching, eng.clearCalls, len(m.deferredCommands))
+	}
+	if got := eng.launches(); len(got) != 2 || got[1].Text != "b" {
+		t.Errorf("StartRecipe calls = %+v, want the queued /bg launched second", got)
+	}
+}
+
+// A background workflow that ends while a /bg launch is in flight does not wake the agent beside
+// the launch: the wake is held and tried when the launch lands.
+func TestBgLaunchHoldsAWakeUntilItLands(t *testing.T) {
+	t.Parallel()
+	eng := wakingEngine()
+	eng.startRecipeFn = func(context.Context, domain.RecipeLaunch) (string, error) { return testWorkflowID, nil }
+	m := newTestModelEng(t, eng, recipeOpts())
+
+	m.input.SetValue("/bg /audit a")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = finishBackground(t, m)
+
+	if eng.wakes() != 0 || !m.wakePending {
+		t.Fatalf("Wake calls %d, pending %v; want the wake held while the launch is in flight", eng.wakes(), m.wakePending)
+	}
+
+	m = step(t, m, bgStartedMsg{id: testWorkflowID})
+
+	if eng.wakes() != 1 || m.wakePending {
+		t.Errorf("Wake calls %d, pending %v; want one wake once the launch landed", eng.wakes(), m.wakePending)
+	}
+}
+
+// An Exchange that ends while a /bg launch is in flight is not the boundary a stashed rebind waits
+// for: a message can open one beside the launch, and finishWorker driving the rebind there would
+// meet the launch-time snapshot still reading the Agent. The stash stands until the launch lands.
+func TestBgLaunchKeepsARebindStashedPastAnExchangeEnd(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{startRecipeFn: func(context.Context, domain.RecipeLaunch) (string, error) {
+		return testWorkflowID, nil
+	}}
+	rb := &fakeRebind{}
+	opts := recipeOpts()
+	serverSeams(&opts).beat = (&fakeHeartbeat{}).beat
+	serverSeams(&opts).rebind = rb.rebind
+	m := newTestModelEng(t, eng, opts)
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the baseline binding, at idle
+
+	m.input.SetValue("/bg /audit internal/")
+	m, _ = stepCmd(t, m, keyEnter()) // the launch Cmd is held: the launch is still in flight
+	startStubWorker(t, &m)           // a message opened an Exchange beside the launch
+	m = foldBeatMsg(t, m, upBeat("new-model", 16384))
+	m = step(t, m, exchangeDoneMsg{})
+
+	if len(rb.calls) != 1 {
+		t.Fatalf("rebind calls = %+v, want none driven at the Exchange's end while the launch reads the engine", rb.calls)
+	}
+	if m.hb.pendingRebind == nil || m.hb.pendingRebind.model != "new-model" {
+		t.Fatalf("pendingRebind = %+v, want the observed change still stashed for the launch's fold", m.hb.pendingRebind)
+	}
+
+	m = step(t, m, bgStartedMsg{id: testWorkflowID})
+
+	if len(rb.calls) != 2 || rb.calls[1] != (rebindCall{model: "new-model", window: 16384}) {
+		t.Errorf("rebind calls = %+v, want the stashed change bound once the launch landed", rb.calls)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Errorf("pendingRebind = %+v after the launch landed, want it cleared by the apply", m.hb.pendingRebind)
+	}
+}
+
+// A launcher verb's completion is not that boundary either while a /bg launch is in flight. The
+// latch refuses /bg while a launcher verb runs (touchesServer), so the overlap is forced here to pin
+// the completion fold's own guard: the stash stands until the launch lands.
+func TestBgLaunchKeepsARebindStashedPastAnActuationEnd(t *testing.T) {
+	t.Parallel()
+	m, rb := wireLauncher(t, newLauncher())
+	m, cmd := startLoad(t, m, "alpha")
+	m = foldBeatMsg(t, m, upBeat("other-model", 16384))
+	m.bgLaunching = true // a /bg launch reading the engine off the loop
+
+	m, _ = driveActuation(t, m, cmd)
+
+	if len(rb.calls) != 0 {
+		t.Fatalf("rebind calls = %+v, want none driven at the completion while the launch reads the engine", rb.calls)
+	}
+	if want := (rebindIntent{model: "other-model", window: 16384}); m.hb.pendingRebind == nil || !reflect.DeepEqual(*m.hb.pendingRebind, want) {
+		t.Fatalf("pendingRebind = %+v, want the observation still stashed (%+v)", m.hb.pendingRebind, want)
+	}
+
+	m = step(t, m, bgStartedMsg{id: testWorkflowID})
+
+	if want := []rebindCall{{model: "other-model", window: 16384}}; !reflect.DeepEqual(rb.calls, want) {
+		t.Errorf("rebind calls = %+v, want the stashed change bound once the launch landed", rb.calls)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Errorf("pendingRebind = %+v after the launch landed, want it cleared by the apply", m.hb.pendingRebind)
 	}
 }

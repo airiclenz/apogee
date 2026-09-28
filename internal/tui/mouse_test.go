@@ -6166,23 +6166,23 @@ func dropdownItemRow(t *testing.T, m Model, value string) int {
 }
 
 // The pointer takes two clicks to answer the dropdown, and the first one only moves the highlight
-// (call J, owner 2026-09-06). The row clicked is /confine — a verb that takes arguments and does not
-// run bare, so its accept SPLICES "/confine " into the box (acceptAutocomplete) and the box is where
+// (call J, owner 2026-09-06). The row clicked is /color-scheme — a verb that takes arguments and does not
+// run bare, so its accept SPLICES "/color-scheme " into the box (acceptAutocomplete) and the box is where
 // the answer can be read. It is also why an unconditional accept on the first press would be a
 // defect rather than a shortcut: the menu opens on /clear, whose accept throws the session away.
 func TestDropdownClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
 	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/")
-	want := dropdownItemRow(t, m, "confine")
+	want := dropdownItemRow(t, m, "color-scheme")
 	if want == m.autocomplete.selected {
-		t.Fatalf("/confine is already the highlighted row (%d); the case needs a row the pane did not pick", want)
+		t.Fatalf("/color-scheme is already the highlighted row (%d); the case needs a row the pane did not pick", want)
 	}
-	x, y := frameCell(t, m, "/confine")
+	x, y := frameCell(t, m, "/color-scheme")
 
 	m = step(t, m, leftClick(x, y))
 
 	if m.autocomplete.selected != want {
-		t.Fatalf("selected = %d after a click on /confine, want the highlight seated on %d", m.autocomplete.selected, want)
+		t.Fatalf("selected = %d after a click on /color-scheme, want the highlight seated on %d", m.autocomplete.selected, want)
 	}
 	if !m.clickArmed.holds(paneDropdown, want) {
 		t.Errorf("the click armed %+v, want the row it highlighted", m.clickArmed)
@@ -6196,8 +6196,8 @@ func TestDropdownClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
 
 	m = step(t, m, leftClick(x, y))
 
-	if m.input.Value() != "/confine " {
-		t.Fatalf("the box reads %q after the second click, want tab's own splice %q", m.input.Value(), "/confine ")
+	if m.input.Value() != "/color-scheme " {
+		t.Fatalf("the box reads %q after the second click, want tab's own splice %q", m.input.Value(), "/color-scheme ")
 	}
 	if m.autocomplete.active {
 		t.Error("the accept left the menu open")

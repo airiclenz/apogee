@@ -183,7 +183,8 @@ func unloadOutcome(res ActuationResult) string {
 
 // actuationBlocked reports whether command is one of the verbs the latch refuses while it is held:
 // the ones that open an Exchange (a typed message is the third path and is gated in submit) and the
-// ones that switch or actuate the session's server. Both sets are read off the "/" table's own flags
+// ones that switch or actuate the session's server (with /bg, whose launch reads the engine a
+// completing move would re-point). Both sets are read off the "/" table's own flags
 // (commandSpec.opensExchange, commandSpec.touchesServer) rather than named here, so a verb cannot be
 // added to the namespace and forgotten by the latch — which used to fail silently, the verb running
 // into a server mid-restart. Everything else — scrollback, /clear, /sessions, /version, /confine —
@@ -424,8 +425,13 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	// this fold the quiescent boundary a binding change observed under the latch has been waiting
 	// for: observeBinding STASHES one rather than driving Agent.Rebind beside a move this completion
 	// may be about to make. It is finishWorker's posture, one level across, and it runs BEFORE the
-	// completion's own words because the beat that saw it landed before the completion did.
-	m.applyPendingRebind()
+	// completion's own words because the beat that saw it landed before the completion did. A /bg
+	// launch still reading the Agent off the loop (bgLaunching) keeps it stashed for foldBgStarted —
+	// /bg is touchesServer, so the latch refuses it while a launcher verb is in flight, and this
+	// guard holds the boundary should the two ever overlap anyway.
+	if !m.bgLaunching {
+		m.applyPendingRebind()
+	}
 
 	if ev.err != nil {
 		note := stripEscapes(ev.err.Error())

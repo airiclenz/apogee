@@ -118,10 +118,11 @@ type parsedInput struct {
 //
 //   - touchesServer — the verb switches the session's server or actuates it, so the actuation latch
 //     refuses it while a launcher verb is in flight: the server is mid-restart, and there is nothing
-//     stable to switch (actuationBlocked, ADR 0029 D5). The latch refuses the opensExchange pair for
-//     the neighbouring reason — there is nothing to send to — so it reads the two flags together
-//     rather than keeping a verb list of its own, and a future verb that opens an Exchange is
-//     latched by declaring that one flag.
+//     stable to switch (actuationBlocked, ADR 0029 D5). /bg carries it too: its launch reads the
+//     Agent off the loop (bgLaunching), which a completing load's move would re-point beside it. The
+//     latch refuses the opensExchange pair for the neighbouring reason — there is nothing to send
+//     to — so it reads the two flags together rather than keeping a verb list of its own, and a
+//     future verb that opens an Exchange is latched by declaring that one flag.
 //
 //   - gatedByEffort — the verb is only worth offering when the bound model has a thinking-effort
 //     dial, so the dropdown DROPS its row when detection says there is none (ADR 0060 D5). /effort
@@ -292,6 +293,7 @@ var commandSpecs []commandSpec
 func init() {
 	commandSpecs = []commandSpec{
 		{name: "advice", summary: "what advice the model saw, by Turn", whileRunning: true, noRecall: true, run: bareVerb(Model.runAdviceCommand)},
+		{name: "bg", summary: "start a recipe in the background — /bg /<recipe> <text>", takesArgs: true, touchesServer: true, run: restVerb(Model.runBg)},
 		{name: "clear", summary: "reset the model's memory of this session", noRecall: true, run: bareVerb(Model.startNewSession)},
 		{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true, parseArgs: verbGrammar(parseColorScheme), run: typedVerb(Model.runColorScheme)},
 		{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true, run: bareVerb(Model.runCompact)},

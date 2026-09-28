@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -14,7 +18,7 @@ import (
 // runs now or is queued for the next idle, the queue's drain, and the drivers that DO run: the
 // Exchange launch both send paths share, the session reset /clear means, the /command dispatch
 // (its gates, then the row's own run), the adapters a commandSpecs row names its verb through, and
-// the verbs with no file of their own (/continue, /compact, /version, /help). Lifted out of
+// the verbs with no file of their own (/bg, /continue, /compact, /version, /help). Lifted out of
 // model.go as one concern: what a recognised verb does and what an unrunnable one is answered with
 // are the same question. The parse that classifies the line and the table that declares each verb
 // stay in command.go; [Model.submit] stays in model.go with the input concern it belongs to.
@@ -39,12 +43,13 @@ func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
 // tag, the queue a line goes into and what actually happens are three views of a single rule.
 //
 // At a quiescent boundary every verb is runnable. While a worker owns the engine (m.busy() — the
-// same predicate that decides whether Esc stops something) only the reporting lines are:
-// parsedInput.safeWhileRunning owns which those are, and it is deliberately asked about the parsed
-// LINE rather than the bare verb, because "/confine" and "/confine off" are the same verb and only
-// one of them is a report.
+// same predicate that decides whether Esc stops something), or a /bg launch is reading it off the
+// loop (m.bgLaunching — an idle state whose engine is still not the loop's to mutate), only the
+// reporting lines are: parsedInput.safeWhileRunning owns which those are, and it is deliberately
+// asked about the parsed LINE rather than the bare verb, because "/confine" and "/confine off" are
+// the same verb and only one of them is a report.
 func (m Model) commandRunnable(parsed parsedInput) bool {
-	return !m.busy() || parsed.safeWhileRunning()
+	return (!m.busy() && !m.bgLaunching) || parsed.safeWhileRunning()
 }
 
 // queueCommand stages an idle-only command invoked while a worker works: the parsed line joins
@@ -75,15 +80,15 @@ func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 // /clear clears before a queued message lands (ADR 0025 D7 and D10, amended 2026-09-14).
 //
 // The drain stops at the first verb that leaves the Model busy — /compact starts its worker,
-// /continue opens an Exchange — because the next verb would be driven against a worker that owns
-// the engine: never two workers on one Agent. What is left queued waits for that worker's own
+// /continue opens an Exchange, /bg launches off the loop (bgLaunching) — because the next verb would
+// be driven against an engine something else holds: never two workers on one Agent. What is left queued waits for that worker's own
 // terminal fold, which drains again, so a /clear queued behind a /compact still runs, in order,
 // once the compaction lands. A deferred quit runs nothing: the queued commands are
 // session-ephemeral like the staged rows (ADR 0025), and a program that is exiting has no session
 // to run them in.
 func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	for len(m.deferredCommands) > 0 && !m.busy() && !m.quitting {
+	for len(m.deferredCommands) > 0 && !m.busy() && !m.bgLaunching && !m.quitting {
 		parsed := m.deferredCommands[0]
 		m.deferredCommands = m.deferredCommands[1:]
 		if len(m.deferredCommands) == 0 {
@@ -466,4 +471,90 @@ func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	cmd := m.finishWorker(stateIdle)
 	return m.drainThenFlush(cmd)
+}
+
+// The notes /bg answers with (ADR 0089 D1): the id of the workflow it started, or — when the line
+// names no recipe skill — a refusal listing the recipe skills there are.
+const (
+	bgStartedFormat   = "started %s in the background"
+	bgNoRecipeFormat  = "/bg starts a recipe in the background — /bg /<recipe> <text>; the recipes: %s"
+	bgNotRecipeFormat = "/%s is not a recipe — /bg starts only a recipe in the background; the recipes: %s"
+	bgNoRecipes       = "none"
+)
+
+// bgStartedMsg carries what StartRecipe answered for a /bg launch back to the Update loop: the
+// workflow's id, or why it did not start.
+type bgStartedMsg struct {
+	id  string
+	err error
+}
+
+// runBg drives /bg: `/bg /<recipe> <text>` starts that recipe as a background workflow (ADR 0089
+// D1), its inputs bound from text alone — a required one left unbound is refused as `missing input:
+// <name>` by the engine rather than asked. A line whose first word is not a recipe skill's token is
+// refused here with the recipe skills named, and nothing reaches the engine.
+//
+// The launch runs in a tea.Cmd rather than on this loop, because it opens the workflow's folder on
+// disk; the context it is handed is the program's, never an Exchange's, since the running workflow
+// lives under a context the engine's manager owns, which the conversation's esc never reaches
+// (ADR 0089 D5). /bg is idle-only, so no worker drives the engine when the launch starts, and the
+// launch is latched until its answer folds (bgLaunching, cleared by foldBgStarted) the way a
+// /sessions load is: while the Cmd reads the Agent, a heartbeat's rebind is stashed, a wake is held
+// and every idle-only command — a second /bg among them — is queued, so no idle-only mutator runs
+// beside the launch-time snapshot.
+func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
+	token, text := cutToken(rest)
+	id, named := strings.CutPrefix(token, "/")
+	if !named || id == "" {
+		m.transcript.addNote(fmt.Sprintf(bgNoRecipeFormat, m.recipeList()))
+		return m, nil
+	}
+	if !m.recipeSkill(id) {
+		m.transcript.addNote(fmt.Sprintf(bgNotRecipeFormat, id, m.recipeList()))
+		return m, nil
+	}
+	eng, ctx := m.eng, m.parent
+	launch := domain.RecipeLaunch{SkillID: id, Text: strings.TrimSpace(text), Background: true}
+	m.bgLaunching = true
+	return m, func() tea.Msg {
+		workflow, err := eng.StartRecipe(ctx, launch)
+		return bgStartedMsg{id: workflow, err: err}
+	}
+}
+
+// foldBgStarted notes what a /bg launch came to: the id it started under, or the engine's refusal
+// exactly as the engine worded it. It releases the launch latch first, and — the engine being the
+// loop's again — binds a rebind a beat stashed meanwhile and runs the commands queued behind the
+// launch, in order; either waits on for a worker a message opened meanwhile (finishWorker). A held
+// wake is tried by the Update tail (wakeAfterFold).
+func (m Model) foldBgStarted(msg bgStartedMsg) (tea.Model, tea.Cmd) {
+	m.bgLaunching = false
+	if msg.err != nil {
+		m.transcript.addNote(msg.err.Error())
+	} else {
+		m.transcript.addNote(fmt.Sprintf(bgStartedFormat, msg.id))
+	}
+	if !m.busy() && !m.actuation.inFlight {
+		m.applyPendingRebind()
+	}
+	return m.runDeferredCommands()
+}
+
+// recipeList names the catalog's recipe skills as "/<id>" tokens, sorted and comma-separated, or
+// "none" when the catalog carries no recipe.
+func (m Model) recipeList() string {
+	if m.opts.Skills == nil {
+		return bgNoRecipes
+	}
+	var ids []string
+	for _, skill := range m.opts.Skills.List() {
+		if skill.Recipe != nil {
+			ids = append(ids, "/"+skill.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return bgNoRecipes
+	}
+	slices.Sort(ids)
+	return strings.Join(ids, ", ")
 }

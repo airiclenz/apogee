@@ -1810,7 +1810,7 @@ profile on the server you are already on moves nothing.
 A load blocks while the server comes up, so it is narrated rather than modal: each
 launcher step lands as a transcript note as it happens, and the footer's model slot
 shows `loading <profile>…` until the beat binds. One actuation runs at a time — while
-one is in flight, sends and the other switching commands are refused with a single line
+one is in flight, sends, `/bg` and the other switching commands are refused with a single line
 — and there is no mid-flight cancel: `/stop-server` is the cancel, available the moment
 the verb returns. When the health wait times out the launcher deliberately leaves the server
 running and names its PID and log path; apogee prints that and adds the honest coda —
