@@ -81,6 +81,20 @@ var (
 	_ apogee.PresentMethod
 	_ apogee.SkillResolver
 	_ apogee.ResolvedSkill
+	_ apogee.RecipeSource
+	_ apogee.Recipe
+	_ apogee.InputDecl
+	_ apogee.RecipeLaunch
+	_ apogee.WorkflowConfig
+	_ apogee.WorkflowPlan
+	_ apogee.WorkflowStage
+	_ apogee.StageKind
+	_ apogee.ItemSource
+	_ apogee.ReceiptSpec
+	_ apogee.WorkflowInfo
+	_ apogee.WorkflowPhaseEvent
+	_ apogee.WorkflowPhase
+	_ apogee.WorkflowReceipt
 	_ apogee.Tool
 	_ apogee.ExternalEffectTool
 	_ apogee.ReadOnlyTool
@@ -137,6 +151,13 @@ var (
 	_ = apogee.ShippedProfile
 )
 
+// Workflow entry points on the engine handle — method values, so an embedder's route onto a
+// Workflow (ADR 0087) cannot be renamed or dropped without failing the build here.
+var (
+	_ = (*apogee.Agent).StartRecipe
+	_ = (*apogee.Agent).Workflows
+)
+
 // Re-exported consts and sentinel errors — one reference each.
 var (
 	_ = apogee.SeatFallbackNote
@@ -171,6 +192,22 @@ var (
 
 	_ = apogee.SubAgentStarted
 	_ = apogee.SubAgentFinished
+
+	_ = apogee.WorkflowStarted
+	_ = apogee.WorkflowStageStarted
+	_ = apogee.WorkflowItemFinished
+	_ = apogee.WorkflowWaiting
+	_ = apogee.WorkflowFinished
+	_ = apogee.WorkflowStopped
+	_ = apogee.WorkflowFailed
+
+	_ = apogee.StageFanout
+	_ = apogee.StageVerify
+	_ = apogee.StageMerge
+	_ = apogee.StagePick
+	_ = apogee.StageScript
+	_ = apogee.StageAsk
+	_ = apogee.StageRepeat
 
 	_ = apogee.UndeliveredCompleted
 	_ = apogee.UndeliveredCapped

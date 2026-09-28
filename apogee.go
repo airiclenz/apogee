@@ -460,6 +460,44 @@ type InputDecl = workflow.InputDecl
 type RecipeLaunch = agent.RecipeLaunch
 
 // ----------------------------------------------------------------------------
+// Workflows (internal/workflow) — the definition an embedder writes and the listing it reads
+// ----------------------------------------------------------------------------
+
+// WorkflowPlan is one Workflow definition (ADR 0087): the stages a `fan_out` call asks for or a
+// Recipe declares, run in the order listed. It is Recipe.Plan's type, so an embedder's own
+// RecipeSource builds one; the CONTEXT.md word for the human-written definition is Recipe.
+type WorkflowPlan = workflow.Plan
+
+// WorkflowStage is one stage of a WorkflowPlan; its Kind says which of its fields it reads.
+type WorkflowStage = workflow.Stage
+
+// StageKind names what a WorkflowStage does.
+type StageKind = workflow.StageKind
+
+// The seven stage kinds (ADR 0087 D6); a `fan_out` call's plan uses only fanout, verify and merge.
+const (
+	StageFanout = workflow.StageFanout
+	StageVerify = workflow.StageVerify
+	StageMerge  = workflow.StageMerge
+	StagePick   = workflow.StagePick
+	StageScript = workflow.StageScript
+	StageAsk    = workflow.StageAsk
+	StageRepeat = workflow.StageRepeat
+)
+
+// ItemSource is where a fanout stage's items come from (WorkflowStage.Over).
+type ItemSource = workflow.ItemSource
+
+// ReceiptSpec declares the typed receipt fields a stage wants beyond status and summary, keyed by
+// field name: `int`, `text`, `list`, or an enum written `a|b|c`.
+type ReceiptSpec = workflow.ReceiptSpec
+
+// WorkflowInfo is one Workflow of the session as Agent.Workflows lists it: its status (every
+// stage and item with the receipts so far), its folder, and whether it runs or waits in the
+// background.
+type WorkflowInfo = agent.WorkflowInfo
+
+// ----------------------------------------------------------------------------
 // Tools (internal/domain)
 // ----------------------------------------------------------------------------
 

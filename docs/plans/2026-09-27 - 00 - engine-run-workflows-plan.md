@@ -1091,7 +1091,13 @@ NOTES (2026-09-28): retry — the three actionDefects messages no longer end on 
 **Acceptance:** `go test -race -count=1 ./internal/daemon/ && go test -race -count=1 -run Daemon ./cmd/apogee/`
 **Commit:** `feat(daemon): schedule a recipe with run: workflow:`
 
-## 37. Bench readiness for workflows
+## 37. Bench readiness for workflows — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): re-derived from "aliases in apogee.go" — Recipe, RecipeSource, InputDecl and RecipeLaunch were already aliased by item 20, so this item adds only the missing workflow definition and listing aliases (WorkflowPlan, WorkflowStage, StageKind + the seven Stage… consts, ItemSource, ReceiptSpec, WorkflowInfo). The root `Plan`/`Stage` names are prefixed `Workflow…` so they do not read as ModePlan or a docs/plans/ plan (CONTEXT.md _Avoid_ "plan").
+
+NOTES (2026-09-28): example_test.go also pins the workflow surface earlier items aliased but never pinned (WorkflowConfig, WorkflowPhaseEvent, WorkflowPhase, WorkflowReceipt, the seven WorkflowPhase consts, Recipe, RecipeSource, InputDecl, RecipeLaunch), plus `(*apogee.Agent).StartRecipe` and `.Workflows` as method values.
+
+NOTES (2026-09-28): benchreadiness_test.go's runToQuiescence now submits and calls a new stepToQuiescence helper, so the recipe case can step an Exchange that StartRecipe opened; the file header gains a paragraph on the workflow proof's import rule (internal/tools only stocks the menu with fan_out).
 
 **What:** Depends on items 15, 20, 25.
 **Goal:** the root facade exports what an embedder needs to run a `fan_out` workflow and a recipe in-process (types, `StartRecipe`, `Workflows`, events), and `benchreadiness_test.go` drives both against a stub upstream to quiescence.

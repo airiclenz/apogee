@@ -15,6 +15,12 @@ package apogee_test
 // they inspect the on-disk session schema, stock the tool menu and script the upstream, not the
 // arming path, and none is the bare root module path, so ADR-0010's "internal never imports
 // root" invariant is untouched.
+//
+// The Workflow proof (ADR 0087) holds to the same rule: TestBenchReadinessRunsAWorkflow runs a
+// model's `fan_out` call and a Recipe through the facade alone — the Recipe is built from the
+// root's WorkflowPlan / WorkflowStage / ReceiptSpec aliases, served through the root's
+// RecipeSource port and started by Agent.StartRecipe — and internal/tools only stocks the menu
+// with the fan_out tool, which an injected Config.Tools is taken exactly as given without.
 
 import (
 	"context"
@@ -24,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -241,6 +248,13 @@ func runToQuiescence(t *testing.T, a *apogee.Agent, in apogee.UserInput) {
 	if err := a.Submit(in); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
+	stepToQuiescence(t, a)
+}
+
+// stepToQuiescence Steps an Agent whose Exchange is already open — by Submit, or by
+// Agent.StartRecipe — to the quiescent boundary that ends it, under the same bounded step budget.
+func stepToQuiescence(t *testing.T, a *apogee.Agent) {
+	t.Helper()
 	for i := 0; i < 8; i++ {
 		res, err := a.Step(context.Background())
 		if err != nil {
@@ -657,4 +671,267 @@ func TestBenchConfigDialsTheProductsPromptAndShape(t *testing.T) {
 		t.Fatalf("New with the product's prompt and shape: %v", err)
 	}
 	_ = ag.Close()
+}
+
+// ----------------------------------------------------------------------------
+// Workflows (ADR 0087): a model's fan_out and a Recipe, run in-process to quiescence
+// ----------------------------------------------------------------------------
+
+// The briefs the two workflows run and the recipe's skill id. {item} names each child's item,
+// which the scripted upstream reads back into the child's receipt; {scope} is the recipe's input.
+const (
+	fanOutTask = "check {item} carefully and report"
+	recipeTask = "check {item} carefully in {scope} and report"
+	recipeID   = "bench-review"
+)
+
+// workflowScript is the Script both workflows play. Every Turn is selected by the request's own
+// shape, so it holds however the item children interleave: an item child hands back an ok
+// receipt naming its item through `finish`; the parent that has the fan_out's result, or the
+// recipe's result lines, closes the Exchange; and a fresh fan-out request calls fan_out over two
+// items.
+func workflowScript() stubllm.Script {
+	fanOutArgs, _ := json.Marshal(map[string]any{
+		"task":    fanOutTask,
+		"over":    []string{"alpha", "beta"},
+		"returns": map[string]string{"count": "int"},
+	})
+	return stubllm.Script{Model: benchModelName, Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: tools.FanOutToolName}, Repeat: true, Text: "fanned out"},
+		{When: &stubllm.Match{LastMessage: `^/` + recipeID}, Repeat: true, Text: "reviewed"},
+		{
+			When:     &stubllm.Match{LastMessage: `check \w+ carefully`},
+			Repeat:   true,
+			Captures: []stubllm.Capture{{Name: "item", From: "last_message", Pattern: `check (\w+) carefully`}},
+			ToolCalls: []stubllm.ToolCall{{
+				ID: "call_finish", Name: tools.FinishToolName,
+				Arguments: `{"status":"ok","summary":"{{item}} is fine","count":1}`,
+			}},
+		},
+		{
+			When:      &stubllm.Match{LastMessage: "please fan out"},
+			Repeat:    true,
+			ToolCalls: []stubllm.ToolCall{{ID: "call_fan_out", Name: tools.FanOutToolName, Arguments: string(fanOutArgs)}},
+		},
+	}}
+}
+
+// lockedSink records every emitted Event under a lock: a Workflow's item children run beside
+// each other, so their events may reach the sink from more than one goroutine.
+type lockedSink struct {
+	mu     sync.Mutex
+	events []apogee.Event
+}
+
+func (s *lockedSink) Emit(e apogee.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, e)
+}
+
+// workflowPhases returns the Workflow phase events the sink recorded, in emission order.
+func (s *lockedSink) workflowPhases() []apogee.WorkflowPhaseEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []apogee.WorkflowPhaseEvent
+	for _, e := range s.events {
+		if we, ok := e.(apogee.WorkflowPhaseEvent); ok {
+			out = append(out, we)
+		}
+	}
+	return out
+}
+
+// benchRecipes is the bench's own recipe catalog, built from the root's aliases alone: one skill,
+// a Recipe of one fanout stage over alpha and beta whose brief names its required `scope` input.
+// It is both the SkillResolver an attach reads and the RecipeSource a launch reads.
+type benchRecipes struct{}
+
+func (benchRecipes) ResolveSkills(ids []string) []apogee.ResolvedSkill {
+	var out []apogee.ResolvedSkill
+	for _, id := range ids {
+		if id == recipeID {
+			out = append(out, apogee.ResolvedSkill{ID: id, DisplayName: id, Body: "BENCH REVIEW BODY"})
+		}
+	}
+	return out
+}
+
+func (benchRecipes) Recipe(id string) (apogee.Recipe, bool) {
+	if id != recipeID {
+		return apogee.Recipe{}, false
+	}
+	return apogee.Recipe{
+		ID: recipeID,
+		Plan: apogee.WorkflowPlan{Name: recipeID, Stages: []apogee.WorkflowStage{{
+			Name:    "items",
+			Kind:    apogee.StageFanout,
+			Task:    recipeTask,
+			Over:    &apogee.ItemSource{List: []string{"alpha", "beta"}},
+			Returns: apogee.ReceiptSpec{"count": "int"},
+		}}},
+		Inputs: []apogee.InputDecl{{Name: "scope", Required: true, Description: "the folder to review"}},
+		Dir:    "/bench/skills/" + recipeID,
+	}, true
+}
+
+func (benchRecipes) RecipeIDs() []string { return []string{recipeID} }
+
+// The bench's catalog must satisfy both ports the engine reads off Config.Skills.
+var (
+	_ apogee.SkillResolver = benchRecipes{}
+	_ apogee.RecipeSource  = benchRecipes{}
+)
+
+// workflowArm constructs an Agent that can run a Workflow: fan_out on its injected menu beside a
+// real list_dir, the bench's recipe catalog as its skills, and a scratch directory of its own for
+// the workflow folders.
+func workflowArm(t *testing.T, endpoint string, sink apogee.EventSink) *apogee.Agent {
+	t.Helper()
+	roots := newRoots(t)
+	reg := apogee.NewToolRegistry()
+	if err := reg.Register(tools.NewListDir(roots.workspace, tools.ReadMounts{})); err != nil {
+		t.Fatalf("register list_dir: %v", err)
+	}
+	if err := reg.Register(tools.NewFanOut()); err != nil {
+		t.Fatalf("register fan_out: %v", err)
+	}
+	a, err := apogee.New(apogee.Config{
+		Endpoint:     endpoint,
+		Model:        benchModelName,
+		Mode:         apogee.ModeAskBefore,
+		Approver:     allowAll{},
+		Events:       sink,
+		Tools:        reg,
+		Skills:       benchRecipes{},
+		WorkspaceDir: roots.workspace,
+		ScratchDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("New (workflow arm): %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a
+}
+
+// wantItemLines fails unless text carries one ok result line per item and the totals line.
+func wantItemLines(t *testing.T, text string) {
+	t.Helper()
+	for _, want := range []string{
+		"#1 alpha — ok — alpha is fine count=1",
+		"#2 beta — ok — beta is fine count=1",
+		"items 2 · ok 2 · partial 0 · blocked 0",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("result lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// wantPhases fails unless the sink saw the workflow start, finish each item, and finish.
+func wantPhases(t *testing.T, sink *lockedSink) {
+	t.Helper()
+	seen := map[apogee.WorkflowPhase]int{}
+	for _, e := range sink.workflowPhases() {
+		seen[e.Phase]++
+	}
+	if seen[apogee.WorkflowStarted] != 1 || seen[apogee.WorkflowItemFinished] != 2 || seen[apogee.WorkflowFinished] != 1 {
+		t.Errorf("workflow phases = %v, want one started, two items finished, one finished", seen)
+	}
+}
+
+// wantOneFinishedWorkflow fails unless Agent.Workflows lists exactly one Workflow, run to its end
+// in the foreground, and returns it.
+func wantOneFinishedWorkflow(t *testing.T, a *apogee.Agent) apogee.WorkflowInfo {
+	t.Helper()
+	listed, err := a.Workflows()
+	if err != nil {
+		t.Fatalf("Workflows: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("Workflows listed %d, want the one this Exchange ran", len(listed))
+	}
+	info := listed[0]
+	if info.Status.Phase != "done" || info.Background || info.Queued || info.Dir == "" {
+		t.Errorf("listed workflow = phase %q, background %v, queued %v, dir %q; want a finished foreground one with a folder",
+			info.Status.Phase, info.Background, info.Queued, info.Dir)
+	}
+	return info
+}
+
+// TestBenchReadinessRunsAWorkflow proves a Driver that cannot import internal/* can run both kinds
+// of Workflow in-process and read what they did (ADR 0087, ADR 0031 invariant 4): a model's
+// blocking fan_out call and a Recipe started by Agent.StartRecipe each run their item children
+// against the scripted upstream to quiescence, report their phases on the public event stream, and
+// are listed by Agent.Workflows with the folder their record lives in.
+func TestBenchReadinessRunsAWorkflow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fan_out", func(t *testing.T) {
+		t.Parallel()
+		srv := stubllm.New(t, workflowScript())
+		sink := &lockedSink{}
+		a := workflowArm(t, srv.URL, sink)
+
+		runToQuiescence(t, a, apogee.UserInput{Text: "please fan out over the two modules"})
+
+		var result string
+		for _, e := range sink.events {
+			if re, ok := e.(apogee.ToolResultEvent); ok && re.Depth == 0 && re.Result.CallID == "call_fan_out" {
+				result = re.Result.Content
+			}
+		}
+		if result == "" {
+			t.Fatal("no depth-0 result answered the fan_out call")
+		}
+		wantItemLines(t, result)
+		wantPhases(t, sink)
+		if info := wantOneFinishedWorkflow(t, a); info.Status.Recipe != "" {
+			t.Errorf("a fan_out's workflow names recipe %q, want none", info.Status.Recipe)
+		}
+		if unmatched := srv.Unmatched(); len(unmatched) != 0 {
+			t.Errorf("the upstream saw %d requests no Turn answered", len(unmatched))
+		}
+	})
+
+	t.Run("recipe", func(t *testing.T) {
+		t.Parallel()
+		srv := stubllm.New(t, workflowScript())
+		sink := &lockedSink{}
+		a := workflowArm(t, srv.URL, sink)
+
+		id, err := a.StartRecipe(context.Background(), apogee.RecipeLaunch{SkillID: recipeID, Text: "src"})
+		if err != nil || id != "" {
+			t.Fatalf("StartRecipe = %q, %v; want a foreground launch", id, err)
+		}
+		stepToQuiescence(t, a)
+
+		var parent string
+		for n := range srv.Requests() {
+			if last := srv.LastMessage(n + 1); strings.HasPrefix(last, "/"+recipeID) {
+				parent = last
+			}
+		}
+		if !strings.HasPrefix(parent, "/"+recipeID+" src\n\n") {
+			t.Fatalf("the model's request does not open with the user's line:\n%s", parent)
+		}
+		wantItemLines(t, parent)
+		bound := false
+		for n := range srv.Requests() {
+			bound = bound || strings.Contains(srv.LastMessage(n+1), "check alpha carefully in src")
+		}
+		if !bound {
+			t.Error("no item child's brief carried the scope input bound from the launch text")
+		}
+		if strings.Contains(parent, "BENCH REVIEW BODY") {
+			t.Errorf("the launch attached the skill body instead of running the recipe:\n%s", parent)
+		}
+		wantPhases(t, sink)
+		if info := wantOneFinishedWorkflow(t, a); info.Status.Recipe != recipeID {
+			t.Errorf("the recipe's workflow names recipe %q, want %q", info.Status.Recipe, recipeID)
+		}
+		if unmatched := srv.Unmatched(); len(unmatched) != 0 {
+			t.Errorf("the upstream saw %d requests no Turn answered", len(unmatched))
+		}
+	})
 }
