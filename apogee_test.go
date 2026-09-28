@@ -11,12 +11,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 type nopSink struct{}
@@ -241,5 +244,50 @@ func TestFacadeExportsEventLines(t *testing.T) {
 		if !strings.HasPrefix(got[i], `{"event":"`+kind+`","v":2,`) {
 			t.Errorf("line %d is not a v:2 %s line: %s", i+1, kind, got[i])
 		}
+	}
+}
+
+// TestNew_BackgroundOptInPublishesTheWorkflowTool pins Config.OffersBackground through the facade
+// (ADR 0089 D1): an embedder whose engine composes its own roster, with fan_out and workflow lifted,
+// publishes the workflow tool on the wire exactly when it set the field — left unset, the menu is
+// the one before the field existed. The menu is read where a model reads it, off the request the
+// scripted upstream received.
+func TestNew_BackgroundOptInPublishesTheWorkflowTool(t *testing.T) {
+	t.Parallel()
+
+	for _, optIn := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unset", true: "set"}[optIn], func(t *testing.T) {
+			t.Parallel()
+
+			srv := stubllm.New(t, stubllm.Script{Model: benchModelName, Turns: []stubllm.Turn{{Repeat: true, Text: "done"}}})
+			ag, err := apogee.New(apogee.Config{
+				Endpoint:         srv.URL,
+				Model:            benchModelName,
+				Mode:             apogee.ModeAskBefore,
+				Approver:         allowAll{},
+				Events:           &recSink{},
+				WorkspaceDir:     t.TempDir(),
+				EnabledTools:     []string{tools.FanOutToolName, tools.WorkflowToolName},
+				OffersBackground: optIn,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			defer func() { _ = ag.Close() }()
+
+			runToQuiescence(t, ag, apogee.UserInput{Text: "hello"})
+
+			requests := srv.Requests()
+			if len(requests) == 0 {
+				t.Fatal("the upstream received no request")
+			}
+			menu := requests[0].Tools
+			if !slices.Contains(menu, tools.FanOutToolName) {
+				t.Fatalf("the lifted fan_out is missing from the menu: %v", menu)
+			}
+			if got := slices.Contains(menu, tools.WorkflowToolName); got != optIn {
+				t.Errorf("workflow on the menu = %v, want %v (menu %v)", got, optIn, menu)
+			}
+		})
 	}
 }

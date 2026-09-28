@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // TestNewAgentBuildsATopLevelAgent pins the other side of the split construction path: newAgent
@@ -314,5 +315,57 @@ func TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster(t *testing.T) {
 	})
 	if _, ok := disabled.Lookup("load_skill"); ok {
 		t.Error("`tools.disabled: [load_skill]` did not reach the assembly")
+	}
+}
+
+// TestDefaultRosterCarriesTheEmbeddersBackgroundOptIn pins Config.OffersBackground (ADR 0089 D1)
+// on the engine's own roster: with fan_out and workflow lifted, the workflow tool is offered and
+// fan_out publishes `background` exactly when the embedder set the field — unset is the roster
+// before the field existed — and both re-compositions of that roster, a profile edit and a model
+// switch, keep what construction chose.
+func TestDefaultRosterCarriesTheEmbeddersBackgroundOptIn(t *testing.T) {
+	t.Parallel()
+
+	for _, optIn := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unset", true: "set"}[optIn], func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig(&recordingSink{})
+			cfg.EnabledTools = []string{tools.FanOutToolName, tools.WorkflowToolName}
+			cfg.OffersBackground = optIn
+			a := rosterAgent(t, cfg)
+			assertBackgroundPair(t, a, "at construction", optIn)
+
+			if err := a.SetProfile(domain.ModelProfile{}); err != nil {
+				t.Fatalf("SetProfile: %v", err)
+			}
+			assertBackgroundPair(t, a, "after SetProfile", optIn)
+
+			if err := a.Rebind(RebindSpec{Model: "another-model"}); err != nil {
+				t.Fatalf("Rebind: %v", err)
+			}
+			assertBackgroundPair(t, a, "after Rebind", optIn)
+		})
+	}
+}
+
+// assertBackgroundPair checks the pair ADR 0089 D1/D4 ties together on a's live tool set: the
+// workflow tool is offered, and the lifted fan_out publishes `background`, exactly when want.
+func assertBackgroundPair(t *testing.T, a *Agent, when string, want bool) {
+	t.Helper()
+
+	if got := offers(a, tools.WorkflowToolName); got != want {
+		t.Errorf("%s: workflow offered = %v, want %v", when, got, want)
+	}
+	tool, ok := a.tools.Lookup(tools.FanOutToolName)
+	if !ok {
+		t.Fatalf("%s: the roster dropped the lifted fan_out", when)
+	}
+	fanOut, _ := tool.(*tools.FanOut)
+	if fanOut == nil {
+		t.Fatalf("%s: fan_out is a %T, not *tools.FanOut", when, tool)
+	}
+	if got := fanOut.OffersBackground(); got != want {
+		t.Errorf("%s: fan_out publishes background = %v, want %v", when, got, want)
 	}
 }

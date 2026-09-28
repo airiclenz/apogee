@@ -101,16 +101,19 @@ type HostTools struct {
 
 	// OffersBackground is the Driver's opt-in to background Workflows (ADR 0089 D1, D4): true only
 	// where a conversation goes on while a workflow runs and something can wake the agent when it
-	// ends — the TUI. A headless run and a daemon firing leave it false, as does the engine's own
-	// default roster: with no conversation to go on, a workflow there blocks. False withholds the
-	// pair whatever the roster says — fan_out publishes no `background`, and the workflow control
-	// tool is not offered (backedTools) — because the switch and the tool that controls what it
-	// starts travel together. True lets the roster decide: `background` and the tool appear exactly
-	// where a configuration rung lifts `workflow`.
+	// ends — the TUI, or an embedder that set domain.Config.OffersBackground on the engine's own
+	// roster. A headless run and a daemon firing leave it false, as does the engine's default
+	// roster when that field is unset: with no conversation to go on, a workflow there blocks.
+	// False withholds the pair whatever the roster says — fan_out publishes no `background`, and
+	// the workflow control tool is not offered (backedTools) — because the switch and the tool that
+	// controls what it starts travel together. True lets the roster decide: `background` and the
+	// tool appear exactly where a configuration rung lifts `workflow`.
 	//
-	// Like SubAgentSeatChoice it is a Driver's policy rather than a Config field (ADR 0031 — the
-	// engine reads no config of its own), and like it, it shapes the set a build carries, so a
-	// Driver that rebuilds its set carries it forward.
+	// It is a Driver's policy, and it reaches this struct as HostToolsOf's argument rather than
+	// from the Config it reads: the composition root passes its own value, and the engine's default
+	// roster passes Config.OffersBackground — the one door an embedder has onto it, since the
+	// engine reads no config file of its own (ADR 0031). Like SubAgentSeatChoice it shapes the set
+	// a build carries, so a Driver that rebuilds its set carries it forward.
 	OffersBackground bool
 }
 
@@ -147,7 +150,8 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 
 // HostToolsOf composes the HostTools a Config implies — the ONE translation from what the host put
 // on domain.Config into the tool assembly's own configuration, shared by the engine's default roster
-// (internal/agent, seatChoice and offersBackground false) and the composition root's MCP-aware assembly (cmd/apogee).
+// (internal/agent: seatChoice false, offersBackground from Config.OffersBackground) and the composition
+// root's MCP-aware assembly (cmd/apogee).
 // It is one function rather than a literal in each of those places because a field added to
 // HostTools that only one composer filled is how a configured URL deny, credential scrub or read
 // root silently stopped applying on the other path (TestHostToolsOfFillsEveryHostField pins every
@@ -171,11 +175,13 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // RosterConflicts), never a refusal to build. SecretEnvVars is the caller-named half of the
 // execution tools' credential scrub (`api-key-env:`, ADR 0047); empty ⇒ apogee's own alone.
 //
-// seatChoice and offersBackground are the two policies Config does NOT carry: `sub-agents-choice:`
-// shapes the sub_agent and fan_out schemas this build publishes (ADR 0069), and whether the Driver
-// offers background Workflows decides fan_out's `background` and the workflow tool (ADR 0089 D1) —
-// and the engine reads no config of its own (ADR 0031), so the engine passes false for both and the
-// composition root passes its own values (offersBackground true for the TUI alone).
+// seatChoice and offersBackground are the two Driver policies this composer takes from its caller
+// rather than from cfg: `sub-agents-choice:` shapes the sub_agent and fan_out schemas this build
+// publishes (ADR 0069), and whether the Driver offers background Workflows decides fan_out's
+// `background` and the workflow tool (ADR 0089 D1). The engine reads no config of its own (ADR
+// 0031), so it passes false for seatChoice and the embedder's Config.OffersBackground opt-in for
+// offersBackground (false unless set), while the composition root passes its own values
+// (offersBackground true for the TUI alone).
 func HostToolsOf(cfg domain.Config, seatChoice, offersBackground bool) HostTools {
 	return HostTools{
 		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),

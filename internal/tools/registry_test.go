@@ -587,15 +587,16 @@ func zeroHostFields(host reflect.Value) []string {
 	return zero
 }
 
-// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the two fields Config does not carry: the engine
-// passes false for both and the composition root its own values, and nothing on Config can flip
-// either — nor can one argument reach the other's field.
+// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the two Driver policies this composer takes from
+// its caller rather than from cfg: the engine passes seatChoice false and Config.OffersBackground,
+// the composition root its own values. The argument alone decides — a Config.OffersBackground set
+// the other way does not reach the field — and neither argument reaches the other's field.
 func TestHostToolsOfLeavesSeatChoiceToTheCaller(t *testing.T) {
 	t.Parallel()
 
 	for _, seatChoice := range []bool{false, true} {
 		for _, offersBackground := range []bool{false, true} {
-			host := HostToolsOf(domain.Config{}, seatChoice, offersBackground)
+			host := HostToolsOf(domain.Config{OffersBackground: !offersBackground}, seatChoice, offersBackground)
 			if host.SubAgentSeatChoice != seatChoice || host.OffersBackground != offersBackground {
 				t.Errorf("HostToolsOf(cfg, %v, %v) = seat choice %v, background %v",
 					seatChoice, offersBackground, host.SubAgentSeatChoice, host.OffersBackground)

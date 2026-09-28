@@ -18,6 +18,12 @@
 // completeness guard: it names the full public surface so a forgotten alias fails the
 // build.
 //
+// Background Workflows (ADR 0089 D1): an embedder whose engine composes its own tool set
+// (Config.Tools nil, Config.WorkspaceDir set) opts into fan_out's `background` field and the
+// workflow control tool by setting Config.OffersBackground. Only a Driver that keeps a
+// conversation going while a workflow runs should set it; it defaults to false, and both tools
+// stay default-off until Config.EnabledTools (or the profile's roster) lifts them.
+//
 // It is grounded in:
 //
 //	ADR 0001  embeddable, steppable, no ambient state; snapshot/resume + hygiene

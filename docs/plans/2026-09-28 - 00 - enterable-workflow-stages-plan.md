@@ -141,7 +141,12 @@ internal/agent/workflowspawn_test.go — newWorkflowParent, spawnItem, TestWorkf
 
 **Commit:** `fix(workflow): an item that falls back from the sub-agents server carries the seat-fallback note`
 
-## 3. The facade can opt into background fan_out and the workflow tool
+## 3. The facade can opt into background fan_out and the workflow tool — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): consequential edit — internal/tools/registry_test.go: made necessary by the Config.OffersBackground field (TestHostToolsOfLeavesSeatChoiceToTheCaller's comment said Config does not carry the policy; the test now also sets Config.OffersBackground opposite to the argument to pin that the argument alone decides)
+NOTES (2026-09-28): consequential edit — internal/agent/workflowcall_test.go: made necessary by the Config.OffersBackground field (TestWorkflowCall_TheFacadeRosterOffersNoBackground's comment now names the field as unset)
+NOTES (2026-09-28): consequential edit — cmd/apogee/wire_firing.go: made necessary by the Config.OffersBackground field (the firing comment's "exactly as the engine's own roster does on the nil path" now says the firing Config leaves the field unset)
+NOTES (2026-09-28): HostToolsOf keeps its three-argument signature and does not read cfg.OffersBackground itself; defaultRoster passes the field as the third argument, as the Approach says. workflow_test.go gains an "embedder's opt-in" case alongside the rewritten comment.
 
 **What:**
 **Goal:** An embedder that sets the new `domain.Config` field on an engine that uses its own roster gets fan_out's `background` field and the `workflow` tool. Leaving the field unset gives exactly today's roster. The field also survives a model rebind, which re-composes the roster.

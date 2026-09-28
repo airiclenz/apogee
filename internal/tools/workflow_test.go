@@ -71,8 +71,8 @@ func TestWorkflowSchema_PublishesTheThreeActions(t *testing.T) {
 // TestWorkflow_TravelsWithTheDriversBackgroundOptIn pins the pair ADR 0089 D1/D4 ties together: the
 // workflow tool is offered, and fan_out publishes `background`, exactly where the Driver offers
 // background workflows AND the roster lifts `workflow`. A Driver that does not — a headless run, a
-// daemon firing, the engine's own default roster (HostToolsOf with offersBackground false) — offers
-// neither, whatever `tools.enabled:` names.
+// daemon firing, the engine's own default roster while the embedder leaves Config.OffersBackground
+// unset — offers neither, whatever `tools.enabled:` names; an embedder that sets it gets both.
 func TestWorkflow_TravelsWithTheDriversBackgroundOptIn(t *testing.T) {
 	t.Parallel()
 
@@ -86,6 +86,11 @@ func TestWorkflow_TravelsWithTheDriversBackgroundOptIn(t *testing.T) {
 		{name: "the TUI without workflow lifted", host: HostTools{Enabled: []string{FanOutToolName}, OffersBackground: true}},
 		{name: "a firing with workflow lifted", host: HostTools{Enabled: lifted}},
 		{name: "the engine's own roster", host: HostToolsOf(domain.Config{EnabledTools: lifted}, false, false)},
+		{
+			name: "the engine's roster with the embedder's opt-in",
+			host: HostToolsOf(domain.Config{EnabledTools: lifted, OffersBackground: true}, false, true),
+			want: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

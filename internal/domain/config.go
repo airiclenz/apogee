@@ -425,6 +425,19 @@ type Config struct {
 	// does.
 	Workflow WorkflowConfig
 
+	// OffersBackground is an embedder's opt-in to background Workflows (ADR 0089 D1) on the tool
+	// set the ENGINE composes (Config.Tools nil, a WorkspaceDir set): true hands it to the roster
+	// assembly, so fan_out publishes `background` and the workflow control tool is offered wherever
+	// the roster lifts `workflow` (both are default-off, so EnabledTools or the profile axis must
+	// still name them). Only a Driver with a conversation to go on sets it — one that keeps talking
+	// while a workflow runs and hands the agent the finish note when it ends (TakeWorkflowNotes);
+	// a headless run or a daemon firing has nothing for a background workflow to run beside and
+	// leaves it false. False ⇒ exactly the roster before the field existed: no `background`, no
+	// workflow tool. It rides the Config every roster re-composition reads, so a model switch
+	// (Rebind) or a profile edit (SetProfile) keeps it. An injected Config.Tools ignores it — the
+	// host's assembly says for itself whether its fan_out offers `background`.
+	OffersBackground bool
+
 	// Floor opts individual Floor guards OUT. Like Context and Delegation the guards are
 	// structural — they stay on under Bypass — and, being Disable… bools, the ZERO value keeps
 	// every one of them ON: an embedder that constructs a bare Config gets the floor.

@@ -399,11 +399,13 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // MCP-aware assembly shares, so no host policy can apply on one path and not the other. The engine
 // passes seatChoice false: `sub-agents-choice:` shapes the sub_agent schema a Driver publishes, and
 // Config carries no field for it because the engine reads no config of its own (ADR 0031). It
-// passes offersBackground false for the same reason: only a Driver with a conversation to go on
-// offers background workflows (ADR 0089 D1), so the facade's own roster — the one a headless run or
-// a daemon firing gets — publishes no `background` on fan_out and no workflow tool.
+// passes offersBackground from Config.OffersBackground, the embedder's opt-in: only a Driver with a
+// conversation to go on offers background workflows (ADR 0089 D1), so the field defaults to false
+// and the facade's own roster — the one a headless run or a daemon firing gets — publishes no
+// `background` on fan_out and no workflow tool unless the embedder set it. Because a rebind re-runs
+// this function over the same cfg (applyRoster), the opt-in outlives a model switch.
 func defaultRoster(cfg domain.Config) *domain.ToolRegistry {
-	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, tools.HostToolsOf(cfg, false, false))
+	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, tools.HostToolsOf(cfg, false, cfg.OffersBackground))
 }
 
 // composesDefaultRoster reports whether the tool set an Agent built from cfg is the engine's OWN

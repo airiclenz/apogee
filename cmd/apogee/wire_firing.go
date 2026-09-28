@@ -535,7 +535,8 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// Either way a Firing offers no background Workflows (ADR 0089 D1): with no conversation to go
 	// on, a workflow there blocks. So the set built here passes offersBackground false — fan_out
 	// publishes no `background` and the workflow control tool is not offered, whatever
-	// `tools.enabled:` says — exactly as the engine's own roster does on the nil path.
+	// `tools.enabled:` says — exactly as the engine's own roster does on the nil path, where this
+	// Config leaves OffersBackground unset.
 	if in.opts.SubAgentsChoice == config.SubAgentsChoiceModel {
 		const offersBackground = false
 		cfg.Tools = registryWithMCP(in.roots.workspace, cfg, true, offersBackground, nil)

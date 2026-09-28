@@ -1445,8 +1445,9 @@ func TestWorkflowCall_BackgroundRunsBlockingWhereTheSwitchIsNotOffered(t *testin
 }
 
 // TestWorkflowCall_TheFacadeRosterOffersNoBackground pins the engine's own roster (defaultRoster,
-// the one a headless run or a daemon firing gets): with fan_out and workflow lifted, fan_out still
-// publishes no `background` and no workflow tool is offered.
+// the one a headless run or a daemon firing gets): with fan_out and workflow lifted and
+// Config.OffersBackground unset, fan_out still publishes no `background` and no workflow tool is
+// offered.
 func TestWorkflowCall_TheFacadeRosterOffersNoBackground(t *testing.T) {
 	t.Parallel()
 
