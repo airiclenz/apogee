@@ -368,6 +368,66 @@ func TestEntrySpecCarriesTheLibraryHalfOnly(t *testing.T) {
 	}
 }
 
+// A workflow entry has no prompt, and the library refuses a Spec without one (schedule.ErrPrompt),
+// so its Spec carries the recipe's launch line as the label the fired line prints.
+func TestEntrySpecLabelsAWorkflowByItsLaunchLine(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name     string
+		workflow WorkflowAction
+		want     string
+	}{
+		{name: "with inputs", workflow: WorkflowAction{Recipe: "audit", Inputs: "internal/ depth=2"}, want: "/audit internal/ depth=2"},
+		{name: "without inputs", workflow: WorkflowAction{Recipe: "audit"}, want: "/audit"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			adopted := Entry{
+				Name: "weekly-audit",
+				On:   Trigger{Cycle: 24 * time.Hour},
+				Run:  Action{Workflow: testCase.workflow, Workspace: "/repos/apogee", Mode: domain.ModePlan},
+			}
+
+			spec := adopted.Spec()
+
+			want := schedule.Spec{Name: "weekly-audit", Cycle: 24 * time.Hour, Prompt: testCase.want, Mode: domain.ModePlan}
+			if spec != want {
+				t.Errorf("Spec() = %+v, want %+v", spec, want)
+			}
+		})
+	}
+}
+
+// The reload keeps an unchanged workflow entry by value, like any other — its phase survives an
+// edit to a neighbour — and replaces it when its recipe or its inputs change.
+func TestDiffComparesAWorkflowEntryByValue(t *testing.T) {
+	t.Parallel()
+	workflow := func(recipe, inputs string) Entry {
+		return Entry{
+			Name: "weekly-audit",
+			On:   Trigger{Cycle: 24 * time.Hour},
+			Run: Action{
+				Workflow:  WorkflowAction{Recipe: recipe, Inputs: inputs},
+				Workspace: "/repos/apogee",
+				Mode:      domain.ModePlan,
+			},
+		}
+	}
+	audit := workflow("audit", "internal/")
+	sweep := entry("morning-sweep", "sweep the log", time.Hour)
+	edited := entry("morning-sweep", "sweep the log twice", time.Hour)
+
+	kept := Diff([]Entry{audit, sweep}, []Entry{workflow("audit", "internal/"), edited})
+	assertNames(t, "Kept", kept.Kept, []string{"weekly-audit"})
+	assertNames(t, "Replaced", kept.Replaced, []string{"morning-sweep"})
+
+	for _, changed := range []Entry{workflow("audit", "cmd/"), workflow("review", "internal/")} {
+		reload := Diff([]Entry{audit}, []Entry{changed})
+		assertNames(t, "Kept", reload.Kept, nil)
+		assertNames(t, "Replaced", reload.Replaced, []string{"weekly-audit"})
+	}
+}
+
 // assertIDs compares the whole name→id map, so a stale name left behind fails as loudly as a
 // missing one.
 func assertIDs(t *testing.T, got, want map[string]string) {

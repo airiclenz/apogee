@@ -1070,7 +1070,15 @@ NOTES (2026-09-28): `make lint` reports one ineffassign at internal/tui/commandr
 **Acceptance:** `go build ./... && go test -race -count=1 -run Headless ./cmd/apogee/`
 **Commit:** `feat(headless): run a recipe with --recipe`
 
-## 36. Daemon run: workflow:
+## 36. Daemon run: workflow: — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): `recipe:` is validated as a bare skill id — a leading `/` or embedded whitespace is a load defect pointing at `inputs:` — since a Firing cannot check that the recipe exists until it runs (the skills catalog is per workspace); an unknown recipe fails the firing before anything is sent, as headless's does.
+
+NOTES (2026-09-28): the daemon does not turn a stopped, failed or all-blocked workflow into a failed firing (headless's exit-1 mapping, recipeWorkflowFailure); like a faulted final turn, the firing completes and its record carries the result lines — headless.go was left untouched.
+
+NOTES (2026-09-28): the Long help of `apogee daemon`, the package comment in daemon.go and the commented template (a second, `workflow:` example entry) name the new key; the real-engine test drives Load → Apply → tick → run.Once end to end in daemon_test.go.
+
+NOTES (2026-09-28): retry — the three actionDefects messages no longer end on a key name with a trailing colon ("…under run: workflow: recipe: instead", "…under inputs: beside it"), the asserted substrings kept.
 
 **What:** Depends on item 35.
 **Goal:** `schedules.yaml` accepts `run: {workflow: {recipe: <id>, inputs: <text>}, workspace, mode, server, model}`; `prompt` and `workflow` are mutually exclusive (a defect naming both); a firing runs the recipe as headless does.

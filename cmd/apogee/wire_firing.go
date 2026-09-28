@@ -61,8 +61,8 @@ type firingInputs struct {
 	// mode is the mode the run executes in — plan or auto, the two an unattended run may use.
 	mode domain.Mode
 	// recipe is the id of the recipe skill this run launches (run.Spec.Recipe), the prompt raise
-	// is handed then being the text its inputs bind from. Empty — every Driver but `apogee headless
-	// --recipe` — runs the prompt as an ordinary message.
+	// is handed then being the text its inputs bind from. Set by `apogee headless --recipe` and by
+	// a daemon Firing of a `run: workflow:` entry; empty runs the prompt as an ordinary message.
 	recipe string
 	// skills is the catalog the run resolves attached skill IDs through and mounts the read roots
 	// of; nil builds a fresh Provider from roots. A session passes its LIVE provider so a

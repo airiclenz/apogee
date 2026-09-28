@@ -78,8 +78,14 @@
 #                  restarting the daemon restarts every cycle. If a run is still going
 #                  when the next tick comes due, that tick is skipped, not queued.
 #   run:
-#     prompt:      required. Exactly what you would type into apogee — a slash command
-#                  works here too.
+#     prompt:      required, unless workflow: names a recipe instead. Exactly what you
+#                  would type into apogee — a slash command works here too.
+#     workflow:    instead of prompt: (never beside it), a recipe run as a blocking
+#                  workflow, as `apogee headless --recipe` runs one:
+#       recipe:    required. The recipe skill's id, without the slash (audit).
+#       inputs:    optional. The text its inputs bind from, in order or as key=value.
+#                  A firing has nobody to ask: an ask stage takes its default, and a
+#                  required input left unbound fails the firing.
 #     workspace:   required. The directory the run happens in. `~` is expanded; it must
 #                  exist when the file is read.
 #     mode:        optional: plan (the default) or auto. See above.
@@ -99,3 +105,12 @@
 #       workspace: ~/repos/apogee
 #       mode: plan
 #       server: workstation
+#
+#   - name: weekly-audit
+#     on:
+#       cycle: 168h
+#     run:
+#       workflow:
+#         recipe: audit
+#         inputs: internal/
+#       workspace: ~/repos/apogee

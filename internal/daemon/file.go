@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -55,10 +56,15 @@ type Trigger struct {
 	Cycle time.Duration `yaml:"cycle"`
 }
 
-// Action is what an Entry runs when it fires.
+// Action is what an Entry runs when it fires: a prompt, or a recipe's workflow — exactly one.
 type Action struct {
-	// Prompt is the single user message every Firing submits. Required.
+	// Prompt is the single user message every Firing submits. Required unless Workflow names a
+	// recipe, and refused beside one: a Firing launches one thing.
 	Prompt string `yaml:"prompt"`
+	// Workflow is the recipe every Firing runs in place of a prompt (ADR 0087; ADR 0034 reserved
+	// `run: workflow:` for it). The zero value is absent. A value rather than a pointer, so the
+	// Entry stays comparable — the identity the reload diff keeps an unchanged entry by.
+	Workflow WorkflowAction `yaml:"workflow"`
 	// Workspace is the directory the Firing runs in, `~`-expanded and checked to exist at
 	// validation. Required: a Firing that runs nowhere in particular is a footgun, not a default.
 	Workspace string `yaml:"workspace"`
@@ -72,6 +78,36 @@ type Action struct {
 	// name is a per-request selection: on a llama-launcher-fronted server it would be a request to
 	// LOAD one, and the daemon never actuates the launcher (ADR 0055).
 	Model string `yaml:"model,omitempty"`
+}
+
+// WorkflowAction is a recipe run as a Firing: the recipe skill's id and the text its declared
+// inputs bind from, exactly as `apogee headless --recipe <id> <text>` takes them. A Firing has
+// nobody to ask, so a required input the text leaves unbound refuses the launch, and an `ask` stage
+// takes its declared default.
+type WorkflowAction struct {
+	// Recipe is the id of the recipe skill the Firing launches — the name it is invoked by, without
+	// the slash. Required whenever `workflow:` is written.
+	Recipe string `yaml:"recipe"`
+	// Inputs is the text the recipe's inputs bind from, in order or as key=value. Optional.
+	Inputs string `yaml:"inputs,omitempty"`
+}
+
+// present reports whether the file wrote anything under `workflow:`.
+func (w WorkflowAction) present() bool {
+	return w.Recipe != "" || w.Inputs != ""
+}
+
+// Launch is the line a Firing of this workflow stands for: `/<recipe>` and its inputs text, the
+// same line a session's user would type to run the recipe and the one its saved record is titled
+// by (run.Spec). Empty for an absent workflow.
+func (w WorkflowAction) Launch() string {
+	if w.Recipe == "" {
+		return ""
+	}
+	if w.Inputs == "" {
+		return "/" + w.Recipe
+	}
+	return "/" + w.Recipe + " " + w.Inputs
 }
 
 // ServerFacts is everything validation needs to know about one `servers:` entry. Deliberately not
@@ -242,10 +278,9 @@ func validateEntry(index int, entry Entry, host Host, named map[string]struct{})
 	}
 
 	entry.Run.Prompt = strings.TrimSpace(entry.Run.Prompt)
-	if entry.Run.Prompt == "" {
-		defects = append(defects, fmt.Errorf("%s has no run: prompt: — the prompt is the whole instruction a Firing "+
-			"submits, and there is no session for anyone to type one into", label))
-	}
+	entry.Run.Workflow.Recipe = strings.TrimSpace(entry.Run.Workflow.Recipe)
+	entry.Run.Workflow.Inputs = strings.TrimSpace(entry.Run.Workflow.Inputs)
+	defects = append(defects, actionDefects(label, entry.Run)...)
 
 	workspace, defect := resolveWorkspace(label, entry.Run.Workspace, host.Home)
 	entry.Run.Workspace = workspace
@@ -284,6 +319,30 @@ func nameDefect(label, name string, named map[string]struct{}) error {
 	if duplicate {
 		return fmt.Errorf("%s an earlier entry already has that name — a reload matches entries BY name, so two of them "+
 			"leave it with no way to tell which schedule an edit belongs to; give this one its own", label)
+	}
+	return nil
+}
+
+// actionDefects refuses an entry that runs nothing, one that names both a prompt and a workflow,
+// and a workflow whose recipe is missing or is not a bare recipe id.
+func actionDefects(label string, run Action) []error {
+	workflow := run.Workflow
+	switch {
+	case run.Prompt == "" && !workflow.present():
+		return []error{fmt.Errorf("%s has no run: prompt: — the prompt is the whole instruction a Firing submits, and "+
+			"there is no session for anyone to type one into; write one, or name a recipe under "+
+			"run: workflow: recipe: instead", label)}
+	case run.Prompt != "" && workflow.present():
+		return []error{fmt.Errorf("%s names both run: prompt: and run: workflow: — a Firing launches one thing, a "+
+			"message or a recipe; keep the one this schedule is for", label)}
+	case run.Prompt != "":
+		return nil
+	case workflow.Recipe == "":
+		return []error{fmt.Errorf("%s run: workflow: has no recipe: — the recipe is the skill the Firing runs; name it "+
+			"by its id, and put the text its inputs bind from under inputs: beside it", label)}
+	case strings.HasPrefix(workflow.Recipe, "/") || strings.ContainsFunc(workflow.Recipe, unicode.IsSpace):
+		return []error{fmt.Errorf("%s run: workflow: recipe: %q — recipe: is the recipe skill's id alone, without the "+
+			"slash; the text its inputs bind from goes under inputs: beside it", label, workflow.Recipe)}
 	}
 	return nil
 }

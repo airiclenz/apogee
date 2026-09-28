@@ -181,14 +181,23 @@ func add(scheduler Scheduler, ids map[string]string, entry Entry) error {
 }
 
 // Spec is the entry as the scheduler library sees it: a name, a cycle, a prompt and a mode, and
-// nothing else. The daemon-only half of `run:` — workspace, server, model — deliberately does not
-// travel through [schedule.Spec]: the library is runner-agnostic (ADR 0033), so those fields reach
-// the Firing composition through the daemon's own name→Entry map instead.
+// nothing else. The daemon-only half of `run:` — workspace, server, model, workflow — deliberately
+// does not travel through [schedule.Spec]: the library is runner-agnostic (ADR 0033), so those
+// fields reach the Firing composition through the daemon's own name→Entry map instead.
+//
+// A workflow entry has no prompt, and the library refuses a Spec without one (schedule.ErrPrompt),
+// so its Prompt is the recipe's launch line instead — `/<recipe> <inputs>`. It is a LABEL: the
+// daemon log's fired line prints it, and the Firing composition reads the entry's workflow rather
+// than submitting it.
 func (e Entry) Spec() schedule.Spec {
+	prompt := e.Run.Prompt
+	if launch := e.Run.Workflow.Launch(); launch != "" {
+		prompt = launch
+	}
 	return schedule.Spec{
 		Name:   e.Name,
 		Cycle:  e.On.Cycle,
-		Prompt: e.Run.Prompt,
+		Prompt: prompt,
 		Mode:   e.Run.Mode,
 	}
 }

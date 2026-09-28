@@ -372,6 +372,16 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
 	// answer with. No onID and no narrate either: a daemon stamps the id on no stream, and the
 	// record raise files under it is the account a supervisor opens.
+	//
+	// A `run: workflow:` entry runs its recipe as `apogee headless --recipe` does: the recipe rides
+	// firingInputs.recipe and its inputs text is the prompt raise is handed, read off the ENTRY —
+	// the Firing's own Prompt is only the launch line the library was given as the entry's label
+	// (daemon.Entry.Spec). A Firing has no Asker, so an `ask` stage takes its declared default, and
+	// no background seat, so the workflow blocks the Firing to its end (ADR 0089 D1).
+	prompt, recipe := f.Prompt, ""
+	if workflow := entry.Run.Workflow; workflow.Recipe != "" {
+		prompt, recipe = workflow.Inputs, workflow.Recipe
+	}
 	res, notices, err := raise(ctx, firingInputs{
 		opts:     w.opts,
 		entry:    server,
@@ -381,6 +391,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		runner:   w.runner,
 		model:    entry.Run.Model,
 		mode:     f.Mode,
+		recipe:   recipe,
 		// The Scheduler's own clock, so the id this Firing is filed under is minted off the same
 		// sense of time that made it due; nil in production ⇒ the wall clock (clockNow).
 		now:    clockNow(daemonClock),
@@ -388,7 +399,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		// The daemon's one stats recorder, so this Firing's upstream attempts land in the home's
 		// server-stats.jsonl exactly as a headless run's or a session's do (ADR 0085).
 		stats: w.stats,
-	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
+	}, prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
 	// What the composition had to say about this binding — a model the server never advertised, a
 	// rebind that had to degrade — reaches the daemon LOG, which is this Driver's whole user
 	// interface (ADR 0034 decision 10). The session record still carries the run; what it cannot

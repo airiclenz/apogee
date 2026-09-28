@@ -30,14 +30,36 @@ schedules:
     on:
       cycle: 24h               # required; a Go duration, 30s floor
     run:
-      prompt: "/code-audit internal/tui"  # required — what you would type into apogee
-                                          # @file and /skill references resolve as in a session
+      prompt: "/code-audit internal/tui"  # required, unless workflow: below replaces it —
+                                          # what you would type into apogee; @file and /skill
+                                          # references resolve as in a session
       workspace: ~/repos/apogee           # required; `~` expands, must exist
       mode: plan                          # optional: plan (default) or auto
       server: workstation                 # optional: a `servers:` entry by name
       model: qwen3-coder-30b              # optional; only where that server serves several
                                           # (never on one llama-launcher fronts)
 ```
+
+An entry can run a **recipe** in place of a prompt — a skill whose header declares the stages
+the engine runs as a workflow, like the shipped `audit`:
+
+```yaml
+  - name: weekly-audit
+    on:
+      cycle: 168h
+    run:
+      workflow:
+        recipe: audit            # required: the recipe skill's id, without the slash
+        inputs: internal/        # optional: the text its inputs bind from, in order or as key=value
+      workspace: ~/repos/apogee
+```
+
+`prompt:` and `workflow:` are mutually exclusive — an entry naming both is refused. A firing
+runs the recipe exactly as [`apogee headless --recipe`](headless.md) does: the workflow runs to
+its end before the model is asked anything, an `ask` stage takes its declared default (the result
+lines say `(default taken: no one to ask)`), and a recipe no skill answers to, or a required
+input the text leaves unbound, fails the firing before anything is sent. The log's fired line names the recipe as you would type it —
+`fired     weekly-audit — /audit internal/`.
 
 The daemon watches the file and picks up every saved edit within a second or two — no
 restart. Entries are matched across an edit by their `name:`, so a schedule you did not

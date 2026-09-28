@@ -1,8 +1,9 @@
 package main
 
 // `apogee daemon` — the durable half of the scheduler (ADR 0034): a foreground process that reads
-// `~/.apogee/daemon/schedules.yaml`, puts every entry on the clock, and runs each one's prompt
-// through the same shared runner a session's Firing and `apogee headless` run through (ADR 0033).
+// `~/.apogee/daemon/schedules.yaml`, puts every entry on the clock, and runs each one's prompt — or
+// its `run: workflow:` recipe (ADR 0087) — through the same shared runner a session's Firing and
+// `apogee headless` run through (ADR 0033).
 //
 // It is the third Driver over the embeddable engine (ADR 0031), and it is deliberately the THINNEST
 // of the three. Everything that decides anything lives somewhere else: the file's schema and its
@@ -117,6 +118,9 @@ func newDaemonCommand() *cobra.Command {
 			"picked up while the daemon runs, and every schedule you did not touch keeps its place\n" +
 			"in its own cycle. An edit that does not validate is refused whole, with every defect\n" +
 			"logged and the previous schedules left running.\n\n" +
+			"An entry runs a prompt, or a recipe in its place — run: workflow: with recipe: <id>\n" +
+			"and inputs: <text>, run blocking as `apogee headless --recipe` runs it. An entry that\n" +
+			"names both is refused.\n\n" +
 			"A firing is an unattended run, so it never asks: every gated action is refused rather\n" +
 			"than parked, ask_user and present_document are not registered, and no MCP server is\n" +
 			"contacted. Only plan and auto make sense there and only those two are accepted. Every\n" +

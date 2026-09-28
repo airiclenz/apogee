@@ -133,6 +133,53 @@ func entryFor(t *testing.T, name string, run daemon.Action) daemon.Entry {
 	return daemon.Entry{Name: name, On: daemon.Trigger{Cycle: schedule.MinCycle}, Run: run}
 }
 
+// A `run: workflow:` entry's Firing hands the runner the recipe and its inputs text, read off the
+// ENTRY — never the launch line the library carries as the entry's label (daemon.Entry.Spec), which
+// submitted as a prompt would reach the model as a message rather than launch the recipe. The entry
+// is built by hand because it has no prompt at all, which entryFor would default one into.
+func TestDaemonFireRunsTheEntrysRecipe(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{})
+	entry := daemon.Entry{
+		Name: "weekly-audit",
+		On:   daemon.Trigger{Cycle: schedule.MinCycle},
+		Run: daemon.Action{
+			Workflow:  daemon.WorkflowAction{Recipe: "audit", Inputs: "internal/ depth=2"},
+			Workspace: t.TempDir(),
+			Mode:      domain.ModePlan,
+		},
+	}
+	harness.wiring.adopt([]daemon.Entry{entry})
+
+	_, err := harness.wiring.fire(context.Background(), schedule.Firing{
+		ScheduleID:   "sched-1",
+		ScheduleName: entry.Name,
+		Prompt:       entry.Spec().Prompt,
+		Mode:         entry.Run.Mode,
+	})
+	if err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	spec := harness.runner.spec
+	if spec.Recipe != "audit" {
+		t.Errorf("run.Spec.Recipe = %q; want the entry's recipe", spec.Recipe)
+	}
+	if spec.Prompt != "internal/ depth=2" {
+		t.Errorf("run.Spec.Prompt = %q; want the entry's inputs text, not the launch-line label", spec.Prompt)
+	}
+}
+
+// A prompt entry launches no recipe: the Firing's prompt goes to the runner as the message it is.
+func TestDaemonFireRunsAPromptEntryAsAMessage(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{})
+
+	spec := harness.fire(t, entryFor(t, "audit", daemon.Action{Prompt: "/code-audit internal/tui"}))
+
+	if spec.Recipe != "" || spec.Prompt != "/code-audit internal/tui" {
+		t.Errorf("run.Spec = {Recipe: %q, Prompt: %q}; want no recipe and the entry's prompt", spec.Recipe, spec.Prompt)
+	}
+}
+
 // A schedule that NAMES a server is bound to that entry — its endpoint, its key source, its model —
 // and not to the one the host happens to start sessions on (ADR 0055 decision 1). The two entries
 // differ in every one of those three fields, so a composition that reached for the startup default

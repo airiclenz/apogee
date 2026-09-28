@@ -97,6 +97,48 @@ schedules:
 	}
 }
 
+// A `run: workflow:` entry loads with its recipe and inputs trimmed and no prompt, and every
+// other key of `run:` keeps its meaning beside it.
+func TestLoadParsesAWorkflowEntry(t *testing.T) {
+	t.Parallel()
+	host, workspace := testHost(t)
+	data := "schedules:\n  - name: weekly-audit\n    on:\n      cycle: 168h\n    run:\n" +
+		"      workflow:\n        recipe: \" audit \"\n        inputs: \" internal/ depth=2 \"\n" +
+		"      workspace: " + workspace + "\n      server: openrouter\n" +
+		"  - name: bare-audit\n    on:\n      cycle: 24h\n    run:\n" +
+		"      workflow: {recipe: audit}\n      workspace: " + workspace + "\n"
+
+	file, err := Load([]byte(data), host)
+	if err != nil {
+		t.Fatalf("a valid workflow entry must load: %v", err)
+	}
+	want := []Entry{
+		{
+			Name: "weekly-audit",
+			On:   Trigger{Cycle: 168 * time.Hour},
+			Run: Action{
+				Workflow:  WorkflowAction{Recipe: "audit", Inputs: "internal/ depth=2"},
+				Workspace: workspace,
+				Mode:      domain.ModePlan,
+				Server:    "openrouter",
+			},
+		},
+		{
+			Name: "bare-audit",
+			On:   Trigger{Cycle: 24 * time.Hour},
+			Run:  Action{Workflow: WorkflowAction{Recipe: "audit"}, Workspace: workspace, Mode: domain.ModePlan},
+		},
+	}
+	if len(file.Schedules) != len(want) {
+		t.Fatalf("parsed %d schedules, want %d", len(file.Schedules), len(want))
+	}
+	for i, entry := range file.Schedules {
+		if entry != want[i] {
+			t.Errorf("entry %d =\n%#v\nwant\n%#v", i+1, entry, want[i])
+		}
+	}
+}
+
 func TestLoadTakesTheDefaultShutdownGrace(t *testing.T) {
 	t.Parallel()
 	host, workspace := testHost(t)
@@ -179,6 +221,42 @@ func TestLoadNamesEveryDefect(t *testing.T) {
 			name:  "an entry with no prompt",
 			yaml:  "schedules:\n  - name: nightly\n    on:\n      cycle: 1h\n    run:\n" + workspaceLine,
 			wants: []string{"has no run: prompt:"},
+		},
+		{
+			name:  "the no-prompt defect names the workflow alternative",
+			yaml:  "schedules:\n  - name: nightly\n    on:\n      cycle: 1h\n    run:\n" + workspaceLine,
+			wants: []string{"run: workflow: recipe:"},
+		},
+		{
+			name:    "a prompt and a workflow in one entry",
+			yaml:    entry(workspaceLine + "      workflow:\n        recipe: audit\n"),
+			wants:   []string{`entry 1 ("nightly")`, "names both run: prompt: and run: workflow:"},
+			unwants: []string{"has no run: prompt:"},
+		},
+		{
+			name: "a workflow with inputs and no recipe",
+			yaml: "schedules:\n  - name: nightly\n    on:\n      cycle: 1h\n    run:\n" +
+				"      workflow:\n        inputs: internal/\n" + workspaceLine,
+			wants:   []string{"run: workflow: has no recipe:"},
+			unwants: []string{"has no run: prompt:"},
+		},
+		{
+			name: "a recipe written with its slash",
+			yaml: "schedules:\n  - name: nightly\n    on:\n      cycle: 1h\n    run:\n" +
+				"      workflow:\n        recipe: /audit\n" + workspaceLine,
+			wants: []string{`recipe: "/audit"`, "without the slash"},
+		},
+		{
+			name: "a recipe carrying its inputs",
+			yaml: "schedules:\n  - name: nightly\n    on:\n      cycle: 1h\n    run:\n" +
+				"      workflow:\n        recipe: audit internal/\n" + workspaceLine,
+			wants: []string{`recipe: "audit internal/"`, "goes under inputs:"},
+		},
+		{
+			name: "an unknown key under workflow",
+			yaml: "schedules:\n  - name: nightly\n    on:\n      cycle: 1h\n    run:\n" +
+				"      workflow:\n        recipe: audit\n        input: internal/\n" + workspaceLine,
+			wants: []string{`unknown key "input"`},
 		},
 		{
 			name:  "a whitespace-only prompt",

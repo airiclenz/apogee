@@ -523,6 +523,56 @@ func TestDaemonFiresAnAdoptedScheduleOnItsTick(t *testing.T) {
 	}
 }
 
+// A `run: workflow:` entry end to end, through the real engine: the file loads, the reload adopts
+// it on the real scheduler (daemon.Load → Apply), the tick fires it, and the Firing runs the recipe
+// as `apogee headless --recipe` does — a blocking workflow before the model is asked anything, its
+// `ask` stage taking the declared default because a Firing has nobody to ask. The fired line names
+// the recipe's launch line, which is the label the entry's Spec carries in place of a prompt.
+func TestDaemonFiresAWorkflowEntryThroughTheEngine(t *testing.T) {
+	h := newDaemonHarness(t)
+	upstream := sweepUpstream(t, "ok")
+	h.home = eventLinesHome(t, upstream.URL, headlessBeatModel)
+	h.dir = filepath.Join(h.home, daemonDirName)
+	h.schedules = filepath.Join(h.dir, schedulesFileName)
+	h.deps.runner = run.Once
+	skillDir := filepath.Join(h.home, "skills", "sweep")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create the skill folder: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(sweepRecipeSkill("    required: true\n")), 0o600); err != nil {
+		t.Fatalf("write the recipe skill: %v", err)
+	}
+	h.writeSchedules(t, fmt.Sprintf("schedules:\n"+
+		"  - name: weekly-sweep\n    on:\n      cycle: 24h\n"+
+		"    run:\n      workflow:\n        recipe: sweep\n        inputs: src\n      workspace: %s\n", t.TempDir()))
+
+	wait := h.run(t)
+	h.awaitLog(t, "1 schedule on the clock")
+	h.clock.tick()
+	h.awaitLog(t, "completed weekly-sweep")
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+
+	if logged := h.out.String(); !strings.Contains(logged, "fired     weekly-sweep — /sweep src") {
+		t.Errorf("the fired line does not name the recipe's launch line; the log holds:\n%s", logged)
+	}
+	upstream.AssertConsumed(t)
+	req := launchRequest(t, upstream)
+	launch := req.Messages[len(req.Messages)-1].Content
+	if !strings.HasPrefix(launch, "/sweep src\n\n") {
+		t.Errorf("the model's message does not open on the recipe's launch line:\n%s", launch)
+	}
+	if !strings.Contains(launch, "#1 alpha — ok — alpha checked") {
+		t.Errorf("the model's message does not carry the item's result line:\n%s", launch)
+	}
+	if !strings.Contains(launch, "default taken: no one to ask") {
+		t.Errorf("the result lines do not say the ask stage took its default:\n%s", launch)
+	}
+}
+
 // A stop with nothing in flight does not sit out the grace: the daemon exits at once.
 func TestDaemonStopsPromptlyWithNoFiringInFlight(t *testing.T) {
 	h := newDaemonHarness(t)
