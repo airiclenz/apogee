@@ -1151,7 +1151,13 @@ NOTES (2026-09-28): the doc names instrument prerequisites outside this repo's s
 **Acceptance:** `test -s docs/design/workflow-bench-experiment.md`
 **Commit:** `docs(design): the workflow bench experiment`
 
-## 40. fan_out honours run_on and refuses a mistyped recipe
+## 40. fan_out honours run_on and refuses a mistyped recipe — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): recipeCallResult and runRecipe take the recipe's id, inputs and seat as one `recipeCall` value (added in workflowcall.go) rather than growing a seventh positional parameter; newWorkflowRunner, newRecipeRunner, startKeyedBackgroundRecipe, backgroundWidth and backgroundServer gain a seat parameter (launchRecipe, startBackgroundRecipe and resumeBackground pass seatConfigured). newWorkflowSpawner keeps its signature; the seat is set on the returned spawner.
+
+NOTES (2026-09-28): a run_on that is not a JSON string (e.g. `5`) is refused with sub_agent's text over its raw spelling (`invalid run_on "5": …`), and the run_on check precedes the recipe checks, so it covers the recipe form too.
+
+NOTES (2026-09-28): a workflow child that asked for `sub-agents-server` with nothing latched falls back to the session as newChildAgentOn does, but a workflow item's result line carries no SeatFallbackNote (sub_agent's delegationResult does); not in this item's scope.
 
 **What:** Depends on item 27. Fixes two run findings in fan_out's argument handling: the published `run_on` is never read (`workflowSpawner.Spawn` builds every item child with `newChildAgentOn(seatConfigured, …)`), and a `recipe` whose value is not a string (e.g. `5`) makes `parseFanOutRecipe` report "not a recipe call", so the call runs as a plain fan-out.
 **Goal:** a fan_out call's `run_on` is the seat of every item child the workflow it starts spawns, recipe form and background included. The Runner's width and the split budget follow that seat. An invalid `run_on` value, or a `recipe` set to a non-empty value that is not a string, is refused as a fixable tool error and runs nothing.

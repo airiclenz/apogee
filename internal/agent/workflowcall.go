@@ -65,6 +65,7 @@ const (
 	fanOutProblemsHead       = "fan_out was not run — fix these arguments and call it again:"
 	fanOutArgumentsFormat    = "fan_out was not run: its arguments are not valid JSON (%v); send an object with task and over"
 	fanOutOverFormat         = "fan_out was not run: over must be an array of strings or an object with one of files, lines or split (%v)"
+	fanOutRecipeTypeFormat   = "fan_out was not run: recipe must be the name of a recipe (a string), got %s"
 	fanOutRecipeMixedFormat  = "fan_out was not run: recipe runs a recipe's own stages, so it cannot be combined with %s; call it again with only recipe and inputs, or without recipe to describe the fan-out yourself"
 	fanOutUnknownRecipe      = "fan_out was not run: %q is not a recipe; the recipes are: %s"
 	fanOutRecipeInputsFormat = "fan_out was not run: inputs must be an object of name: text pairs (%v)"
@@ -97,8 +98,8 @@ const workflowStatusFileName = "status.json"
 const fanOutListingLineFormat = "items: %s"
 
 // fanOutArgs is a fan_out call's arguments as the tool publishes them (tools.fanOutSchemaTemplate).
-// `run_on` is read by nothing here yet: the item children run on the configured seat. `recipe` and
-// `inputs`, the recipe form, are read by parseFanOutRecipe, and `background` by asksBackground.
+// `run_on` is read by fanOutSeat, `recipe` and `inputs`, the recipe form, by parseFanOutRecipe, and
+// `background` by asksBackground.
 type fanOutArgs struct {
 	Task    string               `json:"task"`
 	Over    json.RawMessage      `json:"over"`
@@ -116,7 +117,8 @@ type fanOutArgs struct {
 var fanOutPlanFields = []string{"task", "over", "batch", "context", "returns", "out", "verify", "merge", "tools"}
 
 // emptyJSONValues are the argument values that count as unset when fan_out checks a recipe call
-// for fan-out arguments: a model that fills every field in with an empty value asked for nothing.
+// for fan-out arguments, and a `recipe` for a value at all: a model that fills every field in with
+// an empty value asked for nothing.
 var emptyJSONValues = []string{"null", `""`, "[]", "{}", "0", "false"}
 
 // fanOutVerifyArgs is fan_out's `verify` object: which items to check and what to look at.
@@ -230,12 +232,16 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if isWorkflowControlCall(call) {
 		return a.workflowControlResult(call)
 	}
+	seat, refusal := a.fanOutSeat(call.Arguments)
+	if refusal != "" {
+		return errorToolResult(call.ID, refusal)
+	}
 	background := asksBackground(call.Arguments) && a.offersBackground()
 	if recipe, inputs, refusal, isRecipe := parseFanOutRecipe(call.Arguments); isRecipe {
 		if refusal != "" {
 			return errorToolResult(call.ID, refusal)
 		}
-		return a.recipeCallResult(ctx, turn, call, recipe, inputs, background)
+		return a.recipeCallResult(ctx, turn, call, recipeCall{id: recipe, inputs: inputs, seat: seat}, background)
 	}
 	plan, refusal := parseFanOutPlan(call.Arguments)
 	if refusal != "" {
@@ -244,12 +250,12 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if problems := workflow.ValidateModelPlan(plan); len(problems) > 0 {
 		return errorToolResult(call.ID, fanOutProblemsText(problems))
 	}
-	runner, refusal := a.newWorkflowRunner(turn, call)
+	runner, refusal := a.newWorkflowRunner(turn, call, seat)
 	if refusal != "" {
 		return errorToolResult(call.ID, refusal)
 	}
 	if background {
-		id, err := a.startBackground(backgroundLaunch{plan: plan, runner: runner, tool: tools.FanOutToolName, turn: turn})
+		id, err := a.startBackground(backgroundLaunch{plan: plan, runner: runner, tool: tools.FanOutToolName, turn: turn, seat: seat})
 		return a.backgroundCallResult(call.ID, id, err)
 	}
 	observer := a.observeWorkflow(runner, turn, plan.Name)
@@ -261,52 +267,65 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome)}
 }
 
-// recipeCallResult runs the recipe id one fan_out call names over its keyed inputs and renders its
-// answer: the result lines, the recipes there are for an unknown id, or why the recipe could not
-// run (an unknown or missing input among them). With background set it starts the recipe in the
-// background instead and answers at once.
+// recipeCall is what a fan_out call's recipe form asks for: the recipe's id, its keyed inputs and
+// the Delegation seat its item children run on.
+type recipeCall struct {
+	id     string
+	inputs map[string]string
+	seat   delegationSeat
+}
+
+// recipeCallResult runs the recipe one fan_out call names over its keyed inputs, on the seat the
+// call named, and renders its answer: the result lines, the recipes there are for an unknown id, or
+// why the recipe could not run (an unknown or missing input among them). With background set it
+// starts the recipe in the background instead and answers at once.
 func (a *Agent) recipeCallResult(
 	ctx context.Context,
 	turn int,
 	call domain.ToolCall,
-	id string,
-	inputs map[string]string,
+	asked recipeCall,
 	background bool,
 ) domain.ToolResult {
 	source := a.recipeSource()
 	if source == nil {
-		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, id, "none"))
+		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, asked.id, "none"))
 	}
-	recipe, ok := source.Recipe(id)
+	recipe, ok := source.Recipe(asked.id)
 	if !ok {
 		known := "none"
 		if ids := source.RecipeIDs(); len(ids) > 0 {
 			known = strings.Join(ids, ", ")
 		}
-		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, id, known))
+		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, asked.id, known))
 	}
 	if background {
-		workflowID, err := a.startKeyedBackgroundRecipe(recipe, inputs)
+		workflowID, err := a.startKeyedBackgroundRecipe(recipe, asked.inputs, asked.seat)
 		return a.backgroundCallResult(call.ID, workflowID, err)
 	}
-	result, err := a.runRecipe(ctx, turn, call, id, inputs)
+	result, err := a.runRecipe(ctx, turn, call, asked)
 	if err != nil {
-		return errorToolResult(call.ID, fmt.Sprintf(fanOutRecipeFailed, id, err))
+		return errorToolResult(call.ID, fmt.Sprintf(fanOutRecipeFailed, asked.id, err))
 	}
 	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result)}
 }
 
 // parseFanOutRecipe reads a fan_out call that names a recipe: the recipe id and its inputs, or the
-// refusal a recipe beside fan-out arguments, or inputs that are not name: text pairs, earn.
-// isRecipe is false — and the call is an ordinary fan-out — when the arguments name no recipe or
-// are not a JSON object (parseFanOutPlan reports that).
+// refusal a recipe that is not a string, a recipe beside fan-out arguments, or inputs that are not
+// name: text pairs, earn. isRecipe is false — and the call is an ordinary fan-out — when the
+// arguments leave `recipe` unset or empty (emptyJSONValues) or are not a JSON object
+// (parseFanOutPlan reports that). A `recipe` set to anything else is a recipe call, so a mistyped
+// one is refused rather than run as the plain fan-out it never asked for.
 func parseFanOutRecipe(raw json.RawMessage) (id string, inputs map[string]string, refusal string, isRecipe bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return "", nil, "", false
 	}
-	if err := json.Unmarshal(fields["recipe"], &id); err != nil || id == "" {
+	named, set := fields["recipe"]
+	if !set || slices.Contains(emptyJSONValues, string(bytes.TrimSpace(named))) {
 		return "", nil, "", false
+	}
+	if err := json.Unmarshal(named, &id); err != nil {
+		return "", nil, fmt.Sprintf(fanOutRecipeTypeFormat, bytes.TrimSpace(named)), true
 	}
 	var mixed []string
 	for _, name := range fanOutPlanFields {
@@ -325,12 +344,14 @@ func parseFanOutRecipe(raw json.RawMessage) (id string, inputs map[string]string
 	return id, inputs, "", true
 }
 
-// newWorkflowRunner builds the Runner one fan_out call runs under, or the refusal that keeps it
-// from running: the session's workflow store under its scratch directory, the workspace the items
-// are read from, the split budget a `split:` source cuts to, and the dispatch width. Width is this
-// Agent's delegation width — the cap of the server the children run on, 1 on a delegate — and the
-// Runner never runs more children than a stage has items, so the width in effect is min(width, N).
-func (a *Agent) newWorkflowRunner(turn int, call domain.ToolCall) (*workflow.Runner, string) {
+// newWorkflowRunner builds the Runner one fan_out call runs under, its item children built on seat,
+// or the refusal that keeps it from running: the session's workflow store under its scratch
+// directory, the workspace the items are read from, the split budget a `split:` source cuts to, and
+// the dispatch width. Width and split budget follow the seat (workflowWidthOn,
+// workflowContextLimitOn) — the cap and window of the server the children run on, width 1 on a
+// delegate — and the Runner never runs more children than a stage has items, so the width in
+// effect is min(width, N).
+func (a *Agent) newWorkflowRunner(turn int, call domain.ToolCall, seat delegationSeat) (*workflow.Runner, string) {
 	scratch := a.ScratchDir()
 	if scratch == "" {
 		return nil, fanOutNoScratch
@@ -342,12 +363,14 @@ func (a *Agent) newWorkflowRunner(turn int, call domain.ToolCall) (*workflow.Run
 	if err != nil {
 		return nil, fanOutRunFailedPrefix + err.Error()
 	}
+	spawner := a.newWorkflowSpawner(turn, call, nil)
+	spawner.seat = seat
 	return &workflow.Runner{
-		Spawner:       a.newWorkflowSpawner(turn, call, nil),
+		Spawner:       spawner,
 		Store:         store,
 		Workspace:     os.DirFS(a.cfg.WorkspaceDir),
-		Split:         workflow.NewSplitBudget(a.workflowContextLimit()),
-		Width:         a.delegationWidth(),
+		Split:         workflow.NewSplitBudget(a.workflowContextLimitOn(seat)),
+		Width:         a.workflowWidthOn(seat),
 		Retries:       a.cfg.Workflow.ResolvedRetries(),
 		Continuations: a.cfg.Workflow.ResolvedContinuations(),
 	}, ""
@@ -363,6 +386,56 @@ func (a *Agent) workflowContextLimit() int {
 		return workingLimit(target.binding().applyTo(a.cfg).Context)
 	}
 	return a.budget().ContextLimit
+}
+
+// workflowContextLimitOn is workflowContextLimit for item children built on seat: a session-seated
+// child never reads the latch (newChildAgentOn), so it runs in this session's own window whatever
+// is latched; every other seat reads the latch as workflowContextLimit does, which is also where a
+// sub-agents-server ask with nothing latched falls back to the session's window.
+func (a *Agent) workflowContextLimitOn(seat delegationSeat) int {
+	if seat == seatSession {
+		return a.budget().ContextLimit
+	}
+	return a.workflowContextLimit()
+}
+
+// workflowWidthOn is how many item children a workflow on seat runs at once: the session server's
+// cap for a session-seated workflow, even with a target latched (ADR 0069 decision 7's "a
+// single-seat reply keeps its seat's cap"), and this Agent's delegation width otherwise — the
+// latched target's cap, else the session's. It is 1 on a delegate either way.
+func (a *Agent) workflowWidthOn(seat delegationSeat) int {
+	if seat != seatSession || a.isDelegate() {
+		return a.delegationWidth()
+	}
+	return max(a.parallelAgentsCap(), 1)
+}
+
+// fanOutSeat resolves the Delegation seat a fan_out call's `run_on` names, or the refusal an
+// invalid one earns — sub_agent's own text (parseDelegationSeat), which names the two spellings. It
+// is read only where this Agent's fan_out published `run_on` (seatChoosingFanOut), the rule
+// runSubAgent applies to sub_agent: anywhere else the argument was never offered and is ignored,
+// and the call runs on seatConfigured. Arguments that are not an object name no seat either;
+// parseFanOutPlan reports them.
+func (a *Agent) fanOutSeat(raw json.RawMessage) (delegationSeat, string) {
+	if _, published := seatChoosingFanOut(a.tools); !published {
+		return seatConfigured, ""
+	}
+	var args struct {
+		RunOn json.RawMessage `json:"run_on"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil || len(args.RunOn) == 0 {
+		return seatConfigured, ""
+	}
+	var name string
+	if err := json.Unmarshal(args.RunOn, &name); err != nil {
+		// Not a string: named as written, so the refusal shows the model what it sent.
+		name = string(bytes.TrimSpace(args.RunOn))
+	}
+	seat, err := parseDelegationSeat(name)
+	if err != nil {
+		return seatConfigured, err.Error()
+	}
+	return seat, ""
 }
 
 // parseFanOutPlan turns a fan_out call's arguments into the Plan they describe — the fanout stage,

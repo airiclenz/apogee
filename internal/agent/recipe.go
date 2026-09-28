@@ -186,7 +186,7 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 		inputs = bound
 	}
 	call := domain.ToolCall{ID: fmt.Sprintf("recipe-%s-%d", recipe.ID, turn), Tool: recipeCallTool}
-	result, err := a.runRecipe(ctx, turn, call, recipe.ID, inputs)
+	result, err := a.runRecipe(ctx, turn, call, recipeCall{id: recipe.ID, inputs: inputs})
 	if err != nil {
 		return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 	}
@@ -251,23 +251,23 @@ func (a *Agent) askUser(ctx context.Context, question string, choices []string) 
 	return strings.TrimSpace(answer.Text), nil
 }
 
-// runRecipe runs the recipe id as a Workflow over inputs — keyed by name, the ones left out
-// taking their defaults — and returns its result. It opens no Exchange: the recipe launch and
-// fan_out's recipe form both call it from inside one. call and turn stamp the children's phase
-// events as a fan_out call's do. The error is a recipe that could not run: an unknown id, an
-// unknown or missing input, no scratch dir or workspace, or a run the Runner could not proceed
-// with.
-func (a *Agent) runRecipe(ctx context.Context, turn int, call domain.ToolCall, id string, inputs map[string]string) (workflow.Result, error) {
-	recipe, err := a.recipeByID(id)
+// runRecipe runs the recipe asked names as a Workflow over its inputs — keyed by name, the ones
+// left out taking their defaults — with its item children on the seat asked names, and returns its
+// result. It opens no Exchange: the recipe launch (seatConfigured) and fan_out's recipe form both
+// call it from inside one. call and turn stamp the children's phase events as a fan_out call's do.
+// The error is a recipe that could not run: an unknown id, an unknown or missing input, no scratch
+// dir or workspace, or a run the Runner could not proceed with.
+func (a *Agent) runRecipe(ctx context.Context, turn int, call domain.ToolCall, asked recipeCall) (workflow.Result, error) {
+	recipe, err := a.recipeByID(asked.id)
 	if err != nil {
 		return workflow.Result{}, err
 	}
-	inputs, err = completeInputs(recipe.Inputs, inputs)
+	inputs, err := completeInputs(recipe.Inputs, asked.inputs)
 	if err != nil {
 		return workflow.Result{}, err
 	}
 	plan := bindPlanInputs(recipe, inputs)
-	runner, err := a.newRecipeRunner(turn, call, recipe)
+	runner, err := a.newRecipeRunner(turn, call, recipe, asked.seat)
 	if err != nil {
 		return workflow.Result{}, err
 	}
@@ -376,12 +376,12 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-// newRecipeRunner builds the Runner a recipe runs under: fan_out's store, workspace, split budget,
-// width and second chances (newWorkflowRunner), children whose prompt files are read from the
-// skill's folder, this Agent's script runner, and — when a human can be asked — its Asker. It names
-// the recipe, so the folder's status.json records where a re-run reads those files from
-// (Agent.RerunFailed).
-func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.Recipe) (*workflow.Runner, error) {
+// newRecipeRunner builds the Runner a recipe runs under, its item children built on seat: fan_out's
+// store, workspace, split budget, width and second chances (newWorkflowRunner — the budget and
+// width sized for the seat), children whose prompt files are read from the skill's folder, this
+// Agent's script runner, and — when a human can be asked — its Asker. It names the recipe, so the
+// folder's status.json records where a re-run reads those files from (Agent.RerunFailed).
+func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.Recipe, seat delegationSeat) (*workflow.Runner, error) {
 	scratch := a.ScratchDir()
 	if scratch == "" {
 		return nil, errors.New("this session has no scratch directory to keep the workflow in")
@@ -393,13 +393,15 @@ func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.
 	if err != nil {
 		return nil, err
 	}
-	split := workflow.NewSplitBudget(a.workflowContextLimit())
+	split := workflow.NewSplitBudget(a.workflowContextLimitOn(seat))
+	spawner := a.newWorkflowSpawner(turn, call, recipe.Files)
+	spawner.seat = seat
 	runner := &workflow.Runner{
-		Spawner:       a.newWorkflowSpawner(turn, call, recipe.Files),
+		Spawner:       spawner,
 		Store:         store,
 		Workspace:     os.DirFS(a.cfg.WorkspaceDir),
 		Split:         split,
-		Width:         a.delegationWidth(),
+		Width:         a.workflowWidthOn(seat),
 		Retries:       a.cfg.Workflow.ResolvedRetries(),
 		Continuations: a.cfg.Workflow.ResolvedContinuations(),
 		Scripts:       &recipeScripts{agent: a, turn: turn, recipe: recipe, split: split},

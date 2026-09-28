@@ -161,16 +161,20 @@ func (a *Agent) wrapUpFinishDirective() string {
 // where a stage's `prompt:` file is read from; nil reads it from the workspace. children is the
 // registry a running child is addressable and stoppable through — the parent's own, except for a
 // background workflow, whose parent is a launch-time snapshot (backgroundHost) while its children
-// stay listed on the top-level Agent the Driver addresses.
+// stay listed on the top-level Agent the Driver addresses. seat is the Delegation seat every child
+// is built on (newChildAgentOn): the one the fan_out call's `run_on` named, seatConfigured — the
+// zero — when it named none.
 type workflowSpawner struct {
 	parent   *Agent
 	turn     int
 	call     domain.ToolCall
 	prompts  fs.FS
 	children *childRegistry
+	seat     delegationSeat
 }
 
-// newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn.
+// newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn, on
+// seatConfigured; a caller whose call named a seat sets it on the returned spawner.
 func (a *Agent) newWorkflowSpawner(turn int, call domain.ToolCall, prompts fs.FS) *workflowSpawner {
 	return &workflowSpawner{parent: a, turn: turn, call: call, prompts: prompts, children: &a.children}
 }
@@ -224,7 +228,7 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		})
 	}()
 
-	sub, err := a.newChildAgentOn(seatConfigured, s.call.ID, runID, task, delegationName(spec.Item.Label))
+	sub, err := a.newChildAgentOn(s.seat, s.call.ID, runID, task, delegationName(spec.Item.Label))
 	if err != nil {
 		return workflow.Outcome{}, fmt.Errorf("could not construct the item's child: %w", err)
 	}

@@ -147,6 +147,45 @@ func TestBackground_RunsAtTheServerWidthMinusOne(t *testing.T) {
 	}
 }
 
+// TestBackground_ASessionSeatedFanOutQueuesOnTheSessionServer holds a background fan_out on the
+// latched Sub-agent server, then launches a second with `run_on: "session"`: the line is kept per
+// server, so the second starts at once beside the first and its child runs on the session server.
+func TestBackground_ASessionSeatedFanOutQueuesOnTheSessionServer(t *testing.T) {
+	t.Parallel()
+
+	cfg := withSeatChoiceFanOut(workflowConfig(t, newLockedSink()), true)
+	cfg.ParallelAgents = 2
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("launch far", nil, toolCallScript("fo1", tools.FanOutToolName, seatArgsJSON("", true, "alpha"))).
+		route("launch far", nil, contentScript("started it")).
+		route("launch near", nil, toolCallScript("fo2", tools.FanOutToolName, seatArgsJSON(tools.RunOnSession, true, "beta"))).
+		route("launch near", nil, contentScript("started it too")).
+		route("check beta", nil, finishScript("s-beta", "beta is fine"))
+	grunt := (&workflowResponder{}).
+		route("check alpha", signalThenWait(started, release), finishScript("g-alpha", "alpha is fine")).
+		route("check beta", nil, finishScript("g-beta", "beta is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	a.dial = dialerTo(grunt).dial
+	a.SetDelegationTarget(gruntTarget(gruntEndpoint, 2))
+
+	runSubmitted(t, context.Background(), a, "launch far")
+	awaitClosed(t, started, "the far workflow's child")
+	runSubmitted(t, context.Background(), a, "launch near")
+
+	for id, queued := range a.background.liveStates() {
+		if queued {
+			t.Errorf("workflow %s waits in line, want the session-seated one started beside the far one", id)
+		}
+	}
+	close(release)
+	a.background.waitAll()
+
+	if onSession, onGrunt := up.askedCount("check beta"), grunt.askedCount("check beta"); onSession != 1 || onGrunt != 0 {
+		t.Errorf("beta ran %d times on the session server and %d on the target, want once on the session server", onSession, onGrunt)
+	}
+}
+
 // TestBackground_TheIdleOnlyMutatorsDoNotRaceARunningWorkflow runs each idle-only mutator over and
 // over while a background workflow spawns its children one after another. Nothing orders the two
 // goroutines, so under -race a child built off the live Agent's fields is a reported race; built

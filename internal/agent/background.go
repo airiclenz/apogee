@@ -183,6 +183,7 @@ type backgroundRun struct {
 	id       string
 	recipe   string
 	server   string
+	seat     delegationSeat // the seat its children run on, which its width is read for (startRunLocked)
 	plan     workflow.Plan
 	runner   *workflow.Runner
 	host     *Agent
@@ -197,8 +198,9 @@ type backgroundRun struct {
 // backgroundLaunch is what startBackground needs of a workflow: its plan (inputs already bound),
 // the recipe it comes from ("" for a fan_out's plan), the Runner built for it, where its stages'
 // prompt files are read from (nil: the workspace), the tool its children are bracketed under, the
-// Turn that launched it, and — for a re-run — the folder it must run in again ("" finds or creates
-// one, openWorkflowFolder).
+// Turn that launched it, the Delegation seat its children run on (the fan_out call's `run_on`;
+// seatConfigured, the zero, for every other launch), and — for a re-run — the folder it must run in
+// again ("" finds or creates one, openWorkflowFolder).
 type backgroundLaunch struct {
 	plan    workflow.Plan
 	recipe  string
@@ -206,6 +208,7 @@ type backgroundLaunch struct {
 	prompts fs.FS
 	tool    string
 	turn    int
+	seat    delegationSeat
 	folder  string
 }
 
@@ -406,7 +409,7 @@ func (a *Agent) resumeBackground(entry workflowEntryJSON, folder string) error {
 	turn := a.turns.snapshot().index
 	launch := backgroundLaunch{plan: plan, tool: tools.FanOutToolName, turn: turn, folder: folder}
 	if entry.Recipe == "" {
-		runner, refusal := a.newWorkflowRunner(turn, domain.ToolCall{})
+		runner, refusal := a.newWorkflowRunner(turn, domain.ToolCall{}, seatConfigured)
 		if refusal != "" {
 			return errors.New(refusal)
 		}
@@ -416,7 +419,7 @@ func (a *Agent) resumeBackground(entry workflowEntryJSON, folder string) error {
 		if err != nil {
 			return err
 		}
-		runner, err := a.newRecipeRunner(turn, domain.ToolCall{}, recipe)
+		runner, err := a.newRecipeRunner(turn, domain.ToolCall{}, recipe, seatConfigured)
 		if err != nil {
 			return err
 		}
@@ -510,25 +513,26 @@ func (a *Agent) startBackgroundRecipe(recipe workflow.Recipe, text string) (stri
 	if len(missing) > 0 {
 		return "", fmt.Errorf(missingInputFormat, missing[0])
 	}
-	return a.startKeyedBackgroundRecipe(recipe, values)
+	return a.startKeyedBackgroundRecipe(recipe, values, seatConfigured)
 }
 
 // startKeyedBackgroundRecipe launches recipe in the background over keyed inputs — the ones the
-// user's text bound, or the ones a model's `fan_out{recipe, inputs, background}` named — and returns
-// the workflow's id. An undeclared key or a required input left unset is refused, never asked.
-func (a *Agent) startKeyedBackgroundRecipe(recipe workflow.Recipe, given map[string]string) (string, error) {
+// user's text bound, or the ones a model's `fan_out{recipe, inputs, background}` named — with its
+// children on seat, and returns the workflow's id. An undeclared key or a required input left unset
+// is refused, never asked.
+func (a *Agent) startKeyedBackgroundRecipe(recipe workflow.Recipe, given map[string]string, seat delegationSeat) (string, error) {
 	inputs, err := completeInputs(recipe.Inputs, given)
 	if err != nil {
 		return "", err
 	}
 	turn := a.turns.snapshot().index
-	runner, err := a.newRecipeRunner(turn, domain.ToolCall{}, recipe)
+	runner, err := a.newRecipeRunner(turn, domain.ToolCall{}, recipe, seat)
 	if err != nil {
 		return "", err
 	}
 	return a.startBackground(backgroundLaunch{
 		plan: bindPlanInputs(recipe, inputs), recipe: recipe.ID, runner: runner,
-		prompts: recipe.Files, tool: recipeCallTool, turn: turn,
+		prompts: recipe.Files, tool: recipeCallTool, turn: turn, seat: seat,
 	})
 }
 
@@ -552,6 +556,7 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	call := domain.ToolCall{ID: backgroundCallPrefix + status.ID, Tool: launch.tool}
 	spawner := host.newWorkflowSpawner(launch.turn, call, launch.prompts)
 	spawner.children = &a.children
+	spawner.seat = launch.seat
 	launch.runner.Spawner = spawner
 	if scripts, ok := launch.runner.Scripts.(*recipeScripts); ok {
 		scripts.agent = host
@@ -564,7 +569,7 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 		launch.runner.Asker = backgroundAsker{scope: backgroundScope{manager: &a.background, workflow: status.ID, observer: observer}}
 	}
 	run := &backgroundRun{
-		id: status.ID, recipe: launch.recipe, server: host.backgroundServer(),
+		id: status.ID, recipe: launch.recipe, server: host.backgroundServer(launch.seat), seat: launch.seat,
 		plan: launch.plan, runner: launch.runner, host: host, turn: launch.turn, observer: observer,
 		done: make(chan struct{}),
 	}
@@ -634,7 +639,7 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 	scope := backgroundScope{manager: &a.background, workflow: run.id, observer: run.observer}
 	ctx, cancel := context.WithCancel(withBackgroundPrompts(context.Background(), scope))
 	run.running, run.cancel = true, cancel
-	run.runner.Width = run.host.backgroundWidth()
+	run.runner.Width = run.host.backgroundWidth(run.seat)
 	go a.driveBackground(ctx, run)
 }
 
@@ -751,15 +756,26 @@ func (a *Agent) backgroundHost() *Agent {
 	return host
 }
 
-// backgroundWidth is how many children a background workflow runs at once: the width of the server
-// they run on minus the one slot the conversation keeps, and never below one (ADR 0089 D2).
-func (a *Agent) backgroundWidth() int {
-	return max(a.delegationCap()-1, 1)
+// backgroundWidth is how many children a background workflow on seat runs at once: the width of the
+// server they run on minus the one slot the conversation keeps, and never below one (ADR 0089 D2).
+// A session-seated workflow runs on the session server whatever is latched, so its width is that
+// server's cap.
+func (a *Agent) backgroundWidth(seat delegationSeat) int {
+	width := a.delegationCap()
+	if seat == seatSession {
+		width = a.parallelAgentsCap()
+	}
+	return max(width-1, 1)
 }
 
-// backgroundServer names the server a background workflow's children run on, which is what the
-// one-at-a-time line is kept per: the latched Delegation target's endpoint, else the session's.
-func (a *Agent) backgroundServer() string {
+// backgroundServer names the server a background workflow's children on seat run on, which is what
+// the one-at-a-time line is kept per: the session's endpoint for a session-seated workflow, else
+// the latched Delegation target's endpoint, else — nothing latched, where a sub-agents-server ask
+// falls back too — the session's.
+func (a *Agent) backgroundServer(seat delegationSeat) string {
+	if seat == seatSession {
+		return a.cfg.Endpoint
+	}
 	if target := a.delegationTarget(); target != nil {
 		return target.Endpoint
 	}

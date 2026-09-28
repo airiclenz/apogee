@@ -565,6 +565,194 @@ func TestWorkflowContextLimit(t *testing.T) {
 	}
 }
 
+// withSeatChoiceFanOut replaces cfg's tools with a fan_out publishing `run_on` — what the host
+// builds under `sub-agents-choice: model` — plus the background switch and the workflow control
+// tool when background is set, and the one read-only tool.
+func withSeatChoiceFanOut(cfg domain.Config, background bool) domain.Config {
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewFanOutWith(tools.FanOutOptions{SeatChoice: true, Background: background}))
+	if background {
+		_ = reg.Register(tools.NewWorkflow())
+	}
+	_ = reg.Register(fakeTool{name: "read_thing", readOnly: true, result: "package main"})
+	cfg.Tools = reg
+	return cfg
+}
+
+// seatArgsJSON is fanOutArgsJSON over items with `run_on` set to runOn ("" leaves it out) and
+// `background` to background.
+func seatArgsJSON(runOn string, background bool, items ...string) string {
+	args := map[string]any{"task": fanOutTask, "over": items, "returns": map[string]string{"count": "int"}}
+	if runOn != "" {
+		args["run_on"] = runOn
+	}
+	if background {
+		args["background"] = true
+	}
+	b, _ := json.Marshal(args)
+	return string(b)
+}
+
+// TestWorkflowCall_RunOnIsTheSeatOfEveryItemChild drives a fan_out whose `run_on` is published,
+// with a Sub-agent server latched: "session" builds every item child on the parent's own server at
+// the session cap, "sub-agents-server" and an unnamed seat route them to the latched target at its
+// cap. The two servers' caps differ, so the peak in flight says whose cap sized the workflow.
+func TestWorkflowCall_RunOnIsTheSeatOfEveryItemChild(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		runOn      string
+		sessionCap int
+		gruntCap   int
+		wantGrunt  bool
+	}{
+		{"session runs on the parent's server at its cap", tools.RunOnSession, 3, 1, false},
+		{"sub-agents-server routes at the target's cap", tools.RunOnSubAgentsServer, 1, 3, true},
+		{"an unnamed seat routes as configured", "", 1, 3, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := withSeatChoiceFanOut(workflowConfig(t, sink), false)
+			cfg.ParallelAgents = tc.sessionCap
+			probe := newConcurrencyProbe(3, 3*time.Second)
+			items := []string{"alpha", "beta", "gamma"}
+			up := (&workflowResponder{}).
+				route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, seatArgsJSON(tc.runOn, false, items...))).
+				route("please fan out", nil, contentScript("all done"))
+			grunt := &workflowResponder{}
+			for _, item := range items {
+				up.route("check "+item, probe.enter, finishScript("s-"+item, item+" is fine"))
+				grunt.route("check "+item, probe.enter, finishScript("g-"+item, item+" is fine"))
+			}
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.dial = dialerTo(grunt).dial
+			a.SetDelegationTarget(gruntTarget(gruntEndpoint, tc.gruntCap))
+
+			runSubmitted(t, context.Background(), a, "please fan out")
+
+			if got := callResult(t, sink.events, "fo1"); got.IsError {
+				t.Fatalf("fan_out result is an error: %q", got.Content)
+			}
+			for _, item := range items {
+				onGrunt, onSession := grunt.askedCount("check "+item), up.askedCount("check "+item)
+				if tc.wantGrunt && (onGrunt != 1 || onSession != 0) || !tc.wantGrunt && (onGrunt != 0 || onSession != 1) {
+					t.Errorf("%s ran %d times on the target and %d on the session server, want it on the target: %v",
+						item, onGrunt, onSession, tc.wantGrunt)
+				}
+			}
+			if peak := probe.peakInFlight(); peak != 3 {
+				t.Errorf("peak children in flight = %d, want 3 at the cap of the server they ran on", peak)
+			}
+		})
+	}
+}
+
+// TestWorkflowCall_TheRunnerIsSizedForItsSeat pins the width and the split budget a fan_out's
+// Runner takes for each seat: a session-seated workflow takes the session's cap and window whatever
+// is latched, every other seat the latched target's — and with nothing latched, the session's.
+func TestWorkflowCall_TheRunnerIsSizedForItsSeat(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		target    *DelegationTarget
+		seat      delegationSeat
+		wantWidth int
+		wantLimit int
+	}{
+		{"configured with a target", gruntTarget(gruntEndpoint, 2), seatConfigured, 2, 32768},
+		{"session with a target", gruntTarget(gruntEndpoint, 2), seatSession, 3, 32000},
+		{"sub-agents-server with a target", gruntTarget(gruntEndpoint, 2), seatSubAgentsServer, 2, 32768},
+		{"sub-agents-server with none latched", nil, seatSubAgentsServer, 3, 32000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := workflowConfig(t, &recordingSink{})
+			cfg.Context.MaxContextTokens = 32000
+			cfg.ParallelAgents = 3
+			a, err := newAgent(cfg, scriptedResponder(t))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.SetDelegationTarget(tc.target)
+
+			runner, refusal := a.newWorkflowRunner(0, domain.ToolCall{}, tc.seat)
+
+			if refusal != "" {
+				t.Fatalf("newWorkflowRunner refused: %s", refusal)
+			}
+			if runner.Width != tc.wantWidth || runner.Split != workflow.NewSplitBudget(tc.wantLimit) {
+				t.Errorf("runner width %d, split %d; want %d and the split of a %d window",
+					runner.Width, runner.Split, tc.wantWidth, tc.wantLimit)
+			}
+		})
+	}
+}
+
+// TestWorkflowCall_AnInvalidRunOnIsRefusedWithSubAgentsText refuses a `run_on` outside the two
+// published spellings — on a plain fan-out and on the recipe form — with sub_agent's own text, and
+// runs nothing.
+func TestWorkflowCall_AnInvalidRunOnIsRefusedWithSubAgentsText(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"a fan-out on elsewhere", seatArgsJSON("elsewhere", false, "alpha in src"),
+			`invalid run_on "elsewhere": want "session" or "sub-agents-server"`},
+		{"a recipe on a number", `{"recipe":"review","inputs":{"scope":"src"},"run_on":5}`,
+			`invalid run_on "5": want "session" or "sub-agents-server"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := withSeatChoiceFanOut(recipeConfig(t, sink, reviewRecipe()), false)
+			up := recipeFanOutUpstream(tc.args)
+
+			runWorkflowParent(t, context.Background(), cfg, up, "please run it")
+
+			if got := callResult(t, sink.events, "fo1"); !got.IsError || got.Content != tc.want {
+				t.Errorf("fan_out result = %+v, want the error %q", got, tc.want)
+			}
+			if n := up.askedCount("check alpha in src"); n != 0 {
+				t.Errorf("item child asked %d times, want no child for a refused call", n)
+			}
+			if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
+				t.Errorf("workflow folders = %v, want none for a refused call", folders)
+			}
+		})
+	}
+}
+
+// TestWorkflowCall_RunOnIsIgnoredWhereItWasNeverPublished runs a fan_out whose tool published no
+// `run_on`: a seat the call names anyway — even one outside the enum — is ignored, not refused.
+func TestWorkflowCall_RunOnIsIgnoredWhereItWasNeverPublished(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink)
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, seatArgsJSON("elsewhere", false, "alpha"))).
+		route("please fan out", nil, contentScript("all done")).
+		route("check alpha", nil, finishScript("f1", "alpha is fine"))
+
+	runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+	if got := callResult(t, sink.events, "fo1"); got.IsError || !strings.Contains(got.Content, "#1 alpha — ok — alpha is fine") {
+		t.Errorf("fan_out result = %q (error %v), want the item's result line", got.Content, got.IsError)
+	}
+}
+
 // workflowPhaseEvents returns the WorkflowPhaseEvents among events, in emission order.
 func workflowPhaseEvents(events []domain.Event) []domain.WorkflowPhaseEvent {
 	var phases []domain.WorkflowPhaseEvent
@@ -757,6 +945,10 @@ func TestWorkflowCall_ARecipeCallThatCannotRunIsAFixableError(t *testing.T) {
 		{"inputs of the wrong shape", `{"recipe":"review","inputs":{"scope":3}}`, "inputs must be an object of name: text pairs"},
 		{"a missing input", `{"recipe":"review"}`, "fan_out could not run recipe review: missing input: scope"},
 		{"an unknown input", `{"recipe":"review","inputs":{"scope":"src","depth":"2"}}`, `unknown input "depth"`},
+		{"a recipe that is not a string", `{"recipe":5}`,
+			"fan_out was not run: recipe must be the name of a recipe (a string), got 5"},
+		{"a boolean recipe beside a task", `{"recipe":true,"task":"check {item} carefully and report","over":["alpha in src"]}`,
+			"fan_out was not run: recipe must be the name of a recipe (a string), got true"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -764,7 +956,8 @@ func TestWorkflowCall_ARecipeCallThatCannotRunIsAFixableError(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := recipeConfig(t, sink, reviewRecipe())
 
-			runWorkflowParent(t, context.Background(), cfg, recipeFanOutUpstream(tc.args), "please run it")
+			up := recipeFanOutUpstream(tc.args)
+			runWorkflowParent(t, context.Background(), cfg, up, "please run it")
 
 			got := callResult(t, sink.events, "fo1")
 			if !got.IsError || !strings.Contains(got.Content, tc.want) {
@@ -772,6 +965,9 @@ func TestWorkflowCall_ARecipeCallThatCannotRunIsAFixableError(t *testing.T) {
 			}
 			if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
 				t.Errorf("workflow folders = %v, want none for a recipe that did not run", folders)
+			}
+			if n := up.askedCount("check alpha in src"); n != 0 {
+				t.Errorf("item child asked %d times, want no child for a refused call", n)
 			}
 		})
 	}
