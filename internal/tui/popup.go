@@ -290,11 +290,20 @@ const (
 // belongs to a ROW: a header is one whether or not the selection is near it, and the selection
 // itself already travels as an index.
 //
-// rowTop is where a spec with NO selection opens its row window: a report is SCROLLED rather than
-// walked, so the window is anchored where the reader put it instead of around a cursor that does not
-// exist (the /usage pane under the wheel, mouse.go). It is read only where selected is negative — a
-// list with a cursor windows around that cursor, which is what keeps the cursor on the screen — and a
-// zero is the top of the list, which is exactly where a selection-less spec has always been read from.
+// rowTop is where the row window opens when it is not grown around a cursor. A spec with NO selection
+// always opens there: a report is SCROLLED rather than walked, so the window is anchored where the
+// reader put it instead of around a cursor that does not exist (the /usage pane under the wheel,
+// mouse.go), and a zero is the top of the list, which is exactly where a selection-less spec has always
+// been read from. A spec WITH a selection opens there only under pinTop, and only while the selection
+// lies inside the window rowTop seats; everywhere else it windows around that cursor, which is what
+// keeps the cursor on the screen.
+//
+// pinTop is set by a list whose highlight the POINTER just moved (clickArm, mouse.go): the click landed
+// on a row of the window the human was looking at, so the window stays exactly where it was — rowTop
+// is that pre-click window's first row — and a second click at the same screen position lands on the
+// row the first one highlighted. Re-centring there would slide the row away from the pointer, and the
+// second click would highlight a neighbour instead of accepting. A key or a wheel notch drops the arm,
+// and with it the pin, so walking the list re-centres as it always has.
 //
 // scrollbar asks for the overflow bar down the row block's right-hand column (popupRowScrollbar). It
 // is opt-in rather than always-on because it is a SETTING one level up — the human turns the
@@ -327,6 +336,7 @@ type popupSpec struct {
 	rowPadAbove   bool
 	selected      int
 	rowTop        int
+	pinTop        bool
 	hint          string
 	maxRows       int
 	scrollbar     bool
@@ -970,12 +980,21 @@ func popupRowSeat(spec popupSpec, heights []int) popupRowSeating {
 	}
 	// window opens the row window against one budget: around the cursor for a list that has one, and
 	// at the reader's own top for a REPORT, which has none (popupSpec.rowTop) — and at rowTop 0 the
-	// two answer alike, which is what leaves every selection-less pane before it unchanged. It is
-	// asked twice because the pads are reserved before the rows are seated and handed back where they
-	// cannot be afforded.
+	// two answer alike, which is what leaves every selection-less pane before it unchanged. A list
+	// whose highlight the pointer just moved keeps its window where it was (popupSpec.pinTop) for as
+	// long as the highlight is inside it, and falls back to the cursor's window where it is not — a
+	// shrunken budget, say — so a pin can never push the highlight off the screen. It is asked twice
+	// because the pads are reserved before the rows are seated and handed back where they cannot be
+	// afforded.
 	window := func(budget int) (int, int) {
 		if spec.selected < 0 {
 			return popupRowWindowFrom(spec.rowTop, heights, gap, budget)
+		}
+		if spec.pinTop {
+			start, end := popupRowWindowFrom(spec.rowTop, heights, gap, budget)
+			if spec.selected >= start && spec.selected < end {
+				return start, end
+			}
 		}
 		return popupRowWindow(spec.selected, heights, gap, budget)
 	}
@@ -1683,7 +1702,8 @@ func popupTitleLine(th theme, title string, hidden, inner int) string {
 // rather than showing a fraction of an option and saying nothing about the rest.
 //
 // A spec with NO selection is windowed by popupRowWindowFrom instead (popupSpec.rowTop): there is no
-// cursor to grow out of there, and the two answer the same at the top of a list.
+// cursor to grow out of there, and the two answer the same at the top of a list. So is a spec whose
+// window the pointer pinned (popupSpec.pinTop), while its selection lies inside that window.
 func popupRowWindow(selected int, heights []int, gap, budget int) (int, int) {
 	total := len(heights)
 	if total == 0 {

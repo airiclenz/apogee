@@ -427,6 +427,9 @@ func (m Model) askPromptSpec(req domain.AskRequest) (popupSpec, bool) {
 		maxRows:     rowLines,
 		scrollbar:   m.popupScrollbarOn(),
 	}
+	// The pane builds its own spec rather than going through the list surface (listSpec), so it asks
+	// for the pointer's pin itself: a clicked answer stays under the pointer for the sending click.
+	spec.rowTop, spec.pinTop = m.clickArmed.pin(panePrompt, selected)
 	return spec, true
 }
 

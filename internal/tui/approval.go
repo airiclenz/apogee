@@ -658,6 +658,9 @@ func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) 
 		maxRows:   rowsShown,
 		scrollbar: m.popupScrollbarOn(),
 	}
+	// The pane builds its own spec rather than going through the list surface (listSpec), so it asks
+	// for the pointer's pin itself: a clicked decision stays under the pointer for the deciding click.
+	spec.rowTop, spec.pinTop = m.clickArmed.pin(panePrompt, spec.selected)
 	return spec, true
 }
 

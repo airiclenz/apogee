@@ -410,7 +410,12 @@ internal/tui/seam_test.go — fakeEngine.ContextFilesReport; internal/tui/model_
 
 **Commit:** `fix(tui): the context gauge shows an estimate until the first usage reading`
 
-## 9. Clicking a list row never moves the row window
+## 9. Clicking a list row never moves the row window — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): clickArm has a new pin(pane, selected) method that returns (rowTop, pinTop). listSpec, askPromptSpec and approvalPromptSpec all call it, so the rule is written once rather than as three `holds` checks. popupPaneHit returns (row, top, inRect, ok). settingsPaint.rowAt drops top, because /settings arms no row.
+NOTES (2026-09-28): the plan asked for TestClickArmClearsOnKeyAndWheel to cover "a key after a click re-centres". That check is a new sibling test, TestClickArmDropsThePinSoTheWindowRecentres, with a key case and a wheel case. The existing test is table-driven over a bare model with no pane on screen, so it could not look at a window.
+NOTES (2026-09-28): the picker/browser/workflows/ask checks are one table test, TestClickOnALowRowKeepsTheRowWindowStill. It also covers the approval prompt. Each case clicks the lowest row the window seats, and the picker, workflows and approval cases shrink the terminal so the list overflows.
+NOTES (2026-09-28): consequential edit — layout.md: made necessary by the click no longer re-centring the list; one sentence in "And the click follows the notch" says the rows stay still under the first click.
 
 **What:** This fixes a defect that predates the base, and commit 3f468f6d wrote the workaround into `TestE2EPopupClickDropdown`.
 

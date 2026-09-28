@@ -122,7 +122,9 @@ prompt, the `/sessions` browser, the `/model` | `/server` picker and the `/` | `
 click on a row moves the highlight onto it, the way `↑`/`↓` do (ticking its box where the question
 is multi-select, exactly as `␣` does), and a **second** click on that same row is the `⏎` the
 highlight was already offering: it takes the approval decision, sends the answer, loads the session,
-switches the model, completes the token in the box. It is always two clicks, never select-and-send
+switches the model, completes the token in the box. The first click leaves the rows where they stand
+rather than re-centring the list on the row it highlighted, so the second click, at the same spot,
+lands on that same row; a key or a notch re-centres the list as it always has. It is always two clicks, never select-and-send
 in one: the row an activating click may take is the row the *pointer* highlighted, so a pane's own
 opening highlight — `Allow` on the approval prompt, `/clear` at the top of the `/` menu — can never
 be turned into an answer nobody gave. The approval prompt's arming delay gates that second click

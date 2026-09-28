@@ -549,6 +549,10 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	if !seated {
 		return popupSpec{}, false
 	}
+	// A highlight the POINTER just put here keeps the window where the click found it (clickArm.pin), so
+	// the row stays under the pointer for the second click; a key or a notch drops the arm and the
+	// window re-centres on the cursor.
+	rowTop, pinTop := m.clickArmed.pin(c.pane, c.selected)
 	return popupSpec{
 		title:        c.title,
 		body:         c.body,
@@ -561,6 +565,8 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 		rowPadAbove:  padAbove,
 		rowStyle:     popupRowStyle{padBelow: padBelow},
 		selected:     c.selected,
+		rowTop:       rowTop,
+		pinTop:       pinTop,
 		hint:         c.hint,
 		maxRows:      shown,
 		scrollbar:    m.popupScrollbarOn(),

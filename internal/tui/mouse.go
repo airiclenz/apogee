@@ -439,12 +439,17 @@ func selectionText(value string, a, b int) string {
 }
 
 // clickArm is the row one boxed pane's click handler highlighted with the POINTER: which pane it was,
-// which of that pane's rows, and whether anything is armed at all. It is the Model field of the same
-// name (model.go), whose doc states the rule; the type is here because the click chain is its only
-// author and its only reader.
+// which of that pane's rows, the first row of the window that pane was showing when the click landed,
+// and whether anything is armed at all. It is the Model field of the same name (model.go), whose doc
+// states the rule; the type is here because the click chain is its only author and its only reader.
+//
+// top is what keeps the rows still under the pointer (pin): the pane goes on opening its window at the
+// row it opened at before the click, rather than re-centring on the row just highlighted, so a second
+// click at the same screen position lands on that same row.
 type clickArm struct {
 	pane framePane
 	row  int
+	top  int
 	ok   bool
 }
 
@@ -453,6 +458,18 @@ type clickArm struct {
 // itself, so "the pointer highlighted this" has one spelling in the package.
 func (a clickArm) holds(pane framePane, row int) bool {
 	return a.ok && a.pane == pane && a.row == row
+}
+
+// pin is the row window pane's spec opens at while selected is the row the POINTER armed on it
+// (popupSpec.rowTop, popupSpec.pinTop): the pre-click window's first row, and pinned true. Anywhere
+// else — nothing armed, another pane, a highlight a key has since moved — it pins nothing and the pane
+// windows around its cursor. Every spec that paints a clickable list asks it, so a click keeps the rows
+// still on every pane alike.
+func (a clickArm) pin(pane framePane, selected int) (top int, pinned bool) {
+	if !a.holds(pane, selected) {
+		return 0, false
+	}
+	return a.top, true
 }
 
 // pointerPanes is the click chain and the wheel chain in ONE order, the order the two gestures have
@@ -1060,22 +1077,25 @@ func (m Model) settingsPaneRect() (y0, h int, ok bool) {
 //   - row is which of the spec's rows is drawn on that line, through the painter's own placement
 //     (popupPlacement.rowAt) — ok is false on the title, the body, a pad line, a gap, the hint and the
 //     borders, so a click there claims the pane and does nothing.
+//   - top is the first row of the window that placement seated (popupPlacement.start): what a handler
+//     arming the row records (clickArm.top), so the pane keeps that window while the arm stands and
+//     the row stays under the pointer for the second click.
 //
 // pre is the frame the gesture was aimed at (handleMouseClick's snapshot), and render composes that
 // frame's pane exactly as View does — one composition, the painter's own numbers, rather than a second
 // arithmetic that can disagree with it. It is called only once the point is inside the rectangle, so a
 // gesture the pane has no part in costs no render.
-func popupPaneHit(pre Model, pane framePane, render func() (string, popupPlacement), y int) (row int, inRect, ok bool) {
+func popupPaneHit(pre Model, pane framePane, render func() (string, popupPlacement), y int) (row, top int, inRect, ok bool) {
 	if !pre.openPanes().has(pane) {
-		return 0, false, false
+		return 0, 0, false, false
 	}
 	paneTop, h, drawn := pre.frameSpans().pane(pane)
 	if !drawn || y < paneTop || y >= paneTop+h {
-		return 0, false, false
+		return 0, 0, false, false
 	}
 	_, place := render()
 	row, _, ok = place.rowAt(y - paneTop)
-	return row, true, ok
+	return row, place.start, true, ok
 }
 
 // settingsPaint is the open key list as the frame composes it: the display rows the pane built, and the
@@ -1128,7 +1148,7 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 // all. The two panes that DISMISS on an outside click need those told apart and ask popupPaneHit
 // themselves; /settings claims its rows and nothing else, so one answer serves it.
 func (p settingsPaint) rowAt(pre Model, y int) (int, bool) {
-	row, _, ok := popupPaneHit(pre, paneSettings, p.render, y)
+	row, _, _, ok := popupPaneHit(pre, paneSettings, p.render, y)
 	return row, ok
 }
 
@@ -1507,7 +1527,7 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 	if m.sessionBrowser.renaming || m.sessionBrowser.confirming {
 		return m, nil, true // a modal surface within the modal: it owns the pane until it is answered
 	}
-	row, inRect, onRow := popupPaneHit(pre, paneBrowser, pre.renderSessionBrowserPlaced, msg.Y)
+	row, top, inRect, onRow := popupPaneHit(pre, paneBrowser, pre.renderSessionBrowserPlaced, msg.Y)
 	if !inRect {
 		m.sessionBrowser = sessionBrowser{} // outside the modal: dismissed, and the click is spent on that
 		return m, nil, true
@@ -1528,7 +1548,7 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 		return next, cmd, true
 	}
 	m.sessionBrowser.seat(row, count)
-	m.clickArmed = clickArm{pane: paneBrowser, row: row, ok: true}
+	m.clickArmed = clickArm{pane: paneBrowser, row: row, top: top, ok: true}
 	return m, nil, true
 }
 
@@ -1550,7 +1570,7 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 	if !m.picker.open || !pre.picker.open {
 		return m, nil, false
 	}
-	row, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, msg.Y)
+	row, top, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, msg.Y)
 	if !inRect {
 		m.picker = picker{} // outside the modal: dismissed, and the click is spent on that
 		return m, nil, true
@@ -1568,7 +1588,7 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 		return next, cmd, true
 	}
 	m.picker.seat(row, count)
-	m.clickArmed = clickArm{pane: panePicker, row: row, ok: true}
+	m.clickArmed = clickArm{pane: panePicker, row: row, top: top, ok: true}
 	return m, nil, true
 }
 
@@ -1608,7 +1628,7 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 		return m, nil, false
 	}
 	req := pre.pendingAsk.Request
-	row, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
+	row, top, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
 		return pre.askPromptPlaced(req)
 	}, msg.Y)
 	if !inRect {
@@ -1639,7 +1659,7 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 			m.askChecked[sel] = !m.askChecked[sel]
 		}
 	}
-	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
+	m.clickArmed = clickArm{pane: panePrompt, row: row, top: top, ok: true}
 	return m, nil, true
 }
 
@@ -1683,7 +1703,7 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		return m, nil, false
 	}
 	req := pre.pending.Request
-	row, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
+	row, top, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
 		return pre.approvalPromptPlaced(req)
 	}, msg.Y)
 	if !inRect {
@@ -1703,7 +1723,7 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		return next, cmd, true
 	}
 	m.approvalSel.seat(row, len(approvalMenuFor(req)))
-	m.clickArmed = clickArm{pane: panePrompt, row: row, ok: true}
+	m.clickArmed = clickArm{pane: panePrompt, row: row, top: top, ok: true}
 	return m, nil, true
 }
 
@@ -1749,7 +1769,7 @@ func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 	if !m.openPanes().has(paneDropdown) || !pre.openPanes().has(paneDropdown) {
 		return m, nil, false
 	}
-	row, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, msg.Y)
+	row, top, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, msg.Y)
 	if !inRect {
 		m.dismissAutocomplete() // outside a menu that decides nothing: it closes, and the click travels on
 		return m, nil, false
@@ -1765,7 +1785,7 @@ func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		return next, cmd, true
 	}
 	m.autocomplete.seat(row, len(m.autocomplete.items))
-	m.clickArmed = clickArm{pane: paneDropdown, row: row, ok: true}
+	m.clickArmed = clickArm{pane: paneDropdown, row: row, top: top, ok: true}
 	return m, nil, true
 }
 

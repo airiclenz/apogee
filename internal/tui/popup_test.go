@@ -2605,13 +2605,15 @@ func TestPopupRowSeatFromCountsIsThePaintersWindow(t *testing.T) {
 					for _, bar := range []bool{false, true} {
 						for _, sel := range []int{-1, 2} {
 							for _, top := range []int{0, 3, n} {
-								spec := popupSpec{rows: rows, selected: sel, rowTop: top, maxRows: maxRows, hint: hint,
-									rowPadAbove: padAbove, rowStyle: popupRowStyle{padBelow: true}, scrollbar: bar}
-								seat := popupRowSeat(spec, popupFlatRowHeights(n))
-								_, place := renderPopupPlaced(th, spec, width)
-								if seat.start != place.start || seat.end != place.end {
-									t.Errorf("n=%d max=%d hint=%q pad=%v bar=%v sel=%d top=%d: counts seat [%d,%d), painter [%d,%d)",
-										n, maxRows, hint, padAbove, bar, sel, top, seat.start, seat.end, place.start, place.end)
+								for _, pin := range []bool{false, true} {
+									spec := popupSpec{rows: rows, selected: sel, rowTop: top, pinTop: pin, maxRows: maxRows, hint: hint,
+										rowPadAbove: padAbove, rowStyle: popupRowStyle{padBelow: true}, scrollbar: bar}
+									seat := popupRowSeat(spec, popupFlatRowHeights(n))
+									_, place := renderPopupPlaced(th, spec, width)
+									if seat.start != place.start || seat.end != place.end {
+										t.Errorf("n=%d max=%d hint=%q pad=%v bar=%v sel=%d top=%d pin=%v: counts seat [%d,%d), painter [%d,%d)",
+											n, maxRows, hint, padAbove, bar, sel, top, pin, seat.start, seat.end, place.start, place.end)
+									}
 								}
 							}
 						}
@@ -2619,5 +2621,46 @@ func TestPopupRowSeatFromCountsIsThePaintersWindow(t *testing.T) {
 				}
 			}
 		}
+	}
+
+	// A pinned window (popupSpec.pinTop — the pointer just highlighted a row) stays at rowTop while
+	// the selection lies inside the window rowTop seats, and falls back to the cursor's own window the
+	// moment it does not, so a pin can never hold the highlight off the screen.
+	rows := make([]popupRow, 12)
+	for i := range rows {
+		rows[i] = popupRow{fmt.Sprintf("row %d", i)}
+	}
+	heights := popupFlatRowHeights(len(rows))
+	const seats = 4
+	centred := func(selected int) int {
+		start, _ := popupRowWindow(selected, heights, 0, seats)
+		return start
+	}
+	cases := []struct {
+		name      string
+		top, sel  int
+		wantStart int
+	}{
+		{"a selection inside the pinned window keeps its top", 6, 9, 6},
+		{"a selection outside the pinned window re-centres", 0, 9, centred(9)},
+	}
+	if centred(9) == 6 {
+		t.Fatal("precondition: the cursor's own window already opens at 6; the pin would prove nothing")
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			spec := popupSpec{rows: rows, selected: c.sel, rowTop: c.top, pinTop: true, maxRows: seats}
+
+			seat := popupRowSeat(spec, heights)
+
+			if seat.start != c.wantStart || seat.end != c.wantStart+seats {
+				t.Errorf("pinned at %d with row %d selected: seat [%d,%d), want [%d,%d)",
+					c.top, c.sel, seat.start, seat.end, c.wantStart, c.wantStart+seats)
+			}
+			if _, place := renderPopupPlaced(th, spec, width); place.start != seat.start || place.end != seat.end {
+				t.Errorf("the painter seats [%d,%d), the counts [%d,%d)", place.start, place.end, seat.start, seat.end)
+			}
+		})
 	}
 }

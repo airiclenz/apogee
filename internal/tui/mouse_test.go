@@ -2926,7 +2926,7 @@ func TestPopupPaneHitAnswersNothingWithThePaneShut(t *testing.T) {
 		return paint.render()
 	}
 	_, y := frameCell(t, m, "key-02")
-	row, inRect, ok := popupPaneHit(m.withFrameSpans(), paneSettings, render, y)
+	row, _, inRect, ok := popupPaneHit(m.withFrameSpans(), paneSettings, render, y)
 	if !ok || !inRect {
 		t.Fatalf("with the pane up, y=%d named row %d (inRect=%v, ok=%v), want the row inside the box", y, row, inRect, ok)
 	}
@@ -2938,10 +2938,10 @@ func TestPopupPaneHitAnswersNothingWithThePaneShut(t *testing.T) {
 	shut.settings = settingsPane{}
 	renders = 0
 
-	row, inRect, ok = popupPaneHit(shut, paneSettings, render, y)
+	row, top, inRect, ok := popupPaneHit(shut, paneSettings, render, y)
 
-	if ok || inRect || row != 0 {
-		t.Errorf("with the pane shut: row %d, inRect %v, ok %v — want nothing named at all", row, inRect, ok)
+	if ok || inRect || row != 0 || top != 0 {
+		t.Errorf("with the pane shut: row %d, top %d, inRect %v, ok %v — want nothing named at all", row, top, inRect, ok)
 	}
 	if renders != 0 {
 		t.Errorf("the shut pane was composed %d times; the gate must answer before the rect", renders)
@@ -3001,6 +3001,186 @@ func TestClickArmClearsOnKeyAndWheel(t *testing.T) {
 
 			if m.clickArmed.ok || m.clickArmed.holds(panePrompt, 2) {
 				t.Errorf("the arm survived %s: %+v", c.name, m.clickArmed)
+			}
+		})
+	}
+}
+
+// A key or a wheel notch after a click drops the arm, and with it the pointer's pin on the row window
+// (popupSpec.pinTop): the window re-centres on the highlight exactly as a list the pointer never
+// touched does. The dropdown is clicked on /confine — a row below the window's middle, whose pinned
+// window opens at the top — and then walked one row on; the window must then be the one a keyboard
+// walk to that same row shows.
+func TestClickArmDropsThePinSoTheWindowRecentres(t *testing.T) {
+	t.Parallel()
+	walked := dropdownPaneModel(t, testOpts, "/")
+	target := dropdownItemRow(t, walked, "confine") + 1
+	for range target {
+		walked = step(t, walked, keyDown())
+	}
+	_, want := walked.renderAutocompletePlaced()
+
+	cases := []struct {
+		name string
+		msg  func(y int) tea.Msg
+	}{
+		{"a key", func(int) tea.Msg { return keyDown() }},
+		{"a wheel notch", func(y int) tea.Msg { return tea.MouseWheelMsg{X: 10, Y: y, Button: tea.MouseWheelDown} }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := dropdownPaneModel(t, testOpts, "/")
+			x, y := frameCell(t, m, "/confine")
+			m = step(t, m, leftClick(x, y))
+			if _, pinned := m.renderAutocompletePlaced(); pinned.start != 0 {
+				t.Fatalf("precondition: the clicked window opens at %d, want it held at the top", pinned.start)
+			}
+
+			m = step(t, m, c.msg(y))
+
+			if m.autocomplete.selected != target {
+				t.Fatalf("selected = %d after %s, want %d", m.autocomplete.selected, c.name, target)
+			}
+			if m.clickArmed.ok {
+				t.Errorf("the arm survived %s: %+v", c.name, m.clickArmed)
+			}
+			if _, got := m.renderAutocompletePlaced(); got.start != want.start || got.end != want.end {
+				t.Errorf("after %s the window is [%d,%d), want the re-centred [%d,%d)",
+					c.name, got.start, got.end, want.start, want.end)
+			}
+		})
+	}
+}
+
+// lowestSeatedRow is the LAST row pane's window seats and the screen row its first line is painted
+// on — the row a window re-centred on a click would move furthest. It fails unless the window seats
+// at least three rows with more below them, the shape in which re-centring moves the row at all.
+func lowestSeatedRow(t *testing.T, m Model, pane framePane, render func(Model) (string, popupPlacement)) (row, y int) {
+	t.Helper()
+	paneTop, h, ok := m.frameSpans().pane(pane)
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+	_, place := render(m)
+	if place.end-place.start < 3 || place.end >= len(place.blocks) {
+		t.Fatalf("the window seats rows [%d,%d) of %d; the case needs three or more with rows below them",
+			place.start, place.end, len(place.blocks))
+	}
+	for line := range h {
+		if r, _, onRow := place.rowAt(line); onRow && r == place.end-1 {
+			return r, paneTop + line
+		}
+	}
+	t.Fatalf("no painted line of the pane carries row %d", place.end-1)
+	return 0, 0
+}
+
+// frameLine is the plain text of screen row y of the frame View composes.
+func frameLine(t *testing.T, m Model, y int) string {
+	t.Helper()
+	lines := strings.Split(plain(m.View()), "\n")
+	if y < 0 || y >= len(lines) {
+		t.Fatalf("the frame has %d rows; row %d is off it", len(lines), y)
+	}
+	return lines[y]
+}
+
+// The first click on a row highlights it WITHOUT moving the rows on the screen, in every list pane
+// the pointer arms a row on (apogee-slash-dropdown-click-recentre). Each pane is clicked on the lowest
+// row its window seats — the row a window re-centred on the new highlight would slide furthest up
+// from under the pointer — and the ❯ has to land on the screen row the pointer is on, so the SECOND
+// click, at the very same position, takes the row the first one highlighted.
+func TestClickOnALowRowKeepsTheRowWindowStill(t *testing.T) {
+	t.Parallel()
+	resized := func(t *testing.T, m Model, height int) Model {
+		t.Helper()
+		return step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+	}
+	cases := []struct {
+		name     string
+		open     func(t *testing.T) Model
+		pane     framePane
+		render   func(Model) (string, popupPlacement)
+		accepted func(Model) bool
+	}{
+		{
+			name: "the picker",
+			open: func(t *testing.T) Model {
+				m := pickerPaneModel(t, pickerCycle)
+				m.picker.draft.prompt = "tidy the logs"
+				return resized(t, m, 22)
+			},
+			pane:     panePicker,
+			render:   Model.renderPickerPlaced,
+			accepted: func(m Model) bool { return m.picker.kind == pickerScheduleMode },
+		},
+		{
+			name:     "the /sessions browser",
+			open:     func(t *testing.T) Model { return browserPaneModel(t, 12) },
+			pane:     paneBrowser,
+			render:   Model.renderSessionBrowserPlaced,
+			accepted: func(m Model) bool { return !m.sessionBrowser.open },
+		},
+		{
+			name:     "the /workflows view",
+			open:     func(t *testing.T) Model { return resized(t, workflowsPaneModel(t, workflowsAtDetail), 21) },
+			pane:     paneWorkflows,
+			render:   Model.renderWorkflowsPlaced,
+			accepted: func(m Model) bool { return m.workflowsPane.level != workflowsAtDetail },
+		},
+		{
+			name: "the ask prompt",
+			open: func(t *testing.T) Model {
+				m, _ := askClickModel(t, domain.AskRequest{
+					Question: "which?",
+					Choices:  []string{"one", "two", "three", "four", "five", "six", "seven", "eight"},
+				})
+				return m
+			},
+			pane: panePrompt,
+			render: func(m Model) (string, popupPlacement) {
+				return m.askPromptPlaced(m.pendingAsk.Request)
+			},
+			accepted: func(m Model) bool { return m.state != stateAwaitingAsk },
+		},
+		{
+			name: "the approval prompt",
+			open: func(t *testing.T) Model {
+				m, _ := approvalClickModel(t)
+				return resized(t, armApproval(t, m), 18)
+			},
+			pane: panePrompt,
+			render: func(m Model) (string, popupPlacement) {
+				return m.approvalPromptPlaced(m.pending.Request)
+			},
+			accepted: func(m Model) bool { return m.state != stateAwaitingApproval },
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := c.open(t)
+			row, y := lowestSeatedRow(t, m, c.pane, c.render)
+			const x = 10
+
+			m = step(t, m, leftClick(x, y))
+
+			if !m.clickArmed.holds(c.pane, row) {
+				t.Fatalf("the click armed %+v, want row %d", m.clickArmed, row)
+			}
+			if line := frameLine(t, m, y); !strings.Contains(line, "❯") {
+				t.Fatalf("screen row %d reads %q after the click; the ❯ has to land under the pointer:\n%s",
+					y, line, plain(m.View()))
+			}
+			if c.accepted(m) {
+				t.Fatal("a single click accepted the row")
+			}
+
+			m = step(t, m, leftClick(x, y))
+
+			if !c.accepted(m) {
+				t.Errorf("the second click at the same position did not take row %d:\n%s", row, plain(m.View()))
 			}
 		})
 	}
@@ -6204,6 +6384,29 @@ func TestDropdownClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
 	}
 	if m.clickArmed.ok {
 		t.Errorf("the arm outlived the accept: %+v", m.clickArmed)
+	}
+}
+
+// The first click on a row below the window's middle leaves the rows where they were
+// (apogee-slash-dropdown-click-recentre): the ❯ lands on the very screen row the pointer is on, so a
+// second click at the same position accepts /confine instead of whichever row a re-centred window
+// slid under the pointer.
+func TestDropdownClickBelowTheMiddleKeepsTheRowUnderThePointer(t *testing.T) {
+	t.Parallel()
+	m := dropdownPaneModel(t, testOpts, "/")
+	x, y := frameCell(t, m, "/confine")
+
+	m = step(t, m, leftClick(x, y))
+
+	if line := frameLine(t, m, y); !strings.Contains(line, "❯") || !strings.Contains(line, "/confine") {
+		t.Fatalf("screen row %d reads %q after the click, want the ❯ on /confine under the pointer:\n%s",
+			y, line, plain(m.View()))
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.input.Value() != "/confine " {
+		t.Errorf("the box reads %q after the second click at the same position, want %q", m.input.Value(), "/confine ")
 	}
 }
 

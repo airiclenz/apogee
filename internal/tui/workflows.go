@@ -635,7 +635,7 @@ func (m Model) handleWorkflowsClick(pre Model, msg tea.MouseClickMsg) (Model, te
 	if !m.workflowsPane.open || !pre.workflowsPane.open {
 		return m, nil, false
 	}
-	row, inRect, onRow := popupPaneHit(pre, paneWorkflows, pre.renderWorkflowsPlaced, msg.Y)
+	row, top, inRect, onRow := popupPaneHit(pre, paneWorkflows, pre.renderWorkflowsPlaced, msg.Y)
 	if !inRect {
 		m.workflowsPane = workflowsPane{}
 		return m, nil, true
@@ -650,7 +650,7 @@ func (m Model) handleWorkflowsClick(pre Model, msg tea.MouseClickMsg) (Model, te
 		return next, cmd, true
 	}
 	m.workflowsPane.cursor().seat(row, count)
-	m.clickArmed = clickArm{pane: paneWorkflows, row: row, ok: true}
+	m.clickArmed = clickArm{pane: paneWorkflows, row: row, top: top, ok: true}
 	return m, nil, true
 }
 

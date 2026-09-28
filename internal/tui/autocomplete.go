@@ -1035,8 +1035,10 @@ func autocompleteTitle(kind acKind) string {
 // they are always doing.
 //
 // Shrinking costs rows, never the selection and never silence. A window granted at least one row
-// scrolls around the selected item (popupRowWindow), so arrowing through a live filter keeps the
-// highlight on the screen however few rows the frame can spare; a window granted NONE is counted
+// keeps the selected item inside it: an arrow key re-centres the window on it (popupRowWindow), so
+// arrowing through a live filter keeps the highlight on the screen however few rows the frame can
+// spare, and a click holds the window still while the row it highlighted is still in it
+// (popupSpec.pinTop), so the second click lands on the same row; a window granted NONE is counted
 // out on the title row in the module's one marker (popupTitleLine), the same wording the browser
 // and the ask prompt use — a menu that quietly showed nothing while its hint still read "↑/↓
 // select" would be the browser's silent-drop defect wearing this pane's title.
