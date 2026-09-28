@@ -1241,7 +1241,11 @@ NOTES (2026-09-28): insideCollapsedRun and runUnder now climb through a workflow
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/eventjson/ && go test -race -count=1 ./internal/agent/ && go test -race -count=1 -run 'EventLine' ./cmd/apogee/`
 **Commit:** `fix(tui): a workflow's item runs nest under the block that started them`
 
-## 44. `inputs:` is read only beside `recipe:`
+## 44. `inputs:` is read only beside `recipe:` — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the run's notes-18.md pending CHANGELOG text (gitignored run file, not in FILES) is restated to say `inputs:` is read only beside `recipe:`; item 18's NOTES line in the plan ("`inputs:` is accepted without a `recipe:`") is left as the historical record — the implementer never writes into the plan document.
+
+NOTES (2026-09-28): the gate is a new `hasRecipeKey` helper (recipe node present and not an explicit null); a null `recipe:` still refuses through parseRecipe ("the workflow has no stages"), so no refusal row changes.
 
 **What:** Depends on item 18. Regression from 29ef8ff6 (item 18): any SKILL.md header with an `inputs:` key now fails to load when that key is malformed, carries unknown keys or fails the strict YAML parse, even with no `recipe:`. A SKILL.md shared with another tool that shapes `inputs:` differently loaded at the header base and no longer does. No ADR requires `inputs:` without a recipe, and a Recipe is what declares inputs (ADR 0065's amendment, ADR 0087 D6).
 **Goal:** a SKILL.md whose header carries `inputs:` but no `recipe:` loads exactly as at the header base: `Skill.Inputs` is empty, the key is ignored, and a strict-parse failure still falls to the lenient scan. `inputs:` is decoded and validated strictly (all of item 18's refusals) only when `recipe:` is present.

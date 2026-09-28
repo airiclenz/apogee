@@ -551,6 +551,41 @@ func TestParseSkillWithoutRecipeHasNone(t *testing.T) {
 	}
 }
 
+// inputs: is read only beside recipe: — a header without a recipe loads exactly as it did before
+// recipes existed, whatever its inputs: holds (the file may be shared with a tool that shapes the
+// key differently): no inputs, the key unread, and a strict-parse failure still recovered by the
+// lenient scan.
+func TestParseSkillInputsWithoutRecipeIgnored(t *testing.T) {
+	const head = "---\nid: plain\nsummary: a plain skill\n"
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{"scalar inputs", head + "inputs: scope\n---\nbody"},
+		{"mapping inputs", head + "inputs: {a: {type: string}}\n---\nbody"},
+		{"an unknown input key", head + "inputs:\n  - name: scope\n    requried: true\n---\nbody"},
+		{"a nameless input", head + "inputs:\n  - description: d\n---\nbody"},
+		// The strict parse fails on the unclosed flow sequence; the lenient scan recovers the skill.
+		{"an inputs line that is not YAML", head + "inputs: [scope\n---\nbody"},
+		// Even a well-formed declaration is not read without a recipe to bind it to.
+		{"a valid inputs list", "---\nid: plain\ninputs:\n  - name: scope\nsummary: a plain skill\n---\nbody"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sk, err := parseSkill(tc.content, "d")
+			if err != nil {
+				t.Fatalf("parseSkill: %v, want the skill to load with its inputs: ignored", err)
+			}
+			if sk.Inputs != nil || sk.Recipe != nil {
+				t.Errorf("Inputs/Recipe = %+v / %+v, want none on a skill without a recipe", sk.Inputs, sk.Recipe)
+			}
+			if sk.ID != "plain" || sk.Summary != "a plain skill" || sk.Body != "body" {
+				t.Errorf("id/summary/body = %q / %q / %q, want plain / a plain skill / body", sk.ID, sk.Summary, sk.Body)
+			}
+		})
+	}
+}
+
 // Every way a recipe or its inputs can be wrong fails the skill's load with an error naming the
 // problem — never a skill that loads with its recipe silently dropped.
 func TestParseSkillRecipeRefused(t *testing.T) {

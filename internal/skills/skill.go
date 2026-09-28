@@ -61,7 +61,8 @@ type Skill struct {
 	Recipe *workflow.Plan
 
 	// Inputs is the recipe's declared inputs, under "inputs:", in the order the user's text binds
-	// bare tokens to them; nil when the header declares none.
+	// bare tokens to them; nil when the header declares none. The key is read only beside a
+	// recipe: a header with "inputs:" and no "recipe:" leaves Inputs nil and the key unread.
 	Inputs []workflow.InputDecl
 }
 

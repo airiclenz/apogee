@@ -81,19 +81,22 @@ var recognisedKeys = map[string]bool{
 	"triggers":    true,
 }
 
-// recipeKeyRe finds a `recipe:` or `inputs:` key line in a frontmatter block, so a block that
-// failed the strict parse can be told apart from one the lenient scan may recover: a recipe is a
-// program the engine runs, and the scan — which models neither key — could only drop it.
-var recipeKeyRe = regexp.MustCompile(`(?mi)^[ \t]*(recipe|inputs)[ \t]*:`)
+// recipeKeyRe finds a `recipe:` key line in a frontmatter block, so a block that failed the
+// strict parse can be told apart from one the lenient scan may recover: a recipe is a program the
+// engine runs, and the scan — which does not model it — could only drop it. An `inputs:` key alone
+// does not count: inputs are read only beside a recipe, so without one the key is ignored and a
+// block that carries it recovers through the scan like any other.
+var recipeKeyRe = regexp.MustCompile(`(?mi)^[ \t]*recipe[ \t]*:`)
 
 // frontmatter is the recognised YAML frontmatter keys, including the apogee-code/agent-skills
 // aliases: id|name for the identifier, displayName for the menu label, summary|description
 // for the menu hint, and apogee's own optional triggers for the suggestion matcher. An unknown key
 // is ignored (yaml.v3 does not error on extras).
 //
-// Recipe and Inputs are held as raw nodes and decoded by parseRecipe, not here: a mistyped recipe
-// must fail the skill's load with a message that names the recipe, never fail the strict unmarshal
-// and so send the whole block to the lenient scan. An absent key leaves its node's Kind zero.
+// Recipe and Inputs are held as raw nodes and decoded by parseRecipe and parseInputs, not here: a
+// mistyped recipe must fail the skill's load with a message that names the recipe, never fail the
+// strict unmarshal and so send the whole block to the lenient scan. An absent key leaves its node's
+// Kind zero. Inputs is decoded only when the header also carries a recipe; otherwise it is ignored.
 type frontmatter struct {
 	ID          string        `yaml:"id"`
 	Name        string        `yaml:"name"`
@@ -226,8 +229,12 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 	if err != nil {
 		return Skill{}, err
 	}
-	if sk.Inputs, err = parseInputs(fm.Inputs); err != nil {
-		return Skill{}, err
+	// Inputs belong to a recipe: a header without one keeps whatever it holds under `inputs:`
+	// unread, as any unknown key is — the file may be shared with a tool that shapes it differently.
+	if hasRecipeKey(fm.Recipe) {
+		if sk.Inputs, err = parseInputs(fm.Inputs); err != nil {
+			return Skill{}, err
+		}
 	}
 	if sk.Recipe, err = parseRecipe(fm.Recipe, sk.ID); err != nil {
 		return Skill{}, err
@@ -235,10 +242,18 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 	return sk, nil
 }
 
-// parseInputs decodes the frontmatter's `inputs:` — a list of {name, required, default,
-// description} — and checks it with workflow.ValidateInputs. An absent key yields no inputs; a
-// key that is not a list, an entry that is not a mapping, an unknown key in an entry or a failed
-// check is an error naming the problem, so the skill does not load.
+// hasRecipeKey reports whether the header carries a `recipe:` with a value — the one case its
+// `inputs:` is read. An absent key or an explicit null (`recipe:` with nothing after it) does not
+// count; parseRecipe refuses the null on its own.
+func hasRecipeKey(node yaml.Node) bool {
+	return node.Kind != 0 && !isNullNode(node)
+}
+
+// parseInputs decodes a recipe skill's `inputs:` — a list of {name, required, default,
+// description} — and checks it with workflow.ValidateInputs. It is called only beside a recipe
+// (hasRecipeKey). An absent key yields no inputs; a key that is not a list, an entry that is not a
+// mapping, an unknown key in an entry or a failed check is an error naming the problem, so the
+// recipe skill does not load.
 func parseInputs(node yaml.Node) ([]workflow.InputDecl, error) {
 	if node.Kind == 0 || isNullNode(node) {
 		return nil, nil
@@ -409,8 +424,9 @@ func joinProblems(problems []workflow.Problem) string {
 // When even the scan finds no recognised key, the original YAML error is returned rather than the
 // scan's silence: it names the actual line and fault, which is the more useful thing to print.
 //
-// A block carrying `recipe:` or `inputs:` never reaches the scan: the scan models neither key, so
-// its "recovery" would load the skill with its recipe silently gone. The YAML error is returned
+// A block carrying `recipe:` never reaches the scan: the scan does not model it, so its "recovery"
+// would load the skill with its recipe silently gone. An `inputs:` key without a recipe does not
+// stop the scan — inputs are read only beside a recipe, so the scan drops nothing that counts. The YAML error is returned
 // instead, and the skill does not load until its author fixes the block.
 func parseFrontmatterFields(text string) (frontmatter, error) {
 	var strict frontmatter

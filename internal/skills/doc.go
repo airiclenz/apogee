@@ -45,10 +45,11 @@
 // ordinary authoring slips — an unquoted value containing ": ", a tab indent, an unclosed quote.
 // These same SKILL.md files are shared with tools whose parsers are more forgiving, so a skill
 // another tool lists must not vanish here; a block that IS valid YAML keeps its exact YAML meaning
-// and never reaches the scan. The one exception is a block carrying a Recipe (`recipe:` or
-// `inputs:`): a recipe is a program the engine runs, so a block of that kind that fails the strict
-// parse — or whose recipe fails workflow.Validate — refuses to load, naming the problem, rather than
-// load a skill whose recipe the scan could only drop.
+// and never reaches the scan. The one exception is a block carrying a Recipe (`recipe:`): a recipe
+// is a program the engine runs, so a block of that kind that fails the strict parse — or whose
+// recipe or `inputs:` fails its checks — refuses to load, naming the problem, rather than load a
+// skill whose recipe the scan could only drop. `inputs:` is read only beside `recipe:`; without one
+// the key is ignored, and the block parses exactly as any other.
 //
 // Suggestion (suggest.go) is the one thing this package computes rather than discovers: a BM25
 // matcher over id + display name + description (unclamped — the 200-rune summary is the / menu's
