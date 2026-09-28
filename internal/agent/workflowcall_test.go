@@ -552,25 +552,94 @@ func TestWorkflowCall_FanOutIsWithheldAndRefusedAtTheDepthBound(t *testing.T) {
 	}
 }
 
+// TestWorkflowCall_AChildBelowTheBoundGetsFanOutWithoutRunOn pins the child's roster under a parent
+// whose fan_out publishes `background` (and, in the second case, `run_on` too) beside the workflow
+// tool: below the depth bound the child keeps fan_out, but the plain variant — neither argument in
+// its schema, since a delegate's fan_out never runs in the background nor picks a seat — and never
+// the workflow tool, which only the top-level Agent runs (ADR 0089 D1/D4). The parent's own menu is
+// untouched.
 func TestWorkflowCall_AChildBelowTheBoundGetsFanOutWithoutRunOn(t *testing.T) {
 	t.Parallel()
 
-	cfg := workflowConfig(t, &recordingSink{})
-	reg := domain.NewToolRegistry()
-	_ = reg.Register(tools.NewFanOutWith(tools.FanOutOptions{SeatChoice: true, Background: true}))
-	cfg.Tools = reg
-	cfg.Delegation.MaxDepth = 2
-	a, err := newAgent(cfg, scriptedResponder(t))
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
+	for _, tc := range []struct {
+		name string
+		opts tools.FanOutOptions
+	}{
+		{"a background fan_out", tools.FanOutOptions{Background: true}},
+		{"a background fan_out with seat choice", tools.FanOutOptions{SeatChoice: true, Background: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	tool, ok := a.defaultSubAgentTools().Lookup(tools.FanOutToolName)
+			cfg := workflowConfig(t, &recordingSink{})
+			reg := domain.NewToolRegistry()
+			_ = reg.Register(tools.NewFanOutWith(tc.opts))
+			_ = reg.Register(tools.NewWorkflow())
+			cfg.Tools = reg
+			cfg.Delegation.MaxDepth = 2
+			a, err := newAgent(cfg, scriptedResponder(t))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
 
-	fanOut, isFanOut := tool.(*tools.FanOut)
-	if !ok || !isFanOut || fanOut.OffersSeatChoice() || !fanOut.OffersBackground() {
-		t.Errorf("child's fan_out = %#v, want the variant without run_on that keeps background", tool)
+			roster := a.defaultSubAgentTools()
+
+			tool, ok := roster.Lookup(tools.FanOutToolName)
+			if !ok {
+				t.Fatal("the child's roster has no fan_out below the bound; the case would be vacuous")
+			}
+			if _, offered := roster.Lookup(tools.WorkflowToolName); offered {
+				t.Error("the child's roster holds the workflow tool; only the top-level Agent runs it")
+			}
+			fanOut, isFanOut := tool.(*tools.FanOut)
+			if !isFanOut || fanOut.OffersSeatChoice() || fanOut.OffersBackground() {
+				t.Errorf("child's fan_out = %#v, want the plain variant", tool)
+			}
+			for _, arg := range []string{"background", "run_on"} {
+				if schemaHasProperty(t, tool.Schema(), arg) {
+					t.Errorf("child's fan_out schema publishes %q", arg)
+				}
+			}
+			parentTool, _ := a.lookupTool(tools.FanOutToolName)
+			if !schemaHasProperty(t, parentTool.Schema(), "background") {
+				t.Error("the parent's own fan_out lost its background argument")
+			}
+		})
 	}
+}
+
+// TestWorkflowCall_AnItemChildIsNotOfferedTheWorkflowTool pins the same withholding on a workflow's
+// item child: its menu keeps the parent's leaf tool and finish, never the workflow tool.
+func TestWorkflowCall_AnItemChildIsNotOfferedTheWorkflowTool(t *testing.T) {
+	t.Parallel()
+
+	a, upstream := newWorkflowParent(t, &recordingSink{}, domain.ModeAskBefore,
+		func(cfg *domain.Config) { _ = cfg.Tools.Register(tools.NewWorkflow()) },
+		finishTurn("f1", `{"status":"ok","summary":"done"}`),
+	)
+
+	spawnItem(t, a, itemSpec("a.go", nil))
+
+	menu := upstream.requests()[0].Tools
+	if slices.Contains(menu, tools.WorkflowToolName) {
+		t.Errorf("the item child's menu = %v, want no workflow tool", menu)
+	}
+	if !slices.Contains(menu, "read_thing") || !slices.Contains(menu, tools.FinishToolName) {
+		t.Errorf("the item child's menu = %v, want read_thing and finish kept", menu)
+	}
+}
+
+// schemaHasProperty reports whether a JSON object schema declares name among its properties.
+func schemaHasProperty(t *testing.T, schema json.RawMessage, name string) bool {
+	t.Helper()
+	var parsed struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(schema, &parsed); err != nil {
+		t.Fatalf("unparseable schema %s: %v", schema, err)
+	}
+	_, ok := parsed.Properties[name]
+	return ok
 }
 
 func TestWorkflowContextLimit(t *testing.T) {

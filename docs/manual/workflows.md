@@ -52,7 +52,8 @@ them. Adding `workflow` beside it also gives `fan_out` its `background` switch �
 [Background workflows](#background-workflows). Background workflows exist in the TUI only: a
 [`headless`](headless.md) run or a [`daemon`](daemon.md) firing has no conversation to go on
 while a workflow runs, so there `fan_out` always blocks and `workflow` is not offered, whatever
-the roster says. The rest of the `tools:` block — `disabled:`, typos, which list wins — is in
+the roster says. A delegate — a `sub_agent` child or a workflow's helper — is never offered
+`workflow` or `background` either: background workflows belong to your agent alone. The rest of the `tools:` block — `disabled:`, typos, which list wins — is in
 [Configuration](configuration.md).
 
 ## What the model asks for — `fan_out`

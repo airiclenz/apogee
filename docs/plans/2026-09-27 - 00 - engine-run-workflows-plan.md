@@ -1310,7 +1310,15 @@ NOTES (2026-09-28): the per-run spend is a `runSpend` map type (usage.go) shared
 **Acceptance:** `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./internal/tui/... && go test -race -count=1 -run 'TestABgOnlySessionIsSavedAtQuitAndResumedOnStart' ./internal/tui/` (the lint command is the Makefile's `$(GOLANGCI_LINT)` at its pinned `GOLANGCI_LINT_VERSION`; use the Makefile's pin if it has moved)
 **Commit:** `fix(tui): drop the ineffectual assignment make lint flags in commandrun_test.go`
 
-## 48. A delegate is offered neither fan_out's background nor the workflow tool
+## 48. A delegate is offered neither fan_out's background nor the workflow tool — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the workflow tool is withheld through a new `topLevelOnlyTools` list beside `childWithheldTools`, and `withoutSeatChoice` keys the plain fan_out on a new `publishesFanOutChoice` helper (`run_on` or `background`); `seatChoosingFanOut` is kept unchanged for `fanOutSeat`.
+
+NOTES (2026-09-28): orientation.go:234 is left as written — it states only that a child's sub_agent is the plain variant, which still holds; loop.go's toolMenu comment merged with item 41's Plan restatement already in the tree.
+
+NOTES (2026-09-28): the workflow item child case lives in workflowcall_test.go (TestWorkflowCall_AnItemChildIsNotOfferedTheWorkflowTool), reusing workflowspawn_test.go's newWorkflowParent/spawnItem helpers; the sub_agent `tools` case is TestSubAgent_ToolsListDropsTheWorkflowTool with a fake `read_file` leaf.
+
+NOTES (2026-09-28): docs/manual/workflows.md gains one sentence stating a delegate is never offered `workflow` or `background` (user-facing doc for the changed tool surface; not in the item's Files list).
 
 **What:** Depends on item 27. Fixes a run finding (item 27). `withoutSeatChoice` (internal/agent/subagent.go) rebuilds a child's fan_out only when it publishes `run_on`, and keeps `background` when it does, while `defaultSubAgentTools` withholds nothing but `childWithheldTools`. So every child built through it (a sub_agent child and a workflow item child alike, `newChildAgentOn`) is offered `background` and the `workflow` tool whenever its parent is. On a delegate `offersBackground` is false, so `background` runs blocking and `workflow` is refused (`workflowControlDelegate`): the schema offers a knob the engine ignores, which the function's own doc names as the lie it exists to prevent.
 **Goal:** no child roster carries the `workflow` tool, and a child's fan_out, when it has one, publishes neither `background` nor `run_on`. The top-level Agent's menu and schemas are unchanged.

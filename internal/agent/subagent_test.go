@@ -747,6 +747,44 @@ func TestSubAgent_ToolsListNarrowsToExactlyThoseTools(t *testing.T) {
 	}
 }
 
+// TestSubAgent_ToolsListDropsTheWorkflowTool pins the workflow tool's withholding under a `tools`
+// ask: the parent holds it, so naming it is not a misspelling and passes the unknown-name check,
+// and the intersection drops it as it drops ask_user — the child runs holding the leaf alone.
+func TestSubAgent_ToolsListDropsTheWorkflowTool(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewSubAgent())
+	_ = reg.Register(tools.NewWorkflow())
+	_ = reg.Register(fakeTool{name: "read_file", readOnly: true, result: "read"})
+	cfg.Tools = reg
+
+	const parentInput, childTask = "delegate a read with the workflow tool", "read the file, control nothing"
+	up := newMenuRecorder(newRoutedResponder().
+		route(parentInput, nil, toolCallScript("c1", tools.SubAgentToolName,
+			`{"task":"`+childTask+`","tools":["workflow","read_file"]}`)).
+		route(childTask, nil, contentScript("child done")).
+		route(parentInput, nil, contentScript("parent done")))
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: parentInput})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := up.firstMenu(childTask); !slices.Equal(got, []string{"read_file"}) {
+		t.Errorf("the narrowed child's menu = %v, want exactly [read_file]", got)
+	}
+	if res, ok := lastSubAgentResult(sink.events); !ok || res.IsError {
+		t.Errorf("the delegation's result = %+v, want the child's own completion, no refusal", res)
+	}
+	if got := up.firstMenu(parentInput); !slices.Contains(got, tools.WorkflowToolName) {
+		t.Errorf("the parent's menu = %v, want it to keep the workflow tool", got)
+	}
+}
+
 // TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns pins the refusal: a list naming a tool
 // the parent does not hold is answered with an error result naming every unknown name — before
 // ToolRegistry.Subset could drop it silently and before a child is built — so the parent spends

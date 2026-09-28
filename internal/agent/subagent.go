@@ -1871,10 +1871,18 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 // lets the parent ask; a child that has a deliverable names its path and lets the parent present it.
 var childWithheldTools = []string{tools.AskUserToolName, tools.PresentDocumentToolName}
 
+// topLevelOnlyTools are the tools NO sub-agent is offered for a reason apart from the human's seat:
+// the workflow control tool lists, stops and reports the session's background workflows, and a
+// background workflow belongs to the top-level Agent alone (ADR 0089 D1/D4) — a delegate's call is
+// refused (workflowControlDelegate), so offering it to a child would publish a tool the engine
+// never runs. Withheld at every depth and under any `tools` ask, as childWithheldTools are.
+var topLevelOnlyTools = []string{tools.WorkflowToolName}
+
 // defaultSubAgentTools returns the tool registry a sub-agent is constructed with: the parent's
 // tool set (ADR 0005 — the caller may narrow further per task through the call's `tools`
 // argument, requestedChildTools), MINUS the two human-seat tools no child ever gets
-// (childWithheldTools) and MINUS the sub_agent recursion point itself when spawning the child
+// (childWithheldTools), MINUS the workflow control tool, which belongs to the top-level Agent
+// (topLevelOnlyTools), and MINUS the sub_agent recursion point itself when spawning the child
 // would put it AT the depth bound (a depth-(max) sub-agent is never offered sub_agent, so it
 // cannot recurse further) — and fan_out with it, whose Workflow spawns its item children through
 // the same recursion point (ADR 0087). A nil parent registry yields nil (a tool-less sub-agent —
@@ -1884,7 +1892,9 @@ var childWithheldTools = []string{tools.AskUserToolName, tools.PresentDocumentTo
 // via Subset, so it can never name a tool the parent lacks (a privilege expansion is
 // structurally impossible — ADR 0005). The tools that do not arrive verbatim are sub_agent and
 // fan_out, and only in the narrowing direction: a parent offering seat choice hands the child the
-// variant without `run_on`, so it is a depth-0 offer (withoutSeatChoice, ADR 0069 decision 3).
+// plain sub_agent, so `run_on` is a depth-0 offer (ADR 0069 decision 3), and a parent whose fan_out
+// publishes `run_on` or `background` hands the child the plain fan_out, since a background
+// workflow is the top-level Agent's too (withoutSeatChoice, ADR 0089 D1).
 func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 	if a.tools == nil {
 		return nil
@@ -1901,6 +1911,10 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 		// And the human's seat from every child, unconditionally: a sub-agent never puts a
 		// question to the person or a document in front of them.
 		if slices.Contains(childWithheldTools, t.Name()) {
+			continue
+		}
+		// And the background workflows' control tool, which only the top-level Agent runs.
+		if slices.Contains(topLevelOnlyTools, t.Name()) {
 			continue
 		}
 		names = append(names, t.Name())
@@ -1923,8 +1937,9 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 //     unknown — the refusal names every unknown one, in the order given, so the model reads the
 //     spellings it got wrong rather than finding the tool silently gone (the check runs BEFORE
 //     Subset, which would drop the name without a word). A name the parent holds but no child gets
-//     (childWithheldTools, sub_agent at the bound) passes the check and is dropped by the
-//     intersection: it is not a tool the model misspelled, it is one a child never has.
+//     (childWithheldTools, topLevelOnlyTools, sub_agent at the bound) passes the check and is
+//     dropped by the intersection: it is not a tool the model misspelled, it is one a child never
+//     has.
 //
 // An empty list is the zero value — "no narrowing" — rather than a tool-less child, because a model
 // that emits `"tools": []` out of habit should not lose its delegate's whole menu to the habit.
@@ -1965,21 +1980,22 @@ func isRecursionTool(name string) bool {
 }
 
 // withoutSeatChoice returns roster with its sub_agent tool swapped for the PLAIN variant when the
-// one it holds publishes `run_on`, and its fan_out tool for the variant without `run_on` when that
-// one publishes it — the depth-0-only rule of ADR 0069 decision 3, applied where a child's tool
-// set is built. fan_out keeps its `background` argument, the one it does not share with
-// sub_agent. Below the first hop a delegation keeps the seat it landed on, so the child is never
-// offered the parameter: removing it from the schema rather than accepting and discarding it is
-// the honest form, because a schema advertising a knob the engine ignores teaches the model a lie
-// about its own leverage.
+// one it holds publishes `run_on`, and its fan_out tool for the PLAIN variant when that one
+// publishes `run_on` or `background` — the depth-0-only rule of ADR 0069 decision 3, applied where
+// a child's tool set is built, and ADR 0089 D1's for `background`: a background workflow belongs
+// to the top-level Agent, so on a delegate the argument would run blocking (offersBackground).
+// Below the first hop a delegation keeps the seat it landed on and runs its fan_outs in the
+// foreground, so the child is never offered either parameter: removing it from the schema rather
+// than accepting and discarding it is the honest form, because a schema advertising a knob the
+// engine ignores teaches the model a lie about its own leverage.
 //
 // It is never a privilege change in either direction — both variants are the same recursion point
 // under the same name, and the plain one publishes strictly fewer arguments — so the ADR 0005
-// subset property Subset gives is untouched. A roster whose sub_agent is already plain, or which
-// holds none at all (the depth bound withheld it, or the parent had no tools), comes back as it
-// went in.
+// subset property Subset gives is untouched. A roster whose sub_agent and fan_out are already
+// plain, or which holds neither (the depth bound withheld them, or the parent had no tools), comes
+// back as it went in.
 func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
-	fanOut, fanOutChoice := seatChoosingFanOut(roster)
+	fanOutChoice := publishesFanOutChoice(roster)
 	if !publishesSeatChoice(roster) && !fanOutChoice {
 		return roster
 	}
@@ -1989,7 +2005,7 @@ func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
 		case tool.Name() == tools.SubAgentToolName:
 			tool = tools.NewSubAgent()
 		case tool.Name() == tools.FanOutToolName && fanOutChoice:
-			tool = tools.NewFanOutWith(tools.FanOutOptions{Background: fanOut.OffersBackground()})
+			tool = tools.NewFanOut()
 		}
 		// Cannot fail: the names come from a registry, so each is non-empty and appears once.
 		_ = plain.Register(tool)
@@ -2009,6 +2025,14 @@ func seatChoosingFanOut(roster *domain.ToolRegistry) (*tools.FanOut, bool) {
 	}
 	fanOut, ok := t.(*tools.FanOut)
 	return fanOut, ok && fanOut.OffersSeatChoice()
+}
+
+// publishesFanOutChoice reports whether roster's fan_out tool published an argument that only the
+// top-level Agent honours — `run_on` or `background` — so a child's roster must carry the plain
+// variant instead; a nil roster, one without fan_out and a foreign tool under the name report false.
+func publishesFanOutChoice(roster *domain.ToolRegistry) bool {
+	fanOut, seatChoice := seatChoosingFanOut(roster)
+	return seatChoice || (fanOut != nil && fanOut.OffersBackground())
 }
 
 // publishesSeatChoice reports whether roster's sub_agent tool published the `run_on` argument —
