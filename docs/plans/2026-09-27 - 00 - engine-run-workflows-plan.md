@@ -1258,7 +1258,17 @@ NOTES (2026-09-28): the gate is a new `hasRecipeKey` helper (recipe node present
 **Acceptance:** `go test -race -count=1 ./internal/skills/`
 **Commit:** `fix(skills): a skill without a recipe ignores its inputs key`
 
-## 45. split.sh handles paths with spaces and glob characters
+## 45. split.sh handles paths with spaces and glob characters — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): no CHANGELOG entry — the audit recipe (item 23) is unreleased, so this fixes work the run itself delivers; item 23's entry covers the shipped behaviour.
+
+NOTES (2026-09-28): runAuditSplit keeps its signature and now delegates to a new runAuditSplitWithEnv (the git-listed case needs an env without the GIT_DIR=no-git override); the new tests are TestAuditSplitReadsPathsWithSpacesAndGlobCharacters (bites on the old script), TestAuditSplitNeverGlobsTheScope (the literal-`*` and `[z].go` pin; passes on the old script by design) and TestAuditSplitListsGitNamesUnquoted (bites on the old script).
+
+NOTES (2026-09-28): no `set -f` was added outside list_scope — every other word-splitting site (the xargs pair, three `for … in $(…)` loops, the `set -- $(…)` part list) was replaced by `while IFS= read -r` over a temp list or a per-file loop, so none remains to guard; the $W/$RUN globs and the part-*/group-* rm keep pathname expansion. The concurrency scan is a new holds_concurrency helper (per-file `grep -qE`, stops at the first hit).
+
+NOTES (2026-09-28): verified by hand that a re-run with the same scope skips the re-split (layout.txt untouched) under dash, bash and busybox sh, and that chunk_flat_part cuts `dir with space/…` parts correctly.
+
+NOTES (2026-09-28): pre-existing, outside the Goal — names holding a backslash still pass through `awk -v`, which interprets escapes (list_scope, split_by_top_level_dir, resplit_one_level_deeper), and a tab in a name would break part_index's tab-separated table; split.txt's space-separated `<part> …` line is ambiguous to a human reader when a part name holds spaces.
 
 **What:** Recast at the regression check (2026-09-27). Depends on item 23. Fixes a run finding. `internal/skills/shipped/audit/split.sh` word-splits and glob-expands file paths: `xargs cat` / `xargs grep` over path lists, `for path in $SCOPE`, `for dir in $(…)`, and `set -- $(…)` over part names. So a file named `a b.go`, `x*y.go` or `[z].go` is miscounted, dropped or expanded into other files.
 **Goal:** for a tree whose file and directory names contain spaces, `*`, `?` or `[`, split.sh puts every listed file in exactly one part's scope.txt, `src=` counts them, and each part's line count equals `wc -l` over its files. Only a name containing a newline is out of scope, and it is skipped. The scope input still splits on whitespace into its entries, but no entry is glob-expanded.

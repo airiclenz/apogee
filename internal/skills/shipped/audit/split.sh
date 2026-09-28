@@ -46,6 +46,10 @@
 # The flags form reads the CONCURRENCY line the ground-truth child writes into
 # <RUN>/bundle.md and prints `concurrency=yes` or `concurrency=no`.
 #
+# Paths are read one a line and always quoted, so a name holding spaces, `*`,
+# `?` or `[` is one file, never several or a glob. A name holding a newline
+# cannot sit in a one-a-line list: it is skipped.
+#
 # POSIX sh only — hosts may run it with `sh`, never assume bash.
 
 set -eu
@@ -107,7 +111,22 @@ list_length() {
 # ------------------------------------------------------------------------------
 # Prints the total source-line count of every file named in a list file.
 list_source_lines() {
-  { xargs cat < "$1" 2>/dev/null || true; } | wc -l | tr -d ' '
+  total=0
+  if [ -f "$1" ]; then
+    while IFS= read -r file; do
+      total=$((total + $(file_lines "$file")))
+    done < "$1"
+  fi
+  printf '%s\n' "$total"
+}
+
+# ------------------------------------------------------------------------------
+# Succeeds when any file named in a list file holds a concurrency primitive.
+holds_concurrency() {
+  while IFS= read -r file; do
+    if grep -qE -- "$CONC_PATTERN" "$file" 2>/dev/null; then return 0; fi
+  done < "$1"
+  return 1
 }
 
 # ------------------------------------------------------------------------------
@@ -145,10 +164,17 @@ resolve_part_lines() {
 # ------------------------------------------------------------------------------
 # Writes the workspace's source files under the scope paths to $1: tracked and
 # untracked-but-not-ignored files in a git repo, every file otherwise, less
-# docs, dependencies, build output, fixtures and generated files.
+# docs, dependencies, build output, fixtures and generated files. git lists
+# NUL-terminated and unquoted, so a name is printed as it is on disk; a listed
+# line naming no regular file (the fragments of a name holding a newline) is
+# dropped.
 list_scope() {
-  { git ls-files --cached --others --exclude-standard 2>/dev/null \
-      || find . -type f -not -path '*/.git/*' | sed 's|^\./||'; } \
+  if git -c core.quotePath=false ls-files -z --cached --others --exclude-standard \
+    > "$TMP/listed" 2>/dev/null; then
+    tr '\000' '\n' < "$TMP/listed"
+  else
+    find . -type f -not -path '*/.git/*' | sed 's|^\./||'
+  fi \
     | { grep -vE -- "$EXCLUDED_DIRS" || true; } \
     | { grep -vE -- "$EXCLUDED_FILES" || true; } \
     | sort -u > "$TMP/workspace"
@@ -163,7 +189,9 @@ list_scope() {
     esac
   done
   set +f
-  sort -u "$TMP/wanted" > "$1"
+  sort -u "$TMP/wanted" | while IFS= read -r line; do
+    if [ -f "$line" ]; then printf '%s\n' "$line"; fi
+  done > "$1"
 }
 
 # ------------------------------------------------------------------------------
@@ -189,9 +217,10 @@ part_index() {
 split_by_top_level_dir() {
   grep -v / "$1" > "$W/scope-root.txt" || true
   [ -s "$W/scope-root.txt" ] || rm -f "$W/scope-root.txt"
-  for dir in $({ grep / "$1" || true; } | cut -d/ -f1 | sort -u); do
+  { grep / "$1" || true; } | cut -d/ -f1 | sort -u > "$TMP/dirs"
+  while IFS= read -r dir; do
     awk -v prefix="$dir/" 'index($0, prefix) == 1' "$1" > "$W/scope-$dir.txt"
-  done
+  done < "$TMP/dirs"
 }
 
 # ------------------------------------------------------------------------------
@@ -200,10 +229,11 @@ split_by_top_level_dir() {
 # <dir> keep the original part (dropped when there are none).
 resplit_one_level_deeper() {
   part_file="$W/scope-$1.txt"
-  for sub in $(awk -F/ 'NF > 2 { print $2 }' "$part_file" | sort -u); do
+  awk -F/ 'NF > 2 { print $2 }' "$part_file" | sort -u > "$TMP/subs"
+  while IFS= read -r sub; do
     awk -v prefix="$1/$sub/" 'index($0, prefix) == 1' "$part_file" \
       > "$W/scope-$1-$sub.txt"
-  done
+  done < "$TMP/subs"
   awk -F/ 'NF == 2' "$part_file" > "$TMP/direct"
   if [ -s "$TMP/direct" ]; then cp "$TMP/direct" "$part_file"; else rm -f "$part_file"; fi
 }
@@ -232,18 +262,23 @@ chunk_flat_part() {
 # Mechanic 4: a part under MIN_PART_FILES files merges into the alphabetically
 # next part of the same top-level directory — or, when it is the last one,
 # into the previous part — unless the merge would push that part over either
-# bound. A directory with a single part keeps it as is.
+# bound. A directory with a single part keeps it as is. Part names come from
+# directory names, so they are read one a line and never word-split.
 merge_small_parts() {
-  for dir in $(part_index | cut -f2 | sort -u); do
-    set -- $(part_index | awk -F'\t' -v dir="$dir" '$2 == dir { print $1 }')
+  part_index | cut -f2 | sort -u > "$TMP/merge-dirs"
+  while IFS= read -r dir; do
+    part_index | awk -F'\t' -v dir="$dir" '$2 == dir { print $1 }' > "$TMP/merge-parts"
+    count=$(list_length "$TMP/merge-parts")
     previous=""
-    while [ $# -gt 0 ]; do
-      current=$1; shift
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      i=$((i + 1))
+      current=$(sed -n "${i}p" "$TMP/merge-parts")
       part_file="$W/scope-$current.txt"
       if [ "$(list_length "$part_file")" -ge "$MIN_PART_FILES" ]; then
         previous=$current; continue
       fi
-      if [ $# -gt 0 ]; then target=$1
+      if [ "$i" -lt "$count" ]; then target=$(sed -n "$((i + 1))p" "$TMP/merge-parts")
       elif [ -n "$previous" ]; then target=$previous
       else previous=$current; continue
       fi
@@ -252,7 +287,7 @@ merge_small_parts() {
       cp "$TMP/merged" "$W/scope-$target.txt"
       rm -f "$part_file"
     done
-  done
+  done < "$TMP/merge-dirs"
 }
 
 # ------------------------------------------------------------------------------
@@ -311,8 +346,7 @@ write_parts() {
     cp "$part_file" "$folder/scope.txt"
     if [ -f "$W/tests-$part.txt" ]; then cp "$W/tests-$part.txt" "$folder/tests.txt"; else : > "$folder/tests.txt"; fi
     printf '%s\n' "$folder" >> "$RUN/parts.txt"
-    hits=$(xargs grep -lE -- "$CONC_PATTERN" < "$part_file" 2>/dev/null || true)
-    if [ -n "$hits" ]; then printf '%s\n' "$folder" >> "$RUN/conc-parts.txt"; fi
+    if holds_concurrency "$part_file"; then printf '%s\n' "$folder" >> "$RUN/conc-parts.txt"; fi
   done
 }
 
@@ -323,26 +357,28 @@ write_parts() {
 write_groups() {
   part_index > "$TMP/index"
   : > "$TMP/grouping"
-  for dir in $(cut -f2 "$TMP/index" | sort -u); do
+  cut -f2 "$TMP/index" | sort -u > "$TMP/group-dirs"
+  while IFS= read -r dir; do
     count=$(awk -F'\t' -v dir="$dir" '$2 == dir' "$TMP/index" | wc -l | tr -d ' ')
     if [ "$count" -gt "$GROUP_PARTS" ]; then
       awk -F'\t' -v dir="$dir" '$2 == dir { print $1 "\t" $3 }' "$TMP/index" >> "$TMP/grouping"
     else
       awk -F'\t' -v dir="$dir" '$2 == dir { print $1 "\t" $2 }' "$TMP/index" >> "$TMP/grouping"
     fi
-  done
-  groups=$(cut -f2 "$TMP/grouping" | sort -u | wc -l | tr -d ' ')
+  done < "$TMP/group-dirs"
+  cut -f2 "$TMP/grouping" | sort -u > "$TMP/group-names"
+  groups=$(list_length "$TMP/group-names")
   cap=$((TOTAL_CLAIMS / groups))
   [ "$cap" -le "$MAX_GROUP_CLAIMS" ] || cap=$MAX_GROUP_CLAIMS
   [ "$cap" -ge "$MIN_GROUP_CLAIMS" ] || cap=$MIN_GROUP_CLAIMS
   : > "$RUN/groups.txt"
-  for grp in $(cut -f2 "$TMP/grouping" | sort -u); do
+  while IFS= read -r grp; do
     folder="$RUN/group-$grp"
     mkdir -p "$folder"
     awk -F'\t' -v grp="$grp" -v run="$RUN" '$2 == grp { print run "/part-" $1 }' "$TMP/grouping" > "$folder/parts.txt"
     printf '%s\n' "$cap" > "$folder/cap.txt"
     printf '%s\n' "$folder" >> "$RUN/groups.txt"
-  done
+  done < "$TMP/group-names"
   : > "$RUN/split.txt"
   while IFS="$(printf '\t')" read -r part grp; do
     folder="$RUN/part-$part"

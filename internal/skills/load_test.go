@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -1299,6 +1300,15 @@ func auditFixture(t *testing.T) string {
 // budget, and returns the workflow folder and the receipt lines it printed.
 func runAuditSplit(t *testing.T, workspace, scope, partLines, partBytes string) (string, map[string]string) {
 	t.Helper()
+	// GIT_DIR at a missing folder makes `git ls-files` fail, so the listing takes the find
+	// fallback over the fixture whatever repository the temp dir happens to sit in.
+	env := append(os.Environ(), "PART_LINES="+partLines, "GIT_DIR="+filepath.Join(workspace, "no-git"))
+	return runAuditSplitWithEnv(t, workspace, scope, partBytes, env)
+}
+
+// runAuditSplitWithEnv runs the embedded split.sh as runAuditSplit does, in exactly env.
+func runAuditSplitWithEnv(t *testing.T, workspace, scope, partBytes string, env []string) (string, map[string]string) {
+	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("no POSIX sh on this host to run split.sh")
 	}
@@ -1313,9 +1323,7 @@ func runAuditSplit(t *testing.T, workspace, scope, partLines, partBytes string) 
 	}
 	cmd := exec.Command("sh", scriptPath, run, scope, "", partBytes)
 	cmd.Dir = workspace
-	// GIT_DIR at a missing folder makes `git ls-files` fail, so the listing takes the find
-	// fallback over the fixture whatever repository the temp dir happens to sit in.
-	cmd.Env = append(os.Environ(), "PART_LINES="+partLines, "GIT_DIR="+filepath.Join(workspace, "no-git"))
+	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("split.sh failed: %v\n%s", err, out)
@@ -1422,6 +1430,178 @@ func TestAuditSplitTakesItsBoundFromTheWindow(t *testing.T) {
 				t.Errorf("part_lines = %q, want %s", receipt["part_lines"], tc.want)
 			}
 		})
+	}
+}
+
+// hostCanName reports whether this host's file system can hold name: Windows refuses `*`, `?`,
+// `"` and newlines in a file name, so a fixture holding one is skipped there.
+func hostCanName(name string) bool {
+	return runtime.GOOS != "windows" || !strings.ContainsAny(name, "*?\"\n")
+}
+
+// writeSplitFixture writes files (slash-separated name to body) under root, skipping the names
+// this host cannot hold, and returns the names it wrote, sorted.
+func writeSplitFixture(t *testing.T, root string, files map[string]string) []string {
+	t.Helper()
+	var written []string
+	for name, body := range files {
+		if !hostCanName(name) {
+			continue
+		}
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		written = append(written, name)
+	}
+	slices.Sort(written)
+	return written
+}
+
+// splitTableLine is one split.txt line: `<part> <files> <lines> conc=<yes|no> group=<name>`,
+// read from the right so a part name holding spaces stays whole.
+var splitTableLine = regexp.MustCompile(`^(.*) ([0-9]+) ([0-9]+) conc=(yes|no) group=(.*)$`)
+
+// split.sh reads every path as one name: a tree whose file and directory names hold spaces, `*`,
+// `?` and `[`, sized over PART_LINES so the directory split, re-split and merge all run, lands
+// every file in exactly one part, counts it in src=, and gives each part the line count wc -l
+// gives its files. A name holding a newline is skipped, and no scope line names anything but a
+// regular file.
+func TestAuditSplitReadsPathsWithSpacesAndGlobCharacters(t *testing.T) {
+	t.Parallel()
+	const partLines = 100
+	workspace := t.TempDir()
+	lines := func(n int, extra string) string {
+		return strings.Repeat("x := 1\n", n-1) + extra + "\n"
+	}
+	sources := writeSplitFixture(t, workspace, map[string]string{
+		"a b.go":                          lines(20, "x := 1"),
+		"x*y.go":                          lines(20, "x := 1"),
+		"q?.go":                           lines(20, "x := 1"),
+		"[z].go":                          lines(20, "x := 1"),
+		"z.go":                            lines(20, "x := 1"),
+		"dir with space/one.go":           lines(30, "go func() {}()"),
+		"dir with space/two.go":           lines(30, "x := 1"),
+		"dir with space/sub dir/three.go": lines(30, "x := 1"),
+		"dir with space/sub dir/four.go":  lines(30, "x := 1"),
+		"[g]/g1.go":                       lines(30, "x := 1"),
+		"[g]/g2.go":                       lines(30, "x := 1"),
+		"[g]/g3.go":                       lines(30, "x := 1"),
+		"[g]/h/g4.go":                     lines(30, "x := 1"),
+	})
+	newlineName := "new\nline.go"
+	if hostCanName(newlineName) {
+		if err := os.WriteFile(filepath.Join(workspace, newlineName), []byte(lines(20, "x := 1")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run, receipt := runAuditSplit(t, workspace, ".", strconv.Itoa(partLines), "")
+
+	if receipt["src"] != strconv.Itoa(len(sources)) || receipt["files"] != strconv.Itoa(len(sources)) {
+		t.Errorf("receipt = %v, want files=src=%d, one for every fixture file", receipt, len(sources))
+	}
+	for _, name := range readLines(t, filepath.Join(run, "scope.txt")) {
+		if info, err := os.Stat(filepath.Join(workspace, filepath.FromSlash(name))); err != nil || !info.Mode().IsRegular() {
+			t.Errorf("scope.txt names %q, which is no regular file (err %v)", name, err)
+		}
+	}
+
+	tableLines := map[string]string{}
+	for _, line := range readLines(t, filepath.Join(run, "split.txt")) {
+		fields := splitTableLine.FindStringSubmatch(line)
+		if fields == nil {
+			t.Fatalf("split.txt line %q is not `<part> <files> <lines> conc= group=`", line)
+		}
+		tableLines[fields[1]] = fields[3]
+	}
+	parts := readLines(t, filepath.Join(run, "parts.txt"))
+	if len(parts) < 4 {
+		t.Fatalf("parts.txt lists %v; want the directory split to cut several parts", parts)
+	}
+	var covered []string
+	for _, part := range parts {
+		files := readLines(t, filepath.Join(part, "scope.txt"))
+		total := 0
+		for _, name := range files {
+			data, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(name)))
+			if err != nil {
+				t.Fatalf("part %s names %q, which does not read: %v", filepath.Base(part), name, err)
+			}
+			total += strings.Count(string(data), "\n")
+		}
+		name := strings.TrimPrefix(filepath.Base(part), "part-")
+		if tableLines[name] != strconv.Itoa(total) {
+			t.Errorf("split.txt gives part %q %q lines, want %d, the wc -l over its files %v", name, tableLines[name], total, files)
+		}
+		if total > partLines {
+			t.Errorf("part %q holds %d lines, over the %d-line bound", name, total, partLines)
+		}
+		covered = append(covered, files...)
+	}
+	slices.Sort(covered)
+	if !slices.Equal(covered, sources) {
+		t.Errorf("the parts cover %q, want every fixture file exactly once: %q", covered, sources)
+	}
+	if conc := readLines(t, filepath.Join(run, "conc-parts.txt")); len(conc) != 1 ||
+		!slices.Contains(readLines(t, filepath.Join(conc[0], "scope.txt")), "dir with space/one.go") {
+		t.Errorf("conc-parts.txt = %v, want the one part holding `dir with space/one.go`'s goroutine", conc)
+	}
+}
+
+// The scope input splits on whitespace into its entries and no entry is glob-expanded: a literal
+// `*` names no file (there is none called `*`) and `[z].go` names itself, never `z.go`. A pin —
+// the scope loop already ran under `set -f` before split.sh read paths one a line.
+func TestAuditSplitNeverGlobsTheScope(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	writeSplitFixture(t, workspace, map[string]string{
+		"[z].go":   "x := 1\n",
+		"z.go":     "x := 1\n",
+		"a/one.go": "x := 1\n",
+	})
+	run, receipt := runAuditSplit(t, workspace, "* [z].go", "", "")
+	if scope := readLines(t, filepath.Join(run, "scope.txt")); !slices.Equal(scope, []string{"[z].go"}) {
+		t.Errorf("scope.txt = %q for the scope `* [z].go`, want only [z].go", scope)
+	}
+	if receipt["files"] != "1" {
+		t.Errorf("receipt = %v, want files=1", receipt)
+	}
+}
+
+// In a git repository split.sh lists through git unquoted, so a name git would quote by default —
+// a non-ASCII `café.go`, a `q"t.go` — reaches scope.txt as it is on disk.
+func TestAuditSplitListsGitNamesUnquoted(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git on this host")
+	}
+	workspace := t.TempDir()
+	sources := writeSplitFixture(t, workspace, map[string]string{
+		"café.go":  "x := 1\n",
+		"q\"t.go":  "x := 1\n",
+		"plain.go": "x := 1\n",
+	})
+	// The fixture's own repository alone: no inherited GIT_* (a hook's GIT_DIR, GIT_INDEX_FILE)
+	// and no system or global config.
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") && !strings.HasPrefix(entry, "PART_LINES=") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	initRepo := exec.Command("git", "init", "-q")
+	initRepo.Dir = workspace
+	initRepo.Env = env
+	if out, err := initRepo.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	run, _ := runAuditSplitWithEnv(t, workspace, ".", "", env)
+	if scope := readLines(t, filepath.Join(run, "scope.txt")); !slices.Equal(scope, sources) {
+		t.Errorf("scope.txt = %q, want every git-listed file as named on disk: %q", scope, sources)
 	}
 }
 
