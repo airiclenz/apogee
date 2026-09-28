@@ -141,6 +141,23 @@ func init() {
 			click:   Model.handlePickerClick,
 			wheel:   Model.pickerWheel,
 		},
+		paneWorkflows: {
+			// The /workflows view shares that position on the picker's terms: modal, and asked in
+			// BOTH live states, because its verb is whileRunning (commandSpecs) — the human reads a
+			// workflow's items while the conversation runs, and a pane that rendered without taking
+			// keys would be a modal the human cannot close. It cannot be open when a worker STARTS,
+			// since it owns ⏎ for as long as it is up (workflows.go).
+			name:    "workflows view",
+			slot:    slotTranscript,
+			modal:   true,
+			open:    func(m Model) bool { return m.workflowsPane.open },
+			render:  Model.renderWorkflows,
+			height:  Model.workflowsHeight,
+			key:     modalClaim(Model.workflowsKey),
+			keyOpen: func(m Model) bool { return m.state.live() && m.workflowsPane.open },
+			click:   Model.handleWorkflowsClick,
+			wheel:   Model.workflowsWheel,
+		},
 		paneSettings: {
 			// The /settings pane is the frame's one FULL-HEIGHT pane (frameRowPlan): it is granted the
 			// transcript's whole budget, and on every window it is seated in it is the only thing in

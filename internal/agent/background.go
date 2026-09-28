@@ -120,13 +120,10 @@ const (
 // WorkflowInfo is one Workflow of the session as Agent.Workflows lists it: its status.json (every
 // stage and item with the receipts so far), its folder, and whether this session's manager holds it
 // as a background workflow — running now, or Queued behind another on its server. A workflow neither
-// flag marks is not live: a blocking fan_out's, or a background one that has ended.
-type WorkflowInfo struct {
-	Status     workflow.RunStatus
-	Dir        string
-	Background bool
-	Queued     bool
-}
+// flag marks is not live: a blocking fan_out's, or a background one that has ended. It is
+// [workflow.Info], named there so the TUI's Engine seam can spell Workflows' result without
+// importing this package (ADR 0010).
+type WorkflowInfo = workflow.Info
 
 // workflowEntryJSON is one live background workflow as the session snapshot spells it: its
 // folder's id under `<scratch>/workflows/` and, for a recipe's, the recipe skill's id its prompt

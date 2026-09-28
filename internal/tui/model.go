@@ -188,6 +188,12 @@ type Model struct {
 	// It is driven only at idle.
 	picker picker
 
+	// workflowsPane is the /workflows view's state (workflows.go): the listing as its last load
+	// folded it, which level is on screen, each level's cursor and the item level's rows. Plain
+	// values whose zero value is "closed", the picker's posture (ADR 0011). It is driven in both
+	// live states.
+	workflowsPane workflowsPane
+
 	// settings is the /settings pane's state (settings.go): whether it is open and which config key
 	// is highlighted. Its rows are derived at render time from [SettingsHost.Rows], so the value
 	// itself is two plain values and its zero value is "closed" — the picker posture (ADR 0011). It
@@ -1144,10 +1150,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// this Exchange's life) — workflow.go, ADR 0089.
 		if m.workflows.owns(msg.Event) {
 			m = m.foldBackgroundEvent(msg.Event)
+			// A workflow's phase moves what the open /workflows view lists: it re-reads (workflows.go).
+			refresh := m.refreshWorkflows(msg.Event)
 			if _, isToolResult := msg.Event.(domain.ToolResultEvent); isToolResult {
-				return m.reassertMouse()
+				next, reassert := m.reassertMouse()
+				return next, tea.Batch(reassert, refresh)
 			}
-			return m, nil
+			return m, refresh
 		}
 		// Any Event, any depth, any variant: the engine is not silent. Stamped before the fold and
 		// unconditionally, so an Event the folds deliberately ignore — usage accounting, an audit
@@ -1180,10 +1189,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// (progressSaveTrigger, fold.go). Scheduled AFTER the fold, so the transcript it encodes
 		// already holds the event that asked for it; every other Event leaves the record where the
 		// last save put it.
+		// A blocking fan_out's phase moves what the open /workflows view lists too (workflows.go).
+		refresh := m.refreshWorkflows(msg.Event)
 		if progressSaveTrigger(msg.Event) {
-			return m, tea.Batch(m.progressSave(), reassert, resumed)
+			return m, tea.Batch(m.progressSave(), reassert, resumed, refresh)
 		}
-		return m, tea.Batch(reassert, resumed)
+		return m, tea.Batch(reassert, resumed, refresh)
 
 	case approvalReqMsg:
 		// The worker's Approver hands the gate to the Update loop: record the request and switch
@@ -1325,6 +1336,17 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// wait (settingswatcher.go). Nothing else moves: nobody pressed anything, so the screen is
 		// whatever it already was.
 		return m.foldConfigChanged(msg)
+
+	case workflowsListMsg:
+		// Engine.Workflows returned off the Update loop: open the /workflows view over the listing,
+		// or refresh the open one (workflows.go).
+		return m, m.foldWorkflowsList(msg)
+
+	case workflowItemMsg:
+		// An item's detail, composed off the Update loop from its folder, for the /workflows view's
+		// item level (workflows.go).
+		m.foldWorkflowItem(msg)
+		return m, nil
 
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
@@ -1534,7 +1556,7 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 //
 // The order is load-bearing, which is why it is data: every entry states what its surface claims and
 // why it can neither rise nor fall in the list, and TestKeyClaimOrderMatchesTheDocumentedPrecedence
-// fails if the sequence changes. The eight pane rungs read their gate and their claim off the pane's
+// fails if the sequence changes. The nine pane rungs read their gate and their claim off the pane's
 // row of the pane table ([paneClaimant], panes.go), so what a pane DOES with a key is stated once, on
 // its row, and this list holds only WHEN it is asked; the two rungs that are not panes — the run view
 // and the block cursor — carry their claims here. Adding a pane's keys is its row plus one rung here;
@@ -1558,6 +1580,11 @@ var keyClaimOrder = []keyClaimant{
 	// selection, the accept and esc are all its own (picker.go) — in BOTH live states, for the reason
 	// its row states.
 	paneClaimant(panePicker, "picker"),
+	// The /workflows view is the picker's sibling in the same way: modal while it is up, in both live
+	// states, for the reason its row states (workflows.go). The two are never open together — each
+	// owns ⏎ for as long as it is up, so neither verb can be accepted over the other — so the order
+	// between them decides nothing.
+	paneClaimant(paneWorkflows, "workflows view"),
 	// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
 	// including enter and tab — before the normal routing below. Any other key returns
 	// handled=false and falls through to edit the input (which re-derives it).
@@ -4306,6 +4333,11 @@ const transcriptReserve = 3
 // here once — every rectangle in the slot is measured through the walk that stacks it (frameSpans),
 // and there is no second list for it to disagree with. Each position is a decision:
 //
+// The /workflows view sits beside the picker, after it: both are modals the human is acting in and
+// both open in either live state, so they keep their rows before any passive pane does; and it can
+// share a frame with neither the picker nor the /settings pane below it, since each of the three owns
+// ⏎ for as long as it is up.
+//
 // The /usage report sits at the transient end beside the dropdown, and above it: it is a pane
 // nothing is being decided on — a question already answered, dismissed by the esc that is its only
 // key — so it yields to every surface the human is acting IN, while the dropdown, which the next
@@ -4332,6 +4364,7 @@ const (
 	panePrompt    framePane = iota // the approval or the ask prompt
 	paneBrowser                    // the /sessions history browser
 	panePicker                     // the /model | /server picker
+	paneWorkflows                  // the /workflows view of the session's workflows
 	paneSettings                   // the /settings configuration pane — the frame's one full-height pane
 	paneUsage                      // the /usage token-accounting report
 	paneInspector                  // the /inspect raw-protocol pane

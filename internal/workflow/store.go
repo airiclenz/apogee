@@ -118,6 +118,18 @@ type ItemStatus struct {
 	Receipt *Receipt `json:"receipt,omitempty"`
 }
 
+// Info is one Workflow of a session as a listing reads it: its status.json (every stage and item
+// with the receipts so far), its folder, and whether the session's background manager holds it —
+// running now, or Queued behind another on its server. A workflow neither flag marks is not live: a
+// blocking fan_out's, or a background one that has ended. It lives here rather than beside the
+// manager so a Driver can name it without importing the engine (ADR 0010's lowest-layer rule).
+type Info struct {
+	Status     RunStatus
+	Dir        string
+	Background bool
+	Queued     bool
+}
+
 // Store is one session's workflow folders, rooted at `<scratch>/workflows/`. The scratch dir moves
 // at every session boundary, so a Store is built per workflow from the live value, never cached.
 // Every write is atomic (a temp file renamed into place), directories are 0700 and files 0600.
@@ -318,6 +330,54 @@ func (s *Store) WriteTranscript(id, key string, messages []domain.Message) error
 		}
 	}
 	return atomicWrite(filepath.Join(dir, transcriptName), lines.Bytes())
+}
+
+// ReadItemTranscript reads back the conversation WriteTranscript saved for the item key of the
+// workflow folder dir (an Info's Dir), oldest message first; found is false when the item saved none
+// (it has not finished, or its stage runs no child). ErrInvalidKey refuses a key that is not an item
+// key, so no key can turn into a path outside the folder.
+func ReadItemTranscript(dir, key string) (messages []domain.Message, found bool, err error) {
+	if !isValidKey(key) {
+		return nil, false, fmt.Errorf("%w: %q", ErrInvalidKey, key)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, itemsDirName, key, transcriptName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("workflow: read transcript of item %q: %w", key, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	for decoder.More() {
+		var message domain.Message
+		if err := decoder.Decode(&message); err != nil {
+			return nil, false, fmt.Errorf("workflow: decode transcript of item %q: %w", key, err)
+		}
+		messages = append(messages, message)
+	}
+	return messages, true, nil
+}
+
+// ItemOutputPath is where the item key, labelled label, of the stage named stage in the workflow
+// folder dir was told to write its detail output — read from the folder's plan.json: the stage's
+// `out:` with {item} rendered as the label, exactly as the child was handed it (a relative path is
+// the workspace's), or output.md inside the item's own folder when the stage sets no `out:`. A stage
+// the plan does not name has no `out:` of its own. ErrInvalidKey refuses a key that is not an item
+// key.
+func ItemOutputPath(dir, stage, key, label string) (string, error) {
+	if !isValidKey(key) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidKey, key)
+	}
+	var plan Plan
+	if err := readJSON(filepath.Join(dir, planFileName), &plan); err != nil {
+		return "", err
+	}
+	for _, candidate := range plan.Stages {
+		if candidate.Name == stage && candidate.Out != "" {
+			return strings.ReplaceAll(candidate.Out, placeholderItem, label), nil
+		}
+	}
+	return filepath.Join(dir, itemsDirName, key, outputName), nil
 }
 
 // Path is the absolute path of a stage output named by name, a slash-separated path local to the

@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/undo"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
@@ -1043,6 +1044,12 @@ type Engine interface {
 	// workflow's stop withdrew it). It resumes that workflow and nothing else: the conversation is
 	// untouched. Called from the Update goroutine when the human answers the pane it opened in.
 	AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromptAnswer) bool
+	// Workflows lists the session's Workflows — every folder of its `<scratch>/workflows/` store,
+	// read from its status.json, oldest first — with the background ones the engine runs or queues
+	// marked (ADR 0087 D5, ADR 0089). A session with no scratch directory or no store yet has none.
+	// It reads the disk, so the TUI calls it only from a tea.Cmd (the /workflows view,
+	// workflows.go); goroutine-safe.
+	Workflows() ([]workflow.Info, error)
 }
 
 // ----------------------------------------------------------------------------

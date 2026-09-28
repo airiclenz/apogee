@@ -320,6 +320,7 @@ func init() {
 		{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true, run: actuationVerb(verbUnload)},
 		{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true, run: bareVerb(Model.runUsageCommand)},
 		{name: "version", summary: "show the apogee version", whileRunning: true, run: bareVerb(Model.runVersion)},
+		{name: "workflows", summary: "the session's workflows — stages, items, each item's output and conversation", whileRunning: true, run: bareVerb(Model.openWorkflows)},
 	}
 }
 

@@ -161,6 +161,62 @@ func TestReadReceiptOfAnUnfinishedItemIsNotFound(t *testing.T) {
 	}
 }
 
+// ReadItemTranscript hands back what WriteTranscript saved, in order; an item that saved none is
+// not found, and a key that is not an item key is refused before any path is built from it.
+func TestReadItemTranscript(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	status := createWorkflow(t, store, "audit", "hash-1", storeClock)
+	dir, _ := store.Dir(status.ID)
+	key := sampleKey(t, "a.go")
+	transcript := []domain.Message{{Role: domain.RoleUser, Content: "audit a.go"}, {Role: domain.RoleAssistant, Content: "done"}}
+	if err := store.WriteTranscript(status.ID, key, transcript); err != nil {
+		t.Fatalf("WriteTranscript: %v", err)
+	}
+
+	got, found, err := ReadItemTranscript(dir, key)
+	if err != nil || !found || !reflect.DeepEqual(got, transcript) {
+		t.Errorf("ReadItemTranscript = %+v, %v, %v; want %+v", got, found, err, transcript)
+	}
+	if _, found, err := ReadItemTranscript(dir, sampleKey(t, "b.go")); err != nil || found {
+		t.Errorf("ReadItemTranscript of an item with none = found %v, err %v; want not found, nil", found, err)
+	}
+	if _, _, err := ReadItemTranscript(dir, "../escape"); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("ReadItemTranscript of a bad key = %v, want ErrInvalidKey", err)
+	}
+}
+
+// ItemOutputPath names the path the stage's `out:` rendered for the item, or output.md in the
+// item's own folder when the stage sets none.
+func TestItemOutputPath(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	plan := samplePlan("audit")
+	plan.Stages = append(plan.Stages, Stage{Name: "check", Kind: StageFanout, Task: "check {item}", Out: "notes/{item}.md",
+		Over: &ItemSource{List: []string{"a.go"}}})
+	status, err := store.Create(plan, "hash-1", storeClock)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	dir, _ := store.Dir(status.ID)
+	key := sampleKey(t, "a.go")
+
+	for _, tc := range []struct {
+		stage string
+		want  string
+	}{
+		{"find", filepath.Join(dir, "items", key, "output.md")},
+		{"check", "notes/a.go.md"},
+	} {
+		if got, err := ItemOutputPath(dir, tc.stage, key, "a.go"); err != nil || got != tc.want {
+			t.Errorf("ItemOutputPath(%s) = %q, %v; want %q", tc.stage, got, err, tc.want)
+		}
+	}
+	if _, err := ItemOutputPath(dir, "find", "nope", "a.go"); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("ItemOutputPath of a bad key = %v, want ErrInvalidKey", err)
+	}
+}
+
 func TestItemKey(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{"CONTEXT.md": {Data: []byte("the terms")}}

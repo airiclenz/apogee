@@ -14,13 +14,13 @@ import (
 // without a row would index a zero row, a nil func rather than a build error, and the walks over
 // the table would panic on the first frame or the first click. The key claim is the one func a row
 // may leave nil, and only the prompt's: its keys are handleKey's state switches, not a rung of
-// keyClaimOrder. modal is true for exactly the three panes that own the keyboard through such a rung
+// keyClaimOrder. modal is true for exactly the four panes that own the keyboard through such a rung
 // plus the prompt, which owns it by state. The input slot holds exactly one pane, the dropdown,
 // which is what lets stackInputSlot name it rather than filter for it.
 func TestEveryFramePaneHasASpec(t *testing.T) {
 	t.Parallel()
 
-	modal := map[framePane]bool{panePrompt: true, paneBrowser: true, paneSettings: true, panePicker: true}
+	modal := map[framePane]bool{panePrompt: true, paneBrowser: true, paneSettings: true, panePicker: true, paneWorkflows: true}
 	names := map[string]framePane{}
 	var inputPanes []framePane
 	for p := framePane(0); p < paneKinds; p++ {
@@ -146,6 +146,18 @@ func paneFixtures() []paneFixture {
 		{"picker", panePicker, func(t *testing.T) Model {
 			t.Helper()
 			return pickerPaneModel(t, pickerCycle)
+		}},
+		{"workflows list", paneWorkflows, func(t *testing.T) Model {
+			t.Helper()
+			return workflowsPaneModel(t, workflowsAtList)
+		}},
+		{"workflow detail", paneWorkflows, func(t *testing.T) Model {
+			t.Helper()
+			return workflowsPaneModel(t, workflowsAtDetail)
+		}},
+		{"workflow item", paneWorkflows, func(t *testing.T) Model {
+			t.Helper()
+			return workflowsPaneModel(t, workflowsAtItem)
 		}},
 		{"settings key list", paneSettings, func(t *testing.T) Model {
 			t.Helper()

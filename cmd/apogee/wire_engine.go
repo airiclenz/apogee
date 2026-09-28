@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/undo"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // ----------------------------------------------------------------------------
@@ -825,6 +826,16 @@ func (e *lateEngine) AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromp
 		return false
 	}
 	return agent.AnswerWorkflowPrompt(id, answer)
+}
+
+// Workflows lists the bound Agent's Workflows; unbound there is no session scratch directory to
+// have held one, so there are none.
+func (e *lateEngine) Workflows() ([]workflow.Info, error) {
+	agent := e.bound()
+	if agent == nil {
+		return nil, nil
+	}
+	return agent.Workflows()
 }
 
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.

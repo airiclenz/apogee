@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/undo"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // ----------------------------------------------------------------------------
@@ -179,6 +180,10 @@ type fakeEngine struct {
 	workflowPrompts []domain.WorkflowPrompt // what WorkflowPrompts lists, oldest first; an answer takes its prompt off
 	promptListings  int                     // records WorkflowPrompts calls
 	promptAnswers   []workflowPromptAnswer  // records AnswerWorkflowPrompt calls that found their prompt, in order
+
+	workflowInfos    []workflow.Info // what Workflows lists, oldest first
+	workflowsErr     error           // what Workflows fails with (nil ⇒ it lists workflowInfos)
+	workflowListings int             // records Workflows calls
 }
 
 // workflowPromptAnswer is one recorded AnswerWorkflowPrompt call: the prompt's id and the answer.
@@ -301,6 +306,17 @@ func (f *fakeEngine) AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromp
 	f.workflowPrompts = slices.Delete(f.workflowPrompts, index, index+1)
 	f.promptAnswers = append(f.promptAnswers, workflowPromptAnswer{id: id, answer: answer})
 	return true
+}
+
+// Workflows lists the scripted workflows, or fails with the scripted error, and counts the call.
+func (f *fakeEngine) Workflows() ([]workflow.Info, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.workflowListings++
+	if f.workflowsErr != nil {
+		return nil, f.workflowsErr
+	}
+	return slices.Clone(f.workflowInfos), nil
 }
 
 // answers reports the AnswerWorkflowPrompt calls that found their prompt, in order.

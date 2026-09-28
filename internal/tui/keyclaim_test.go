@@ -15,6 +15,7 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 		"sessions browser",
 		"settings pane",
 		"picker",
+		"workflows view",
 		"autocomplete overlay",
 		"usage report",
 		"inspector pane",

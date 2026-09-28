@@ -471,7 +471,8 @@ func (a clickArm) holds(pane framePane, row int) bool {
 // reaches it, and what makes that safe is the pre-click frame, not the geometry (reportpane.go). The
 // /sessions browser opens the MODAL half of the chain, asked first of the modals because it is the
 // top rung of the overlay precedence (keyClaimOrder, model.go): where it is up it is what the human
-// is looking at. The /model | /server picker is the rung below it. The prompt slot — the ask pane
+// is looking at. The /model | /server picker is the rung below it, and the /workflows view below that
+// — the two are never up together, since each owns ⏎ while it is. The prompt slot — the ask pane
 // and the approval pane beside it, which share panePrompt's rectangle — is asked next: while a
 // question is up it claims what lands INSIDE its box, and a click outside leaves the question standing
 // and travels on. The "/" | "@" dropdown closes the chain: it is the input slot's OWN tenant, drawn
@@ -487,6 +488,7 @@ var pointerPanes = []framePane{
 	paneAdvice,
 	paneBrowser,
 	panePicker,
+	paneWorkflows,
 	panePrompt,
 	paneDropdown,
 }

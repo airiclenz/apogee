@@ -927,7 +927,23 @@ NOTES (2026-09-27): resume re-asks. Item 10 (7235dbbd) skips only finished fan-o
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(tui): background workflow indicator and waiting questions`
 
-## 31. The /workflows view: list and detail
+## 31. The /workflows view: list and detail — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): re-derived from the assumption that the TUI's Engine seam could name `Agent.Workflows()`'s result type. `WorkflowInfo` lived in internal/agent, which internal/tui does not import (ADR 0010), while `*apogee.Agent` must still satisfy tui.Engine. It moved to `workflow.Info` in internal/workflow/store.go, the lowest layer that can define it because it carries `workflow.RunStatus`. `agent.WorkflowInfo` is kept as an alias, so every agent caller is unchanged. This is the item 29 `domain.RecipeLaunch` precedent.
+
+NOTES (2026-09-28): re-derived from "data from status.json via Agent.Workflows()". status.json carries an item's receipt, but not its detail output path or its conversation. internal/workflow gains two readers beside WriteTranscript, both taking the folder dir an Info carries: `ReadItemTranscript(dir, key)` reads items/<key>/transcript.jsonl back, and `ItemOutputPath(dir, stage, key, label)` renders the stage's `out:` from plan.json, falling back to items/<key>/output.md. store_test.go pins both. The TUI resolves a relative `out:` against the workspace, reads at most 64 KiB of the output file and caps the item level at 2000 rows. Every line is escape-stripped.
+
+NOTES (2026-09-28): the pane holds a `listCursor` per level (list, detail, item) rather than a filtering `listSurface`. The Goal names no filter, and a per-level cursor lets esc return to the row the human left. The item level shows its reading as rows under a highlight that ↑/↓ and the wheel move, with no wrap.
+
+NOTES (2026-09-28): the pane is `paneWorkflows`, placed after `panePicker` in framePane, keyClaimOrder ("workflows view") and pointerPanes. It is modal (so it also holds the wake and the waiting-prompt offer while it is up, via `modalPaneOpen`), and its keyOpen is the picker's `state.live()` gate. That makes 10 panes, under the 16-bit cap. The listing loads through a tea.Cmd, on open and again on each WorkflowPhaseEvent while the pane is up, on both the background and the conversation event paths. The item detail also loads through a tea.Cmd, on open and on each re-list. `listSeq` and `itemSeq` drop an overtaken read.
+
+NOTES (2026-09-28): consequential edit — internal/tui/command_test.go: made necessary by the new `workflows` row (TestCommandTableDrivesParserAndMenu pins the parser's verb list).
+
+NOTES (2026-09-28): consequential edit — internal/workflow/store.go, internal/workflow/store_test.go, internal/agent/background.go: made necessary by the two re-derivations above (the Info move and the item readers).
+
+NOTES (2026-09-28): consequential edit — docs/manual/commands.md: made necessary by the new user-visible `/workflows` command (a ✅ row, and its name in the list of commands that answer mid-run).
+
+NOTES (2026-09-28): not in this item: item 30's notes name /workflows as "the other planned route back" to a dismissed waiting prompt, and the ratified design call says the question opens "when the user is idle or opens /workflows". Item 31's Goal does not include answering a waiting prompt from the view, and this item does not add it.
 
 **What:** Depends on items 17, 25.
 **Goal:** `/workflows` opens a pane listing the session's workflows (name, state, item counts); enter opens one: stages, items with status and summary; enter on an item opens its detail output and conversation read-only; `esc` goes one level up.
