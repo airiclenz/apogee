@@ -1112,7 +1112,8 @@ type Options struct {
 	// ContextWindow is the active model's context-window size in tokens (0 when unknown), as
 	// reported by upstream discovery. The footer renders it statically (e.g. "32k") and it is the
 	// denominator of the live status-line context-fill gauge, which lights as each top-level
-	// UsageEvent folds the turn's total-token count into ctxUsed (0 leaves the gauge hidden).
+	// UsageEvent folds the turn's total-token count into ctxUsed. While ctxUsed is 0 the gauge states
+	// the engine's `~` estimate taken at Turn start instead, and is hidden only with neither.
 	ContextWindow int
 
 	// HostAlias is a short, friendly name for the upstream host shown in the footer — the bound

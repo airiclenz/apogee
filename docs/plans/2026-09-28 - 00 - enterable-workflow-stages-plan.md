@@ -448,7 +448,13 @@ internal/tui/ask.go — askPromptSpec; internal/tui/approval.go — approvalProm
 
 **Commit:** `fix(tui): clicking a list row keeps the row window still`
 
-## 10. ADR 0090 and the docs describe enterable workflow stages
+## 10. ADR 0090 and the docs describe enterable workflow stages — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): consequential edit — internal/tui/model_test.go: made necessary by the `~` estimate rewrite (the "gauge is dark until the first turn reports usage" test comment now names the missing estimate too)
+NOTES (2026-09-28): consequential edit — internal/tui/doc.go: made necessary by the stage-row rewrite (the file map said stage rows stand for item runs only under a "live" Recipe block; a resumed one draws them too)
+NOTES (2026-09-28): consequential edit — docs/manual/commands.md: made necessary by the manual update (the run view paragraph links to the new "Watching a workflow in the TUI" section)
+NOTES (2026-09-28): the three test failure messages the Rule's grep still hits ("setup: no run view is open", "opened no run view, so the box addresses nobody" in workflowblock_test.go, interject_test.go, runview_test.go) are left as they are — they report a test setup failure, not a claim that a workflow block has no run view; the remaining gauge-grep hits (throughput, a run view's own gauge, the estimate-aware contextGauge comment) are accurate and stay
+NOTES (2026-09-28): CONTEXT.md's **Workflow** keeps its ADR 0087 wording and gains a paragraph on the TUI shape; **Run view** gains a sentence that item runs open the same way
 
 **What:**
 **Goal:** The documentation matches the shipped behaviour of items 4 to 9:

@@ -851,8 +851,9 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// (subAgentSpan), but framing is a run head's alone (subAgentFramed), so it never reaches this
 	// branch. A fan_out card paints as the block it is, and the walk goes on to the item runs' heads
 	// behind it — each a run head (entryWorkflowItem) that reaches this branch and elides its own
-	// run; a collapsed card folds its own body and nothing it heads. A live workflow block is the
-	// exception below: its stage rows stand for its item runs, so it steps over its span whole.
+	// run; a collapsed card folds its own body and nothing it heads. A workflow block that draws its
+	// stage rows — a live one, or one replayed with its structure — is the exception below: its stage
+	// rows stand for its item runs, so it steps over its span whole.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
 		ins := root.appendInputs(buf[:0], t.entries[head:head+span+1])
 		return resolvedBlock{

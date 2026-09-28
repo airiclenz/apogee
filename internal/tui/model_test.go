@@ -321,7 +321,7 @@ func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t) // ContextWindow 32768
 
-	// The gauge is dark until the first turn reports usage.
+	// The gauge is dark with no reading and no estimate: no Turn has started to take one.
 	if g := m.contextGauge(); g != "" {
 		t.Fatalf("context gauge lit before any usage: %q", g)
 	}

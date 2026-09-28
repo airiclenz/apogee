@@ -37,8 +37,10 @@ import (
 // superseded are stepped over by the paint (retiredAttempts). Under a workflow block that draws its
 // stage rows — a live one, or one replayed with its structure — the item heads are not painted at
 // all: the block's stage rows stand for them (each marked targetStage), so the walk steps over the
-// block's span whole (transcript.resolveBlock). A fan_out card has one stage, and paints its item
-// rows. The block itself never collapses, and a fan_out card's own fold hides its body alone.
+// block's span whole (transcript.resolveBlock), and each row opens its stage's work as a view
+// (Model.openStageAt, runview.go) — a stage view listing its item rows, or a one-item stage's run
+// view. A fan_out card has one stage, and paints its item rows. The block has no fold of its own,
+// and a fan_out card's fold hides the card's own body, never its item rows.
 //
 // The block's text is its whole record in words and its view its paint: every fold re-renders the
 // text from the view (workflowView), and the painter draws the view's stage rows. The record keeps
@@ -165,9 +167,10 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 			return
 		}
 		view := workflowView{id: e.Workflow, name: stripEscapes(e.Name), stages: workflowStagesOf(e.Stages)}
-		// The call its item children are bracketed under is the block's own: it is what those
-		// children's entries find it by as their head (entry.headsWorkflowRuns), and it is kept
-		// in the record, so the nesting holds after a save and reopen.
+		// The call its item children are bracketed under is the block's own: it is what their
+		// item heads are seated under (entry.seatsItemHead), what an item run whose head is not
+		// placed yet finds as the head of its span (entry.headsWorkflowRuns), and it is kept in
+		// the record, so the nesting holds after a save and reopen.
 		t.place(inRun(entry{kind: entryWorkflow, callID: e.Call, text: view.text(), workflow: view}, run))
 		return
 	}
@@ -577,7 +580,7 @@ type workflowItemPlace struct {
 // addWorkflowItem seats the run head of the item run a WorkflowItemStarted names: an
 // entryWorkflowItem in the run that started the Workflow, under the Workflow's call, heading the
 // item child's run by its run id. It is placed at the end of that item run ([transcript.placeBehind])
-// — which, with no head of its own standing yet, is the end of the Workflow's block span
+// — which, before this head stands, is the end of the Workflow's block span
 // ([spanHeadAt]) — so a later stage's item head lands inside the span even after a host note has
 // landed below it.
 //

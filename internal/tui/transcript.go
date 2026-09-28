@@ -2289,8 +2289,10 @@ func (e entry) headsRunFor(run runRef) bool {
 
 // headsWorkflow reports whether e is a block that heads a Workflow's item runs: a Recipe launch's
 // workflow block, or a fan_out call's card. Its item runs' heads, each with the run behind it, are
-// recorded behind it ([subAgentSpan]), but it is no delegation — nothing folds into it, and it
-// never elides what it heads (each item head elides its own run).
+// recorded behind it ([subAgentSpan]), but it is no delegation — nothing folds into it, and it has
+// no collapsed state of its own: each item head elides its own run, a fan_out card paints those
+// heads as its item rows, and a workflow block that draws its stage rows steps over them, its rows
+// standing for them (resolveBlock).
 func (e entry) headsWorkflow() bool {
 	return e.kind == entryWorkflow || (e.kind == entryToolCall && e.tool.name == fanOutToolName)
 }

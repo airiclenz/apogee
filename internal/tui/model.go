@@ -4284,7 +4284,8 @@ func (m Model) contextGauge() string {
 
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit, and
 // whether Used is an estimate rather than a server reading (Estimated: the value is prefixed `~`).
-// It is self-hiding — view renders nothing until usage is known.
+// It is self-hiding — view paints nothing while Used or Limit is not known (0), so a gauge with
+// neither a reading nor an estimate takes no room.
 type contextUsage struct {
 	Used      int
 	Limit     int

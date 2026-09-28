@@ -1198,6 +1198,6 @@ func TestItemRunsAreClimbedThroughTheirWorkflowHead(t *testing.T) {
 		t.Error("an item of a fan_out the delegation called is not under the delegation's view")
 	}
 	if top := (runRef{depth: 1, spawn: "f2", id: "run.2"}); insideCollapsedRun(tr.entries, top, runRef{}) {
-		t.Error("an item of a top-level fan_out card is inside a collapsed run; the card never elides its items")
+		t.Error("an item of a top-level fan_out card is inside a collapsed run; the card's fold hides its own body, never its item rows")
 	}
 }

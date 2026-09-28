@@ -72,8 +72,7 @@ func subAgentFramed(head paintInput, span int) bool {
 // insideCollapsedRun reports whether a block about to be painted at depth would land inside a
 // sub-agent run that is currently COLLAPSED — the question subAgentSpan answers for committed
 // entries, asked on behalf of the one block that is not in the list: the live streaming preview
-// (renderView). A collapsed run stands alone and everything railed beneath it is elided
-// (layout.md), and a delegate's answer is beneath it from its first streamed token, not only once
+// (renderView). A collapsed run stands alone and everything behind it is elided (layout.md), and a delegate's answer is beneath it from its first streamed token, not only once
 // its MessageEvent commits an entry the span rule can see.
 //
 // It keys on the HEAD rather than on the span being non-empty, because a child that has streamed
@@ -98,9 +97,10 @@ func subAgentFramed(head paintInput, span int) bool {
 //
 // A Workflow's item run is found by its own head (entryWorkflowItem), which is collapsed like a
 // delegation's. An item run no head stands for yet is climbed THROUGH ([spanHead]): the block that
-// started the Workflow never elides what it heads (a fan_out card's fold hides its own body alone),
-// so its state answers nothing and the walk goes on to the run that block sits in — a collapsed
-// delegation that called fan_out still elides its items' streaming tails.
+// started the Workflow is not a run that collapses — a fan_out card's fold hides its own body alone,
+// and a workflow block's stage rows stand for its item runs rather than folding them — so its state
+// answers nothing and the walk goes on to the run that block sits in — a collapsed delegation that
+// called fan_out still elides its items' streaming tails.
 func insideCollapsedRun(entries []entry, run, root runRef) bool {
 	if run.isTop() {
 		return insideCollapsedRunAtDepth(entries, run.depth)

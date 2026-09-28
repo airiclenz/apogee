@@ -278,11 +278,11 @@ an enum does not allow is caught when the skill loads, not half-way through a ru
 ### Starting a recipe
 
 - **In the TUI**, send a message that opens with `/<id>`: `/audit internal/`. The workflow runs
-  first, drawn in the transcript as one **workflow block** that grows in place — `✦ Workflow
-  <name> — running`, the stage that is running, one line per item as it finishes, an ask stage's
-  question — and then the model's first request carries your line followed by the result lines.
-  A `/<id>` later in a message attaches the skill's body as usual, and a recipe line sent while the
-  agent is working is refused and stays in the box.
+  first, drawn in the transcript as one **workflow block** that grows in place, and then the
+  model's first request carries your line followed by the result lines. A `/<id>` later in a
+  message attaches the skill's body as usual, and a recipe line sent while the agent is working is
+  refused and stays in the box. What the block shows, and how you read each helper's work, is
+  [below](#watching-a-workflow-in-the-tui).
 - **In the background**, with [`/bg`](#background-workflows): `/bg /audit internal/`.
 - **Headless**, with [`apogee headless --recipe audit internal/`](headless.md).
 - **On a schedule**, with a daemon entry's [`workflow:`](daemon.md) in place of `prompt:`.
@@ -293,6 +293,43 @@ an enum does not allow is caught when the skill loads, not half-way through a ru
 The shipped `audit` is the worked example: its header, prompts and split script are in
 [`internal/skills/shipped/audit/`](../../internal/skills/shipped/audit/SKILL.md), and
 `/skills export audit` copies it into your library to make your own.
+
+### Watching a workflow in the TUI
+
+The block reads `✦ Workflow <name> — running` (`waiting for you` while an ask stage's question is
+out, then `finished`, `stopped` or `failed`), and beneath it **one row per stage** of the recipe,
+all of them from the start (the sketch shortens `audit`'s list):
+
+```
+✦ Workflow audit — running
+  ┝ split ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ done
+  ┝ ground-truth ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2/5 · running  ▶
+  ┕ lens-intent ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ pending
+```
+
+- A stage row says where the stage stands: `pending` (dim — it has not started), `running`
+  (`2/5 · running` while items finish), `waiting for you`, `done` (with a ✓ when every item came
+  back `ok`), `failed` or `stopped`. A stage a repeat runs again keeps one row and adds the round:
+  `round 2/3 · running`.
+- Beneath the rows the block keeps one line for each item that did **not** come back `ok`, an ask
+  stage's question, and once the workflow ends the totals line and, if it failed, the cause.
+- The helpers' own work — their narration and tool calls — never fills the conversation. A row
+  wearing **▶** at its right end has work to open: click it, or `⏎` on it with the block cursor.
+  A stage of one item opens that helper's **run view** straight away, the same full-transcript view a sub-agent
+  opens ([the run view](commands.md)). Any other stage opens a **stage view**: one row per item
+  with its receipt's summary, grouped under `round N` for a repeated stage, with a retried item's
+  earlier attempts as dim `attempt N` rows beneath it. Each item row opens that helper's run view.
+- The black band at the top names where you are — `← main › audit › ground-truth` on the stage
+  view, `← main › audit › ground-truth › internal/tui` on one of its items — and `esc`, or a click
+  on the band, goes up one level.
+- Inside a running helper's view you can message it, and `^x` stops that one helper, as for any
+  sub-agent. A stage view itself is read-only — it is a list, not a helper — so the box says so and
+  a message typed there is refused. Stopping the whole workflow is `esc` twice at the top level, or
+  `^x` in [`/workflows`](#the-workflows-view--workflows).
+- A `fan_out` call the model makes draws its own block with **one row per item**, since it has one
+  stage; each opens that helper's run view.
+- **After a resume** the block comes back with the same rows, and they open read-only views of what
+  each helper did. A workflow that was still running when the session was saved reads `stopped`.
 
 ## Background workflows
 

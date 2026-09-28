@@ -108,6 +108,13 @@ never restored — a resumed session opens at the top level.
 > while the parent's Turn goes on, and the slot reads `esc back · ^x stop` while the viewed run is
 > running; `esc` still goes back, and `esc×2` at the top level still cancels the whole Turn.
 
+> **Amended 2026-09-28 ([ADR 0090](0090-workflow-stages-are-enterable-views.md) D3).** A level of
+> the view stack is a run **or a workflow stage**. A stage view lists one row per item of a Workflow
+> stage and is not a run: its box is read-only, it states no gauge, and `^x` stops only an item's run
+> from that item's row. The breadcrumb names the Workflow and the stage
+> (`← main › <workflow> › <stage>[ › <item>]`), and `esc` still goes up one level. A Workflow's item
+> run is a run like any other and opens as its own run view.
+
 **D5 — Expanding a framed delegation opens its run view.** Expand, from the block cursor or from a
 click on the run's header, no longer flips a fold flag: it opens the view, at the run's latest line,
 following it as it grows. The inline expanded shape is removed, so a run has exactly two shapes —

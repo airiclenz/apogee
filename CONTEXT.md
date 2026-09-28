@@ -463,8 +463,27 @@ still opens inline to its member rows. It is **Driver state**: a stack of open r
 `Model`, never encoded in the transcript, never written to a **Session record** and never restored,
 so a resumed session opens at the top level. Ratified 2026-08-30
 ([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)).
+A **Workflow**'s item runs are runs like any other and open the same way, from their stage's row
+or its **Stage view**
+([ADR 0090](docs/adr/0090-workflow-stages-are-enterable-views.md)).
 _Avoid_: "full screen" (the frame's other rows stay — only the transcript slot is taken),
 "expanded sub-agent" (the inline expanded shape is gone; a run has no fold state), "drill-down".
+
+**Stage view**:
+The level of the **Run view** stack that lists one **Workflow** stage's items. A foreground
+Workflow's block shows one row per stage; opening a started stage of more than one item (or more
+than one round, or a retried item) pushes a stage view, which lists one delegation-style row per
+item — the item's receipt summary on its row, `round N` sub-headers for a repeated stage, dim
+`attempt N` sub-rows for an item's earlier attempts — each opening that item's run view. A stage of
+one item, run once, skips the level and opens its item's run view directly. The breadcrumb reads
+`← main › <workflow> › <stage>[ › <item>]`, and `esc` goes up one level. A stage view is **not a
+run**: its prompt box is read-only, it states no context gauge, and `^x` stops only an item's run
+from that item's row — stopping the whole Workflow stays `/workflows`. Like every view level it is
+**Driver state** and is never restored, but the stage rows it opens from are kept in the **Session
+record**, so a resumed session's rows reopen read-only. Ratified 2026-09-28
+([ADR 0090](docs/adr/0090-workflow-stages-are-enterable-views.md), amending ADR 0063 D4).
+_Avoid_: "stage run" (a stage is not a run — its items are), "sub-view", "workflow view" (the
+`/workflows` pane is a different surface).
 
 **Workflow**:
 One engine-run orchestration of **Sub-agent** runs: an ordered list of **stages**, each covering a
@@ -479,6 +498,13 @@ A workflow lives in a folder under the session's **Scratch dir**, so it survives
 a resume: cancel stops it and keeps every finished item, and asking again with the same task,
 items and inputs picks it up where it stopped. It runs **blocking** by default, or as a
 **Background workflow**. Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
+In the TUI a blocking workflow draws one block — a Recipe's own, or the `fan_out` call's card — and
+its item runs never paint in the conversation: a Recipe's block shows one row per stage from the
+start (dim and `pending` until the stage starts), each opening its **Stage view** or, for a one-item
+stage, that item's **Run view**; a `fan_out` card, having one stage, shows one row per item. Every
+item run has a head of its own, so it is opened, messaged and stopped as a delegation is, and the
+block's structure is kept in the **Session record** so its rows reopen after a resume
+([ADR 0090](docs/adr/0090-workflow-stages-are-enterable-views.md), 2026-09-28).
 _Avoid_: "run" (one child's execution — a workflow is made of runs), "job", "batch" (a count of
 items per child, not the whole), "sweep", "pipeline".
 

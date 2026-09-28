@@ -1204,20 +1204,48 @@ drawer.
 Workflow before the model's first request, so there is no tool call to hang its progress on; it
 gets one block of its own instead, appended when the Workflow starts and grown in place as it
 runs. The header reads `✦ Workflow <name> — running` (`waiting for you` while an `ask` stage's
-question is out, then `finished`, `stopped` or `failed`). Beneath it, in the detail tone: the stage
-running now (`stage: <name>`), one result line per item as it finishes on its receipt — `#<n>
-<item> — <status> — <summary>` plus its fields as `k=v`, the line the model is handed — headed by
-its stage's name when the run spans several, the question an `ask` stage waits on, the totals line
-(`items N · ok a · partial b · blocked c`) once an item has finished, and a failed run's cause.
-Past forty items only the items that did not end ok are listed, as the model's result lines list
-them. The block paints one way and never collapses. It heads the Workflow's item runs: each
-item's own work — its narration, its tool calls — lands behind the block in the order it happened
-and paints railed beneath it, live and after the session is reopened, and a host note arriving
-mid-run waits below the last of it. A Workflow a `fan_out` call starts draws no block: the call's
-own block already stands and heads the item runs the same way — its fold, born collapsed, hides its
-own body and never the items beneath it — and its result is those lines. A recipe line starts only from an idle prompt with nothing held — typed while the agent
-works, into a sub-agent's view, or with messages held, it is refused with a note and left in the
-box.
+question is out, then `finished`, `stopped` or `failed`). Beneath it stands **one row per stage**
+of the Plan, in its order, from the moment the Workflow starts — every stage is shown, not only the
+ones that have begun. A stage row wears a delegation row's leader shape: the branch marker, the
+stage's name, the dotted leader, and its state in the outcome slot — `pending`, `running`
+(`2/5 · running` for a stage of more than one item), `waiting for you`, `done`, `failed` (in the
+failure red) or `stopped`. A stage that ended with every item `ok` earns the ✓. A stage a repeat
+re-runs keeps **one** row that moves on to each round and says so, `round 2/3 · running` (`round
+2` where the most rounds are not known). A stage that has not started is painted dim whole and has
+no ▶; a stage one of whose item runs has started wears ▶ at the block's edge, because it now has
+something to open. Beneath the rows, in the detail tone: one line for each item whose receipt is
+not `ok` (`<stage> · <item> — <status> — <summary>`), the question an `ask` stage waits on, and —
+once the Workflow has ended — the totals line (`items N · ok a · partial b · blocked c`) and a
+failed run's cause. An item that ended `ok` is read on its own row in its stage's view (below), not
+here. The block has no fold of its own and always paints this way.
+
+**A stage row opens its stage's work.** Each item of a Workflow is a child run with a **run head
+of its own**, seated under the block and inside its span when the item's run starts: it opens as
+that run's view, `^x` stops it, a message typed in its view reaches its child, and the gauge states
+its fill, exactly as for a delegation — but it never groups into a `✦ Sub-Agent (N)` list, and its
+receipt folds onto it as the run's report. Under a workflow block those item heads are not painted
+in the conversation: the stage rows stand for them, and the item runs' own narration and tool calls
+are read in their views. A motionless click on a stage row, or `⏎` on the block cursor, opens what
+the row leads to — nothing for a stage none of whose items has started; the item's **run view**
+directly for a stage of one item, run once, in one attempt; and a **stage view** (see "Run view",
+below) for every other started stage. A retried item keeps one row, which opens its latest attempt.
+`^x` on a stage row does nothing — a stage is not a run, and a whole Workflow is stopped from
+`/workflows`.
+
+**A `fan_out` card lists its items.** A Workflow a `fan_out` call starts draws no block: the call's
+own block already stands, and since that Workflow has one stage the card paints **one enterable row
+per item** beneath it, each the item's run head, opening that item's run view. The card's fold,
+born collapsed, hides its own body and never those rows, and its result is the result lines.
+
+**It reopens after a resume.** The record keeps the block's structure — its stages, their states
+and rounds, and the finished items — beside its text, and keeps each item's run head, so a resumed
+session paints the same stage rows, and they open read-only views over the item runs replayed
+beside them. A Workflow still running when its record was written died with the engine that ran it:
+on replay its running stages read `stopped`, and so does its header. A block from a record written
+before the structure was kept paints its text, and the item rows its span holds stay painted
+beneath it as the way into its runs. A recipe line starts only from an idle prompt with nothing
+held — typed while the agent works, into a sub-agent's view, or with messages held, it is refused
+with a note and left in the box.
 
 ---
 
@@ -1303,6 +1331,25 @@ drops it — the two rows advertise one key, and neither may name a press the ot
 trail itself stays, because where the reader is is still true. A motionless click
 anywhere on the band — any of its three rows — goes **one** level up, and `esc` does the same: the trail is a sign rather than
 a set of jump targets, so leaving a run two deep is two presses.
+
+**A workflow stage is a level of its own.** A workflow block's stage row (above) opens a **stage
+view** when the stage has more than one item, has run more than one round, or has retried its item:
+a level of the same stack, under the same four-row header, that lists the stage's items rather than
+painting a run. Each item is one delegation-style row — the item's run head, eliding its run, with
+the receipt's summary in its outcome slot — which opens that item's run view one level further
+down. A stage a repeat re-ran groups its items under `round N` sub-headers, oldest round first, and
+an item that was retried shows each earlier attempt as a dim `attempt N` sub-row beneath its row,
+which opens that attempt's own run. The trail names the Workflow and the stage:
+`← main › audit › fan-out` on the stage view, `← main › audit › fan-out › internal/tui` on an item
+opened from it, and — for a stage of one item, which opens its item's run view directly — the stage
+crumb ends the trail, since the stage and its run are one thing there. A stage is **not a run**, so
+its level is read-only whatever its items are doing: the prompt box reads
+`stage <name> · read-only · esc back`, a `⏎` there flashes `stage <name> is not a run — open one of
+its items to message it` in the status line's right slot rather than sending, the header offers
+`esc back` alone, and the slot states no gauge — a stage fills no window of its own. `^x` on an
+item's row under the block cursor stops that item's run, as on any delegation row. A `fan_out`
+card has no stage view: its one stage's items are already its rows, and each opens its run view
+with the item's name as the crumb.
 
 **`esc` means back, `^x` stops one run, and `esc×2` cancels the Turn.** Two gestures end work and
 they reach different things. `^x` **stops one sub-agent's run** and nothing else (ADR 0086 D5):
@@ -1530,16 +1577,24 @@ is tight, dropped whole rather than truncated.
 the context-usage gauge (`16k/32k 50% █████░░░░░` in the sketch above — the tokens used out of the
 window they are measured against, because a fill only means something beside the limit it fills,
 and where `░` draws the empty half of the ten-cell track: on screen those cells are a painted
-dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 cancel`
-while a turn runs, `esc back · ^x stop` while a run view is open on a run that can still be stopped
-and has reported no usage yet — falling back to `esc back` where the slot cannot hold it — and
+dark-gray field carrying no glyph of their own), the key hint that stands in for it while there is
+no fill to state (`esc×2 cancel` while a turn runs with nothing measured or estimated yet,
+`esc back · ^x stop` while a run view is open on a run that can still be stopped and has reported
+no usage yet — falling back to `esc back` where the slot cannot hold it — and
 `esc back` alone once that run is over,
 `enter dismiss` after an error, the
 primed-`ctrl+c` and armed-`esc` lines), and
 the mouse-copy flash. The gauge is the fill of the run the reader is looking at: at the top level the
 session's own agent, inside a run view the viewed run's — its latest reading against the window that
 run filled — and never the parent's there, since a parent's fill above a child's transcript is a
-number about someone else. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
+number about someone else; a stage view lists runs and fills no window, so it states none. At the
+top level the gauge does not wait for the server: until the first usage reading lands — again after
+`/clear` or `/compact` zeroes it, and all session long on a server that reports none — it states the
+engine's own estimate of the next request instead, taken at each Turn start and spelled the same way
+with a `~` in front (`~9k/32k 28%` and its track), so a long first Turn (a Recipe's whole Workflow
+runs before the model's first request) shows a fill rather than a hint. The estimate takes the slot
+from `esc×2 cancel` exactly as a reading does, and never from `enter dismiss`; with neither a reading
+nor an estimate the slot falls through to its hint. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
 sub-agent group is in flight in the open Turn it says what the second press would do: `press esc
 again to cancel — keeps 3 finished delegations, stops the rest` where members have already
 reported (`1 finished delegation` for one), or `press esc again to cancel — ⏎ a message instead skips

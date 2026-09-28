@@ -152,7 +152,8 @@ view — stops that one run, and leaves the bar where it was so the row can say 
 **sub-agent** does something else: it opens that delegation's **run view**, which gives the
 whole transcript area over to that one run — its task at the top, its own tool calls and
 its answer below, following its latest line as it works. A click on the run's row opens the
-same thing. The black band at the top of the view is the way back: `← main › scout` in its
+same thing, and a workflow's stage rows and item rows open their helpers' runs the same way
+([watching a workflow](workflows.md#watching-a-workflow-in-the-tui)). The black band at the top of the view is the way back: `← main › scout` in its
 middle row, and `esc` — or a click anywhere on the band — goes one level up, one press per
 level. While a view is open the status line's right end shows **that run's** context
 gauge once it has reported usage — never the main agent's — and `esc back` until then
