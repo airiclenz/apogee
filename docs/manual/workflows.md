@@ -314,8 +314,9 @@ server and tools it started with, and `esc` never reaches it: it is stopped from
 
 **Questions wait for you.** An approval one of its helpers needs, or an `ask` stage's question,
 never interrupts what you are doing. The status line adds `· 1 workflow waiting for you`, and the
-question opens in the approval or answer pane as soon as you are idle; `esc` puts it back to wait
-until your next exchange ends.
+question opens in the approval or answer pane as soon as you are idle and no pane is open; `esc`
+puts it back to wait until your next exchange ends. You need not wait for either: `^a` in the
+workflow's [`/workflows`](#the-workflows-view--workflows) detail opens it at once.
 
 **The wake.** When a background workflow ends — finished, stopped or failed — apogee writes a
 one-line finish note into the transcript: its name, how it ended, its items counted by status (and
@@ -354,10 +355,14 @@ The model is woken with a workflow's result when it ends, so it has no need to p
 ## The workflows view — `/workflows`
 
 `/workflows` lists the session's workflows — every `fan_out` and every recipe run, background or
-not — one row each with its state (`running`, `queued`, or how it ended) and its items done of all.
+not — one row each with its state (`running`, `waiting for you` while an approval or a question of
+it waits on you, `queued`, or how it ended) and its items done of all.
 
 - `⏎` opens one to its stages and their items, each with its status and summary; `⏎` on an item
   opens it read-only — its receipt, the detail output it wrote and its whole conversation.
+- `^a` answers what the workflow waits on: the pane closes and its oldest waiting approval or
+  question opens — one `esc` sent back included — only while the agent is idle; mid-turn it says
+  so and opens nothing.
 - `^x` stops the workflow and keeps its finished items.
 - `^r` re-runs its `blocked` and faulted items as a new run of the same finished workflow, in the
   background and only while the agent is idle; every item that ended `ok` or `partial` is kept.

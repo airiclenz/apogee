@@ -32,7 +32,9 @@ import (
 // list. In a workflow's detail two chords act on it (workflowsVerb): ^x stops it, keeping its
 // finished items, and ^r re-runs its blocked and faulted items as a new run of the same workflow.
 // They are chords by the rule the /sessions browser ratified (sessionBrowserKey): no letter of a
-// list pane is a verb. A third, ^s, saves a fan_out's workflow as a recipe skill: it asks for a name
+// list pane is a verb. ^a answers the question or approval it waits on: it closes the pane and opens
+// the workflow's oldest waiting prompt, one esc sent back included, at idle only (answerShownWorkflow).
+// Another, ^s, saves a fan_out's workflow as a recipe skill: it asks for a name
 // on the pane's own name row (workflowsNameKey) and writes <ConfigHome>/skills/<name>/SKILL.md off
 // the Update loop (saveWorkflowRecipe), refusing a name a skill or a command already answers to and
 // never overwriting a folder that is there. Every read runs off the Update loop through a tea.Cmd and folds into plain values on the Model
@@ -50,6 +52,7 @@ const maxWorkflowItemRows = 16
 const (
 	workflowsListHint   = "↑/↓ select · ⏎ open · esc close"
 	workflowsDetailHint = "↑/↓ select · ⏎ open item · ^x stop · ^r re-run failed · ^s save as recipe · esc back"
+	workflowsAnswerHint = "↑/↓ select · ⏎ open item · ^a answer · ^x stop · ^r re-run failed · ^s save as recipe · esc back"
 	workflowsNamingHint = "type a skill name · ⏎ save · esc cancel"
 	workflowsItemHint   = "↑/↓ scroll · esc back"
 )
@@ -68,6 +71,7 @@ const (
 	workflowNoTranscript  = "conversation: none saved yet"
 	workflowTranscriptBad = "conversation: could not read: "
 	workflowRerunNotIdle  = "a re-run starts only while the agent is idle — press ^r again once it is"
+	workflowAnswerNotIdle = "a question opens only while the agent is idle — press ^a again once it is"
 	workflowSavePrompt    = "save as recipe — skill name: "
 	workflowSaveRecipe    = "only a fan_out workflow saves as a recipe — this one already runs the recipe /%s"
 	workflowSaveTaken     = "a %s is already named %q — pick another name"
@@ -80,16 +84,19 @@ const workflowSaveCaret = "▏"
 
 // The chords a workflow's detail answers (workflowsVerb).
 const (
-	workflowStopKey  = "ctrl+x"
-	workflowRerunKey = "ctrl+r"
-	workflowSaveKey  = "ctrl+s"
+	workflowStopKey   = "ctrl+x"
+	workflowRerunKey  = "ctrl+r"
+	workflowSaveKey   = "ctrl+s"
+	workflowAnswerKey = "ctrl+a"
 )
 
-// The two queued/running states the engine's manager holds a background workflow in; every other
-// workflow reads the phase its status.json records.
+// The two queued/running states the engine's manager holds a background workflow in, and the
+// running one's state while a prompt of it waits on the human; every other workflow reads the phase
+// its status.json records.
 const (
 	workflowStateQueued  = "queued"
 	workflowStateRunning = "running"
+	workflowStateWaiting = "waiting for you"
 )
 
 // workflowOutputReadCap bounds how much of an item's detail output the item level reads: it is a
@@ -299,8 +306,7 @@ func (p *workflowsPane) cursor() *listCursor {
 }
 
 // workflowsKey routes a keypress while the pane is up: ↑/↓ walk the level's rows, ⏎ opens what the
-// highlight names, esc goes one level up, and a workflow's detail answers its two chords
-// (workflowsVerb). It swallows every other key — the pane is modal.
+// highlight names, esc goes one level up, and a workflow's detail answers its chords (workflowsVerb). It swallows every other key — the pane is modal.
 func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.workflowsPane.naming {
 		return m.workflowsNameKey(msg)
@@ -329,7 +335,8 @@ func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // nor queues, and that refusal is noted. ^r re-runs its failed items: the launch reads the engine
 // for its snapshot, so it goes only at idle, off the loop and under the /bg launch latch
 // (bgLaunching), and folds as a /bg launch does (foldBgStarted). ^s opens the name row that saves it
-// as a recipe (openWorkflowSave). Any other key is swallowed.
+// as a recipe (openWorkflowSave). ^a opens the prompt it waits on (answerShownWorkflow). Any other
+// key is swallowed.
 func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	id, eng := m.workflowsPane.shown, m.eng
 	switch msg.String() {
@@ -344,8 +351,38 @@ func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return bgStartedMsg{id: id, err: eng.RerunFailed(id)} }
 	case workflowSaveKey:
 		return m.openWorkflowSave(), nil
+	case workflowAnswerKey:
+		return m.answerShownWorkflow()
 	}
 	return m, nil
+}
+
+// answerShownWorkflow is ^a in a workflow's detail: it closes the pane and opens the shown workflow's
+// oldest waiting prompt — one esc sent back to the queue included, whose dismissal it clears — in
+// the approval or the ask pane, through the route the idle offer takes (openWorkflowPrompt), so the
+// answer returns to idle and resumes no worker. A decision pane mid-Turn belongs to the running
+// Exchange, so it goes only when the session is idle as canWake reads it with this pane taken as
+// closed, and otherwise notes why and opens nothing. A workflow with nothing waiting — by the folded
+// count, or by the engine's queue once read — takes nothing.
+func (m Model) answerShownWorkflow() (tea.Model, tea.Cmd) {
+	id := m.workflowsPane.shown
+	if !m.workflows.waits(id) {
+		return m, nil
+	}
+	closed := m
+	closed.workflowsPane = workflowsPane{}
+	if !closed.canWake() {
+		m.transcript.addNote(workflowAnswerNotIdle)
+		return m, nil
+	}
+	prompts := m.eng.WorkflowPrompts()
+	m.workflows = m.workflows.synced(prompts)
+	i := slices.IndexFunc(prompts, func(prompt domain.WorkflowPrompt) bool { return prompt.Workflow == id })
+	if i < 0 {
+		return m, nil
+	}
+	closed.workflows = m.workflows.withoutDismissed(prompts[i].ID)
+	return closed.openWorkflowPrompt(prompts[i])
 }
 
 // openWorkflowSave is ^s in a workflow's detail: it opens the name row the workflow is saved under.
@@ -527,7 +564,7 @@ func (m Model) workflowsRows() ([]popupRow, bool) {
 	}
 	rows := make([]popupRow, 0, len(pane.infos))
 	for _, info := range pane.infos {
-		rows = append(rows, workflowListRow(info))
+		rows = append(rows, workflowListRow(info, m.workflows.waits(info.Status.ID)))
 	}
 	return rows, len(rows) > 0
 }
@@ -549,8 +586,11 @@ func (m Model) workflowsListContent() (listContent, bool) {
 		c.title, c.hint, c.rowCap = fmt.Sprintf("workflows  (%d)", len(pane.infos)), workflowsListHint, maxWorkflowRows
 	case workflowsAtDetail:
 		c.title, c.hint, c.rowCap = "workflow  "+sanitize.StripEscapesToLine(pane.shown), workflowsDetailHint, maxWorkflowRows
+		if m.workflows.waits(pane.shown) {
+			c.hint = workflowsAnswerHint
+		}
 		if info, ok := pane.shownInfo(); ok {
-			c.title = "workflow  " + workflowName(info) + "  (" + workflowState(info) + ")"
+			c.title = "workflow  " + workflowName(info) + "  (" + workflowState(info, m.workflows.waits(pane.shown)) + ")"
 		}
 		if pane.naming {
 			c.hint = workflowsNamingHint
@@ -637,19 +677,23 @@ func workflowName(info workflow.Info) string {
 }
 
 // workflowState is how a workflow stands: queued or running when the session's manager holds it in
-// the background, else the phase its status.json records.
-func workflowState(info workflow.Info) string {
+// the background — waiting for you, running, when a prompt of it waits on the human (the folded
+// backgroundWorkflows count, never the engine) — else the phase its status.json records.
+func workflowState(info workflow.Info, waiting bool) string {
 	switch {
 	case info.Queued:
 		return workflowStateQueued
+	case info.Background && waiting:
+		return workflowStateWaiting
 	case info.Background:
 		return workflowStateRunning
 	}
 	return sanitize.StripEscapesToLine(string(info.Status.Phase))
 }
 
-// workflowListRow is one workflow's row: its name, its state, its fan-out items done of all, its id.
-func workflowListRow(info workflow.Info) popupRow {
+// workflowListRow is one workflow's row: its name, its state (waiting says a prompt of it waits on
+// the human), its fan-out items done of all, its id.
+func workflowListRow(info workflow.Info, waiting bool) popupRow {
 	done, total := 0, 0
 	for _, stage := range info.Status.Stages {
 		if stage.Kind != workflow.StageFanout {
@@ -664,7 +708,7 @@ func workflowListRow(info workflow.Info) popupRow {
 	}
 	return popupRow{
 		workflowName(info),
-		"· " + workflowState(info),
+		"· " + workflowState(info, waiting),
 		fmt.Sprintf("· %d/%d items", done, total),
 		"· " + sanitize.StripEscapesToLine(info.Status.ID),
 	}

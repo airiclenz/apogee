@@ -40,7 +40,10 @@ import (
 // queue is read, and the oldest prompt not dismissed opens in the approval or the ask pane with its
 // origin on the request. Its answer goes back through Engine.AnswerWorkflowPrompt and returns the
 // TUI to idle (leaveWorkflowPrompt) — there is no worker to resume — and esc dismisses it back to
-// the queue, where it waits, still counted, until the next Exchange ends and it is offered again.
+// the queue, where it waits, still counted, until the next Exchange ends and it is offered again, or
+// until the human opens it from /workflows: ^a in the workflow's detail opens its oldest waiting
+// prompt, a dismissed one included, at idle only (answerShownWorkflow). The idle offer is held while
+// the /workflows pane is up, as it is behind any modal pane.
 // A workflow that ends while its prompt is open takes the pane with it.
 //
 // Its spend reaches the session's accounting. The usage readings its runs report fold into its view,
@@ -243,6 +246,17 @@ func (b backgroundWorkflows) spendEntries() []entry {
 	return entries
 }
 
+// withoutDismissed returns b with the prompt id's dismissal forgotten.
+func (b backgroundWorkflows) withoutDismissed(id uint64) backgroundWorkflows {
+	if !b.dismissed[id] {
+		return b
+	}
+	dismissed := maps.Clone(b.dismissed)
+	delete(dismissed, id)
+	b.dismissed = dismissed
+	return b
+}
+
 // withDismissed returns b with the prompt id marked dismissed.
 func (b backgroundWorkflows) withDismissed(id uint64) backgroundWorkflows {
 	dismissed := maps.Clone(b.dismissed)
@@ -252,6 +266,11 @@ func (b backgroundWorkflows) withDismissed(id uint64) backgroundWorkflows {
 	dismissed[id] = true
 	b.dismissed = dismissed
 	return b
+}
+
+// waits reports whether live workflow id has a prompt waiting for the human.
+func (b backgroundWorkflows) waits(id string) bool {
+	return b.live[id].waiting > 0
 }
 
 // waitingCount is how many live workflows have a prompt waiting for the human.
@@ -472,7 +491,8 @@ func (m *Model) answerWorkflowPrompt(origin domain.WorkflowPrompt, answer domain
 
 // dismissWorkflowPrompt is esc on a background prompt's pane: the prompt goes back to the engine's
 // queue unanswered — its workflow still waits on it, and the status line still counts it — and is
-// not offered again until the next Exchange ends (finishWorker). It never touches a worker.
+// not offered again until the next Exchange ends (finishWorker), though ^a in /workflows opens it
+// sooner (answerShownWorkflow). It never touches a worker.
 func (m Model) dismissWorkflowPrompt() (Model, tea.Cmd) {
 	origin := m.workflowPromptOrigin()
 	if origin == nil {

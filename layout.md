@@ -1590,9 +1590,13 @@ background workflows run — `1 workflow running`, `2 workflows running` — and
 on the human for an approval or an `ask` stage's answer, `· 1 workflow waiting for you`
 (`N workflows waiting for you`). It is folded from the workflows' own phase events, never read off
 the engine, and it keeps the count's rule: whole or not at all. The waiting prompt itself opens in
-the approval or the answer pane as soon as the session is idle — a question under a
-`background workflow <name> asks:` line — and closes back to idle when answered; `esc` sends it back
-to wait, still counted, until the next exchange ends.
+the approval or the answer pane as soon as the session is idle and no modal pane is up — a question
+under a `background workflow <name> asks:` line — and closes back to idle when answered; `esc` sends
+it back to wait, still counted, until the next exchange's end offers it again or the human opens
+it from `/workflows`. That pane's list reads `waiting for you` as such a workflow's state, and its
+detail's hint adds `^a answer`: `^a` closes the pane and opens the workflow's oldest waiting prompt,
+a dismissed one included, through the same route — at idle only; mid-turn it notes
+`a question opens only while the agent is idle — press ^a again once it is` and opens nothing.
 
 **And the two facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
 input box below already invites a message — but the slot is where a surface that has gone leaves its

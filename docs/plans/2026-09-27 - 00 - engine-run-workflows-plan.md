@@ -1331,7 +1331,15 @@ NOTES (2026-09-28): docs/manual/workflows.md gains one sentence stating a delega
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/`
 **Commit:** `fix(agent): a delegate is offered neither fan_out's background nor the workflow tool`
 
-## 49. /workflows answers a waiting question
+## 49. /workflows answers a waiting question — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the Goal's errored case — in `stateErrored` the /workflows pane takes no keys at all (panes.go `keyOpen` is `m.state.live()`), so a pressed `^a` never reaches `workflowsVerb`: it opens nothing and writes no note. The verb's own canWake-based gate still refuses errored with the exact note; the test asserts both (the gate directly, the press through Update). Widening `keyOpen` to errored would re-route ⏎/esc at an error and was left alone.
+
+NOTES (2026-09-28): the detail's title reads the same state as the list row (`workflow <name>  (waiting for you)`), since both call `workflowState`.
+
+NOTES (2026-09-28): consequential edit — docs/manual/workflows.md: made necessary by the `^a` route (its "Questions wait for you" paragraph said an esc-dismissed prompt waits until the next exchange ends; its /workflows key list and state list now name `^a` and `waiting for you`), within the guard's `docs/manual/*.md` grep.
+
+NOTES (2026-09-28): pre-existing — workflow.go's background-workflows doc comment names `leaveWorkflowPrompt`, which does not exist (the function is `closeWorkflowPrompt`); left as found.
 
 **What:** Depends on items 30, 31. Fixes a run finding (item 31). The ratified Background question call says a waiting question opens "when the user is idle or opens `/workflows`", but the `/workflows` pane neither shows nor answers one, and because the pane is modal, `canWake` (`modalPaneOpen`) holds the idle offer (`offerWaitingPrompt`) for as long as it stays open. A question esc dismissed waits until the next Exchange ends (`reofferDismissed`) with no route back. Decided here: `/workflows` is the explicit route, and it opens a question at idle only, never mid-Turn, where the decision panes belong to the running Exchange (item 30's guard).
 **Goal:** a workflow with a waiting approval or question reads `waiting for you` as its state on the `/workflows` list row, and its detail's hint offers `^a answer`. In that detail `^a` closes the pane and opens the workflow's oldest waiting prompt, a dismissed one included, in the approval or ask pane, through the same route as item 30's idle offer; the answer resumes the workflow and returns to idle. While the session is not idle as `canWake` reads it with the /workflows pane taken as closed (busy, errored, a `/bg` launch or `/sessions` load in flight, quitting, a write or interjection pending), `^a` opens nothing and notes `a question opens only while the agent is idle — press ^a again once it is`. The idle offer is otherwise unchanged, its hold while `/workflows` is open included.

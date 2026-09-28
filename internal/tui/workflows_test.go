@@ -644,3 +644,162 @@ func TestWorkflowsViewSaveRefusesARecipesWorkflow(t *testing.T) {
 		t.Errorf("^s noted %q, want %q", note, want)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// ^a — answering a waiting prompt from a workflow's detail
+// ----------------------------------------------------------------------------
+
+// waitingWorkflowsModel is the fixture's workflow running in the background with prompt waiting on
+// the human, and /workflows open on its list: the waiting phase folded while the pane was up, so the
+// idle offer held it. The prompt is re-aimed at the fixture's workflow.
+func waitingWorkflowsModel(t *testing.T, prompt domain.WorkflowPrompt) (Model, *fakeEngine) {
+	t.Helper()
+	infos := workflowsFixture(t)
+	id := infos[0].Status.ID
+	prompt.Workflow = id
+	eng := &fakeEngine{workflowInfos: infos, workflowPrompts: []domain.WorkflowPrompt{prompt}}
+	m := openWorkflowsLine(t, streamOneScreen(t, newTestModelEng(t, eng, testOpts)))
+	started := domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Workflow: id, Name: bgWorkflowName, Background: true}
+	waiting := started
+	waiting.Phase = domain.WorkflowWaiting
+	m = foldEvents(t, m, started, waiting)
+	if !m.workflowsPane.open || m.state != stateIdle || m.pendingAsk != nil || m.pending != nil {
+		t.Fatalf("precondition: pane open %v, state %v; want the list up and the prompt held", m.workflowsPane.open, m.state)
+	}
+	m.layout()
+	return m, eng
+}
+
+// answerFromDetail opens the listed workflow's detail and presses ^a there.
+func answerFromDetail(t *testing.T, m Model) Model {
+	t.Helper()
+	m = workflowsKeyStep(t, m, keyEnter())
+	if m.workflowsPane.level != workflowsAtDetail {
+		t.Fatalf("precondition: the view is at level %d, want the detail", m.workflowsPane.level)
+	}
+	return step(t, m, keyCtrl('a'))
+}
+
+// A workflow a prompt of it waits on reads `waiting for you` on its row and offers ^a in its detail;
+// ^a closes the pane and opens the prompt in the pane its kind takes — a question under its
+// workflow's line — and the answer reaches the engine and leaves the TUI idle, no worker resumed.
+func TestWorkflowsViewCtrlAOpensTheWaitingPromptAndTheAnswerReturnsToIdle(t *testing.T) {
+	t.Parallel()
+	if workflowAnswerKey != "ctrl+a" {
+		t.Fatalf("the answer chord is %q, want ctrl+a", workflowAnswerKey)
+	}
+	cases := []struct {
+		name   string
+		prompt domain.WorkflowPrompt
+		answer tea.KeyPressMsg
+		want   workflowPromptAnswer
+	}{
+		{"question", bgQuestion(7), keyEnter(), workflowPromptAnswer{id: 7, answer: domain.WorkflowPromptAnswer{Text: "yes"}}},
+		{"approval", bgApproval(3), keyRune('a'), workflowPromptAnswer{id: 3, answer: domain.WorkflowPromptAnswer{Decision: domain.ApprovalAllow}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, eng := waitingWorkflowsModel(t, tc.prompt)
+			assertPaneHas(t, m, "waiting for you")
+			detail := workflowsKeyStep(t, m, keyEnter())
+			assertPaneHas(t, detail, "^a answer")
+
+			m = answerFromDetail(t, m)
+
+			if m.workflowsPane.open {
+				t.Error("^a left the /workflows pane open")
+			}
+			switch tc.prompt.Question {
+			case nil:
+				if m.state != stateAwaitingApproval || m.pending == nil || m.pending.Workflow == nil || m.pending.Workflow.ID != tc.want.id {
+					t.Fatalf("state %v, pane %+v; want the approval open", m.state, m.pending)
+				}
+			default:
+				if m.state != stateAwaitingAsk || m.pendingAsk == nil || m.pendingAsk.Workflow == nil || m.pendingAsk.Workflow.ID != tc.want.id {
+					t.Fatalf("state %v, pane %+v; want the question open", m.state, m.pendingAsk)
+				}
+				if q := m.pendingAsk.Request.Question; !strings.HasPrefix(q, "background workflow sweep asks:\n") {
+					t.Errorf("question = %q, want it led by the workflow's line", q)
+				}
+			}
+			m = step(t, armed(m), tc.answer)
+			if got := eng.answers(); len(got) != 1 || got[0] != tc.want {
+				t.Errorf("answers = %+v, want [%+v]", got, tc.want)
+			}
+			if m.state != stateIdle || m.pending != nil || m.pendingAsk != nil || m.worker.cancel != nil {
+				t.Errorf("state %v, worker %v; want idle with no worker", m.state, m.worker.cancel != nil)
+			}
+		})
+	}
+}
+
+// A prompt esc sent back to the queue opens again through ^a before any Exchange ends, its
+// dismissal cleared.
+func TestWorkflowsViewCtrlAReopensADismissedPrompt(t *testing.T) {
+	t.Parallel()
+	m, _ := waitingWorkflowsModel(t, bgQuestion(7))
+	m = answerFromDetail(t, m)
+	m = step(t, m, keyEsc())
+	if m.state != stateIdle || m.pendingAsk != nil || !m.workflows.dismissed[7] {
+		t.Fatalf("state %v, dismissed %v; want the question sent back to the queue", m.state, m.workflows.dismissed)
+	}
+
+	m = answerFromDetail(t, openWorkflowsLine(t, m))
+
+	if m.state != stateAwaitingAsk || m.pendingAsk == nil || m.pendingAsk.Workflow.ID != 7 {
+		t.Fatalf("state %v; want the dismissed question open again", m.state)
+	}
+	if m.workflows.dismissed[7] {
+		t.Error("the reopened question is still marked dismissed")
+	}
+}
+
+// ^a while the session is not idle — mid-Turn, or on an error not yet dismissed — opens nothing,
+// reads no queue and says why; the pane stays on the detail. At errored the pane takes no keys at
+// all (its keyOpen is the live states), so ^a pressed there reaches no verb and opens nothing; the
+// verb's own gate refuses errored with the same note all the same.
+func TestWorkflowsViewCtrlANotIdleNotes(t *testing.T) {
+	t.Parallel()
+	for _, state := range []uiState{stateRunning, stateErrored} {
+		m, eng := waitingWorkflowsModel(t, bgQuestion(7))
+		m = workflowsKeyStep(t, m, keyEnter())
+		m.state = state
+		listings := eng.listings()
+
+		pressed := step(t, m, keyCtrl('a'))
+		gated, _ := m.workflowsVerb(keyCtrl('a'))
+
+		if note := lastNote(gated.(Model)); note != workflowAnswerNotIdle {
+			t.Errorf("state %v: the verb noted %q, want %q", state, note, workflowAnswerNotIdle)
+		}
+		if note := lastNote(pressed); state == stateRunning && note != workflowAnswerNotIdle {
+			t.Errorf("state %v: ^a noted %q, want %q", state, note, workflowAnswerNotIdle)
+		}
+		for _, got := range []Model{pressed, gated.(Model)} {
+			if got.pendingAsk != nil || got.state != state || !got.workflowsPane.open || got.workflowsPane.level != workflowsAtDetail {
+				t.Errorf("state %v: pane %v, now %v, view open %v; want nothing opened", state, got.pendingAsk != nil, got.state, got.workflowsPane.open)
+			}
+		}
+		if eng.listings() != listings {
+			t.Errorf("state %v: ^a read the engine's queue (%d→%d listings)", state, listings, eng.listings())
+		}
+	}
+}
+
+// ^a on a workflow with nothing waiting does nothing: no note, no pane, the detail kept, and no ^a
+// on its hint.
+func TestWorkflowsViewCtrlAWithNothingWaitingDoesNothing(t *testing.T) {
+	t.Parallel()
+	m := workflowsPaneModel(t, workflowsAtDetail)
+	notes := len(noteTexts(m))
+	if strings.Contains(strip(m.renderWorkflows()), "^a answer") {
+		t.Error("the detail offers ^a with nothing waiting")
+	}
+
+	m = step(t, m, keyCtrl('a'))
+
+	if len(noteTexts(m)) != notes || m.state != stateIdle || !m.workflowsPane.open || m.workflowsPane.level != workflowsAtDetail {
+		t.Errorf("state %v, pane open %v at level %d; want ^a to do nothing", m.state, m.workflowsPane.open, m.workflowsPane.level)
+	}
+}
