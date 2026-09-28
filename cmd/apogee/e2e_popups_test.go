@@ -428,13 +428,22 @@ func TestE2EPopupClickDropdown(t *testing.T) {
 		t.Fatalf("the dropdown paints no %q row:\n%s", dropdownConfineRow, drv.Frame())
 	}
 
-	// The menu opens on /clear, so the first click on /confine only moves the ❯ onto it and arms it.
+	// The menu opens on its first row, so the first click on /confine only moves the ❯ onto it and
+	// arms it. Seating the ❯ re-centres the row window around it (popupRowWindow), and /confine sits
+	// below the window's middle, so the row can move up under the pointer: the ❯ is looked for on
+	// whichever row /confine is painted on now, and the second click is aimed there.
 	click(drv, x, y)
-	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().Row(y), popupMenuMarker) },
-		tuitest.Awaiting("the ❯ to move onto the clicked /confine row"))
+	drv.WaitFor(func() bool {
+		_, row, found := drv.Frame().Find(dropdownConfineRow)
+		return found && strings.Contains(drv.Frame().Row(row), popupMenuMarker)
+	}, tuitest.Awaiting("the ❯ to move onto the clicked /confine row"))
 	drv.WaitQuiet(settled)
 	if !strings.Contains(drv.Frame().String(), dropdownTitle) {
 		t.Fatalf("a single click accepted from the menu:\n%s", drv.Frame())
+	}
+	x, y, ok = drv.Frame().Find(dropdownConfineRow)
+	if !ok {
+		t.Fatalf("the armed dropdown paints no %q row:\n%s", dropdownConfineRow, drv.Frame())
 	}
 
 	// The second click on that row is tab: the verb is spliced into the box and the menu closes.

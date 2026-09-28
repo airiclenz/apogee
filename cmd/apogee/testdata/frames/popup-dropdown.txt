@@ -13,13 +13,13 @@
 │ commands and skills                                                                              │
 │                                                                                                  │
 │ ❯ /advice                      what advice the model saw, by Turn                              ┃ │
-│   /clear                       reset the model's memory of this session                        ┃ │
+│   /bg                          start a recipe in the background — /bg /<recipe> <text>         │ │
+│   /clear                       reset the model's memory of this session                        │ │
 │   /color-scheme                list, switch or export the screen's colour schemes              │ │
 │   /compact                     summarise the conversation to reclaim context                   │ │
 │   /confine                     report or change auto mode's blast radius                       │ │
 │   /continue                    ask the model to keep going                                     │ │
 │   /fork                        branch a new session from one of this session's prompts         │ │
-│   /help                        list the commands and keys                                      │ │
 │                                                                                                  │
 │ ↑/↓ select · ⏎/tab accept · esc dismiss                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
