@@ -504,7 +504,10 @@ internal/tools/registry_test.go — TestNewDefaultRegistry_MenuOrderIsDeterminis
 
 **Commit:** `docs(agents): AGENTS.md states the current tool count`
 
-## 12. End-to-end: a recipe's stages are entered and left in the real program
+## 12. End-to-end: a recipe's stages are entered and left in the real program — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): beyond the Goal's four scenes the test also opens the one-item `plan` stage and checks it lands straight on its item's run under a trail ending on the stage (`← main › stages › plan`), since the fixture's one-item stage exists to exercise that single-stage path.
+NOTES (2026-09-28): observed, not in scope — an item's run view opened from a stage shows only the item's `finish` card, not the brief it was handed; a sub_agent run view opens on its task (ADR 0063 D5), so a workflow item's view reads thinner. No doc claims otherwise; an improvement idea only.
 
 **What:**
 **Goal:** A PTY-free e2e test drives a stubbed two-stage recipe (one item, then three) through the real program:

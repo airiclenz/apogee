@@ -1,0 +1,49 @@
+# The upstream TestE2EWorkflowStages talks to: a two-stage Recipe launched as "/stages" — a stage of
+# one item, then a stage of three — and the model's own answer once the Workflow is over.
+#
+# Every item child answers its brief with a `finish` call on its first request, so each item ends
+# on an `ok` receipt with a summary of its own. Those summaries are what the stage view shows on the
+# item rows and what the top-level block must NOT show: an ok receipt keeps no line on the block.
+# The item turns and the Firing's turn are served once each (no `repeat:`), so AssertConsumed
+# proves all four items and the Firing reached the wire.
+#
+# The fixture advertises no context window and the home pins no `context-window:`, so the context
+# gauge's `~` estimate (shown until the first usage reading) never enters the recorded frames.
+model: recipe-stages-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # anything else or a later turn would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Staged build
+    # The Firing's own request, once the Workflow has run: its last message is the launch line,
+    # "/stages" followed by the result lines.
+    - when:
+        last_message: ^/stages
+      text: Every stage ran.
+    # The first stage's one item.
+    - when:
+        last_message: plan the outline
+      tool_calls:
+        - name: finish
+          arguments: '{"status":"ok","summary":"outline planned"}'
+    # The second stage's three items, one brief each.
+    - when:
+        last_message: build part alpha
+      tool_calls:
+        - name: finish
+          arguments: '{"status":"ok","summary":"alpha built"}'
+    - when:
+        last_message: build part beta
+      tool_calls:
+        - name: finish
+          arguments: '{"status":"ok","summary":"beta built"}'
+    - when:
+        last_message: build part gamma
+      tool_calls:
+        - name: finish
+          arguments: '{"status":"ok","summary":"gamma built"}'
+    # Anything neither the Firing nor an item claims.
+    - repeat: true
+      text: Nothing else to add.
