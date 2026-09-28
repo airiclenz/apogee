@@ -746,6 +746,12 @@ type WorkflowReceipt struct {
 // how a Driver keeps them apart from the conversation's own delegations. No headless or daemon
 // run starts one (ADR 0089 D1), so the NDJSON encoding does not carry the flag.
 //
+// Call is the id of the call the Workflow's item children are bracketed under — the EventBase.CallID
+// every event of an item child carries: the fan_out call's own id, the synthetic `recipe-…` call a
+// Recipe launch stands in for, or a background workflow's BackgroundWorkflowCallPrefix + Workflow.
+// It is what a Driver hangs the item runs off: the block that started the Workflow, whose call
+// the children name as their spawning call.
+//
 // It is OBSERVATION ONLY: nothing in the loop reads it, and the result the Workflow's caller reads
 // is its result lines, not these events. A Driver that ignores it loses the Workflow's liveness
 // and nothing else.
@@ -761,6 +767,7 @@ type WorkflowPhaseEvent struct {
 	Receipt    WorkflowReceipt
 	Detail     string
 	Background bool
+	Call       string
 }
 
 // BackgroundWorkflowCallPrefix leads the synthetic call id a background workflow's item children

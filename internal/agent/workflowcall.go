@@ -259,6 +259,7 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		return a.backgroundCallResult(call.ID, id, err)
 	}
 	observer := a.observeWorkflow(runner, turn, plan.Name)
+	observer.call = call.ID
 	outcome, err := runner.Run(ctx, plan)
 	observer.end(outcome, err)
 	if err != nil {
@@ -549,6 +550,10 @@ type workflowObserver struct {
 	// background marks every event a background workflow's observer emits (domain.
 	// WorkflowPhaseEvent.Background); driveBackground sets it before the run starts.
 	background bool
+	// call is the id of the call the Workflow's item children are bracketed under
+	// (domain.WorkflowPhaseEvent.Call); every caller of observeWorkflow sets it before the run
+	// starts.
+	call string
 
 	mu sync.Mutex
 	id string // the Workflow's id, once started was emitted
@@ -641,7 +646,7 @@ func (o *workflowObserver) startLocked(id string) {
 // The caller holds mu.
 func (o *workflowObserver) emitLocked(event domain.WorkflowPhaseEvent) {
 	event.EventBase = o.agent.base(o.turn)
-	event.Workflow, event.Name, event.Background = o.id, o.name, o.background
+	event.Workflow, event.Name, event.Background, event.Call = o.id, o.name, o.background, o.call
 	o.agent.cfg.Events.Emit(event)
 }
 

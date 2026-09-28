@@ -751,6 +751,12 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// tail behind it is elided with the rest of the run (insideCollapsedRun). A run reaching this
 	// branch closes with no ┊ at all: the closer belongs to a list resuming after one of its
 	// members, and a delegation standing here stands alone.
+	//
+	// A block heading a Workflow's item runs (a workflow block, a fan_out card) has a span too
+	// (subAgentSpan), but framing is a delegation's alone (subAgentFramed), so it never reaches this
+	// branch: it paints as the block it is, and its item runs paint railed beneath it, each by the
+	// walk's own rules — the workflow block never collapses, and a collapsed fan_out card folds its
+	// own body and nothing it heads.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
 		ins := root.appendInputs(buf[:0], t.entries[head:head+span+1])
 		return resolvedBlock{

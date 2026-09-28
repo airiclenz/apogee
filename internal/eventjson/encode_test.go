@@ -164,12 +164,13 @@ func TestEncodeJSONGolden(t *testing.T) {
 				Phase:     domain.WorkflowStarted,
 				Workflow:  "20260927-101500-ab12",
 				Name:      "check each package",
+				Call:      "call-7",
 			},
 			wantKind: "workflow_phase",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"phase":"started","workflow":"20260927-101500-ab12","name":"check each package",` +
 				`"stage":"","item":"","index":0,"resumed":false,` +
-				`"receipt":{"status":"","summary":"","fields":{}},"detail":""}`,
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"call-7"}`,
 		},
 		{
 			name: "workflow_phase item_finished carries the receipt",
@@ -190,7 +191,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.3"},
 			wantData: `{"phase":"item_finished","workflow":"20260927-101500-ab12","name":"check each package",` +
 				`"stage":"items","item":"internal/tui","index":2,"resumed":true,` +
-				`"receipt":{"status":"partial","summary":"two findings","fields":{"findings":"2"}},"detail":""}`,
+				`"receipt":{"status":"partial","summary":"two findings","fields":{"findings":"2"}},"detail":"","call":""}`,
 		},
 		{
 			name: "workflow_phase waiting carries the question",
@@ -205,7 +206,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Turn: 5},
 			wantData: `{"phase":"waiting","workflow":"20260927-101500-ab12","name":"",` +
 				`"stage":"confirm","item":"","index":0,"resumed":false,` +
-				`"receipt":{"status":"","summary":"","fields":{}},"detail":"Fix the refuted items?"}`,
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"Fix the refuted items?","call":""}`,
 		},
 		{
 			name: "sub_agent_named",

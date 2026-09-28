@@ -22,12 +22,18 @@ const subAgentToolName = "sub_agent"
 // marks the span; it is derived at paint from the depths already on the entries, exactly as the
 // rails framing it are (railLines).
 //
-// It answers 0 for anything that is not a sub-agent call, and for a run that produced no nested
-// entry at all (a child that failed before its first event) — either way the head is an ordinary
-// tool block with nothing behind it, and renderView paints it as one.
+// A block that heads a Workflow's item runs ([entry.headsWorkflow] — a Recipe launch's workflow
+// block, a fan_out call's card) has a span by the same rule, since its item runs are recorded
+// behind it the same way; without it every item run would end at the head (runEnd = head+1) and an
+// item's later entries would land in front of its earlier ones. Only the span is shared: framing and
+// eliding stay a delegation's alone ([subAgentFramed]), so such a head never hides what it heads.
+//
+// It answers 0 for anything that heads no run, and for a run that produced no nested entry at all
+// (a child that failed before its first event) — either way the head is an ordinary tool block with
+// nothing behind it, and renderView paints it as one.
 func subAgentSpan(entries []entry, i int) int {
 	head := entries[i]
-	if !head.headsRun() {
+	if !head.headsRun() && !head.headsWorkflow() {
 		return 0
 	}
 	n := 0
@@ -87,16 +93,21 @@ func subAgentFramed(head paintInput, span int) bool {
 // row the reader replaced with the header: a run has two shapes under ADR 0063 — the collapsed row
 // and its view — so opening a view leaves the head collapsed the whole time it is open. The zero
 // root stops the walk at the top of the transcript, which is the rule as it was written.
+//
+// A Workflow's item run is climbed THROUGH ([spanHead]): the block that started the Workflow never
+// elides what it heads (a fan_out card's fold hides its own body alone), so its state answers
+// nothing and the walk goes on to the run that block sits in — a collapsed delegation that called
+// fan_out still elides its items' streaming tails.
 func insideCollapsedRun(entries []entry, run, root runRef) bool {
 	if run.isTop() {
 		return insideCollapsedRunAtDepth(entries, run.depth)
 	}
 	for r := run; !r.isTop() && r != root; {
-		head, ok := runHead(entries, r)
+		head, ok := spanHead(entries, r)
 		if !ok {
 			return false
 		}
-		if !head.expanded {
+		if head.headsRun() && !head.expanded {
 			return true
 		}
 		r = head.run() // this run is open: the run it sits in may still be collapsed
@@ -110,6 +121,9 @@ func insideCollapsedRun(entries []entry, run, root runRef) bool {
 // reason: with siblings live (ADR 0039) a depth says which level a run stands
 // at and never which run it is.
 //
+// A Workflow's item run is climbed through the block that started it ([spanHead]), so an item of a
+// fan_out a delegation called is under that delegation's view.
+//
 // The zero root is the whole transcript, and every run is under that.
 func runUnder(entries []entry, run, root runRef) bool {
 	if root.isTop() {
@@ -119,7 +133,7 @@ func runUnder(entries []entry, run, root runRef) bool {
 		if r == root {
 			return true
 		}
-		head, ok := runHead(entries, r)
+		head, ok := spanHead(entries, r)
 		if !ok {
 			return false
 		}
@@ -148,6 +162,34 @@ func runHeadAt(entries []entry, run runRef) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// spanHeadAt is where the block a run's entries are recorded behind sits — the head its span is
+// measured from ([subAgentSpan]). A delegation's head is asked first ([runHeadAt]); only where the
+// list holds none is the block that started a Workflow asked for ([entry.headsWorkflowRuns]), which
+// heads every item run of that Workflow at once. It is the lookup of the questions about WHERE a run
+// lies — its end (runEnd) and the runs enclosing it (insideCollapsedRun, runUnder) — and never of
+// the folds that write a run's phase, name or result into its head, nor of the breadcrumb trail,
+// which stay a delegation's alone ([runHeadAt]): an item run has no head of its own to fold into.
+func spanHeadAt(entries []entry, run runRef) (int, bool) {
+	if at, ok := runHeadAt(entries, run); ok {
+		return at, true
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].headsWorkflowRuns(run) {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// spanHead is [spanHeadAt] as the entry.
+func spanHead(entries []entry, run runRef) (entry, bool) {
+	at, ok := spanHeadAt(entries, run)
+	if !ok {
+		return entry{}, false
+	}
+	return entries[at], true
 }
 
 // The run view's header row, spelled once (render.go): the way back (←), the separator between the

@@ -847,6 +847,9 @@ func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
 		if phase.Workflow != id || phase.Name != "check {item} carefully and report" || phase.Depth != 0 || phase.RunID != "" {
 			t.Errorf("phase %s = %+v, want workflow %q, the fan_out's name and the parent's identity", phase.Phase, phase, id)
 		}
+		if phase.Call != "fo1" {
+			t.Errorf("phase %s names call %q, want the fan_out call fo1 its item children run under", phase.Phase, phase.Call)
+		}
 		if phase.Phase == domain.WorkflowItemFinished {
 			if phase.Stage != fanOutStageName || phase.Resumed || phase.Receipt.Status != "ok" || phase.Receipt.Fields["count"] != "1" {
 				t.Errorf("item_finished = %+v, want an ok items receipt with count=1, not resumed", phase)
@@ -856,6 +859,18 @@ func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
 	}
 	if summaries["alpha"] != "alpha is fine" || summaries["beta"] != "beta is fine" {
 		t.Errorf("item summaries = %v, want each item's own", summaries)
+	}
+	children := 0
+	for _, e := range sink.events {
+		if base := e.Identity(); base.Depth == 1 {
+			children++
+			if base.CallID != phases[0].Call {
+				t.Errorf("item child's %T carries call %q, want the phases' call %q", e, base.CallID, phases[0].Call)
+			}
+		}
+	}
+	if children == 0 {
+		t.Error("no item child event was emitted, want each child's events under the fan_out call")
 	}
 }
 
@@ -969,6 +984,11 @@ func TestWorkflowCall_ARecipeRunsAndAnswersItsResultLines(t *testing.T) {
 	}
 	if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 1 {
 		t.Errorf("workflow folders = %v, want the recipe's one", folders)
+	}
+	for _, phase := range workflowPhaseEvents(sink.events) {
+		if phase.Call != "fo1" {
+			t.Errorf("recipe phase %s names call %q, want the fan_out call fo1", phase.Phase, phase.Call)
+		}
 	}
 }
 
@@ -1186,6 +1206,11 @@ func TestWorkflowCall_BackgroundAnswersAtOnceAndRunsBesideTheConversation(t *tes
 
 	if ends := workflowEnds(sink, id); !slices.Equal(ends, []domain.WorkflowPhase{domain.WorkflowFinished}) {
 		t.Errorf("workflow ends = %v, want one finished", ends)
+	}
+	for _, phase := range workflowPhaseEvents(lockedEvents(sink)) {
+		if phase.Workflow == id && phase.Call != domain.BackgroundWorkflowCallPrefix+id {
+			t.Errorf("background phase %s names call %q, want %q", phase.Phase, phase.Call, domain.BackgroundWorkflowCallPrefix+id)
+		}
 	}
 }
 

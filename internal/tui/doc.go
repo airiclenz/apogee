@@ -1090,8 +1090,9 @@
 // both read had long earned (blocktarget_test.go is the suite named for it);
 // subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
 // workflowblock.go the block a launched Recipe's Workflow reports its run in (ADR 0087), folded
-// from its WorkflowPhaseEvents and grown in place; workflow.go the session's background workflows
-// (ADR 0089) — the rule that keeps their events out of the transcript, the activity board and the
+// from its WorkflowPhaseEvents and grown in place, which — like a fan_out call's card — heads the
+// Workflow's item runs by the call they are bracketed under; workflow.go the session's background
+// workflows (ADR 0089) — the rule that keeps their events out of the transcript, the activity board and the
 // stall clock, the finish line their end writes, the wake that opens an Exchange on it once the
 // session is idle, the status line's running and waiting readout, and the waiting approval or
 // question it opens in the decision panes at idle and answers through the engine; workflows.go the

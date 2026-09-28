@@ -23,6 +23,11 @@ import (
 // in the transcript, its children nest under it, and its result IS the result lines. So only a
 // Workflow no open fan_out call of the same run accounts for opens a block here.
 //
+// Either way the block heads the Workflow's item runs: every item child is bracketed under the
+// block's call (domain.WorkflowPhaseEvent.Call), so its entries land inside the block's span
+// (entry.headsWorkflowRuns, spanHeadAt) and paint railed beneath it. The span is never elided — the
+// block paints one way and never collapses, and a fan_out card's own fold hides its body alone.
+//
 // The block's text is its whole paint and its whole record: every fold re-renders the text from the
 // view (workflowView), the painter draws the text alone, and the record keeps the text — so a
 // resumed session paints the block exactly as it last stood, with no view to rebuild. Because the
@@ -83,7 +88,10 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 			return
 		}
 		view := workflowView{id: e.Workflow, name: stripEscapes(e.Name)}
-		t.place(inRun(entry{kind: entryWorkflow, text: view.text(), workflow: view}, run))
+		// The call its item children are bracketed under is the block's own: it is what those
+		// children's entries find it by as their head (entry.headsWorkflowRuns), and it is kept
+		// in the record, so the nesting holds after a save and reopen.
+		t.place(inRun(entry{kind: entryWorkflow, callID: e.Call, text: view.text(), workflow: view}, run))
 		return
 	}
 	i := t.workflowAt(e.Workflow)

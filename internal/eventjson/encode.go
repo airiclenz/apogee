@@ -201,6 +201,7 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			Resumed:  e.Resumed,
 			Receipt:  workflowReceiptOf(e.Receipt),
 			Detail:   e.Detail,
+			Call:     e.Call,
 		}, true
 	default:
 		return "", domain.EventBase{}, nil, false
@@ -268,7 +269,8 @@ type subAgentPhaseData struct {
 
 // workflowPhaseData is the workflow_phase line: one Workflow crossing a lifecycle boundary. Stage,
 // item, index, resumed and receipt are the zero values on the phases they do not describe, and the
-// receipt's status is "" on every phase but item_finished.
+// receipt's status is "" on every phase but item_finished. Call is on every phase: the call id the
+// Workflow's item children carry as their envelope's call_id.
 type workflowPhaseData struct {
 	Phase    string          `json:"phase"`
 	Workflow string          `json:"workflow"`
@@ -279,6 +281,7 @@ type workflowPhaseData struct {
 	Resumed  bool            `json:"resumed"`
 	Receipt  workflowReceipt `json:"receipt"`
 	Detail   string          `json:"detail"`
+	Call     string          `json:"call"`
 }
 
 // workflowReceipt is a workflow item's receipt on the line. Fields is an object on every line,

@@ -1208,9 +1208,12 @@ running now (`stage: <name>`), one result line per item as it finishes on its re
 its stage's name when the run spans several, the question an `ask` stage waits on, the totals line
 (`items N · ok a · partial b · blocked c`) once an item has finished, and a failed run's cause.
 Past forty items only the items that did not end ok are listed, as the model's result lines list
-them. The block paints one way and never collapses. A Workflow a `fan_out` call starts draws no
-block: the call's own block already stands, its children nest under it, and its result is those
-lines. A recipe line starts only from an idle prompt with nothing held — typed while the agent
+them. The block paints one way and never collapses. It heads the Workflow's item runs: each
+item's own work — its narration, its tool calls — lands behind the block in the order it happened
+and paints railed beneath it, live and after the session is reopened, and a host note arriving
+mid-run waits below the last of it. A Workflow a `fan_out` call starts draws no block: the call's
+own block already stands and heads the item runs the same way — its fold, born collapsed, hides its
+own body and never the items beneath it — and its result is those lines. A recipe line starts only from an idle prompt with nothing held — typed while the agent
 works, into a sub-agent's view, or with messages held, it is refused with a note and left in the
 box.
 

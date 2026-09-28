@@ -1221,7 +1221,13 @@ NOTES (2026-09-28): the test `shellTool` fake (recipe_test.go) now hands a confi
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ && grep -q "Amended 2026-09-27" docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md && grep -q "Amendment (2026-09-27)" docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md`
 **Commit:** `fix(agent): plan mode runs recipe scripts confined to the workflow folder`
 
-## 43. A workflow's item runs nest under the block that started them
+## 43. A workflow's item runs nest under the block that started them — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): re-derived from "backgroundRun stores its `workflow-<id>` call": startBackground already holds that call where it builds the observer, so the call is set on the observer (`observer.background, observer.call = true, call.ID`), and backgroundRun carries it through the observer it already stores rather than through a field of its own.
+
+NOTES (2026-09-28): resolveBlock (render.go) needed no code change, only a comment: it reads the widened subAgentSpan, but subAgentFramed stays keyed on headsRun as the re-check requires, so a workflow block or fan_out card never reaches the eliding branch. The separate head lookup is `spanHeadAt`/`spanHead` (subagentblock.go), used by runEnd, insideCollapsedRun and runUnder; continuesOpenRun widens its enclosing-block test with `workflowHeads`.
+
+NOTES (2026-09-28): insideCollapsedRun and runUnder now climb through a workflow head, which means an item of a fan_out that a collapsed delegation called is elided with that delegation's run, and sits under that delegation's run view. Before this change the walk stopped at the missing head. TestItemRunsAreClimbedThroughTheirWorkflowHead pins this.
 
 **What:** Recast at the regression check (2026-09-27). Depends on item 22. Fixes a run finding (item 22's NOTES). A recipe launch's item children emit their events under the synthetic `recipe-<id>-<turn>` call (`launchRecipe`, recipe.go). No transcript entry heads that call (`entry.headsRunFor` matches sub_agent cards only), so the children's entries land as unheaded depth-1 entries after the workflow block.
 **Goal:** every workflow item run nests under the block of the call that spawned it: the workflow block for a recipe launch, the fan_out call card for a fan_out. The nesting holds live, collapsed and expanded, and after a session save and reopen. Sub_agent heads and groups render exactly as before.

@@ -571,7 +571,8 @@ func (t *transcript) commit(e entry) {
 // entry, and the point its live preview paints at (renderView). The run's stretch is its head's
 // [subAgentSpan], so this asks the same derivation the painter asks and the two cannot disagree
 // about where a run ends. The head is the one [entry.headsRunFor] names, so a run whose spawning
-// call id collides with a sibling's still grows behind its own block.
+// call id collides with a sibling's still grows behind its own block — or, for a Workflow's item
+// run, the block that started the Workflow ([spanHeadAt]), so every item grows behind it.
 //
 // The end of the LIST is the answer for the top-level conversation (no spawning call), and for a
 // run this transcript has no head for — a replayed record written before the id existed, a
@@ -580,7 +581,7 @@ func (t *transcript) runEnd(run runRef) int {
 	if run.isTop() {
 		return len(t.entries)
 	}
-	if i, ok := runHeadAt(t.entries, run); ok {
+	if i, ok := spanHeadAt(t.entries, run); ok {
 		return i + 1 + subAgentSpan(t.entries, i)
 	}
 	return len(t.entries)
@@ -618,22 +619,24 @@ func (t *transcript) tailBeforeHostNotes(e entry) int {
 // so it reads the list as it will be around at rather than around an index of its own.
 //
 // A DELEGATED entry (depth above 0) qualifies when the block enclosing that position is a still-open
-// delegation: the run the notes interrupted is the only run it can belong to, and the head's span
-// has to reach it. A DELEGATION at the notes' own depth qualifies when the block before them is a
+// delegation, or a still-running block that heads a Workflow's item runs ([entry.headsWorkflow]):
+// the run the notes interrupted is the only run it can belong to, and the head's span has to reach
+// it. A DELEGATION at the notes' own depth qualifies when the block before them is a
 // still-open delegation too: it is the next member of that fan-out, and members group only while
 // they stand next to each other.
 //
 // Everything else answers no and lands after the notes, in the order it happened — a fresh top-level
 // block belongs after the note, not in front of it.
 func (t *transcript) continuesOpenRun(e entry, at int) bool {
-	head := -1
 	switch {
 	case e.depth > 0:
-		head = enclosingBlock(t.entries, at, e.depth)
+		head := enclosingBlock(t.entries, at, e.depth)
+		return (subAgentHeads(t.entries, head) || workflowHeads(t.entries, head)) && !t.entries[head].done
 	case e.headsRun():
-		head = prevSiblingAt(t.entries, at, e.depth)
+		head := prevSiblingAt(t.entries, at, e.depth)
+		return subAgentHeads(t.entries, head) && !t.entries[head].done
 	}
-	return subAgentHeads(t.entries, head) && !t.entries[head].done
+	return false
 }
 
 // isHostNote reports whether e is a host note: a note or a Firing block standing at depth 0 and
@@ -2182,6 +2185,28 @@ func (e entry) headsRunFor(run runRef) bool {
 		return e.spawnRunID == run.id
 	}
 	return e.callID == run.spawn && e.depth == run.depth-1
+}
+
+// headsWorkflow reports whether e is a block that heads a Workflow's item runs: a Recipe launch's
+// workflow block, or a fan_out call's card. Its item runs are recorded behind it ([subAgentSpan])
+// but it is no delegation — nothing folds into it, and it never elides what it heads.
+func (e entry) headsWorkflow() bool {
+	return e.kind == entryWorkflow || (e.kind == entryToolCall && e.tool.name == fanOutToolName)
+}
+
+// headsWorkflowRuns reports whether e is the block that started the Workflow run is an item of:
+// a block that heads Workflow runs ([entry.headsWorkflow]) whose call is the run's spawning call —
+// the call every item child is bracketed under (domain.WorkflowPhaseEvent.Call, which a workflow
+// block records as its callID) — standing one level above it. It matches on the call alone, never
+// on a run id: one head carries every item run of its Workflow.
+func (e entry) headsWorkflowRuns(run runRef) bool {
+	return e.headsWorkflow() && e.callID != "" && e.callID == run.spawn && e.depth == run.depth-1
+}
+
+// workflowHeads is [entry.headsWorkflow] asked of a position; an index outside the list answers
+// false.
+func workflowHeads(entries []entry, i int) bool {
+	return i >= 0 && i < len(entries) && entries[i].headsWorkflow()
 }
 
 // run is the run e belongs to — the ref of the agent whose event folded into it, the same ref
