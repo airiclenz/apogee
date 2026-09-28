@@ -331,7 +331,7 @@ func TestABgOnlySessionIsSavedAtQuitAndResumedOnStart(t *testing.T) {
 	resumed := newModel(context.Background(), eng, Options{Sessions: host, UI: testUIPrefs,
 		Resumed: &ResumedSession{Title: "bg only"}}, nil)
 	resumed = step(t, resumed, tea.WindowSizeMsg{Width: 80, Height: 24})
-	resumed = step(t, resumed, tea.WindowSizeMsg{Width: 81, Height: 24})
+	step(t, resumed, tea.WindowSizeMsg{Width: 81, Height: 24})
 
 	if _, _, resumes := eng.boundaryKeeps(); resumes != 1 {
 		t.Errorf("ResumeWorkflows calls = %d after a --resume start, want exactly one", resumes)

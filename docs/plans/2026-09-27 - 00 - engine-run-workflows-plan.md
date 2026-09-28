@@ -1298,7 +1298,7 @@ NOTES (2026-09-28): the per-run spend is a `runSpend` map type (usage.go) shared
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/`
 **Commit:** `fix(tui): workflow item runs' token spend reaches /usage and the session record`
 
-## 47. `make lint` passes over commandrun_test.go
+## 47. `make lint` passes over commandrun_test.go — ✅ DONE (2026-09-28)
 
 **What:** Depends on item 34. Regression from ad3fee2b (item 34), never deferred: `TestABgOnlySessionIsSavedAtQuitAndResumedOnStart` (internal/tui/commandrun_test.go) assigns the second `WindowSizeMsg` fold to `resumed` and never reads it, so `make lint` fails with `ineffectual assignment to resumed (ineffassign)`. `make lint` passed before that commit, and the closeout's `make check` runs it.
 **Regression guard.** The Goal and Acceptance are scoped to the package the item touches — the Makefile's golangci-lint run over `./internal/tui/...` (the same `$(GOLANGCI_LINT)` binary `make lint` uses) reports no issue, plus the named test; a lint finding in another package belongs to the item that introduced it and is filed as a FOLLOW-UP, never fixed under 47.
