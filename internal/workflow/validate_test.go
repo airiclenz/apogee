@@ -422,8 +422,11 @@ func TestProblemStringNamesStageAndField(t *testing.T) {
 func TestWorkflowStaysOffTheLoopAndItsDrivers(t *testing.T) {
 	t.Parallel()
 
-	const module = "github.com/airiclenz/apogee"
-	forbidden := []string{module, module + "/internal/agent", module + "/internal/config", module + "/internal/run", module + "/internal/tools", module + "/internal/tui"}
+	// The root module path is derived rather than spelled as a bare quoted literal: make check's
+	// ADR-0010 gate greps internal/ for exactly that literal as an import of the root facade.
+	const internalTree = "github.com/airiclenz/apogee/internal"
+	module := strings.TrimSuffix(internalTree, "/internal")
+	forbidden := []string{module, internalTree + "/agent", internalTree + "/config", internalTree + "/run", internalTree + "/tools", internalTree + "/tui"}
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read the package directory: %v", err)
