@@ -274,7 +274,10 @@ internal/tui/workflowblock_test.go — TestWorkflowBlockShowsProgressAndResultLi
 
 **Commit:** `feat(tui): the workflow block paints one row per stage`
 
-## 6. A stage row opens a stage view or, for a one-item stage, the item's run view
+## 6. A stage row opens a stage view or, for a one-item stage, the item's run view — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the stage level is `runView.stage stageLevel{call, place}` (the stage index is stored as place = stage+1, and the block is found by its call in the level's run) rather than a bare `stage int`. At a stage level, `runView.ref` is the run the workflow block stands in. So `viewedRun()` answers that run (the conversation for a Recipe), and `statusLeft`/`shownSlot`/`isStalled` speak for it and name the working item. `viewedChild()` answers none, so there is no gauge, no ^x and no child legend. `runLabel` is asked only where the new `inRunScope()` holds. /inspect and the thinking pane now gate on `inRunScope()` instead of `inRunView()`. The transcript carries the stage beside `root` through a new `setStage` touch-writer. `setRoot` keeps its signature.
+NOTES (2026-09-28): ⏎ at a stage level is refused with a flash naming the stage (`stage <name> is not a run — open one of its items to message it`). It writes no transcript note and keeps the draft. The box legend reads `stage <name> · read-only · esc back`. `blockKey` now takes the `paintRoot`, so the key names both the root and the stage.
 
 **What:** Recast at the regression check (2026-09-28).
 **Goal:** Opening a stage row, by click or by block cursor and `⏎`, does one of three things:

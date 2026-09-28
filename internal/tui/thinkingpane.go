@@ -104,7 +104,8 @@ func (m Model) scopedThinking() []thinkingRecord {
 
 // inThinkingScope says whether one run's thinking belongs in the pane as the human has it open: the
 // MAIN agent's alone at the top level, and the viewed delegation's alone under a run view (the
-// ratified sub-agent scoping). Top level is a depth test rather than an equality one, so a
+// ratified sub-agent scoping). A stage level scopes as the run its workflow stands in does
+// ([Model.viewedRun]): a stage is not a run. Top level is a depth test rather than an equality one, so a
 // top-level record that carried a call id is still the human's own conversation rather than a
 // record the pane silently drops.
 func (m Model) inThinkingScope(run runRef) bool {
@@ -270,7 +271,7 @@ func (c *thinkingRowCache) wrapRecords(records []thinkingRecord, column int, sco
 // what is under it, so the run's name is composed here, beside the rows it belongs to.
 func (m Model) thinkingContent() reportContent {
 	title := thinkingTitle
-	if m.inRunView() {
+	if m.inRunScope() {
 		title += " — " + m.runLabel(m.viewedRun())
 	}
 	rows, kinds := m.thinkingRows(m.thinkingWrapColumn())

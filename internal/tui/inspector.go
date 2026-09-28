@@ -930,7 +930,7 @@ func attemptRate(ae domain.UpstreamAttemptEvent) string {
 // scopedAttempts is scopedWire for the attempt ring: the whole ring at the top level, only the
 // viewed run's attempts while a run view is open, and a FRESH slice when scoped (ADR 0011).
 func (m Model) scopedAttempts() []attemptRecord {
-	if !m.inRunView() {
+	if !m.inRunScope() {
 		return m.attempts
 	}
 	viewed := m.viewedRun()
@@ -1011,7 +1011,7 @@ func (m Model) inspectContent() reportContent {
 		hint = inspectorRawHint
 	}
 	title := inspectorTitle
-	if m.inRunView() {
+	if m.inRunScope() {
 		title += " · " + m.runLabel(m.viewedRun())
 	}
 	rows, kinds := m.inspectorRows()
@@ -1027,7 +1027,9 @@ func (m Model) inspectContent() reportContent {
 // scopedWire is the record list the pane speaks for in THIS frame: the whole ring at the top level,
 // and only the viewed delegation's records while a run view is open — the record's run
 // ([wireRecord.run]) against the runRef the view is rooted at (runOf's mapping, ADR 0039), which is
-// one `==` because those three facts are the run identity every event carries.
+// one `==` because those three facts are the run identity every event carries. A stage level is not
+// a run: it scopes as the run its workflow stands in does ([Model.inRunScope]) — the whole ring for a
+// Recipe the human launched.
 //
 // It is a slice and not a filter passed around because everything the pane composes has to see the
 // SAME list: the headers, the elision counts and the unanswered-request note are all statements
@@ -1038,7 +1040,7 @@ func (m Model) inspectContent() reportContent {
 // handed back over the ring's own backing array would let a later fold write into rows a frame is
 // still drawing. Unscoped there is nothing to build — the ring itself is the answer, read-only.
 func (m Model) scopedWire() []wireRecord {
-	if !m.inRunView() {
+	if !m.inRunScope() {
 		return m.wire
 	}
 	viewed := m.viewedRun()
@@ -1078,7 +1080,7 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 		switch {
 		case !m.opts.UI.Inspector:
 			row = inspectorDisarmedRow
-		case m.inRunView():
+		case m.inRunScope():
 			row = inspectorScopedEmptyRow
 		}
 		return append(rows, popupRow{row}), append(kinds, popupRowPlain)

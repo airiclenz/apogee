@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -19,20 +22,56 @@ import (
 // remembers where the level BELOW it was parked, so backing out of a child lands the reader on the
 // row they opened it from rather than at the tail of a conversation they had scrolled up in.
 
-// runView is one open level of that stack: the run it is rooted at, and the scroll position of the
-// level BELOW it — the offset and follow-the-tail flag the transcript had when this view opened,
-// handed back when it closes.
+// runView is one open level of that stack: the run it is rooted at, the workflow stage when the
+// level is a stage view rather than a run's, and the scroll position of the level BELOW it — the
+// offset and follow-the-tail flag the transcript had when this view opened, handed back when it
+// closes.
 //
-// Three plain fields, riding the value-copied Model (ADR 0011).
+// A STAGE level ([Model.openStageAt]) lists one workflow stage's item runs and is not a run: its
+// ref is the run its workflow block stands in — the level beneath's own run, the zero ref for a
+// Recipe the human launched — and stage names the block and the stage. The zero stage is "no
+// stage", so a level built as runView{ref: …} is the run view it always was.
+//
+// Four plain fields, riding the value-copied Model (ADR 0011).
 type runView struct {
-	ref      runRef // the run this level paints
-	yOffset  int    // where the level below was scrolled to when this one opened
-	detached bool   // …and whether it was following the tail there
+	ref      runRef     // the run this level paints; at a stage level, the run its workflow stands in
+	stage    stageLevel // the workflow stage this level lists; the zero value on a run's level
+	yOffset  int        // where the level below was scrolled to when this one opened
+	detached bool       // …and whether it was following the tail there
 }
+
+// stageLevel names the workflow stage a stage view lists: the workflow block, by the call it
+// records (domain.WorkflowPhaseEvent.Call), and the stage's place in the block's stage list, stored
+// one up so the zero value is no stage at all. The block is found in the run the level's ref names
+// ([stageBlockAt]), so a call alone never has to be unique across runs.
+type stageLevel struct {
+	call  string // the workflow block's call
+	place int    // the stage's place in the block's stage list plus one; 0 is no stage
+}
+
+// isStage reports whether s names a stage at all.
+func (s stageLevel) isStage() bool { return s.place > 0 }
+
+// index is the stage's place in its block's stage list.
+func (s stageLevel) index() int { return s.place - 1 }
+
+// stageLegendFormat is what the empty box says at a stage level: the stage is a list of runs, not a
+// run, so the box takes no message there — an item is opened to be messaged — and esc is the way
+// out. stageMessageNoteFormat is the flash a ⏎ there gets instead of a send.
+const (
+	stageLegendFormat      = "stage %s · read-only · esc back"
+	stageMessageNoteFormat = "stage %s is not a run — open one of its items to message it"
+)
 
 // viewedRun is the run the human is LOOKING at: the delegation whose view is open, or the zero
 // runRef for the top-level conversation. It is the status line's subject (statusLeft) as much as
 // the paint's root, so the row speaks for the run on screen rather than for the session.
+//
+// At a stage level it is the run the stage's workflow block stands in — the conversation, for a
+// Recipe the human launched. A stage is not a run, so the readers that speak for one run (the status
+// line, the thinking pane's scope, /inspect's scope) speak there for the run the workflow belongs
+// to, which is the run driving the stage's items; the readers that ADDRESS a run ask
+// [Model.viewedChild], which answers none at a stage level.
 func (m Model) viewedRun() runRef {
 	if len(m.viewStack) == 0 {
 		return runRef{}
@@ -40,22 +79,49 @@ func (m Model) viewedRun() runRef {
 	return m.viewStack[len(m.viewStack)-1].ref
 }
 
-// inRunView reports whether any run view is open.
+// viewedStage is the workflow stage the open level lists, and the zero value everywhere but a stage
+// level.
+func (m Model) viewedStage() stageLevel {
+	if len(m.viewStack) == 0 {
+		return stageLevel{}
+	}
+	return m.viewStack[len(m.viewStack)-1].stage
+}
+
+// inRunView reports whether any view is open — a run's or a stage's.
 func (m Model) inRunView() bool { return len(m.viewStack) > 0 }
+
+// inRunScope reports whether the level on screen speaks for one delegation rather than for the
+// conversation: a run view, or a stage level whose workflow stands inside one. It is what the panes
+// that scope their records to a run ask (/inspect, the thinking pane), so a stage level opened from
+// the conversation scopes them exactly as the conversation does.
+func (m Model) inRunScope() bool { return !m.viewedRun().isTop() }
 
 // viewedChild is the HEAD of the run the human is looking at — the sub_agent call block the view
 // was opened from — and whether there is one at all. It is [Model.viewedRun] resolved to the entry
 // that answers for the run: its name, and its lifecycle.
 //
-// It answers false at the top level, and for a view whose head the transcript no longer holds — a
+// It answers false at the top level, at a stage level — a stage is not a run, so there is no child
+// on screen to message, stop or gauge — and for a view whose head the transcript no longer holds — a
 // frame between a session reset and [Model.reseatViewStack], which the paint already degrades to
 // the whole conversation ([transcript.paintRoot]). Every caller here treats that as "no child to
 // address", which is the same answer the top level gives.
 func (m Model) viewedChild() (entry, bool) {
-	if !m.inRunView() {
+	if !m.inRunView() || m.viewedStage().isStage() {
 		return entry{}, false
 	}
 	return runHead(m.transcript.entries, m.viewedRun())
+}
+
+// viewedStageName is the name of the stage the open level lists, and "" where it lists none or its
+// block is gone.
+func (m Model) viewedStageName() string {
+	stage := m.viewedStage()
+	at, ok := stageBlockAt(m.transcript.entries, m.viewedRun(), stage)
+	if !ok {
+		return ""
+	}
+	return m.transcript.entries[at].workflow.stages[stage.index()].name
 }
 
 // childPhase is a delegation's life as the PROMPT BOX needs it: three states, because the box has
@@ -88,7 +154,8 @@ func childPhaseOf(head entry) childPhase {
 // runLabel names run, the way every other surface that names one does ([usageAgentName]): the short
 // name its call carried, else the task's first line, else the constant. A run the transcript holds
 // no head for falls back to that same constant, so a notice worded about a run reads as something
-// rather than as a hole in the sentence.
+// rather than as a hole in the sentence. At a stage level its callers ask it of [Model.viewedRun] —
+// the run the workflow stands in — and only where [Model.inRunScope] says that is a delegation.
 func (m Model) runLabel(run runRef) string {
 	if head, ok := runHead(m.transcript.entries, run); ok {
 		return usageAgentName(head)
@@ -130,7 +197,12 @@ func (m Model) legend() string {
 // child's own invitation: while a run view is open the box addresses the child on screen
 // (ADR 0063), so it names that run, by that run's lifecycle and under the name it wears in THIS
 // frame. Only [Model.legend] calls it, and only from the states in which the view owns the box.
+//
+// A stage level is not a run and takes no message, so its box says so, naming the stage.
 func (m Model) legendFor(top string) string {
+	if m.viewedStage().isStage() {
+		return fmt.Sprintf(stageLegendFormat, m.viewedStageName())
+	}
 	head, ok := m.viewedChild()
 	if !ok {
 		return top
@@ -195,9 +267,17 @@ func (m Model) openRunAt(index int) (Model, bool) {
 // construction ([transcript.closeRun] builds its ref from exactly this) — so the ref the paint is
 // keyed by is the ref the entries carry.
 func (m Model) openRun(ref runRef) Model {
-	m.viewStack = append(m.viewStack, runView{ref: ref, yOffset: m.viewport.YOffset(), detached: m.detached})
+	return m.pushView(runView{ref: ref})
+}
+
+// pushView pushes level onto the view stack — a run's ([Model.openRun]) or a stage's
+// ([Model.openStageAt]) — parking the level below's scroll position on it, and repaints the
+// transcript rooted at it. It is the one move in, so both kinds of level open the same way.
+func (m Model) pushView(level runView) Model {
+	level.yOffset, level.detached = m.viewport.YOffset(), m.detached
+	m.viewStack = append(m.viewStack, level)
 	m.cursor = blockCursor{}
-	m.transcript.setRoot(ref)
+	m.reroot()
 	m.detached = false
 	// The box now addresses the child rather than the conversation, and the next frame says so on
 	// its own: the legend is derived at paint from the stack this just pushed ([Model.legend]), so
@@ -237,7 +317,7 @@ func (m Model) upRun() Model {
 	left := m.viewStack[len(m.viewStack)-1]
 	m.viewStack = m.viewStack[:len(m.viewStack)-1]
 	m.cursor = blockCursor{}
-	m.transcript.setRoot(m.viewedRun())
+	m.reroot()
 	m.detached = left.detached
 	// Whatever the box is addressing now — the level below's own child, or the conversation itself
 	// at the top — the next frame says so, by the same derivation the move in relies on (openRun).
@@ -263,14 +343,37 @@ func (m Model) upRun() Model {
 // same view, no rule of its own. It is called after the transcript has been re-filled, never
 // between the reset and the replay, since a stack judged against an empty list would pop a view the
 // replay was about to restore.
+//
+// A stage level stands as long as its workflow block does, with the stage it names still in the
+// block's stage list ([stageBlockAt]); the paint re-roots at whatever level survives, a stage level
+// included ([Model.reroot]).
 func (m *Model) reseatViewStack() {
 	for len(m.viewStack) > 0 {
-		if _, ok := runHeadAt(m.transcript.entries, m.viewedRun()); ok {
+		if m.levelStands(m.viewStack[len(m.viewStack)-1]) {
 			break
 		}
 		m.viewStack = m.viewStack[:len(m.viewStack)-1]
 	}
+	m.reroot()
+}
+
+// levelStands reports whether the transcript still holds what level paints: its run's head, or —
+// at a stage level — its workflow block and the stage.
+func (m Model) levelStands(level runView) bool {
+	if level.stage.isStage() {
+		_, ok := stageBlockAt(m.transcript.entries, level.ref, level.stage)
+		return ok
+	}
+	_, ok := runHeadAt(m.transcript.entries, level.ref)
+	return ok
+}
+
+// reroot roots the transcript's paint at the level on top of the stack — its run, and its stage
+// when it is a stage level — or at the whole conversation when the stack is empty. Every move of the
+// stack ends here, so the paint and the stack cannot come to name different levels.
+func (m *Model) reroot() {
 	m.transcript.setRoot(m.viewedRun())
+	m.transcript.setStage(m.viewedStage())
 }
 
 // runViewOwnsEsc reports whether esc means "one level up" in this frame — the claimant's own gate,
@@ -362,4 +465,134 @@ func (m Model) stopRun(head entry) {
 		// the whole account of how it ended, so the refusal adds nothing to the frame.
 		return
 	}
+}
+
+// openStageAt opens what the stage row of the workflow block at entries[index] leads to, reporting
+// whether it opened anything — the targetStage half of [Model.toggleBlockAt], which the block
+// cursor's ⏎ reaches through as well. Which of three it is, is one predicate ([singleStage]):
+//
+//   - a stage none of whose items has started (a pending stage, an `ask` stage) opens nothing;
+//   - a single stage — one item, one round, one attempt — opens that item's run view directly
+//     ([Model.openRunAt]), since a list of one row would be a level that says nothing;
+//   - every other started stage pushes a stage level listing its items ([Model.pushView]).
+//
+// The stage is the row's place in the block's stage list ([lineTarget.stage]).
+func (m Model) openStageAt(index, stage int) (Model, bool) {
+	entries := m.transcript.entries
+	if index < 0 || index >= len(entries) {
+		return m, false
+	}
+	block := entries[index]
+	level := stageLevel{call: block.callID, place: stage + 1}
+	if at, ok := stageBlockAt(entries, block.run(), level); !ok || at != index {
+		return m, false
+	}
+	heads := stageItemHeads(entries, index, block.workflow.stages[stage].name)
+	switch {
+	case len(heads) == 0:
+		return m, false
+	case singleStage(entries, index, stage):
+		return m.openRunAt(heads[0])
+	}
+	return m.pushView(runView{ref: block.run(), stage: level}), true
+}
+
+// stageBlockAt is where the workflow block a stage level lists a stage of sits: the block standing
+// in run under the level's call, whose stage list still holds the level's stage. −1 and false where
+// the list holds no such block — a level naming no stage, a block a reset took away, one replayed
+// from a record that carries no stage list.
+func stageBlockAt(entries []entry, run runRef, level stageLevel) (int, bool) {
+	if !level.isStage() || level.call == "" {
+		return -1, false
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.kind == entryWorkflow && e.callID == level.call && e.run() == run {
+			return i, level.index() < len(e.workflow.stages)
+		}
+	}
+	return -1, false
+}
+
+// stageItemHeads is the indices of the item heads of stage name that the workflow block at entries[at]
+// heads, in list order: every attempt of every item, in every round.
+func stageItemHeads(entries []entry, at int, name string) []int {
+	var heads []int
+	block := entries[at]
+	for i := at + 1; i <= at+subAgentSpan(entries, at); i++ {
+		if e := entries[i]; block.seatsItemHead(e) && e.item.stage == name {
+			heads = append(heads, i)
+		}
+	}
+	return heads
+}
+
+// singleStage is THE predicate a stage's shape turns on, stated once: the stage at place stage of
+// the workflow block at entries[at] is single when its StageStarted counted one item, it has run
+// one round, and that item has made one attempt — so exactly one item head stands for it. A single
+// stage opens its item's run directly ([Model.openStageAt]) and that run's breadcrumb ends on the
+// stage ([headCrumbs]); every other stage is a stage level of its own and its items wear their own
+// crumb beneath it. Both the choice and the crumb ask here, so they cannot come to disagree.
+func singleStage(entries []entry, at, stage int) bool {
+	stages := entries[at].workflow.stages
+	if stage < 0 || stage >= len(stages) {
+		return false
+	}
+	row := stages[stage]
+	return row.items == 1 && row.round <= 1 && len(stageItemHeads(entries, at, row.name)) == 1
+}
+
+// itemBlockAt is where the Recipe's workflow block that seats the item head at entries[at] sits
+// ([entry.seatsItemHead]), and false for an item a fan_out card heads — a card has one stage and no
+// stage name to add to a trail.
+func itemBlockAt(entries []entry, at int) (int, bool) {
+	for i := at - 1; i >= 0; i-- {
+		if e := entries[i]; e.kind == entryWorkflow && e.seatsItemHead(entries[at]) {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// stageListRow is one row a stage view lists, in paint order: a `round N` sub-header (head −1), or an
+// item's row — the head of its latest attempt — with the heads its earlier attempts left, oldest
+// first, each painted beneath it as a dim `attempt N` sub-row of its own.
+type stageListRow struct {
+	round    int   // the round a sub-header names
+	head     int   // the item row's head; −1 on a sub-header
+	attempts []int // the earlier attempts' heads, oldest first
+}
+
+// stageRows lays out the stage view of stage name under the workflow block at entries[at]: its
+// items grouped by round, oldest round first, each round headed by a `round N` sub-header when the
+// stage has run more than one, and each item — in its place in the stage — one row opening its
+// latest attempt, with its earlier attempts under it.
+func stageRows(entries []entry, at int, name string) []stageListRow {
+	type itemKey struct{ round, index int }
+	var keys []itemKey
+	attempts := map[itemKey][]int{}
+	for _, i := range stageItemHeads(entries, at, name) {
+		key := itemKey{round: entries[i].item.round, index: entries[i].item.index}
+		if _, seen := attempts[key]; !seen {
+			keys = append(keys, key)
+		}
+		attempts[key] = append(attempts[key], i)
+	}
+	slices.SortStableFunc(keys, func(a, b itemKey) int {
+		if a.round != b.round {
+			return a.round - b.round
+		}
+		return a.index - b.index
+	})
+	headed := len(keys) > 0 && keys[0].round != keys[len(keys)-1].round
+	var rows []stageListRow
+	for n, key := range keys {
+		if headed && (n == 0 || keys[n-1].round != key.round) {
+			rows = append(rows, stageListRow{round: key.round, head: -1})
+		}
+		heads := attempts[key]
+		slices.SortStableFunc(heads, func(a, b int) int { return entries[a].item.attempt - entries[b].item.attempt })
+		rows = append(rows, stageListRow{head: heads[len(heads)-1], attempts: heads[:len(heads)-1]})
+	}
+	return rows
 }

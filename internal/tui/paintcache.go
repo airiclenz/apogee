@@ -190,6 +190,10 @@ type paintKey struct {
 	// — a row is stored by head index, and the same entry has one — so without this a view opened on
 	// a child would serve the railed paint the top level had left behind for it.
 	root runRef
+	// stage is the workflow stage a stage view's paint lists ([transcript.setStage]), the zero value
+	// everywhere else. A stage view is rooted at the run its workflow stands in — the same root as the
+	// level beneath it — so the root alone would serve an item row the paint of that other level.
+	stage stageLevel
 
 	span  int    // how many entries the paint covers — a run that grew a member is a different block
 	live  bool   // whether the block still holds an open call (blockState.live), which is what makes the star blink
@@ -442,16 +446,18 @@ func (m Model) frameKey() frameKey {
 //
 // live is the caller's because it is the PAINTER's own liveness rule and each branch has a
 // different one (blockState.live); root is the caller's for the same reason one level up — it is a
-// fact about the paint being composed rather than about the records — and so is fold, the umbrella
-// shape's own answer ([resolvedBlock.fold]); everything else is read off the records and the frame.
-func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, live bool, root runRef, fold umbrellaFold) paintKey {
+// fact about the paint being composed rather than about the records, and the key names its run and
+// its stage — and so is fold, the umbrella shape's own answer ([resolvedBlock.fold]); everything else
+// is read off the records and the frame.
+func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, live bool, root paintRoot, fold umbrellaFold) paintKey {
 	return paintKey{
 		shape:   shape,
 		kind:    ins[0].kind,
 		depth:   ins[0].depth,
 		width:   width,
 		measure: th.measure,
-		root:    root,
+		root:    root.ref,
+		stage:   root.stage,
 		span:    len(ins),
 		live:    live,
 		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip

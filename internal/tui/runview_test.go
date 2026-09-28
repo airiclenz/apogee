@@ -1390,3 +1390,253 @@ func TestWorkflowItemRowOpensAsARunView(t *testing.T) {
 		t.Errorf("StopChild calls = %v; want only the item's run, %s", got, item.id)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Workflow stages: a stage row opens its item's run, or a stage view listing its items
+// ----------------------------------------------------------------------------
+
+// recipeCall is the call a stage test's Recipe brackets its item children under.
+const recipeCall = "w1"
+
+// itemStartedIn is one item run of stage starting under recipeCall in round, as attempt.
+func itemStartedIn(runID, stage, item string, round, index, attempt int) domain.WorkflowPhaseEvent {
+	e := itemStartedUnder(recipeCall, runID, stage, item, index, attempt)
+	e.Round = round
+	return e
+}
+
+// itemRef is the run an item child of recipeCall runs as.
+func itemRef(runID string) runRef { return runRef{depth: 1, spawn: recipeCall, id: runID} }
+
+// startItem starts runID's item and has its child say one thing, so its row has a run to open.
+func startItem(tr *transcript, runID, stage, item string, round, index, attempt int) {
+	tr.apply(itemStartedIn(runID, stage, item, round, index, attempt))
+	itemSays(tr, recipeCall, runID, item+" is at work")
+}
+
+// modelWithRecipeStages is an idle model holding a Recipe's live workflow block, "audit", under
+// recipeCall, with three stages: "plan" ran one item, "planner" (run.p); "build" is running two,
+// "alpha" (run.a) and "beta" (run.b); "check" has not started. The block's stage rows are 0, 1, 2.
+func modelWithRecipeStages(t *testing.T, eng *fakeEngine) Model {
+	t.Helper()
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.transcript.reset()
+	tr := &m.transcript
+	tr.addUser("/audit src", nil)
+	started := startedUnder(recipeCall)
+	started.Stages = []string{"plan", "build", "check"}
+	tr.apply(started)
+	tr.apply(stageStarted("plan", 1, 1, 0))
+	startItem(tr, "run.p", "plan", "planner", 1, 0, 1)
+	tr.apply(itemFinishedUnder(recipeCall, "run.p", "plan", "planner", 0, "ok", "planned it"))
+	tr.apply(stageFinished("plan", 1))
+	tr.apply(stageStarted("build", 1, 2, 0))
+	startItem(tr, "run.a", "build", "alpha", 1, 0, 1)
+	startItem(tr, "run.b", "build", "beta", 1, 1, 1)
+	m.refreshViewport()
+	return m
+}
+
+// stageRowLine is the content line of the stage row at place stage.
+func stageRowLine(t *testing.T, m Model, stage int) int {
+	t.Helper()
+	for i, target := range m.lineTargets {
+		if target.kind == targetStage && target.stage == stage {
+			return i
+		}
+	}
+	t.Fatalf("no rendered line is stage row %d", stage)
+	return -1
+}
+
+// clickLine clicks the content line motionlessly, wherever it stands on screen.
+func clickLine(t *testing.T, m Model, line int) Model {
+	t.Helper()
+	return clickCell(t, m, 4, screenRow(t, m, line))
+}
+
+// trailOnScreen is the breadcrumb band's trail row, plain.
+func trailOnScreen(m Model) string {
+	return strings.TrimSpace(strip(m.lines[breadcrumbTrailRow]))
+}
+
+// openedHeads is the entries a paint offers to open as runs, one per surface, in paint order.
+func openedHeads(m Model) []int {
+	var heads []int
+	for _, target := range m.lineTargets {
+		if target.kind == targetHeader && !slices.Contains(heads, target.entry) {
+			heads = append(heads, target.entry)
+		}
+	}
+	return heads
+}
+
+// A multi-item stage opens a stage view: the band names the workflow and the stage, it lists one
+// delegation row per item carrying its summary, and each row opens its run under a trail that adds
+// the item. esc walks back one level at a time — to the stage view, then to main.
+func TestStageRowOpensAStageViewOfItsItems(t *testing.T) {
+	t.Parallel()
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	build := stageLevel{call: recipeCall, place: 2}
+
+	m = clickLine(t, m, stageRowLine(t, m, 1))
+
+	if got := m.viewedStage(); got != build {
+		t.Fatalf("the build row opened stage %+v; want %+v", got, build)
+	}
+	if got, want := trailOnScreen(m), "← main › audit › build"; !strings.HasPrefix(got, want) {
+		t.Errorf("the stage view's trail = %q; want it to read %q", got, want)
+	}
+	alpha, beta := workflowItemHeadAt(m.transcript.entries, "run.a"), workflowItemHeadAt(m.transcript.entries, "run.b")
+	if got := openedHeads(m); !slices.Equal(got, []int{alpha, beta}) {
+		t.Errorf("the stage view offers %v to open; want its two items %v", got, []int{alpha, beta})
+	}
+	painted := strip(strings.Join(m.lines, "\n"))
+	if !strings.Contains(painted, "┕ beta ") || strings.Contains(painted, "planner") {
+		t.Errorf("the stage view paints something other than its own items' rows:\n%s", painted)
+	}
+
+	m = clickLine(t, m, headerLineOf(t, m, alpha))
+
+	if got := m.viewedRun(); got != itemRef("run.a") {
+		t.Fatalf("the alpha row opened %+v; want its run", got)
+	}
+	if got, want := trailOnScreen(m), "← main › audit › build › alpha"; !strings.HasPrefix(got, want) {
+		t.Errorf("the item's trail = %q; want it to read %q", got, want)
+	}
+
+	m = step(t, m, keyEsc())
+	if got := m.viewedStage(); got != build || m.transcript.stage != build {
+		t.Fatalf("esc from the item left the stack at %+v, the paint at %+v; want the stage view %+v",
+			got, m.transcript.stage, build)
+	}
+	m = step(t, m, keyEsc())
+	if m.inRunView() || m.transcript.stage.isStage() || !m.transcript.root.isTop() {
+		t.Errorf("esc, esc left a view open (stack %d, stage %+v); want main", len(m.viewStack), m.transcript.stage)
+	}
+}
+
+// A repeated stage's view groups its items under `round N`, oldest first; a retried item keeps one
+// row with its earlier attempt as a dim `attempt N` sub-row that opens that attempt's own run. A
+// stage of one item is single only in one round and one attempt, so this one opens its stage view,
+// and an item opened from there wears its own crumb.
+func TestStageViewGroupsRoundsAndAttempts(t *testing.T) {
+	t.Parallel()
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	tr := &m.transcript
+	tr.apply(stageFinished("build", 1))
+	tr.apply(stageStarted("check", 1, 1, 2))
+	startItem(tr, "run.c1", "check", "gamma", 1, 0, 1)
+	startItem(tr, "run.c2", "check", "gamma", 1, 0, 2)
+	tr.apply(stageFinished("check", 1))
+	tr.apply(stageStarted("check", 2, 1, 2))
+	startItem(tr, "run.c3", "check", "gamma", 2, 0, 1)
+	m.refreshViewport()
+
+	m = clickLine(t, m, stageRowLine(t, m, 2))
+
+	if !m.viewedStage().isStage() {
+		t.Fatalf("a one-item stage of two rounds opened %+v; want its stage view", m.viewedRun())
+	}
+	painted := strip(strings.Join(m.lines, "\n"))
+	first, second := strings.Index(painted, "round 1"), strings.Index(painted, "round 2")
+	if first < 0 || second < first {
+		t.Errorf("the rounds are headed at %d and %d; want `round 1` above `round 2`:\n%s", first, second, painted)
+	}
+	if n := strings.Count(painted, "attempt "); n != 1 {
+		t.Errorf("the view paints %d attempt sub-rows; want one, the retried item's first:\n%s", n, painted)
+	}
+	c1, c3 := workflowItemHeadAt(tr.entries, "run.c1"), workflowItemHeadAt(tr.entries, "run.c3")
+	attempt := headerLineOf(t, m, c1)
+	if got := strings.TrimSpace(strip(m.lines[attempt])); got != "attempt 1" {
+		t.Errorf("the first attempt's row reads %q; want `attempt 1`", got)
+	}
+
+	opened := clickLine(t, m, attempt)
+	if got := opened.viewedRun(); got != itemRef("run.c1") {
+		t.Errorf("the attempt sub-row opened %+v; want the first attempt's run", got)
+	}
+
+	m = clickLine(t, m, headerLineOf(t, m, c3))
+	if got, want := trailOnScreen(m), "← main › audit › check › gamma"; !strings.HasPrefix(got, want) {
+		t.Errorf("an item opened from its stage view wears %q; want %q", got, want)
+	}
+}
+
+// At a stage level there is no run to address: ⏎ sends nothing and writes no note — a flash names
+// the stage — the box says it is read-only, the gauge is empty, and the status line speaks for the
+// run the stage's workflow stands in, naming the item that is working rather than a blank slot.
+func TestStageViewAddressesNoRun(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := modelWithRecipeStages(t, eng)
+	startStubWorker(t, &m)
+	m.ctxUsed = 20000
+	m.acts.put(itemRef("run.a"), runActivity{
+		act:   activity{kind: actThinking, depth: 1, spawn: recipeCall},
+		since: time.Now(),
+	})
+	m = clickLine(t, m, stageRowLine(t, m, 1))
+	notes := len(m.transcript.entries)
+
+	m.input.SetValue("check the tests too")
+	m = step(t, m, keyEnter())
+
+	if got := eng.childInterjections(); len(got) != 0 {
+		t.Errorf("InterjectChild calls = %+v; want none — a stage is not a run", got)
+	}
+	if got := m.input.Value(); got != "check the tests too" {
+		t.Errorf("input = %q; a refused message must stay in the box", got)
+	}
+	if n := len(m.transcript.entries); n != notes {
+		t.Errorf("⏎ added %d entries; want no note", n-notes)
+	}
+	if !strings.Contains(m.flash, "build") || strings.Contains(m.flash, "not running") {
+		t.Errorf("flash = %q; want a refusal naming the stage, never `not running`", m.flash)
+	}
+	if got, want := m.legend(), "stage build · read-only · esc back"; got != want {
+		t.Errorf("legend = %q; want %q", got, want)
+	}
+	if got := m.contextGauge(); got != "" {
+		t.Errorf("gauge = %q; want none at a stage level", strip(got))
+	}
+	if got := leftStatus(m); !strings.Contains(got, "alpha · thinking") {
+		t.Errorf("status = %q; want the working item named, as the conversation's row names it", got)
+	}
+}
+
+// A stage level stands exactly as long as its workflow block does, and the paint re-roots at it.
+func TestStageViewFollowsItsBlock(t *testing.T) {
+	t.Parallel()
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	m = clickLine(t, m, stageRowLine(t, m, 1))
+
+	m.reseatViewStack()
+	if !m.viewedStage().isStage() || !m.transcript.stage.isStage() {
+		t.Fatal("a reseat with the block standing closed its stage view")
+	}
+
+	m.transcript.reset()
+	m.reseatViewStack()
+	if m.inRunView() || m.transcript.stage.isStage() {
+		t.Errorf("a stage view outlived its block (stack %d, stage %+v)", len(m.viewStack), m.transcript.stage)
+	}
+}
+
+// The block cursor stops on every stage row, and ⏎ on one opens it as a click does.
+func TestBlockCursorReachesTheStageRows(t *testing.T) {
+	t.Parallel()
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	stops := cursorStops(m.lineTargets)
+	for stage := range 3 {
+		if line := stageRowLine(t, m, stage); !slices.Contains(stops, line) {
+			t.Errorf("stage row %d (line %d) is no cursor stop %v", stage, line, stops)
+		}
+	}
+
+	m = step(t, step(t, step(t, m, keyAltUp()), keyAltUp()), keyEnter())
+
+	if got := m.viewedStage(); got != (stageLevel{call: recipeCall, place: 2}) {
+		t.Errorf("⌥↑ ⌥↑ ⏎ opened %+v; want the build stage's view", got)
+	}
+}

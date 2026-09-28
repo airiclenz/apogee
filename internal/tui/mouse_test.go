@@ -6431,3 +6431,59 @@ func TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered(t *te
 		})
 	}
 }
+
+// A click on a workflow's stage row opens what the stage leads to: a single stage — one item, one
+// round, one attempt — its item's run view, under a trail that ends on the stage; a stage no item
+// of which has started, nothing at all.
+func TestStageRowClickOpensBySingleStagePredicate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a one-item stage opens its item's run", func(t *testing.T) {
+		t.Parallel()
+		m := modelWithRecipeStages(t, &fakeEngine{})
+
+		m = clickLine(t, m, stageRowLine(t, m, 0))
+
+		if got := m.viewedRun(); got != itemRef("run.p") || m.viewedStage().isStage() {
+			t.Fatalf("the plan row opened %+v (stage %+v); want its one item's run", got, m.viewedStage())
+		}
+		if got, want := trailOnScreen(m), "← main › audit › plan"; !strings.HasPrefix(got, want) ||
+			strings.Contains(got, "planner") {
+			t.Errorf("the item's trail = %q; want it to end on the stage, %q", got, want)
+		}
+		m = step(t, m, keyEsc())
+		if m.inRunView() {
+			t.Error("esc from a single stage's run did not return to main")
+		}
+	})
+
+	t.Run("a pending stage opens nothing", func(t *testing.T) {
+		t.Parallel()
+		m := modelWithRecipeStages(t, &fakeEngine{})
+		before := strings.Join(m.lines, "\n")
+
+		m = clickLine(t, m, stageRowLine(t, m, 2))
+
+		if m.inRunView() {
+			t.Errorf("a click on the pending stage opened %+v (stage %+v)", m.viewedRun(), m.viewedStage())
+		}
+		if got := strings.Join(m.lines, "\n"); got != before {
+			t.Errorf("a click on the pending stage repainted the transcript:\n%s", got)
+		}
+	})
+
+	t.Run("the stage view's band goes up one level", func(t *testing.T) {
+		t.Parallel()
+		m := modelWithRecipeStages(t, &fakeEngine{})
+		m = clickLine(t, m, stageRowLine(t, m, 1))
+		if !m.viewedStage().isStage() {
+			t.Fatal("setup: the build row opened no stage view")
+		}
+
+		m = clickLine(t, m, markedLine(t, m, targetBreadcrumb))
+
+		if m.inRunView() || m.transcript.stage.isStage() {
+			t.Errorf("a click on the band left the stage view standing (stage %+v)", m.transcript.stage)
+		}
+	})
+}

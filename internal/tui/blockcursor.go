@@ -287,7 +287,9 @@ func (m *Model) followBlockCursor() {
 //
 // "Opens" is not always in place. A framed delegation opens as its RUN VIEW (runview.go, ADR 0063),
 // which is the same redirect a click gets and for the same reason: the rule lives where the click
-// map is read, so ⏎ on a delegation and a click on one are one gesture with two ways in.
+// map is read, so ⏎ on a delegation and a click on one are one gesture with two ways in. A workflow's
+// stage row is a stop like any other surface (targetStage) and opens the same way: its item's run
+// view, or the stage view listing its items ([Model.openStageAt]).
 //
 // The anchor row is where the cursor is DRAWN, so ⏎ holds the highlighted row exactly where the eye
 // already is. A cursor the view is not showing cannot be toggled — followBlockCursor keeps that

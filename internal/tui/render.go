@@ -20,6 +20,7 @@ package tui
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
 import (
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -320,7 +321,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		for row := range breadcrumbBandRows {
 			ln := pad
 			if row == breadcrumbTrailRow {
-				ln = breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref), width, backHint)
+				ln = breadcrumbRow(th, root.trail(t.entries), width, backHint)
 			}
 			lines = append(lines, ln)
 			targets = append(targets, lineTarget{kind: targetBreadcrumb})
@@ -353,6 +354,15 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	// the view's own or one of its descendants (runUnder). A sibling's tokens land at an index this
 	// walk never reaches, and the parent's at the end of a span the walk stops inside — either would
 	// paint another agent's live sentence into this run's view.
+	//
+	// A stage view paints no preview at all: it lists item rows, each eliding its own run, and the
+	// run the stage's workflow stands in is not on screen.
+	if root.stage.isStage() {
+		t.paintStage(th, width, blink, root, appendJoined)
+		return renderedTranscript{
+			lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
+		}
+	}
 	previewAt := -1
 	if t.streaming && runUnder(t.entries, t.pendingRun, root.ref) &&
 		!insideCollapsedRun(t.entries, t.pendingRun, root.ref) {
@@ -411,7 +421,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		block := t.resolveBlock(i, in, width, blink, root, records)
 		// the buffer, grown if this block needed more; the next block overwrites it
 		records = block.ins
-		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root.ref, block.fold)
+		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root, block.fold)
 		appendJoined(block.isUser, block.closes, in.depth, i,
 			t.paintBlock(i, key, func() blockPaint { return block.draw(th) }))
 		// A block ending on an OPEN span does not end the run: that span follows, railed one level
@@ -609,15 +619,22 @@ func splitAtWidgetWidth(ln string, width, limit int) []string {
 // records the painters read are handed their depth less the root's, so a child's blocks paint as
 // top-level rows — no rail, wrapped to the full column — while the entries themselves still say
 // exactly where they sit in the conversation.
+//
+// A STAGE view is rooted the same way at a workflow block ([transcript.setStage]): the block is the
+// head the header is read off, its span is the window, and its own depth — the depth its item heads
+// stand at — is the rebase, so an item row paints as a top-level delegation row. What the walk lays
+// down there is the stage's item rows alone ([stageRows]), never the span's whole run.
 type paintRoot struct {
-	ref   runRef // the run the paint is rooted at, as the paint key names it (paintcache.go)
-	first int    // the first entry the walk may paint: the root's head is NOT painted, being the header
-	last  int    // one past the last — the end of the root's span, or of the entry list
-	depth int    // the root run's own nesting level: what every painted row's depth is rebased by
+	ref   runRef     // the run the paint is rooted at, as the paint key names it (paintcache.go)
+	stage stageLevel // the workflow stage a stage view lists, and the zero value on any other paint
+	first int        // the first entry the walk may paint: the root's head is NOT painted, being the header
+	last  int        // one past the last — the end of the root's span, or of the entry list
+	depth int        // the root run's own nesting level: what every painted row's depth is rebased by
 }
 
-// rooted reports whether this paint covers ONE run rather than the whole transcript.
-func (r paintRoot) rooted() bool { return !r.ref.isTop() }
+// rooted reports whether this paint covers ONE run or one workflow stage rather than the whole
+// transcript.
+func (r paintRoot) rooted() bool { return !r.ref.isTop() || r.stage.isStage() }
 
 // painted states one entry as its painter's record ([entry.painted]), rebased to the root.
 func (r paintRoot) painted(e entry) paintInput {
@@ -662,8 +679,24 @@ func (r paintRoot) rebase(ins []paintInput) []paintInput {
 // away — resolves to the WHOLE transcript rather than to an empty view: the Model pops such a view
 // the moment it notices, and a frame painted before that lands shows the conversation instead of a
 // blank screen.
+//
+// A stage root resolves to its workflow block's span, rebased by the block's own depth; one whose
+// block is gone resolves to the whole transcript by the same rule.
 func (t *transcript) paintRoot() paintRoot {
 	whole := paintRoot{last: len(t.entries)}
+	if t.stage.isStage() {
+		at, ok := stageBlockAt(t.entries, t.root, t.stage)
+		if !ok {
+			return whole
+		}
+		return paintRoot{
+			ref:   t.root,
+			stage: t.stage,
+			first: at + 1,
+			last:  at + 1 + subAgentSpan(t.entries, at),
+			depth: t.entries[at].depth,
+		}
+	}
 	if t.root.isTop() {
 		return whole
 	}
@@ -682,6 +715,51 @@ func (t *transcript) paintRoot() paintRoot {
 		depth: t.entries[at].depth + 1,
 	}
 }
+
+// trail is the breadcrumb's text for this paint: the trail of the run it is rooted at
+// ([breadcrumbTrail]), or — for a stage view — of the run the stage's workflow stands in, then the
+// workflow and the stage ([stageTrail]).
+func (r paintRoot) trail(entries []entry) string {
+	if r.stage.isStage() {
+		return stageTrail(entries, r.first-1, r.stage.index())
+	}
+	return breadcrumbTrail(entries, r.ref)
+}
+
+// paintStage lays a stage view's rows down through the walk's own join (renderView's appendJoined):
+// a `round N` sub-header where the stage has run more than one round, and each item's row — its
+// latest attempt's head, resolved and keyed exactly as the walk resolves a delegation row, so the row
+// and its receipt summary read as they do anywhere else — with its earlier attempts as dim
+// `attempt N` sub-rows beneath it, each marked as that attempt's own run head (targetHeader), so a
+// click or ⏎ opens it ([Model.openRunAt]).
+func (t *transcript) paintStage(th theme, width int, blink bool, root paintRoot,
+	appendJoined func(isUser, closes bool, depth, head int, block blockPaint)) {
+	at := root.first - 1
+	name := t.entries[at].workflow.stages[root.stage.index()].name
+	var records []paintInput
+	for _, row := range stageRows(t.entries, at, name) {
+		if row.head < 0 {
+			header := hangingWrap(th, th.toolLabel, "", workflowRoundWord+strconv.Itoa(row.round), width)
+			appendJoined(false, false, 0, at, plainPaint(header))
+			continue
+		}
+		in := root.painted(t.entries[row.head])
+		block := t.resolveBlock(row.head, in, width, blink, root, records)
+		records = block.ins
+		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root, block.fold)
+		var paint blockPaint
+		// Joined into a fresh paint: the row may be the cache's own stored slices.
+		paint.join(t.paintBlock(row.head, key, func() blockPaint { return block.draw(th) }))
+		for _, attempt := range row.attempts {
+			label := stageAttemptWord + strconv.Itoa(t.entries[attempt].item.attempt)
+			paint.addFor(attempt-row.head, hangingWrap(th, th.toolLeader, workflowBodyIndent+workflowBodyIndent, label, width), targetHeader)
+		}
+		appendJoined(false, false, in.depth, row.head, paint)
+	}
+}
+
+// stageAttemptWord leads an earlier attempt's sub-row in a stage view: `attempt N`.
+const stageAttemptWord = "attempt "
 
 // resolvedBlock is the answer to "what block starts at this entry?": everything
 // [transcript.renderView] needs to lay one block down and step past it, resolved together — the

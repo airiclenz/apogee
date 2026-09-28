@@ -354,7 +354,7 @@ func childNotRunningNote(name string) string {
 // and the draft is left standing for the human to carry back up. The same is true of the race the
 // engine reports (ErrNoSuchChild): the child ended between the frame that invited the message and
 // the keypress that sent it, and a draft silently swallowed there would be the one outcome worse
-// than a refusal.
+// than a refusal. A stage level is not a run at all and takes none either ([Model.refuseStageMessage]).
 func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	// The line verbatim, before anything empties the box — stageInterjection's reading, for
 	// stageInterjection's reason (recall.go, decision 3): only the paths that send or run record it.
@@ -375,6 +375,9 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 		// A running child is inside an Exchange too, and a delegate never launches a Workflow (ADR
 		// 0087 D9): the line is refused rather than attached, and stays in the box.
 		return m.refuseRecipe(recipeBusyNote(parsed.recipe))
+	}
+	if m.viewedStage().isStage() {
+		return m.refuseStageMessage()
 	}
 	run := m.viewedRun()
 	spawn := run.spawn
@@ -431,6 +434,15 @@ func (m Model) refuseChildMessage(note string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	cmd := m.showFlash(note)
+	return m, cmd
+}
+
+// refuseStageMessage is ⏎ at a stage level: a stage lists runs and is none, so there is no child to
+// address and nothing is sent. The draft stays in the box, and the refusal is a flash naming the
+// stage rather than a note — no transcript note, and never [childNotRunningNote]'s "not running",
+// which would name the stage as a run that ended.
+func (m Model) refuseStageMessage() (tea.Model, tea.Cmd) {
+	cmd := m.showFlash(fmt.Sprintf(stageMessageNoteFormat, m.viewedStageName()))
 	return m, cmd
 }
 

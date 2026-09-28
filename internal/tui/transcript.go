@@ -90,6 +90,11 @@ type transcript struct {
 	// transcript rooted back at the zero value paints exactly what it painted before. That is what
 	// lets a view be opened and left with no record of it anywhere but here.
 	root runRef
+	// stage is the workflow stage the paint lists when the view open is a stage level
+	// ([transcript.setStage], render.go): root is then the run the stage's workflow block stands in,
+	// and the paint shows that stage's item rows alone. The zero value is no stage, the paint the root
+	// alone names. It is view state for root's reason.
+	stage stageLevel
 	// paints memoises the per-block paints renderView produced last time, so a repaint mid-stream
 	// costs the live tail rather than the whole scrollback (paintcache.go). It is a POINTER for the
 	// reason entries is a shared backing array: the Model is copied by value on every Update (ADR
@@ -103,7 +108,7 @@ type transcript struct {
 	// reason: a clock is a fact about the run, not about the conversation.
 	now func() time.Time
 	// generation counts the writes to what [transcript.renderView] reads — entries, pending (with
-	// its streaming and pendingRun halves), root, taskListOpen, toolsOpen and toolsFoldOver. Every `func (t *transcript)` that
+	// its streaming and pendingRun halves), root, stage, taskListOpen, toolsOpen and toolsFoldOver. Every `func (t *transcript)` that
 	// writes one of those fields bumps it ([transcript.touch]), so "has the paint's input moved since
 	// the last repaint?" is one integer compare at the end of every Update ([Model.settle]) rather
 	// than a repaint every arm has to remember to ask for. It is a plain counter riding the
@@ -714,6 +719,16 @@ func (t *transcript) runName(run runRef) string {
 // picture, rebased to the root's depth and wrapped to the wider column that leaves.
 func (t *transcript) setRoot(r runRef) {
 	t.root = r
+	t.touch()
+}
+
+// setStage roots the paint at stage s of the workflow block standing in the run [transcript.setRoot]
+// named — the stage view's mechanism: from here the renderer lists that stage's item rows under the
+// breadcrumb naming the workflow and the stage. The zero value leaves the paint rooted at the run,
+// which is how a stage view is left. Like setRoot it invalidates nothing by hand: the stage is part
+// of every paint's key (paintcache.go).
+func (t *transcript) setStage(s stageLevel) {
+	t.stage = s
 	t.touch()
 }
 

@@ -626,8 +626,8 @@ type Model struct {
 	// surface (blockCursor.clamp) exactly as it keeps the map above it honest.
 	cursor blockCursor
 	// viewStack is the run views that are open, outermost first, and empty at the top level: which
-	// delegation the transcript is painted rooted at, and where the level below each one was parked
-	// (runview.go, ADR 0063). The paint's own root lives on the transcript; this is the WALK — what
+	// delegation — or which workflow stage, at a stage level — the transcript is painted rooted at,
+	// and where the level below each one was parked (runview.go, ADR 0063). The paint's own root lives on the transcript; this is the WALK — what
 	// esc and the breadcrumb go back to, and how a nested delegation is unwound one level at a time.
 	// A plain slice of plain values, so ADR 0011's copy rule needs no exception.
 	viewStack []runView
@@ -3982,7 +3982,9 @@ func (m Model) statusLeft() string {
 		now := time.Now()
 		spinner, throughput := m.spin.view(m.th)+m.th.statusBar.Render(" "), m.throughputSuffix()
 		// The row speaks for the run the human is LOOKING at: the top-level conversation, or the
-		// delegation whose run view is open (ADR 0063, runview.go).
+		// delegation whose run view is open (ADR 0063, runview.go). A stage level is not a run, so
+		// it speaks for the run the stage's workflow stands in (Model.viewedRun) — the stage's items
+		// are that run's children, and the board names them as it does there.
 		view := m.viewedRun()
 		phrase = spinner + m.runningPhrase(view, now, false) + throughput
 		if m.isStalled(view, now) {
@@ -4237,6 +4239,8 @@ func (m Model) statusRight(room int) string {
 // gauge above a child's transcript is a number about someone else. Until the viewed run has
 // reported usage — or when its head is gone ([Model.viewedChild]) — the gauge renders nothing, and
 // the slot falls through to its hints ([Model.statusRight]), which inside a view say `esc back`.
+// A stage level shows no gauge either: it lists runs and fills no window of its own
+// ([Model.viewedChild] answers none there).
 func (m Model) contextGauge() string {
 	if !m.inRunView() {
 		return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view(m.th)

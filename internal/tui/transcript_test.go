@@ -4194,6 +4194,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 			tr.enrichFiring(schedule.Event{Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly"})
 		}},
 		{"setRoot", func(tr *transcript) { tr.setRoot(runRef{depth: 1, spawn: "s1"}) }},
+		{"setStage", func(tr *transcript) { tr.setStage(stageLevel{call: "w1", place: 1}) }},
 		{"setTaskListOpen", func(tr *transcript) { tr.setTaskListOpen(true) }},
 		{"setToolsOpen", func(tr *transcript) { tr.setToolsOpen(true) }},
 		{"setToolsFoldOver", func(tr *transcript) { tr.setToolsFoldOver(3) }},

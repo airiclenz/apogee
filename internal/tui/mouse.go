@@ -759,7 +759,8 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // its own session-only head flag (transcript.umbrellaIsLarge, setUmbrellaFolded). A run view's TASK
 // ROW is the same rule again at the level ADR 0063 added: it flips the fold of the task the viewed
 // run was handed, which is the view's own state and not the head's block state (render.go's rooted
-// paint marks the row, transcript.setTaskExpanded holds it).
+// paint marks the row, transcript.setTaskExpanded holds it). A workflow's STAGE ROW opens rather
+// than flips: its item's run view, or the stage view listing its items ([Model.openStageAt]).
 //
 // WHAT a toggle line names is the paint's business and not this function's, which is why one case
 // covers a single block, its body and a group member alike. A single tool block marks every row it
@@ -826,6 +827,13 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		if !m.transcript.toggleExpanded(target.entry) {
 			return m, nil
 		}
+	case targetStage:
+		// A workflow's stage row opens what the stage leads to — its item's run view, or a stage
+		// view listing its items — and a stage no item of which has started opens nothing
+		// ([Model.openStageAt]). Like the breadcrumb it repaints a different transcript, so it
+		// returns rather than anchoring.
+		next, _ := m.openStageAt(target.entry, target.stage)
+		return next, nil
 	case targetTask:
 		// Inside a run view the task row folds by its own state, never by the head's block state:
 		// the redirect above would refuse the view's own head and setExpanded would refuse the flag,

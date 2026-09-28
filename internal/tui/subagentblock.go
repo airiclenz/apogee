@@ -238,18 +238,77 @@ func fitBreadcrumbHint(measure widthAuthority, hint string, room int) string {
 // live (ADR 0039) a depth says which level a run stands at and never which run it is. A run the list
 // holds no head for ends the climb where it stands — the trail names what it can and still leads
 // back to main, which is the one crumb that is always true.
+//
+// A Recipe's item run is named inside its workflow ([headCrumbs]): `← main › <workflow> › <stage> ›
+// <item>`, the item's crumb dropped where its stage is single ([singleStage]) — such a run is opened
+// straight from the stage row, so the stage is the level it is. An item of a fan_out card keeps its
+// own crumb alone: a card has no stage name.
 func breadcrumbTrail(entries []entry, run runRef) string {
-	var names []string
+	return crumbText(runCrumbs(entries, run))
+}
+
+// stageTrail is the header's text for a stage view: the trail of the run the workflow block at
+// entries[at] stands in, then the workflow and the stage at place stage in its stage list —
+// `← main › <workflow> › <stage>`.
+func stageTrail(entries []entry, at, stage int) string {
+	v := entries[at].workflow
+	names := append(runCrumbs(entries, entries[at].run()), workflowCrumbs(v.name, v.stages[stage].name)...)
+	return crumbText(names)
+}
+
+// crumbText joins names under main into the trail's text: `← main › a › b`.
+func crumbText(names []string) string {
+	return breadcrumbBack + " " + strings.Join(append([]string{usageMainLabel}, names...), " "+breadcrumbSep+" ")
+}
+
+// runCrumbs is the crumbs of the runs from main down to run, main itself left out — the climb
+// [breadcrumbTrail] describes, each head it passes naming itself ([headCrumbs]).
+func runCrumbs(entries []entry, run runRef) []string {
+	var levels [][]string // one per head climbed, the innermost first
 	for r := run; !r.isTop(); {
 		at, ok := runHeadAt(entries, r)
 		if !ok {
 			break
 		}
-		names = append(names, usageAgentName(entries[at]))
+		levels = append(levels, headCrumbs(entries, at))
 		r = entries[at].run()
 	}
-	slices.Reverse(names) // climbed from the run upwards; the trail reads downwards
-	return breadcrumbBack + " " + strings.Join(append([]string{usageMainLabel}, names...), " "+breadcrumbSep+" ")
+	slices.Reverse(levels) // climbed from the run upwards; the trail reads downwards
+	return slices.Concat(levels...)
+}
+
+// headCrumbs is what the run head at entries[at] adds to a trail, read downwards: its run's name
+// ([usageAgentName]) — or, for a Recipe's item head, the workflow and the stage it runs in, then the
+// item's name unless the stage is single ([singleStage]).
+func headCrumbs(entries []entry, at int) []string {
+	head := entries[at]
+	name := usageAgentName(head)
+	if head.kind != entryWorkflowItem {
+		return []string{name}
+	}
+	block, ok := itemBlockAt(entries, at)
+	if !ok {
+		return []string{name}
+	}
+	v := entries[block].workflow
+	crumbs := workflowCrumbs(v.name, head.item.stage)
+	stage := slices.IndexFunc(v.stages, func(s workflowStage) bool { return s.name == head.item.stage })
+	if stage >= 0 && singleStage(entries, block, stage) {
+		return crumbs
+	}
+	return append(crumbs, name)
+}
+
+// workflowCrumbs is a workflow's name and a stage's, each left out where it is empty — a block
+// replayed from a record names neither.
+func workflowCrumbs(workflow, stage string) []string {
+	var crumbs []string
+	for _, name := range []string{workflow, stage} {
+		if name != "" {
+			crumbs = append(crumbs, name)
+		}
+	}
+	return crumbs
 }
 
 // breadcrumbRow paints that trail as the middle row of the run view's own sticky header band
