@@ -186,11 +186,11 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 		inputs = bound
 	}
 	call := domain.ToolCall{ID: fmt.Sprintf("recipe-%s-%d", recipe.ID, turn), Tool: recipeCallTool}
-	result, err := a.runRecipe(ctx, turn, call, recipeCall{id: recipe.ID, inputs: inputs})
+	result, fellBack, err := a.runRecipe(ctx, turn, call, recipeCall{id: recipe.ID, inputs: inputs})
 	if err != nil {
 		return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 	}
-	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result))
+	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack))
 }
 
 // recipeRefusal reports a launch that could not run and returns the line the model reads it by.
@@ -255,27 +255,34 @@ func (a *Agent) askUser(ctx context.Context, question string, choices []string) 
 // left out taking their defaults — with its item children on the seat asked names, and returns its
 // result. It opens no Exchange: the recipe launch (seatConfigured) and fan_out's recipe form both
 // call it from inside one. call and turn stamp the children's phase events as a fan_out call's do.
+// fellBack reports whether any item child asked for the Sub-agent server and ran on the session one
+// (seatFellBack), the fact the answer's SeatFallbackNote line rides (workflowAnswer).
 // The error is a recipe that could not run: an unknown id, an unknown or missing input, no scratch
 // dir or workspace, or a run the Runner could not proceed with.
-func (a *Agent) runRecipe(ctx context.Context, turn int, call domain.ToolCall, asked recipeCall) (workflow.Result, error) {
+func (a *Agent) runRecipe(
+	ctx context.Context,
+	turn int,
+	call domain.ToolCall,
+	asked recipeCall,
+) (result workflow.Result, fellBack bool, err error) {
 	recipe, err := a.recipeByID(asked.id)
 	if err != nil {
-		return workflow.Result{}, err
+		return workflow.Result{}, false, err
 	}
 	inputs, err := completeInputs(recipe.Inputs, asked.inputs)
 	if err != nil {
-		return workflow.Result{}, err
+		return workflow.Result{}, false, err
 	}
 	plan := bindPlanInputs(recipe, inputs)
 	runner, err := a.newRecipeRunner(turn, call, recipe, asked.seat)
 	if err != nil {
-		return workflow.Result{}, err
+		return workflow.Result{}, false, err
 	}
 	observer := a.observeWorkflow(runner, turn, plan)
 	observer.call = call.ID
-	result, err := runner.Run(ctx, plan)
+	result, err = runner.Run(ctx, plan)
 	observer.end(result, err)
-	return result, err
+	return result, seatFellBack(runner), err
 }
 
 // completeInputs checks keyed inputs against the declarations: an undeclared key is an error, an

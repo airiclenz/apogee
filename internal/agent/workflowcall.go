@@ -265,7 +265,7 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if err != nil {
 		return errorToolResult(call.ID, fanOutRunFailedPrefix+err.Error())
 	}
-	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome)}
+	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome, seatFellBack(runner))}
 }
 
 // recipeCall is what a fan_out call's recipe form asks for: the recipe's id, its keyed inputs and
@@ -303,11 +303,11 @@ func (a *Agent) recipeCallResult(
 		workflowID, err := a.startKeyedBackgroundRecipe(recipe, asked.inputs, asked.seat)
 		return a.backgroundCallResult(call.ID, workflowID, err)
 	}
-	result, err := a.runRecipe(ctx, turn, call, asked)
+	result, fellBack, err := a.runRecipe(ctx, turn, call, asked)
 	if err != nil {
 		return errorToolResult(call.ID, fmt.Sprintf(fanOutRecipeFailed, asked.id, err))
 	}
-	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result)}
+	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result, fellBack)}
 }
 
 // parseFanOutRecipe reads a fan_out call that names a recipe: the recipe id and its inputs, or the
@@ -523,17 +523,28 @@ func fanOutArgumentPath(problem workflow.Problem) string {
 }
 
 // workflowAnswer is the text a finished or stopped Workflow answers its call with: Format's result
-// lines, and — for a stopped one — the item listing written so far, when Format has not named it.
-func workflowAnswer(result workflow.Result) string {
+// lines, for a stopped one the item listing written so far when Format has not named it, and —
+// when any item child asked for the Sub-agent server and ran on the session one (fellBack,
+// seatFellBack) — SeatFallbackNote once, last, because that note is for the MODEL (ADR 0069
+// decision 9) and the model reads this answer, not the items' phase results.
+func workflowAnswer(result workflow.Result, fellBack bool) string {
 	text := workflow.Format(result)
-	if !result.Stopped() || result.Listing == "" {
-		return text
+	if result.Stopped() && result.Listing != "" {
+		if line := fmt.Sprintf(fanOutListingLineFormat, result.Listing); !strings.Contains(text, line) {
+			text += "\n" + line
+		}
 	}
-	line := fmt.Sprintf(fanOutListingLineFormat, result.Listing)
-	if strings.Contains(text, line) {
-		return text
+	if fellBack {
+		text += "\n" + SeatFallbackNote
 	}
-	return text + "\n" + line
+	return text
+}
+
+// seatFellBack reports whether any item child runner's spawner built fell back from the Sub-agent
+// server to the session one (workflowSpawner.fellBack); false for any other Spawner.
+func seatFellBack(runner *workflow.Runner) bool {
+	spawner, ok := runner.Spawner.(*workflowSpawner)
+	return ok && spawner.fellBack.Load()
 }
 
 // workflowObserver turns one Workflow run's Runner notifications into the WorkflowPhaseEvents this

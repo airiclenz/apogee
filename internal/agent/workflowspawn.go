@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
@@ -173,6 +174,11 @@ type workflowSpawner struct {
 	children *childRegistry
 	seat     delegationSeat
 	observer *workflowObserver
+	// fellBack is set once any item child this spawner built asked for the Sub-agent server and was
+	// built on the session server instead (Agent.seatFallback, ADR 0069 decision 9): the fact the
+	// workflow's answer adds its one SeatFallbackNote line on (workflowAnswer). Items spawn
+	// concurrently, so it is atomic.
+	fellBack atomic.Bool
 }
 
 // newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn, on
@@ -216,6 +222,8 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		Phase:   domain.SubAgentStarted,
 		StepCap: stepCap,
 	})
+	// Whether the child below fell back from the Sub-agent server; read by the finished phase.
+	seatFallback := false
 	// Registered FIRST so it runs LAST: the finished phase closes the block on whatever outcome
 	// the frame ends with, a recovered panic's included.
 	defer func() {
@@ -229,13 +237,17 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		}
 		a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{
 			Phase:  domain.SubAgentFinished,
-			Result: workflowPhaseResult(s.call.ID, outcome, err),
+			Result: workflowPhaseResult(s.call.ID, outcome, err, seatFallback),
 		})
 	}()
 
 	sub, err := a.newChildAgentOn(s.seat, s.call.ID, runID, task, delegationName(spec.Item.Label))
 	if err != nil {
 		return workflow.Outcome{}, fmt.Errorf("could not construct the item's child: %w", err)
+	}
+	// newChildAgentOn decided the fallback at the one place that saw both the ask and the latch.
+	if seatFallback = sub.seatFallback; seatFallback {
+		s.fellBack.Store(true)
 	}
 	item := &workflowChild{}
 	sub.workflowItem = item
@@ -397,8 +409,21 @@ func (a *Agent) workflowOutcome(res domain.StepResult, err error, stopped bool) 
 }
 
 // workflowPhaseResult is the result an item child's finished phase carries: its receipt's status
-// and summary, or why it has none.
-func workflowPhaseResult(callID string, outcome workflow.Outcome, err error) domain.ToolResult {
+// and summary, or why it has none — and, for a child that asked for the Sub-agent server and ran
+// on the session one (seatFallback), SeatFallbackNote as its last body line, the slot
+// delegationResult gives it. The note rides this result, which Drivers read, and never the
+// Receipt: receipt.json replays on resume and feeds merge manifests and `when:`.
+func workflowPhaseResult(callID string, outcome workflow.Outcome, err error, seatFallback bool) domain.ToolResult {
+	result := workflowPhaseBody(callID, outcome, err)
+	if seatFallback {
+		result.Content += "\n" + SeatFallbackNote
+	}
+	return result
+}
+
+// workflowPhaseBody is workflowPhaseResult before its note: the receipt's status and summary, or
+// why there is none.
+func workflowPhaseBody(callID string, outcome workflow.Outcome, err error) domain.ToolResult {
 	switch {
 	case err != nil:
 		return errorToolResult(callID, workflowFaultResultPrefix+err.Error())

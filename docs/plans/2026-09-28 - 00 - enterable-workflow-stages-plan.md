@@ -111,7 +111,11 @@ internal/eventjson/encode.go — Encode, workflowPhaseData; internal/agent/workf
 
 **Commit:** `feat(workflow): phase events carry the stage list and each item's run id`
 
-## 2. A workflow item that falls back from the sub-agents server says so
+## 2. A workflow item that falls back from the sub-agents server says so — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): the fallback is read off the built child (`sub.seatFallback`, decided once in newChildAgentOn) and recorded on the spawner (`workflowSpawner.fellBack`, atomic since items spawn concurrently); `workflowAnswer` gains a `fellBack bool` parameter read through `seatFellBack(runner)`, and `runRecipe` now returns it as a second value so both recipe launches pass it on. The Receipt is untouched.
+NOTES (2026-09-28): consequential edit — internal/agent/agent.go: made necessary by the note now also being appended by workflowPhaseResult and workflowAnswer (the `seatFallback` field comment named delegationResult alone).
+NOTES (2026-09-28): a background workflow's end message (background.go) does not go through workflowAnswer and so carries no answer-level note; its items' phase results do carry it. Left as the plan scoped it (workflowAnswer only).
 
 **What:**
 **Goal:** A workflow item that asked for `sub-agents-server`, and ran on the session server because nothing was latched, carries `SeatFallbackNote` as a body note in its result. This is the same note `sub_agent` appends. An item that ran on the server it asked for carries no note.

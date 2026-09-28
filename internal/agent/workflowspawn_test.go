@@ -481,3 +481,85 @@ func TestWorkflowSpawn_ASpawnRefusedBeforeItsRunReportsNoStart(t *testing.T) {
 		t.Errorf("item finished phases = %+v, want one blocked item naming no run", finished)
 	}
 }
+
+// TestWorkflowSpawn_AnItemThatFellBackFromTheSubAgentsServerSaysSo drives a fan_out whose
+// `run_on` asks for the Sub-agent server (ADR 0069 decision 9). With nothing latched every item
+// child runs on the session server, and each item's finished phase carries SeatFallbackNote as its
+// last body line while the call's answer — what the model reads — carries it once, last. With a
+// target latched the ask is honoured and neither carries it.
+func TestWorkflowSpawn_AnItemThatFellBackFromTheSubAgentsServerSaysSo(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		latched  bool
+		wantNote bool
+	}{
+		{"nothing latched falls back to the session server and says so", false, true},
+		{"a latched target runs the items where asked and adds no note", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := withSeatChoiceFanOut(workflowConfig(t, sink), false)
+			items := []string{"alpha", "beta"}
+			up := (&workflowResponder{}).
+				route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName,
+					seatArgsJSON(tools.RunOnSubAgentsServer, false, items...))).
+				route("please fan out", nil, contentScript("all done"))
+			grunt := &workflowResponder{}
+			for _, item := range items {
+				up.route("check "+item, nil, finishScript("s-"+item, item+" is fine"))
+				grunt.route("check "+item, nil, finishScript("g-"+item, item+" is fine"))
+			}
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if tc.latched {
+				a.dial = dialerTo(grunt).dial
+				a.SetDelegationTarget(gruntTarget(gruntEndpoint, 2))
+			}
+
+			runSubmitted(t, context.Background(), a, "please fan out")
+
+			var finished []domain.SubAgentPhaseEvent
+			for _, event := range sink.events {
+				if phase, ok := event.(domain.SubAgentPhaseEvent); ok && phase.Phase == domain.SubAgentFinished {
+					finished = append(finished, phase)
+				}
+			}
+			if len(finished) != len(items) {
+				t.Fatalf("finished phases = %d, want one per item (%d)", len(finished), len(items))
+			}
+			for _, phase := range finished {
+				content := phase.Result.Content
+				if got := strings.HasSuffix(content, "\n"+SeatFallbackNote); got != tc.wantNote {
+					t.Errorf("item result %q ends on the seat-fallback note: %v, want %v", content, got, tc.wantNote)
+				}
+				if !strings.HasPrefix(content, "ok — ") {
+					t.Errorf("item result %q, want the receipt line first", content)
+				}
+			}
+			answer := callResult(t, sink.events, "fo1")
+			if answer.IsError {
+				t.Fatalf("fan_out result is an error: %q", answer.Content)
+			}
+			if got := strings.Count(answer.Content, SeatFallbackNote); got != boolCount(tc.wantNote) {
+				t.Errorf("answer carries the seat-fallback note %d times, want %d:\n%s", got, boolCount(tc.wantNote), answer.Content)
+			}
+			if tc.wantNote && !strings.HasSuffix(answer.Content, "\n"+SeatFallbackNote) {
+				t.Errorf("answer does not end on the seat-fallback note:\n%s", answer.Content)
+			}
+		})
+	}
+}
+
+// boolCount is 1 for true and 0 for false.
+func boolCount(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
