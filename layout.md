@@ -1582,6 +1582,15 @@ clock** (`reading · 3s`) since the tool's target left this slot, so on any wind
 gauge it arrives whole — which is the point of it having left. The order above is what happens on
 the windows narrow enough that something must still give.
 
+**And the background workflows' readout.** After the count, in every state, the slot says how many
+background workflows run — `1 workflow running`, `2 workflows running` — and, while one of them waits
+on the human for an approval or an `ask` stage's answer, `· 1 workflow waiting for you`
+(`N workflows waiting for you`). It is folded from the workflows' own phase events, never read off
+the engine, and it keeps the count's rule: whole or not at all. The waiting prompt itself opens in
+the approval or the answer pane as soon as the session is idle — a question under a
+`background workflow <name> asks:` line — and closes back to idle when answered; `esc` sends it back
+to wait, still counted, until the next exchange ends.
+
 **And the two facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
 input box below already invites a message — but the slot is where a surface that has gone leaves its
 fact, and two of them are owed at idle. The first is the `/settings` pane's `settings — esc close`

@@ -886,7 +886,33 @@ NOTES (2026-09-28): consequential edit — docs/manual/configuration.md: made ne
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/tui/`
 **Commit:** `feat(tui): /bg starts a recipe in the background`
 
-## 30. Status indicator and waiting questions
+## 30. Status indicator and waiting questions — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): DECISION applied (persist and replay). `workflow.StageRecord{Phase, Note, Receipt}` is written by `Store.WriteStageRecord` to `results/<stage>/<round>.json` and read back by `ReadStageRecord`. The stage name is held to the plan's `namePattern`, and a negative round is refused (`ErrInvalidName`). `runScript` and `runAsk` now take the round. They replay the record (`replayStage`, item marked Resumed) before they run or ask anything, and they record through `settleRecorded` before status.json shows the stage settled. Only outcomes the stage actually reached are recorded: a script that ran (any exit code) and a question the Asker answered, including an empty or off-option answer that took the default. A script that could not run, a cancel, and a "no one to ask" default are not recorded, so a resume runs or asks them. The replay is in `Runner.Run`, so item 34's session resume (Close marks the folder stopped, then `ResumeWorkflows` then Run) gets it without further work. `TestBackground_AResumeReplaysAnAnsweredQuestion` pins that path. With the replay disabled it fails with two waiting events.
+
+NOTES (2026-09-28): replay is keyed on the found folder not having finished. `openStatus` returns `replay = found && status.Phase != PhaseDone`. A re-issue of a workflow that ran to its end still skips finished fan-out items (ADR 0087 D4), but it runs its scripts and asks its questions afresh. A stale split listing or answer is therefore never replayed into new work. Pinned by `TestReissueOfAFinishedWorkflowRunsItsScriptAndAsksAgain`.
+
+NOTES (2026-09-28): item 25's CHANGELOG text ("A resumed workflow skips its finished items, but runs its script stages and asks its questions again") is contradicted by this item. The closeout should drop that clause when it applies both entries. background.go's file comment ("Resume replays") and `ResumeWorkflows`'s doc comment are updated here.
+
+NOTES (2026-09-28): re-derived from "the manager's queued asks surface through the Bridge": no Bridge route was added. A background prompt is reported by a Background `WorkflowWaiting` event, which already reaches the Model as eventMsg. At idle, the Update tail (`offerAfterFold`, run before `wakeAfterFold`) reads the queue through two new Engine calls, `WorkflowPrompts() []domain.WorkflowPrompt` and `AnswerWorkflowPrompt(id uint64, domain.WorkflowPromptAnswer) bool`. Both are on `*agent.Agent`, lateEngine and fakeEngine. The two types live in internal/domain/ask.go (ADR 0010's lowest-layer rule, as `domain.RecipeLaunch` did in item 29). The idle gate is `canWake`, and the fold syncs the waiting counts to the queue it read.
+
+NOTES (2026-09-28): re-derived from the assumption that a background ask's waiting event could be trusted. At the base it was emitted by `observedAsker` BEFORE the question was queued, and background approvals emitted none. The observer is now built at launch in `startBackground` and kept on `backgroundRun`. The background Asker is set after `observeWorkflow`, so it is not wrapped. `backgroundManager.wait` mints a prompt id, queues the prompt, and only then announces it (`backgroundScope.announce`), with Detail set to the question or `approve <tool>`. internal/agent/workflowcall.go gains `workflowObserver.waitingOn`, and `waiting` now delegates to it. Pinned by `TestBackground_AQuestionIsListedBeforeItIsReportedAndItsAnswerResumesTheWorkflow`, whose sink lists the queue inside Emit.
+
+NOTES (2026-09-28): consequential edit — internal/domain/events.go: made necessary by WorkflowWaiting now also reporting a background approval (the doc comment says so).
+
+NOTES (2026-09-28): consequential edit — internal/tui/messages.go: made necessary by "the ask request carries its origin": `approvalReqMsg.Workflow` and `askReqMsg.Workflow` (`*domain.WorkflowPrompt`, nil for the conversation's own, with no Reply when set).
+
+NOTES (2026-09-28): consequential edit — internal/tui/doc.go: made necessary by workflow.go's new role (readout, waiting prompts); its map line says so.
+
+NOTES (2026-09-28): consequential edit — layout.md: made necessary by the status line's left slot gaining the workflow readout (new paragraph after "what the left slot sheds").
+
+NOTES (2026-09-28): consequential edit — docs/manual/commands.md: made necessary by the user-visible indicator, waiting prompt and resume replay (the /bg row).
+
+NOTES (2026-09-28): consequential edit — internal/workflow/store.go, runner.go, stages.go, doc.go, recipe_stages_test.go: made necessary by the DECISION (persist and replay), which lives in the Runner, outside the item's Files.
+
+NOTES (2026-09-28): the pane's close path is `closeWorkflowPrompt`. It resets the pane, hands back the borrowed draft, returns to stateIdle (never resumeRunning), applies a rebind stashed while the pane stood (unless a /bg launch or an actuation is in flight), and re-arms the offer. esc and the approval menu's Cancel row dismiss (`dismissWorkflowPrompt`, never stopWorker). A dismissed id is skipped by the offer until the next Exchange ends: `finishWorker` calls `reofferDismissed`. Item 31's /workflows is the other planned route back. `quit()` dismisses an open background pane first, so a quit is the idle one rather than a deferred busy quit that would wait for a worker that does not exist. A workflow ending while its prompt is open closes the pane unanswered.
+
+NOTES (2026-09-28): the readout shows both counts, "2 workflows running · 1 workflow waiting for you" (`statusTrail`, after the queued count, kept whole). `statusLeft` reads only the folded `backgroundWorkflows`. No apogee.go alias was added for domain.WorkflowPrompt(Answer): the facade is outside this item's files, and `*apogee.Agent` exposes the two methods typed in domain.
 
 NOTES (2026-09-27): resume re-asks. Item 10 (7235dbbd) skips only finished fan-out items on resume: `prepareItems` (runner.go) reads each item's stored receipt through `Store.ReadReceipt`, but `openStatus` resets every stage to pending and `runRound` sends script and ask stages to `runScript` and `runAsk` (stages.go), which look up nothing stored and run fresh. A resumed recipe therefore re-runs its scripts and asks the user its questions again. Weigh this here: either persist ask answers and script results and replay them on resume, or accept the re-ask and document it.
 

@@ -521,10 +521,17 @@ func (o *workflowObserver) ItemPhase(event workflow.ItemEvent) {
 
 // waiting reports an `ask` stage's question as it is put to the user.
 func (o *workflowObserver) waiting(question workflow.Question) {
+	o.waitingOn(question.Workflow, question.Stage, question.Text)
+}
+
+// waitingOn reports workflow id as waiting on the user: an `ask` stage's question (stage names it,
+// detail is its text), or — for a background workflow — an approval one of its runs is gated on
+// (no stage; detail names the tool).
+func (o *workflowObserver) waitingOn(id, stage, detail string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.startLocked(question.Workflow)
-	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowWaiting, Stage: question.Stage, Detail: question.Text})
+	o.startLocked(id)
+	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowWaiting, Stage: stage, Detail: detail})
 }
 
 // end reports how the run Run returned ended: failed when it returned an error after the Workflow

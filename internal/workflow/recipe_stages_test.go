@@ -412,3 +412,162 @@ func TestWhenSkipsAStageOnAFanoutsTally(t *testing.T) {
 		t.Errorf("status.json fix line = %+v, want skipped with its note", line)
 	}
 }
+
+// replayPlan runs a script and asks a question, then fans out only on what both returned — so a
+// replayed record must still read as the typed fields a condition compares.
+func replayPlan() Plan {
+	return Plan{Name: "replay", Stages: []Stage{
+		{Name: "prep", Kind: StageScript, Run: "split.sh", Returns: ReceiptSpec{"parts": "int"}},
+		{Name: "scope", Kind: StageAsk, Question: "Go deep?", Options: []string{"yes", "no"}, Default: "no"},
+		{Name: "find", Kind: StageFanout, When: "prep.parts > 1 and scope.answer == yes", Task: "check {item}", Over: &ItemSource{List: []string{"a", "b"}}},
+	}}
+}
+
+// countingStages is a script runner and an asker that count their calls; the script reports two
+// parts and the question is answered yes, unless scriptErr makes the script fail to run.
+type countingStages struct {
+	mu        sync.Mutex
+	scripts   int
+	asks      int
+	scriptErr error
+}
+
+func (c *countingStages) RunScript(context.Context, ScriptSpec) (ScriptOutput, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scripts++
+	if c.scriptErr != nil {
+		return ScriptOutput{}, c.scriptErr
+	}
+	return ScriptOutput{Stdout: "parts=2\n"}, nil
+}
+
+func (c *countingStages) Ask(context.Context, Question) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.asks++
+	return "yes", nil
+}
+
+func (c *countingStages) counts() (scripts, asks int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scripts, c.asks
+}
+
+// stopInFind returns a spawner that cancels the run on find's first child, leaving the workflow
+// stopped with its script and ask stages settled.
+func stopInFind(cancel context.CancelFunc) *recordingSpawner {
+	return &recordingSpawner{script: func(ctx context.Context, _ ItemSpec) (Outcome, error) {
+		cancel()
+		<-ctx.Done()
+		return Outcome{Ending: EndStopped}, nil
+	}}
+}
+
+func TestResumeReplaysTheRecordedScriptAndAnswer(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stages := &countingStages{}
+	runner := newTestRunner(t, stopInFind(cancel))
+	runner.Scripts, runner.Asker = stages, stages
+	if first := runPlan(t, runner, ctx, replayPlan()); !first.Stopped() {
+		t.Fatalf("first run phase = %s, want stopped", first.Phase)
+	}
+
+	runner.Spawner = okSpawner()
+	second := runPlan(t, runner, context.Background(), replayPlan())
+
+	if scripts, asks := stages.counts(); scripts != 1 || asks != 1 {
+		t.Errorf("script ran %d times and the question was asked %d times, want once each: a resume replays both", scripts, asks)
+	}
+	for _, name := range []string{"prep", "scope"} {
+		stage := stageNamed(t, second, name)
+		if stage.Phase != PhaseDone || len(stage.Items) != 1 || !stage.Items[0].Resumed || stage.Tally.Resumed != 1 {
+			t.Errorf("%s = %+v, want done with its one item resumed", name, stage)
+		}
+	}
+	if answer := stageNamed(t, second, "scope").Items[0].Receipt.Fields[AskAnswerField]; answer != "yes" {
+		t.Errorf("replayed answer = %v, want yes", answer)
+	}
+	if find := stageNamed(t, second, "find"); find.Phase != PhaseDone || find.Tally.OK != 2 {
+		t.Errorf("find = %+v, want both items run on the replayed parts and answer", find)
+	}
+}
+
+func TestReissueOfAFinishedWorkflowRunsItsScriptAndAsksAgain(t *testing.T) {
+	t.Parallel()
+	stages := &countingStages{}
+	runner := newTestRunner(t, okSpawner())
+	runner.Scripts, runner.Asker = stages, stages
+	first := runPlan(t, runner, context.Background(), replayPlan())
+
+	second := runPlan(t, runner, context.Background(), replayPlan())
+
+	if second.ID != first.ID {
+		t.Fatalf("re-issue opened %s, want the finished folder %s", second.ID, first.ID)
+	}
+	if scripts, asks := stages.counts(); scripts != 2 || asks != 2 {
+		t.Errorf("script ran %d times and the question was asked %d times, want twice each: a finished workflow is re-run, not resumed", scripts, asks)
+	}
+	if prep := stageNamed(t, second, "prep"); prep.Items[0].Resumed {
+		t.Errorf("prep = %+v, want a fresh run", prep)
+	}
+}
+
+func TestResumeRunsAScriptThatCouldNotRunAndAsksWhenNoOneWasAsked(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stages := &countingStages{scriptErr: errors.New("approval refused")}
+	plan := replayPlan()
+	plan.Stages[2].When = ""
+	runner := newTestRunner(t, stopInFind(cancel))
+	runner.Scripts = stages // no Asker: the ask takes its default unasked
+	if first := runPlan(t, runner, ctx, plan); !first.Stopped() {
+		t.Fatalf("first run phase = %s, want stopped", first.Phase)
+	}
+
+	stages.mu.Lock()
+	stages.scriptErr = nil
+	stages.mu.Unlock()
+	runner.Spawner, runner.Asker = okSpawner(), stages
+	second := runPlan(t, runner, context.Background(), plan)
+
+	if scripts, asks := stages.counts(); scripts != 2 || asks != 1 {
+		t.Errorf("script ran %d times and the question was asked %d times, want the script run again and the question asked", scripts, asks)
+	}
+	if prep := stageNamed(t, second, "prep"); prep.Phase != PhaseDone || prep.Items[0].Resumed {
+		t.Errorf("prep = %+v, want a fresh run that now succeeds", prep)
+	}
+}
+
+func TestStageRecordRoundTripsPerRoundAndRefusesABadStageName(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	status, err := store.Create(replayPlan(), "hash", storeClock)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	record := StageRecord{Phase: PhaseDone, Note: "n", Receipt: Receipt{Status: StatusOK, Summary: "s", Fields: map[string]any{"parts": 2}}}
+	if err := store.WriteStageRecord(status.ID, "prep", 1, record); err != nil {
+		t.Fatalf("WriteStageRecord: %v", err)
+	}
+
+	got, found, err := store.ReadStageRecord(status.ID, "prep", 1)
+	if err != nil || !found || got.Phase != PhaseDone || got.Note != "n" || fieldText(got.Receipt.Fields["parts"]) != "2" {
+		t.Errorf("round 1 = %+v, %v, %v; want the record written", got, found, err)
+	}
+	if _, found, err := store.ReadStageRecord(status.ID, "prep", 0); err != nil || found {
+		t.Errorf("round 0 found = %v, err = %v; want none: rounds are kept apart", found, err)
+	}
+	for _, stage := range []string{"../x", "a/b", "", "Prep"} {
+		if err := store.WriteStageRecord(status.ID, stage, 0, record); !errors.Is(err, ErrInvalidName) {
+			t.Errorf("WriteStageRecord(%q) = %v, want ErrInvalidName", stage, err)
+		}
+	}
+	if _, _, err := store.ReadStageRecord(status.ID, "prep", -1); !errors.Is(err, ErrInvalidName) {
+		t.Errorf("ReadStageRecord(round -1) = %v, want ErrInvalidName", err)
+	}
+}

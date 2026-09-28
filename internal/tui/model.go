@@ -400,6 +400,11 @@ type Model struct {
 	// tail asks the engine to wake on its finish note at the first idle fold with no idle-only
 	// operation in flight (wakeIfIdle), and clears it on that one try.
 	//
+	// promptPending says a background workflow's prompt may be waiting to be offered: a waiting
+	// phase folded, a background pane closed, or an Exchange ended with a dismissed prompt still
+	// queued. The Update tail reads the engine's queue at the first idle fold (offerWaitingPrompt)
+	// and clears it on that one try.
+	//
 	// sessionLoading marks a /sessions load in flight — the record is being read off the loop, and
 	// the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held until it
 	// lands.
@@ -410,6 +415,7 @@ type Model struct {
 	// wake is held (canWake), and an idle-only command is queued rather than run (commandRunnable).
 	workflows      backgroundWorkflows
 	wakePending    bool
+	promptPending  bool
 	sessionLoading bool
 	bgLaunching    bool
 
@@ -1068,7 +1074,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// session was busy is held until a fold leaves it idle with nothing idle-only in flight, and
 	// that can be ANY fold — a save landing, a load returning, a pane closing — so it is asked here
 	// rather than at a list of sites. It launches a worker, so the frame settles over the result.
+	// Ahead of it, by the same rule, a background workflow's waiting prompt is offered
+	// (offerAfterFold): the pane it opens holds the wake until the human has answered.
 	defer func() {
+		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))
 	}()
@@ -1733,6 +1742,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
 		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.
 		//
+		// A background workflow's prompt (either pane) has no worker behind it: one press sends it
+		// back to the engine's queue unanswered (dismissWorkflowPrompt, workflow.go).
+		if m.workflowPromptOrigin() != nil {
+			return m.dismissWorkflowPrompt()
+		}
 		// The ask prompt is the one carve-out: its Esc is the answer box's own cancel, and a
 		// human backing out of a question is not aborting a turn they lost track of — one press
 		// still cancels there (ask.go's `esc cancel` hint).
@@ -2272,6 +2286,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
 	m.lastEsc = time.Time{}
 	m.state = next
+	// A background prompt the human dismissed during or before this Exchange is offered again now
+	// that they are idle once more (offerWaitingPrompt, workflow.go).
+	m.reofferDismissed()
 	// The box invites again from the next frame — nothing is running, so ⏎ sends — by the same
 	// derivation as every other state ([Model.legend]): a question that died with its Exchange has
 	// just let go of the box, and a run view still open behind it takes the box back right here.
@@ -2445,6 +2462,11 @@ func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 // requested with rows queued simply exits, and the deferred exit beats the terminal fold's flush
 // (flushAfterCompletion).
 func (m Model) quit() (tea.Model, tea.Cmd) {
+	// A background workflow's prompt pane stands at idle with no worker to wait for: it goes back
+	// to the engine's queue first, so the quit is the idle one below.
+	if m.workflowPromptOrigin() != nil {
+		m, _ = m.dismissWorkflowPrompt()
+	}
 	if m.busy() {
 		// A quit is the program leaving, so the cancel carries that cause and the engine settles
 		// the run without folding a single delegation (ADR 0088).
@@ -3868,7 +3890,8 @@ func (m Model) statusLine() string {
 // statusLeft composes the status line's left slot to the window's WIDTH: the two-column body lead,
 // the state's own words, and then the "N queued" readout of what is waiting to go out — in every
 // state, because a queue that survives a stop or an error (it does) must keep saying so at idle
-// too, where the slot is otherwise empty.
+// too, where the slot is otherwise empty. The background workflows' readout ("1 workflow running",
+// "· 1 workflow waiting for you") follows it, under the same keep-it-whole rule (statusTrail).
 //
 // The width is spent in the order the slot is READ for, exactly as a pane's title row spends its
 // own (popupTitleLine, layout.md): the count is the last thing the slot gives up, and the state's
@@ -3922,10 +3945,10 @@ func (m Model) statusLeft() string {
 		phrase = m.th.statusError.Render("error")
 	}
 	if phrase == "" {
-		return lead + m.queuedSegment(false)
+		return lead + m.statusTrail(false)
 	}
 
-	queued := m.queuedSegment(true)
+	queued := m.statusTrail(true)
 	room := m.width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
 	// The quiet qualifier is the FIRST thing the slot gives up, one rung below the phrase it
 	// qualifies: a row too tight for the qualified form falls back to the plain one, so the
@@ -3938,7 +3961,7 @@ func (m Model) statusLeft() string {
 		return lead + phrase + queued
 	}
 	if room <= 1 {
-		return lead + m.queuedSegment(false)
+		return lead + m.statusTrail(false)
 	}
 	return lead + m.th.measure.Truncate(phrase, room, "…") + queued
 }

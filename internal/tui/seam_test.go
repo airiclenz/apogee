@@ -175,6 +175,16 @@ type fakeEngine struct {
 
 	recipeLaunches []domain.RecipeLaunch                                      // records StartRecipe calls, in order
 	startRecipeFn  func(context.Context, domain.RecipeLaunch) (string, error) // scripted StartRecipe answer (nil ⇒ no id, no error)
+
+	workflowPrompts []domain.WorkflowPrompt // what WorkflowPrompts lists, oldest first; an answer takes its prompt off
+	promptListings  int                     // records WorkflowPrompts calls
+	promptAnswers   []workflowPromptAnswer  // records AnswerWorkflowPrompt calls that found their prompt, in order
+}
+
+// workflowPromptAnswer is one recorded AnswerWorkflowPrompt call: the prompt's id and the answer.
+type workflowPromptAnswer struct {
+	id     uint64
+	answer domain.WorkflowPromptAnswer
 }
 
 // childInterjection is one recorded InterjectChild call: the run it addressed and the message.
@@ -269,6 +279,42 @@ func (f *fakeEngine) StartRecipe(ctx context.Context, launch domain.RecipeLaunch
 		return fn(ctx, launch)
 	}
 	return "", nil
+}
+
+// WorkflowPrompts lists the scripted waiting prompts and counts the call.
+func (f *fakeEngine) WorkflowPrompts() []domain.WorkflowPrompt {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.promptListings++
+	return slices.Clone(f.workflowPrompts)
+}
+
+// AnswerWorkflowPrompt takes the prompt id off the scripted list and records the answer, reporting
+// false — and recording nothing — when no such prompt waits.
+func (f *fakeEngine) AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromptAnswer) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	index := slices.IndexFunc(f.workflowPrompts, func(prompt domain.WorkflowPrompt) bool { return prompt.ID == id })
+	if index < 0 {
+		return false
+	}
+	f.workflowPrompts = slices.Delete(f.workflowPrompts, index, index+1)
+	f.promptAnswers = append(f.promptAnswers, workflowPromptAnswer{id: id, answer: answer})
+	return true
+}
+
+// answers reports the AnswerWorkflowPrompt calls that found their prompt, in order.
+func (f *fakeEngine) answers() []workflowPromptAnswer {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.promptAnswers)
+}
+
+// listings reports how many times WorkflowPrompts was called.
+func (f *fakeEngine) listings() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.promptListings
 }
 
 // launches reports the StartRecipe calls, in order.

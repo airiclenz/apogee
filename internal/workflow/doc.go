@@ -24,9 +24,9 @@
 // (`**` included), a file's non-blank `lines:`, or a `split:` directory cut into contiguous parts
 // sized to a child's context window, batched N per child.
 // store.go is Store, ItemKey and PlanHash: one workflow's folder under `<scratch>/workflows/` —
-// plan.json, status.json, items/<key>/ with receipt and transcript, stage outputs, the items.md
-// listing a run ends with — written atomically, its items keyed by content so a re-issue found by
-// PlanHash skips finished work.
+// plan.json, status.json, items/<key>/ with receipt and transcript, results/<stage>/ with the script
+// and ask outcomes a resume replays, stage outputs, the items.md listing a run ends with — written
+// atomically, its items keyed by content so a re-issue found by PlanHash skips finished work.
 // runner.go is Runner.Run and the Spawner seam the agent implements: a fanout stage's items run as
 // fresh children at most Width at a time, a capped child continued (ItemSpec.Prior) and a faulted
 // or receipt-less one retried within configured bounds, each receipt stored as it lands, so a
@@ -37,8 +37,9 @@
 // runs one child over a manifest of every item's output, briefs/merge.txt leading, and has it write
 // report.md in the folder. The recipe-only kinds run no child: pick turns a receipt list or a
 // folder file into the next fanout's items, script runs through the ScriptRunner seam, ask through
-// the Asker seam (its default taken when there is none), and repeat re-runs a stage in rounds keyed
-// apart; any stage's `when:`, read off earlier stages, skips it.
+// the Asker seam (its default taken when there is none) — each outcome recorded, so the resume of
+// an unfinished workflow replays it rather than running the script or asking again — and repeat
+// re-runs a stage in rounds keyed apart; any stage's `when:`, read off earlier stages, skips it.
 // inputs.go is InputDecl, ValidateInputs and BindInputs: the inputs a Recipe declares in its
 // skill's header (name, required, default, description), and the binding of the user's text to
 // them — `key=value` by name, the rest in declared order, quotes allowed — that starts it.

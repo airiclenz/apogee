@@ -385,6 +385,11 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 	menu := approvalMenuFor(m.pending.Request)
 	opt := menu[m.approvalSel.highlight(len(menu))]
 	if opt.cancels {
+		// A background workflow's gate has no worker to stop: Cancel sends it back to the engine's
+		// queue unanswered, as esc does (dismissWorkflowPrompt, workflow.go).
+		if m.pending.Workflow != nil {
+			return m.dismissWorkflowPrompt()
+		}
 		m.stopWorker()
 		return m, nil
 	}
@@ -395,7 +400,15 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 // cap 1, so the send never blocks — messages.go) and returns the model to running so the worker's
 // blocked Step resumes — the launch verb's resume half (resumeRunning, model.go): the state, the
 // legend the question has let go of, the layout the departed pane frees, and the re-armed spinner.
+//
+// A gate a background workflow raised (approvalReqMsg.Workflow) has no Reply and no worker: the
+// verdict goes back through the engine and the TUI returns to idle (answerWorkflowPrompt,
+// workflow.go), never to running.
 func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cmd) {
+	if origin := m.pending.Workflow; origin != nil {
+		m.answerWorkflowPrompt(*origin, domain.WorkflowPromptAnswer{Decision: decision})
+		return m, nil
+	}
 	m.pending.Reply <- decision
 	m.pending = nil
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one

@@ -30,7 +30,10 @@ package agent
 // background (withBackgroundPrompts). A gate one of them reaches, and a question an `ask` stage
 // puts, never reach the Driver's prompt directly — the conversation may be showing one of its own —
 // they wait in the manager's queue (backgroundPrompt) until the Driver takes them up, and a stop
-// withdraws them.
+// withdraws them. Each one queued is reported by a WorkflowWaiting phase event emitted once it is in
+// the queue, never before, so a Driver reacting to the event always finds it there; the Driver
+// lists the queue (Agent.WorkflowPrompts) and answers from it (Agent.AnswerWorkflowPrompt) when its
+// human is free to answer.
 //
 // Lifetime. Agent.StopWorkflow stops one workflow and keeps its finished items (ADR 0088);
 // Agent.Close stops them all, on the top-level Agent only (a finishing delegate's Close must never
@@ -52,11 +55,10 @@ package agent
 // live state only: a snapshot does not carry them, and stopping the whole set (Close,
 // RestoreSession) drops them with the session they were meant for.
 //
-// Resume re-asks, by decision (plan 2026-09-27 - 00, item 25). A resumed workflow re-opens its
-// folder and skips every fan-out item whose receipt is already there, but it keeps nothing else of
-// the earlier run: its script stages run again and its `ask` stages put their questions again.
-// Neither a script's output nor an ask's answer is persisted or replayed, so the user of a
-// resumed recipe may be asked a question they already answered.
+// Resume replays, by decision (plan 2026-09-27 - 00, item 30). A resumed workflow re-opens its
+// folder and skips every fan-out item whose receipt is already there, and it replays the script and
+// `ask` stages the earlier run settled (workflow.StageRecord): a script that already produced a
+// result is not run again, and a question already answered is not asked again.
 
 import (
 	"cmp"
@@ -145,6 +147,7 @@ type backgroundManager struct {
 	runs     []*backgroundRun
 	restored []workflowEntryJSON
 	prompts  []*backgroundPrompt
+	promptID uint64 // the last id minted for a queued prompt (backgroundPrompt.id)
 	notes    []string
 }
 
@@ -153,13 +156,14 @@ type backgroundManager struct {
 // starts, under the manager's lock. done closes when it has ended — run to its end, stopped, or
 // dropped from the queue.
 type backgroundRun struct {
-	id     string
-	recipe string
-	server string
-	plan   workflow.Plan
-	runner *workflow.Runner
-	host   *Agent
-	turn   int
+	id       string
+	recipe   string
+	server   string
+	plan     workflow.Plan
+	runner   *workflow.Runner
+	host     *Agent
+	turn     int
+	observer *workflowObserver // reports its phases, and each prompt it queues (backgroundScope.announce)
 
 	running bool
 	cancel  context.CancelFunc
@@ -250,8 +254,9 @@ func (a *Agent) StopWorkflow(id string) error {
 // ResumeWorkflows starts the background workflows the restored snapshot carried (its `workflows`
 // key), each from its folder under the live `<scratch>/workflows/`: the plan is read back from the
 // folder, a recipe's prompt files and scripts from the recipe skill the entry names, and the
-// workflow is launched as a new one would be — so the finished fan-out items are skipped, while
-// script stages run again and ask stages ask again (see the file comment). A workflow the manager
+// workflow is launched as a new one would be — so the finished fan-out items are skipped, and the
+// settled script and ask stages replayed rather than run or asked again (see the file comment),
+// which is what a session resume relies on. A workflow the manager
 // already runs is skipped. The Driver calls it after Bind or RestoreSession, once the scratch
 // directory, catalog and tools are the session's; it is never called from a restore itself. The
 // set is taken whole: an entry that cannot resume is reported in the joined error and dropped.
@@ -364,12 +369,17 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	if scripts, ok := launch.runner.Scripts.(*recipeScripts); ok {
 		scripts.agent = host
 	}
+	observer := host.observeWorkflow(launch.runner, launch.turn, launch.plan.Name)
+	observer.background = true
+	// Set after observeWorkflow, which would wrap it to report the question before it is queued: a
+	// background question is reported once it waits in the queue (backgroundScope.announce).
 	if launch.runner.Asker != nil {
-		launch.runner.Asker = backgroundAsker{scope: backgroundScope{manager: &a.background, workflow: status.ID}}
+		launch.runner.Asker = backgroundAsker{scope: backgroundScope{manager: &a.background, workflow: status.ID, observer: observer}}
 	}
 	run := &backgroundRun{
 		id: status.ID, recipe: launch.recipe, server: host.backgroundServer(),
-		plan: launch.plan, runner: launch.runner, host: host, turn: launch.turn, done: make(chan struct{}),
+		plan: launch.plan, runner: launch.runner, host: host, turn: launch.turn, observer: observer,
+		done: make(chan struct{}),
 	}
 
 	m := &a.background
@@ -425,7 +435,7 @@ func openWorkflowFolder(runner *workflow.Runner, plan workflow.Plan) (workflow.R
 // the manager's queue. The caller holds the manager's lock; it may be a previous workflow's
 // goroutine (endBackground), which is why nothing here reads this Agent beyond the manager.
 func (a *Agent) startRunLocked(run *backgroundRun) {
-	scope := backgroundScope{manager: &a.background, workflow: run.id}
+	scope := backgroundScope{manager: &a.background, workflow: run.id, observer: run.observer}
 	ctx, cancel := context.WithCancel(withBackgroundPrompts(context.Background(), scope))
 	run.running, run.cancel = true, cancel
 	run.runner.Width = run.host.backgroundWidth()
@@ -436,11 +446,9 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 // a blocking workflow's are reported, then hands its server to the next in line. The finish note is
 // held before the end is reported, so a Driver that wakes on that event finds it.
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
-	observer := run.host.observeWorkflow(run.runner, run.turn, run.plan.Name)
-	observer.background = true
 	result, err := run.runner.Run(ctx, run.plan)
 	a.background.hold(finishNote(run.plan.Name, result, err))
-	observer.end(result, err)
+	run.observer.end(result, err)
 	a.endBackground(run)
 }
 
@@ -698,10 +706,11 @@ func isRecipeName(id string) bool {
 	})
 }
 
-// backgroundPrompt is one approval or question a background workflow waits on: the workflow's id,
-// the request or the question, and the channel its answer arrives on (buffered, so answering never
-// blocks).
+// backgroundPrompt is one approval or question a background workflow waits on: the id the manager
+// minted for it as it was queued, the workflow's id, the request or the question, and the channel
+// its answer arrives on (buffered, so answering never blocks).
 type backgroundPrompt struct {
+	id       uint64
 	workflow string
 	approval *domain.ApprovalRequest
 	question *workflow.Question
@@ -716,10 +725,12 @@ type backgroundAnswer struct {
 	err      error
 }
 
-// backgroundScope is the manager a background workflow's prompts queue in, and the workflow's id.
+// backgroundScope is the manager a background workflow's prompts queue in, the workflow's id, and
+// the observer that reports each prompt once it is queued.
 type backgroundScope struct {
 	manager  *backgroundManager
 	workflow string
+	observer *workflowObserver
 }
 
 // backgroundPromptsKey is the context key withBackgroundPrompts sets.
@@ -740,7 +751,7 @@ func backgroundPromptsFrom(ctx context.Context) (backgroundScope, bool) {
 // approve queues req and waits for its decision. Cancelled while waiting, it answers what a
 // cancelled visible prompt answers: deny, with ctx's error.
 func (s backgroundScope) approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
-	answer, err := s.manager.wait(ctx, &backgroundPrompt{workflow: s.workflow, approval: &req})
+	answer, err := s.manager.wait(ctx, &backgroundPrompt{workflow: s.workflow, approval: &req}, s.announce)
 	if err != nil {
 		return domain.ApprovalDeny, err
 	}
@@ -755,19 +766,42 @@ type backgroundAsker struct {
 
 // Ask queues the question and waits for its answer.
 func (b backgroundAsker) Ask(ctx context.Context, question workflow.Question) (string, error) {
-	answer, err := b.scope.manager.wait(ctx, &backgroundPrompt{workflow: b.scope.workflow, question: &question})
+	answer, err := b.scope.manager.wait(ctx, &backgroundPrompt{workflow: b.scope.workflow, question: &question}, b.scope.announce)
 	if err != nil {
 		return "", err
 	}
 	return answer.text, answer.err
 }
 
-// wait queues prompt and blocks until it is answered or ctx ends, when it is withdrawn.
-func (m *backgroundManager) wait(ctx context.Context, prompt *backgroundPrompt) (backgroundAnswer, error) {
+// announce reports prompt as waiting (a WorkflowWaiting phase event): the question's text for an
+// `ask` stage, the tool a gate asks about for an approval.
+func (s backgroundScope) announce(prompt *backgroundPrompt) {
+	if s.observer == nil {
+		return
+	}
+	switch {
+	case prompt.question != nil:
+		s.observer.waitingOn(s.workflow, prompt.question.Stage, prompt.question.Text)
+	case prompt.approval != nil:
+		s.observer.waitingOn(s.workflow, "", approvalWaitingPrefix+prompt.approval.Tool)
+	}
+}
+
+// approvalWaitingPrefix leads a waiting approval's WorkflowWaiting Detail; the tool's name follows.
+const approvalWaitingPrefix = "approve "
+
+// wait queues prompt under a fresh id, announces it once it is queued, and blocks until it is
+// answered or ctx ends, when it is withdrawn.
+func (m *backgroundManager) wait(ctx context.Context, prompt *backgroundPrompt, announce func(*backgroundPrompt)) (backgroundAnswer, error) {
 	prompt.reply = make(chan backgroundAnswer, 1)
 	m.mu.Lock()
+	m.promptID++
+	prompt.id = m.promptID
 	m.prompts = append(m.prompts, prompt)
 	m.mu.Unlock()
+	if announce != nil {
+		announce(prompt)
+	}
 	select {
 	case answer := <-prompt.reply:
 		return answer, nil
@@ -791,6 +825,53 @@ func (m *backgroundManager) answer(prompt *backgroundPrompt, answer backgroundAn
 	}
 	prompt.reply <- answer
 	return true
+}
+
+// WorkflowPrompts lists the approvals and questions this session's background workflows wait on,
+// oldest first, each with the id AnswerWorkflowPrompt takes (ADR 0089). An `ask` stage's question
+// offers its options as the request's Choices; an answer outside them takes the stage's default.
+// A delegate runs no background workflow and lists none. Safe from any goroutine.
+func (a *Agent) WorkflowPrompts() []domain.WorkflowPrompt {
+	m := &a.background
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prompts := make([]domain.WorkflowPrompt, 0, len(m.prompts))
+	for _, prompt := range m.prompts {
+		listed := domain.WorkflowPrompt{ID: prompt.id, Workflow: prompt.workflow}
+		if run := m.liveLocked(prompt.workflow); run != nil {
+			listed.Name = run.plan.Name
+		}
+		switch {
+		case prompt.approval != nil:
+			request := *prompt.approval
+			listed.Approval = &request
+		case prompt.question != nil:
+			listed.Question = &domain.AskRequest{
+				Question: prompt.question.Text,
+				Choices:  slices.Clone(prompt.question.Options),
+			}
+		}
+		prompts = append(prompts, listed)
+	}
+	return prompts
+}
+
+// AnswerWorkflowPrompt answers the waiting prompt id — an approval with answer.Decision, a question
+// with answer.Text — and reports whether it was still waiting: false for an id already answered,
+// withdrawn by its workflow's stop, or never minted. Safe from any goroutine.
+func (a *Agent) AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromptAnswer) bool {
+	m := &a.background
+	m.mu.Lock()
+	index := slices.IndexFunc(m.prompts, func(prompt *backgroundPrompt) bool { return prompt.id == id })
+	var prompt *backgroundPrompt
+	if index >= 0 {
+		prompt = m.prompts[index]
+	}
+	m.mu.Unlock()
+	if prompt == nil {
+		return false
+	}
+	return m.answer(prompt, backgroundAnswer{decision: answer.Decision, text: answer.Text})
 }
 
 // withdraw takes prompt off the queue and reports whether it was on it.

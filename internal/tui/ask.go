@@ -102,6 +102,10 @@ func (m Model) askChoiceKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 // input box is emptied (it was borrowed for the answer). An empty answer is allowed — the human
 // may legitimately reply with nothing — so the answer round-trips whatever was typed. Only
 // reachable from stateAwaitingAsk.
+//
+// A question a background workflow asked (askReqMsg.Workflow) has no Reply and no worker: its
+// answer goes back through the engine and the TUI returns to idle (answerWorkflowPrompt,
+// workflow.go), never to running.
 func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	if m.pendingAsk == nil {
 		return m, nil
@@ -123,6 +127,11 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 		}
 	} else {
 		answer = strings.TrimSpace(m.input.Value())
+	}
+	if origin := m.pendingAsk.Workflow; origin != nil {
+		m.input.Reset()
+		m.answerWorkflowPrompt(*origin, domain.WorkflowPromptAnswer{Text: answer})
+		return m, nil
 	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	m.pendingAsk = nil

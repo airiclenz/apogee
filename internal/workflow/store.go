@@ -28,6 +28,7 @@ const (
 	receiptName    = "receipt.json"
 	transcriptName = "transcript.jsonl"
 	listingName    = "items.md"
+	resultsDirName = "results"
 )
 
 // Permissions: the folder holds the model's working notes and a child's whole conversation, so it
@@ -108,7 +109,8 @@ type StageStatus struct {
 
 // ItemStatus is one item's line in status.json: its key (the folder name under items/), its label,
 // its phase, and the receipt its child handed back once it has one. A script or ask stage's one
-// line has no key: it runs no child and keeps no item folder, so its receipt lives here alone.
+// line has no key: it runs no child and keeps no item folder, so its receipt lives here and in the
+// stage's record under results/ (StageRecord), the copy a resume replays.
 type ItemStatus struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
@@ -246,6 +248,59 @@ func (s *Store) ReadReceipt(id, key string) (receipt Receipt, found bool, err er
 		return receipt, false, nil
 	}
 	return receipt, err == nil, err
+}
+
+// StageRecord is a script or ask stage's settled outcome as the folder keeps it — the stage's phase,
+// its note and its receipt (a script's fields, an ask's answer) — under results/<stage>/<round>.json,
+// so a resume of the workflow replays it instead of running the script or asking the question again
+// (Runner.Run). Only an outcome the stage actually reached is recorded: a script that ran (whatever
+// its exit code) and a question someone answered, never a cancel, a script that could not run, or a
+// default taken because no one could be asked.
+type StageRecord struct {
+	Phase   Phase   `json:"phase"`
+	Note    string  `json:"note,omitempty"`
+	Receipt Receipt `json:"receipt"`
+}
+
+// WriteStageRecord writes the record of stage's run in the given repeat round (0 for its own run),
+// making results/<stage>/ when it is the stage's first. ErrInvalidName refuses a stage name that is
+// not a plan's stage name, and a negative round.
+func (s *Store) WriteStageRecord(id, stage string, round int, record StageRecord) error {
+	path, err := s.stageRecordPath(id, stage, round)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
+		return fmt.Errorf("workflow: create results folder for stage %q: %w", stage, err)
+	}
+	return writeJSON(path, record)
+}
+
+// ReadStageRecord reads the record of stage's run in the given repeat round; found is false when the
+// stage has none for that round.
+func (s *Store) ReadStageRecord(id, stage string, round int) (record StageRecord, found bool, err error) {
+	path, err := s.stageRecordPath(id, stage, round)
+	if err != nil {
+		return record, false, err
+	}
+	err = readJSON(path, &record)
+	if errors.Is(err, fs.ErrNotExist) {
+		return record, false, nil
+	}
+	return record, err == nil, err
+}
+
+// stageRecordPath is results/<stage>/<round>.json in the workflow folder id. A stage name is held to
+// the plan's own spelling (namePattern), so it is always one plain path segment.
+func (s *Store) stageRecordPath(id, stage string, round int) (string, error) {
+	dir, err := s.Dir(id)
+	if err != nil {
+		return "", err
+	}
+	if !namePattern.MatchString(stage) || round < 0 {
+		return "", fmt.Errorf("%w: stage %q round %d", ErrInvalidName, stage, round)
+	}
+	return filepath.Join(dir, resultsDirName, stage, strconv.Itoa(round)+".json"), nil
 }
 
 // WriteTranscript writes an item child's conversation as transcript.jsonl, one message per line,

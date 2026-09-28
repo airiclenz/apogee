@@ -698,7 +698,9 @@ const (
 	// blocked. An item an earlier run of the same Workflow finished is reported too, as Resumed.
 	WorkflowItemFinished WorkflowPhase = "item_finished"
 	// WorkflowWaiting reports that an `ask` stage has put its question to the user and waits for
-	// the answer; Detail carries the question.
+	// the answer; Detail carries the question. A background workflow reports it too for an approval
+	// one of its runs waits on (no Stage; Detail is "approve <tool>"), and only once the prompt is in
+	// the engine's queue, where the Driver finds it (Agent.WorkflowPrompts).
 	WorkflowWaiting WorkflowPhase = "waiting"
 	// WorkflowFinished reports that the Workflow ran every stage to its end.
 	WorkflowFinished WorkflowPhase = "finished"

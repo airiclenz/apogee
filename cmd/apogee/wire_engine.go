@@ -807,6 +807,26 @@ func (e *lateEngine) StartRecipe(ctx context.Context, launch apogee.RecipeLaunch
 	return agent.StartRecipe(ctx, launch)
 }
 
+// WorkflowPrompts lists what the bound Agent's background workflows wait on; unbound there is no
+// Agent to have launched one, so nothing waits.
+func (e *lateEngine) WorkflowPrompts() []domain.WorkflowPrompt {
+	agent := e.bound()
+	if agent == nil {
+		return nil
+	}
+	return agent.WorkflowPrompts()
+}
+
+// AnswerWorkflowPrompt answers a waiting prompt on the bound Agent; unbound nothing waits, so
+// nothing is answered.
+func (e *lateEngine) AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromptAnswer) bool {
+	agent := e.bound()
+	if agent == nil {
+		return false
+	}
+	return agent.AnswerWorkflowPrompt(id, answer)
+}
+
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.
 func (e *lateEngine) Close() error {
 	agent := e.bound()

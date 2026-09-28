@@ -234,3 +234,25 @@ type AskAnswer struct {
 	// is therefore byte-identical to a single-select reply.
 	Text string
 }
+
+// WorkflowPrompt is one approval or question a background workflow (ADR 0089) waits on in the
+// engine's own queue until a Driver takes it up — it never reaches the Driver's Approver or Asker,
+// which the conversation may be using. ID names it for the answer; Workflow and Name are the
+// workflow's id and name. Exactly one of Approval and Question is set: the gate one of the
+// workflow's children or script stages reached, or an `ask` stage's question with its options
+// offered as Choices. It lives here rather than beside the engine's queue so a Driver that holds
+// the engine through a narrow interface of its own can name it (ADR 0010, the lowest-layer rule).
+type WorkflowPrompt struct {
+	ID       uint64
+	Workflow string
+	Name     string
+	Approval *ApprovalRequest
+	Question *AskRequest
+}
+
+// WorkflowPromptAnswer answers a WorkflowPrompt: Decision for an approval, Text for a question
+// (the typed answer or the chosen label, as AskAnswer.Text carries it).
+type WorkflowPromptAnswer struct {
+	Decision ApprovalDecision
+	Text     string
+}

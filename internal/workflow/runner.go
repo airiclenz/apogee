@@ -231,7 +231,9 @@ type Tally struct {
 
 // Run runs plan. It validates the plan, expands every fanout's items, and resumes the newest
 // workflow folder with the same PlanHash — skipping each item whose stored receipt is ok or
-// partial — or creates a new one. A cancelled ctx stops the running children, keeps the finished
+// partial — or creates a new one. A folder that had not finished also replays its recorded script
+// and ask stages (StageRecord): a resume never runs a script that already produced a result, nor
+// asks a question already answered. A cancelled ctx stops the running children, keeps the finished
 // items' receipts, and returns a Result whose Phase is PhaseStopped. Either way the run ends by
 // writing items.md (Store.WriteItems) into the folder. The error is for a run that
 // could not proceed: an invalid plan, an unreadable item source, a store that cannot be written.
@@ -253,7 +255,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	status, err := r.openStatus(plan, planHash)
+	status, replay, err := r.openStatus(plan, planHash)
 	if err != nil {
 		return Result{}, err
 	}
@@ -262,7 +264,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		return Result{}, err
 	}
 
-	state := &runState{runner: r, status: status}
+	state := &runState{runner: r, status: status, replay: replay}
 	result := Result{ID: status.ID, Dir: dir, Phase: PhaseDone, Stages: make([]StageResult, 0, len(plan.Stages))}
 	for index := range plan.Stages {
 		if ctx.Err() != nil {
@@ -312,17 +314,22 @@ func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
 }
 
 // openStatus resumes the newest workflow carrying planHash, its stages reset to pending, or creates
-// a new one.
-func (r *Runner) openStatus(plan Plan, planHash string) (RunStatus, error) {
+// a new one. replay reports that the folder it resumes had not finished — stopped, or cut off while
+// running — so its recorded script and ask stages are replayed rather than run again (StageRecord).
+// A re-issue of a workflow that ran to its end still skips its finished items, but runs its scripts
+// and asks its questions afresh: it is a new run of finished work, not the resume of unfinished work.
+func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, replay bool, err error) {
 	now := r.now()
 	status, found, err := r.Store.Find(planHash)
 	if err != nil {
-		return RunStatus{}, err
+		return RunStatus{}, false, err
 	}
-	if !found {
+	if found {
+		replay = status.Phase != PhaseDone
+	} else {
 		status, err = r.Store.Create(plan, planHash, now)
 		if err != nil {
-			return RunStatus{}, err
+			return RunStatus{}, false, err
 		}
 	}
 	status.Stages = make([]StageStatus, 0, len(plan.Stages))
@@ -331,7 +338,7 @@ func (r *Runner) openStatus(plan Plan, planHash string) (RunStatus, error) {
 	}
 	status.Phase = PhaseRunning
 	status.Updated = now
-	return status, r.Store.WriteStatus(status)
+	return status, replay, r.Store.WriteStatus(status)
 }
 
 // now reads the Runner's clock.
@@ -343,11 +350,13 @@ func (r *Runner) now() time.Time {
 }
 
 // runState is one Run's shared state: the status.json it keeps current, under mu, which also
-// serialises the Observer's calls.
+// serialises the Observer's calls, and whether the run resumes an unfinished folder whose recorded
+// script and ask stages it replays (openStatus). replay is fixed before the first stage runs.
 type runState struct {
 	runner *Runner
 	mu     sync.Mutex
 	status RunStatus
+	replay bool
 }
 
 // runFanout runs one fanout stage's items in the given repeat round and returns the stage's result.

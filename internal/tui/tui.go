@@ -1033,6 +1033,16 @@ type Engine interface {
 	// already running under the same id; with no model bound it refuses as Submit does. Called
 	// ONLY at idle, with no worker driving the engine, from a tea.Cmd (runBg).
 	StartRecipe(context.Context, domain.RecipeLaunch) (string, error)
+	// WorkflowPrompts lists the approvals and questions the session's background workflows wait on
+	// (ADR 0089), oldest first — each reported by a Background WorkflowWaiting event once it is
+	// listed here, never before. Read at idle, from the Update goroutine, when a fold has seen such
+	// an event (workflow.go, offerWaitingPrompt); goroutine-safe all the same.
+	WorkflowPrompts() []domain.WorkflowPrompt
+	// AnswerWorkflowPrompt answers the waiting prompt id — an approval with answer.Decision, a
+	// question with answer.Text — and reports whether it was still waiting (false once its
+	// workflow's stop withdrew it). It resumes that workflow and nothing else: the conversation is
+	// untouched. Called from the Update goroutine when the human answers the pane it opened in.
+	AnswerWorkflowPrompt(id uint64, answer domain.WorkflowPromptAnswer) bool
 }
 
 // ----------------------------------------------------------------------------

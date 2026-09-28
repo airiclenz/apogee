@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -456,5 +458,197 @@ func TestBackground_AMissingInputIsRefusedNotAsked(t *testing.T) {
 	}
 	if len(asker.questions) != 0 {
 		t.Errorf("a background launch asked %+v", asker.questions)
+	}
+}
+
+// askRecipe asks whether to sweep, then sweeps alpha.
+func askRecipe() workflow.Recipe {
+	recipe := sweepRecipe("asking", "alpha")
+	recipe.Plan.Stages = append([]workflow.Stage{{
+		Name: "go", Kind: workflow.StageAsk, Question: "Sweep now?", Options: []string{"yes", "no"}, Default: "no",
+	}}, recipe.Plan.Stages...)
+	return recipe
+}
+
+// promptProbeSink records every event and, on each background WorkflowWaiting, what the engine's
+// queue lists at that moment — so a test can pin that the event never runs ahead of the queue. With
+// autoAnswer set it answers each prompt so listed at once, so a question asked where none should be
+// ends the workflow instead of hanging it.
+type promptProbeSink struct {
+	*lockedSink
+	agent      atomic.Pointer[Agent]
+	autoAnswer atomic.Pointer[string]
+	mu         sync.Mutex
+	listed     [][]domain.WorkflowPrompt
+	waited     chan struct{}
+	once       sync.Once
+}
+
+func newPromptProbeSink() *promptProbeSink {
+	return &promptProbeSink{lockedSink: newLockedSink(), waited: make(chan struct{})}
+}
+
+func (s *promptProbeSink) Emit(e domain.Event) {
+	s.lockedSink.Emit(e)
+	phase, ok := e.(domain.WorkflowPhaseEvent)
+	if !ok || phase.Phase != domain.WorkflowWaiting || !phase.Background {
+		return
+	}
+	if a := s.agent.Load(); a != nil {
+		listed := a.WorkflowPrompts()
+		s.mu.Lock()
+		s.listed = append(s.listed, listed)
+		s.mu.Unlock()
+		if answer := s.autoAnswer.Load(); answer != nil {
+			for _, prompt := range listed {
+				a.AnswerWorkflowPrompt(prompt.ID, domain.WorkflowPromptAnswer{Text: *answer})
+			}
+		}
+	}
+	s.once.Do(func() { close(s.waited) })
+}
+
+// waitings returns every background WorkflowWaiting event the sink saw, in order.
+func (s *promptProbeSink) waitings() []domain.WorkflowPhaseEvent {
+	s.lockedSink.mu.Lock()
+	defer s.lockedSink.mu.Unlock()
+	var waitings []domain.WorkflowPhaseEvent
+	for _, e := range s.lockedSink.events {
+		if phase, ok := e.(domain.WorkflowPhaseEvent); ok && phase.Phase == domain.WorkflowWaiting && phase.Background {
+			waitings = append(waitings, phase)
+		}
+	}
+	return waitings
+}
+
+func TestBackground_AQuestionIsListedBeforeItIsReportedAndItsAnswerResumesTheWorkflow(t *testing.T) {
+	t.Parallel()
+
+	sink := newPromptProbeSink()
+	cfg := recipeConfig(t, sink, askRecipe())
+	host := &scriptedAsker{answer: "host"}
+	cfg.Asker = host
+	up := (&workflowResponder{}).route("sweep alpha", nil, finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	sink.agent.Store(a)
+	id := launchBackground(t, a, "asking")
+	awaitClosed(t, sink.waited, "the question's waiting event")
+
+	sink.mu.Lock()
+	listed := sink.listed[0]
+	sink.mu.Unlock()
+	if len(listed) != 1 || listed[0].Workflow != id || listed[0].Name != "asking" || listed[0].Question == nil ||
+		listed[0].Question.Question != "Sweep now?" || !slices.Equal(listed[0].Question.Choices, []string{"yes", "no"}) {
+		t.Fatalf("queue at the waiting event = %+v, want the question already listed", listed)
+	}
+	if waiting := sink.waitings(); len(waiting) != 1 || waiting[0].Workflow != id || waiting[0].Stage != "go" || waiting[0].Detail != "Sweep now?" {
+		t.Errorf("waiting events = %+v, want one naming the stage and its question", waiting)
+	}
+
+	if !a.AnswerWorkflowPrompt(listed[0].ID, domain.WorkflowPromptAnswer{Text: "yes"}) {
+		t.Fatal("AnswerWorkflowPrompt refused the waiting question")
+	}
+	if a.AnswerWorkflowPrompt(listed[0].ID, domain.WorkflowPromptAnswer{Text: "no"}) {
+		t.Error("AnswerWorkflowPrompt answered the same question twice")
+	}
+	a.background.waitAll()
+
+	info := workflowInfo(t, a, id)
+	if receipt := info.Status.Stages[0].Items[0].Receipt; receipt == nil || receipt.Fields[workflow.AskAnswerField] != "yes" {
+		t.Errorf("ask stage receipt = %+v, want the answer yes", receipt)
+	}
+	if n := up.askedCount("sweep alpha"); n != 1 {
+		t.Errorf("alpha's child ran %d times, want 1 after the answer", n)
+	}
+	if len(host.questions) != 0 || len(a.WorkflowPrompts()) != 0 {
+		t.Errorf("host Asker asked %+v, queue %+v; want neither used", host.questions, a.WorkflowPrompts())
+	}
+}
+
+func TestBackground_AnApprovalIsListedAndAnsweredThroughTheDriverCalls(t *testing.T) {
+	t.Parallel()
+
+	var ran atomic.Int32
+	write := fakeTool{name: "write_thing", execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+		ran.Add(1)
+		return domain.ToolResult{CallID: call.ID, Content: "written"}, nil
+	}}
+	sink := newPromptProbeSink()
+	cfg := workflowConfig(t, sink, write)
+	cfg.Skills = fakeRecipes{recipes: map[string]workflow.Recipe{"pair": sweepRecipe("pair", "alpha")}}
+	cfg.Approver = &countingApprover{}
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, toolCallScript("w1", "write_thing", `{}`)).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	sink.agent.Store(a)
+	id := launchBackground(t, a, "pair")
+	awaitClosed(t, sink.waited, "the approval's waiting event")
+
+	prompts := a.WorkflowPrompts()
+	if len(prompts) != 1 || prompts[0].Workflow != id || prompts[0].Approval == nil || prompts[0].Approval.Tool != "write_thing" {
+		t.Fatalf("WorkflowPrompts = %+v, want write_thing's approval", prompts)
+	}
+	if waiting := sink.waitings(); len(waiting) != 1 || waiting[0].Detail != "approve write_thing" {
+		t.Errorf("waiting events = %+v, want one naming the tool", waiting)
+	}
+	if !a.AnswerWorkflowPrompt(prompts[0].ID, domain.WorkflowPromptAnswer{Decision: domain.ApprovalAllow}) {
+		t.Fatal("AnswerWorkflowPrompt refused the waiting approval")
+	}
+	a.background.waitAll()
+
+	if n := ran.Load(); n != 1 {
+		t.Errorf("write_thing ran %d times, want 1 once allowed", n)
+	}
+}
+
+func TestBackground_AResumeReplaysAnAnsweredQuestion(t *testing.T) {
+	t.Parallel()
+
+	sink := newPromptProbeSink()
+	cfg := recipeConfig(t, sink, askRecipe())
+	cfg.Asker = &scriptedAsker{answer: "host"}
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", signalThenWait(started, nil), cancelledScript()).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	sink.agent.Store(a)
+	id := launchBackground(t, a, "asking")
+	awaitClosed(t, sink.waited, "the question's waiting event")
+	if !a.AnswerWorkflowPrompt(a.WorkflowPrompts()[0].ID, domain.WorkflowPromptAnswer{Text: "yes"}) {
+		t.Fatal("AnswerWorkflowPrompt refused the waiting question")
+	}
+	awaitClosed(t, started, "alpha's child")
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	b, err := resumeAgent(cfg, snap, up)
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	t.Cleanup(b.stopAllBackground)
+	sink.agent.Store(b)
+	again := "yes"
+	sink.autoAnswer.Store(&again)
+	if err := b.ResumeWorkflows(); err != nil {
+		t.Fatalf("ResumeWorkflows: %v", err)
+	}
+	b.background.waitAll()
+
+	if waiting := sink.waitings(); len(waiting) != 1 {
+		t.Errorf("waiting events = %+v, want the one before the resume: an answered question is not asked again", waiting)
+	}
+	info := workflowInfo(t, b, id)
+	if info.Status.Phase != workflow.PhaseDone {
+		t.Errorf("resumed workflow = %+v, want it done", info)
+	}
+	if receipt := info.Status.Stages[0].Items[0].Receipt; receipt == nil || receipt.Fields[workflow.AskAnswerField] != "yes" {
+		t.Errorf("ask stage receipt = %+v, want the replayed answer yes", receipt)
 	}
 }

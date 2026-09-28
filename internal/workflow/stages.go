@@ -108,9 +108,9 @@ func (s *runState) runRound(ctx context.Context, plan Plan, index, round int, st
 	case StagePick:
 		stageResult, err = s.runPick(plan, index, stageItems, result)
 	case StageScript:
-		stageResult, err = s.runScript(ctx, index, stage)
+		stageResult, err = s.runScript(ctx, index, round, stage)
 	case StageAsk:
-		stageResult, err = s.runAsk(ctx, index, stage)
+		stageResult, err = s.runAsk(ctx, index, round, stage)
 	case StageRepeat:
 		stageResult, err = s.runRepeat(ctx, plan, index, stageItems, result)
 	default:
@@ -637,8 +637,12 @@ func stringList(value any) []string {
 
 // runScript runs a script stage's command through the ScriptRunner and turns its output into the
 // stage's receipt (scriptReceipt). A command that could not run, or whose receipt is blocked,
-// fails the stage; the workflow goes on, and a later `when:` may read `<stage>.status`.
-func (s *runState) runScript(ctx context.Context, index int, stage Stage) (StageResult, error) {
+// fails the stage; the workflow goes on, and a later `when:` may read `<stage>.status`. A command
+// that ran is recorded (StageRecord), so a resume replays its result instead of running it again.
+func (s *runState) runScript(ctx context.Context, index, round int, stage Stage) (StageResult, error) {
+	if replayed, found, err := s.replayStage(index, round, stage); found || err != nil {
+		return replayed, err
+	}
 	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
 		return StageResult{}, err
 	}
@@ -653,20 +657,19 @@ func (s *runState) runScript(ctx context.Context, index int, stage Stage) (Stage
 		return s.settleStage(index, stage, PhaseStopped, "", nil)
 	}
 
-	var receipt Receipt
 	if runErr != nil {
-		receipt = Receipt{
+		receipt := Receipt{
 			Status:  StatusBlocked,
 			Summary: clampWords("the script could not run: "+firstLine(runErr.Error()), SummaryMaxWords),
 		}
-	} else {
-		receipt = scriptReceipt(output, stage.Returns)
+		return s.settleStage(index, stage, PhaseFailed, "", &receipt)
 	}
+	receipt := scriptReceipt(output, stage.Returns)
 	phase := PhaseDone
 	if receipt.Status == StatusBlocked {
 		phase = PhaseFailed
 	}
-	return s.settleStage(index, stage, phase, "", &receipt)
+	return s.settleRecorded(index, round, stage, StageRecord{Phase: phase, Receipt: receipt})
 }
 
 // scriptReceipt reads a script's receipt off its output. Each stdout line `KEY=value` whose key —
@@ -727,12 +730,17 @@ func scriptReceipt(output ScriptOutput, spec ReceiptSpec) Receipt {
 
 // runAsk puts an ask stage's question through the Asker and stores the answer in the `answer`
 // field of an ok receipt. The default is taken — and the stage's note says why — when there is no
-// Asker, when asking fails, when the answer is empty, or when it is not one of the options.
-func (s *runState) runAsk(ctx context.Context, index int, stage Stage) (StageResult, error) {
+// Asker, when asking fails, when the answer is empty, or when it is not one of the options. A
+// question the Asker answered is recorded (StageRecord), so a resume replays the answer instead of
+// asking again; a default taken because no one could be asked is not, so a resume asks.
+func (s *runState) runAsk(ctx context.Context, index, round int, stage Stage) (StageResult, error) {
+	if replayed, found, err := s.replayStage(index, round, stage); found || err != nil {
+		return replayed, err
+	}
 	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
 		return StageResult{}, err
 	}
-	answer, note := stage.Default, noOneToAskNote
+	answer, note, answered := stage.Default, noOneToAskNote, false
 	if asker := s.runner.Asker; asker != nil {
 		given, err := asker.Ask(ctx, Question{
 			Workflow: s.status.ID, Stage: stage.Name, Text: stage.Question,
@@ -745,11 +753,11 @@ func (s *runState) runAsk(ctx context.Context, index int, stage Stage) (StageRes
 		case err != nil:
 			note = "(default taken: the question could not be asked: " + firstLine(err.Error()) + ")"
 		case given == "":
-			note = "(default taken: no answer)"
+			note, answered = "(default taken: no answer)", true
 		case len(stage.Options) > 0 && !slices.Contains(stage.Options, given):
-			note = fmt.Sprintf("(default taken: %q is not one of the options)", given)
+			note, answered = fmt.Sprintf("(default taken: %q is not one of the options)", given), true
 		default:
-			answer, note = given, ""
+			answer, note, answered = given, "", true
 		}
 	}
 
@@ -762,7 +770,45 @@ func (s *runState) runAsk(ctx context.Context, index int, stage Stage) (StageRes
 		Summary: clampWords(summary, SummaryMaxWords),
 		Fields:  map[string]any{AskAnswerField: answer},
 	}
-	return s.settleStage(index, stage, PhaseDone, note, &receipt)
+	if !answered {
+		return s.settleStage(index, stage, PhaseDone, note, &receipt)
+	}
+	return s.settleRecorded(index, round, stage, StageRecord{Phase: PhaseDone, Note: note, Receipt: receipt})
+}
+
+// settleRecorded records a script or ask stage's outcome in the folder (Store.WriteStageRecord) and
+// settles the stage on it. The record is written first, so a status.json that shows the stage
+// settled always has its record beside it for a resume to replay.
+func (s *runState) settleRecorded(index, round int, stage Stage, record StageRecord) (StageResult, error) {
+	if err := s.runner.Store.WriteStageRecord(s.status.ID, stage.Name, round, record); err != nil {
+		return StageResult{}, err
+	}
+	receipt := record.Receipt
+	return s.settleStage(index, stage, record.Phase, record.Note, &receipt)
+}
+
+// replayStage settles a script or ask stage from the record an earlier run of this workflow left for
+// the same round, when the run resumes an unfinished folder (runState.replay): the script is not run
+// and the question not asked again. Its one item is marked Resumed, as a skipped fan-out item is.
+// found is false when there is nothing to replay and the stage runs.
+func (s *runState) replayStage(index, round int, stage Stage) (StageResult, bool, error) {
+	if !s.replay {
+		return StageResult{}, false, nil
+	}
+	record, found, err := s.runner.Store.ReadStageRecord(s.status.ID, stage.Name, round)
+	if err != nil || !found {
+		return StageResult{}, false, err
+	}
+	receipt := record.Receipt
+	stageResult, err := s.settleStage(index, stage, record.Phase, record.Note, &receipt)
+	if err != nil {
+		return stageResult, true, err
+	}
+	for i := range stageResult.Items {
+		stageResult.Items[i].Resumed = true
+	}
+	stageResult.Tally = tallyOf(stageResult.Items)
+	return stageResult, true, nil
 }
 
 // runRepeat re-runs the stage its `repeat:` names while its `when:` holds, at most `max:` times,

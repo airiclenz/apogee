@@ -60,6 +60,12 @@ type approvalReqMsg struct {
 	// phase lands (withdrawAbandonedDecision). Nil — a request built without a context — never
 	// reads as abandoned.
 	Abandoned <-chan struct{}
+	// Workflow is the request's ORIGIN when a background workflow raised it (ADR 0089): the prompt
+	// the engine's queue listed, opened at idle by offerWaitingPrompt (workflow.go). It is nil for
+	// the conversation's own request. A request with an origin has no Reply and no worker behind
+	// it: its answer goes back through Engine.AnswerWorkflowPrompt and returns the TUI to idle, and
+	// esc dismisses it back to the waiting queue — it never resumes or stops a worker.
+	Workflow *domain.WorkflowPrompt
 }
 
 // approvalArmedMsg arms the pending approval prompt's decision keys on the BACKSTOP the fold
@@ -88,6 +94,9 @@ type askReqMsg struct {
 	Reply   chan domain.AskAnswer
 	// Abandoned is approvalReqMsg.Abandoned's twin: the parked call's context's Done channel.
 	Abandoned <-chan struct{}
+	// Workflow is approvalReqMsg.Workflow's twin: the background workflow's prompt this question
+	// came from, nil for the conversation's own.
+	Workflow *domain.WorkflowPrompt
 }
 
 // presentedMsg hands a finished presentation to the Update loop (ADR 0019). The uiPresenter

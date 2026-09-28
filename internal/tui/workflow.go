@@ -30,6 +30,17 @@ import (
 // The wake's transcript row is a depth-0 prompt (entryUser) like a typed one, so it is a fork
 // point and the prompt a cancelled first Turn marks aborted (transcript.forkPoints, markAborted) —
 // the engine opened an Exchange on it, and the two counts must agree.
+//
+// Its approvals and questions wait for the human. A gate one of its runs reaches, and an `ask`
+// stage's question, wait in the engine's own queue rather than on the conversation's prompt; each
+// is reported by a waiting phase once it is queued. The status line counts the live workflows and
+// the ones waiting (statusTrail), folded from the phases alone — it never reads the engine. The
+// waiting prompt opens when the human is idle (offerWaitingPrompt, the Update tail): the engine's
+// queue is read, and the oldest prompt not dismissed opens in the approval or the ask pane with its
+// origin on the request. Its answer goes back through Engine.AnswerWorkflowPrompt and returns the
+// TUI to idle (leaveWorkflowPrompt) — there is no worker to resume — and esc dismisses it back to
+// the queue, where it waits, still counted, until the next Exchange ends and it is offered again.
+// A workflow that ends while its prompt is open takes the pane with it.
 
 // The words the finish line, the wake's prompt row and the two failure notes are built from.
 const (
@@ -40,6 +51,16 @@ const (
 	workflowNoteLostPrefix = "a background workflow's report did not reach the model: "
 )
 
+// The words the status line's workflow readout (statusTrail) and a waiting question's lead line
+// are built from.
+const (
+	workflowRunningOne     = "1 workflow running"
+	workflowRunningFormat  = "%d workflows running"
+	workflowWaitingOne     = "1 workflow waiting for you"
+	workflowWaitingFormat  = "%d workflows waiting for you"
+	workflowQuestionFormat = "background workflow %s asks:"
+)
+
 // The receipt statuses a finish line counts (domain.WorkflowReceipt.Status).
 const (
 	receiptOK      = "ok"
@@ -48,21 +69,24 @@ const (
 )
 
 // backgroundWorkflows is the session's live background workflows as their events fold: each one's
-// view by workflow id, and the run id of every run a background run spawned, mapped to its
-// workflow. Both maps are replaced on write, never mutated in place, because the Model is copied by
-// value on every Update and an earlier copy must not see a later fold. The zero value is empty.
+// view by workflow id, the run id of every run a background run spawned, mapped to its workflow,
+// and the ids of the waiting prompts the human dismissed with esc, which the idle offer skips. The
+// maps are replaced on write, never mutated in place, because the Model is copied by value on every
+// Update and an earlier copy must not see a later fold. The zero value is empty.
 type backgroundWorkflows struct {
-	live map[string]backgroundWorkflow
-	runs map[string]string
+	live      map[string]backgroundWorkflow
+	runs      map[string]string
+	dismissed map[uint64]bool
 }
 
-// backgroundWorkflow is one live background workflow: its name and its items so far, counted by the
-// status their receipts ended on.
+// backgroundWorkflow is one live background workflow: its name, its items so far, counted by the
+// status their receipts ended on, and how many of its prompts wait for the human.
 type backgroundWorkflow struct {
 	name    string
 	ok      int
 	partial int
 	blocked int
+	waiting int
 }
 
 // workflowNoteLostMsg reports that the worker's drain took a finish note and the engine refused to
@@ -131,6 +155,78 @@ func (b backgroundWorkflows) without(id string) backgroundWorkflows {
 	return b
 }
 
+// synced returns b with every live workflow's waiting count taken from prompts — the engine's queue
+// as it stands — and every dismissed id that is no longer queued forgotten.
+func (b backgroundWorkflows) synced(prompts []domain.WorkflowPrompt) backgroundWorkflows {
+	counts := make(map[string]int, len(prompts))
+	queued := make(map[uint64]bool, len(prompts))
+	for _, prompt := range prompts {
+		counts[prompt.Workflow]++
+		queued[prompt.ID] = true
+	}
+	live := make(map[string]backgroundWorkflow, len(b.live))
+	for id, view := range b.live {
+		view.waiting = counts[id]
+		live[id] = view
+	}
+	dismissed := maps.Clone(b.dismissed)
+	maps.DeleteFunc(dismissed, func(id uint64, _ bool) bool { return !queued[id] })
+	b.live, b.dismissed = live, dismissed
+	return b
+}
+
+// answered returns b with prompt counted off its workflow's waiting prompts.
+func (b backgroundWorkflows) answered(prompt domain.WorkflowPrompt) backgroundWorkflows {
+	view, ok := b.live[prompt.Workflow]
+	if !ok || view.waiting == 0 {
+		return b
+	}
+	view.waiting--
+	return b.withWorkflow(prompt.Workflow, view)
+}
+
+// withDismissed returns b with the prompt id marked dismissed.
+func (b backgroundWorkflows) withDismissed(id uint64) backgroundWorkflows {
+	dismissed := maps.Clone(b.dismissed)
+	if dismissed == nil {
+		dismissed = make(map[uint64]bool)
+	}
+	dismissed[id] = true
+	b.dismissed = dismissed
+	return b
+}
+
+// waitingCount is how many live workflows have a prompt waiting for the human.
+func (b backgroundWorkflows) waitingCount() int {
+	n := 0
+	for _, view := range b.live {
+		if view.waiting > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// readout is the status line's workflow segment: how many background workflows run and, when any
+// waits on the human, how many do — "" when none runs.
+func (b backgroundWorkflows) readout() string {
+	running := len(b.live)
+	if running == 0 {
+		return ""
+	}
+	text := fmt.Sprintf(workflowRunningFormat, running)
+	if running == 1 {
+		text = workflowRunningOne
+	}
+	switch waiting := b.waitingCount(); {
+	case waiting == 1:
+		text += " · " + workflowWaitingOne
+	case waiting > 1:
+		text += " · " + fmt.Sprintf(workflowWaitingFormat, waiting)
+	}
+	return text
+}
+
 // view is id's live view, named from e when no started phase was folded for it.
 func (b backgroundWorkflows) view(id, name string) backgroundWorkflow {
 	view, ok := b.live[id]
@@ -181,8 +277,9 @@ func (m Model) foldBackgroundEvent(e domain.Event) Model {
 }
 
 // foldBackgroundPhase folds one phase of a background workflow: a start opens its view, a finished
-// item counts, and an end drops the view, writes the finish line and asks for a wake (wakePending).
-// A stage start and a waiting question change nothing here.
+// item counts, a waiting prompt counts and asks for the idle offer (promptPending), and an end
+// drops the view — closing its prompt's pane if one is open — writes the finish line and asks for
+// a wake (wakePending). A stage start changes nothing here.
 func (m Model) foldBackgroundPhase(e domain.WorkflowPhaseEvent) Model {
 	switch e.Phase {
 	case domain.WorkflowStarted:
@@ -190,13 +287,152 @@ func (m Model) foldBackgroundPhase(e domain.WorkflowPhaseEvent) Model {
 	case domain.WorkflowItemFinished:
 		view := m.workflows.view(e.Workflow, e.Name).count(e.Receipt.Status)
 		m.workflows = m.workflows.withWorkflow(e.Workflow, view)
+	case domain.WorkflowWaiting:
+		view := m.workflows.view(e.Workflow, e.Name)
+		view.waiting++
+		m.workflows = m.workflows.withWorkflow(e.Workflow, view)
+		m.promptPending = true
 	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
 		view := m.workflows.view(e.Workflow, e.Name)
 		m.workflows = m.workflows.without(e.Workflow)
+		if origin := m.workflowPromptOrigin(); origin != nil && origin.Workflow == e.Workflow {
+			m.closeWorkflowPrompt()
+		}
 		m.transcript.addNote(view.finishLine(e))
 		m.wakePending = true
 	}
 	return m
+}
+
+// statusTrail is what the status line's left slot carries after its phrase: the queued readout
+// (queuedSegment), then the background workflows' (backgroundWorkflows.readout), each led by the
+// separator when something stands before it. Folded state only — it never reads the engine.
+func (m Model) statusTrail(afterPhrase bool) string {
+	queued := m.queuedSegment(afterPhrase)
+	text := m.workflows.readout()
+	if text == "" {
+		return queued
+	}
+	if afterPhrase || queued != "" {
+		text = " · " + text
+	}
+	return queued + m.th.statusBar.Render(text)
+}
+
+// offerAfterFold is the Update tail's waiting-prompt half, run before the wake: when a background
+// workflow has reported a prompt since the last offer, it tries one now (offerWaitingPrompt).
+// Anything but the Model, or a Model with no offer pending, passes through untouched.
+func offerAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
+	m, ok := next.(Model)
+	if !ok || !m.promptPending {
+		return next, cmd
+	}
+	m, open := m.offerWaitingPrompt()
+	if open == nil {
+		return m, cmd
+	}
+	return m, tea.Batch(cmd, open)
+}
+
+// offerWaitingPrompt opens the oldest waiting background prompt the human has not dismissed, when
+// the human is idle — the same idle a wake waits for (canWake); until then the offer is held and
+// the next fold asks again. The engine's queue is read once per try, and the waiting counts are
+// synced to it, so a prompt its workflow's stop withdrew stops being counted.
+func (m Model) offerWaitingPrompt() (Model, tea.Cmd) {
+	if !m.canWake() {
+		return m, nil
+	}
+	m.promptPending = false
+	prompts := m.eng.WorkflowPrompts()
+	m.workflows = m.workflows.synced(prompts)
+	for _, prompt := range prompts {
+		if !m.workflows.dismissed[prompt.ID] {
+			return m.openWorkflowPrompt(prompt)
+		}
+	}
+	return m, nil
+}
+
+// openWorkflowPrompt opens prompt in the pane its kind takes — an approval in the approval pane, a
+// question in the ask pane under a line naming the workflow — with prompt as the request's origin
+// and no Reply, through the very folds the conversation's own requests take.
+func (m Model) openWorkflowPrompt(prompt domain.WorkflowPrompt) (Model, tea.Cmd) {
+	origin := prompt
+	var (
+		next tea.Model
+		cmd  tea.Cmd
+	)
+	switch {
+	case prompt.Approval != nil:
+		next, cmd = m.foldApprovalRequest(approvalReqMsg{Request: *prompt.Approval, Workflow: &origin})
+	case prompt.Question != nil:
+		request := *prompt.Question
+		request.Question = fmt.Sprintf(workflowQuestionFormat, prompt.Name) + "\n" + request.Question
+		next, cmd = m.foldAskRequest(askReqMsg{Request: request, Workflow: &origin})
+	default:
+		return m, nil
+	}
+	return next.(Model), cmd
+}
+
+// workflowPromptOrigin is the background prompt the open decision pane answers, or nil when no pane
+// is open or the open one is the conversation's own.
+func (m Model) workflowPromptOrigin() *domain.WorkflowPrompt {
+	switch {
+	case m.state == stateAwaitingApproval && m.pending != nil:
+		return m.pending.Workflow
+	case m.state == stateAwaitingAsk && m.pendingAsk != nil:
+		return m.pendingAsk.Workflow
+	}
+	return nil
+}
+
+// answerWorkflowPrompt hands the human's answer to origin back to the engine and closes the pane.
+// An answer the engine no longer takes — the workflow's stop withdrew the prompt first — is simply
+// dropped: the workflow's end is folded on its own.
+func (m *Model) answerWorkflowPrompt(origin domain.WorkflowPrompt, answer domain.WorkflowPromptAnswer) {
+	m.eng.AnswerWorkflowPrompt(origin.ID, answer)
+	m.workflows = m.workflows.answered(origin)
+	m.closeWorkflowPrompt()
+}
+
+// dismissWorkflowPrompt is esc on a background prompt's pane: the prompt goes back to the engine's
+// queue unanswered — its workflow still waits on it, and the status line still counts it — and is
+// not offered again until the next Exchange ends (finishWorker). It never touches a worker.
+func (m Model) dismissWorkflowPrompt() (Model, tea.Cmd) {
+	origin := m.workflowPromptOrigin()
+	if origin == nil {
+		return m, nil
+	}
+	m.workflows = m.workflows.withDismissed(origin.ID)
+	m.closeWorkflowPrompt()
+	return m, nil
+}
+
+// closeWorkflowPrompt closes the open background prompt's pane and returns the TUI to idle — the
+// state it was opened from, with no worker behind it, so nothing resumes (never resumeRunning).
+// The box the ask pane borrowed is handed back, a rebind stashed while the pane stood is applied
+// (the engine is the Update loop's, as at an Exchange's end), and the next waiting prompt is
+// offered at the tail.
+func (m *Model) closeWorkflowPrompt() {
+	m.pendingDecision.reset()
+	m.restoreAskDraft()
+	m.state = stateIdle
+	m.layout()
+	if !m.bgLaunching && !m.actuation.inFlight {
+		m.applyPendingRebind()
+	}
+	m.promptPending = true
+}
+
+// reofferDismissed forgets every dismissal, so a prompt the human sent back with esc is offered
+// again at the next idle fold; finishWorker calls it as an Exchange ends.
+func (m *Model) reofferDismissed() {
+	if len(m.workflows.dismissed) == 0 {
+		return
+	}
+	m.workflows.dismissed = nil
+	m.promptPending = true
 }
 
 // wakeAfterFold is the Update tail's wake half: when a background workflow has ended since the last

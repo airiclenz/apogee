@@ -272,3 +272,191 @@ func TestDeliverWorkflowNotes_TakesTheNoteAtTheBoundaryAndInterjectsIt(t *testin
 		t.Errorf("Interject calls = %v, want the note committed at the boundary", got)
 	}
 }
+
+// bgQuestion is a question the background workflow waits on, as the engine's queue lists it.
+func bgQuestion(id uint64) domain.WorkflowPrompt {
+	return domain.WorkflowPrompt{ID: id, Workflow: bgWorkflowID, Name: bgWorkflowName,
+		Question: &domain.AskRequest{Question: "Sweep deep?", Choices: []string{"yes", "no"}}}
+}
+
+// bgApproval is a gate the background workflow waits on, as the engine's queue lists it.
+func bgApproval(id uint64) domain.WorkflowPrompt {
+	return domain.WorkflowPrompt{ID: id, Workflow: bgWorkflowID, Name: bgWorkflowName,
+		Approval: &domain.ApprovalRequest{Tool: "write_file", Arguments: []byte(`{}`)}}
+}
+
+// bgWaiting is the waiting phase the background workflow reports once a prompt is queued.
+func bgWaiting() domain.WorkflowPhaseEvent {
+	e := bgPhase(domain.WorkflowWaiting)
+	e.Stage, e.Detail = "scope", "Sweep deep?"
+	return e
+}
+
+// statusText is the status line's left slot without its styling.
+func leftStatus(m Model) string { return ansiPattern.ReplaceAllString(m.statusLeft(), "") }
+
+// armed returns m with the open decision pane's latch open, as the terminal's drain answer would.
+func armed(m Model) Model {
+	m.approvalArmed = true
+	return m
+}
+
+func TestBackgroundWorkflow_StatusLineCountsRunningAndWaitingWorkflows(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	startStubWorker(t, &m) // busy, so a waiting prompt is counted but not opened
+
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted))
+	if got := leftStatus(m); !strings.Contains(got, "1 workflow running") || strings.Contains(got, "waiting") {
+		t.Errorf("status = %q, want `1 workflow running` and nothing waiting", got)
+	}
+	second := bgPhase(domain.WorkflowStarted)
+	second.Workflow, second.Name = "sweep-2", "other"
+	m = foldEvents(t, m, second, bgWaiting())
+	if got := leftStatus(m); !strings.Contains(got, "2 workflows running · 1 workflow waiting for you") {
+		t.Errorf("status = %q, want `2 workflows running · 1 workflow waiting for you`", got)
+	}
+
+	m = step(t, m, exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete}})
+	if got := leftStatus(m); !strings.Contains(got, "2 workflows running") || strings.Contains(got, "waiting") {
+		t.Errorf("idle status = %q, want the waiting count synced to the engine's empty queue", got)
+	}
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStopped), func() domain.WorkflowPhaseEvent {
+		e := bgPhase(domain.WorkflowFinished)
+		e.Workflow, e.Name = "sweep-2", "other"
+		return e
+	}())
+	if got := leftStatus(m); strings.Contains(got, "workflow") {
+		t.Errorf("status = %q after both ended, want no workflow readout", got)
+	}
+}
+
+func TestBackgroundWorkflow_AWaitingQuestionOpensOnlyWhenIdle(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgQuestion(7)}}
+	m := newTestModelEng(t, eng, testOpts)
+	m.transcript.addUser("first", nil)
+	startStubWorker(t, &m)
+
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+	if eng.listings() != 0 || m.pendingAsk != nil || m.state != stateRunning {
+		t.Fatalf("listings %d, pane %v, state %v while an Exchange runs; want the question held", eng.listings(), m.pendingAsk != nil, m.state)
+	}
+	m = step(t, m, exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete}})
+
+	if m.state != stateAwaitingAsk || m.pendingAsk == nil || m.pendingAsk.Workflow == nil || m.pendingAsk.Workflow.ID != 7 {
+		t.Fatalf("state %v, pane %+v; want the waiting question open once idle", m.state, m.pendingAsk)
+	}
+	if q := m.pendingAsk.Request.Question; !strings.HasPrefix(q, "background workflow sweep asks:\n") || !strings.HasSuffix(q, "Sweep deep?") {
+		t.Errorf("question = %q, want it led by the workflow's name", q)
+	}
+	if m.worker.cancel != nil {
+		t.Error("opening a background question started a worker")
+	}
+}
+
+func TestBackgroundWorkflow_AnAnsweredQuestionGoesToTheEngineAndReturnsToIdle(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgQuestion(7)}}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("half a message")
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+	if m.state != stateAwaitingAsk {
+		t.Fatalf("state = %v, want the question open at idle", m.state)
+	}
+
+	m = step(t, armed(m), keyEnter()) // the first choice, highlighted, is the answer
+
+	want := []workflowPromptAnswer{{id: 7, answer: domain.WorkflowPromptAnswer{Text: "yes"}}}
+	if got := eng.answers(); !reflect.DeepEqual(got, want) {
+		t.Errorf("answers = %+v, want %+v", got, want)
+	}
+	if m.state != stateIdle || m.pendingAsk != nil || m.worker.cancel != nil {
+		t.Errorf("state %v, pane %v, worker %v; want idle with no worker", m.state, m.pendingAsk != nil, m.worker.cancel != nil)
+	}
+	if got := m.input.Value(); got != "half a message" {
+		t.Errorf("input = %q, want the borrowed draft handed back", got)
+	}
+	if got := leftStatus(m); strings.Contains(got, "waiting") {
+		t.Errorf("status = %q, want nothing waiting once answered", got)
+	}
+}
+
+func TestBackgroundWorkflow_EscSendsTheQuestionBackToTheQueue(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgQuestion(7)}}
+	m := newTestModelEng(t, eng, testOpts)
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+
+	m = step(t, m, keyEsc())
+
+	if m.state != stateIdle || m.pendingAsk != nil || len(eng.answers()) != 0 || m.worker.cancel != nil {
+		t.Fatalf("state %v, pane %v, answers %v; want idle with the question unanswered", m.state, m.pendingAsk != nil, eng.answers())
+	}
+	if got := leftStatus(m); !strings.Contains(got, "1 workflow waiting for you") {
+		t.Errorf("status = %q, want the dismissed question still counted", got)
+	}
+	m = step(t, m, bgItemOK())
+	if m.pendingAsk != nil {
+		t.Fatal("a dismissed question reopened on the next fold")
+	}
+
+	m.transcript.addUser("next", nil)
+	startStubWorker(t, &m)
+	m = step(t, m, exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete}})
+	if m.state != stateAwaitingAsk || m.pendingAsk == nil || m.pendingAsk.Workflow.ID != 7 {
+		t.Errorf("state %v after the next Exchange, want the dismissed question offered again", m.state)
+	}
+}
+
+func TestBackgroundWorkflow_AQueuedApprovalOpensAtIdleAndIsAnsweredThroughTheEngine(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgApproval(3)}}
+	m := newTestModelEng(t, eng, testOpts)
+
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+	if m.state != stateAwaitingApproval || m.pending == nil || m.pending.Workflow == nil || m.pending.Request.Tool != "write_file" {
+		t.Fatalf("state %v, pane %+v; want the queued approval open at idle", m.state, m.pending)
+	}
+	m = step(t, armed(m), keyRune('a'))
+
+	want := []workflowPromptAnswer{{id: 3, answer: domain.WorkflowPromptAnswer{Decision: domain.ApprovalAllow}}}
+	if got := eng.answers(); !reflect.DeepEqual(got, want) {
+		t.Errorf("answers = %+v, want %+v", got, want)
+	}
+	if m.state != stateIdle || m.pending != nil || m.worker.cancel != nil {
+		t.Errorf("state %v, pane %v; want idle with no worker", m.state, m.pending != nil)
+	}
+}
+
+func TestBackgroundWorkflow_EndingTheWorkflowClosesItsOpenPrompt(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgApproval(3)}}
+	m := newTestModelEng(t, eng, testOpts)
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+	eng.mu.Lock()
+	eng.workflowPrompts = nil // the stop withdrew it
+	eng.mu.Unlock()
+
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStopped))
+
+	if m.state != stateIdle || m.pending != nil || len(eng.answers()) != 0 {
+		t.Errorf("state %v, pane %v, answers %v; want the pane closed unanswered", m.state, m.pending != nil, eng.answers())
+	}
+}
+
+func TestBackgroundWorkflow_QuitWithAPromptOpenQuitsAtOnce(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgQuestion(7)}}
+	m := newTestModelEng(t, eng, testOpts)
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+
+	next, cmd := m.quit()
+
+	if got := next.(Model); got.state != stateIdle || got.quitting && cmd == nil {
+		t.Errorf("state %v, quitting %v; want the prompt dismissed and the idle quit taken", got.state, got.quitting)
+	}
+	if len(eng.answers()) != 0 {
+		t.Errorf("answers = %v, want the question left unanswered", eng.answers())
+	}
+}
