@@ -195,7 +195,9 @@ var (
 
 	_ = apogee.WorkflowStarted
 	_ = apogee.WorkflowStageStarted
+	_ = apogee.WorkflowItemStarted
 	_ = apogee.WorkflowItemFinished
+	_ = apogee.WorkflowStageFinished
 	_ = apogee.WorkflowWaiting
 	_ = apogee.WorkflowFinished
 	_ = apogee.WorkflowStopped

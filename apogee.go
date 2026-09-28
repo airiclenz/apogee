@@ -346,13 +346,15 @@ type WorkflowReceipt = domain.WorkflowReceipt
 // The phases a Workflow is reported at: started, then its stages and items, then exactly one of
 // finished, stopped or failed.
 const (
-	WorkflowStarted      = domain.WorkflowStarted
-	WorkflowStageStarted = domain.WorkflowStageStarted
-	WorkflowItemFinished = domain.WorkflowItemFinished
-	WorkflowWaiting      = domain.WorkflowWaiting
-	WorkflowFinished     = domain.WorkflowFinished
-	WorkflowStopped      = domain.WorkflowStopped
-	WorkflowFailed       = domain.WorkflowFailed
+	WorkflowStarted       = domain.WorkflowStarted
+	WorkflowStageStarted  = domain.WorkflowStageStarted
+	WorkflowItemStarted   = domain.WorkflowItemStarted
+	WorkflowItemFinished  = domain.WorkflowItemFinished
+	WorkflowStageFinished = domain.WorkflowStageFinished
+	WorkflowWaiting       = domain.WorkflowWaiting
+	WorkflowFinished      = domain.WorkflowFinished
+	WorkflowStopped       = domain.WorkflowStopped
+	WorkflowFailed        = domain.WorkflowFailed
 )
 
 // The two values WireEvent.Direction takes.

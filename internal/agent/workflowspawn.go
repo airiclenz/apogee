@@ -163,7 +163,8 @@ func (a *Agent) wrapUpFinishDirective() string {
 // background workflow, whose parent is a launch-time snapshot (backgroundHost) while its children
 // stay listed on the top-level Agent the Driver addresses. seat is the Delegation seat every child
 // is built on (newChildAgentOn): the one the fan_out call's `run_on` named, seatConfigured — the
-// zero — when it named none.
+// zero — when it named none. observer, when set (observeWorkflow), is told of every item child's
+// run id as it is minted.
 type workflowSpawner struct {
 	parent   *Agent
 	turn     int
@@ -171,6 +172,7 @@ type workflowSpawner struct {
 	prompts  fs.FS
 	children *childRegistry
 	seat     delegationSeat
+	observer *workflowObserver
 }
 
 // newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn, on
@@ -206,6 +208,9 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	}
 
 	runID := a.runIDs.mint()
+	if s.observer != nil {
+		s.observer.itemStarted(spec, runID)
+	}
 	stepCap, _ := resolveStepCap(a.cfg.Delegation.MaxSteps, 0)
 	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{
 		Phase:   domain.SubAgentStarted,

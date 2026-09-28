@@ -53,7 +53,11 @@
 - `^x` on a stage row. A stage is not a run. Stopping a whole workflow stays `/workflows` `^x`.
 - Headless and daemon output of the new workflow phases, which stay silent there.
 
-## 1. Workflow phase events carry the workflow's structure and each item's run id
+## 1. Workflow phase events carry the workflow's structure and each item's run id — ✅ DONE (2026-09-28)
+
+NOTES (2026-09-28): observeWorkflow now takes the whole workflow.Plan (name and stage names, plus the repeat caps `Rounds` is derived from) in place of the name string, and it hands itself to the Runner's Spawner when that is a *workflowSpawner. The spawner reports ItemStarted through it right after the run id is minted.
+NOTES (2026-09-28): `Rounds` is computed by the observer from the plan (the repeat stage's `max:` + 1, the larger when two repeats name one stage), not carried on workflow.StageEvent. `Attempt` counts the runs that were minted, so a Spawn refused before the mint neither counts nor starts a row. ItemFinished names the last minted run ("" when none) and also carries its Attempt.
+NOTES (2026-09-28): setStagePhase/notifyStage/notifyItem take the stage index (RepeatRound is read from status.Stages[i].Round), and setStagePhase takes the item count, 0 at every caller except runItems. The runner-level tests (repeat, retry, continuation, shared key, pre-mint refusal) sit in workflowspawn_test.go and drive a Runner directly. The fan_out, recipe and cancel sequences sit in workflowcall_test.go and are checked structurally (assertWorkflowShape), so they hold however the items interleave.
 
 **What:** Recast at the regression check (2026-09-28).
 **Goal:** A Driver can rebuild a Workflow's shape from `domain.WorkflowPhaseEvent` alone:

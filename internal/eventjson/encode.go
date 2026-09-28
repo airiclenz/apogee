@@ -76,6 +76,11 @@ func Kinds() []string {
 // format on a documented stdout contract would make it part of a public surface. A caller that
 // sees false writes no line at all and, per the same decision, consumes no sequence number for it.
 //
+// ok is false as well for the two workflow phases that describe a Workflow's shape for a Driver
+// that draws it — domain.WorkflowItemStarted and domain.WorkflowStageFinished — which the
+// workflow_phase line's documented phase list does not carry (docs/manual/headless.md), so the
+// NDJSON stream is the same whether the engine reports them or not.
+//
 // A domain.SeamClosedEvent maps to the seam_closed kind, but only PART of it: its Value is the
 // seam's live working value, read-only and valid only for the duration of Emit, so no line carries
 // it — a consumer reads which seam closed and which reactions fired, nothing more. Whether that
@@ -191,6 +196,9 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			Outcome:      e.Outcome,
 		}, true
 	case domain.WorkflowPhaseEvent:
+		if !isLineWorkflowPhase(e.Phase) {
+			return "", domain.EventBase{}, nil, false
+		}
 		return kindWorkflowPhase, e.EventBase, workflowPhaseData{
 			Phase:    string(e.Phase),
 			Workflow: e.Workflow,
@@ -210,8 +218,11 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 
 // The per-variant `data` values. Every exported field carries an explicit snake_case tag and NONE
 // carries omitempty: ADR 0075 decision 3 promises a consumer never has to test for a missing key,
-// so a zero value is written as the zero and not dropped. The tags name the variant's own fields,
-// so a member added to an Event variant is a member added here under the same name.
+// so a zero value is written as the zero and not dropped. The tags name the variant's own fields
+// under the same names. A member added to an Event variant is added here only when the line's
+// documented shape grows with it: domain.WorkflowPhaseEvent's Stages, Items, Round, Rounds, Run
+// and Attempt describe the Workflow's shape for a Driver that draws it and are not on the
+// workflow_phase line (workflowPhaseData).
 
 // tokenData is the token line: one streamed chunk of assistant text.
 type tokenData struct {
@@ -282,6 +293,12 @@ type workflowPhaseData struct {
 	Receipt  workflowReceipt `json:"receipt"`
 	Detail   string          `json:"detail"`
 	Call     string          `json:"call"`
+}
+
+// isLineWorkflowPhase reports whether phase is one the workflow_phase line carries: every phase but
+// the two a drawing Driver alone reads (Encode).
+func isLineWorkflowPhase(phase domain.WorkflowPhase) bool {
+	return phase != domain.WorkflowItemStarted && phase != domain.WorkflowStageFinished
 }
 
 // workflowReceipt is a workflow item's receipt on the line. Fields is an object on every line,

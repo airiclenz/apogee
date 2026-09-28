@@ -689,14 +689,26 @@ type WorkflowPhase string
 
 const (
 	// WorkflowStarted reports that a Workflow has begun: its folder exists and it has an id. It is
-	// the first phase of every run, a resumed one included.
+	// the first phase of every run, a resumed one included, and carries Stages.
 	WorkflowStarted WorkflowPhase = "started"
-	// WorkflowStageStarted reports that one of the Workflow's stages began running. A stage its
-	// `when:` skipped never starts.
+	// WorkflowStageStarted reports that one of the Workflow's stages began running, in Round; it
+	// carries Items, and Rounds for a stage a repeat re-runs. A stage its `when:` skipped never
+	// starts, and neither does a script or ask stage a resume replays from its record.
 	WorkflowStageStarted WorkflowPhase = "stage_started"
+	// WorkflowItemStarted reports that one run of an item began: Run is the item child's RunID,
+	// reported before that child's own SubAgentStarted, and Attempt counts the runs of the item in
+	// this Round (a retry and a continuation are each a new one). An item a cancel stops gets no
+	// WorkflowItemFinished after it.
+	WorkflowItemStarted WorkflowPhase = "item_started"
 	// WorkflowItemFinished reports that one item of a stage ended on a receipt — ok, partial or
-	// blocked. An item an earlier run of the same Workflow finished is reported too, as Resumed.
+	// blocked. An item an earlier run of the same Workflow finished is reported too, as Resumed,
+	// before its stage's WorkflowStageStarted. Run names the item's last run, "" when none began
+	// (a resumed item, or one whose child could not be built).
 	WorkflowItemFinished WorkflowPhase = "item_finished"
+	// WorkflowStageFinished reports that one of the Workflow's stages ended, in Round — done,
+	// failed, stopped or skipped. A skipped stage, or a script or ask stage a resume replays, gets
+	// it with no WorkflowStageStarted before it.
+	WorkflowStageFinished WorkflowPhase = "stage_finished"
 	// WorkflowWaiting reports that an `ask` stage has put its question to the user and waits for
 	// the answer; Detail carries the question. A background workflow reports it too for an approval
 	// one of its runs waits on (no Stage; Detail is "approve <tool>"), and only once the prompt is in
@@ -724,16 +736,27 @@ type WorkflowReceipt struct {
 }
 
 // WorkflowPhaseEvent reports one Workflow (ADR 0087) crossing a lifecycle boundary: starting, a
-// stage starting, an item finishing on its receipt, an `ask` stage waiting for the user, and the
-// Workflow ending — finished, stopped or failed. Every Workflow that starts ends on exactly one of
-// those three.
+// stage starting and finishing, an item's run starting, an item finishing on its receipt, an
+// `ask` stage waiting for the user, and the Workflow ending — finished, stopped or failed. Every
+// Workflow that starts ends on exactly one of those three.
 //
 // Workflow is the Workflow's id — its folder name in the session's workflow store — and is what
 // tells two Workflows' events apart. Name is the Workflow's name (a fan_out's first task line, a
 // Recipe's name). Stage names the stage on the stage and item phases; Item, Index, Resumed and
 // Receipt are the finished item's label, its 0-based place in the stage, whether an earlier run
-// had already finished it, and the receipt it ended on — all zero on every other phase. Detail is
-// the question on WorkflowWaiting and the cause on WorkflowFailed, "" otherwise.
+// had already finished it, and the receipt it ended on — all zero on every other phase (a started
+// item carries its label and place). Detail is the question on WorkflowWaiting and the cause on
+// WorkflowFailed, "" otherwise.
+//
+// The rest describe the Workflow's shape, so a Driver can rebuild it from these events alone.
+// Stages lists the plan's stage names in order, on WorkflowStarted only. Items is a stage's item
+// count on WorkflowStageStarted — 0 for a stage that runs no child (script, ask, pick, repeat).
+// Round is the 1-based round of the stage on the stage and item phases: 1 for its own run, one
+// more for each time a repeat re-runs it; a Driver keys a stage by (Stage, Round). Rounds is, on
+// the WorkflowStageStarted of a stage a repeat re-runs, the most rounds it can run — its own
+// included, so Round never exceeds it — and 0 otherwise. Run is the item child's RunID on
+// WorkflowItemStarted and WorkflowItemFinished, and Attempt the 1-based run of the item that
+// WorkflowItemStarted opens.
 //
 // Its EventBase is the identity of the agent that runs the Workflow — the one whose fan_out call
 // or Recipe launch started it — never an item child's: each child's own events carry the child's
@@ -768,6 +791,12 @@ type WorkflowPhaseEvent struct {
 	Detail     string
 	Background bool
 	Call       string
+	Stages     []string
+	Items      int
+	Round      int
+	Rounds     int
+	Run        string
+	Attempt    int
 }
 
 // BackgroundWorkflowCallPrefix leads the synthetic call id a background workflow's item children

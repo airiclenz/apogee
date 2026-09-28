@@ -561,7 +561,7 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	if scripts, ok := launch.runner.Scripts.(*recipeScripts); ok {
 		scripts.agent = host
 	}
-	observer := host.observeWorkflow(launch.runner, launch.turn, launch.plan.Name)
+	observer := host.observeWorkflow(launch.runner, launch.turn, launch.plan)
 	observer.background, observer.call = true, call.ID
 	// Set after observeWorkflow, which would wrap it to report the question before it is queued: a
 	// background question is reported once it waits in the queue (backgroundScope.announce).

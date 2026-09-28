@@ -271,7 +271,7 @@ func (a *Agent) runRecipe(ctx context.Context, turn int, call domain.ToolCall, a
 	if err != nil {
 		return workflow.Result{}, err
 	}
-	observer := a.observeWorkflow(runner, turn, plan.Name)
+	observer := a.observeWorkflow(runner, turn, plan)
 	observer.call = call.ID
 	result, err := runner.Run(ctx, plan)
 	observer.end(result, err)

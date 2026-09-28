@@ -479,6 +479,34 @@ func TestEncodeSkipsTheWireEvent(t *testing.T) {
 	}
 }
 
+// TestEncodeSkipsTheDriverOnlyWorkflowPhases pins that the two phases a drawing Driver alone reads
+// — an item's run starting and a stage finishing — write no workflow_phase line, so the NDJSON
+// stream keeps the phase list the headless manual documents.
+func TestEncodeSkipsTheDriverOnlyWorkflowPhases(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []domain.WorkflowPhase{domain.WorkflowItemStarted, domain.WorkflowStageFinished} {
+		t.Run(string(phase), func(t *testing.T) {
+			t.Parallel()
+
+			kind, base, data, ok := Encode(domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Turn: 1},
+				Phase:     phase,
+				Workflow:  "wf-1",
+				Stage:     "items",
+				Run:       "r1",
+			})
+
+			if ok {
+				t.Fatalf("Encode(%s) ok = true, want false", phase)
+			}
+			if kind != "" || data != nil || base != (domain.EventBase{}) {
+				t.Errorf("Encode(%s) = (%q, %+v, %v, false), want zero values", phase, kind, base, data)
+			}
+		})
+	}
+}
+
 // TestEncodeSeamClosed pins the seam_closed line's `data` over every seam: `seam` is the seam's
 // CLOSING-NOTICE name — the spelling a Reaction `on:` list and the manual use for the same fact —
 // never the seam's own, `fired` lists the firings in order and is `[]` rather than null when the

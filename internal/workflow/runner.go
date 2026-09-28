@@ -57,9 +57,15 @@ type ItemSpec struct {
 	// Stage is the stage the child runs for: its Returns, Context, Tools and Prompt are the child's.
 	// A verify child's Returns is the engine's `verdict` field, never the author's.
 	Stage Stage
-	// Item is the child's share of the stage, and Key the item's folder name.
+	// Item is the child's share of the stage, and Key the item's folder name. Two items of one
+	// stage may share a Key (a fanout list is not deduplicated); Index tells them apart.
 	Item Item
 	Key  string
+	// Index is the item's 0-based place in its stage.
+	Index int
+	// RepeatRound is the repeat round the stage runs in: 0 for its own run, n for a repeat's n-th
+	// re-run of it.
+	RepeatRound int
 	// Brief is the stage's `task:` with {item} and {out} rendered. A verify or merge child's Brief
 	// leads with the engine's own brief for the stage kind (verify refutes the item's claim, merge
 	// writes the report), the stage's brief after it. When the stage names its brief as a `prompt:`
@@ -101,26 +107,32 @@ type Observer interface {
 	ItemPhase(event ItemEvent)
 }
 
-// StageEvent is one stage's phase change.
+// StageEvent is one stage's phase change. RepeatRound is the repeat round the stage runs in (0 for
+// its own run, n for a repeat's n-th re-run of it). Items is the stage's item count on the running
+// phase of a stage that runs children — fanout, verify, merge — and 0 otherwise.
 type StageEvent struct {
-	Workflow string
-	Stage    string
-	Kind     StageKind
-	Phase    Phase
+	Workflow    string
+	Stage       string
+	Kind        StageKind
+	Phase       Phase
+	RepeatRound int
+	Items       int
 }
 
 // ItemEvent is one item's phase change. Attempt and Round are 1-based and zero for an item that
-// never ran (pending, or skipped on resume); Receipt is set once the item is done.
+// never ran (pending, or skipped on resume) — Round is the continuation round within the attempt;
+// RepeatRound is the stage's repeat round, as on StageEvent. Receipt is set once the item is done.
 type ItemEvent struct {
-	Workflow string
-	Stage    string
-	Index    int
-	Key      string
-	Label    string
-	Phase    Phase
-	Attempt  int
-	Round    int
-	Receipt  *Receipt
+	Workflow    string
+	Stage       string
+	Index       int
+	Key         string
+	Label       string
+	Phase       Phase
+	Attempt     int
+	Round       int
+	RepeatRound int
+	Receipt     *Receipt
 }
 
 // Runner runs a Workflow's stages over their items (ADR 0087): each item is one fresh child from
@@ -390,7 +402,7 @@ func (s *runState) runItems(ctx context.Context, stageIndex int, stage Stage, dr
 	if err != nil {
 		return nil, err
 	}
-	if err := s.setStagePhase(stageIndex, stage, PhaseRunning); err != nil {
+	if err := s.setStagePhase(stageIndex, stage, PhaseRunning, len(jobs)); err != nil {
 		return nil, err
 	}
 
@@ -447,7 +459,7 @@ func (s *runState) endStage(ctx context.Context, stageIndex int, stage Stage, re
 	if ctx.Err() != nil && hasUnfinished(results) {
 		phase = PhaseStopped
 	}
-	if err := s.setStagePhase(stageIndex, stage, phase); err != nil {
+	if err := s.setStagePhase(stageIndex, stage, phase, 0); err != nil {
 		return StageResult{}, err
 	}
 	return StageResult{Name: stage.Name, Kind: stage.Kind, Phase: phase, Items: results, Tally: tallyOf(results)}, nil
@@ -512,7 +524,7 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 	defer s.mu.Unlock()
 	s.status.Stages[stageIndex].Items = statuses
 	for index, job := range jobs {
-		s.notifyItem(stage, index, job, job.result.Phase, 0, 0, job.result.Receipt)
+		s.notifyItem(stageIndex, stage, index, job, job.result.Phase, 0, 0, job.result.Receipt)
 	}
 	return jobs, s.writeStatus()
 }
@@ -523,6 +535,7 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, index int, job itemJob) (ItemResult, error) {
 	runner := s.runner
 	result := job.result
+	repeatRound := s.repeatRound(stageIndex)
 	var (
 		prior []Round
 		last  Outcome
@@ -538,6 +551,7 @@ func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, ind
 		}
 		spec := ItemSpec{
 			Workflow: s.status.ID, Stage: stage, Item: job.item, Key: job.key,
+			Index: index, RepeatRound: repeatRound,
 			Brief: job.brief, Output: result.Output,
 			Attempt: attempt, Prior: append([]Round(nil), prior...),
 		}
@@ -642,23 +656,35 @@ func (s *runState) updateItem(stageIndex int, stage Stage, index int, job itemJo
 	defer s.mu.Unlock()
 	line := &s.status.Stages[stageIndex].Items[index]
 	line.Phase, line.Receipt = phase, receipt
-	s.notifyItem(stage, index, job, phase, attempt, round, receipt)
+	s.notifyItem(stageIndex, stage, index, job, phase, attempt, round, receipt)
 	return s.writeStatus()
 }
 
-// setStagePhase records a stage's phase change in status.json and tells the Observer.
-func (s *runState) setStagePhase(stageIndex int, stage Stage, phase Phase) error {
+// setStagePhase records a stage's phase change in status.json and tells the Observer; items is the
+// stage's item count, reported by a stage that runs children as it starts them (0 otherwise).
+func (s *runState) setStagePhase(stageIndex int, stage Stage, phase Phase, items int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status.Stages[stageIndex].Phase = phase
-	s.notifyStage(stage, phase)
+	s.notifyStage(stageIndex, stage, phase, items)
 	return s.writeStatus()
 }
 
-// notifyStage tells the Observer of a stage's phase. The caller holds mu.
-func (s *runState) notifyStage(stage Stage, phase Phase) {
+// repeatRound is the repeat round the stage at stageIndex runs in (startRound).
+func (s *runState) repeatRound(stageIndex int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status.Stages[stageIndex].Round
+}
+
+// notifyStage tells the Observer of a stage's phase, in the repeat round status.json records for
+// it. The caller holds mu.
+func (s *runState) notifyStage(stageIndex int, stage Stage, phase Phase, items int) {
 	if observer := s.runner.Observer; observer != nil {
-		observer.StagePhase(StageEvent{Workflow: s.status.ID, Stage: stage.Name, Kind: stage.Kind, Phase: phase})
+		observer.StagePhase(StageEvent{
+			Workflow: s.status.ID, Stage: stage.Name, Kind: stage.Kind, Phase: phase,
+			RepeatRound: s.status.Stages[stageIndex].Round, Items: items,
+		})
 	}
 }
 
@@ -670,15 +696,17 @@ func (s *runState) setWorkflowPhase(phase Phase) error {
 	return s.writeStatus()
 }
 
-// notifyItem tells the Observer of an item's phase. The caller holds mu.
-func (s *runState) notifyItem(stage Stage, index int, job itemJob, phase Phase, attempt, round int, receipt *Receipt) {
+// notifyItem tells the Observer of an item's phase, in its stage's repeat round. The caller holds
+// mu.
+func (s *runState) notifyItem(stageIndex int, stage Stage, index int, job itemJob, phase Phase, attempt, round int, receipt *Receipt) {
 	observer := s.runner.Observer
 	if observer == nil {
 		return
 	}
 	observer.ItemPhase(ItemEvent{
 		Workflow: s.status.ID, Stage: stage.Name, Index: index, Key: job.key, Label: job.item.Label,
-		Phase: phase, Attempt: attempt, Round: round, Receipt: receipt,
+		Phase: phase, Attempt: attempt, Round: round, RepeatRound: s.status.Stages[stageIndex].Round,
+		Receipt: receipt,
 	})
 }
 

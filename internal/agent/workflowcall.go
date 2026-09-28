@@ -258,7 +258,7 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		id, err := a.startBackground(backgroundLaunch{plan: plan, runner: runner, tool: tools.FanOutToolName, turn: turn, seat: seat})
 		return a.backgroundCallResult(call.ID, id, err)
 	}
-	observer := a.observeWorkflow(runner, turn, plan.Name)
+	observer := a.observeWorkflow(runner, turn, plan)
 	observer.call = call.ID
 	outcome, err := runner.Run(ctx, plan)
 	observer.end(outcome, err)
@@ -538,15 +538,20 @@ func workflowAnswer(result workflow.Result) string {
 
 // workflowObserver turns one Workflow run's Runner notifications into the WorkflowPhaseEvents this
 // Agent emits (domain.WorkflowPhaseEvent), stamped with this Agent's own identity at the Turn that
-// started the Workflow: started on the first notification that names the Workflow's id, a stage
-// started for each stage that begins running, an item finished for each item that ends on a
-// receipt, waiting while an `ask` stage's question is out, and — from end — finished, stopped or
-// failed. The Runner serialises its Observer calls, but an ask and the run's end arrive from the
-// Run caller, so mu guards the started state.
+// started the Workflow: started — with the plan's stage names — on the first notification that
+// names the Workflow's id, a stage started and finished for each stage that begins and ends, an
+// item started for each item child the spawner mints a run for (itemStarted), an item finished for
+// each item that ends on a receipt, waiting while an `ask` stage's question is out, and — from end
+// — finished, stopped or failed. The Runner serialises its Observer calls, but an ask, the run's
+// end and every item child's start arrive from other goroutines, so mu guards the observer's state.
 type workflowObserver struct {
 	agent *Agent
 	turn  int
 	name  string
+	// stages is the plan's stage names in order (domain.WorkflowPhaseEvent.Stages), and rounds the
+	// most rounds each stage a repeat re-runs can run, its own included (…Rounds).
+	stages []string
+	rounds map[string]int
 	// background marks every event a background workflow's observer emits (domain.
 	// WorkflowPhaseEvent.Background); driveBackground sets it before the run starts.
 	background bool
@@ -557,33 +562,87 @@ type workflowObserver struct {
 
 	mu sync.Mutex
 	id string // the Workflow's id, once started was emitted
+	// runs is each item's runs so far, keyed by its place — never by its Key, which two items of
+	// one stage can share.
+	runs map[itemPlace]itemRuns
 }
 
-// observeWorkflow installs a workflowObserver on runner — as its Observer, and around its Asker
+// itemPlace names one item of one round of one stage.
+type itemPlace struct {
+	stage       string
+	repeatRound int
+	index       int
+}
+
+// itemRuns is how many runs of one item have started and the run id of the latest, "" when none.
+type itemRuns struct {
+	attempts int
+	run      string
+}
+
+// observeWorkflow installs a workflowObserver on runner — as its Observer, on its Spawner when that
+// is this package's (so each item child's start is reported with its run id), and around its Asker
 // when it has one, so an `ask` stage's question is reported before it is put — and returns it for
-// the caller to end once Run returns. name is the Workflow's name the events carry.
-func (a *Agent) observeWorkflow(runner *workflow.Runner, turn int, name string) *workflowObserver {
-	observer := &workflowObserver{agent: a, turn: turn, name: name}
+// the caller to end once Run returns. plan is the Workflow's plan: its name and its stages' names
+// are what the events carry.
+func (a *Agent) observeWorkflow(runner *workflow.Runner, turn int, plan workflow.Plan) *workflowObserver {
+	observer := &workflowObserver{
+		agent: a, turn: turn, name: plan.Name,
+		stages: stageNames(plan), rounds: repeatedRounds(plan), runs: map[itemPlace]itemRuns{},
+	}
 	runner.Observer = observer
+	if spawner, ok := runner.Spawner.(*workflowSpawner); ok {
+		spawner.observer = observer
+	}
 	if runner.Asker != nil {
 		runner.Asker = observedAsker{inner: runner.Asker, observer: observer}
 	}
 	return observer
 }
 
-// StagePhase reports a stage that began running; a stage's other phases add nothing the item and
-// end phases do not.
+// stageNames is plan's stage names in order.
+func stageNames(plan workflow.Plan) []string {
+	names := make([]string, len(plan.Stages))
+	for index, stage := range plan.Stages {
+		names[index] = stage.Name
+	}
+	return names
+}
+
+// repeatedRounds maps each stage a repeat stage re-runs to the most rounds it can run: its own run
+// plus the repeat's `max:`, the larger when two repeats name it. A repeat with no cap adds nothing.
+func repeatedRounds(plan workflow.Plan) map[string]int {
+	rounds := map[string]int{}
+	for _, stage := range plan.Stages {
+		if stage.Kind == workflow.StageRepeat && stage.Max > 0 {
+			rounds[stage.Repeat] = max(rounds[stage.Repeat], stage.Max+1)
+		}
+	}
+	return rounds
+}
+
+// StagePhase reports a stage that began running, with its item count, and one that ended — done,
+// failed, stopped or skipped — each in its round.
 func (o *workflowObserver) StagePhase(event workflow.StageEvent) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.startLocked(event.Workflow)
-	if event.Phase != workflow.PhaseRunning {
+	round := event.RepeatRound + 1
+	switch event.Phase {
+	case workflow.PhasePending:
 		return
+	case workflow.PhaseRunning:
+		o.emitLocked(domain.WorkflowPhaseEvent{
+			Phase: domain.WorkflowStageStarted, Stage: event.Stage, Round: round,
+			Items: event.Items, Rounds: o.rounds[event.Stage],
+		})
+	default:
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStageFinished, Stage: event.Stage, Round: round})
 	}
-	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStageStarted, Stage: event.Stage})
 }
 
-// ItemPhase reports an item that ended on a receipt — a resumed one, which never ran, included.
+// ItemPhase reports an item that ended on a receipt — a resumed one, which never ran, included —
+// naming its latest run, "" when none began.
 func (o *workflowObserver) ItemPhase(event workflow.ItemEvent) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -591,9 +650,29 @@ func (o *workflowObserver) ItemPhase(event workflow.ItemEvent) {
 	if event.Phase != workflow.PhaseDone || event.Receipt == nil {
 		return
 	}
+	runs := o.runs[itemPlace{stage: event.Stage, repeatRound: event.RepeatRound, index: event.Index}]
 	o.emitLocked(domain.WorkflowPhaseEvent{
 		Phase: domain.WorkflowItemFinished, Stage: event.Stage, Item: event.Label, Index: event.Index,
 		Resumed: event.Attempt == 0, Receipt: event.Receipt.Domain(),
+		Round: event.RepeatRound + 1, Run: runs.run, Attempt: runs.attempts,
+	})
+}
+
+// itemStarted reports one run of an item beginning: the spawner calls it once it has minted the
+// child's run id and before the child's own started phase. Every call is a new attempt of the item,
+// a retry's and a continuation's alike.
+func (o *workflowObserver) itemStarted(spec workflow.ItemSpec, run string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.startLocked(spec.Workflow)
+	place := itemPlace{stage: spec.Stage.Name, repeatRound: spec.RepeatRound, index: spec.Index}
+	runs := o.runs[place]
+	runs.attempts++
+	runs.run = run
+	o.runs[place] = runs
+	o.emitLocked(domain.WorkflowPhaseEvent{
+		Phase: domain.WorkflowItemStarted, Stage: spec.Stage.Name, Item: spec.Item.Label, Index: spec.Index,
+		Round: spec.RepeatRound + 1, Run: run, Attempt: runs.attempts,
 	})
 }
 
@@ -632,14 +711,14 @@ func (o *workflowObserver) end(result workflow.Result, err error) {
 	}
 }
 
-// startLocked emits started the first time a notification names the Workflow's id. The caller
-// holds mu.
+// startLocked emits started, with the stage names, the first time a notification names the
+// Workflow's id. The caller holds mu.
 func (o *workflowObserver) startLocked(id string) {
 	if o.id != "" || id == "" {
 		return
 	}
 	o.id = id
-	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted})
+	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Stages: slices.Clone(o.stages)})
 }
 
 // emitLocked stamps event with this Agent's identity, the Workflow's id and name, and emits it.

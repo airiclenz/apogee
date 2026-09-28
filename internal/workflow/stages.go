@@ -427,7 +427,7 @@ func (s *runState) settleStage(index int, stage Stage, phase Phase, note string,
 	if lines != nil {
 		line.Items = lines
 	}
-	s.notifyStage(stage, phase)
+	s.notifyStage(index, stage, phase, 0)
 	return stageResult, s.writeStatus()
 }
 
@@ -560,7 +560,7 @@ func fanoutItems(plan Plan, index int, stageItems map[int][]Item) []Item {
 // cannot be read fails the stage with no items; the workflow goes on.
 func (s *runState) runPick(plan Plan, index int, stageItems map[int][]Item, result *Result) (StageResult, error) {
 	stage := plan.Stages[index]
-	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+	if err := s.setStagePhase(index, stage, PhaseRunning, 0); err != nil {
 		return StageResult{}, err
 	}
 	entries, failure := s.pickEntries(stage, result)
@@ -643,7 +643,7 @@ func (s *runState) runScript(ctx context.Context, index, round int, stage Stage)
 	if replayed, found, err := s.replayStage(index, round, stage); found || err != nil {
 		return replayed, err
 	}
-	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+	if err := s.setStagePhase(index, stage, PhaseRunning, 0); err != nil {
 		return StageResult{}, err
 	}
 	dir, err := s.runner.Store.Dir(s.status.ID)
@@ -737,7 +737,7 @@ func (s *runState) runAsk(ctx context.Context, index, round int, stage Stage) (S
 	if replayed, found, err := s.replayStage(index, round, stage); found || err != nil {
 		return replayed, err
 	}
-	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+	if err := s.setStagePhase(index, stage, PhaseRunning, 0); err != nil {
 		return StageResult{}, err
 	}
 	answer, note, answered := stage.Default, noOneToAskNote, false
@@ -825,7 +825,7 @@ func (s *runState) runRepeat(ctx context.Context, plan Plan, index int, stageIte
 	if target < 0 || target >= len(result.Stages) {
 		return StageResult{}, fmt.Errorf("workflow: stage %q: the stage it repeats, %q, has not run", stage.Name, stage.Repeat)
 	}
-	if err := s.setStagePhase(index, stage, PhaseRunning); err != nil {
+	if err := s.setStagePhase(index, stage, PhaseRunning, 0); err != nil {
 		return StageResult{}, err
 	}
 

@@ -293,3 +293,191 @@ func TestWorkflowSpawn_TranscriptFileIsWritten(t *testing.T) {
 		t.Errorf("transcript = %s, want the task and the finish call", data)
 	}
 }
+
+// observedRun runs plan through a Runner over a's workflow spawner, with the given second chances,
+// observed as a fan_out's Workflow is, and returns the phases sink recorded.
+func observedRun(t *testing.T, a *Agent, sink *recordingSink, plan workflow.Plan, retries, continuations int) []domain.WorkflowPhaseEvent {
+	t.Helper()
+	store, err := workflow.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	runner := &workflow.Runner{
+		Spawner:       a.newWorkflowSpawner(0, fanOutCall, nil),
+		Store:         store,
+		Workspace:     fstest.MapFS{},
+		Retries:       retries,
+		Continuations: continuations,
+	}
+	observer := a.observeWorkflow(runner, 0, plan)
+	observer.call = fanOutCall.ID
+	result, err := runner.Run(context.Background(), plan)
+	observer.end(result, err)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return workflowPhaseEvents(sink.events)
+}
+
+// phasesAt keeps the phases whose Phase is one of wanted, in order.
+func phasesAt(phases []domain.WorkflowPhaseEvent, wanted ...domain.WorkflowPhase) []domain.WorkflowPhaseEvent {
+	var kept []domain.WorkflowPhaseEvent
+	for _, phase := range phases {
+		if slices.Contains(wanted, phase.Phase) {
+			kept = append(kept, phase)
+		}
+	}
+	return kept
+}
+
+// fanoutPlan is a one-stage plan auditing items.
+func fanoutPlan(items ...string) workflow.Plan {
+	return workflow.Plan{Name: "audit", Stages: []workflow.Stage{{
+		Name: "find", Kind: workflow.StageFanout, Task: "audit {item}",
+		Over: &workflow.ItemSource{List: items},
+	}}}
+}
+
+func TestWorkflowSpawn_ARepeatedStageReportsEachRound(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore, nil,
+		finishTurn("f1", `{"status":"ok","summary":"first round"}`),
+		finishTurn("f2", `{"status":"ok","summary":"second round"}`),
+	)
+	plan := fanoutPlan("a.go")
+	plan.Stages = append(plan.Stages, workflow.Stage{Name: "again", Kind: workflow.StageRepeat, Repeat: "find", When: "ok > 0", Max: 1})
+
+	phases := observedRun(t, a, sink, plan, 0, 0)
+
+	type stagePhase struct {
+		phase  domain.WorkflowPhase
+		stage  string
+		round  int
+		rounds int
+	}
+	var stages []stagePhase
+	for _, phase := range phasesAt(phases, domain.WorkflowStageStarted, domain.WorkflowStageFinished) {
+		stages = append(stages, stagePhase{phase.Phase, phase.Stage, phase.Round, phase.Rounds})
+	}
+	want := []stagePhase{
+		{domain.WorkflowStageStarted, "find", 1, 2},
+		{domain.WorkflowStageFinished, "find", 1, 0},
+		{domain.WorkflowStageStarted, "again", 1, 0},
+		{domain.WorkflowStageStarted, "find", 2, 2},
+		{domain.WorkflowStageFinished, "find", 2, 0},
+		{domain.WorkflowStageFinished, "again", 1, 0},
+	}
+	if !slices.Equal(stages, want) {
+		t.Fatalf("stage phases = %+v, want %+v", stages, want)
+	}
+	items := phasesAt(phases, domain.WorkflowItemStarted, domain.WorkflowItemFinished)
+	if len(items) != 4 {
+		t.Fatalf("item phases = %v, want a started and a finished per round", phaseNames(items))
+	}
+	for round := 1; round <= 2; round++ {
+		started, finished := items[2*(round-1)], items[2*(round-1)+1]
+		if started.Round != round || started.Attempt != 1 || finished.Round != round || finished.Run != started.Run {
+			t.Errorf("round %d: started %+v, finished %+v; want round %d, attempt 1, the same run", round, started, finished, round)
+		}
+	}
+	if items[0].Run == items[2].Run {
+		t.Errorf("both rounds ran as %q, want a run of each round's own", items[0].Run)
+	}
+}
+
+func TestWorkflowSpawn_ARetriedItemReportsEachAttempt(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore, nil,
+		contentTurn("I looked around"), // ends without a receipt: the item is retried
+		finishTurn("f1", `{"status":"ok","summary":"done"}`),
+	)
+
+	phases := observedRun(t, a, sink, fanoutPlan("a.go"), 1, 0)
+
+	assertAttempts(t, phases, "ok")
+}
+
+func TestWorkflowSpawn_AContinuedItemReportsEachRun(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore,
+		func(cfg *domain.Config) { cfg.Delegation.MaxSteps = 1 },
+		narratedToolCallTurn("t0", "read_thing", `{"n":0}`, "reading"),
+		contentTurn(childFoldSummary),
+		finishTurn("f1", `{"status":"partial","summary":"one file read"}`),
+		finishTurn("f2", `{"status":"ok","summary":"done"}`),
+	)
+
+	phases := observedRun(t, a, sink, fanoutPlan("a.go"), 0, 1)
+
+	assertAttempts(t, phases, "ok")
+}
+
+// assertAttempts checks an item that ran twice: two item started phases on attempts 1 and 2, each
+// with a run of its own, and one item finished on status naming the second run.
+func assertAttempts(t *testing.T, phases []domain.WorkflowPhaseEvent, status string) {
+	t.Helper()
+	started := phasesAt(phases, domain.WorkflowItemStarted)
+	finished := phasesAt(phases, domain.WorkflowItemFinished)
+	if len(started) != 2 || len(finished) != 1 {
+		t.Fatalf("item phases = %v, want two started and one finished", phaseNames(phasesAt(phases, domain.WorkflowItemStarted, domain.WorkflowItemFinished)))
+	}
+	if started[0].Attempt != 1 || started[1].Attempt != 2 || started[0].Run == "" || started[0].Run == started[1].Run {
+		t.Errorf("item started = %+v, %+v; want attempts 1 and 2, each on a run of its own", started[0], started[1])
+	}
+	if finished[0].Run != started[1].Run || finished[0].Receipt.Status != status {
+		t.Errorf("item finished = %+v, want the second run %q on status %s", finished[0], started[1].Run, status)
+	}
+}
+
+func TestWorkflowSpawn_ItemsSharingAKeyEachNameTheirOwnRun(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore, nil,
+		finishTurn("f1", `{"status":"ok","summary":"first"}`),
+		finishTurn("f2", `{"status":"ok","summary":"second"}`),
+	)
+
+	phases := observedRun(t, a, sink, fanoutPlan("a.go", "a.go"), 0, 0)
+
+	runs := map[int]string{}
+	for _, phase := range phasesAt(phases, domain.WorkflowItemStarted) {
+		runs[phase.Index] = phase.Run
+	}
+	if len(runs) != 2 || runs[0] == runs[1] {
+		t.Fatalf("item runs = %v, want one run for each of the two items", runs)
+	}
+	finished := phasesAt(phases, domain.WorkflowItemFinished)
+	if len(finished) != 2 {
+		t.Fatalf("item finished phases = %d, want 2", len(finished))
+	}
+	for _, phase := range finished {
+		if phase.Run != runs[phase.Index] {
+			t.Errorf("item #%d finished naming run %q, want its own run %q", phase.Index, phase.Run, runs[phase.Index])
+		}
+	}
+}
+
+func TestWorkflowSpawn_ASpawnRefusedBeforeItsRunReportsNoStart(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore, nil)
+	a.depth = a.maxDepth()
+
+	phases := observedRun(t, a, sink, fanoutPlan("a.go"), 0, 0)
+
+	if started := phasesAt(phases, domain.WorkflowItemStarted); len(started) != 0 {
+		t.Errorf("item started phases = %+v, want none for a child that was never built", started)
+	}
+	finished := phasesAt(phases, domain.WorkflowItemFinished)
+	if len(finished) != 1 || finished[0].Run != "" || finished[0].Receipt.Status != "blocked" {
+		t.Errorf("item finished phases = %+v, want one blocked item naming no run", finished)
+	}
+}

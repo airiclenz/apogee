@@ -883,9 +883,106 @@ func phaseNames(events []domain.WorkflowPhaseEvent) []domain.WorkflowPhase {
 	return names
 }
 
-// TestWorkflowCall_EmitsItsPhases pins the events a fan_out's Workflow reports: started, the item
-// stage starting, one item finished per item with its receipt, then finished — every one naming
-// the one Workflow and stamped with the parent's own identity.
+// stageShape is one stage a Workflow's phases report: its name and its item count.
+type stageShape struct {
+	name  string
+	items int
+}
+
+// assertWorkflowShape checks that events report one Workflow that ran stages to its end, in order:
+// started with the stage names; for each stage a stage started with its item count, then one item
+// started and one item finished per item — however the items interleave — then a stage finished;
+// and finished last.
+func assertWorkflowShape(t *testing.T, events []domain.Event, stages []stageShape) {
+	t.Helper()
+	phases := workflowPhaseEvents(events)
+	if len(phases) < 2 || phases[0].Phase != domain.WorkflowStarted || phases[len(phases)-1].Phase != domain.WorkflowFinished {
+		t.Fatalf("workflow phases = %v, want started first and finished last", phaseNames(phases))
+	}
+	names := make([]string, len(stages))
+	for index, stage := range stages {
+		names[index] = stage.name
+	}
+	if !slices.Equal(phases[0].Stages, names) {
+		t.Errorf("started carries stages %v, want %v", phases[0].Stages, names)
+	}
+	rest := phases[1 : len(phases)-1]
+	for _, stage := range stages {
+		if len(rest) == 0 || rest[0].Phase != domain.WorkflowStageStarted || rest[0].Stage != stage.name {
+			t.Fatalf("workflow phases = %v, want stage %q to start next", phaseNames(phases), stage.name)
+		}
+		if rest[0].Items != stage.items || rest[0].Round != 1 {
+			t.Errorf("stage %q started with items %d, round %d; want items %d, round 1", stage.name, rest[0].Items, rest[0].Round, stage.items)
+		}
+		end := slices.IndexFunc(rest, func(phase domain.WorkflowPhaseEvent) bool {
+			return phase.Phase == domain.WorkflowStageFinished && phase.Stage == stage.name
+		})
+		if end < 0 {
+			t.Fatalf("workflow phases = %v, want stage %q to finish", phaseNames(phases), stage.name)
+		}
+		assertItemRuns(t, events, rest[1:end], stage)
+		rest = rest[end+1:]
+	}
+	if len(rest) != 0 {
+		t.Errorf("phases after the last stage = %v, want none before finished", phaseNames(rest))
+	}
+}
+
+// assertItemRuns checks one stage's item phases: one item started and one item finished per item,
+// every one in the stage, each finished naming the run its item's started opened, and each started
+// reported before that run's own SubAgentStarted.
+func assertItemRuns(t *testing.T, events []domain.Event, items []domain.WorkflowPhaseEvent, stage stageShape) {
+	t.Helper()
+	runs := map[int]string{}
+	finished := 0
+	for _, phase := range items {
+		if phase.Stage != stage.name || phase.Round != 1 {
+			t.Errorf("%s %+v, want stage %q in round 1", phase.Phase, phase, stage.name)
+		}
+		switch phase.Phase {
+		case domain.WorkflowItemStarted:
+			if phase.Run == "" || phase.Attempt != 1 {
+				t.Errorf("item_started = %+v, want a run id on attempt 1", phase)
+			}
+			if !startsBeforeItsChild(events, phase.Run) {
+				t.Errorf("item_started for run %q is not reported before that run's SubAgentStarted", phase.Run)
+			}
+			runs[phase.Index] = phase.Run
+		case domain.WorkflowItemFinished:
+			finished++
+			if run, ok := runs[phase.Index]; !ok || phase.Run != run {
+				t.Errorf("item_finished #%d names run %q, want the run its item_started opened (%q)", phase.Index, phase.Run, run)
+			}
+		default:
+			t.Errorf("stage %q reported %s between its start and finish, want item phases only", stage.name, phase.Phase)
+		}
+	}
+	if len(runs) != stage.items || finished != stage.items {
+		t.Errorf("stage %q reported %d items started and %d finished, want %d each", stage.name, len(runs), finished, stage.items)
+	}
+}
+
+// startsBeforeItsChild reports whether run's item started phase comes before the SubAgentStarted
+// its child emits under that run id.
+func startsBeforeItsChild(events []domain.Event, run string) bool {
+	isItemSeen := false
+	for _, event := range events {
+		switch e := event.(type) {
+		case domain.WorkflowPhaseEvent:
+			isItemSeen = isItemSeen || (e.Phase == domain.WorkflowItemStarted && e.Run == run)
+		case domain.SubAgentPhaseEvent:
+			if e.Phase == domain.SubAgentStarted && e.RunID == run {
+				return isItemSeen
+			}
+		}
+	}
+	return false
+}
+
+// TestWorkflowCall_EmitsItsPhases pins the events a fan_out's Workflow reports: started with its
+// one stage, the item stage starting with its item count, each item's run starting under its child's
+// run id and finishing on its receipt, the stage finishing, then finished — every one naming the one
+// Workflow and stamped with the parent's own identity.
 func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
 	t.Parallel()
 
@@ -899,14 +996,8 @@ func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
 
 	runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
 
+	assertWorkflowShape(t, sink.events, []stageShape{{name: fanOutStageName, items: 2}})
 	phases := workflowPhaseEvents(sink.events)
-	want := []domain.WorkflowPhase{
-		domain.WorkflowStarted, domain.WorkflowStageStarted,
-		domain.WorkflowItemFinished, domain.WorkflowItemFinished, domain.WorkflowFinished,
-	}
-	if !slices.Equal(phaseNames(phases), want) {
-		t.Fatalf("workflow phases = %v, want %v", phaseNames(phases), want)
-	}
 	id := phases[0].Workflow
 	if id == "" || !slices.Contains(workflowFolders(t, cfg.ScratchDir), id) {
 		t.Errorf("started names workflow %q, want the id of its folder %v", id, workflowFolders(t, cfg.ScratchDir))
@@ -944,7 +1035,8 @@ func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
 }
 
 // TestWorkflowCall_ACancelEndsItsPhasesStopped pins a cancelled fan_out's events: the item that
-// finished is reported, and the Workflow ends stopped rather than finished.
+// finished is reported, the stopped item's run is reported started and never finished, the stage
+// finishes, and the Workflow ends stopped rather than finished.
 func TestWorkflowCall_ACancelEndsItsPhasesStopped(t *testing.T) {
 	t.Parallel()
 
@@ -960,15 +1052,60 @@ func TestWorkflowCall_ACancelEndsItsPhasesStopped(t *testing.T) {
 	runWorkflowParent(t, ctx, cfg, up, "please fan out")
 
 	phases := workflowPhaseEvents(sink.events)
-	want := []domain.WorkflowPhase{
-		domain.WorkflowStarted, domain.WorkflowStageStarted, domain.WorkflowItemFinished, domain.WorkflowStopped,
+	if len(phases) < 3 || phases[0].Phase != domain.WorkflowStarted || phases[1].Phase != domain.WorkflowStageStarted {
+		t.Fatalf("workflow phases = %v, want started then the stage started", phaseNames(phases))
 	}
-	if !slices.Equal(phaseNames(phases), want) {
-		t.Fatalf("workflow phases = %v, want %v", phaseNames(phases), want)
+	last := len(phases) - 1
+	if phases[last].Phase != domain.WorkflowStopped || phases[last-1].Phase != domain.WorkflowStageFinished {
+		t.Fatalf("workflow phases = %v, want the stage finished then stopped at the end", phaseNames(phases))
 	}
-	if phases[2].Item != "alpha" {
-		t.Errorf("item_finished = %+v, want alpha's", phases[2])
+	started, finished := map[string]int{}, map[string]int{}
+	for _, phase := range phases {
+		switch phase.Phase {
+		case domain.WorkflowItemStarted:
+			started[phase.Item]++
+		case domain.WorkflowItemFinished:
+			finished[phase.Item]++
+		}
 	}
+	if started["alpha"] != 1 || finished["alpha"] != 1 {
+		t.Errorf("alpha started %d and finished %d times, want once each", started["alpha"], finished["alpha"])
+	}
+	if started["beta"] != 1 || finished["beta"] != 0 {
+		t.Errorf("stopped beta started %d and finished %d times, want started once and never finished", started["beta"], finished["beta"])
+	}
+}
+
+// TestWorkflowCall_ARecipeReportsEachStagesShape pins the phases of a two-stage recipe — one item,
+// then three: each stage starts with its own item count, each item's run is reported under the run
+// id its child carries, and each stage finishes before the next starts.
+func TestWorkflowCall_ARecipeReportsEachStagesShape(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	recipe := workflow.Recipe{
+		ID: "survey",
+		Plan: workflow.Plan{Name: "survey", Stages: []workflow.Stage{
+			{Name: "scope", Kind: workflow.StageFanout, Task: "survey {item} for the plan", Over: &workflow.ItemSource{List: []string{"alpha"}}, Returns: workflow.ReceiptSpec{"count": "int"}},
+			{Name: "items", Kind: workflow.StageFanout, Task: "check {item} deeply", Over: &workflow.ItemSource{List: []string{"one", "two", "three"}}, Returns: workflow.ReceiptSpec{"count": "int"}},
+		}},
+		Dir: "/skills/survey",
+	}
+	cfg := recipeConfig(t, sink, recipe)
+	up := (&workflowResponder{}).
+		route("please run it", nil, toolCallScript("fo1", tools.FanOutToolName, `{"recipe":"survey"}`)).
+		route("please run it", nil, contentScript("all done")).
+		route("survey alpha", nil, finishScript("f0", "scoped")).
+		route("check one", nil, finishScript("f1", "one is fine")).
+		route("check two", nil, finishScript("f2", "two is fine")).
+		route("check three", nil, finishScript("f3", "three is fine"))
+
+	runWorkflowParent(t, context.Background(), cfg, up, "please run it")
+
+	if got := callResult(t, sink.events, "fo1"); got.IsError {
+		t.Fatalf("fan_out result is an error: %q", got.Content)
+	}
+	assertWorkflowShape(t, sink.events, []stageShape{{name: "scope", items: 1}, {name: "items", items: 3}})
 }
 
 // fixedAsker answers every question with answer.
@@ -989,7 +1126,7 @@ func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	runner := &workflow.Runner{Asker: fixedAsker{answer: "yes"}}
-	observer := a.observeWorkflow(runner, 3, "audit")
+	observer := a.observeWorkflow(runner, 3, workflow.Plan{Name: "audit"})
 
 	answer, err := runner.Asker.Ask(context.Background(), workflow.Question{Workflow: "wf-1", Stage: "confirm", Text: "Go on?"})
 	observer.end(workflow.Result{ID: "wf-1"}, errors.New("disk full"))
@@ -1016,7 +1153,7 @@ func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	b.observeWorkflow(&workflow.Runner{}, 1, "audit").end(workflow.Result{}, errors.New("invalid plan"))
+	b.observeWorkflow(&workflow.Runner{}, 1, workflow.Plan{Name: "audit"}).end(workflow.Result{}, errors.New("invalid plan"))
 	if got := workflowPhaseEvents(quiet.events); len(got) != 0 {
 		t.Errorf("a run that failed before it had an id emitted %v, want nothing", phaseNames(got))
 	}
