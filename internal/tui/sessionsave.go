@@ -60,13 +60,13 @@ func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
 }
 
 // persist builds a savePayload around sess and schedules it, gated on there being a wired host and
-// a sent prompt (hasPrompt). It is the entry the per-Turn snapshot (turnSnapshotMsg) and the idle
+// something worth saving (worthSaving). It is the entry the per-Turn snapshot (turnSnapshotMsg) and the idle
 // finishers both funnel through, so the "worth saving?" gate lives in one place. Those callers only
 // run inside a Turn, which only a prompt opens, so the gate never fires here in practice — it is
 // carried so that every save in the package answers to the same one predicate. It returns the Cmd
 // to run (nil when nothing was scheduled).
 func (m *Model) persist(sess domain.Session) tea.Cmd {
-	if m.sessions == nil || !m.transcript.hasPrompt() {
+	if m.sessions == nil || !m.worthSaving() {
 		return nil
 	}
 	p, ok := m.snapshotPayload(sess)
@@ -80,10 +80,12 @@ func (m *Model) persist(sess domain.Session) tea.Cmd {
 // because every caller is a terminal boundary at which the worker has returned and the Update
 // loop owns the engine again (C1). Three callers share it: the idle finisher (finishWorker), the
 // clean quit's closing flush, and the /clear|/new close of the outgoing session. Best-effort like
-// persist: a Snapshot error, an unwired host, or a transcript that holds no prompt yet simply
+// persist: a Snapshot error, an unwired host, or a session with nothing worth resuming simply
 // schedules nothing — a launch that only ran slash commands has produced notes and chrome but
 // nothing anyone would resume, so quitting it, or clearing it, must not file a record reading 0
-// messages (hasPrompt).
+// messages (worthSaving). A session whose only work is a background workflow still running IS
+// worth resuming — the snapshot carries it, and a resume starts it again from its folder — so a
+// `/bg`-only session is saved at quit like one that has spoken.
 //
 // The two closing callers used to call the host synchronously instead, on the reasoning that the
 // record must be on disk before the program exits or the host rotates. It bought that at the cost of
@@ -92,7 +94,7 @@ func (m *Model) persist(sess domain.Session) tea.Cmd {
 // session it was closing. Both now schedule here and wait for the queue instead (quit,
 // startNewSession).
 func (m *Model) saveAtIdle() tea.Cmd {
-	if m.sessions == nil || !m.transcript.hasPrompt() {
+	if m.sessions == nil || !m.worthSaving() {
 		return nil
 	}
 	sess, err := m.eng.Snapshot()
@@ -100,6 +102,13 @@ func (m *Model) saveAtIdle() tea.Cmd {
 		return nil
 	}
 	return m.persist(sess)
+}
+
+// worthSaving is the one "worth saving?" gate every save answers to: a prompt was sent
+// (hasPrompt), or a background workflow is running — its snapshot entry is what a resume starts it
+// again from.
+func (m Model) worthSaving() bool {
+	return m.transcript.hasPrompt() || m.workflowsRunning()
 }
 
 // ----------------------------------------------------------------------------
@@ -250,12 +259,15 @@ type recordWrite struct {
 // scrollback prefix through it already projected onto the neutral wire form (entriesToRecords over
 // transcript.prefixThrough), the title the child starts under, and the parent's metadata as the
 // renderer holds it. The host stamps the child's ParentID from its own identity and takes parent
-// only as the fallback (SessionHost.Fork). Plain values only, like the rest of recordWrite.
+// only as the fallback (SessionHost.Fork). keep is the human's `n` to "stop running workflows?",
+// carried to the restore that switches to the child (foldFork). Plain values only, like the rest of
+// recordWrite.
 type forkPayload struct {
 	sess    domain.Session
 	entries []session.Entry
 	title   string
 	parent  session.Meta
+	keep    bool
 }
 
 // forkResult is what a landed fork hands the fold: the child's metadata as the host minted it, and

@@ -85,10 +85,11 @@ func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 // terminal fold, which drains again, so a /clear queued behind a /compact still runs, in order,
 // once the compaction lands. A deferred quit runs nothing: the queued commands are
 // session-ephemeral like the staged rows (ADR 0025), and a program that is exiting has no session
-// to run them in.
+// to run them in. A queued /clear that asks whether to stop the running workflows stops the drain
+// too: the commands behind it wait for the answer, whose fold drains again (answerBoundary).
 func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	for len(m.deferredCommands) > 0 && !m.busy() && !m.bgLaunching && !m.quitting {
+	for len(m.deferredCommands) > 0 && !m.busy() && !m.bgLaunching && !m.quitting && !m.boundaryConfirmOpen() {
 		parsed := m.deferredCommands[0]
 		m.deferredCommands = m.deferredCommands[1:]
 		if len(m.deferredCommands) == 0 {
@@ -164,12 +165,27 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 // is seeded into the Agent the LATER bind builds, so a fresh-looking view there would be lying about
 // an engine that comes back remembering the whole resumed conversation — the same lie the error path
 // above refuses to tell. With a resume pending the branch is skipped and today's refusal note stands.
+//
+// With background workflows running it asks first — `stop running workflows? (y/n)`, the boundary
+// confirm below — and clears on the answer (clearSession): `y` lets the clear stop them, `n` keeps
+// them running and their finish notes for the new conversation (ADR 0089 D5).
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if m.prebound() && m.opts.Resumed == nil {
 		// Nothing to flush, abort or clear while no engine exists, so the reset is the view's alone.
 		m.resetSessionView()
 		return m, nil
 	}
+	if m.workflowsRunning() {
+		return m.confirmBoundary(pendingBoundary{kind: boundaryClear})
+	}
+	return m.clearSession(false)
+}
+
+// clearSession is startNewSession past its confirm: the flush, the abort, the clear and the rotate
+// described there. keep is the human's `n` — the engine is marked to keep its background workflows
+// just before the clear (Engine.KeepWorkflows), which a clear otherwise stops, and the fresh view
+// says they are still running.
+func (m Model) clearSession(keep bool) (tea.Model, tea.Cmd) {
 	cmd := m.saveAtIdle() // flush the outgoing session into history before it closes (queued, gated)
 	if m.eng.InExchange() {
 		// A session interrupted mid-task cannot be cleared — ClearContext refuses mid-Exchange with
@@ -179,6 +195,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		// the conversation to be gone, finished Turns included, where a cancel or a fresh message on
 		// the interrupted session keeps them (Engine.SettleExchange).
 		m.eng.AbortExchange()
+	}
+	if keep {
+		m.eng.KeepWorkflows()
 	}
 	if err := m.eng.ClearContext(); err != nil {
 		m.transcript.addNote("could not clear context: " + err.Error())
@@ -191,7 +210,137 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		cmd = rotate
 	}
 	m.resetSessionView()
+	if keep {
+		m.transcript.addNote(workflowsKeptNote)
+	}
 	return m, cmd
+}
+
+// ----------------------------------------------------------------------------
+// The boundary confirm: stop or keep the running workflows (ADR 0089 D5)
+// ----------------------------------------------------------------------------
+//
+// A session boundary — /clear (and /new), a /sessions switch, a /fork — ends the conversation the
+// running background workflows report to, so with any running it first asks whether to stop them.
+// The question is a picker kind (pickerWorkflowBoundary, the start-up key-migration precedent),
+// answered by y or n or ⏎ on a row: `y` lets the boundary stop them, their finished items kept;
+// `n` marks the engine to keep them across that one boundary (Engine.KeepWorkflows), so they run on
+// and their finish notes reach the new conversation. esc cancels the boundary. What the question
+// holds back — the commands queued behind a queued /clear, and the staged messages a completion
+// would have flushed after them — resumes from the answer's fold, whichever it was.
+
+// boundaryKind names the session boundary a confirm holds.
+type boundaryKind int
+
+const (
+	boundaryClear  boundaryKind = iota // /clear and /new
+	boundarySwitch                     // a /sessions switch to sessionID
+	boundaryFork                       // a /fork at fork
+)
+
+// pendingBoundary is the boundary the confirm holds: which one, the stored session a switch loads,
+// the point a fork cuts at, and whether a completion's staged flush was held back behind it (flush).
+// Plain values only (ADR 0011).
+type pendingBoundary struct {
+	kind      boundaryKind
+	sessionID string
+	fork      forkPoint
+	flush     bool
+}
+
+// boundaryAnswer is how the confirm was answered.
+type boundaryAnswer int
+
+const (
+	boundaryStop   boundaryAnswer = iota // y — the boundary stops the workflows
+	boundaryKeep                         // n — they run on into the new conversation
+	boundaryCancel                       // esc — no boundary at all
+)
+
+// The confirm's words. The title is the question itself; the rows gloss the two answers.
+const (
+	boundaryConfirmTitle = "stop running workflows? (y/n)"
+	boundaryConfirmHint  = "y stop · n keep running · ⏎ choose · esc cancel"
+	workflowsKeptNote    = "background workflows keep running — their reports come to this conversation"
+)
+
+// boundaryRows is the confirm's offering, in answer order: y, then n.
+func boundaryRows() []popupRow {
+	return []popupRow{
+		{"y", "— stop them; their finished items are kept"},
+		{"n", "— keep them running; their reports come to the new conversation"},
+	}
+}
+
+// workflowsRunning reports whether any background workflow is live as its events have folded.
+func (m Model) workflowsRunning() bool {
+	return len(m.workflows.live) > 0
+}
+
+// boundaryConfirmOpen reports whether the stop-or-keep confirm is up.
+func (m Model) boundaryConfirmOpen() bool {
+	return m.picker.open && m.picker.kind == pickerWorkflowBoundary
+}
+
+// confirmBoundary opens the stop-or-keep confirm over boundary b.
+func (m Model) confirmBoundary(b pendingBoundary) (tea.Model, tea.Cmd) {
+	m.picker = picker{open: true, kind: pickerWorkflowBoundary, boundary: b}
+	m.layout()
+	return m, nil
+}
+
+// boundaryKey answers the confirm's own keys — y, n and esc; ok is false for any other key, which
+// the list surface takes (⏎ on a row, the arrows).
+func (m Model) boundaryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+	var answer boundaryAnswer
+	switch msg.String() {
+	case "y":
+		answer = boundaryStop
+	case "n":
+		answer = boundaryKeep
+	case "esc":
+		answer = boundaryCancel
+	default:
+		return m, nil, false
+	}
+	next, cmd := m.answerBoundary(answer)
+	return next, cmd, true
+}
+
+// acceptBoundaryRow answers the confirm from ⏎ on a row of boundaryRows.
+func (m Model) acceptBoundaryRow(offered int) (tea.Model, tea.Cmd) {
+	if offered == 1 {
+		return m.answerBoundary(boundaryKeep)
+	}
+	return m.answerBoundary(boundaryStop)
+}
+
+// answerBoundary closes the confirm and goes through with the boundary it held — unless the answer
+// cancels it — keeping the workflows on `n`. Then what the confirm held back resumes: the queued
+// commands drain, and a completion's staged messages flush after them when the confirm had held
+// that flush (drainThenFlush).
+func (m Model) answerBoundary(answer boundaryAnswer) (tea.Model, tea.Cmd) {
+	b := m.picker.boundary
+	m.picker = picker{}
+	m.layout()
+	next, cmd := tea.Model(m), tea.Cmd(nil)
+	if answer != boundaryCancel {
+		keep := answer == boundaryKeep
+		switch b.kind {
+		case boundaryClear:
+			next, cmd = m.clearSession(keep)
+		case boundarySwitch:
+			next, cmd = m.switchSession(b.sessionID, keep)
+		case boundaryFork:
+			next, cmd = m.forkAt(b.fork, keep)
+		}
+	}
+	after, drained := next.(Model).runDeferredCommands()
+	cmd = tea.Batch(cmd, drained)
+	if b.flush && !after.busy() {
+		return after.flushAfterCompletion(cmd)
+	}
+	return after, cmd
 }
 
 // resetSessionView wipes what the closed conversation owned out of the view and re-seeds the

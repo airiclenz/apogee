@@ -189,6 +189,12 @@ type fakeEngine struct {
 	stopWorkflowFn func(string) error // scripted StopWorkflow error (nil ⇒ stopped)
 	workflowReruns []string           // records RerunFailed calls (^r in the /workflows detail), in order
 	rerunFn        func(string) error // scripted RerunFailed error (nil ⇒ started)
+
+	keepMarked  bool   // a KeepWorkflows call no boundary has consumed yet
+	clearKept   []bool // per ClearContext call, in order: whether KeepWorkflows marked it
+	restoreKept []bool // per RestoreSession call, in order: whether KeepWorkflows marked it
+	resumeCalls int    // records ResumeWorkflows calls
+	resumeErr   error  // what ResumeWorkflows fails with (nil ⇒ resumed)
 }
 
 // workflowPromptAnswer is one recorded AnswerWorkflowPrompt call: the prompt's id and the answer.
@@ -395,6 +401,29 @@ func (f *fakeEngine) RerunFailed(id string) error {
 	return nil
 }
 
+// KeepWorkflows marks the next ClearContext or RestoreSession as kept, as the engine does; the
+// boundary that consumes the mark records it (clearKept, restoreKept).
+func (f *fakeEngine) KeepWorkflows() {
+	f.mu.Lock()
+	f.keepMarked = true
+	f.mu.Unlock()
+}
+
+// ResumeWorkflows records the call and answers with the scripted error (nil ⇒ resumed).
+func (f *fakeEngine) ResumeWorkflows() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumeCalls++
+	return f.resumeErr
+}
+
+// boundaryKeeps returns copies of clearKept and restoreKept and the ResumeWorkflows call count.
+func (f *fakeEngine) boundaryKeeps() (clears, restores []bool, resumes int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.clearKept), slices.Clone(f.restoreKept), f.resumeCalls
+}
+
 // workflowActions returns copies of the ids StopWorkflow and RerunFailed were called with, in order.
 func (f *fakeEngine) workflowActions() (stops, reruns []string) {
 	f.mu.Lock()
@@ -448,6 +477,8 @@ func (f *fakeEngine) CutSnapshot(dropExchanges int) (domain.Session, error) {
 func (f *fakeEngine) ClearContext() error {
 	f.mu.Lock()
 	f.clearCalls++
+	f.clearKept = append(f.clearKept, f.keepMarked)
+	f.keepMarked = false
 	fn := f.clearFn
 	f.mu.Unlock()
 	if fn != nil {
@@ -477,6 +508,8 @@ func (f *fakeEngine) SettleExchange() (dropped bool) {
 func (f *fakeEngine) RestoreSession(snap domain.Session) error {
 	f.mu.Lock()
 	f.restoreCalls = append(f.restoreCalls, snap)
+	f.restoreKept = append(f.restoreKept, f.keepMarked)
+	f.keepMarked = false
 	fn := f.restoreFn
 	f.mu.Unlock()
 	if fn != nil {

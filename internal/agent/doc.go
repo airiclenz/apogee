@@ -96,11 +96,12 @@
 // the background workflow manager (ADR 0089): the Workflows that run outside any Turn at the
 // server's width minus one, one per server at a time with the rest queued, each running off a
 // snapshot of the Agent taken at launch (backgroundHost) so the idle-only mutators never race it,
-// their gates and questions waiting in its queue, stopped by StopWorkflow and Close, a finished
+// their gates and questions waiting in its queue, stopped by StopWorkflow and Close — and by a
+// ClearContext or RestoreSession unless KeepWorkflows kept them across that boundary — a finished
 // one's blocked and faulted items run again by RerunFailed, and carried
 // across a session snapshot as identifiers that ResumeWorkflows starts again; it holds each ended
 // one's one-line finish note until a Driver's drain, the Wake that opens an Exchange on it, or the
-// next opening message takes it (ADR 0089 D3).
+// next opening message takes it (ADR 0089 D3), and a note still held rides the snapshot too.
 // approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.

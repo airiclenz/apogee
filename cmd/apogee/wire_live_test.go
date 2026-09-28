@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 )
 
@@ -501,5 +502,47 @@ func requireSnapshotStore(t *testing.T) {
 
 	if !snapshot.Available() {
 		t.Skip("git is not on PATH: the snapshot store cannot be opened here")
+	}
+}
+
+// TestWorkflowResumeReachesTheResumedSessionsSet pins the resume path of item 34 (ADR 0089 D5): a
+// --resume start builds its Agent off the record's snapshot, which only LOADS the background set it
+// carries, and the TUI's ResumeWorkflows through the engine holder is what starts it — here it
+// reaches the bound Agent and reports the one entry whose folder is gone, then finds the set taken.
+// Unbound, the holder has nothing to resume or keep and answers quietly.
+func TestWorkflowResumeReachesTheResumedSessionsSet(t *testing.T) {
+	t.Parallel()
+
+	unbound := &lateEngine{}
+	unbound.KeepWorkflows()
+	if err := unbound.ResumeWorkflows(); err != nil {
+		t.Errorf("unbound ResumeWorkflows = %v, want nil: there is no restored set yet", err)
+	}
+
+	const recordID = "20260928T100000Z-0a0a0a0a"
+	const gone = "20260928-090000-gone"
+	w := urlGuardWiring(t, config.Options{Resume: recordID})
+	record := session.Record{
+		Meta: session.Meta{ID: recordID, Title: "bg only", Workspace: w.roots.workspace, UpdatedAt: time.Now()},
+		Session: domain.Session{Version: domain.SessionVersion,
+			State: []byte(`{"turnIndex":0,"workflows":[{"id":"` + gone + `","recipe":"audit"}]}`)},
+	}
+	if err := session.NewStore(w.roots.sessions).Save(record); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	if w.engine.bound() == nil {
+		t.Fatal("precondition: the determined --resume start did not bind")
+	}
+
+	err := w.engine.ResumeWorkflows()
+
+	if err == nil || !strings.Contains(err.Error(), gone) {
+		t.Errorf("ResumeWorkflows = %v, want the resumed record's workflow %s named", err, gone)
+	}
+	if again := w.engine.ResumeWorkflows(); again != nil {
+		t.Errorf("a second ResumeWorkflows = %v, want nil: the set is taken whole", again)
 	}
 }

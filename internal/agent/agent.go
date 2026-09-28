@@ -417,9 +417,11 @@ type Agent struct {
 	retained retainedDelegates
 	// background is the set of Workflows THIS Agent runs outside any Turn (background.go, ADR
 	// 0089): the live ones — running, or queued behind another on their server — the snapshot's set
-	// a restore loaded for ResumeWorkflows, and the approvals and questions they wait on. It rides
-	// the session snapshot as identifiers (the `workflows` key); Close stops it on the top-level
-	// Agent only, and RestoreSession stops the outgoing session's before the incoming one resumes.
+	// and held notes a restore loaded for ResumeWorkflows, the approvals and questions they wait on,
+	// and the finish notes held for the parent. It rides the session snapshot as identifiers (the
+	// `workflows` key) and one-line notes (`workflow_notes`); Close stops it on the top-level Agent
+	// only, and ClearContext and RestoreSession stop the outgoing session's before the incoming one
+	// resumes — unless KeepWorkflows marked that boundary to keep it.
 	background backgroundManager
 	// delegations is the ledger of every delegation THIS Agent spawned in its current Exchange —
 	// spawn order, outcome, cause and resolved output target (children.go, apogee-clb): what the
@@ -1803,6 +1805,14 @@ func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
 // The retained delegations are dropped whole here too (ADR 0086 D3): a `continue` names work the
 // forgotten conversation delegated, and the new session never delegated it.
 //
+// The background workflows are session-owned live state as well, and are stopped here with their
+// finished items kept and their held finish notes dropped (ADR 0089 D5, background.go) — with two
+// exceptions. When the Driver called KeepWorkflows just before (the human's "keep them" answer to
+// `/clear`), this clear leaves the running set and its held notes untouched, so they run on and
+// their notes reach the new conversation; the mark is consumed even by a refused clear. And when no
+// workflow is live — the clear no one was asked about — it stops nothing and drops no held note:
+// the finish notes of workflows that already ended reach the new conversation.
+//
 // The cumulative usage tally is zeroed here too, exactly as RestoreSession zeroes it: the tally is
 // PER CONTEXT — the sums and the call count belong to the conversation this call drops — so the
 // first UsageEvent of the new session counts one call, not the forgotten session's calls plus one.
@@ -1810,8 +1820,12 @@ func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
 // opened"; a Driver that wants the closed conversation's totals takes them from its last event
 // before the clear (the TUI's saveAtIdle captures its record before this call).
 func (a *Agent) ClearContext() error {
+	keep := a.background.takeKeep()
 	if a.turns.inExchange {
 		return domain.ErrInputPending
+	}
+	if !keep {
+		a.endSessionWorkflows()
 	}
 	a.consoles.CloseAll()
 	_ = a.tasks.Replace(nil) // clearing cannot break a cap, so the validated error is not one
@@ -1852,17 +1866,23 @@ func (a *Agent) ClearContext() error {
 // along with the conversation.
 //
 // The outgoing session's background workflows are stopped too, after the swap and before the call
-// returns (their finished items kept in the outgoing session's folders), and the incoming
-// snapshot's set is only loaded: the Driver starts it with ResumeWorkflows once it has moved the
-// scratch directory to the incoming session. A REFUSED restore leaves them running.
+// returns (their finished items kept in the outgoing session's folders, their held notes dropped),
+// and the incoming snapshot's set and held notes are only loaded: the Driver starts and adopts them
+// with ResumeWorkflows once it has moved the scratch directory to the incoming session. A REFUSED
+// restore leaves them running. A restore the Driver called KeepWorkflows just before — a `/sessions`
+// switch or a `/fork` the human answered "keep them" — stops nothing: the running set and its held
+// notes carry over into the incoming session. The mark is consumed even by a refused restore.
 func (a *Agent) RestoreSession(snap domain.Session) error {
+	keep := a.background.takeKeep()
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
 	if err := a.restoreSnapshot(snap); err != nil {
 		return err
 	}
-	a.stopAllBackground()
+	if !keep {
+		a.stopAllBackground()
+	}
 	a.consoles.CloseAll()
 	a.usage = usageTally{}
 	a.reloadContextFiles()

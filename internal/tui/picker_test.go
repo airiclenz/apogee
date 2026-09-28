@@ -2353,7 +2353,7 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 // kind added to the enum without a row would fail here rather than as a nil call on the first ⏎.
 func TestEveryPickerKindHasAnOffering(t *testing.T) {
 	t.Parallel()
-	for kind := pickerModel; kind <= pickerFork; kind++ {
+	for kind := pickerModel; kind <= pickerWorkflowBoundary; kind++ {
 		offering, ok := pickerOfferings[kind]
 		if !ok {
 			t.Errorf("pickerOfferings[%v]: no row", kind)
@@ -2364,7 +2364,7 @@ func TestEveryPickerKindHasAnOffering(t *testing.T) {
 				kind, offering.title != nil, offering.hint, offering.rows != nil, offering.accept != nil)
 		}
 	}
-	if got, want := len(pickerOfferings), int(pickerFork)+1; got != want {
+	if got, want := len(pickerOfferings), int(pickerWorkflowBoundary)+1; got != want {
 		t.Errorf("len(pickerOfferings) = %d, want %d — a row for every kind and nothing beyond the enum", got, want)
 	}
 }

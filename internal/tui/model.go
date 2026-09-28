@@ -419,11 +419,17 @@ type Model struct {
 	// reads the Agent off the loop where the idle-only mutators must not run (StartRecipe's
 	// launch-time snapshot), so until it lands a heartbeat's rebind is stashed (observeBinding), a
 	// wake is held (canWake), and an idle-only command is queued rather than run (commandRunnable).
+	//
+	// resumePending says a restored session's background workflows are still to be started from
+	// their folders (Engine.ResumeWorkflows): set by a --resume start and by every /sessions switch
+	// or /fork that restored a record, and honoured by the Update tail at the first fold that finds
+	// the engine bound, idle and on the restored session's scratch directory (resumeAfterFold).
 	workflows      backgroundWorkflows
 	wakePending    bool
 	promptPending  bool
 	sessionLoading bool
 	bgLaunching    bool
+	resumePending  bool
 
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
@@ -823,6 +829,10 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// A resumed run then repaints the stored scrollback beneath that box and relights the gauge
 	// (a no-op on a fresh start, when opts.Resumed is nil).
 	m.replayResumed(opts.Resumed)
+	// …and its background workflows start again from their folders once the engine is bound and
+	// idle (resumeAfterFold) — at the first fold for a determined start, after the pick for a
+	// pre-bound one.
+	m.resumePending = opts.Resumed != nil
 	// Construction is the session's first boundary, so the workspace context files the engine
 	// loaded are reported here — last, so the notice closes the opening frame rather than
 	// separating the box from the scrollback it belongs to.
@@ -1081,8 +1091,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// that can be ANY fold — a save landing, a load returning, a pane closing — so it is asked here
 	// rather than at a list of sites. It launches a worker, so the frame settles over the result.
 	// Ahead of it, by the same rule, a background workflow's waiting prompt is offered
-	// (offerAfterFold): the pane it opens holds the wake until the human has answered.
+	// (offerAfterFold): the pane it opens holds the wake until the human has answered. Ahead of
+	// both, a restored session's background workflows are started again (resumeAfterFold), so a
+	// note the snapshot held is there for the wake.
 	defer func() {
+		next = resumeAfterFold(next)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))

@@ -94,7 +94,9 @@ func forkRows(points []forkPoint) []popupRow {
 // rather than among the painted rows (acceptPicker resolves the filter first). The points are
 // re-derived rather than trusted from the frame that drew them, the acceptScheduleStop posture: the
 // scrollback cannot change under an idle picker, but an index naming no point closes the overlay
-// and forks nothing rather than indexing past the list.
+// and forks nothing rather than indexing past the list. With background workflows running the fork
+// asks first whether to stop them (the boundary confirm, commandrun.go), since switching to the
+// child is a session boundary like /clear.
 func (m Model) acceptFork(offered int) (tea.Model, tea.Cmd) {
 	points := m.transcript.forkPoints()
 	m.picker = picker{}
@@ -102,7 +104,10 @@ func (m Model) acceptFork(offered int) (tea.Model, tea.Cmd) {
 	if offered < 0 || offered >= len(points) {
 		return m, nil
 	}
-	return m.forkAt(points[offered])
+	if m.workflowsRunning() {
+		return m.confirmBoundary(pendingBoundary{kind: boundaryFork, fork: points[offered]})
+	}
+	return m.forkAt(points[offered], false)
 }
 
 // forkAt cuts the child at point and queues its write behind the parent's idle Save. The engine
@@ -116,8 +121,9 @@ func (m Model) acceptFork(offered int) (tea.Model, tea.Cmd) {
 //
 // The parent Meta rides along as the host's FALLBACK identity only (SessionHost.Fork): a renderer
 // may read ActiveID as "" before the first Save lands, which is exactly why the host stamps
-// ParentID from its own identity once that Save has.
-func (m Model) forkAt(point forkPoint) (tea.Model, tea.Cmd) {
+// ParentID from its own identity once that Save has. keep — the human's `n` to "stop running
+// workflows?" — rides the write to the restore that switches to the child (foldFork).
+func (m Model) forkAt(point forkPoint, keep bool) (tea.Model, tea.Cmd) {
 	sess, err := m.eng.CutSnapshot(point.drop)
 	if err != nil {
 		return m.pickerNote("could not fork: " + err.Error())
@@ -129,6 +135,7 @@ func (m Model) forkAt(point forkPoint) (tea.Model, tea.Cmd) {
 		entries: entriesToRecords(m.transcript.prefixThrough(point.index)),
 		title:   title,
 		parent:  session.Meta{ID: m.sessions.ActiveID(), Title: title},
+		keep:    keep,
 	}})
 	return m, tea.Batch(saveCmd, forkCmd)
 }
@@ -159,7 +166,7 @@ func (m *Model) foldFork(msg recordWriteDoneMsg) tea.Cmd {
 		m.transcript.addNote(fmt.Sprintf("forked as %s — resume it from /sessions", child.ID))
 		return nil
 	}
-	cmd := m.resumeLoaded(sessionLoadedMsg{rec: msg.fork.record})
+	cmd := m.resumeLoaded(sessionLoadedMsg{rec: msg.fork.record, keep: msg.write.fork.keep})
 	m.transcript.addNote(fmt.Sprintf("forked from %s — %s", child.ParentID, msg.write.fork.title))
 	return cmd
 }

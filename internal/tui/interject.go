@@ -583,11 +583,17 @@ func (m Model) flushAfterCompletion(done tea.Cmd) (tea.Model, tea.Cmd) {
 // message lands, which is the order the human typed them in. A queued verb that opens a worker of
 // its own (/compact, /continue) stops the drain and the flush alike: never two workers on one
 // Agent, so what is still staged waits for THAT worker's own terminal fold, which reaches this
-// same ruling (foldCompactDone, the exchangeDoneMsg case).
+// same ruling (foldCompactDone, the exchangeDoneMsg case). A queued /clear that asks whether to stop
+// the running workflows holds the flush the same way: the confirm records that it did, and its
+// answer's fold flushes (answerBoundary, commandrun.go).
 func (m Model) drainThenFlush(done tea.Cmd) (tea.Model, tea.Cmd) {
 	m, drained := m.runDeferredCommands()
 	done = tea.Batch(done, drained)
 	if m.busy() {
+		return m, done
+	}
+	if m.boundaryConfirmOpen() {
+		m.picker.boundary.flush = true
 		return m, done
 	}
 	return m.flushAfterCompletion(done)

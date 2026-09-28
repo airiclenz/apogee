@@ -1063,6 +1063,20 @@ type Engine interface {
 	// background launch it reads the engine for the launch-time snapshot, so it is called ONLY at
 	// idle, from a tea.Cmd, under the /bg launch latch (the view's ctrl+r, workflows.go).
 	RerunFailed(id string) error
+	// KeepWorkflows makes the next session boundary — the next ClearContext or RestoreSession, and
+	// that one only — keep the background workflows running and their held finish notes for the new
+	// conversation, where it would otherwise stop them and drop the notes (ADR 0089 D5). The TUI
+	// calls it just before the boundary when the human answered `n` to "stop running workflows?"
+	// (/clear, a /sessions switch, /fork — commandrun.go); idle-only, like the boundary it marks.
+	KeepWorkflows()
+	// ResumeWorkflows starts the background workflows a restored session snapshot carried, from
+	// their folders — finished items skipped, settled script and ask stages replayed — skipping one
+	// already running, and adopts the finish notes the snapshot held. The TUI calls it once the
+	// engine is bound and the scratch directory is the resumed session's: after a --resume start's
+	// bind, and after a /sessions switch or /fork's Activate has moved the scratch directory
+	// (resumeAfterFold, sessions.go). It reads the engine for each launch-time snapshot, so it is
+	// called ONLY at idle.
+	ResumeWorkflows() error
 }
 
 // ----------------------------------------------------------------------------

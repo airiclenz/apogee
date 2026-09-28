@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -476,7 +478,7 @@ func TestBackground_RestoreSessionStopsTheOutgoingSet(t *testing.T) {
 	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseStopped {
 		t.Errorf("outgoing workflow = %+v, want it stopped before the restore returned", info)
 	}
-	if got := a.background.entries(); len(got) != 1 || got[0] != incoming[0] {
+	if got := a.background.entries(a.ScratchDir()); len(got) != 1 || got[0] != incoming[0] {
 		t.Errorf("entries after the restore = %+v, want the incoming set loaded", got)
 	}
 }
@@ -748,5 +750,216 @@ func TestBackground_AResumeReplaysAnAnsweredQuestion(t *testing.T) {
 	}
 	if receipt := info.Status.Stages[0].Items[0].Receipt; receipt == nil || receipt.Fields[workflow.AskAnswerField] != "yes" {
 		t.Errorf("ask stage receipt = %+v, want the replayed answer yes", receipt)
+	}
+}
+
+// A session boundary and the background set (ADR 0089 D5, plan 2026-09-27 - 00 item 34): a clear
+// or restore stops the outgoing set and drops its held notes, unless KeepWorkflows marked it to
+// keep them; a held note rides the snapshot. Each test ends "pair" first, so its note is held, and
+// then launches "slow", whose one child waits until it is stopped.
+
+// newBoundaryParent builds a parent serving "pair" (one item that finishes) and "slow" (one item
+// whose first child waits for its stop, and whose next one finishes) over a scratch directory
+// named like a session's, and returns it, its request log and the channel slow's child closes.
+func newBoundaryParent(t *testing.T) (*Agent, *requestLog, chan struct{}) {
+	t.Helper()
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
+		route("sweep gamma", signalThenWait(started, nil), cancelledScript()).
+		route("sweep gamma", nil, finishScript("f2", "gamma is fine")).
+		route(wakeUserText, nil, contentScript("done"))
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("pair", "alpha"), sweepRecipe("slow", "gamma"))
+	cfg.ScratchDir = sessionScratch(t, filepath.Dir(cfg.ScratchDir), "20260928T100000Z-0a0a0a0a")
+	log := &requestLog{inner: up}
+	return newBackgroundParent(t, cfg, log), log, started
+}
+
+// sessionScratch creates and returns the session scratch directory id under root.
+func sessionScratch(t *testing.T, root, id string) string {
+	t.Helper()
+	dir := filepath.Join(root, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	return dir
+}
+
+// holdPairNoteThenRunSlow ends "pair" so its note is held, then starts "slow" and waits for its
+// child; it returns slow's workflow id.
+func holdPairNoteThenRunSlow(t *testing.T, a *Agent, started chan struct{}) string {
+	t.Helper()
+	launchBackground(t, a, "pair")
+	a.background.waitAll()
+	slow := launchBackground(t, a, "slow")
+	awaitClosed(t, started, "slow's child")
+	return slow
+}
+
+func TestBackground_AClearStopsTheSetAndDropsItsNotes(t *testing.T) {
+	t.Parallel()
+
+	a, _, started := newBoundaryParent(t)
+	slow := holdPairNoteThenRunSlow(t, a, started)
+
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	if info := workflowInfo(t, a, slow); info.Background || info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("slow after the clear = %+v, want it stopped before the clear returned", info)
+	}
+	if notes := a.background.takeNotes(); len(notes) != 0 {
+		t.Errorf("held notes after the clear = %q, want none: a stopped set leaves nothing behind", notes)
+	}
+	if woke, err := a.Wake(context.Background()); err != nil || woke {
+		t.Errorf("Wake after the clear = %v, %v; want nothing to wake on", woke, err)
+	}
+}
+
+func TestBackground_AClearWithNothingRunningKeepsTheHeldNote(t *testing.T) {
+	t.Parallel()
+
+	a, log, _ := newBoundaryParent(t)
+	launchBackground(t, a, "pair")
+	a.background.waitAll()
+
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	runInput(t, a, domain.UserInput{Text: wakeUserText})
+	sent := log.first(t, wakeUserText)
+	if !strings.HasPrefix(sent, wakeUserText) || !strings.Contains(sent, workflowNoteHeader+"\n"+pairNoteLine) {
+		t.Errorf("the new conversation's first message = %q, want the human's text and then the note "+
+			"held before a clear that stopped nothing", sent)
+	}
+}
+
+func TestBackground_AKeptClearLeavesTheSetRunningAndItsNoteOpensTheNewConversation(t *testing.T) {
+	t.Parallel()
+
+	a, log, started := newBoundaryParent(t)
+	slow := holdPairNoteThenRunSlow(t, a, started)
+
+	a.KeepWorkflows()
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	if !a.background.isLive(slow) {
+		t.Fatal("a kept clear stopped the running workflow")
+	}
+	runInput(t, a, domain.UserInput{Text: wakeUserText})
+	sent := log.first(t, wakeUserText)
+	if !strings.HasPrefix(sent, wakeUserText) || !strings.Contains(sent, workflowNoteHeader+"\n"+pairNoteLine) {
+		t.Errorf("the new conversation's first message = %q, want the human's text and then the held note", sent)
+	}
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("second ClearContext: %v", err)
+	}
+	if a.background.isLive(slow) {
+		t.Error("the keep mark outlived its boundary: a second clear left the workflow running")
+	}
+}
+
+func TestBackground_AKeptRestoreKeepsTheSetAndItsNote(t *testing.T) {
+	t.Parallel()
+
+	a, _, started := newBoundaryParent(t)
+	slow := holdPairNoteThenRunSlow(t, a, started)
+
+	a.KeepWorkflows()
+	err := a.RestoreSession(cutFixtureSession(t, agentState{Conversation: domain.NewConversation(nil)}))
+	if err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+
+	if !a.background.isLive(slow) {
+		t.Error("a kept restore stopped the running workflow")
+	}
+	if notes := a.background.takeNotes(); len(notes) != 1 || !strings.HasPrefix(notes[0], pairNoteLine) {
+		t.Errorf("held notes after a kept restore = %q, want pair's note carried over", notes)
+	}
+}
+
+func TestBackground_AHeldNoteSurvivesASnapshotAndRestore(t *testing.T) {
+	t.Parallel()
+
+	a, log, _ := newBoundaryParent(t)
+	launchBackground(t, a, "pair")
+	a.background.waitAll()
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	var st agentState
+	if err := json.Unmarshal(snap.State, &st); err != nil {
+		t.Fatalf("decode the snapshot: %v", err)
+	}
+	if len(st.WorkflowNotes) != 1 || !strings.HasPrefix(st.WorkflowNotes[0], pairNoteLine) {
+		t.Fatalf("snapshot workflow_notes = %q, want pair's held note", st.WorkflowNotes)
+	}
+
+	b, err := resumeAgent(a.cfg, snap, log)
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	t.Cleanup(b.stopAllBackground)
+	if err := b.ResumeWorkflows(); err != nil {
+		t.Fatalf("ResumeWorkflows: %v", err)
+	}
+	runInput(t, b, domain.UserInput{Text: wakeUserText})
+	assertNoteMessage(t, log.first(t, wakeUserText))
+}
+
+func TestBackground_AWorkflowKeptAcrossAScratchMoveIsListedAndResumesFromItsHome(t *testing.T) {
+	t.Parallel()
+
+	a, _, started := newBoundaryParent(t)
+	home := filepath.Base(a.ScratchDir())
+	slow := launchBackground(t, a, "slow")
+	awaitClosed(t, started, "slow's child")
+	a.KeepWorkflows()
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+	a.SetScratchDir(sessionScratch(t, filepath.Dir(a.ScratchDir()), "20260928T110000Z-0b0b0b0b"))
+
+	if info := workflowInfo(t, a, slow); !info.Background {
+		t.Errorf("the kept workflow after the scratch move = %+v, want it listed as running", info)
+	}
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	var st agentState
+	if err := json.Unmarshal(snap.State, &st); err != nil {
+		t.Fatalf("decode the snapshot: %v", err)
+	}
+	if want := (workflowEntryJSON{ID: slow, Recipe: "slow", Home: home}); len(st.Workflows) != 1 || st.Workflows[0] != want {
+		t.Fatalf("snapshot workflows = %+v, want %+v", st.Workflows, want)
+	}
+
+	cfg := a.cfg
+	cfg.ScratchDir = a.ScratchDir()
+	b, err := resumeAgent(cfg, snap, a.upstream)
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	t.Cleanup(b.stopAllBackground)
+	if err := b.ResumeWorkflows(); err != nil {
+		t.Fatalf("ResumeWorkflows: %v", err)
+	}
+	b.background.waitAll()
+	if info := workflowInfo(t, b, slow); info.Status.Phase != workflow.PhaseDone {
+		t.Errorf("the resumed workflow = %+v, want it done in its own folder", info)
 	}
 }

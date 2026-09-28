@@ -40,9 +40,12 @@ package agent
 // workflow that skips every item whose receipt is ok or partial, so only its blocked and faulted
 // items run again;
 // Agent.Close stops them all, on the top-level Agent only (a finishing delegate's Close must never
-// reach them); RestoreSession stops the outgoing session's set before the incoming one's is
-// resumed. The live set rides the session snapshot as the additive `workflows` key — identifiers
-// only (workflowEntryJSON) — which a restore loads and validates without starting anything;
+// reach them); ClearContext and RestoreSession stop the outgoing session's set too — unless the
+// Driver called Agent.KeepWorkflows just before, the human's "keep them" answer, when that one
+// boundary leaves the set and its held notes running into the new conversation. The live set rides
+// the session snapshot as the additive `workflows` key — identifiers only (workflowEntryJSON), with
+// the sibling session scratch directory a kept workflow's folder lives under when it is not the
+// current one — which a restore loads and validates without starting anything;
 // Agent.ResumeWorkflows starts it once the Driver has bound the engine (it reads the live scratch
 // directory and recipe catalog, which a Resume has not re-supplied yet when restoreState runs).
 //
@@ -54,9 +57,14 @@ package agent
 // through Interject), the wake that opens an Exchange on it while the agent is idle (Agent.Wake —
 // refused under `workflow-wake: off`), or the next Exchange a message opens, whose opening message
 // carries it after the human's text (step). Every form reads the same: a fixed plain header, then
-// one line per note (renderWorkflowNotes) — recorded text, so a snapshot keeps it. Held notes are
-// live state only: a snapshot does not carry them, and stopping the whole set (Close,
-// RestoreSession) drops them with the session they were meant for.
+// one line per note (renderWorkflowNotes) — recorded text, so a snapshot keeps it. A note held and
+// not yet delivered rides the snapshot as the additive `workflow_notes` key, so a session saved
+// with one — the record saved at quit, before Close stops the set — hands it to the resumed
+// conversation: a restore loads the notes beside the `workflows` set and ResumeWorkflows adopts
+// them as held. Stopping the whole set (Close, and a ClearContext or RestoreSession not told to
+// keep it) drops the held notes with the session they were meant for, and a stop that drops them
+// leaves none behind to wake on — though a ClearContext with no workflow live stops nothing and so
+// drops nothing: the notes it finds held reach the new conversation.
 //
 // Resume replays, by decision (plan 2026-09-27 - 00, item 30). A resumed workflow re-opens its
 // folder and skips every fan-out item whose receipt is already there, and it replays the script and
@@ -70,6 +78,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -135,23 +144,35 @@ type WorkflowInfo = workflow.Info
 // folder's id under `<scratch>/workflows/` and, for a recipe's, the recipe skill's id its prompt
 // files and scripts are read from on resume. Identifiers only — the plan is read back from the
 // folder.
+//
+// Home is set only for a workflow kept across a session boundary (KeepWorkflows): its folder stays
+// under the scratch directory of the session that launched it, and Home names that directory — a
+// sibling of the current one, by its base name — so a resume finds the folder where it is. Empty
+// means the current session's own scratch directory.
 type workflowEntryJSON struct {
 	ID     string `json:"id"`
 	Recipe string `json:"recipe,omitempty"`
+	Home   string `json:"home,omitempty"`
 }
 
 // backgroundManager is one top-level Agent's background workflows: the live ones (running, or
-// queued behind another on their server) in launch order, the snapshot's set a restore loaded and
-// ResumeWorkflows has not started yet, the questions and approvals the running ones wait on, and the
-// finish notes of the ended ones no one has taken yet, oldest first.
+// queued behind another on their server) in launch order, the snapshot's set and held notes a
+// restore loaded and ResumeWorkflows has not started or adopted yet, the questions and approvals
+// the running ones wait on, the finish notes of the ended ones no one has taken yet, oldest first,
+// every workflow launched since the set was last stopped whole with the store its folder is in (so
+// one kept across a session boundary stays listed after it ends), and whether the next session
+// boundary keeps the set (KeepWorkflows).
 // The zero value is ready to use; mu guards every field, and is never held while a workflow runs.
 type backgroundManager struct {
-	mu       sync.Mutex
-	runs     []*backgroundRun
-	restored []workflowEntryJSON
-	prompts  []*backgroundPrompt
-	promptID uint64 // the last id minted for a queued prompt (backgroundPrompt.id)
-	notes    []string
+	mu            sync.Mutex
+	runs          []*backgroundRun
+	restored      []workflowEntryJSON
+	restoredNotes []string
+	prompts       []*backgroundPrompt
+	promptID      uint64 // the last id minted for a queued prompt (backgroundPrompt.id)
+	notes         []string
+	launched      []keptRun
+	keep          bool
 }
 
 // backgroundRun is one live background workflow. Everything but running and cancel is fixed at
@@ -189,9 +210,10 @@ type backgroundLaunch struct {
 }
 
 // Workflows lists the session's Workflows — every folder in its `<scratch>/workflows/` store, read
-// from its status.json, oldest first — with the background ones this Agent runs or queues marked. A
-// folder whose status.json cannot be read is left out; a session with no scratch directory or no
-// store yet has none.
+// from its status.json, oldest first — with the background ones this Agent runs or queues marked,
+// and with every live one kept across a session boundary (KeepWorkflows) listed too, from the folder
+// of the session that launched it. A folder whose status.json cannot be read is left out; a session
+// with no scratch directory, no store yet and nothing kept has none.
 func (a *Agent) Workflows() ([]WorkflowInfo, error) {
 	scratch := a.ScratchDir()
 	if scratch == "" {
@@ -202,10 +224,7 @@ func (a *Agent) Workflows() ([]WorkflowInfo, error) {
 		return nil, err
 	}
 	entries, err := os.ReadDir(store.Root())
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("apogee: list workflows: %w", err)
 	}
 	live := a.background.liveStates()
@@ -214,16 +233,14 @@ func (a *Agent) Workflows() ([]WorkflowInfo, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		status, err := store.ReadStatus(entry.Name())
-		if err != nil || status.ID != entry.Name() {
-			continue
+		if info, ok := listedWorkflow(store, entry.Name(), live); ok {
+			infos = append(infos, info)
 		}
-		dir, err := store.Dir(status.ID)
-		if err != nil {
-			continue
+	}
+	for _, kept := range a.background.storesElsewhere(store.Root()) {
+		if info, ok := listedWorkflow(kept.store, kept.id, live); ok {
+			infos = append(infos, info)
 		}
-		queued, isLive := live[status.ID]
-		infos = append(infos, WorkflowInfo{Status: status, Dir: dir, Background: isLive, Queued: isLive && queued})
 	}
 	slices.SortFunc(infos, func(x, y WorkflowInfo) int {
 		if c := x.Status.Created.Compare(y.Status.Created); c != 0 {
@@ -232,6 +249,42 @@ func (a *Agent) Workflows() ([]WorkflowInfo, error) {
 		return cmp.Compare(x.Status.ID, y.Status.ID)
 	})
 	return infos, nil
+}
+
+// listedWorkflow reads the folder id of store as Workflows lists it, marked live from live; ok is
+// false for a folder whose status.json cannot be read or names another id.
+func listedWorkflow(store *workflow.Store, id string, live map[string]bool) (WorkflowInfo, bool) {
+	status, err := store.ReadStatus(id)
+	if err != nil || status.ID != id {
+		return WorkflowInfo{}, false
+	}
+	dir, err := store.Dir(status.ID)
+	if err != nil {
+		return WorkflowInfo{}, false
+	}
+	queued, isLive := live[status.ID]
+	return WorkflowInfo{Status: status, Dir: dir, Background: isLive, Queued: isLive && queued}, true
+}
+
+// keptRun is a launched workflow's id and the store its folder is in.
+type keptRun struct {
+	id    string
+	store *workflow.Store
+}
+
+// storesElsewhere lists the workflows launched since the set was last stopped whole whose folder is
+// not under root — the ones kept across a session boundary, running or ended in the store of the
+// session that launched them — each once.
+func (m *backgroundManager) storesElsewhere(root string) []keptRun {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var kept []keptRun
+	for _, run := range m.launched {
+		if run.store.Root() != root && !slices.ContainsFunc(kept, func(k keptRun) bool { return k.id == run.id }) {
+			kept = append(kept, run)
+		}
+	}
+	return kept
 }
 
 // StopWorkflow stops the background workflow id and keeps its finished items (ADR 0088): a running
@@ -310,14 +363,20 @@ func hasBlockedItem(status workflow.RunStatus) bool {
 // workflow is launched as a new one would be — so the finished fan-out items are skipped, and the
 // settled script and ask stages replayed rather than run or asked again (see the file comment),
 // which is what a session resume relies on. A workflow the manager
-// already runs is skipped. The Driver calls it after Bind or RestoreSession, once the scratch
-// directory, catalog and tools are the session's; it is never called from a restore itself. The
-// set is taken whole: an entry that cannot resume is reported in the joined error and dropped.
+// already runs is skipped — one kept across the boundary (KeepWorkflows) that the incoming snapshot
+// names too. The finish notes the snapshot held (its `workflow_notes` key) are adopted as held
+// here too, after any the manager already holds, and are consumed like any held note: by the next
+// Exchange's opening message, a Wake, or TakeWorkflowNotes. The Driver calls it after Bind or
+// RestoreSession, once the scratch directory, catalog and tools are the session's; it is never
+// called from a restore itself. The set is taken whole: an entry that cannot resume is reported in
+// the joined error and dropped.
 func (a *Agent) ResumeWorkflows() error {
 	m := &a.background
 	m.mu.Lock()
 	entries := m.restored
 	m.restored = nil
+	m.notes = append(m.notes, m.restoredNotes...)
+	m.restoredNotes = nil
 	m.mu.Unlock()
 
 	var errs []error
@@ -332,10 +391,11 @@ func (a *Agent) ResumeWorkflows() error {
 	return errors.Join(errs...)
 }
 
-// resumeBackground launches the workflow entry names from its folder. folder is the folder the
-// launch must run in (a re-run, RerunFailed), or "" to find or create it by plan hash (a resume).
+// resumeBackground launches the workflow entry names from its folder — under the scratch directory
+// its Home names (entryScratch). folder is the folder the launch must run in (a re-run,
+// RerunFailed), or "" to find or create it by plan hash (a resume).
 func (a *Agent) resumeBackground(entry workflowEntryJSON, folder string) error {
-	store, err := workflow.NewStore(a.ScratchDir())
+	store, err := workflow.NewStore(a.entryScratch(entry))
 	if err != nil {
 		return err
 	}
@@ -362,8 +422,81 @@ func (a *Agent) resumeBackground(entry workflowEntryJSON, folder string) error {
 		}
 		launch.recipe, launch.runner, launch.prompts, launch.tool = recipe.ID, runner, recipe.Files, recipeCallTool
 	}
+	launch.runner.Store = store // the folder's own store, which a kept workflow's Home moves off the session's
 	_, err = a.startBackground(launch)
 	return err
+}
+
+// entryScratch is the scratch directory entry's folder lives under: the session's own, or — for a
+// workflow kept across a session boundary — the sibling directory its Home names.
+func (a *Agent) entryScratch(entry workflowEntryJSON) string {
+	scratch := a.ScratchDir()
+	if entry.Home == "" || scratch == "" {
+		return scratch
+	}
+	return filepath.Join(filepath.Dir(scratch), entry.Home)
+}
+
+// homeOf is the Home a live run's snapshot entry spells against the session scratch directory
+// scratch: "" when its store is the session's own, the base name of its session scratch directory
+// when that is a sibling of scratch (a workflow kept across a session boundary). A store that is
+// neither cannot be spelled as a Home and is written as "", which a resume reports as a missing
+// folder.
+func homeOf(store *workflow.Store, scratch string) string {
+	if scratch == "" {
+		return ""
+	}
+	home := filepath.Dir(store.Root())
+	if home == filepath.Clean(scratch) || filepath.Dir(home) != filepath.Dir(filepath.Clean(scratch)) {
+		return ""
+	}
+	return filepath.Base(home)
+}
+
+// KeepWorkflows makes the next session boundary — the next ClearContext or RestoreSession, and
+// only that one — keep the background workflows and their held finish notes rather than stopping
+// the set: the Driver calls it just before the boundary when its human answered "keep them" (ADR
+// 0089 D5). The kept workflows run on in the folders of the session that launched them, their
+// finish notes reach the new conversation, and they ride its snapshot. The mark is consumed by the
+// boundary whether or not it succeeds. A delegate runs no background workflow; it is a no-op there.
+// Call it at an idle boundary, from the goroutine that calls the boundary.
+func (a *Agent) KeepWorkflows() {
+	if a.isDelegate() {
+		return
+	}
+	m := &a.background
+	m.mu.Lock()
+	m.keep = true
+	m.mu.Unlock()
+}
+
+// takeKeep reports and clears the KeepWorkflows mark.
+func (m *backgroundManager) takeKeep() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keep := m.keep
+	m.keep = false
+	return keep
+}
+
+// endSessionWorkflows is ClearContext's stop of the outgoing session's workflows: the snapshot's set
+// and notes a restore loaded and ResumeWorkflows never took up are dropped — they belong to the
+// session the clear ends — and, when a workflow is live, every live one is stopped with the held
+// notes dropped (stopAllBackground). With nothing live the clear stops nothing, so it drops nothing
+// held either: the finish notes of workflows that already ended survive it and reach the new
+// conversation, as they would any clear the human was never asked about.
+func (a *Agent) endSessionWorkflows() {
+	m := &a.background
+	m.mu.Lock()
+	m.restored, m.restoredNotes = nil, nil
+	live := len(m.runs) > 0
+	if !live {
+		m.launched = nil
+	}
+	m.mu.Unlock()
+	if live {
+		a.stopAllBackground()
+	}
 }
 
 // startBackgroundRecipe launches recipe in the background over the inputs text binds, and returns
@@ -443,6 +576,7 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 		return "", fmt.Errorf(workflowAlreadyRunningFormat, run.id)
 	}
 	m.runs = append(m.runs, run)
+	m.launched = append(m.launched, keptRun{id: run.id, store: run.runner.Store})
 	if !m.serverBusyLocked(run.server) {
 		a.startRunLocked(run)
 	}
@@ -552,9 +686,14 @@ func (a *Agent) stopAllBackground() {
 	for _, done := range ending {
 		<-done
 	}
-	// The whole set stops only when its session ends (Close, RestoreSession), so the notes held for
-	// that session — the ones these stops just left included — have no one left to read them.
+	// The whole set stops only when its session ends (Close, and a ClearContext or RestoreSession not
+	// told to keep it), so the notes held for that session — the ones these stops just left included
+	// — have no one left to read them. Taking them here, after every run has ended, is also what
+	// leaves a Driver that wakes on those runs' end events nothing to wake on.
 	a.background.takeNotes()
+	m.mu.Lock()
+	m.launched = nil
+	m.mu.Unlock()
 }
 
 // backgroundHost is the snapshot of this top-level Agent a background workflow runs off (see the file
@@ -682,15 +821,16 @@ func (m *backgroundManager) dropLocked(run *backgroundRun) {
 	close(run.done)
 }
 
-// entries is the manager's part of the session snapshot: the live runs in launch order, then the
-// restored set not resumed yet — so a snapshot taken before ResumeWorkflows loses nothing. Nil for
-// none, so a session with no background workflow writes no `workflows` key.
-func (m *backgroundManager) entries() []workflowEntryJSON {
+// entries is the manager's part of the session snapshot: the live runs in launch order — each with
+// the Home its folder is under, spelled against the session scratch directory scratch (homeOf) —
+// then the restored set not resumed yet, so a snapshot taken before ResumeWorkflows loses nothing.
+// Nil for none, so a session with no background workflow writes no `workflows` key.
+func (m *backgroundManager) entries(scratch string) []workflowEntryJSON {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []workflowEntryJSON
 	for _, run := range m.runs {
-		out = append(out, workflowEntryJSON{ID: run.id, Recipe: run.recipe})
+		out = append(out, workflowEntryJSON{ID: run.id, Recipe: run.recipe, Home: homeOf(run.runner.Store, scratch)})
 	}
 	for _, entry := range m.restored {
 		if m.liveLocked(entry.ID) == nil {
@@ -700,12 +840,26 @@ func (m *backgroundManager) entries() []workflowEntryJSON {
 	return out
 }
 
-// load replaces the restored set with a snapshot's, which checkRestoredWorkflows has already held
-// to its shape. Nothing starts: ResumeWorkflows does that.
-func (m *backgroundManager) load(entries []workflowEntryJSON) {
+// load replaces the restored set and notes with a snapshot's, which checkRestoredWorkflows and
+// checkRestoredWorkflowNotes have already held to their shape. Nothing starts and no note is held:
+// ResumeWorkflows does both.
+func (m *backgroundManager) load(entries []workflowEntryJSON, notes []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.restored = slices.Clone(entries)
+	m.restoredNotes = slices.Clone(notes)
+}
+
+// heldNotes is the manager's other part of the session snapshot: the notes held and not yet
+// delivered, oldest first, then the restored ones ResumeWorkflows has not adopted yet. Nil for none,
+// so a session with nothing held writes no `workflow_notes` key.
+func (m *backgroundManager) heldNotes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.notes)+len(m.restoredNotes) == 0 {
+		return nil
+	}
+	return append(slices.Clone(m.notes), m.restoredNotes...)
 }
 
 // waitAll waits for every live run to end.
@@ -739,8 +893,36 @@ func checkRestoredWorkflows(entries []workflowEntryJSON) error {
 			return refuse("repeats the id %q", entry.ID)
 		case entry.Recipe != "" && !isRecipeName(entry.Recipe):
 			return refuse("names the recipe %q, which is not a skill id", entry.Recipe)
+		case entry.Home != "" && !isSessionDirName(entry.Home):
+			return refuse("names the home %q, which is not a session scratch directory", entry.Home)
 		}
 		seen[entry.ID] = true
+	}
+	return nil
+}
+
+// checkRestoredWorkflowNotes checks the held finish notes a snapshot carries (the `workflow_notes`
+// key). A note reaches the model as recorded text in an Exchange's opening message, so it is held to
+// the rules of the text a restore submits: one line each — a finish note is always one (oneLine) —
+// opening with no fence apogee never commits, and all of them together within the byte bound a
+// restored message is held to. Anything else refuses the whole payload.
+func checkRestoredWorkflowNotes(notes []string) error {
+	total := 0
+	for i, note := range notes {
+		refuse := func(format string, args ...any) error {
+			return fmt.Errorf("apogee: decode session state: workflow note %d "+format+": %w",
+				append(append([]any{i}, args...), ErrSnapshotRefused)...)
+		}
+		total += len(note)
+		switch {
+		case strings.ContainsAny(note, "\r\n"):
+			return refuse("spans more than one line")
+		case total > maxRestoredMessageBytes:
+			return refuse("takes the notes past the %d-byte limit", maxRestoredMessageBytes)
+		}
+		if fence, forged := forgesRestoredStructure(note); forged {
+			return refuse("opens with %q, which apogee never commits", fence)
+		}
 	}
 	return nil
 }
@@ -754,6 +936,19 @@ func isStoreFolderName(id string) bool {
 	}
 	return !strings.ContainsFunc(id, func(r rune) bool {
 		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-')
+	})
+}
+
+// isSessionDirName reports whether name can be a session scratch directory's base name — a session
+// id, `YYYYMMDDTHHMMSSZ-<hex>`: ASCII letters of either case, digits and dashes, not led by a dash,
+// within maxRestoredWorkflowIDBytes. No such name is a separator, a `..` or a volume, so a Home
+// resolves to a sibling of the session's scratch directory and nowhere else.
+func isSessionDirName(name string) bool {
+	if name == "" || len(name) > maxRestoredWorkflowIDBytes || name[0] == '-' {
+		return false
+	}
+	return !strings.ContainsFunc(name, func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-')
 	})
 }
 

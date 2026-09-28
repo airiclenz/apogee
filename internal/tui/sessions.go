@@ -125,9 +125,12 @@ type sessionListMsg struct {
 
 // sessionLoadedMsg carries the result of an off-loop Sessions.Load(id) back to the Update loop:
 // the record to restore into the live engine or the error that aborts the resume (resumeLoaded).
+// keep carries the human's `n` to "stop running workflows?" (commandrun.go, the boundary confirm)
+// through to the restore it answered, which marks the engine to keep them just before it swaps.
 type sessionLoadedMsg struct {
-	rec session.Record
-	err error
+	rec  session.Record
+	err  error
+	keep bool
 }
 
 // Compile-time assertions that the browser Msgs are valid tea.Msgs (mirroring messages.go).
@@ -344,14 +347,26 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // The load rides back as a Cmd rather than happening here: the resume runs when the record arrives
 // (sessionLoadedMsg), so a caller that dropped the Cmd would close the pane over a session that
 // never loads.
+//
+// A switch with background workflows running asks first whether to stop them (the boundary confirm,
+// commandrun.go): the browser closes and the load waits for the answer.
 func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 	meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
 	if !ok {
 		return m, nil
 	}
 	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
-	m.sessionLoading = true             // …and a background workflow's wake waits for it (workflow.go)
-	return m, m.loadSession(meta.ID)
+	if m.workflowsRunning() {
+		return m.confirmBoundary(pendingBoundary{kind: boundarySwitch, sessionID: meta.ID})
+	}
+	return m.switchSession(meta.ID, false)
+}
+
+// switchSession starts the load of the stored session id that resumeLoaded then restores, keep
+// riding along to the restore (sessionLoadedMsg).
+func (m Model) switchSession(id string, keep bool) (Model, tea.Cmd) {
+	m.sessionLoading = true // …and a background workflow's wake waits for it (workflow.go)
+	return m, m.loadSession(id, keep)
 }
 
 // sessionBrowserVerb answers the three keys that are this browser's alone and no list's — the chords
@@ -532,11 +547,11 @@ func (m *Model) setSessionTitle(id, title string, src titleSource) tea.Cmd {
 // loadSession builds the Cmd that reads Sessions.Load(id) off the Update loop and reports it as a
 // sessionLoadedMsg. Load does not activate the record — resumeLoaded switches the active session
 // only once the live restore has succeeded, so a failed restore keeps saving the outgoing session.
-func (m Model) loadSession(id string) tea.Cmd {
+func (m Model) loadSession(id string, keep bool) tea.Cmd {
 	sessions := m.sessions
 	return func() tea.Msg {
 		rec, err := sessions.Load(id)
-		return sessionLoadedMsg{rec: rec, err: err}
+		return sessionLoadedMsg{rec: rec, err: err, keep: keep}
 	}
 }
 
@@ -561,15 +576,25 @@ func (m Model) loadSession(id string) tea.Cmd {
 // The title is untrusted disk input — no codec sanitizes a record's Meta on the way back in, which
 // is why sessionRowCells strips it too — and it needs no wrapping here: both addNote and
 // addEphemeralNote escape-strip at the seam.
+//
+// The background workflows follow the human's answer to the boundary confirm (commandrun.go): a
+// `keep` marks the engine just before the restore (Engine.KeepWorkflows), so the running set and its
+// held notes carry over; anything else lets the restore stop them. Either way the restored record's
+// own set is resumed once the Activate queued below has moved the scratch directory to it
+// (resumePending, resumeAfterFold).
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.transcript.addNote("could not load session: " + msg.err.Error())
 		return nil
 	}
+	if msg.keep {
+		m.eng.KeepWorkflows()
+	}
 	if err := m.eng.RestoreSession(msg.rec.Session); err != nil {
 		m.transcript.addNote("could not restore session: " + err.Error())
 		return nil
 	}
+	m.resumePending = true
 	// The restore succeeded, so it is now safe to redirect saves at the loaded session's file
 	// (Load deliberately left the active session untouched — see resumeLoaded's doc). A failed
 	// RestoreSession above returns before this, leaving the outgoing conversation's file active.
@@ -642,6 +667,38 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	return cmd // the queued Activate, when this fold's schedule found the queue idle
+}
+
+// resumeAfterFold is the Update tail's resume half: when a restored session's background workflows
+// are still to be started (resumePending) and the engine is the loop's to start them on
+// (canResumeWorkflows), it starts them — Engine.ResumeWorkflows, which also adopts the finish notes
+// the snapshot held — once, and notes a workflow that could not resume. Anything but the Model, or a
+// Model with nothing pending, passes through untouched. The workflows' own events report them from
+// here on, so the status line counts them as the running ones they are.
+func resumeAfterFold(next tea.Model) tea.Model {
+	m, ok := next.(Model)
+	if !ok || !m.resumePending || !m.canResumeWorkflows() {
+		return next
+	}
+	m.resumePending = false
+	if err := m.eng.ResumeWorkflows(); err != nil {
+		m.transcript.addNote("could not resume background workflows: " + err.Error())
+	}
+	return m
+}
+
+// canResumeWorkflows reports whether the engine is the loop's to resume workflows on right now: bound
+// and idle, not quitting, with no /sessions load or /bg launch in flight, and with the record-write
+// queue drained — a switch's Activate, which moves the scratch directory the workflows' folders are
+// found under, rides that queue, so a resume waits for it to land.
+func (m Model) canResumeWorkflows() bool {
+	switch {
+	case m.state != stateIdle, m.prebound(), m.quitting, m.sessionLoading, m.bgLaunching:
+		return false
+	case m.writeBusy, len(m.pendingWrites) > 0:
+		return false
+	}
+	return true
 }
 
 // ----------------------------------------------------------------------------

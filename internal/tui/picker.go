@@ -93,6 +93,7 @@ const (
 	pickerSubAgentsMigration                   // what to do about a retired sub-agents: flag — the start-up offer
 	pickerMode                                 // the autonomy rungs this session may run at — the footer's mode marker
 	pickerFork                                 // the prompts this session may be forked at — /fork
+	pickerWorkflowBoundary                     // stop or keep the running workflows — /clear, a switch, /fork
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -128,6 +129,10 @@ type picker struct {
 	// already does ends the round: esc leaves every remaining entry unasked, which is a "not now"
 	// and persists nothing.
 	migration []string
+	// boundary is the session boundary the stop-or-keep confirm holds until it is answered
+	// (pickerWorkflowBoundary, commandrun.go): which one — /clear, a /sessions switch, a /fork — and
+	// what it needs to go ahead. Plain values, like migration.
+	boundary pendingBoundary
 }
 
 // maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
@@ -299,6 +304,12 @@ func init() {
 			hint:   forkPickerHint,
 			rows:   func(m Model) []popupRow { return forkRows(m.transcript.forkPoints()) },
 			accept: Model.acceptFork,
+		},
+		pickerWorkflowBoundary: {
+			title:  fixedTitle(boundaryConfirmTitle),
+			hint:   boundaryConfirmHint,
+			rows:   func(Model) []popupRow { return boundaryRows() },
+			accept: Model.acceptBoundaryRow,
 		},
 	}
 }
@@ -1076,6 +1087,13 @@ func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 // half-built Schedule and the migration round with it (the whole-struct zeroing), and accepting
 // resolves the highlighted row through the kind that is open (acceptPicker).
 func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.picker.kind == pickerWorkflowBoundary {
+		// The confirm answers its own y and n ahead of the filter, and its esc cancels the boundary
+		// rather than merely closing: what the confirm held back resumes either way (commandrun.go).
+		if next, cmd, ok := m.boundaryKey(msg); ok {
+			return next, cmd
+		}
+	}
 	verdict, cmd := m.listKey(&m.picker.listSurface, msg, m.pickerOfferingRows(), listWrapsAround)
 	switch verdict {
 	case listCloses:

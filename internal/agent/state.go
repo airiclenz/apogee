@@ -53,6 +53,11 @@ import (
 //     Driver calls; a restore only loads and checks the set). Additive exactly as tasks is:
 //     omitempty, no SessionVersion bump. A fork carries none (CutSession): the fork is a new
 //     conversation, and the workflows belong to the session that launched them.
+//   - workflow_notes : the finish notes of background workflows that ended and were not delivered
+//     yet (ADR 0089 D3, background.go), one line each, oldest first — so a session saved with a
+//     note held, the record saved at quit included, hands it to the resumed conversation's next
+//     opening message (ResumeWorkflows adopts them; a restore only loads and checks them). Additive
+//     exactly as workflows is, and a fork carries none for workflows' reason.
 //
 // The per-message Interjected marker rides the conversation's own marshal as an omitempty
 // sibling, so it needs NO SessionVersion bump in either direction: a snapshot written before
@@ -97,6 +102,7 @@ type agentState struct {
 	Tasks         []tasklist.Item      `json:"tasks,omitempty"`
 	Retained      []retainedEntryJSON  `json:"retained,omitempty"`
 	Workflows     []workflowEntryJSON  `json:"workflows,omitempty"`
+	WorkflowNotes []string             `json:"workflow_notes,omitempty"`
 }
 
 // retainedEntryJSON is one retained delegation (retainedDelegate) as the session snapshot spells
@@ -205,7 +211,8 @@ func (a *Agent) encodeState() (json.RawMessage, error) {
 		PendingInput:  turns.pendingInput,
 		Tasks:         a.tasks.Items(),
 		Retained:      retainedToJSON(a.retained.entries()),
-		Workflows:     a.background.entries(),
+		Workflows:     a.background.entries(a.ScratchDir()),
+		WorkflowNotes: a.background.heldNotes(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apogee: encode session state: %w", err)
@@ -285,8 +292,10 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	// The background workflows are LOADED, never started (background.go): a Resume has not re-supplied
 	// the scratch directory, catalog and tools yet, so ResumeWorkflows — the Driver's call once the
 	// engine is bound — starts them. The snapshot's set replaces whatever the outgoing session had
-	// loaded and not resumed; RestoreSession stops the outgoing session's running ones.
-	a.background.load(st.Workflows)
+	// loaded and not resumed; RestoreSession stops the outgoing session's running ones. The held
+	// finish notes are loaded beside them for the same reason and adopted by the same call, so a
+	// RestoreSession's stop of the outgoing set cannot drop the incoming session's notes.
+	a.background.load(st.Workflows, st.WorkflowNotes)
 	return nil
 }
 
@@ -433,7 +442,8 @@ func messageBytes(m domain.Message) int {
 // normalised to a clean boundary: the deferred-correction queue is cleared, no Exchange is open
 // (InExchange false, ExchangeStart 0), no input is pending, the task list is empty — a fork at
 // the newest prompt clears the checklist exactly like a fork at an earlier one — and no background
-// workflow rides along (no `workflows` key): they belong to the session that launched them. The Turn counter
+// workflow rides along (no `workflows` key, and no `workflow_notes`): they belong to the session
+// that launched them. The Turn counter
 // carries over, so the child's Turn numbering continues the parent's.
 //
 // A negative dropExchanges, or one that would drop every opening, is refused with an error naming
@@ -550,7 +560,9 @@ func dropLeadingSystem(conv *domain.Conversation) int {
 //
 // The background workflow entries are identifiers, never text the model reads, so they are held to
 // their shape instead (checkRestoredWorkflows): an id that could name a folder outside
-// `<scratch>/workflows/` refuses the payload.
+// `<scratch>/workflows/` refuses the payload. The held finish notes ARE text the model reads — an
+// opening message carries them — so they are held to the fence rule and the message bound
+// (checkRestoredWorkflowNotes).
 func checkRestoredStructure(st *agentState) error {
 	if st.Conversation != nil {
 		var bad error
@@ -582,6 +594,9 @@ func checkRestoredStructure(st *agentState) error {
 		return err
 	}
 	if err := checkRestoredWorkflows(st.Workflows); err != nil {
+		return err
+	}
+	if err := checkRestoredWorkflowNotes(st.WorkflowNotes); err != nil {
 		return err
 	}
 	if st.PendingInput != nil {

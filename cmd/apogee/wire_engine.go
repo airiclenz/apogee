@@ -858,6 +858,25 @@ func (e *lateEngine) RerunFailed(id string) error {
 	return agent.RerunFailed(id)
 }
 
+// KeepWorkflows marks the bound Agent's next session boundary to keep its background workflows;
+// unbound no workflow can be running, so there is nothing to keep and it does nothing.
+func (e *lateEngine) KeepWorkflows() {
+	if agent := e.bound(); agent != nil {
+		agent.KeepWorkflows()
+	}
+}
+
+// ResumeWorkflows starts the background workflows and adopts the held notes the bound Agent's
+// restored snapshot carried; unbound there is no snapshot restored into anything yet (a resumed
+// record is seeded into the Agent the later Bind builds), so there is nothing to resume.
+func (e *lateEngine) ResumeWorkflows() error {
+	agent := e.bound()
+	if agent == nil {
+		return nil
+	}
+	return agent.ResumeWorkflows()
+}
+
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.
 func (e *lateEngine) Close() error {
 	agent := e.bound()
