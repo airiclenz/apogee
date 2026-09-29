@@ -945,6 +945,95 @@ func TestDuplicateStartedForLiveWorkflowKeepsOneBlock(t *testing.T) {
 	}
 }
 
+// testResumeHint is the resume text a typed Recipe launch's started phase carries.
+const testResumeHint = "re-run `/audit internal/mcp security` to resume"
+
+// resumableRun folds one Recipe launch of testWorkflowID carrying testResumeHint — one stage, one
+// item finished ok — up to the end phase given.
+func resumableRun(end domain.WorkflowPhase, resume string) *transcript {
+	tr := &transcript{}
+	tr.addUser("/audit internal/mcp security", nil)
+	started := startedUnder("recipe-audit-0")
+	started.Stages = []string{"items"}
+	started.Resume = resume
+	tr.apply(started)
+	tr.apply(stageStarted("items", 1, 1, 0))
+	tr.apply(itemFinished(0, "alpha", "ok", "fine", nil))
+	tr.apply(workflowPhase(end))
+	return tr
+}
+
+// assertEndsOnResumeHint fails unless the transcript's workflow block reads its resume hint as its
+// last line — in its text and in its paint, after the totals line.
+func assertEndsOnResumeHint(t *testing.T, tr *transcript) {
+	t.Helper()
+	i := slices.IndexFunc(tr.entries, func(e entry) bool { return e.kind == entryWorkflow })
+	if i < 0 {
+		t.Fatal("no workflow block in the transcript")
+	}
+	lines := strings.Split(tr.entries[i].text, "\n")
+	if last := lines[len(lines)-1]; last != testResumeHint {
+		t.Errorf("the stopped block's text ends on %q; want %q", last, testResumeHint)
+	}
+	painted := plainRender(tr)
+	totals, hint := strings.Index(painted, "items 1 · ok 1"), strings.Index(painted, testResumeHint)
+	if totals < 0 || hint < totals {
+		t.Errorf("the stopped block paints the hint at %d and the totals at %d; want the hint after the totals in\n%s",
+			hint, totals, painted)
+	}
+}
+
+// A stopped Recipe launch's block ends on the resume hint its started phase carried: one line after
+// the totals, in both the text and the painted stage rows.
+func TestStoppedRecipeBlockShowsResumeHint(t *testing.T) {
+	t.Parallel()
+	tr := resumableRun(domain.WorkflowStopped, testResumeHint)
+
+	assertEndsOnResumeHint(t, tr)
+}
+
+// A run that finished or failed has nothing to resume, and a stopped run whose started phase carried
+// no Resume (a fan_out's, a background Workflow's) has no hint to show: no block of them paints one.
+func TestFinishedBlockHasNoResumeHint(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		end    domain.WorkflowPhase
+		resume string
+	}{
+		{"finished", domain.WorkflowFinished, testResumeHint},
+		{"failed", domain.WorkflowFailed, testResumeHint},
+		{"stopped without a resume", domain.WorkflowStopped, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := resumableRun(tc.end, tc.resume)
+
+			if painted := plainRender(tr); strings.Contains(painted, "to resume") {
+				t.Errorf("the %s block paints a resume hint:\n%s", tc.end, painted)
+			}
+			for _, e := range tr.entries {
+				if e.kind == entryWorkflow && strings.Contains(e.text, "to resume") {
+					t.Errorf("the %s block's text carries a resume hint: %q", tc.end, e.text)
+				}
+			}
+		})
+	}
+}
+
+// A stopped block's resume hint rides the record: after a save and reopen the replayed block still
+// ends on it.
+func TestResumeHintSurvivesSaveAndReopen(t *testing.T) {
+	t.Parallel()
+	tr := resumableRun(domain.WorkflowStopped, testResumeHint)
+
+	reopened := &transcript{entries: roundTrip(t, tr)}
+	reopened.touch()
+
+	assertEndsOnResumeHint(t, reopened)
+}
+
 // ----------------------------------------------------------------------------
 // A Workflow's item runs nest under the block that started it
 // ----------------------------------------------------------------------------

@@ -194,13 +194,15 @@ const (
 
 // Workflow is the structure of one Workflow's block: its name, the end it came to (a
 // domain.WorkflowPhase — "finished", "stopped" or "failed" — and "" for a Workflow still running when
-// the record was written), a failed Workflow's cause, one row per stage of its Plan in its order, and
-// every item that finished, in the order it finished. Every string but End and the stage states is
-// display text and is stripped on decode.
+// the record was written), a failed Workflow's cause, how to resume a Recipe launch's run (its started
+// phase's Resume, shown once it stopped), one row per stage of its Plan in its order, and every item
+// that finished, in the order it finished. Every string but End and the stage states is display text
+// and is stripped on decode.
 type Workflow struct {
 	Name   string               `json:"name,omitempty"`
 	End    string               `json:"end,omitempty"`
 	Cause  string               `json:"cause,omitempty"`
+	Resume string               `json:"resume,omitempty"`
 	Stages []WorkflowStage      `json:"stages,omitempty"`
 	Items  []WorkflowItemResult `json:"items,omitempty"`
 }
@@ -473,12 +475,13 @@ func stripEntry(e *Entry) {
 	}
 }
 
-// stripWorkflow strips a Workflow block's structure: its name, cause, stage names and every finished
-// item's words. End and the stage states are closed enums a consumer maps to its own wording, so an
+// stripWorkflow strips a Workflow block's structure: its name, cause, resume hint, stage names and
+// every finished item's words. End and the stage states are closed enums a consumer maps to its own wording, so an
 // unrecognised value never reaches the terminal as text.
 func stripWorkflow(w *Workflow) {
 	w.Name = sanitize.StripEscapes(w.Name)
 	w.Cause = sanitize.StripEscapes(w.Cause)
+	w.Resume = sanitize.StripEscapes(w.Resume)
 	for i := range w.Stages {
 		w.Stages[i].Name = sanitize.StripEscapes(w.Stages[i].Name)
 	}

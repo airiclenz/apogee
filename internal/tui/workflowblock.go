@@ -95,6 +95,7 @@ type workflowView struct {
 	waitingOn string               // the stage the question waits in
 	end       domain.WorkflowPhase // finished, stopped or failed; "" while it runs
 	cause     string               // a failed Workflow's cause
+	resume    string               // how to resume a stopped run (the started phase's Resume); "" when none
 }
 
 // live reports whether the view was folded in this session. A block replayed from a record is never
@@ -172,7 +173,12 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 		if t.fanOutOpen(run) || t.workflowRunning(e.Workflow) {
 			return
 		}
-		view := workflowView{id: e.Workflow, name: stripEscapes(e.Name), stages: workflowStagesOf(e.Stages)}
+		view := workflowView{
+			id:     e.Workflow,
+			name:   stripEscapes(e.Name),
+			stages: workflowStagesOf(e.Stages),
+			resume: stripEscapes(e.Resume),
+		}
 		// The call its item children are bracketed under is the block's own: it is what their
 		// item heads are seated under (entry.seatsItemHead), what an item run whose head is not
 		// placed yet finds as the head of its span (entry.headsWorkflowRuns), and it is kept in
@@ -408,8 +414,8 @@ func workflowFieldValue(value string) string {
 }
 
 // text renders the block: its header line, then its body — the stage running, the item lines (past
-// workflowListedItems only those that did not end ok), an `ask` stage's question, the totals, and a
-// failure's cause.
+// workflowListedItems only those that did not end ok), an `ask` stage's question, the totals, a
+// failure's cause, and a stopped run's resume hint.
 func (v workflowView) text() string {
 	lines := []string{v.header()}
 	if v.stage != "" {
@@ -437,7 +443,19 @@ func (v workflowView) text() string {
 	if v.cause != "" {
 		lines = append(lines, workflowFailedPrefix+v.cause)
 	}
+	if hint := v.resumeHint(); hint != "" {
+		lines = append(lines, hint)
+	}
 	return strings.Join(lines, "\n")
+}
+
+// resumeHint is the line a stopped run ends on that says how to resume it — the started phase's
+// Resume, set for a Recipe launch only — and "" for a run that did not stop or that carries none.
+func (v workflowView) resumeHint() string {
+	if v.end != domain.WorkflowStopped {
+		return ""
+	}
+	return v.resume
 }
 
 // header names the Workflow and where it stands: running, waiting for the human, or how it ended.
@@ -566,7 +584,7 @@ func (s workflowStage) slot(waiting bool) string {
 
 // stageBody is what a live block says beneath its stage rows: one line per item whose receipt is not
 // ok (`stage · item — status — summary`), an `ask` stage's question, and — once it has ended — the
-// totals and a failure's cause.
+// totals, a failure's cause and a stopped run's resume hint.
 func (v workflowView) stageBody() []string {
 	var lines []string
 	for _, item := range v.items {
@@ -587,6 +605,9 @@ func (v workflowView) stageBody() []string {
 	}
 	if v.cause != "" {
 		lines = append(lines, workflowFailedPrefix+v.cause)
+	}
+	if hint := v.resumeHint(); hint != "" {
+		lines = append(lines, hint)
 	}
 	return lines
 }

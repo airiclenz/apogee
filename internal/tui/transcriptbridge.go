@@ -215,8 +215,8 @@ var workflowStageStateNames = map[workflowStageState]string{
 	stageSkipped: session.WorkflowStageSkipped,
 }
 
-// toWireWorkflow projects a workflow block's view onto the wire: its name, end and cause, its stage
-// rows and its finished items. The live run's own state — its id, the stage running and an `ask`
+// toWireWorkflow projects a workflow block's view onto the wire: its name, end, cause and resume
+// hint, its stage rows and its finished items. The live run's own state — its id, the stage running and an `ask`
 // stage's question — is not kept: the Workflow does not run in the session that reopens it. A view
 // with nothing to draw from (one replayed from an older record) writes nothing, so its block stays
 // the text it came back as.
@@ -224,7 +224,7 @@ func toWireWorkflow(v workflowView) *session.Workflow {
 	if !v.drawsStages() {
 		return nil
 	}
-	w := &session.Workflow{Name: v.name, End: string(v.end), Cause: v.cause}
+	w := &session.Workflow{Name: v.name, End: string(v.end), Cause: v.cause, Resume: v.resume}
 	for _, s := range v.stages {
 		w.Stages = append(w.Stages, session.WorkflowStage{
 			Name:     s.name,
@@ -408,7 +408,7 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 // does not know reads as pending, an end it does not know reads as stopped (workflowEndOf), and an
 // item's result line is not rebuilt: the entry's text keeps it, and only a fold re-renders the text.
 func fromWireWorkflow(w *session.Workflow) workflowView {
-	v := workflowView{replayed: true, name: w.Name, end: workflowEndOf(w.End), cause: w.Cause}
+	v := workflowView{replayed: true, name: w.Name, end: workflowEndOf(w.End), cause: w.Cause, resume: w.Resume}
 	for _, s := range w.Stages {
 		v.stages = append(v.stages, workflowStage{
 			name:     s.Name,

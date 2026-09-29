@@ -183,7 +183,9 @@ internal/eventjson/encode.go — workflowPhaseData; internal/agent/background.go
 - `go test -count=1 -run 'StartedEvent' ./internal/agent/`
 **Commit:** `feat(agent): carry a recipe's resume command on its started phase`
 
-## 5. A stopped block shows the resume hint
+## 5. A stopped block shows the resume hint — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the hint is painted as the last stageBody line (the body's toolDetail tone is the dim one) and appended last in text(), both through a new workflowView.resumeHint (stopped end and a non-empty resume); it shows even when no item finished and so no totals line precedes it.
 
 **What:** Depends on items 1 and 4. `workflowView` stores `Resume` from its Started phase and, when
 `end == stopped` and the text is non-empty, renders it as one dim line after the totals line in
