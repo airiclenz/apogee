@@ -64,7 +64,12 @@ package agent
 // them as held. Stopping the whole set (Close, and a ClearContext or RestoreSession not told to
 // keep it) drops the held notes with the session they were meant for, and a stop that drops them
 // leaves none behind to wake on — though a ClearContext with no workflow live stops nothing and so
-// drops nothing: the notes it finds held reach the new conversation.
+// drops nothing: the notes it finds held reach the new conversation. A note delivered into an
+// Exchange that is then aborted (AbortExchange, or a settle that scraps it) is held again — the
+// abort dropped every message that carried it, whether the opening, a wake's input or a drained
+// interjection — so it reaches the next Exchange; one delivered into an Exchange that closes with it
+// kept is never delivered again. A note held again that way may let a Driver's wake open an Exchange
+// on it right after the cancel, which is intended: it is a note nobody has read (ADR 0089 D3).
 //
 // Resume replays, by decision (plan 2026-09-27 - 00, item 30). A resumed workflow re-opens its
 // folder and skips every fan-out item whose receipt is already there, and it replays the script and
@@ -171,6 +176,7 @@ type backgroundManager struct {
 	prompts       []*backgroundPrompt
 	promptID      uint64 // the last id minted for a queued prompt (backgroundPrompt.id)
 	notes         []string
+	delivered     []string // the notes taken into the open Exchange, or the input a Wake queued
 	launched      []keptRun
 	keep          bool
 }
@@ -1199,6 +1205,9 @@ func (a *Agent) Wake(ctx context.Context) (bool, error) {
 		}
 		return false, err
 	}
+	// The queued input carries them now: an abort of the Exchange it opens puts them back held
+	// (Agent.exchangeAborted), a close that keeps it forgets them (Agent.exchangeClosed).
+	a.background.markDelivered(notes)
 	return true, nil
 }
 
@@ -1303,4 +1312,43 @@ func (m *backgroundManager) putBack(notes []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.notes = append(slices.Clone(notes), m.notes...)
+}
+
+// takeIntoExchange takes every held note, oldest first, as takeNotes does, and records them as
+// delivered into the open Exchange (markDelivered): its opening message, or an interjection the
+// Driver commits into it. nil when none is held.
+func (m *backgroundManager) takeIntoExchange() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	notes := m.notes
+	m.notes = nil
+	m.delivered = append(m.delivered, notes...)
+	return notes
+}
+
+// markDelivered records notes a taker handed to the Exchange about to open — Wake's queued input —
+// so an abort that scraps that Exchange puts them back (restoreDelivered).
+func (m *backgroundManager) markDelivered(notes []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.delivered = append(m.delivered, notes...)
+}
+
+// restoreDelivered puts the notes delivered into an aborted Exchange back at the front of the held
+// ones, ahead of any held since, and forgets the record: the abort dropped every message that
+// carried them, so they are held again for the next Exchange (Agent.exchangeAborted).
+func (m *backgroundManager) restoreDelivered() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notes = append(m.delivered, m.notes...)
+	m.delivered = nil
+}
+
+// forgetDelivered drops the record of the notes delivered into an Exchange that closed with the
+// messages carrying them kept (Agent.exchangeClosed): they reached the conversation and are never
+// delivered again.
+func (m *backgroundManager) forgetDelivered() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.delivered = nil
 }

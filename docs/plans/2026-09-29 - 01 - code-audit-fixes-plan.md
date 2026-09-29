@@ -263,7 +263,9 @@ done, second `RerunFailed(id)` accepted.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Background|Rerun|MarkStopped' ./internal/agent/`
 **Commit:** `fix(agent): keep a finished workflow folder done when its queued re-run stops`
 
-## 8. Agent: an aborted Exchange puts its drained workflow notes back
+## 8. Agent: an aborted Exchange puts its drained workflow notes back — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the per-Exchange record lives on backgroundManager (`delivered`, guarded by its mutex) rather than on the Exchange's loop state, since Wake takes the notes before the Exchange opens; step's opening and TakeWorkflowNotes take through `takeIntoExchange`, Wake records via `markDelivered` once its submit succeeds; `exchangeAborted` restores, `exchangeClosed` forgets.
 
 **What:** Fix "A finished background workflow's note is lost when the opening Exchange is aborted".
 **Regression guard.** Under the default `workflow-wake: on`, `Wake` (background.go) takes the notes as the opening

@@ -1109,3 +1109,122 @@ func TestBackground_AWorkflowKeptAcrossAScratchMoveIsListedAndResumesFromItsHome
 		t.Errorf("the resumed workflow = %+v, want it done in its own folder", info)
 	}
 }
+
+// noteCount is how many messages of a's conversation carry the "pair" recipe's finish note.
+func noteCount(a *Agent) int {
+	count := 0
+	for i := range a.conv.Len() {
+		if strings.Contains(a.conv.At(i).Content, pairNoteLine) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestBackground_AnAbortedOpeningHoldsItsNoteAgainForTheNextExchange(t *testing.T) {
+	t.Parallel()
+
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
+		route(wakeUserText, nil, toolCallScript("c1", "read_thing", `{}`)).
+		route("try again", nil, contentScript("done")).
+		route("third", nil, contentScript("ok"))
+	a, log := newPairParent(t, newLockedSink(), up, nil)
+	launchBackground(t, a, "pair")
+	a.background.waitAll()
+	if err := a.Submit(domain.UserInput{Text: wakeUserText}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res, err := a.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+		t.Fatalf("first Step = %+v, %v; want a Turn that leaves the Exchange open", res, err)
+	}
+
+	a.AbortExchange()
+
+	runInput(t, a, domain.UserInput{Text: "try again"})
+	assertNoteMessage(t, log.first(t, "try again"))
+	if got := noteCount(a); got != 1 {
+		t.Errorf("messages carrying the note = %d, want 1: the aborted opening's copy is gone", got)
+	}
+	runInput(t, a, domain.UserInput{Text: "third"})
+	if sent := log.first(t, "third"); strings.Contains(sent, workflowNoteHeader) {
+		t.Errorf("the Exchange after a completed one = %q, want the delivered note not delivered again", sent)
+	}
+	if notes := a.background.takeNotes(); len(notes) != 0 {
+		t.Errorf("held notes after a completed Exchange = %q, want none", notes)
+	}
+}
+
+func TestBackground_AnAbortHoldsAgainTheNoteADrainInterjected(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", signalThenWait(make(chan struct{}), release), finishScript("f1", "alpha is fine")).
+		route(wakeUserText, nil, toolCallScript("c1", "read_thing", `{}`)).
+		route("try again", nil, contentScript("done"))
+	a, log := newPairParent(t, newLockedSink(), up, nil)
+	launchBackground(t, a, "pair")
+	if err := a.Submit(domain.UserInput{Text: wakeUserText}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res, err := a.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+		t.Fatalf("first Step = %+v, %v; want a Turn that leaves the Exchange open", res, err)
+	}
+	close(release)
+	a.background.waitAll()
+	note, ok := a.TakeWorkflowNotes()
+	if !ok {
+		t.Fatal("TakeWorkflowNotes found no note after the workflow ended mid-Exchange")
+	}
+	if err := a.Interject(context.Background(), note); err != nil {
+		t.Fatalf("Interject(note): %v", err)
+	}
+
+	a.AbortExchange()
+
+	runInput(t, a, domain.UserInput{Text: "try again"})
+	assertNoteMessage(t, log.first(t, "try again"))
+	if got := noteCount(a); got != 1 {
+		t.Errorf("messages carrying the note = %d, want 1: the scrapped interjection's copy is gone", got)
+	}
+}
+
+func TestBackground_ACancelDuringTheWakeReplyHoldsTheNoteAgain(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
+		route(workflowNoteHeader, signalThenWait(started, nil), contentScript("never read")).
+		route(workflowNoteHeader, nil, contentScript("noted"))
+	a, log := newPairParent(t, newLockedSink(), up, nil)
+	launchBackground(t, a, "pair")
+	a.background.waitAll()
+	if woke, err := a.Wake(context.Background()); err != nil || !woke {
+		t.Fatalf("Wake = %v, %v; want it to open an Exchange on the held note", woke, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stepped := make(chan struct{})
+	go func() {
+		defer close(stepped)
+		_, _ = a.Step(ctx)
+	}()
+	awaitClosed(t, started, "the wake reply's request")
+	cancel()
+	awaitClosed(t, stepped, "the cancelled Step")
+
+	if dropped := a.SettleExchange(); !dropped {
+		t.Fatal("SettleExchange kept the wake's Exchange; want the lone opening scrapped")
+	}
+
+	woke, err := a.Wake(context.Background())
+	if err != nil || !woke {
+		t.Fatalf("Wake after the cancel = %v, %v; want the note held again to wake on", woke, err)
+	}
+	runToEnd(t, a)
+	assertNoteMessage(t, log.first(t, workflowNoteHeader))
+	if got := noteCount(a); got != 1 {
+		t.Errorf("messages carrying the note = %d, want 1", got)
+	}
+}

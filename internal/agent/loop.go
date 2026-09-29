@@ -111,9 +111,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// helper an interjection shares (composeUserMessage), so both doors read identically.
 		// The finish notes of background workflows no drain or wake took yet follow the text
 		// (ADR 0089 D3: under `workflow-wake: off` this is how they arrive), after a recipe's
-		// result lines too, so the leading "/<id>" a launch keys on is untouched.
+		// result lines too, so the leading "/<id>" a launch keys on is untouched. They are taken
+		// INTO the Exchange: an abort that drops this opening holds them again (exchangeAborted).
 		opening := a.composeUserMessage(ctx, turn, *in, false)
-		if notes := a.background.takeNotes(); len(notes) > 0 {
+		if notes := a.background.takeIntoExchange(); len(notes) > 0 {
 			opening.Content += workflowNoteSeparator + renderWorkflowNotes(notes)
 		}
 		a.conv.Append(opening)

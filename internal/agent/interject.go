@@ -54,7 +54,9 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // Fates: an interjection is committed history, so it survives a cancelled Turn (the
 // rollback boundary is armed after this window — turn.go) and rides snapshot/resume with
 // its marker intact. AbortExchange discards it along with the rest of the scrapped
-// Exchange, which is the point: the human threw the whole Exchange away.
+// Exchange, which is the point: the human threw the whole Exchange away — except a workflow
+// finish note TakeWorkflowNotes handed over, which the abort holds again for the next Exchange
+// (Agent.exchangeAborted): the human threw away the Exchange, not a note the model never answered.
 //
 // What a STAGED message does before it reaches here is the host's to say through
 // Config.InterjectionPending: while it answers true, the delegations of the running group
@@ -91,12 +93,14 @@ func (a *Agent) Interject(ctx context.Context, in domain.UserInput) error {
 // consumes no slot of its own for them. The notes are taken: a second call returns nothing until
 // another workflow ends. It reports false, and takes nothing, when no Exchange is open (the idle
 // agent is woken on them instead — Wake — or the next opening message carries them) or no note is
-// held. Call it where Interject is called: on the goroutine driving Step, between Steps.
+// held. The notes are recorded as delivered into the open Exchange, so an abort that scraps it holds
+// them again (Agent.exchangeAborted). Call it where Interject is called: on the goroutine driving
+// Step, between Steps.
 func (a *Agent) TakeWorkflowNotes() (domain.UserInput, bool) {
 	if !a.turns.inExchange {
 		return domain.UserInput{}, false
 	}
-	notes := a.background.takeNotes()
+	notes := a.background.takeIntoExchange()
 	if len(notes) == 0 {
 		return domain.UserInput{}, false
 	}
