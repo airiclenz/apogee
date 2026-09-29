@@ -491,6 +491,29 @@ func TestWorkflowsViewCtrlRRerunsTheFailedItems(t *testing.T) {
 	}
 }
 
+// While an actuation is in flight ^r is refused through the predicate that refuses /bg, with the
+// latch's own note: the launch latch stays unset and the engine is not reached.
+func TestWorkflowsViewCtrlRRerunRefusedWhileAnActuationIsInFlight(t *testing.T) {
+	t.Parallel()
+	m := workflowsPaneModel(t, workflowsAtDetail)
+	eng := m.eng.(*fakeEngine)
+	m.actuation.inFlight, m.actuation.verb, m.actuation.profile = true, verbLoad, "big"
+
+	pressed, cmd := stepCmd(t, m, keyCtrl('r'))
+	if cmd != nil {
+		t.Error("^r during an actuation returned a launch Cmd")
+	}
+	if pressed.bgLaunching {
+		t.Error("^r during an actuation latched the /bg launch")
+	}
+	if _, reruns := eng.workflowActions(); len(reruns) != 0 {
+		t.Errorf("^r during an actuation reached the engine: reruns = %v", reruns)
+	}
+	if note, want := lastNote(pressed), m.actuationBlockNote(); note != want {
+		t.Errorf("^r during an actuation noted %q, want %q", note, want)
+	}
+}
+
 // The verbs are chords, never letters, and only a workflow's detail answers them: a bare r or x does
 // nothing there, and ^x and ^r on the list or an item's reading reach no engine call.
 func TestWorkflowsViewVerbsAreDetailChordsOnly(t *testing.T) {

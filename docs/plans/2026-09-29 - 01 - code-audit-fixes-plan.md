@@ -290,7 +290,7 @@ on`, Esc during the wake reply's Turn 0 → the note is held again (fixtures `ne
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Note|Abort' ./internal/agent/`
 **Commit:** `fix(agent): put drained workflow notes back when an Exchange aborts`
 
-## 9. TUI: `^r` re-run obeys the actuation latch
+## 9. TUI: `^r` re-run obeys the actuation latch — ✅ DONE (2026-09-29)
 
 **What:** Fix "`^r` re-run bypasses the actuation latch that guards `/bg`" (data race).
 **Goal:** `^r` in a workflow detail is refused with the actuation block note while an actuation is
