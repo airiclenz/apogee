@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -433,6 +434,42 @@ func TestFloorGuardKeysAreRegistryKeys(t *testing.T) {
 	// unknown-key walk's exemption (unknownkeys.go), never a registry row.
 	if _, ok := LookupKey(stepBudgetNoticeKey); ok {
 		t.Errorf("stepBudgetNoticeKey %q is a registry key; the switch is retired", stepBudgetNoticeKey)
+	}
+}
+
+// spelledCounts is how the prose docs write a small count — "seven always-on guards" — indexed by
+// the number it spells.
+var spelledCounts = []string{
+	"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+	"eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+	"nineteen", "twenty",
+}
+
+// readmeFloorGuardCount matches the README's one sentence that counts the Floor guards: "a *floor*:
+// seven always-on guards". A rewording that drops it fails the test below rather than skipping it.
+var readmeFloorGuardCount = regexp.MustCompile(`\*floor\*:\s+(\w+) always-on guards`)
+
+// The README counts the Floor guards in prose, and floorGuardKeys is the list that count is of: a
+// guard added or retired fails here until the README's number says so.
+func TestReadmeStatesTheFloorGuardCount(t *testing.T) {
+	t.Parallel()
+
+	const readmePath = "../../README.md"
+
+	readme, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", readmePath, err)
+	}
+	match := readmeFloorGuardCount.FindSubmatch(readme)
+	if match == nil {
+		t.Fatalf("%s no longer counts the Floor guards as %q", readmePath, readmeFloorGuardCount)
+	}
+	stated := slices.Index(spelledCounts, string(match[1]))
+	if stated < 0 {
+		t.Fatalf("%s counts the Floor guards as %q, which is no spelled number", readmePath, match[1])
+	}
+	if got := len(floorGuardKeys); stated != got {
+		t.Errorf("%s states %s Floor guards; floorGuardKeys names %d", readmePath, match[1], got)
 	}
 }
 

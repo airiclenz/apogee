@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"regexp"
 	"slices"
 	"testing"
 )
@@ -56,6 +58,44 @@ func TestMomentValuesArePinnedLiterals(t *testing.T) {
 				t.Errorf("Moment = %q, want %q", string(c.moment), c.want)
 			}
 		})
+	}
+}
+
+// spelledCounts is how the prose docs write a small count — "the sixteen Moments" — indexed by the
+// number it spells.
+var spelledCounts = []string{
+	"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+	"eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+	"nineteen", "twenty",
+}
+
+// manualMomentCount matches the manual index's count of the Moments: "the sixteen Moments". A
+// rewording that drops it fails the test below rather than skipping it.
+var manualMomentCount = regexp.MustCompile(`the (\w+) Moments`)
+
+// The manual index counts the Moments in prose, and the vocabulary is the seams plus the notices: a
+// Moment added or retired fails here until the manual's number says so — the spellings test above
+// pins each value but not how many there are.
+func TestManualStatesTheMomentCount(t *testing.T) {
+	t.Parallel()
+
+	const manualPath = "../../docs/manual/README.md"
+
+	manual, err := os.ReadFile(manualPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", manualPath, err)
+	}
+	match := manualMomentCount.FindSubmatch(manual)
+	if match == nil {
+		t.Fatalf("%s no longer counts the Moments as %q", manualPath, manualMomentCount)
+	}
+	stated := slices.Index(spelledCounts, string(match[1]))
+	if stated < 0 {
+		t.Fatalf("%s counts the Moments as %q, which is no spelled number", manualPath, match[1])
+	}
+	if got := len(Seams()) + len(Notices()); stated != got {
+		t.Errorf("%s states %s Moments; the vocabulary holds %d seams and %d notices",
+			manualPath, match[1], len(Seams()), len(Notices()))
 	}
 }
 
