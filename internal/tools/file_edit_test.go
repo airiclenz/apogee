@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -800,6 +801,119 @@ func TestApplyPatch_WholeLinesAndNewlines(t *testing.T) {
 			hunk:     patchHunk{newLines: []string{"new"}, addFile: true},
 			want:     "a\nnew\n",
 		},
+		{
+			name:     "a multi-line hunk at the end of lf text lacking a final newline",
+			original: "a\nb\nc",
+			hunk:     patchHunk{oldLines: []string{"b", "c"}, newLines: []string{"b", "C", "d"}},
+			want:     "a\nb\nC\nd",
+		},
+		{
+			name:     "a multi-line hunk matches a crlf file",
+			original: "a\r\nb\r\nc\r\n",
+			hunk:     patchHunk{oldLines: []string{"a", "b", "c"}, newLines: []string{"a", "B", "c"}},
+			want:     "a\r\nB\r\nc\r\n",
+		},
+		{
+			name:     "lines added to a crlf file take crlf",
+			original: "a\r\nc\r\nz\r\n",
+			hunk:     patchHunk{oldLines: []string{"a", "c"}, newLines: []string{"a", "b1", "b2", "c"}},
+			want:     "a\r\nb1\r\nb2\r\nc\r\nz\r\n",
+		},
+		{
+			name:     "a hunk at the end of a crlf file lacking a final newline",
+			original: "a\r\nb\r\nc",
+			hunk:     patchHunk{oldLines: []string{"b", "c"}, newLines: []string{"b", "C", "d"}},
+			want:     "a\r\nb\r\nC\r\nd",
+		},
+		{
+			name:     "a multi-line hunk present twice in a crlf file is ambiguous",
+			original: "a\r\nb\r\na\r\nb\r\n",
+			hunk:     patchHunk{oldLines: []string{"a", "b"}, newLines: []string{"c"}},
+			wantErr:  "matched 2 places (must match exactly one) — at lines 1, 3",
+		},
+		{
+			name:     "a prefix of a longer crlf line does not match",
+			original: "x = 10\r\ny = 2\r\n",
+			hunk:     patchHunk{oldLines: []string{"x = 1", "y = 2"}, newLines: []string{"x = 3", "y = 2"}},
+			wantErr:  "did not match",
+		},
+		{
+			name:     "an insertion onto a crlf file lacking a final newline takes crlf",
+			original: "a\r\nb",
+			hunk:     patchHunk{newLines: []string{"c", "d"}, addFile: true},
+			want:     "a\r\nb\r\nc\r\nd\r\n",
+		},
+		{
+			// Mixed endings: lines match with a trailing "\r" ignored, the block takes the ending
+			// of the line it starts on, and its last line keeps its own ending.
+			name:     "a hunk in a mixed-ending file takes the ending where it lands",
+			original: "a\r\nb\nc\r\n",
+			hunk:     patchHunk{oldLines: []string{"a", "b"}, newLines: []string{"a", "x", "b"}},
+			want:     "a\r\nx\r\nb\nc\r\n",
+		},
+		{
+			name:     "a removal takes the line's ending with it",
+			original: "a\nb\nc\n",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "a\nc\n",
+		},
+		{
+			name:     "a removal from a crlf file takes the line's ending with it",
+			original: "a\r\nb\r\nc\r\n",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "a\r\nc\r\n",
+		},
+		{
+			name:     "a multi-line removal takes every ending with it",
+			original: "a\r\nb\r\nc\r\nd\r\n",
+			hunk:     patchHunk{oldLines: []string{"b", "c"}},
+			want:     "a\r\nd\r\n",
+		},
+		{
+			name:     "a removal of the last line keeps the final newline",
+			original: "a\nb\n",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "a\n",
+		},
+		{
+			name:     "a removal of the last crlf line keeps the final newline",
+			original: "a\r\nb\r\n",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "a\r\n",
+		},
+		{
+			// The preceding line's ending goes too, so the removal invents no final newline.
+			name:     "a removal of an unterminated last line",
+			original: "a\nb",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "a",
+		},
+		{
+			name:     "a removal of an unterminated last crlf line",
+			original: "a\r\nb",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "a",
+		},
+		{
+			name:     "a removal of every line leaves empty text",
+			original: "a\nb\n",
+			hunk:     patchHunk{oldLines: []string{"a", "b"}},
+			want:     "",
+		},
+		{
+			name:     "a removal of the only line leaves empty text",
+			original: "b\n",
+			hunk:     patchHunk{oldLines: []string{"b"}},
+			want:     "",
+		},
+		{
+			// The empty remainder after the final newline is not a line, so a hunk ending in an
+			// empty removal line cannot land on it, just as a lone empty needle cannot.
+			name:     "a hunk ending in an empty line does not match after the final newline",
+			original: "b\n",
+			hunk:     patchHunk{oldLines: []string{"b", ""}},
+			wantErr:  "did not match",
+		},
 	}
 
 	for _, tc := range cases {
@@ -818,6 +932,77 @@ func TestApplyPatch_WholeLinesAndNewlines(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("applyPatch = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// When an earlier hunk leaves the text without a newline, later hunks take the original file's
+// ending rather than defaulting to LF.
+func TestApplyPatch_EndingOutlivesAnEarlierHunk(t *testing.T) {
+	t.Parallel()
+
+	got, err := applyPatch("a\r\na b", []patchHunk{
+		{oldLines: []string{"a", "a b"}, newLines: []string{"a"}},
+		{newLines: []string{"ab"}, addFile: true},
+	})
+	if err != nil {
+		t.Fatalf("applyPatch returned an error: %v", err)
+	}
+	if want := "a\r\nab\r\n"; got != want {
+		t.Errorf("applyPatch = %q, want %q", got, want)
+	}
+}
+
+// A patch sent with CRLF endings parses to the same hunk as its LF twin: no line keeps a "\r".
+func TestParsePatchHunks_DropsCRLFEndings(t *testing.T) {
+	t.Parallel()
+
+	hunks := parsePatchHunks(strings.Join([]string{
+		"*** Begin Patch", "*** Update File: f.txt", "@@", " a", "-b", "+B", "*** End Patch",
+	}, "\r\n"))
+
+	if len(hunks) != 1 {
+		t.Fatalf("got %d hunks, want 1", len(hunks))
+	}
+	if got, want := hunks[0].oldLines, []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("oldLines = %q, want %q", got, want)
+	}
+	if got, want := hunks[0].newLines, []string{"a", "B"}; !slices.Equal(got, want) {
+		t.Errorf("newLines = %q, want %q", got, want)
+	}
+}
+
+// A multi-line patch edits a CRLF file as it would an LF one, whichever endings the patch itself
+// was sent with, and the file stays CRLF throughout.
+func TestEditExistingFile_PatchKeepsCRLFEndings(t *testing.T) {
+	t.Parallel()
+
+	const original = "func f() {\r\n\tx := 1\r\n\treturn x\r\n}\r\n"
+	const want = "func f() {\r\n\tx := 2\r\n\ty := x\r\n\treturn x\r\n}\r\n"
+	patch := []string{
+		"*** Begin Patch", "*** Update File: f.go",
+		"@@", " func f() {", "-\tx := 1", "+\tx := 2", "+\ty := x", " \treturn x",
+		"*** End Patch",
+	}
+
+	for _, sep := range []string{"\n", "\r\n"} {
+		t.Run(fmt.Sprintf("patch sent with %q", sep), func(t *testing.T) {
+			t.Parallel()
+
+			root := tempRoot(t)
+			path := writeTempFile(t, root, "f.go", original)
+
+			result, err := NewEditExistingFile(root).Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": "f.go", "content": strings.Join(patch, sep)}))
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("unexpected tool error: %q", result.Content)
+			}
+			if got := string(mustRead(t, path)); got != want {
+				t.Errorf("file = %q, want %q", got, want)
 			}
 		})
 	}

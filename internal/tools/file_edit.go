@@ -170,8 +170,13 @@ func isPatchContent(content string) bool {
 // header opens a new hunk; a '-' line removes, a '+' line inserts, and a ' ' (space) line
 // is context kept in both. Lines outside a hunk are ignored, mirroring the oracle. A hunk
 // opened after an "*** Add File" marker (and before the next File marker) is flagged addFile.
+// A patch sent with CRLF endings has each line's "\r" dropped, so hunk lines carry no ending
+// of their own and take the target file's (see applyPatch).
 func parsePatchHunks(content string) []patchHunk {
 	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
 	var hunks []patchHunk
 	inHunk := false
 	var current patchHunk
@@ -227,23 +232,40 @@ func parsePatchHunks(content string) []patchHunk {
 var errUnanchoredHunk = errors.New("patch hunk has only '+' lines, so its position in the file is unknown: " +
 	"include at least one unchanged context line (prefixed with a space) or a '-' line next to the insertion")
 
-// errHunkMismatch reports a hunk whose joined oldLines do not occur in the file as whole lines.
+// errHunkMismatch reports a hunk whose oldLines do not occur in the file as consecutive whole lines.
 var errHunkMismatch = errors.New("patch hunk did not match file content")
 
-// applyPatch applies each hunk to original by locating its joined oldLines as whole lines —
-// starting at a line start and ending at a line end ("\n" or "\r\n") or the end of the text —
-// and substituting its joined newLines. Trailing empty context lines are dropped from both
-// sides first, so a patch's closing blank context line does not demand a blank line in the
-// file. A hunk that matches nowhere returns errHunkMismatch; one that matches more than once
-// is refused as ambiguous, as find_replace refuses repeated old text, rather than landing on
-// whichever occurrence comes first. A pure-insertion hunk (no oldLines) has no anchor, so it
-// appends only when original is empty or the hunk sits under "*** Add File"; anywhere else it
-// is refused with errUnanchoredHunk. An append onto text lacking a final newline adds the
-// separator first and ends the appended lines with a newline, so it never glues onto the last
-// line. Any refusal returns an error, leaving the caller to discard the result so the file is
-// never corrupted.
+// applyPatch applies each hunk to original by locating its oldLines as consecutive whole lines of
+// the text and substituting its newLines. Lines are compared without their line ending, a
+// trailing "\r" counting as part of the ending, so a hunk matches a CRLF file line by line just
+// as it matches an LF one. Trailing empty context lines are dropped from both sides first, so a
+// patch's closing blank context line does not demand a blank line in the file. A hunk that
+// matches nowhere returns errHunkMismatch; one that matches more than once is refused as
+// ambiguous, as find_replace refuses repeated old text, rather than landing on whichever
+// occurrence comes first. A pure-insertion hunk (no oldLines) has no anchor, so it appends only
+// when original is empty or the hunk sits under "*** Add File"; anywhere else it is refused with
+// errUnanchoredHunk. An append onto text lacking a final newline adds the separator first and
+// ends the appended lines with a newline, so it never glues onto the last line. Any refusal
+// returns an error, leaving the caller to discard the result so the file is never corrupted.
+//
+// The substituted lines are joined with the line ending found where the hunk lands (see
+// lineEndingAt), and the matched block's own final ending — or its absence at the end of the
+// text — is kept, so a CRLF file stays CRLF and every line outside the block is untouched. In a
+// file of mixed endings the whole block takes the ending of the line it starts on: a context
+// line inside it that ended differently is rewritten with that ending, which beats guessing a
+// per-line ending for added lines that have no counterpart in the file. When an earlier hunk
+// has left the text without any newline, the ending of original's last line stands in, so a
+// CRLF file does not turn LF halfway through a patch.
+//
+// A hunk with no newLines removes its matched lines together with their endings (see
+// removeLines) rather than leaving an empty line in their place.
+//
+// The empty remainder after a final newline is not a line, so a hunk whose oldLines end in an
+// empty line never matches there: "-b" then "-" (an empty removal line) against "b\n" is refused
+// as a mismatch, exactly as a lone empty needle is, while "-b" alone removes the line cleanly.
 func applyPatch(original string, hunks []patchHunk) (string, error) {
 	result := original
+	fallbackEOL := lineEndingAt(original, len(original), "\n")
 
 	for _, hunk := range hunks {
 		oldLines, newLines := trimTrailingEmptyContext(hunk.oldLines, hunk.newLines)
@@ -252,26 +274,48 @@ func applyPatch(original string, hunks []patchHunk) (string, error) {
 			if original != "" && !hunk.addFile {
 				return "", errUnanchoredHunk
 			}
-			result = appendLines(result, newLines)
+			result = appendLines(result, newLines, fallbackEOL)
 			continue
 		}
 
-		needle := strings.Join(oldLines, "\n")
-		matches := wholeLineMatches(result, needle)
+		lines := splitTextLines(result)
+		matches := wholeLineMatches(lines, oldLines)
 		switch {
 		case len(matches) == 0:
 			return "", errHunkMismatch
 		case len(matches) > 1:
 			return "", fmt.Errorf("patch hunk matched %d places (must match exactly one)%s: "+
 				"add unchanged context lines (prefixed with a space) until the hunk is unique",
-				len(matches), matchLinesNote(result, matches))
+				len(matches), matchLinesNote(matches))
 		}
 
-		idx := matches[0]
-		result = result[:idx] + strings.Join(newLines, "\n") + result[idx+len(needle):]
+		if len(newLines) == 0 {
+			result = removeLines(result, lines, matches[0], len(oldLines))
+			continue
+		}
+
+		first, last := lines[matches[0]], lines[matches[0]+len(oldLines)-1]
+		end := last.start + len(last.content)
+		eol := lineEndingAt(result, first.start, fallbackEOL)
+		result = result[:first.start] + strings.Join(newLines, eol) + result[end:]
 	}
 
 	return result, nil
+}
+
+// removeLines removes count lines of text starting at line index from, endings included, so no
+// empty line is left behind. When the block runs to an unterminated last line, the ending of the
+// line before it goes too: "a\nb" minus "b" is "a", not "a\n", so the removal never invents a
+// final newline the file did not have. Removing every line leaves empty text.
+func removeLines(text string, lines []textLine, from, count int) string {
+	start, end := lines[from].start, len(text)
+	if next := from + count; next < len(lines) {
+		end = lines[next].start
+	} else if !strings.HasSuffix(text, "\n") && from > 0 {
+		prev := lines[from-1]
+		start = prev.start + len(prev.content)
+	}
+	return text[:start] + text[end:]
 }
 
 // trimTrailingEmptyContext drops the empty lines both sides of a hunk end with — trailing blank
@@ -286,50 +330,92 @@ func trimTrailingEmptyContext(oldLines, newLines []string) ([]string, []string) 
 	return oldLines, newLines
 }
 
-// appendLines appends lines to text. Text that is empty or already ends with a newline takes
-// the joined lines as they are; non-empty text lacking a final newline gets a separator first,
-// and the appended lines end with a newline so the file ends on a whole line.
-func appendLines(text string, lines []string) string {
-	joined := strings.Join(lines, "\n")
+// appendLines appends lines to text, joined with the ending of text's last line, or fallback when
+// text holds no newline. Text that is empty or already ends with a newline takes the joined lines
+// as they are; non-empty text lacking a final newline gets a separator first, and the appended
+// lines end with a newline so the file ends on a whole line.
+func appendLines(text string, lines []string, fallback string) string {
+	eol := lineEndingAt(text, len(text), fallback)
+	joined := strings.Join(lines, eol)
 	if text == "" || strings.HasSuffix(text, "\n") {
 		return text + joined
 	}
-	return text + "\n" + joined + "\n"
+	return text + eol + joined + eol
 }
 
-// wholeLineMatches returns the byte offset of every place needle occurs in text as whole lines:
-// preceded by the text's start or a "\n", and followed by the text's end, a "\n" or a "\r\n".
-// Overlapping matches all count, since each is a place the hunk could land.
-func wholeLineMatches(text, needle string) []int {
-	var matches []int
-	for offset := 0; offset <= len(text); {
-		i := strings.Index(text[offset:], needle)
-		if i < 0 {
-			break
-		}
-		at := offset + i
-		offset = at + 1
+// lineEndingAt returns the line ending ("\r\n" or "\n") of the line containing byte offset at,
+// or, when that line is the text's unterminated last one, of the line before it; text with no
+// newline at all gets fallback.
+func lineEndingAt(text string, at int, fallback string) string {
+	nl := strings.IndexByte(text[at:], '\n')
+	if nl >= 0 {
+		nl += at
+	} else {
+		nl = strings.LastIndexByte(text[:at], '\n')
+	}
+	switch {
+	case nl < 0:
+		return fallback
+	case nl > 0 && text[nl-1] == '\r':
+		return "\r\n"
+	default:
+		return "\n"
+	}
+}
 
-		// A zero-length needle (a lone empty line) at the very end of newline-terminated text
-		// sits after the last line, not on one.
-		if at == len(text) && at > 0 {
-			break
+// textLine is one line of the text a hunk is matched against: the byte offset it starts at and
+// its content without its line ending.
+type textLine struct {
+	start   int
+	content string
+}
+
+// splitTextLines splits text into lines at each "\n", stripping the "\n" and a "\r" before it
+// (or a "\r" ending the unterminated last line) from the content. The empty remainder after a
+// final newline is not a line; empty text is one empty line.
+func splitTextLines(text string) []textLine {
+	var lines []textLine
+	for start := 0; ; {
+		n := strings.IndexByte(text[start:], '\n')
+		if n < 0 {
+			if start < len(text) || start == 0 {
+				lines = append(lines, textLine{start: start, content: strings.TrimSuffix(text[start:], "\r")})
+			}
+			return lines
 		}
-		startsLine := at == 0 || text[at-1] == '\n'
-		rest := text[at+len(needle):]
-		endsLine := rest == "" || rest[0] == '\n' || strings.HasPrefix(rest, "\r\n")
-		if startsLine && endsLine {
-			matches = append(matches, at)
+		lines = append(lines, textLine{start: start, content: strings.TrimSuffix(text[start:start+n], "\r")})
+		start += n + 1
+	}
+}
+
+// wholeLineMatches returns the index of every line in lines where want occurs as consecutive
+// whole lines. Overlapping matches all count, since each is a place the hunk could land.
+func wholeLineMatches(lines []textLine, want []string) []int {
+	var matches []int
+	for i := 0; i+len(want) <= len(lines); i++ {
+		if linesEqualAt(lines[i:], want) {
+			matches = append(matches, i)
 		}
 	}
 	return matches
 }
 
-// matchLinesNote names the 1-based lines where each match starts, as " — at lines 2, 4".
-func matchLinesNote(text string, matches []int) string {
+// linesEqualAt reports whether lines begins with want, line for line.
+func linesEqualAt(lines []textLine, want []string) bool {
+	for k, w := range want {
+		if lines[k].content != w {
+			return false
+		}
+	}
+	return true
+}
+
+// matchLinesNote names the 1-based lines where each match starts, as " — at lines 2, 4",
+// from the 0-based line indices wholeLineMatches returns.
+func matchLinesNote(matches []int) string {
 	spelled := make([]string, len(matches))
-	for i, at := range matches {
-		spelled[i] = strconv.Itoa(strings.Count(text[:at], "\n") + 1)
+	for i, line := range matches {
+		spelled[i] = strconv.Itoa(line + 1)
 	}
 	return " — at lines " + strings.Join(spelled, ", ")
 }
