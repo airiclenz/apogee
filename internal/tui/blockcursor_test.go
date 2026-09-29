@@ -40,7 +40,7 @@ func TestBlockCursorEntersAtTheEndItsKeyPointsAwayFrom(t *testing.T) {
 		t.Fatal("setTypeExpanded(1, true) = false; want the run's type row open")
 	}
 	base.refreshViewport()
-	stops := cursorStops(base.lineTargets)
+	stops := cursorStops(base.lineTargets, base.pads)
 	if len(stops) < 2 {
 		t.Fatalf("setup: the fixture offers %d stops, too few to tell the two ends apart", len(stops))
 	}
@@ -68,7 +68,7 @@ func TestBlockCursorWalksOneStopPerSurface(t *testing.T) {
 
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
 	header := markedLine(t, m, targetHeader)
-	if got := cursorStops(m.lineTargets); len(got) != 1 || got[0] != header {
+	if got := cursorStops(m.lineTargets, m.pads); len(got) != 1 || got[0] != header {
 		t.Fatalf("the collapsed block offers stops %v, want the block's header at %d alone", got, header)
 	}
 
@@ -81,7 +81,7 @@ func TestBlockCursorWalksOneStopPerSurface(t *testing.T) {
 	if !blockExpanded(t, m, header) {
 		t.Fatal("⏎ on the block's stop did not open it")
 	}
-	if got := cursorStops(m.lineTargets); len(got) != 1 || got[0] != header {
+	if got := cursorStops(m.lineTargets, m.pads); len(got) != 1 || got[0] != header {
 		t.Errorf("the open block offers stops %v, want its header at %d alone — its body rows are the same surface",
 			got, header)
 	}
@@ -106,7 +106,7 @@ func TestBlockCursorWalksTheDeepestVisibleLevel(t *testing.T) {
 	t.Parallel()
 
 	m := modelWithSuperGroup(t)
-	stops := cursorStops(m.lineTargets)
+	stops := cursorStops(m.lineTargets, m.pads)
 	if len(stops) == 0 || m.lineTargets[stops[0]].kind != targetUmbrella {
 		t.Fatalf("a shut umbrella's first stop is %v, want its header as the fold's targetUmbrella", stops)
 	}
@@ -143,7 +143,7 @@ func TestBlockCursorScrollsTheViewToFollowIt(t *testing.T) {
 	t.Parallel()
 
 	m := modelWithLongToolGroup(t, 30)
-	stops := cursorStops(m.lineTargets)
+	stops := cursorStops(m.lineTargets, m.pads)
 	if len(stops) < m.transcriptRows() {
 		t.Fatalf("setup: %d stops fit inside %d rows — the walk never leaves the screen", len(stops), m.transcriptRows())
 	}
@@ -346,7 +346,7 @@ func TestBlockCursorReachesTheLastBlockUnderAPane(t *testing.T) {
 	if drawn >= budget {
 		t.Fatalf("setup: the report took no rows off the transcript (drawn %d, budget %d)", drawn, budget)
 	}
-	stops := cursorStops(m.lineTargets)
+	stops := cursorStops(m.lineTargets, m.pads)
 	if len(stops) == 0 {
 		t.Fatal("setup: the paint offers no cursor stops")
 	}
@@ -448,4 +448,27 @@ func TestBlockCursorCtrlXStopsTheMemberRowItStandsOn(t *testing.T) {
 			t.Errorf("StopChild calls = %v; want none — the run is over", got)
 		}
 	})
+}
+
+// TestBlockCursorHighlightsPaddedPromptRow is the padded prompt's stop: its ▄ half row opens the
+// click surface but carries none of its words, so the cursor landing on a collapsible prompt stands
+// on — and shades — the ❯ row beneath it.
+func TestBlockCursorHighlightsPaddedPromptRow(t *testing.T) {
+	t.Parallel()
+
+	m := modelWithHugePrompt(t)
+	block := m.userBlocks[len(m.userBlocks)-1]
+
+	m = step(t, m, keyAltUp())
+
+	if got, want := cursorLine(t, m), block.start+1; got != want {
+		t.Fatalf("the cursor stands on line %d (%q); want the ❯ row at %d", got, strip(m.lines[got]), want)
+	}
+	row := m.blockCursorRow()
+	if row < 0 {
+		t.Fatal("the cursor's line is not on screen")
+	}
+	if got := strings.Split(plain(m.View()), "\n")[row]; !strings.Contains(got, glyphUser+" alpha") {
+		t.Errorf("the highlighted row reads %q; want the prompt's ❯ row", got)
+	}
 }

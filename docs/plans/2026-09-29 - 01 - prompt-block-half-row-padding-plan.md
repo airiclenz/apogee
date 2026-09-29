@@ -51,7 +51,13 @@ one delivery), where the upper block's `▀` stands in for the one separator and
 - 2 (second pass): guard folded (decision) — the lower `▄` at a padded-block seam is an added pad, skipped on copy; guard folded — pads at either end of the selected span are skipped, the sticky copy test pins its exact text.
 - 4 (second pass): guard folded (decision) — layout.md prose states the stand-in/added rule, the adjacent-blocks seam included.
 
-## 1. Paint half-row padding around the prompt block and drop the adjacent separators
+## 1. Paint half-row padding around the prompt block and drop the adjacent separators — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the per-line pad fact is a `pad bool` field on `lineMark` (blocktarget.go) rather than a separate slice on `blockPaint`. That way join/railed/retargeted and the paint cache carry it without being changed; `blockPaint.addPad` sets it. blocktarget.go was not in **Files:**.
+NOTES (2026-09-29): `cursorStops`, `surfaceStop` and `blockCursor.clamp` gained a `pads []bool` parameter (guard g), and every call was updated. Short-screen sticky: when `b.count >= viewport height`, `stickyHeaderSpan` trims the pad rows through the new helper `Model.withoutPads`, which mouse_test.go's `promptRow`/`promptBlockLine` also use.
+NOTES (2026-09-29): consequential edit — internal/tui/doc.go: made necessary by the half rows standing in for the one blank row between blocks, which the rail-continuity paragraph describes.
+NOTES (2026-09-29): tests outside the listed files that pinned prompt-block rows or separators, moved to the padded shape: transcript_test.go (two goldens, the trim test, the preview test), paint_test.go (tab-bearing block row count), subagentblock_test.go (the ▄ row between the breadcrumb and the task is allowed), runview_test.go `TestRunViewEscGoesOneLevelUp` (parks at header-3, so the 3-row sticky prompt no longer covers the clicked header; the "taller view" case drops its trailing prompts from 12 to 6), userblock_test.go `promptRows` now checks and drops the half rows, cmd/apogee e2e: 12 frame goldens re-recorded with -update, `assertFirstBodyRow` skips the ▄ row.
+NOTES (2026-09-29): cmd/apogee/e2e_stream_test.go `assertScrollbackIsWhole` now allows up to 3 missing lines in a row instead of 1. A one-line sticky prompt now covers 3 rows (the ratified "sticky range includes the half rows"), so each full-window PgUp now skips 3 answer lines under the overlay instead of 1. That is a visible side effect of the ratified design, not a lost line.
 
 **What:**
 Recast at the regression check (2026-09-29).

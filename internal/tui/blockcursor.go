@@ -52,12 +52,15 @@ type blockCursor struct {
 // that trail row, so the bar lands on the words that say where ⏎ goes, and a screen too short to
 // freeze the whole band — which freezes the trail alone (Model.stickyHeaderSpan) — still shows the
 // line the cursor stands on.
-func cursorStops(targets []lineTarget) []int {
+//
+// A padded prompt block is the other: it opens on its ▄ half row (pads, renderedTranscript.pads),
+// which carries the block's mark but none of its words, so its stop is the first row past the pad.
+func cursorStops(targets []lineTarget, pads []bool) []int {
 	var stops []int
 	prev := lineTarget{}
 	for i, target := range targets {
 		if target.kind != targetNone && target != prev {
-			stops = append(stops, surfaceStop(targets, i))
+			stops = append(stops, surfaceStop(targets, pads, i))
 		}
 		prev = target
 	}
@@ -66,8 +69,16 @@ func cursorStops(targets []lineTarget) []int {
 
 // surfaceStop is the line the cursor stands on for the surface whose first line is first: that line
 // itself, except on the breadcrumb band, whose trail sits breadcrumbTrailRow below its opening pad
-// row. A band shorter than that (a hand-built map) keeps its first line.
-func surfaceStop(targets []lineTarget, first int) int {
+// row, and on a padded prompt block, whose first row past its ▄ half row is the one with words on
+// it. A band shorter than that (a hand-built map), or a pad with nothing of its surface after it,
+// keeps its first line.
+func surfaceStop(targets []lineTarget, pads []bool, first int) int {
+	if first < len(pads) && pads[first] {
+		if next := first + 1; next < len(targets) && targets[next] == targets[first] {
+			return next
+		}
+		return first
+	}
 	if targets[first].kind != targetBreadcrumb {
 		return first
 	}
@@ -90,11 +101,11 @@ func surfaceStop(targets []lineTarget, first int) int {
 // A line that is no longer a stop falls back to the stop BEFORE it, which is where the reader was
 // looking: opening a member of a group moves every stop below it down the body that appeared, and
 // the stop before is the surface the human was standing on when they pressed ⏎.
-func (c blockCursor) clamp(targets []lineTarget) blockCursor {
+func (c blockCursor) clamp(targets []lineTarget, pads []bool) blockCursor {
 	if !c.active {
 		return blockCursor{}
 	}
-	stops := cursorStops(targets)
+	stops := cursorStops(targets, pads)
 	if len(stops) == 0 {
 		return blockCursor{} // nothing on the screen can be opened: the mode has nothing to be
 	}
@@ -208,7 +219,7 @@ func (m Model) cursorRunHead() (entry, bool) {
 // is the same region arbitration the prompt's own selection is cleared for on every keypress
 // (handleKey).
 func (m Model) moveBlockCursor(dir int) Model {
-	stops := cursorStops(m.lineTargets)
+	stops := cursorStops(m.lineTargets, m.pads)
 	if len(stops) == 0 {
 		m.cursor = blockCursor{}
 		return m

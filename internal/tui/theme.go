@@ -53,6 +53,8 @@ const (
 	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
 	glyphPresented      = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
 	glyphInterject      = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
+	glyphPadAbove       = "▄" // U+2584 LOWER HALF BLOCK — one cell of the half row opening a sent prompt block (renderUserBlock): its lower half in the block's own gray, so the field reads half a row taller above its first line
+	glyphPadBelow       = "▀" // U+2580 UPPER HALF BLOCK — one cell of the half row closing a sent prompt block, glyphPadAbove's mirror under its last line
 	glyphTableRule      = "─" // one cell of a markdown table's horizontal rule — under the header row and between adjacent body rows alike (mdtable.go)
 	glyphTableColumn    = "│" // U+2502 LIGHT VERTICAL — the rule between two markdown table columns (mdtable.go); one cell wide in either width method, which is what lets tableDividerWidth be a constant (TestTableDividerHoldsOneColumn). Its shape is glyphSubRail's and glyphScrollTrack's but deliberately NOT shared with either: a column boundary, a sub-agent rail and a scroll-bar track are three elements that move independently.
 	glyphTableCross     = "┼" // U+253C LIGHT VERTICAL AND HORIZONTAL — where a horizontal rule crosses a column divider (mdtable.go); one cell wide in either method, like the divider it crosses
@@ -129,7 +131,11 @@ type theme struct {
 	// widthAuthority is a plain value, the theme stays as copy-safe as it was (ADR 0011).
 	measure widthAuthority
 
-	userBlock     lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
+	userBlock lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
+	promptPad lipgloss.Style // the ▄/▀ half rows padding a sent prompt block (renderUserBlock): the block's `chrome` gray as the glyph's FOREGROUND on no background, so half of each cell is the block's field and the other half the terminal's own
+	// padPrompts says whether a sent prompt block is painted with its half rows (promptPad). newTheme
+	// sets it; a profile with no colour to paint the half in has nothing to draw them with.
+	padPrompts    bool
 	breadcrumb    lipgloss.Style // the run view's sticky header (breadcrumbRow): prompt-white on the `surface` field the input box and the status line already share, so the header reads as one of the frame's black bands rather than as a prompt block it is not
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
@@ -325,8 +331,10 @@ func newTheme(s scheme.Scheme) theme {
 		// (settingsapply.go) rebuilds the theme for a new palette while the painter stayed where
 		// it was, so it reads the measure off the outgoing theme and re-arms it on this one.
 		// Any future live rebuild owes the same carry-over.
-		measure:   newWidthAuthority(),
-		userBlock: lipgloss.NewStyle().Foreground(userText).Background(chrome),
+		measure:    newWidthAuthority(),
+		userBlock:  lipgloss.NewStyle().Foreground(userText).Background(chrome),
+		promptPad:  lipgloss.NewStyle().Foreground(chrome),
+		padPrompts: true,
 		// The run view's header is NOT a prompt block, so it stops borrowing the prompt block's
 		// gray: it is the same black field the input box and the status line stand on, which is
 		// what makes the view read as one frame with a band top and bottom (layout.md, "The

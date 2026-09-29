@@ -116,8 +116,9 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	// (b) render snapshot: the grouped block in the new look — ✦-prefixed, one blank line
 	// between blocks, the tool detail hanging off a ┕ branch.
 	want := strings.Join([]string{
+		strings.Repeat(glyphPadAbove, 80),
 		"❯ read main.go",
-		"",
+		strings.Repeat(glyphPadBelow, 80), // the prompt's ▀ half row stands in for the separator
 		"✦ Let me read it.",
 		"",
 		"✦ Read",
@@ -268,12 +269,14 @@ func TestTranscriptMessageEventEmptyFallsBackToTokens(t *testing.T) {
 
 // Committed assistant text is trimmed of its leading and trailing blank lines, so the model's
 // habitual trailing "\n\n" no longer stacks blank rows on top of the renderer's own one-line
-// block separator. Each case pins the whole scrollback: exactly one empty line between blocks.
+// block separator. Each case pins the whole scrollback: exactly one row between blocks — here the
+// prompt's ▀ half row, standing in for the empty separator line.
 func TestTranscriptTrimsCommittedBlankLines(t *testing.T) {
 	t.Parallel()
 	want := strings.Join([]string{
+		strings.Repeat(glyphPadAbove, 80),
 		"❯ ping",
-		"",
+		strings.Repeat(glyphPadBelow, 80),
 		"✦ the answer",
 	}, "\n")
 	cases := []struct {
@@ -463,7 +466,9 @@ func TestTranscriptStreamingPreviewTrimsTrailingBlanks(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser("ping", nil)
 	tr.apply(domain.TokenEvent{Text: "thinking\n\n"})
-	want := strings.Join([]string{"❯ ping", "", "✦ thinking"}, "\n")
+	want := strings.Join([]string{
+		strings.Repeat(glyphPadAbove, 80), "❯ ping", strings.Repeat(glyphPadBelow, 80), "✦ thinking",
+	}, "\n")
 	if got := plainRender(tr); got != want {
 		t.Errorf("preview mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}

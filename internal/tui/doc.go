@@ -47,8 +47,8 @@
 // no new state — the run boundary is derived from each entry's depth inside
 // [transcript.renderView]), so the flat Depth==0 transcript renders byte-for-byte as before
 // (ADR 0011 still holds — render only).
-// The frame is CONTINUOUS across the one blank row layout.md puts between blocks: that separator is
-// itself railed, at the JOIN — the min — of the depths of the two blocks it sits between
+// The frame is CONTINUOUS across the one blank row layout.md puts between blocks (or the prompt
+// block's ▄/▀ half row standing in for it, railed with its block): that separator is itself railed, at the JOIN — the min — of the depths of the two blocks it sits between
 // ([railJoin], fed by a per-appended-block depth rather than the loop's per-entry one, since a block
 // ending on an OPEN delegation reports the depth of the span that follows it). The min rule is the
 // whole run-boundary logic: inside a run every join is ≥ 1 so the rail never breaks, a climb-out

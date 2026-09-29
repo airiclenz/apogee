@@ -12,10 +12,11 @@ package tui
 // physical line (no embedded newline), so a line index means the same thing to the painter,
 // the viewport and a click.
 //
-// The look mirrors layout.md: the last user prompt is a full-width white-on-dark-gray block;
-// the assistant and tool headers lead with ✦; a tool header carries its label — and, over a
-// grouped run, its member count — with the target leading a ┝/┕ tree branch beneath it, so a
-// single call and a grouped run share one grammar; one blank line separates every block. Sub-agent depth (Phase 3) indents a whole block by two
+// The look mirrors layout.md: the last user prompt is a full-width white-on-dark-gray block
+// padded by a ▄ half row above and a ▀ half row below; the assistant and tool headers lead with ✦;
+// a tool header carries its label — and, over a grouped run, its member count — with the target
+// leading a ┝/┕ tree branch beneath it, so a single call and a grouped run share one grammar; one
+// blank line separates every block, except where a prompt block's half row stands in for it. Sub-agent depth (Phase 3) indents a whole block by two
 // columns per level — the tree-branch and depth-indent primitives are built here now so the
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
@@ -58,6 +59,10 @@ type renderedTranscript struct {
 	// instead of measuring the line again and measures an unmeasured one exactly as it always did,
 	// so a hand-built transcript that sets no cells at all is reserved as before.
 	cells []int
+	// pads is PARALLEL to lines: true on each ▄/▀ half row padding a sent prompt block
+	// ([lineMark.pad]), false everywhere else. It is built in the same loop as targets and moved
+	// with them, so a reader asking "is this row a half row" reads the paint's own answer.
+	pads []bool
 }
 
 // blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
@@ -108,6 +113,15 @@ func (p *blockPaint) addFor(member int, lines []string, kind targetKind) {
 	for range lines {
 		p.targets = append(p.targets, lineMark{kind: kind, member: member})
 	}
+	p.padCells()
+}
+
+// addPad appends one half row padding a sent prompt block (renderUserBlock), marked with the
+// block's own kind so the block stays one click surface, and flagged as a pad ([lineMark.pad]) so
+// the renderer can let it stand in for a separator.
+func (p *blockPaint) addPad(line string, kind targetKind) {
+	p.lines = append(p.lines, line)
+	p.targets = append(p.targets, lineMark{kind: kind, pad: true})
 	p.padCells()
 }
 
@@ -192,7 +206,10 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // renderView renders the committed entries plus any in-progress assistant buffer into the
 // viewport's lines, recording the line range of every user block. Blocks are separated by one
 // line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
-// continuous through its separators (railSpacer).
+// continuous through its separators (railSpacer) — except beside a padded prompt block, whose ▄/▀
+// half row stands in for the separator it would have had (renderUserBlock), and is simply added
+// where there was none: the transcript's top and bottom, under the run view's header, and the ▄ of
+// the lower of two adjacent padded blocks.
 //
 // The in-progress buffer is painted by the SAME rules as a committed block of its depth
 // (transcript.pendingDepth): railed where it was streamed, and elided outright while it streams
@@ -227,6 +244,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	var targets []lineTarget
 	// the widget widths the painted blocks stored, -1 where none did (renderedTranscript.cells)
 	var cells []int
+	var pads []bool // the prompt blocks' half rows (renderedTranscript.pads)
 	var userBlocks []userBlock
 	var header userBlock
 
@@ -253,10 +271,19 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// a rooted paint has already laid its blank spacer down, and a railed spacer on top of it
 		// would open the view with two blank rows. Outside a view header.count is 0 and this is the
 		// `len(lines) > 0` it has always been.
-		if len(lines) > header.count {
+		//
+		// A padded prompt block's half row stands in for the separator on the side it pads: a block
+		// that opens on one, or follows one, gets no blank row beside it. The ┊ closer is the one
+		// separator that is never stood in for — it is a mark, not a gap (railJoin) — though no
+		// prompt block is placed with closes set today.
+		opensOnPad := len(block.targets) > 0 && block.targets[0].pad
+		followsPad := len(pads) > 0 && pads[len(pads)-1]
+		closer := closes && prevBlockDepth > depth
+		if len(lines) > header.count && (closer || !(opensOnPad || followsPad)) {
 			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
 			targets = append(targets, lineTarget{}) // a separator belongs to neither block
 			cells = append(cells, -1)
+			pads = append(pads, false)
 		}
 		// A ROOTED paint registers none, whatever it is laying down: inside a view the breadcrumb is
 		// the only sticky header there is (header, above), and a user row that claimed the slot would
@@ -281,6 +308,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 				cell = block.cells[i]
 			}
 			cells = append(cells, cell)
+			pads = append(pads, i < len(block.targets) && block.targets[i].pad)
 		}
 		prevBlockDepth = depth
 	}
@@ -326,10 +354,12 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 			lines = append(lines, ln)
 			targets = append(targets, lineTarget{kind: targetBreadcrumb})
 			cells = append(cells, -1)
+			pads = append(pads, false)
 		}
 		lines = append(lines, "")
 		targets = append(targets, lineTarget{})
 		cells = append(cells, -1)
+		pads = append(pads, false)
 		header = userBlock{start: 0, count: len(lines)}
 		if strings.TrimSpace(head.tool.task) != "" {
 			prompt := paintInput{
@@ -361,6 +391,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		t.paintStage(th, width, blink, root, appendJoined)
 		return renderedTranscript{
 			lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
+			pads: pads,
 		}
 	}
 	previewAt := -1
@@ -438,6 +469,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	}
 	return renderedTranscript{
 		lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
+		pads: pads,
 	}
 }
 
@@ -467,8 +499,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 // two measures agree about (everything without a VS16 or ZWJ cluster) nothing here fires and the
 // paint is returned as it came.
 //
-// Lines, targets and user-block spans move TOGETHER. A continuation row carries the target of the
-// line it came from — every physical row a header occupies is the same click surface
+// Lines, targets, pads and user-block spans move TOGETHER. A continuation row carries the target
+// and the pad flag of the line it came from — every physical row a header occupies is the same click surface
 // ([blockPaint.add]) — and a block's span is moved by the rows added above it and stretched by the
 // rows added inside it, so the accounting the mouse reads is still the one the paint laid down.
 //
@@ -508,6 +540,10 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 
 	lines := make([]string, 0, len(r.lines)+1)
 	targets := make([]lineTarget, 0, len(r.lines)+1)
+	var pads []bool
+	if r.pads != nil {
+		pads = make([]bool, 0, len(r.lines)+1)
+	}
 	// shift[i] is how many EXTRA rows the lines before i added between them: the offset a line
 	// index at i moves by, and — differenced across a span — the rows that span grew by.
 	shift := make([]int, len(r.lines)+1)
@@ -525,8 +561,12 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 		if i < len(r.targets) {
 			target = r.targets[i]
 		}
+		pad := i < len(r.pads) && r.pads[i]
 		for range segs {
 			targets = append(targets, target)
+			if pads != nil {
+				pads = append(pads, pad)
+			}
 		}
 		lines = append(lines, segs...)
 		shift[i+1] = shift[i] + len(segs) - 1
@@ -547,7 +587,9 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	if header.count > 0 {
 		header = moved(header)
 	}
-	return renderedTranscript{lines: lines, userBlocks: blocks, targets: targets, header: header}
+	return renderedTranscript{
+		lines: lines, userBlocks: blocks, targets: targets, header: header, pads: pads,
+	}
 }
 
 // widgetWidth is ln's width in the measure the viewport WIDGET reads its lines in —

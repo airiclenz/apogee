@@ -545,9 +545,10 @@ func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
 			tr := &transcript{}
 			tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
+			// The one row its text wraps to, between the block's ▄ and ▀ half rows.
 			rows := tr.renderLines(th, width)
-			if len(rows) != 1 {
-				t.Fatalf("the block painted %d rows, want the one its text wraps to:\n%s",
+			if len(rows) != 3 {
+				t.Fatalf("the block painted %d rows, want the one its text wraps to and its two half rows:\n%s",
 					len(rows), strings.Join(mapStrip(rows), "\n"))
 			}
 			for i, ln := range rows {
@@ -559,7 +560,7 @@ func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
 					t.Errorf("row %d still carries a tab for a style to rewrite: %q", i, plain)
 				}
 			}
-			runs := accentRuns(rows[0], accentOpener(t, th.skillAccent))
+			runs := accentRuns(rows[1], accentOpener(t, th.skillAccent))
 			if len(runs) != 1 || runs[0] != "/review" {
 				t.Errorf("the accent covers %q; want the token alone", runs)
 			}

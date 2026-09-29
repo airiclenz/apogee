@@ -325,8 +325,9 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
+		strings.Repeat(glyphPadAbove, 80),
 		"❯ read the docs, then run the tests",
-		"",
+		strings.Repeat(glyphPadBelow, 80), // the prompt's ▀ half row stands in for the separator
 		"✦ Reading the docs first.",
 		"",
 		"✦ Tools (8 calls) " + glyphExpanded,
@@ -602,8 +603,13 @@ func TestRootedPaintRegistersNoUserBlock(t *testing.T) {
 	if view.targets[3].kind != targetNone {
 		t.Errorf("the spacer row is a %v, want no target at all", view.targets[3].kind)
 	}
-	if got := strip(view.lines[4]); !strings.Contains(got, "scout the repo") {
-		t.Errorf("the row under the spacer is %q, want the task the run was handed", got)
+	// Under the spacer the task opens on its ▄ half row — added, there being no separator here for
+	// it to stand in for — and its words are the row below that.
+	if got := strip(view.lines[4]); !strings.HasPrefix(got, glyphPadAbove) {
+		t.Errorf("the row under the spacer is %q, want the task's %s half row", got, glyphPadAbove)
+	}
+	if got := strip(view.lines[5]); !strings.Contains(got, "scout the repo") {
+		t.Errorf("the row under the task's half row is %q, want the task the run was handed", got)
 	}
 }
 
@@ -678,5 +684,111 @@ func TestRunViewHeaderIsDrawnByTheStickyOverlay(t *testing.T) {
 	}
 	if overlaid[4] != "e" {
 		t.Errorf("the overlay drew %q at row 4, want the row under the header left as it was", strip(overlaid[4]))
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The prompt block's half rows in the transcript's rhythm
+// ----------------------------------------------------------------------------
+
+// paintPadded renders tr at 80 columns under the default theme with the prompt padding on or off.
+func paintPadded(tr *transcript, padded bool) renderedTranscript {
+	th := newTheme(scheme.Default())
+	th.padPrompts = padded
+	return tr.renderView(th, 80, false, breadcrumbHint)
+}
+
+// TestRenderViewPaddedPromptReplacesSeparators is the stand-in rule: between two blocks the prompt's
+// ▄ and ▀ half rows take the places the blank separators held, so the scrollback is exactly as tall
+// as it was unpadded, no blank row sits against either half row, and the prompt's user-block range —
+// the sticky header — spans the half rows with the words between them.
+func TestRenderViewPaddedPromptReplacesSeparators(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.commitAssistant("the answer before", runRef{})
+	tr.addUser("the prompt", nil)
+	tr.commitAssistant("the answer after", runRef{})
+
+	padded, unpadded := paintPadded(tr, true), paintPadded(tr, false)
+
+	if len(padded.lines) != len(unpadded.lines) {
+		t.Fatalf("the padded paint is %d rows; want the unpadded %d:\n%s",
+			len(padded.lines), len(unpadded.lines), strip(strings.Join(padded.lines, "\n")))
+	}
+	if len(padded.userBlocks) != 1 {
+		t.Fatalf("the paint registered %d user blocks; want the one prompt", len(padded.userBlocks))
+	}
+	b := padded.userBlocks[0]
+	first, last := strip(padded.lines[b.start]), strip(padded.lines[b.start+b.count-1])
+	if !strings.HasPrefix(first, glyphPadAbove) || !strings.HasPrefix(last, glyphPadBelow) {
+		t.Errorf("the user block spans %q … %q; want its %s and %s half rows at either end",
+			first, last, glyphPadAbove, glyphPadBelow)
+	}
+	for _, at := range []int{b.start - 1, b.start + b.count} {
+		if strip(padded.lines[at]) == "" {
+			t.Errorf("row %d beside the padded prompt is blank; the half row stands in for it", at)
+		}
+	}
+	for i, pad := range padded.pads {
+		if want := i == b.start || i == b.start+b.count-1; pad != want {
+			t.Errorf("pads[%d] = %v; want %v", i, pad, want)
+		}
+	}
+}
+
+// TestRenderViewLonePromptPaintsThreeRows is the added-row half of the rule: a prompt with nothing
+// above or below it has no separator for its half rows to stand in for, so they are added — ▄, the
+// prompt, ▀.
+func TestRenderViewLonePromptPaintsThreeRows(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.addUser("ping", nil)
+
+	view := paintPadded(tr, true)
+
+	want := []string{strings.Repeat(glyphPadAbove, 80), "❯ ping", strings.Repeat(glyphPadBelow, 80)}
+	got := make([]string, len(view.lines))
+	for i, ln := range view.lines {
+		got[i] = strings.TrimRight(strip(ln), " ")
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the lone prompt paints:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestRenderViewAdjacentPaddedBlocksAddOneRow is the seam between two padded blocks — two
+// interjections from one delivery: the upper block's ▀ stands in for the one separator and the lower
+// block's ▄ is added, so the seam reads ▀ then ▄ and the paint is exactly one row taller than
+// unpadded.
+func TestRenderViewAdjacentPaddedBlocksAddOneRow(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.commitAssistant("working on it", runRef{})
+	tr.addInterjected("first remark", nil)
+	tr.addInterjected("second remark", nil)
+	tr.commitAssistant("noted", runRef{})
+
+	padded, unpadded := paintPadded(tr, true), paintPadded(tr, false)
+
+	if len(padded.lines) != len(unpadded.lines)+1 {
+		t.Errorf("the padded paint is %d rows; want the unpadded %d plus the one added ▄",
+			len(padded.lines), len(unpadded.lines))
+	}
+	seam := -1
+	for i := 1; i < len(padded.lines); i++ {
+		if strings.HasPrefix(strip(padded.lines[i-1]), glyphPadBelow) &&
+			strings.HasPrefix(strip(padded.lines[i]), glyphPadAbove) {
+			seam = i
+		}
+	}
+	if seam < 0 {
+		t.Fatalf("no ▀ then ▄ seam between the two remarks:\n%s", strip(strings.Join(padded.lines, "\n")))
+	}
+	if above, below := strip(padded.lines[seam-2]), strip(padded.lines[seam+1]); !strings.Contains(above, "first remark") ||
+		!strings.Contains(below, "second remark") {
+		t.Errorf("the seam sits between %q and %q; want the two remarks", above, below)
 	}
 }

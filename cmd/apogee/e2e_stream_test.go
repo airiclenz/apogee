@@ -803,12 +803,16 @@ func waitForScroll(drv *tuitest.Driver, was int) bool {
 //
 // It stops short of "all 400 numbers were painted", and deliberately. The transcript pins the
 // owning prompt as a STICKY HEADER over the viewport's top rows (layout.md; Model.stickyHeaderSpan),
-// so a ⇞ that scrolls a whole window leaves the line beneath that header uncovered — exactly one
-// per window here, since this prompt is one line. That is the layout's documented overlay and not
-// a lost line, and the record on disk is what settles completeness. What a gap of TWO adjacent
-// lines would mean is different in kind: the terminal really did not paint that stretch.
+// so a ⇞ that scrolls a whole window leaves the lines beneath that header uncovered — at most
+// stickyPromptRows per window here, this prompt's one line between its ▄ and ▀ half rows. That is
+// the layout's documented overlay and not a lost line, and the record on disk is what settles
+// completeness. What a gap of one line MORE than the header would mean is different in kind: the
+// terminal really did not paint that stretch.
 func assertScrollbackIsWhole(t *testing.T, seen map[int]bool) {
 	t.Helper()
+
+	// stickyPromptRows is the stream prompt's sticky header: its one row and its two half rows.
+	const stickyPromptRows = 3
 
 	if !seen[1] {
 		t.Error("the scrollback never reached line 1; the committed answer does not scroll back to its start")
@@ -817,10 +821,16 @@ func assertScrollbackIsWhole(t *testing.T, seen map[int]bool) {
 		t.Errorf("the scrollback never showed line %d; the committed answer does not end where it should",
 			streamLines)
 	}
-	for n := 2; n <= streamLines; n++ {
-		if !seen[n] && !seen[n-1] {
-			t.Fatalf("lines %d and %d were both missing from the scrollback; a stretch of the "+
-				"answer was never painted (%d of %d lines seen)", n-1, n, len(seen), streamLines)
+	missing := 0 // the run of consecutive unseen lines ending at n
+	for n := 1; n <= streamLines; n++ {
+		if seen[n] {
+			missing = 0
+			continue
+		}
+		missing++
+		if missing > stickyPromptRows {
+			t.Fatalf("lines %d to %d were all missing from the scrollback; a stretch of the "+
+				"answer was never painted (%d of %d lines seen)", n-missing+1, n, len(seen), streamLines)
 		}
 	}
 }

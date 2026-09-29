@@ -288,11 +288,14 @@ func TestRunViewTaskFoldOpensWhatItAdvertises(t *testing.T) {
 	}
 	painted := func() string { return strip(strings.Join(m.lines, "\n")) }
 
+	// The task block's ▄/▀ half rows carry its mark too, so every count below is the rows it shows
+	// plus those two, and the marker row is the one above the closing ▀.
+	const padRows = 2
 	folded := markedRows(t, m, targetTask)
-	if len(folded) != promptCollapsedRows {
-		t.Fatalf("the folded task paints %d marked row(s), want the collapsed cap of %d", len(folded), promptCollapsedRows)
+	if len(folded) != promptCollapsedRows+padRows {
+		t.Fatalf("the folded task paints %d marked row(s), want the collapsed cap of %d and its two half rows", len(folded), promptCollapsedRows)
 	}
-	marker := folded[len(folded)-1]
+	marker := folded[len(folded)-2]
 	hidden := seeMoreCount(t, strip(m.lines[marker]))
 	if hidden < 1 {
 		t.Fatalf("setup: the folded task advertises %d hidden row(s); the fixture's task is not tall enough", hidden)
@@ -304,15 +307,18 @@ func TestRunViewTaskFoldOpensWhatItAdvertises(t *testing.T) {
 	m = clickCell(t, m, 2, screenRow(t, m, marker))
 
 	opened := markedRows(t, m, targetTask)
-	if want := promptCollapsedRows + hidden + 1; len(opened) != want {
+	if want := promptCollapsedRows + hidden + 1 + padRows; len(opened) != want {
 		t.Errorf("the marker advertised %d more row(s) and opening it painted %d marked row(s); want %d — the %d it already showed, the %d it counted, and the see-less row closing them",
 			hidden, len(opened), want, promptCollapsedRows, hidden)
 	}
 	if !strings.Contains(painted(), lastWord) {
 		t.Errorf("the opened task still hides %q, which its own marker counted:\n%s", lastWord, painted())
 	}
-	if last := strip(m.lines[opened[len(opened)-1]]); !strings.Contains(last, promptSeeLess) {
+	if last := strip(m.lines[opened[len(opened)-2]]); !strings.Contains(last, promptSeeLess) {
 		t.Errorf("the opened task ends on %q, want the %q row that folds it again", last, promptSeeLess)
+	}
+	if last := strip(m.lines[opened[len(opened)-1]]); !strings.HasPrefix(last, glyphPadBelow) {
+		t.Errorf("the opened task's last marked row is %q, want its ▀ half row", last)
 	}
 
 	// The fold is the view's own, and the rail ADR 0063 deleted stays deleted: the head's block
@@ -329,7 +335,7 @@ func TestRunViewTaskFoldOpensWhatItAdvertises(t *testing.T) {
 
 	m = clickCell(t, m, 2, screenRow(t, m, markedRows(t, m, targetTask)[0]))
 
-	if again := markedRows(t, m, targetTask); len(again) != promptCollapsedRows {
+	if again := markedRows(t, m, targetTask); len(again) != promptCollapsedRows+padRows {
 		t.Errorf("the reopened task folds back to %d marked row(s), want the collapsed cap of %d", len(again), promptCollapsedRows)
 	}
 	if strings.Contains(painted(), lastWord) {
@@ -359,7 +365,9 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 		}
 		m.refreshViewport()
 		header := markedLine(t, m, targetHeader)
-		m.viewport.SetYOffset(header - 2)
+		// Parked on the prompt block above the delegation, its ▄ half row at the top, so the
+		// sticky overlay is that block's own rows and the header row below it is clicked as drawn.
+		m.viewport.SetYOffset(header - 3)
 		m.detached = true
 		wantOffset := m.viewport.YOffset()
 		if wantOffset == 0 || m.viewport.AtBottom() {
@@ -414,13 +422,17 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 			t.Fatalf("setTypeExpanded(%d, true) = false; want the reads' type row open", runHead)
 		}
 		subAgentReport(&m.transcript, "s1", "all clear", 0)
-		for range 12 {
+		// Few enough prompts below that the level, each prompt three rows with its half rows, stays
+		// shorter than the view.
+		for range 6 {
 			m.transcript.addUser("and again", nil)
 		}
 		m.refreshViewport()
 		below := len(m.lines)
 		header := markedLine(t, m, targetHeader)
-		m.viewport.SetYOffset(header - 2)
+		// Parked on the prompt block above the delegation, its ▄ half row at the top, so the
+		// sticky overlay is that block's own rows and the header row below it is clicked as drawn.
+		m.viewport.SetYOffset(header - 3)
 		m.detached = true
 		wantOffset := m.viewport.YOffset()
 		if wantOffset == 0 || m.viewport.AtBottom() {
@@ -1674,7 +1686,7 @@ func TestStageViewFollowsItsBlock(t *testing.T) {
 func TestBlockCursorReachesTheStageRows(t *testing.T) {
 	t.Parallel()
 	m := modelWithRecipeStages(t, &fakeEngine{})
-	stops := cursorStops(m.lineTargets)
+	stops := cursorStops(m.lineTargets, m.pads)
 	for stage := range 3 {
 		if line := stageRowLine(t, m, stage); !slices.Contains(stops, line) {
 			t.Errorf("stage row %d (line %d) is no cursor stop %v", stage, line, stops)

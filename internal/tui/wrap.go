@@ -313,7 +313,9 @@ func railedWidth(width, depth int) int {
 // as deep as both sides reach. Depth 0 — the flat transcript, and either side of a sub-agent run's
 // boundary — is the bare "" the layout has always used, so a top-level transcript renders exactly
 // as before; deeper joins draw the gutter alone, which is what makes a run's frame continuous
-// through its separators instead of breaking at every block.
+// through its separators instead of breaking at every block. Beside a padded prompt block there is
+// no spacer at all: the block's own ▄/▀ half row, railed with the block, stands in for it
+// ([transcript.renderView]).
 //
 // The gutter's trailing space is trimmed BEFORE it is styled, so a spacer's visible text is "│"
 // at depth 1 and "│ │" at depth 2 — never a styled trailing blank, which would leave an invisible
@@ -325,7 +327,8 @@ func railSpacer(th theme, depth int) string {
 	return th.subRail.Render(strings.TrimRight(strings.Repeat(glyphSubRail+" ", depth), " "))
 }
 
-// railJoin is the ONE separator line between two adjacent blocks: the railed spacer (railSpacer) at
+// railJoin is the ONE separator line between two adjacent blocks — where one is drawn at all, a
+// padded prompt block's half row standing in for it (railSpacer): the railed spacer at
 // the join — the min — of their depths, or, where the block below RESUMES a sub-agent list that an
 // expanded member's span interrupted, the ┊ closing that span
 // (docs/layout/tool-layout.md, "Grouped Sub-agents").

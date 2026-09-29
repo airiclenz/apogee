@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -53,10 +55,18 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 // promptRows renders tr at width and returns its lines with the styling stripped and the trailing
 // pad KEPT — deliberately not renderPlain, which trims it: a prompt block is painted to the full
 // width and its collapse marker is flush against the right edge, so where a row ENDS is half of
-// what these tests assert.
+// what these tests assert. The block's ▄/▀ half rows are checked and left off: these tests are
+// about the rows the block's text paints (TestUserBlockPaintsHalfRowPadding pins the half rows).
 func promptRows(t *testing.T, tr *transcript, width int) []string {
 	t.Helper()
 	lines := tr.renderLines(newTheme(scheme.Default()), width)
+	if len(lines) < 2 ||
+		strip(lines[0]) != strings.Repeat(glyphPadAbove, width) ||
+		strip(lines[len(lines)-1]) != strings.Repeat(glyphPadBelow, width) {
+		t.Fatalf("the block does not open on a %s row and close on a %s row:\n%s",
+			glyphPadAbove, glyphPadBelow, strip(strings.Join(lines, "\n")))
+	}
+	lines = lines[1 : len(lines)-1]
 	out := make([]string, len(lines))
 	for i, ln := range lines {
 		out[i] = strip(ln)
@@ -358,14 +368,15 @@ func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
+	// The one row its text wraps to, between the block's ▄ and ▀ half rows.
 	rows := tr.renderLines(th, width)
-	if len(rows) != 1 {
-		t.Fatalf("the block painted %d rows; want the one its text wraps to:\n%s", len(rows), strings.Join(rows, "\n"))
+	if len(rows) != 3 {
+		t.Fatalf("the block painted %d rows; want the one its text wraps to plus its two half rows:\n%s", len(rows), strings.Join(rows, "\n"))
 	}
-	if got := accentRuns(rows[0], accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review"}) {
+	if got := accentRuns(rows[1], accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review"}) {
 		t.Errorf("the accent covers %q; want the token alone", got)
 	}
-	if got := strip(rows[0]); !strings.HasPrefix(got, glyphUser+" "+text) {
+	if got := strip(rows[1]); !strings.HasPrefix(got, glyphUser+" "+text) {
 		t.Errorf("the block's own text changed under the accent: %q", got)
 	}
 }
@@ -440,11 +451,12 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 		tr := &transcript{}
 		tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
+		// The collapsed rows between the block's ▄ and ▀ half rows.
 		rows := tr.renderLines(th, width)
-		if len(rows) != promptCollapsedRows {
-			t.Fatalf("the collapsed block painted %d rows; want %d", len(rows), promptCollapsedRows)
+		if len(rows) != promptCollapsedRows+2 {
+			t.Fatalf("the collapsed block painted %d rows; want %d", len(rows), promptCollapsedRows+2)
 		}
-		marker := rows[promptCollapsedRows-1]
+		marker := rows[promptCollapsedRows]
 		if got := accentRuns(marker, accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review"}) {
 			t.Errorf("the marker row's accent covers %q; want the token alone", got)
 		}
@@ -466,7 +478,7 @@ func TestPromptMarkerCarriesTheHighlightStyle(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser("alpha\nbravo\ncharlie\ndelta", nil)
 
-	row := tr.renderLines(th, 40)[promptCollapsedRows-1]
+	row := tr.renderLines(th, 40)[promptCollapsedRows] // past the block's ▄ half row
 	marker := promptSeeMore(1)
 	styled := th.promptToggle.Render(marker)
 	if styled == marker {
@@ -477,5 +489,86 @@ func TestPromptMarkerCarriesTheHighlightStyle(t *testing.T) {
 	}
 	if !strings.Contains(row, styled) {
 		t.Errorf("row %q does not carry the styled marker %q", row, styled)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The half-row padding: ▄ above, ▀ below
+// ----------------------------------------------------------------------------
+
+// TestUserBlockPaintsHalfRowPadding pins the padded shape: a sent block opens on a row of ▄ and
+// closes on a row of ▀, each exactly the block's width in the theme's width authority and painted
+// in the block's own `chrome` gray on no background — so half of each cell is the block's field and
+// half the terminal's — while the rows between them are exactly what the unpadded block paints.
+func TestUserBlockPaintsHalfRowPadding(t *testing.T) {
+	t.Parallel()
+
+	const width = 40
+	th := newTheme(scheme.Default())
+	in := paintInput{text: "alpha\nbravo"}
+
+	rows := renderUserBlock(th, glyphUser+" ", in, width).lines
+	if len(rows) != 4 {
+		t.Fatalf("the block painted %d rows; want its two body rows between two half rows:\n%s",
+			len(rows), strip(strings.Join(rows, "\n")))
+	}
+	for _, pad := range []struct {
+		row   string
+		glyph string
+	}{{rows[0], glyphPadAbove}, {rows[len(rows)-1], glyphPadBelow}} {
+		if want := th.promptPad.Render(strings.Repeat(pad.glyph, width)); pad.row != want {
+			t.Errorf("half row = %q; want %q", pad.row, want)
+		}
+		if got := th.measure.Width(strip(pad.row)); got != width {
+			t.Errorf("the %s row is %d cells; want the block's %d", pad.glyph, got, width)
+		}
+	}
+	if got := th.promptPad.GetForeground(); got != th.chrome {
+		t.Errorf("the half rows are painted in %v; want the block's chrome %v", got, th.chrome)
+	}
+	if _, none := th.promptPad.GetBackground().(lipgloss.NoColor); !none {
+		t.Errorf("the half rows carry a background %v; want the terminal's own", th.promptPad.GetBackground())
+	}
+
+	unpadded := th
+	unpadded.padPrompts = false
+	body := renderUserBlock(unpadded, glyphUser+" ", in, width).lines
+	if !reflect.DeepEqual(rows[1:len(rows)-1], body) {
+		t.Errorf("the padding changed the body rows:\n--- got ---\n%s\n--- want ---\n%s",
+			strip(strings.Join(rows[1:len(rows)-1], "\n")), strip(strings.Join(body, "\n")))
+	}
+}
+
+// TestUserBlockPaddingCarriesTheBlockMark is the click surface kept whole: the half rows carry the
+// block's own mark — targetHeader on a block tall enough to collapse, so a click on either half row
+// folds it like a click on its words, and no target on a short one — and are flagged as pads for
+// the renderer to seat in place of a separator.
+func TestUserBlockPaddingCarriesTheBlockMark(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	cases := []struct {
+		name string
+		text string
+		want targetKind
+	}{
+		{"a collapsible block marks its half rows targetHeader", "alpha\nbravo\ncharlie\ndelta", targetHeader},
+		{"a short block marks nothing", "alpha", targetNone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			marks := renderUserBlock(th, glyphUser+" ", paintInput{text: tc.text}, 40).targets
+
+			for i, mark := range marks {
+				if mark.kind != tc.want {
+					t.Errorf("row %d is marked %v; want the block's own %v", i, mark.kind, tc.want)
+				}
+				if isPad := i == 0 || i == len(marks)-1; mark.pad != isPad {
+					t.Errorf("row %d pad = %v; want %v", i, mark.pad, isPad)
+				}
+			}
+		})
 	}
 }

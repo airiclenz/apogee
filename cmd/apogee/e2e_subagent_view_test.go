@@ -337,7 +337,8 @@ func statusRow(t *testing.T, f tuitest.Frame) string {
 	return ""
 }
 
-// assertFirstBodyRow fails unless the first non-blank row UNDER the row carrying header holds want.
+// assertFirstBodyRow fails unless the first non-blank row UNDER the row carrying header — past the
+// ▄ half row a prompt block opens on — holds want.
 // It is how "the view opens on the child's task" is asked as a claim about a place rather than
 // about the screen: the task is the first thing the run has to say, and a row that merely appears
 // somewhere would pass with the parent's conversation still painted above it.
@@ -350,7 +351,8 @@ func assertFirstBodyRow(t *testing.T, f tuitest.Frame, header, want string) {
 	}
 	rows := f.Rows()
 	for i := y + 1; i < len(rows); i++ {
-		if strings.TrimSpace(rows[i]) == "" {
+		// A blank row, or the ▄ half row a prompt block opens on, is not a body row.
+		if trimmed := strings.TrimSpace(rows[i]); trimmed == "" || strings.HasPrefix(trimmed, "▄▄") {
 			continue
 		}
 		if !strings.Contains(rows[i], want) {

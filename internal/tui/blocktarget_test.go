@@ -93,7 +93,8 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 		want  []blockMark
 	}{
 		{
-			// ❯ run the tests | (spacer) | ✦ Terminal | ┕ go test ./... ⋯ exit 0 · +4 more lines ▶ —
+			// ▄ | ❯ run the tests | ▀ (standing in for the spacer) | ✦ Terminal |
+			// ┕ go test ./... ⋯ exit 0 · +4 more lines ▶ —
 			// the header and the leader row beneath it are one surface, and the count of the body
 			// behind it rides that row's outcome slot rather than a line of its own.
 			name:  "a hidden body marks the block's rows",
@@ -103,8 +104,8 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Terminal"},
-				{line: 3, kind: targetHeader, entry: 1,
+				{line: 3, kind: targetHeader, entry: 1, text: "✦ Terminal"},
+				{line: 4, kind: targetHeader, entry: 1,
 					text: groupMemberLine("  ┕ go test ./... ⋯ exit 0 · +4 more lines")},
 			},
 		},
@@ -124,13 +125,13 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Terminal"},
-				{line: 3, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯ exit 0", glyphExpanded)},
-				{line: 4, kind: targetHeader, entry: 1, text: "    ok   a"},
-				{line: 5, kind: targetHeader, entry: 1, text: "    ok   b"},
-				{line: 6, kind: targetHeader, entry: 1, text: "    ok   c"},
-				{line: 7, kind: targetHeader, entry: 1, text: "    PASS"},
-				{line: 8, kind: targetHeader, entry: 1, text: seeLessFooterLine(t, 80)},
+				{line: 3, kind: targetHeader, entry: 1, text: "✦ Terminal"},
+				{line: 4, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯ exit 0", glyphExpanded)},
+				{line: 5, kind: targetHeader, entry: 1, text: "    ok   a"},
+				{line: 6, kind: targetHeader, entry: 1, text: "    ok   b"},
+				{line: 7, kind: targetHeader, entry: 1, text: "    ok   c"},
+				{line: 8, kind: targetHeader, entry: 1, text: "    PASS"},
+				{line: 9, kind: targetHeader, entry: 1, text: seeLessFooterLine(t, 80)},
 			},
 		},
 		{

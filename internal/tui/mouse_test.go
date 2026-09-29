@@ -1996,7 +1996,8 @@ func modelWithHugePrompt(t *testing.T) Model {
 	return m
 }
 
-// promptBlockLine returns the rendered line at offset rows into the latest user block, checking it
+// promptBlockLine returns the rendered line at offset rows into the latest user block's rows past
+// its ▄/▀ half rows (Model.withoutPads), checking it
 // is inside the block as painted — a test aiming at a row of the block must fail loudly if the
 // block stopped painting that many rather than silently clicking somewhere else.
 func promptBlockLine(t *testing.T, m Model, offset int) int {
@@ -2004,7 +2005,7 @@ func promptBlockLine(t *testing.T, m Model, offset int) int {
 	if len(m.userBlocks) == 0 {
 		t.Fatal("the transcript holds no user block to aim at")
 	}
-	b := m.userBlocks[len(m.userBlocks)-1]
+	b := m.withoutPads(m.userBlocks[len(m.userBlocks)-1])
 	if offset < 0 || offset >= b.count {
 		t.Fatalf("offset %d is outside the prompt block's %d painted rows", offset, b.count)
 	}
@@ -2294,7 +2295,8 @@ func screenRow(t *testing.T, m Model, line int) int {
 	return row
 }
 
-// promptRow is the viewport row the latest user prompt's first line is drawn on. A short
+// promptRow is the viewport row the latest user prompt's first line past its ▄ half row is drawn
+// on. A short
 // transcript is no longer scrolled so its prompt tops the screen (the submit-time pad is gone),
 // so a test aiming at the prompt block asks the paint where the block actually landed.
 func promptRow(t *testing.T, m Model) int {
@@ -2302,7 +2304,7 @@ func promptRow(t *testing.T, m Model) int {
 	if len(m.userBlocks) == 0 {
 		t.Fatal("the transcript holds no user block to aim at")
 	}
-	return screenRow(t, m, m.userBlocks[len(m.userBlocks)-1].start)
+	return screenRow(t, m, m.withoutPads(m.userBlocks[len(m.userBlocks)-1]).start)
 }
 
 // armTranscriptSelection drags across the whole of one viewport row and returns the model with
@@ -2710,7 +2712,7 @@ func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
 }
 
 // TestTranscriptSelectionOnStickyHeaderRow checks the sticky-header row copies WHAT IS DRAWN ON
-// IT: a drag over row 0 takes the overlaid prompt, not the reply line the scroll offset hides
+// IT: a drag over header row 1 (under the ▄ half row) takes the overlaid prompt, not the reply line the scroll offset hides
 // beneath the overlay, and the highlight reaches the composed View (which layers the highlight
 // over the sticky-header overlay). Both scroll regimes are covered — parked on the prompt row,
 // where the overlay is a visual no-op, and following the tail of a reply taller than the screen,
@@ -2748,9 +2750,10 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 			m := base(t)
 			c.park(&m)
 
+			// Header row 1: the sticky prompt opens on its ▄ half row, and the words are the row under it.
 			w := m.viewport.Width()
-			m = step(t, m, leftClick(0, 0))
-			m = step(t, m, leftDrag(w, 0))
+			m = step(t, m, leftClick(0, 1))
+			m = step(t, m, leftDrag(w, 1))
 			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 			if !strings.Contains(got, "HEADERPROMPT") {
 				t.Fatalf("selecting the sticky-header row copied %q, want it to contain the prompt text", got)

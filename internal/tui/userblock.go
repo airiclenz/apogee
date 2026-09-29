@@ -7,7 +7,10 @@ import (
 
 // renderUserBlock renders something the human said as a full-width white-on-dark-gray block: the
 // marker on the first line, a hanging two-column indent on wrapped continuation lines, and
-// the dark-gray background padded across the whole width on every line. The skills the message
+// the dark-gray background padded across the whole width on every line. Under a theme that pads
+// prompts (theme.padPrompts) the block opens with a half row of ▄ and closes with one of ▀ in the
+// block's own gray (promptPadRow), so the field reads half a row taller at each end; those two rows
+// stand in for the blank separators beside the block ([transcript.renderView]). The skills the message
 // invoked are shown IN it: spans locates their "/tokens" in text and those very runs are painted
 // in the skill violet (userBlockCellSpans), so the record of what the model was given is the
 // sentence the human wrote rather than a badge restating it beside them.
@@ -36,8 +39,8 @@ import (
 // (highlightTranscript, mouse.go), which is what keeps a selected token reading as SELECTED.
 //
 // The block is a click surface exactly when it has two shapes to move between, and then it is a
-// click surface WHOLE: every row it paints is marked targetHeader — the marker row and the see-less
-// row among them — because layout.md makes the whole prompt the toggle rather than one line of it.
+// click surface WHOLE: every row it paints is marked targetHeader — the marker row, the see-less
+// row and the half rows among them — because layout.md makes the whole prompt the toggle rather than one line of it.
 // The mark is state-INDEPENDENT for the tool block's reason: an expanded prompt keeps it, which is
 // the click that closes it again. A body inside the cap marks nothing at all, so a click on an
 // ordinary prompt keeps its selection meaning.
@@ -88,8 +91,25 @@ func renderUserBlock(th theme, marker string, in paintInput, width int) blockPai
 		kind = targetHeader
 	}
 	var paint blockPaint
+	if !th.padPrompts || len(out) == 0 {
+		paint.add(out, kind)
+		return paint
+	}
+	paint.addPad(promptPadRow(th, glyphPadAbove, width), kind)
 	paint.add(out, kind)
+	paint.addPad(promptPadRow(th, glyphPadBelow, width), kind)
 	return paint
+}
+
+// promptPadRow is one half row padding a sent prompt block: glyph run across exactly width cells
+// in the theme's width authority, in the block's gray on no background (theme.promptPad). A glyph
+// the authority measures wider than one cell fills as many whole glyphs as fit and closes the row
+// with plain spaces, so the half row is never wider than the block it pads.
+func promptPadRow(th theme, glyph string, width int) string {
+	cells := max(1, th.measure.Width(glyph))
+	count := max(0, width) / cells
+	rest := max(0, width) - count*cells
+	return th.promptPad.Render(strings.Repeat(glyph, count)) + strings.Repeat(" ", rest)
 }
 
 // promptMarkerRow composes one row of a user block that carries a collapse marker near its right

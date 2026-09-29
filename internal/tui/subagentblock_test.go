@@ -1718,8 +1718,9 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 		if strings.TrimSpace(lines[0]) != "" {
 			t.Errorf("line 0 (%q) is the band's top row, want it blank", lines[0])
 		}
+		// The one row allowed there that is not blank is the task block's own ▄ half row.
 		for i, ln := range lines[breadcrumbTrailRow+1 : task] {
-			if strings.TrimSpace(ln) != "" {
+			if strings.TrimSpace(ln) != "" && !(i+breadcrumbTrailRow+1 == task-1 && strings.HasPrefix(ln, glyphPadAbove)) {
 				t.Errorf("line %d (%q) stands between the breadcrumb and the task row", i+breadcrumbTrailRow+1, ln)
 			}
 		}

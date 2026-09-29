@@ -607,6 +607,10 @@ type Model struct {
 	lines       []string
 	userBlocks  []userBlock
 	lineTargets []lineTarget
+	// pads is the paint's own map of the prompt blocks' ▄/▀ half rows, parallel to lines
+	// (renderedTranscript.pads): the rows the block cursor steps past and a short screen's sticky
+	// header leaves behind. Stashed beside lineTargets for the same reason — read, never re-derived.
+	pads []bool
 	// painted is the frame key the lines above were rendered under ([frameKey], paintcache.go):
 	// every input of renderView, stashed by refreshViewport beside its output. The end of every
 	// Update compares it against the key the model now stands at ([Model.settle]) and lays out on a
@@ -2843,10 +2847,11 @@ func (m *Model) refreshViewport() {
 	m.userBlocks = rendered.userBlocks
 	m.header = rendered.header       // a rooted paint's breadcrumb, and nothing at all otherwise
 	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)
+	m.pads = rendered.pads
 	// The keyboard cursor stands on that same map, so it is re-seated against the paint that just
 	// landed: this is the ONE place the map is restashed, and a highlight left on a line whose
 	// meaning moved would be a ⏎ opening some other block (blockCursor.clamp, blockcursor.go).
-	m.cursor = m.cursor.clamp(m.lineTargets)
+	m.cursor = m.cursor.clamp(m.lineTargets, m.pads)
 	if m.detached {
 		m.viewport.SetContentLines(rendered.lines)
 		m.floorShortScreenOffset()
@@ -3313,6 +3318,12 @@ func (m Model) stickyHeaderSpan() (start, count int) {
 		return 0, 0 // the top content sits above the first prompt — nothing to stick
 	}
 	b := m.userBlocks[cur]
+	// A prompt block as tall as the screen sticks without its half rows, the prompt's version of the
+	// trail-only rule above: the pads are breathing room, and on a frame with none to spare they
+	// would cover rows of the prompt itself.
+	if b.count >= m.viewport.Height() {
+		b = m.withoutPads(b)
+	}
 	push := 0
 	if cur+1 < len(m.userBlocks) {
 		nat := m.userBlocks[cur+1].start - o // the next prompt's natural row within the viewport
@@ -3324,6 +3335,19 @@ func (m Model) stickyHeaderSpan() (start, count int) {
 		return 0, 0 // this header is fully pushed out; the next one is already the natural top
 	}
 	return b.start + push, b.count - push // the still-visible (bottom) header rows
+}
+
+// withoutPads is b less the ▄/▀ half rows at either end of it (Model.pads). A span with no pad
+// rows — a colourless profile, or a hand-built paint that carries no pad map — comes back as it was.
+func (m Model) withoutPads(b userBlock) userBlock {
+	isPad := func(i int) bool { return i >= 0 && i < len(m.pads) && m.pads[i] }
+	if b.count > 0 && isPad(b.start) {
+		b.start, b.count = b.start+1, b.count-1
+	}
+	if b.count > 0 && isPad(b.start+b.count-1) {
+		b.count--
+	}
+	return b
 }
 
 // floorShortScreenOffset keeps the view from scrolling the run's header rows under the frozen trail

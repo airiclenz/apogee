@@ -6209,8 +6209,8 @@ func TestFollowsTailOfLongStreamedReply(t *testing.T) {
 	if got := plain(m.View()); !strings.Contains(got, "THE-TAIL") {
 		t.Errorf("the streamed tail is off screen:\n%s", got)
 	}
-	if top := firstViewLine(m); !strings.Contains(top, "FOLLOW-PROMPT") {
-		t.Errorf("top line = %q; want the owning prompt overlaid as the sticky header", top)
+	if top := viewLineAt(m, 1); !strings.Contains(top, "FOLLOW-PROMPT") {
+		t.Errorf("view row 1 = %q; want the owning prompt overlaid as the sticky header", top)
 	}
 }
 
@@ -7002,7 +7002,17 @@ func TestWheelOnShortTranscriptDoesNotDetach(t *testing.T) {
 // firstViewLine returns the top line of the full View (styling stripped). The sticky-header
 // overlay writes to View, not the viewport, so the viewport alone cannot see it.
 func firstViewLine(m Model) string {
-	return strings.SplitN(plain(m.View()), "\n", 2)[0]
+	return viewLineAt(m, 0)
+}
+
+// viewLineAt returns row of the full View (styling stripped), "" past its last row. A sticky prompt
+// header opens on its ▄ half row, so the prompt's own words stand on row 1.
+func viewLineAt(m Model, row int) string {
+	rows := strings.Split(plain(m.View()), "\n")
+	if row < 0 || row >= len(rows) {
+		return ""
+	}
+	return rows[row]
 }
 
 // A short exchange stays whole at the tail: no prompt is hoisted to the top of an emptied
@@ -7085,27 +7095,27 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 	// row) because the one-time start-up box seeded at entries[0] sits above section one.
 	m.detached = true
 	m.viewport.SetYOffset(one.start + 3)
-	if top := firstViewLine(m); !strings.Contains(top, "PROMPT-ONE") {
-		t.Errorf("scrolled into section one: top line = %q; want PROMPT-ONE stuck to the top", top)
+	if top := viewLineAt(m, 1); !strings.Contains(top, "PROMPT-ONE") {
+		t.Errorf("scrolled into section one: view row 1 = %q; want PROMPT-ONE stuck to the top", top)
 	}
 
 	// Section two's prompt is the natural top line: it owns the top now.
 	m.viewport.SetYOffset(two.start)
-	if top := firstViewLine(m); !strings.Contains(top, "PROMPT-TWO") {
-		t.Errorf("section two at the top: top line = %q; want PROMPT-TWO", top)
+	if top := viewLineAt(m, 1); !strings.Contains(top, "PROMPT-TWO") {
+		t.Errorf("section two at the top: view row 1 = %q; want PROMPT-TWO", top)
 	}
 
 	// One row earlier, the incoming PROMPT-TWO has not yet reached the top: PROMPT-ONE still owns
 	// it (the hand-off boundary).
 	m.viewport.SetYOffset(two.start - 1)
-	if top := firstViewLine(m); strings.Contains(top, "PROMPT-TWO") {
+	if top := firstViewLine(m) + viewLineAt(m, 1); strings.Contains(top, "PROMPT-TWO") {
 		t.Errorf("hand-off boundary: top line = %q; PROMPT-TWO should not yet own the top row", top)
 	}
 }
 
 // The sticky header shows the block's RENDERED state and special-cases nothing (layout.md,
 // "Collapsed and expanded blocks"): a huge prompt that collapsed to its three-row shape sticks as
-// those three rows, hidden body and all, and one deliberately expanded sticks expanded — the
+// those three rows between its ▄/▀ half rows, hidden body and all, and one deliberately expanded sticks expanded — the
 // overlay simply paints the block's own lines, however many the painter made.
 func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 	t.Parallel()
@@ -7122,9 +7132,10 @@ func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 	m.detached = true
 	m.viewport.SetYOffset(block.start + block.count + 3)
 
+	// The collapsed rows and the block's ▄/▀ half rows around them.
 	start, count := m.stickyHeaderSpan()
-	if count != promptCollapsedRows {
-		t.Fatalf("the sticky header spans %d rows; want the collapsed prompt's %d", count, promptCollapsedRows)
+	if count != promptCollapsedRows+2 {
+		t.Fatalf("the sticky header spans %d rows; want the collapsed prompt's %d", count, promptCollapsedRows+2)
 	}
 	head := strip(strings.Join(m.lines[start:start+count], "\n"))
 	if !strings.Contains(head, "❯ alpha") || !strings.Contains(head, "see more") {
@@ -7133,8 +7144,8 @@ func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 	if strings.Contains(head, "foxtrot") {
 		t.Errorf("the stuck header shows body rows the collapsed block hides:\n%s", head)
 	}
-	if top := firstViewLine(m); !strings.Contains(top, "❯ alpha") {
-		t.Errorf("top line = %q; want the collapsed prompt stuck to the top", top)
+	if top := viewLineAt(m, 1); !strings.Contains(top, "❯ alpha") {
+		t.Errorf("view row 1 = %q; want the collapsed prompt stuck to the top", top)
 	}
 
 	// Expanded, the same block sticks as everything it now paints — six body rows and the see-less
@@ -7143,8 +7154,43 @@ func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
 	}
 	m.refreshViewport()
-	if _, count := m.stickyHeaderSpan(); count != 7 {
-		t.Errorf("the expanded prompt sticks as %d rows; want its six body rows plus the see-less row", count)
+	if _, count := m.stickyHeaderSpan(); count != 9 {
+		t.Errorf("the expanded prompt sticks as %d rows; want its six body rows, the see-less row and its two half rows", count)
+	}
+}
+
+// TestStickyHeaderShortScreenDropsPadRows is the prompt's trail-only rule: a prompt block at least
+// as tall as the viewport sticks without its ▄/▀ half rows — on a screen with no row to spare they
+// are breathing room that would cover the prompt's own words.
+func TestStickyHeaderShortScreenDropsPadRows(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	body := make([]string, 30)
+	for i := range body {
+		body[i] = fmt.Sprintf("prompt line %02d", i)
+	}
+	m.transcript.addUser(strings.Join(body, "\n"), nil)
+	if !m.transcript.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
+	}
+	for i := 0; i < 30; i++ {
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
+	}
+	m.refreshViewport()
+	block := m.userBlocks[len(m.userBlocks)-1]
+	if block.count < m.viewport.Height() {
+		t.Fatalf("setup: the prompt block is %d rows on a %d-row viewport; want one at least as tall",
+			block.count, m.viewport.Height())
+	}
+
+	m.detached = true
+	m.viewport.SetYOffset(block.start + 2)
+	start, count := m.stickyHeaderSpan()
+
+	if start != block.start+1 || count != block.count-2 {
+		t.Errorf("the sticky header spans [%d,+%d); want [%d,+%d), the block less its two half rows",
+			start, count, block.start+1, block.count-2)
 	}
 }
 

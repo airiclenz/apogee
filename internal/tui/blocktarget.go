@@ -90,8 +90,15 @@ type lineTarget struct {
 // turns the pair into an absolute entry. The zero value is "the head, no target", which is what
 // every line outside a click surface carries. stage is [lineTarget.stage] as the painter states it,
 // carried through the resolve untouched: a stage's place in its block is the painter's own fact.
+//
+// pad marks a sent prompt block's ▄/▀ half row (renderUserBlock): a line that is part of the block
+// — it carries the block's own kind — but holds none of its text. It rides the mark rather than a
+// slice of its own so every step a paint goes through (join, railed, retargeted, the cache) carries
+// it without being taught to, and [transcript.renderView] reads it to let the half row stand in for
+// the blank separator beside the block.
 type lineMark struct {
 	kind   targetKind
 	member int
 	stage  int
+	pad    bool
 }
