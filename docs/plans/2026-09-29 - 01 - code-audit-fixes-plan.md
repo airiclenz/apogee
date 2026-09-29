@@ -217,7 +217,11 @@ boundedBodyTransport.RoundTrip, proxyForRequest; internal/mcp/bounded.go — lin
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Transport|GuardedClient|VetEndpoint' ./internal/mcp/`
 **Commit:** `test(mcp): cover HTTP pinning, redirect refusal and body bound`
 
-## 6. Git config probe: fingerprint includes ctime
+## 6. Git config probe: fingerprint includes ctime — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): ctime is read in holds() from the os.FileInfo each print already keeps (info.Sys()), via a new sameChangeTime helper, rather than stored as a separate fileprint field; takeFileprint is unchanged.
+NOTES (2026-09-29): gitexec_test.go left unchanged — the new coverage lives in fileprint_internal_test.go (linux || darwin), which the item allows in place of a Capture-level test.
+NOTES (2026-09-29): the BSDs fall to ctime_other.go (no ctime) per the item's three-file regression guard, although their Stat_t exposes one (Ctimespec on freebsd/netbsd, Ctim on openbsd/dragonfly); no BSD is in CROSS_TARGETS. Adding them would take one more build-tagged file.
 
 **What:** Fix "Memoised git config probe can be defeated by a same-length rewrite" (Medium).
 **Regression guard.** `syscall.Stat_t` spells ctime `Ctim` on linux and `Ctimespec` on darwin: use

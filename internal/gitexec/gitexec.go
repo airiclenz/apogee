@@ -446,9 +446,11 @@ func (p commandConfigProbe) holds() bool {
 }
 
 // fileprint is the identity of one file the probe's answer depends on, as os.Stat reports it:
-// size, modification time, mode and the inode/device pair os.SameFile compares — so an edit in
-// place, a rename over the file and a truncation each read as a change whatever the clock's
-// granularity. An absent file is a print of its own: git skips a missing include silently, so
+// size, modification time, mode, the inode/device pair os.SameFile compares and — where the
+// platform exposes it (changeTime) — the inode change time — so an edit in place, a rename over
+// the file and a truncation each read as a change whatever the clock's granularity. ctime is the
+// field a writer cannot put back: a same-length rewrite that restores the mtime with a utimes
+// call still moves it. An absent file is a print of its own: git skips a missing include silently, so
 // the file the model creates later must be watched from the start. A stat that failed for any
 // other reason keeps no info and never matches, which re-probes.
 type fileprint struct {
@@ -482,7 +484,16 @@ func (p fileprint) holds() bool {
 	return os.SameFile(p.info, now.info) &&
 		p.info.Size() == now.info.Size() &&
 		p.info.ModTime().Equal(now.info.ModTime()) &&
-		p.info.Mode() == now.info.Mode()
+		p.info.Mode() == now.info.Mode() &&
+		sameChangeTime(p.info, now.info)
+}
+
+// sameChangeTime reports whether two stats of one file carry the same inode change time. A
+// platform without one (changeTime) compares equal, leaving the rest of the print to decide.
+func sameChangeTime(then, now os.FileInfo) bool {
+	thenCtime, thenOK := changeTime(then)
+	nowCtime, nowOK := changeTime(now)
+	return thenOK == nowOK && thenCtime.Equal(nowCtime)
 }
 
 // probeCommandConfig returns repoLocalCommandConfig's answer for the repository the run at root
