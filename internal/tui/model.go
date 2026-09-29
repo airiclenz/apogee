@@ -611,6 +611,9 @@ type Model struct {
 	// (renderedTranscript.pads): the rows the block cursor steps past and a short screen's sticky
 	// header leaves behind. Stashed beside lineTargets for the same reason — read, never re-derived.
 	pads []bool
+	// padSeps is the depth of the separator each half row stands in for, -1 elsewhere
+	// (renderedTranscript.padSeps): what a copy puts on the clipboard for a half row (padRows).
+	padSeps []int
 	// painted is the frame key the lines above were rendered under ([frameKey], paintcache.go):
 	// every input of renderView, stashed by refreshViewport beside its output. The end of every
 	// Update compares it against the key the model now stands at ([Model.settle]) and lays out on a
@@ -2857,6 +2860,7 @@ func (m *Model) refreshViewport() {
 	m.header = rendered.header       // a rooted paint's breadcrumb, and nothing at all otherwise
 	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)
 	m.pads = rendered.pads
+	m.padSeps = rendered.padSeps
 	// The keyboard cursor stands on that same map, so it is re-seated against the paint that just
 	// landed: this is the ONE place the map is restashed, and a highlight left on a line whose
 	// meaning moved would be a ⏎ opening some other block (blockCursor.clamp, blockcursor.go).

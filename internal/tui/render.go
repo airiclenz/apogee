@@ -63,6 +63,12 @@ type renderedTranscript struct {
 	// ([lineMark.pad]), false everywhere else. It is built in the same loop as targets and moved
 	// with them, so a reader asking "is this row a half row" reads the paint's own answer.
 	pads []bool
+	// padSeps is PARALLEL to lines: on a half row that STANDS IN for a separator, the rail depth
+	// of that separator — the join railJoin drew there before the half row took its place — and -1
+	// on every other row, an added half row included. It is recorded where the placement is
+	// decided (appendJoined), so a copy reads the separator's own depth rather than guessing it
+	// from the rows around it ([padRows.copyText]).
+	padSeps []int
 }
 
 // blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
@@ -245,6 +251,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	// the widget widths the painted blocks stored, -1 where none did (renderedTranscript.cells)
 	var cells []int
 	var pads []bool // the prompt blocks' half rows (renderedTranscript.pads)
+	// the depth of the separator each half row stands in for, -1 elsewhere (renderedTranscript.padSeps)
+	var padSeps []int
 	var userBlocks []userBlock
 	var header userBlock
 
@@ -276,14 +284,27 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// that opens on one, or follows one, gets no blank row beside it. The ┊ closer is the one
 		// separator that is never stood in for — it is a mark, not a gap (railJoin) — though no
 		// prompt block is placed with closes set today.
+		//
+		// Where a half row stands in, the depth of the separator it replaced is recorded on it
+		// (padSeps): the upper block's ▀ where there is one, since at a seam between two padded
+		// blocks it is the one stand-in and the lower ▄ the added row, and otherwise this block's ▄.
 		opensOnPad := len(block.targets) > 0 && block.targets[0].pad
 		followsPad := len(pads) > 0 && pads[len(pads)-1]
 		closer := closes && prevBlockDepth > depth
-		if len(lines) > header.count && (closer || !(opensOnPad || followsPad)) {
-			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
-			targets = append(targets, lineTarget{}) // a separator belongs to neither block
-			cells = append(cells, -1)
-			pads = append(pads, false)
+		standIn := -1 // the row whose half row stands in for this seam's separator, if any
+		if len(lines) > header.count {
+			switch {
+			case closer || !(opensOnPad || followsPad):
+				lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
+				targets = append(targets, lineTarget{}) // a separator belongs to neither block
+				cells = append(cells, -1)
+				pads = append(pads, false)
+				padSeps = append(padSeps, -1)
+			case followsPad:
+				standIn = len(lines) - 1
+			default:
+				standIn = len(lines)
+			}
 		}
 		// A ROOTED paint registers none, whatever it is laying down: inside a view the breadcrumb is
 		// the only sticky header there is (header, above), and a user row that claimed the slot would
@@ -309,6 +330,10 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 			}
 			cells = append(cells, cell)
 			pads = append(pads, i < len(block.targets) && block.targets[i].pad)
+			padSeps = append(padSeps, -1)
+		}
+		if standIn >= 0 && standIn < len(padSeps) {
+			padSeps[standIn] = min(prevBlockDepth, depth) // railJoin's spacer depth: no closer is stood in for
 		}
 		prevBlockDepth = depth
 	}
@@ -355,11 +380,13 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 			targets = append(targets, lineTarget{kind: targetBreadcrumb})
 			cells = append(cells, -1)
 			pads = append(pads, false)
+			padSeps = append(padSeps, -1)
 		}
 		lines = append(lines, "")
 		targets = append(targets, lineTarget{})
 		cells = append(cells, -1)
 		pads = append(pads, false)
+		padSeps = append(padSeps, -1)
 		header = userBlock{start: 0, count: len(lines)}
 		if strings.TrimSpace(head.tool.task) != "" {
 			prompt := paintInput{
@@ -391,7 +418,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		t.paintStage(th, width, blink, root, appendJoined)
 		return renderedTranscript{
 			lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
-			pads: pads,
+			pads: pads, padSeps: padSeps,
 		}
 	}
 	previewAt := -1
@@ -469,7 +496,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	}
 	return renderedTranscript{
 		lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
-		pads: pads,
+		pads: pads, padSeps: padSeps,
 	}
 }
 
@@ -500,7 +527,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 // paint is returned as it came.
 //
 // Lines, targets, pads and user-block spans move TOGETHER. A continuation row carries the target
-// and the pad flag of the line it came from — every physical row a header occupies is the same click surface
+// and the pad flag of the line it came from (and a half row's stood-in separator rides its first
+// row alone, so a break never copies it twice) — every physical row a header occupies is the same click surface
 // ([blockPaint.add]) — and a block's span is moved by the rows added above it and stretched by the
 // rows added inside it, so the accounting the mouse reads is still the one the paint laid down.
 //
@@ -544,6 +572,10 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	if r.pads != nil {
 		pads = make([]bool, 0, len(r.lines)+1)
 	}
+	var padSeps []int
+	if r.padSeps != nil {
+		padSeps = make([]int, 0, len(r.lines)+1)
+	}
 	// shift[i] is how many EXTRA rows the lines before i added between them: the offset a line
 	// index at i moves by, and — differenced across a span — the rows that span grew by.
 	shift := make([]int, len(r.lines)+1)
@@ -562,10 +594,19 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 			target = r.targets[i]
 		}
 		pad := i < len(r.pads) && r.pads[i]
+		sep := -1
+		if i < len(r.padSeps) {
+			sep = r.padSeps[i]
+		}
 		for range segs {
 			targets = append(targets, target)
 			if pads != nil {
 				pads = append(pads, pad)
+			}
+			if padSeps != nil {
+				// one separator was stood in for, so only the line's first row copies as it
+				padSeps = append(padSeps, sep)
+				sep = -1
 			}
 		}
 		lines = append(lines, segs...)
@@ -589,6 +630,7 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	}
 	return renderedTranscript{
 		lines: lines, userBlocks: blocks, targets: targets, header: header, pads: pads,
+		padSeps: padSeps,
 	}
 }
 

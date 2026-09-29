@@ -2770,10 +2770,10 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // copyWhole copies every row of a paint through transcriptSelectionText, with the paint's own half-row
-// map and header bound, the way a drag from the first row to past the end of the last one does.
+// map and separator depths, the way a drag from the first row to past the end of the last one does.
 func copyWhole(t *testing.T, r renderedTranscript) string {
 	t.Helper()
-	pads := padRows{rows: r.pads, floor: r.header.start + r.header.count}
+	pads := padRows{rows: r.pads, seps: r.padSeps}
 	last := contentCell{line: len(r.lines) - 1, col: 1 << 16}
 	return transcriptSelectionText(newWidthAuthority(), r.lines, pads, contentCell{}, last)
 }
@@ -2828,7 +2828,7 @@ func TestTranscriptCopySkipsPadRowsAtTheSpanEnds(t *testing.T) {
 	tr.addUser("prompt", nil)
 	tr.commitAssistant("answer", runRef{})
 	r := paintPadded(tr, true)
-	pads := padRows{rows: r.pads}
+	pads := padRows{rows: r.pads, seps: r.padSeps}
 	// answer, ▄, ❯ prompt, ▀, answer
 	if len(r.lines) != 5 || !pads.isPad(1) || !pads.isPad(3) {
 		t.Fatalf("setup: want answer, ▄, prompt, ▀, answer; got %q", strip(strings.Join(r.lines, "\n")))
@@ -2851,6 +2851,53 @@ func TestTranscriptCopySkipsPadRowsAtTheSpanEnds(t *testing.T) {
 
 			if got != c.want {
 				t.Fatalf("copy %+v..%+v = %q, want %q", c.a, c.b, got, c.want)
+			}
+		})
+	}
+}
+
+// TestTranscriptCopyPadRowsKeepTheSeparatorsRail pins a stand-in's copy to the depth of the
+// separator it replaced, as the paint recorded it: a railed prompt between two railed answers copies
+// its half rows as the "│" spacer the unpadded paint drew, and one between two depth-0 rows copies
+// them bare — even where those rows' own text opens with a "│ ", which is content and no rail.
+func TestTranscriptCopyPadRowsKeepTheSeparatorsRail(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		neighbours int    // the depth of the answers either side of the depth-1 prompt
+		text       string // what the neighbouring answers' rows read, verbatim
+		want       string
+	}{
+		{"depth-1 neighbours", 1, "answer",
+			"│ " + glyphAssistant + " answer\n│\n│ " + glyphUser + " deep prompt\n│\n│ " + glyphAssistant + " answer"},
+		{"depth-0 neighbours opening with a bar", 0, "│ a quoted rail",
+			"│ a quoted rail\n\n│ " + glyphUser + " deep prompt\n\n│ a quoted rail"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+			tr.entries = append(tr.entries,
+				entry{kind: entryAssistant, text: "answer", depth: c.neighbours},
+				entry{kind: entryUser, text: "deep prompt", depth: 1},
+				entry{kind: entryAssistant, text: "answer", depth: c.neighbours},
+			)
+			copies := make([]string, 0, 2)
+			for _, padded := range []bool{true, false} {
+				r := paintPadded(tr, padded)
+				if c.neighbours == 0 {
+					// The answers' rows are rewritten to open with a bar of their own: no painter draws a
+					// depth-0 row that way today, and the copy must not depend on that staying true.
+					r.lines[0], r.lines[len(r.lines)-1] = c.text, c.text
+				}
+				copies = append(copies, copyWhole(t, r))
+			}
+
+			if copies[0] != c.want {
+				t.Errorf("the padded copy = %q, want %q", copies[0], c.want)
+			}
+			if copies[0] != copies[1] {
+				t.Errorf("the padded copy %q differs from the unpadded one %q", copies[0], copies[1])
 			}
 		})
 	}

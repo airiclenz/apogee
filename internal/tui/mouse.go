@@ -1023,7 +1023,7 @@ func transcriptSelectionText(
 			continue
 		}
 		if pads.isPad(row) {
-			if text, ok := pads.copyText(lines, row); ok {
+			if text, ok := pads.copyText(row); ok {
 				out = append(out, text)
 			}
 			continue
@@ -1046,17 +1046,17 @@ func transcriptSelectionText(
 }
 
 // padRows is what a copy needs to know about the prompt blocks' ▄/▀ half rows: which rows they are
-// (rows, the paint's own map — Model.pads) and the first row a separator may stand above (floor,
-// the end of a run view's header: renderView lays no separator under the header's own spacer). A
-// zero padRows names no half row at all, so a copy over it is verbatim.
+// (rows, the paint's own map — Model.pads) and, on each one standing in for a separator, that
+// separator's rail depth (seps — Model.padSeps, -1 where the half row stands in for none). A zero
+// padRows names no half row at all, so a copy over it is verbatim.
 type padRows struct {
-	rows  []bool
-	floor int
+	rows []bool
+	seps []int
 }
 
-// padRows is the model's half-row map with the header bound its paint was laid under.
+// padRows is the model's half-row map with the separator depths its paint recorded.
 func (m Model) padRows() padRows {
-	return padRows{rows: m.pads, floor: m.header.start + m.header.count}
+	return padRows{rows: m.pads, seps: m.padSeps}
 }
 
 // isPad reports whether row is a half row. It is bounds-checked, so a map shorter than the lines —
@@ -1066,53 +1066,17 @@ func (p padRows) isPad(row int) bool {
 }
 
 // copyText is what the half row at row copies as, and ok is false where it copies as nothing.
-// renderView's placement rule (render.go, appendJoined) read backwards: a half row STANDS IN for
-// the blank separator on the side it pads wherever one would have been drawn, and was ADDED where
-// none would — above a block at the transcript's top or under a run view's header, the ▄ of the
-// lower block at a seam between two padded blocks (the upper ▀ stands in for the one separator
-// there), the ▀ closing the transcript, and a ▀ followed by a ┊ closer, which is never stood in
-// for. A stand-in copies as that separator's own text: bare at depth 0, and otherwise the rail
-// gutter of the join — the shallower of the half row's depth and its neighbour's (railJoin).
-func (p padRows) copyText(lines []string, row int) (string, bool) {
-	own := ansi.Strip(lines[row])
-	neighbour := row + 1
-	if strings.Contains(own, glyphPadAbove) {
-		neighbour = row - 1
-		if row <= p.floor || p.isPad(neighbour) {
-			return "", false
-		}
-	}
-	if neighbour < 0 || neighbour >= len(lines) {
+// renderView decided, as it placed the half row, whether it STANDS IN for the blank separator on
+// the side it pads or was ADDED where none would have been drawn, and recorded the stood-in
+// separator's depth (renderedTranscript.padSeps). A stand-in copies as that separator's own text —
+// railSpacer's gutter at that depth, bare at depth 0 — and an added half row as nothing. The depth
+// is the paint's, never inferred from the neighbouring rows' text, which can open with a "│" of its
+// own.
+func (p padRows) copyText(row int) (string, bool) {
+	if row < 0 || row >= len(p.seps) || p.seps[row] < 0 {
 		return "", false
 	}
-	other := ansi.Strip(lines[neighbour])
-	if isCloserRow(other) {
-		return "", false
-	}
-	depth := railDepth(strings.TrimRight(own, glyphPadAbove+glyphPadBelow+" "))
-	if depth > 0 {
-		depth = min(depth, railDepth(other))
-	}
-	return strings.TrimRight(strings.Repeat(glyphSubRail+" ", depth), " "), true
-}
-
-// railDepth counts the rail gutters ("│ ", or a spacer's trimmed final "│") a stripped row opens with.
-func railDepth(text string) int {
-	depth := 0
-	for strings.HasPrefix(text, glyphSubRail) {
-		depth++
-		text = strings.TrimPrefix(strings.TrimPrefix(text, glyphSubRail), " ")
-	}
-	return depth
-}
-
-// isCloserRow reports whether a stripped row is railJoin's ┊ closer: rail gutters and the ┊ alone.
-func isCloserRow(text string) bool {
-	text = strings.TrimRight(text, " ")
-	for strings.HasPrefix(text, glyphSubRail+" ") {
-		text = strings.TrimPrefix(text, glyphSubRail+" ")
-	}
-	return text == glyphRailClose
+	return strings.TrimRight(strings.Repeat(glyphSubRail+" ", p.seps[row]), " "), true
 }
 
 // ----------------------------------------------------------------------------
