@@ -8,6 +8,16 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- A recipe re-issued to resume a stopped workflow now draws its own workflow block: its item runs are seated under it instead of rendering loose in the conversation, and the stopped block stays frozen as it ended.
+
+- Stopping a recipe launch (`/<recipe>`) no longer erases it from the conversation: your line and the stopped run's result stay, marked as cancelled, so the model knows what ran; no model request is sent after the stop.
+
+- A stopped workflow's answer now tells the model how to resume it, on a line after the item listing: re-run the typed recipe line (``to resume: re-run `/audit internal/mcp security` — finished items are kept``), run the recipe again with the same inputs for a launch that bound its inputs up front, or call `fan_out` again with the same arguments. A finished workflow's answer carries no such line, and the "ran on the session server" note stays last.
+
+- A stopped recipe's workflow block now ends on how to resume it, e.g. ``re-run `/audit internal/mcp security` to resume`` (or ``run `/<id>` again with the same inputs to resume`` for a recipe started without typed text), one dim line after the totals. The line is kept in the session record, so a stopped block replayed after a session resume still shows it. A finished or failed block, and a `fan_out` or background workflow, show no such line.
+
+- A stopped workflow now says how to pick it up again: its result ends on a `to resume: …` line the model reads, and a stopped recipe block shows the command that re-runs it (for example ``re-run `/audit internal/` to resume``). Re-running it keeps the finished items and draws a new block, leaving the stopped one as it ended. Cancelling a `/<id>` recipe launch keeps your line and the stopped result in the conversation instead of dropping them.
+
 - **Fixed:** a workflow item's helper is now named by the item's short name instead of its full entry, so an audit's helpers no longer read `/home/…/.apogee/scratch/<session>/workflows/<id>/part-a`. A path inside the workflow folder reads relative to it (`part-a`), the folder itself reads as the stage's name, and a path outside it reads as its file name. An approval from a workflow item names the item's short name, and so do the `workflow` tool's status "running items" lines and its "message queued for" reply; `message` still takes the item's full entry, or its run id, to tell apart two items that share a short name. For embedders, `WorkflowPhaseEvent` carries the short name as `ItemName` on `WorkflowItemStarted` and `WorkflowItemFinished`, beside the full label in `Item`. `apogee run --format json` and the daemon write the same `workflow_phase` lines as before.
 
 - **Fixed:** a workflow item's run head, its row in a stage view or `fan_out` card, its breadcrumb, the status line and the workflow block's not-ok item lines show the item's short name (e.g. `part-foo`) instead of an absolute path under the apogee home; a transcript recorded before this change still shows the item's full label.
