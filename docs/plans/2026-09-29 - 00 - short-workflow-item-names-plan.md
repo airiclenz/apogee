@@ -82,7 +82,12 @@ internal/agent/workflowspawn_test.go — itemSpec
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/` then `go test -race -count=1 ./internal/eventjson/ ./internal/domain/`
 **Commit:** `fix(agent): name a workflow item's child by its short name`
 
-## 3. TUI workflow rows and run heads show the short name
+## 3. TUI workflow rows and run heads show the short name — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): one helper, `itemShownName(e)` (ItemName, else Item), feeds the item head (`addWorkflowItem` → `workflowItemView`, hence breadcrumbs, status phrase, legend and `fan_out` card rows), the block's finished-item `label` and `workflowItemLine`; `e.Item` is no longer displayed anywhere in internal/tui, and no identity match in the package used it.
+NOTES (2026-09-29): layout.md "The workflow block" did not say items are shown by label; a sentence stating the short-name rule and the older-record label fallback was added to the "A stage row opens its stage's work" paragraph. The `workflowItem` struct comment was updated to say its `label` now holds the shown name.
+NOTES (2026-09-29): `fan_out` card rows are not tested separately — they are the same item heads `addWorkflowItem` seats, whose Target/agentName the new run-view test pins.
+NOTES (2026-09-29): Acceptance was run as `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Workflow|FanOut|RunView|Breadcrumb|StageView|ShortName' ./internal/tui/` (the plan's regex plus `ShortName`, since the new stage-view test's name matches `StageView` and the block test's `Workflow` anyway); both new tests fail with the workflowblock.go change stashed.
 
 Depends on item 2.
 

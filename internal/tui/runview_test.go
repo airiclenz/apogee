@@ -1605,6 +1605,53 @@ func TestStageViewAddressesNoRun(t *testing.T) {
 	}
 }
 
+// An item whose label is an absolute path is shown by its short name everywhere its run is named —
+// its head's card, its row in the stage view, the trail of the run it opens and the status line's
+// phrase — and the path never reaches the screen. An item phase carrying no short name (an older
+// transcript's) shows its label.
+func TestStageViewShowsAnItemByItsShortName(t *testing.T) {
+	t.Parallel()
+	const path = "/home/u/.apogee/scratch/s1/workflows/w1/part-foo"
+	m := modelWithRecipeStages(t, &fakeEngine{})
+	startStubWorker(t, &m)
+	tr := &m.transcript
+	tr.apply(stageFinished("build", 1))
+	tr.apply(stageStarted("check", 1, 2, 0))
+	named := itemStartedIn("run.c1", "check", path, 1, 0, 1)
+	named.ItemName = "part-foo"
+	tr.apply(named)
+	itemSays(tr, recipeCall, "run.c1", "part-foo is at work")
+	startItem(tr, "run.c2", "check", "gamma", 1, 1, 1)
+	m.acts.put(itemRef("run.c1"), runActivity{
+		act:   activity{kind: actThinking, depth: 1, spawn: recipeCall},
+		since: time.Now(),
+	})
+	m.refreshViewport()
+
+	c1, c2 := workflowItemHeadAt(tr.entries, "run.c1"), workflowItemHeadAt(tr.entries, "run.c2")
+	if got := tr.entries[c1].tool; got.Target != "part-foo" || got.agentName != "part-foo" {
+		t.Errorf("the item head names %q (run %q); want the short name part-foo", got.Target, got.agentName)
+	}
+	if got := tr.entries[c2].tool.Target; got != "gamma" {
+		t.Errorf("a head whose phase carries no short name names %q; want its label gamma", got)
+	}
+	if got := leftStatus(m); !strings.Contains(got, "part-foo · thinking") || strings.Contains(got, path) {
+		t.Errorf("status = %q; want the working item named part-foo, never by its path", got)
+	}
+
+	m = clickLine(t, m, stageRowLine(t, m, 2))
+
+	painted := strip(strings.Join(m.lines, "\n"))
+	if !strings.Contains(painted, "part-foo") || !strings.Contains(painted, "gamma") || strings.Contains(painted, path) {
+		t.Errorf("the stage view names its items other than part-foo and gamma:\n%s", painted)
+	}
+
+	m = clickLine(t, m, headerLineOf(t, m, c1))
+	if got, want := trailOnScreen(m), "← main › audit › check › part-foo"; !strings.HasPrefix(got, want) {
+		t.Errorf("the item's trail = %q; want it to read %q", got, want)
+	}
+}
+
 // A stage level stands exactly as long as its workflow block does, and the paint re-roots at it.
 func TestStageViewFollowsItsBlock(t *testing.T) {
 	t.Parallel()

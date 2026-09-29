@@ -105,8 +105,9 @@ func (v workflowView) live() bool { return v.id != "" }
 // block's text instead.
 func (v workflowView) drawsStages() bool { return v.live() || v.replayed }
 
-// workflowItem is one finished item: the stage it belongs to, its label, its receipt's status and
-// summary, and its result line.
+// workflowItem is one finished item: the stage it belongs to, the name it is shown by
+// (itemShownName — its short name, or an older phase's label), its receipt's status and summary,
+// and its result line.
 type workflowItem struct {
 	stage   string
 	label   string
@@ -233,7 +234,7 @@ func (v workflowView) fold(e domain.WorkflowPhaseEvent) workflowView {
 	case domain.WorkflowItemFinished:
 		item := workflowItem{
 			stage:   stripEscapes(e.Stage),
-			label:   stripEscapes(e.Item),
+			label:   stripEscapes(itemShownName(e)),
 			status:  stripEscapes(e.Receipt.Status),
 			summary: stripEscapes(firstLine(e.Receipt.Summary)),
 			line:    workflowItemLine(e),
@@ -355,14 +356,24 @@ func endRunningStages(stages []workflowStage, state workflowStageState) []workfl
 	return out
 }
 
-// workflowItemLine renders one finished item the way the result lines do:
-// `#<n> <item> — <status> — <summary>[ k=v…]`, fields in key order.
+// itemShownName is the name a Driver shows a phase's item under: its short name (ItemName), or its
+// full label (Item) for a phase that carries none — one an older transcript recorded. It is display
+// only; Item stays the item's identity.
+func itemShownName(e domain.WorkflowPhaseEvent) string {
+	if e.ItemName != "" {
+		return e.ItemName
+	}
+	return e.Item
+}
+
+// workflowItemLine renders one finished item the way the result lines do, the item shown by its
+// short name (itemShownName): `#<n> <item> — <status> — <summary>[ k=v…]`, fields in key order.
 func workflowItemLine(e domain.WorkflowPhaseEvent) string {
 	summary := firstLine(e.Receipt.Summary)
 	if summary == "" {
 		summary = workflowNoSummary
 	}
-	line := "#" + strconv.Itoa(e.Index+1) + " " + e.Item + workflowLineSep + e.Receipt.Status + workflowLineSep + summary
+	line := "#" + strconv.Itoa(e.Index+1) + " " + itemShownName(e) + workflowLineSep + e.Receipt.Status + workflowLineSep + summary
 	keys := make([]string, 0, len(e.Receipt.Fields))
 	for key := range e.Receipt.Fields {
 		keys = append(keys, key)
@@ -611,7 +622,7 @@ func (t *transcript) addWorkflowItem(e domain.WorkflowPhaseEvent) {
 	if _, ok := spanHeadAt(t.entries, item); !ok {
 		return
 	}
-	label := stripEscapes(e.Item)
+	label := stripEscapes(itemShownName(e))
 	head := inRun(entry{
 		kind:       entryWorkflowItem,
 		callID:     e.Call,
@@ -628,9 +639,9 @@ func (t *transcript) addWorkflowItem(e domain.WorkflowPhaseEvent) {
 }
 
 // workflowItemView is the card an item run's head wears: a delegation's label under the item's
-// label, which is also the run's name — what the breadcrumb, the status line and the view's legend
-// call it (usageAgentName). It carries no task row: the phase names the item, not the instructions
-// its child was handed.
+// shown name (itemShownName), which is also the run's name — what the breadcrumb, the status line
+// and the view's legend call it (usageAgentName). It carries no task row: the phase names the item,
+// not the instructions its child was handed.
 func workflowItemView(label string) toolView {
 	delegation := toolRegistry[subAgentToolName]
 	return toolView{Label: delegation.label, Verb: delegation.verb, Target: label, agentName: label}

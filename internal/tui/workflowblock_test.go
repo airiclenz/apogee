@@ -525,6 +525,42 @@ func TestWorkflowBlockNamesHowItEnded(t *testing.T) {
 	}
 }
 
+// A not-ok item is listed by its short name, never by the absolute path its label is; an item
+// phase carrying no short name (an older transcript's) lists its label; and a merge stage's item,
+// whose short name is its label, the stage's name, reads the stage's name.
+func TestWorkflowBlockListsAnItemByItsShortName(t *testing.T) {
+	t.Parallel()
+	const path = "/home/u/.apogee/scratch/s1/workflows/w1/part-foo"
+	m := newTestModel(t)
+	m.transcript.apply(workflowPhase(domain.WorkflowStarted))
+	named := itemFinished(0, path, "blocked", "part-foo could not be read", nil)
+	named.ItemName = "part-foo"
+	m.transcript.apply(named)
+	m.transcript.apply(itemFinished(1, "legacy.go", "partial", "half of it", nil))
+	merged := itemFinished(2, "report", "partial", "merged half", nil)
+	merged.Stage, merged.ItemName = "report", "report"
+	m.transcript.apply(merged)
+	m.transcript.apply(workflowPhase(domain.WorkflowFinished))
+
+	painted := plainTranscript(m)
+	for _, want := range []string{
+		"items · part-foo — blocked — part-foo could not be read",
+		"items · legacy.go — partial — half of it",
+		"report · report — partial — merged half",
+	} {
+		if !strings.Contains(painted, want) {
+			t.Errorf("the block does not list %q:\n%s", want, painted)
+		}
+	}
+	text := workflowEntries(m)[0].text
+	if !strings.Contains(text, "#1 part-foo — blocked") {
+		t.Errorf("the block's text does not list the item by its short name:\n%s", text)
+	}
+	if strings.Contains(painted, path) || strings.Contains(text, path) {
+		t.Errorf("the item's path reached the block:\n%s\n%s", painted, text)
+	}
+}
+
 // Past forty items only the items that did not end ok are listed, as the result lines list them;
 // the totals still count every item.
 func TestWorkflowBlockListsOnlyTroubleOnALargeRun(t *testing.T) {

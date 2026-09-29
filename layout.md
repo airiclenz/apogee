@@ -1225,7 +1225,11 @@ here. The block has no fold of its own and always paints this way.
 of its own**, seated under the block and inside its span when the item's run starts: it opens as
 that run's view, `^x` stops it, a message typed in its view reaches its child, and the gauge states
 its fill, exactly as for a delegation — but it never groups into a `✦ Sub-Agent (N)` list, and its
-receipt folds onto it as the run's report. Under a workflow block those item heads are not painted
+receipt folds onto it as the run's report. The head, the not-ok item lines, the stage view's rows,
+the breadcrumb and the status line call an item by its **short name** — its path relative to the
+workflow's folder, the folder itself read as the stage name, a path outside it as its basename —
+never by an absolute label; a phase from an older record, which carries no short name, shows the
+item's full label. Under a workflow block those item heads are not painted
 in the conversation: the stage rows stand for them, and the item runs' own narration and tool calls
 are read in their views. A motionless click on a stage row, or `⏎` on the block cursor, opens what
 the row leads to — nothing for a stage none of whose items has started; the item's **run view**
