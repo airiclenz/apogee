@@ -293,7 +293,8 @@ func (m *backgroundManager) storesElsewhere(root string) []keptRun {
 // StopWorkflow stops the background workflow id and keeps its finished items (ADR 0088): a running
 // one's children are cancelled and its Runner settles it stopped — StopWorkflow does not wait for
 // that, the WorkflowPhaseEvent that ends it reports it — and a queued one is dropped from the line
-// and its folder marked stopped. An id this Agent neither runs nor queues is an error.
+// and its folder marked stopped — unless the folder is already done, a queued RerunFailed's, which
+// stays done. An id this Agent neither runs nor queues is an error.
 func (a *Agent) StopWorkflow(id string) error {
 	m := &a.background
 	m.mu.Lock()
@@ -782,11 +783,16 @@ func (a *Agent) backgroundServer(seat delegationSeat) string {
 	return a.cfg.Endpoint
 }
 
-// markStopped writes a queued run's folder as stopped: it never started, so no Runner will.
+// markStopped writes a queued run's folder as stopped: it never started, so no Runner will. A folder
+// already done — a queued RerunFailed's — is left done: the re-run never started, so the finished
+// run it would have repeated stands, and a later RerunFailed still accepts it.
 func markStopped(run *backgroundRun) error {
 	status, err := run.runner.Store.ReadStatus(run.id)
 	if err != nil {
 		return err
+	}
+	if status.Phase == workflow.PhaseDone {
+		return nil
 	}
 	status.Phase = workflow.PhaseStopped
 	status.Updated = time.Now()

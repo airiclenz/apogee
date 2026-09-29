@@ -451,6 +451,57 @@ func TestBackground_RerunFailedRefusesALiveOrUnfinishedWorkflow(t *testing.T) {
 	}
 }
 
+func TestBackground_StoppingAQueuedRerunLeavesTheFolderDone(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(),
+		sweepRecipe("pair", "alpha"), sweepRecipe("slow", "hold"), sweepRecipe("fresh", "new"))
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, blockedScript("b1", "alpha is stuck")).
+		route("sweep hold", signalThenWait(started, release), finishScript("f1", "hold is fine")).
+		route("sweep new", nil, finishScript("f2", "new is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	id := launchBackground(t, a, "pair")
+	a.background.waitAll()
+
+	launchBackground(t, a, "slow")
+	awaitClosed(t, started, "the slow workflow's child")
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed behind a running workflow: %v", err)
+	}
+	fresh := launchBackground(t, a, "fresh")
+	if info := workflowInfo(t, a, id); !info.Queued {
+		t.Fatalf("the re-run = %+v, want it queued behind the slow workflow", info)
+	}
+
+	for _, stop := range []string{id, fresh} {
+		if err := a.StopWorkflow(stop); err != nil {
+			t.Fatalf("StopWorkflow(%s): %v", stop, err)
+		}
+	}
+	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseDone {
+		t.Errorf("the stopped re-run's folder = %+v, want it still done and no longer live", info)
+	}
+	if info := workflowInfo(t, a, fresh); info.Background || info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("the stopped new workflow = %+v, want it stopped and no longer live", info)
+	}
+	close(release)
+	a.background.waitAll()
+
+	up.route("sweep alpha", nil, finishScript("f3", "alpha is fine"))
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed after the queued re-run was stopped: %v", err)
+	}
+	a.background.waitAll()
+	if info := workflowInfo(t, a, id); info.Status.Phase != workflow.PhaseDone || itemReceipts(info)["alpha"] != workflow.StatusOK {
+		t.Errorf("after the second re-run = %+v, want alpha ok and the workflow done", info)
+	}
+	if n := up.askedCount("sweep new"); n != 0 {
+		t.Errorf("the stopped new workflow's child ran %d times, want 0", n)
+	}
+}
+
 func TestBackground_CloseStopsEveryWorkflow(t *testing.T) {
 	t.Parallel()
 

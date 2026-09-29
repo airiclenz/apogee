@@ -246,7 +246,7 @@ does); untouched file → true.
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/gitexec/`
 **Commit:** `fix(gitexec): add ctime to the config probe fingerprint`
 
-## 7. Background: markStopped leaves a done folder done
+## 7. Background: markStopped leaves a done folder done — ✅ DONE (2026-09-29)
 
 **What:** Fix "Re-run queued behind another workflow is marked stopped, blocking later retries".
 **Goal:** Stopping a queued `RerunFailed` run whose folder phase is `done` leaves `status.json`
