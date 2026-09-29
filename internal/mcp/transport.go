@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -424,6 +425,69 @@ func checkEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuar
 	}
 	return u, nil
 }
+
+// endpointRedactor cuts a configured endpoint down to its bare origin wherever it appears in error
+// text this package surfaces. The SDK's HTTP transports report failures as *url.Error text such as
+// `Post "https://host/mcp?token=SECRET": ...`, which carries the configured URL — userinfo, path
+// and query, any of which may hold a credential — past checkEndpoint's parse-time scrub. Every
+// occurrence of the endpoint's origin, with any userinfo net/http prints before the host and any
+// run of non-space, non-quote characters after it, is replaced by `scheme://host[:port]` alone.
+// The run covers any path on the same origin, so an SSE session URL the server announced is cut
+// as well as the configured one.
+//
+// A nil *endpointRedactor is the identity: a stdio server has no endpoint to hide.
+type endpointRedactor struct {
+	pattern *regexp.Regexp // scheme://[userinfo@]host[:port] followed by a non-space, non-quote run
+	origin  string         // scheme://host[:port], the replacement
+}
+
+// newEndpointRedactor builds the redactor for an HTTP-transported server from its configured
+// endpoint, normalised exactly as checkEndpoint normalises it so the origin matches the URL the
+// transport was handed. It returns nil — the identity — for a stdio server, and for an endpoint
+// with no scheme or host, which never reached a transport.
+func newEndpointRedactor(cfg ServerConfig) *endpointRedactor {
+	if cfg.Transport != TransportSSE && cfg.Transport != TransportStreamableHTTP {
+		return nil
+	}
+	u, err := security.NormalizeURL(cfg.Endpoint)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil
+	}
+	origin := u.Scheme + "://" + u.Host
+	pattern := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(u.Scheme) + `://(?:[^@/\s"]*@)?` +
+		regexp.QuoteMeta(u.Host) + `[^\s"]*`)
+	return &endpointRedactor{pattern: pattern, origin: origin}
+}
+
+// redact returns text with every occurrence of the endpoint cut to its bare origin.
+func (r *endpointRedactor) redact(text string) string {
+	if r == nil {
+		return text
+	}
+	return r.pattern.ReplaceAllLiteralString(text, r.origin)
+}
+
+// redactErr returns err with its text redacted, keeping the chain intact so a caller's errors.Is
+// (context cancellation, the url-safety sentinels) still sees what the transport wrapped.
+func (r *endpointRedactor) redactErr(err error) error {
+	if r == nil || err == nil {
+		return err
+	}
+	msg := r.redact(err.Error())
+	if msg == err.Error() {
+		return err
+	}
+	return &redactedError{msg: msg, err: err}
+}
+
+// redactedError is an error whose text has been redacted but whose chain is the original's.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
 
 // newGuardedHTTPClient builds the http.Client the HTTP transports use: control is the dial-time
 // check on the ACTUAL connected IP (PinnedDialControl — the endpoint's own addresses, and the

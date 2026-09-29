@@ -157,6 +157,9 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 		return err
 	}
 
+	// The SDK's HTTP transports quote the endpoint URL in their errors; every error from here on
+	// is cut to the endpoint's bare origin before it is surfaced.
+	redactor := newEndpointRedactor(cfg)
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: clientName, Version: clientVersion}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
@@ -164,11 +167,11 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 			cancel()
 		}
 		reapProcess(cmd, td)
-		return fmt.Errorf("mcp: connect to server %q: %w", cfg.Name, err)
+		return fmt.Errorf("mcp: connect to server %q: %w", cfg.Name, redactor.redactErr(err))
 	}
 	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td, cancel: cancel})
 
-	tools, err := listServerTools(ctx, cfg.Name, session)
+	tools, err := listServerTools(ctx, cfg.Name, session, redactor)
 	if err != nil {
 		return err
 	}
@@ -197,7 +200,9 @@ const (
 // than one page is fully discovered, up to maxMCPToolListPages pages and maxMCPToolsPerServer
 // tools. A tool with an empty name from the server is skipped (it could never be addressed)
 // rather than failing the whole server, and so is one whose schema exceeds maxMCPToolSchemaBytes.
-func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.ClientSession) ([]domain.Tool, error) {
+// redactor cuts the server's endpoint from a list error and is handed to every surfaced tool for
+// its own call errors; nil for stdio.
+func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.ClientSession, redactor *endpointRedactor) ([]domain.Tool, error) {
 	var (
 		out    []domain.Tool
 		cursor string
@@ -205,13 +210,13 @@ func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.Cl
 	for page := 0; page < maxMCPToolListPages; page++ {
 		res, err := session.ListTools(ctx, &mcpsdk.ListToolsParams{Cursor: cursor})
 		if err != nil {
-			return nil, fmt.Errorf("mcp: list tools from server %q: %w", serverAlias, err)
+			return nil, fmt.Errorf("mcp: list tools from server %q: %w", serverAlias, redactor.redactErr(err))
 		}
 		for _, t := range res.Tools {
 			if t == nil || strings.TrimSpace(t.Name) == "" {
 				continue
 			}
-			tool := newServerTool(serverAlias, t, session)
+			tool := newServerTool(serverAlias, t, session, redactor)
 			if len(tool.schema) > maxMCPToolSchemaBytes {
 				continue
 			}

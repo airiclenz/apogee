@@ -29,7 +29,10 @@
 //     MCP server is an ordinary, supported configuration (ADR 0012, Amendment
 //     (2026-07-26)); the floor stays blanket over everything the model drives.
 //     Redirects are not followed, the same policy the native network tools apply, so a
-//     server that redirects must be configured at its final URL. A stdio server is a
+//     server that redirects must be configured at its final URL. The endpoint never
+//     reaches surfaced error text whole: a connect, list-tools or call-failed error that
+//     quotes it is cut to its bare scheme://host[:port] (endpointRedactor), so a token in
+//     its userinfo, path or query stays out. A stdio server is a
 //     LOCAL launched subprocess — a different trust model (the host chose the
 //     command), so no URL check applies, but the launched tool calls still gate
 //     through Approval exactly the same way. What it launches meets the EXEC FENCE

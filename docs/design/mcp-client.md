@@ -45,7 +45,10 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   never model-supplied, so a localhost / LAN server is a supported configuration rather than a fatal
   startup error, while a rebind or a redirect to a *different* private address stays refused
   ([ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md),
-  Amendment 2026-07-26). A **stdio** server is a local launched subprocess — the host chose the
+  Amendment 2026-07-26). The endpoint never reaches surfaced error text whole: a connect, list-tools
+  or call-failed error that quotes it (the SDK's `Post "https://host/mcp?token=…": …`) is cut to the
+  bare `scheme://host[:port]` first, so userinfo, path and query stay out of the model's context and
+  the startup error. A **stdio** server is a local launched subprocess — the host chose the
   command, a different trust model — so no URL check applies; its tool calls still gate through
   Approval in Auto exactly the same.
 - **A stdio server is a fenced absolute program held as a process tree** (2026-08-26). Its

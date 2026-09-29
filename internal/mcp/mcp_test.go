@@ -1128,7 +1128,7 @@ func listFromInProcessServer(t *testing.T, pageSize int, addTools func(*mcpsdk.S
 	}
 	t.Cleanup(func() { _ = session.Close() })
 
-	tools, err := listServerTools(ctx, "many", session)
+	tools, err := listServerTools(ctx, "many", session, nil)
 	if err != nil {
 		t.Fatalf("listServerTools: %v", err)
 	}

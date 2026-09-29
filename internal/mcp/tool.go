@@ -35,12 +35,13 @@ const toolNameSeparator = "__"
 // addresses), and the session caller it forwards the call through. It is stateless across
 // Turns (ADR 0008): it holds no per-call state, only the live session handle the Client owns.
 type serverTool struct {
-	name        string          // registry-qualified: "<serverAlias>__<remoteName>"
-	remoteName  string          // the server's own tool name (what CallTool addresses)
-	alias       string          // the server alias this tool was qualified with ("" = unnamed server)
-	description string          // the server's advertised description (untrusted presentation)
-	schema      json.RawMessage // the server's input schema, normalised to JSON (untrusted)
-	caller      toolCaller      // the live session this tool forwards a call to
+	name        string            // registry-qualified: "<serverAlias>__<remoteName>"
+	remoteName  string            // the server's own tool name (what CallTool addresses)
+	alias       string            // the server alias this tool was qualified with ("" = unnamed server)
+	description string            // the server's advertised description (untrusted presentation)
+	schema      json.RawMessage   // the server's input schema, normalised to JSON (untrusted)
+	caller      toolCaller        // the live session this tool forwards a call to
+	redactor    *endpointRedactor // cuts the server's endpoint from surfaced error text (nil for stdio)
 }
 
 // toolCaller is the narrow seam serverTool forwards a call through — the single method of a
@@ -55,7 +56,8 @@ type toolCaller interface {
 // with the server alias and normalising its input schema to JSON for the model. A tool whose
 // schema does not marshal (an exotic server value) still surfaces, with an empty-object schema
 // — the call can still be made; only the model's argument hint is degraded, never the tool lost.
-func newServerTool(serverAlias string, t *mcpsdk.Tool, caller toolCaller) serverTool {
+// redactor cuts the server's endpoint from the error text Execute surfaces; nil for stdio.
+func newServerTool(serverAlias string, t *mcpsdk.Tool, caller toolCaller, redactor *endpointRedactor) serverTool {
 	return serverTool{
 		name:        qualifyToolName(serverAlias, t.Name),
 		remoteName:  t.Name,
@@ -63,6 +65,7 @@ func newServerTool(serverAlias string, t *mcpsdk.Tool, caller toolCaller) server
 		description: t.Description,
 		schema:      normaliseSchema(t.InputSchema),
 		caller:      caller,
+		redactor:    redactor,
 	}
 }
 
@@ -172,8 +175,9 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 			return domain.ErrorResult(call.ID, fmt.Sprintf("mcp: call timed out after %s", mcpCallTimeout)), nil
 		}
 		// A transport / protocol error (tool missing, server gone) is surfaced to the model as
-		// an error result so the Turn survives and the model can route around it (ADR 0007).
-		return domain.ErrorResult(call.ID, "mcp: call failed: "+err.Error()), nil
+		// an error result so the Turn survives and the model can route around it (ADR 0007). The
+		// transport's text can quote the endpoint URL, so it is cut to the bare origin first.
+		return domain.ErrorResult(call.ID, "mcp: call failed: "+t.redactor.redact(err.Error())), nil
 	}
 
 	content := renderContent(res)

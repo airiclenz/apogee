@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -12,7 +13,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -666,4 +669,153 @@ func serverPort(t *testing.T, srv *httptest.Server) string {
 		t.Fatalf("parse test server URL %q: %v", srv.URL, err)
 	}
 	return u.Port()
+}
+
+// refusedAddr returns a loopback host:port nothing listens on, so a request to it is refused.
+func refusedAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+// realURLErrorText is the text net/http itself produces for a failed POST to rawURL — the exact
+// shape the SDK's HTTP transports surface, userinfo spelling included.
+func realURLErrorText(t *testing.T, rawURL string) string {
+	t.Helper()
+	resp, err := http.Post(rawURL, "application/json", strings.NewReader("{}"))
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("POST %s succeeded; want a refused connection", rawURL)
+	}
+	return err.Error()
+}
+
+func TestEndpointRedactor_CutsTheEndpointToItsOrigin(t *testing.T) {
+	t.Parallel()
+
+	addr := refusedAddr(t)
+	origin := "http://" + addr
+	redactor := newEndpointRedactor(ServerConfig{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: origin + "/mcp?token=SECRET"})
+	if redactor == nil {
+		t.Fatal("newEndpointRedactor returned nil for an HTTP endpoint")
+	}
+
+	tests := []struct {
+		name string
+		text string
+	}{
+		{"token in query", `Post "` + origin + `/mcp?token=SECRET": dial tcp: connection refused`},
+		{"token in path", `Get "` + origin + `/SECRET/mcp": EOF`},
+		{"unquoted url", `sending to ` + origin + `/mcp?token=SECRET failed`},
+		{"same-origin session url", `Post "` + origin + `/messages?sessionid=SECRET": EOF`},
+		{"username-only userinfo", realURLErrorText(t, "http://SECRET@"+addr+"/mcp?token=SECRET")},
+		{"user and password userinfo", realURLErrorText(t, "http://SECRET:SECRET@"+addr+"/mcp?token=SECRET")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := redactor.redact(tt.text)
+			if strings.Contains(got, "SECRET") || strings.Contains(got, "/mcp") || strings.Contains(got, "@") {
+				t.Errorf("redact(%q) = %q; want no userinfo, path or query", tt.text, got)
+			}
+			if !strings.Contains(got, origin) {
+				t.Errorf("redact(%q) = %q; want the bare origin %q kept", tt.text, got, origin)
+			}
+		})
+	}
+
+	t.Run("unrelated text untouched", func(t *testing.T) {
+		const text = `Post "http://other.example/mcp?token=keep": EOF; tool missing`
+		if got := redactor.redact(text); got != text {
+			t.Errorf("redact(%q) = %q; want it unchanged", text, got)
+		}
+	})
+
+	t.Run("stdio and nil are the identity", func(t *testing.T) {
+		if r := newEndpointRedactor(ServerConfig{Name: "local", Transport: TransportStdio, Command: "srv"}); r != nil {
+			t.Errorf("newEndpointRedactor(stdio) = %v; want nil", r)
+		}
+		var none *endpointRedactor
+		if got := none.redact("x /mcp?token=SECRET"); got != "x /mcp?token=SECRET" {
+			t.Errorf("nil redact = %q; want the text unchanged", got)
+		}
+	})
+
+	t.Run("redactErr keeps the chain", func(t *testing.T) {
+		err := redactor.redactErr(fmt.Errorf("wrapped %s/mcp?token=SECRET: %w", origin, context.Canceled))
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("redactErr text = %q; want the token cut", err.Error())
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("errors.Is(redactErr(...), context.Canceled) = false; want the chain intact")
+		}
+	})
+}
+
+func TestConnect_RedactsTheEndpointFromARefusedConnect(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	endpoint := "http://" + refusedAddr(t) + "/mcp?token=SECRET"
+	c, err := Connect(ctx, []ServerConfig{{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: endpoint}},
+		security.URLGuard{}, t.TempDir())
+	if err == nil {
+		_ = c.Close()
+		t.Fatal("Connect to a refused endpoint succeeded; want an error")
+	}
+	if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "/mcp") {
+		t.Errorf("Connect error = %q; want the endpoint cut to its origin", err.Error())
+	}
+}
+
+func TestExecute_RedactsTheEndpointWhenTheServerDies(t *testing.T) {
+	t.Parallel()
+
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "dying", Version: "v0.0.1"}, nil)
+	server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}}}, nil
+		})
+	srv := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+	endpoint := srv.URL + "/mcp?token=SECRET"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := Connect(ctx, []ServerConfig{{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: endpoint}},
+		security.URLGuard{}, t.TempDir())
+	if err != nil {
+		srv.Close()
+		t.Fatalf("Connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	var ping domain.Tool
+	for _, tool := range c.Tools() {
+		if tool.Name() == "remote__ping" {
+			ping = tool
+		}
+	}
+	if ping == nil {
+		srv.Close()
+		t.Fatal("remote__ping was not surfaced")
+	}
+
+	// Close alone blocks on the standalone SSE GET; dropping the client connections first ends it.
+	srv.CloseClientConnections()
+	srv.Close()
+
+	res, err := ping.Execute(ctx, domain.ToolCall{ID: "call-1", Tool: "remote__ping"})
+	if err != nil {
+		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("Execute against a dead server = %q; want an error result", res.Content)
+	}
+	if strings.Contains(res.Content, "SECRET") || strings.Contains(res.Content, "/mcp") {
+		t.Errorf("Execute error result = %q; want the endpoint cut to its origin", res.Content)
+	}
 }

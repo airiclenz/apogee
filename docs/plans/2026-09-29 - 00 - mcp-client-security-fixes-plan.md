@@ -52,7 +52,12 @@ internal/mcp/transport.go — stdioTerminateDuration, boundedBodyTransport; inte
 - `go test -race -count=1 -run 'Timeout|Cancel' ./internal/mcp/`
 **Commit:** `fix(mcp): bound every tool call with a per-call deadline`
 
-## 2. Redact endpoints from surfaced MCP error text
+## 2. Redact endpoints from surfaced MCP error text — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the redactor wraps connect / list-tools errors in an unexported redactedError that keeps the original chain (Unwrap), so errors.Is on ctx cancellation still holds; the call-failed result redacts plain text.
+NOTES (2026-09-29): newServerTool also gained the redactor parameter (serverTool carries it), so the four newServerTool calls in tool_test.go pass nil; the redaction and journey tests live in transport_test.go, not tool_test.go.
+NOTES (2026-09-29): consequential edit — internal/mcp/doc.go: made necessary by the new endpoint redaction in the trust-boundary bullet list
+NOTES (2026-09-29): consequential edit — docs/design/mcp-client.md: made necessary by the new endpoint redaction (network-transport bullet)
 
 **What:**
 **Goal:** No error text the package surfaces — `Execute`'s "call failed" result, `Connect`'s connect and list-tools errors — contains a configured endpoint's userinfo, path or query; an endpoint appears at most as `scheme://host[:port]`.

@@ -59,7 +59,7 @@ func TestNormaliseSchema(t *testing.T) {
 // so the model is never handed a nameless capability.
 func TestServerToolDescriptionFallback(t *testing.T) {
 	t.Parallel()
-	tool := newServerTool("srv", &mcpsdk.Tool{Name: "thing"}, &fakeCaller{})
+	tool := newServerTool("srv", &mcpsdk.Tool{Name: "thing"}, &fakeCaller{}, nil)
 	if strings.TrimSpace(tool.Description()) == "" {
 		t.Errorf("empty server description produced an empty Description()")
 	}
@@ -75,7 +75,7 @@ func TestServerToolDescriptionFallback(t *testing.T) {
 // declaration.
 func TestServerToolDeclaresNoArgRoles(t *testing.T) {
 	t.Parallel()
-	tool := newServerTool("srv", &mcpsdk.Tool{Name: "post"}, &fakeCaller{})
+	tool := newServerTool("srv", &mcpsdk.Tool{Name: "post"}, &fakeCaller{}, nil)
 
 	if _, declares := domain.Tool(tool).(domain.ArgRoleTool); declares {
 		t.Fatal("serverTool implements domain.ArgRoleTool; an MCP tool must declare no argument roles")
@@ -98,7 +98,7 @@ func TestServerToolDeclaresNoArgRoles(t *testing.T) {
 func TestExecuteForwardsArguments(t *testing.T) {
 	t.Parallel()
 	caller := &fakeCaller{result: &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}}
-	tool := newServerTool("github", &mcpsdk.Tool{Name: "search"}, caller)
+	tool := newServerTool("github", &mcpsdk.Tool{Name: "search"}, caller, nil)
 
 	_, err := tool.Execute(context.Background(), domain.ToolCall{
 		ID:        "c",
@@ -121,7 +121,7 @@ func TestExecuteForwardsArguments(t *testing.T) {
 // rather than panicking (defensive — the Client always wires a caller).
 func TestExecuteNilCaller(t *testing.T) {
 	t.Parallel()
-	tool := newServerTool("srv", &mcpsdk.Tool{Name: "x"}, nil)
+	tool := newServerTool("srv", &mcpsdk.Tool{Name: "x"}, nil, nil)
 	res, err := tool.Execute(context.Background(), domain.ToolCall{ID: "c", Tool: "srv__x"})
 	if err != nil {
 		t.Fatalf("Execute with nil caller returned a Go error: %v", err)
