@@ -232,7 +232,9 @@ internal/tui/settingsapply.go — applyColorScheme; internal/tui/width.go — fo
 
 **Commit:** `feat(tui): paint no prompt pad rows on a colourless terminal`
 
-## 4. Document the padded prompt block in layout.md
+## 4. Document the padded prompt block in layout.md — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): docs/layout/tool-layout.md's block-cursor bullet (a Read-first anchor) left unchanged — it stays true; the cursor stepping past pad rows is stated in layout.md's opening paragraph instead.
 
 **What:**
 **Goal:** `layout.md`'s opening prompt-block description states the half-row padding (`▄` above,

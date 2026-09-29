@@ -1,3 +1,4 @@
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
 ❯ The last prompt that the user sent is in white text. It's background color should be
   dark gray. Word wrap must apply everywhere, and it breaks short of the right edge:
   one column stays free between the text and the scroll bar, two between the text
@@ -16,11 +17,27 @@
   never a step a handler remembers: a handler mutates, and the update's tail lays the
   frame out and repaints it — a handler lays out itself only when it reads the geometry
   straight afterwards, and says so.
-
-✦ The LLM's answer looks like this. There is exactly one empty line between the users
-  prompt and the agents response — and exactly one between the answer and the next
-  block, never two or three: the answer's own leading and trailing blank lines are
-  trimmed off. Below there is the layout of a tool call.
+  The block is padded by half a row at each end: a row of `▄` above its first line and
+  a row of `▀` below its last, drawn in the block's own gray as the glyph's colour on
+  the terminal's own background, so the gray field reads half a row taller at the top
+  and at the bottom. That holds for every sent block — a submitted `❯` prompt, a
+  delivered `⧖` interjection and a run view's task row alike. The pad rows stand where
+  the blank separator would: a half row stands in for the empty line above or below the
+  block wherever one exists, and is added where none does — at the transcript's top and
+  its bottom, under a run view's header, and at the seam between two adjacent padded
+  blocks, where the upper block's `▀` stands in for the one separator and the lower
+  block's `▄` is added. They are paint, not text: a copy leaves them out, so the
+  clipboard holds what the unpadded transcript would — a half row standing in for a
+  separator copies as that empty line, an added one as nothing — and a drag paints no
+  selection shading on them; the block cursor steps past them to the block's first row
+  with words on it. A terminal with no colour to paint the half in (`colorprofile.Ascii`,
+  `colorprofile.NoTTY`) gets the flat block with its blank separators back instead.
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+✦ The LLM's answer looks like this. Between the user's prompt and the agent's response
+  the prompt block's `▀` half row stands in for the one empty line — and there is
+  exactly one empty line between the answer and the next block, never two or three:
+  the answer's own leading and trailing blank lines are trimmed off. Below there is
+  the layout of a tool call.
 
 ✦ Read
   ┕ main.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 154 lines
@@ -826,6 +843,11 @@ where the text does: it is the text's field and never the frame's.
 **Blank lines.** Exactly one empty line between blocks, never more. Assistant text is trimmed
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse
 to one — except inside a fenced code block, where blank lines are code and stay verbatim.
+The one exception is the seam beside a sent prompt block: there the block's `▄`/`▀` half row
+stands in for the empty line (see the top of this document), and at the seam between two adjacent
+padded blocks the upper `▀` stands in for the one separator while the lower `▄` is added — so
+two half rows and no empty line. A colourless terminal paints no half rows and gets the empty
+lines back.
 
 That row is **bare everywhere**, because no block opens a railed span inside another any more. A
 delegation's second shape is its **run view** (below), which paints that run's own rows at the
@@ -1017,7 +1039,8 @@ a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one 
 the first two whole, the third truncated with the house ellipsis far enough to clear a gap, and
 `see more (+N lines)…` right-aligned on that same row, where N is every wrapped row beyond the
 three. The marker *rides* a content row rather than taking one of its own, which is what makes the
-collapsed shape exactly three rows, and it is painted in its own highlighted style — bold light
+collapsed body exactly three rows — five with the block's `▄` and `▀` half rows (see the top of this
+document), three on a colourless terminal that paints none — and it is painted in its own highlighted style — bold light
 gray-blue on the block's own field — so what apogee is saying inside the block never reads as what
 the human wrote. It stops **one column short of the block's right edge** rather than running flush
 to it: the marker carries a background, and a highlight touching the boundary reads as clipped
@@ -1044,8 +1067,10 @@ any of those rows is a drag-select like any other, and the clicked row keeps its
 the toggle. Collapsed is the default here too — the prompt just sent as much as every prompt of a
 resumed session — and the state is the view's alone, never persisted. The sticky header shows the
 block's **rendered state** and special-cases nothing: a collapsed huge prompt sticks as its
-three-row shape, a deliberately expanded one sticks expanded, self-inflicted and undone by one
-click.
+padded five-row shape — its three rows between the `▄` and `▀` half rows, which are part of the
+block's range — a deliberately expanded one sticks expanded, self-inflicted and undone by one
+click. A prompt block as tall as the screen sticks without its half rows: they are breathing room,
+and on a frame with none to spare they would cover rows of the prompt itself.
 
 **A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
 block, and in the conversation it is the whole of the run: it stands alone and the whole span
@@ -1322,7 +1347,8 @@ rather than something the human said, so the view reads as one pane with a band 
 band at the bottom. The header is **four rows**: the band's blank black row, the trail, the band's
 second blank black row — all three on the one `surface` field, squared to the full width — and a
 blank row beneath the band, unpainted, holding the view's first block off it exactly as the frame's
-gap row holds the transcript off the bottom block. The spacer freezes with the band rather than
+gap row holds the transcript off the bottom block. The task row beneath it is a padded block like
+any sent prompt, and its `▄` half row is added under that spacer rather than standing in for it. The spacer freezes with the band rather than
 scrolling away, and it is a click target for nothing. On a screen too short to show the whole
 header and a row of the run beneath it, the trail alone is frozen: the band and the spacer are
 breathing room, and a header covering every row the view has would leave the reader looking at
