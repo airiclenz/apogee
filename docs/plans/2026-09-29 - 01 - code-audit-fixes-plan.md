@@ -148,7 +148,11 @@ still exempt; a `..` inside a file name (`<scratch>/a..b`) still exempt; `<scrat
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/security/`
 **Commit:** `fix(security): refuse the scratch exemption for a token with a .. segment`
 
-## 4. MCP: cap each message cumulatively
+## 4. MCP: cap each message cumulatively — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): one reader type keeps a `framing` mode field (frameJSONLines / frameSSEEvents / frameWholeBody) rather than a separate non-SSE reader, so `boundedBody` stays the single body type; the non-SSE mode is the whole-body cumulative bound erroring with errMCPMessageTooLarge. The name `lineBoundedReader` is kept (no renames), though it now bounds messages.
+NOTES (2026-09-29): consequential edit — internal/mcp/tool.go: made necessary by the bound becoming per message (the maxMCPResultBytes comment said "line bound").
+NOTES (2026-09-29): the per-byte JSON-depth scan resets only at a newline at depth 0 outside a string, per the plan; a server that sends back-to-back values with no newline (`{}{}...`) is charged cumulatively across them — off-spec for MCP stdio, so it fails safe.
 
 **What:** Fix "MCP size cap is per line, so one hostile server can exhaust memory" (Medium).
 **Regression guard.** HTTP mode shape fixed so item 5 can test it: a response whose Content-Type is not

@@ -71,23 +71,30 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   moment `Connect` returned) that `Close` cancels once that ladder is spent: it is what arms `cmd.Cancel` and
   `cmd.WaitDelay`, so a server that outlives the ladder is killed as a group and the drain after it
   is bounded by `platform.ProcessWaitDelay` rather than left open-ended.
-- **A stdio server's output is read through a 4 MiB line-bounded reader** (2026-09-21). The launch
-  rides apogee's own `stdioTransport` rather than the SDK's `CommandTransport`: the same start-free
-  shape and the same shutdown ladder (`stdinLadder.Close` re-implements the SDK's close-stdin → wait
-  → SIGTERM → wait → SIGKILL → wait order), but the server's stdout is wrapped in a
-  `lineBoundedReader` under the SDK's `IOTransport`. One newline-delimited message may not exceed
-  `maxMCPMessageBytes` (4 MiB): a line past it fails the read with `apogee: mcp message exceeds
-  the 4 MiB limit`, the SDK retires the in-flight call with that error — the model sees an error
-  result naming it, never the oversize text — and the session is dead from then on (a following
-  call fails too; `Close` still runs the ladder and reaps the tree). The reader knows nothing of
-  MCP, so an HTTP body is bounded with the same type.
+- **A stdio server's output is read through a 4 MiB message-bounded reader** (2026-09-21; cumulative
+  per message since 2026-09-29). The launch rides apogee's own `stdioTransport` rather than the
+  SDK's `CommandTransport`: the same start-free shape and the same shutdown ladder
+  (`stdinLadder.Close` re-implements the SDK's close-stdin → wait → SIGTERM → wait → SIGKILL → wait
+  order), but the server's stdout is wrapped in a `lineBoundedReader` under the SDK's `IOTransport`.
+  One message may not exceed `maxMCPMessageBytes` (4 MiB) in total, however many lines it spans: the
+  count is cumulative and resets only when a message completes — a newline at JSON depth 0 outside a
+  string, since the SDK's `json.Decoder` accepts newlines inside a value. A message past the cap
+  fails the read with `apogee: mcp message exceeds the 4 MiB limit`, the SDK retires the in-flight
+  call with that error — the model sees an error result naming it, never the oversize text — and the
+  session is dead from then on (a following call fails too; `Close` still runs the ladder and reaps
+  the tree). The reader knows nothing of MCP, so an HTTP body is bounded with the same type.
 - **An HTTP server's bodies are bounded the same way; a result and a tool list are capped after
   decode** (2026-09-21). The guarded `http.Client` both HTTP transports speak over wraps its
   `http.Transport` in `boundedBodyTransport`, a RoundTripper that replaces every `resp.Body` with a
   `boundedBody` — the same `lineBoundedReader` over the real body, whose `Close` closes the real
-  body (the SDK closes bodies itself, so a `NopCloser` would leak every connection). SSE events and
-  streamable JSON replies are newline-framed, so the bound is per line, never cumulative — a
-  long-lived SSE stream is never cut for carrying many events. The HTTP-lane outcome is not stdio's
+  body (the SDK closes bodies itself, so a `NopCloser` would leak every connection). The bound is
+  cumulative per message, never per line (2026-09-29), and the framing comes from the base media
+  type of the response's `Content-Type` (`mime.ParseMediaType`, as the SDK's `baseMediaType`
+  reads it): a `text/event-stream` body is bounded per event, the count resetting at each blank
+  line (`\n` or `\r\n`), so a long-lived SSE stream is never cut for carrying many events, only
+  for one event past 4 MiB; any other body — a streamable `application/json` reply above all — is
+  one message, and its read errors with the same `errMCPMessageTooLarge` (never a silent
+  truncation) once the whole body passes the cap. The HTTP-lane outcome is not stdio's
   dead connection: the body read errors; a plain JSON reply fails its call, and a streamable SSE
   reply stalls the call to its ctx or the SDK's retry budget. Above the transport, two post-decode
   caps: `renderContent` clips a flattened result at `maxMCPResultBytes` (2 MiB) and appends

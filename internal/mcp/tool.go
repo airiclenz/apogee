@@ -168,7 +168,7 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 }
 
 // maxMCPResultBytes is the most of a server's flattened result the model is handed: 2 MiB. The
-// transport's line bound (bounded.go) already keeps one message under 4 MiB; this is the
+// transport's message bound (bounded.go) already keeps one message under 4 MiB; this is the
 // post-decode cap on what one call may put in the model's context, the same order as the
 // native network tools' own response cap.
 const maxMCPResultBytes = 2 << 20

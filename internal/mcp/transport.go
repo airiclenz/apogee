@@ -214,9 +214,10 @@ var stdioTerminateDuration time.Duration
 const defaultStdioTerminateDuration = 5 * time.Second
 
 // stdioTransport is apogee's replacement for the SDK's CommandTransport: the same launch-and-speak
-// shape, with the server's stdout read through a lineBoundedReader so one message can never grow
-// past maxMCPMessageBytes (bounded.go), and the shutdown ladder apogee's own (stdinLadder). It is
-// built start-free by buildStdioTransport; Connect is what starts the process.
+// shape, with the server's stdout read through a lineBoundedReader in its JSON-lines framing so
+// one message can never grow past maxMCPMessageBytes (bounded.go) however many lines it spans,
+// and the shutdown ladder apogee's own (stdinLadder). It is built start-free by
+// buildStdioTransport; Connect is what starts the process.
 type stdioTransport struct {
 	cmd *exec.Cmd
 	// td holds the launched process's tree; Connect hands it the process the moment Start
@@ -255,7 +256,7 @@ func (t *stdioTransport) Connect(ctx context.Context) (mcpsdk.Connection, error)
 		terminate = defaultStdioTerminateDuration
 	}
 	transport := &mcpsdk.IOTransport{
-		Reader: io.NopCloser(&lineBoundedReader{r: stdout, max: maxMCPMessageBytes}),
+		Reader: io.NopCloser(&lineBoundedReader{r: stdout, max: maxMCPMessageBytes, framing: frameJSONLines}),
 		Writer: &stdinLadder{cmd: t.cmd, stdin: stdin, terminateDuration: terminate},
 	}
 	return transport.Connect(ctx)
@@ -468,12 +469,14 @@ func newGuardedHTTPClient(control func(network, address string, c syscall.RawCon
 
 // boundedBodyTransport is the RoundTripper the guarded client speaks through: it hands every
 // response body to the SDK wrapped in a boundedBody, so an HTTP-transported server meets the
-// same 4 MiB line bound (bounded.go) as a stdio server's stdout. Both HTTP transports are
-// newline-framed — an SSE event is a run of lines and a streamable JSON response is one line —
-// so the bound is per line, never cumulative: a long-lived SSE stream is never cut for having
-// carried many events, only for one event that cannot fit. The HTTP-lane outcome differs from
-// stdio's dead connection: the body read errors; a plain JSON reply fails its call, and a
-// streamable SSE reply stalls the call to its ctx or the SDK's retry budget.
+// same 4 MiB message bound (bounded.go) as a stdio server's stdout. The bound is cumulative per
+// message, never per line, and the message is read off the Content-Type's base media type: a
+// text/event-stream body is bounded per event (the count resets at each blank line), so a
+// long-lived SSE stream is never cut for having carried many events, only for one event that
+// cannot fit; any other body — a streamable JSON reply above all — is one message, and the read
+// errors (never silently truncates) once the whole body passes the cap. The HTTP-lane outcome
+// differs from stdio's dead connection: the body read errors; a plain JSON reply fails its call,
+// and a streamable SSE reply stalls the call to its ctx or the SDK's retry budget.
 type boundedBodyTransport struct {
 	next http.RoundTripper
 }
@@ -486,13 +489,17 @@ func (t *boundedBodyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		return resp, err
 	}
 	resp.Body = &boundedBody{
-		lineBoundedReader: lineBoundedReader{r: resp.Body, max: maxMCPMessageBytes},
-		Closer:            resp.Body,
+		lineBoundedReader: lineBoundedReader{
+			r:       resp.Body,
+			max:     maxMCPMessageBytes,
+			framing: framingForContentType(resp.Header.Get("Content-Type")),
+		},
+		Closer: resp.Body,
 	}
 	return resp, nil
 }
 
-// boundedBody is the io.ReadCloser a wrapped response carries: reads go through the line bound,
+// boundedBody is the io.ReadCloser a wrapped response carries: reads go through the message bound,
 // and Close closes the ORIGINAL body. The SDK closes resp.Body itself — the SSE stream in Close,
 // handleJSON after its ReadAll, processStream on drain — so a NopCloser here would never close
 // the real body and every connection would leak.

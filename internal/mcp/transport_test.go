@@ -206,8 +206,13 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		if err != nil {
 			t.Fatalf("GET the pinned endpoint: %v", err)
 		}
-		if _, ok := resp.Body.(*boundedBody); !ok {
+		body, ok := resp.Body.(*boundedBody)
+		if !ok {
 			t.Fatalf("resp.Body = %T; want the bounded body", resp.Body)
+		}
+		if body.framing != frameWholeBody {
+			t.Errorf("a %q reply is framed %d; want the whole-body framing %d",
+				resp.Header.Get("Content-Type"), body.framing, frameWholeBody)
 		}
 		if err := resp.Body.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
