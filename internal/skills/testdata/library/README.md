@@ -1,18 +1,21 @@
-# Real-library fixture for `Suggest`
+# Library fixture for `Suggest`
 
-A catalog-shaped copy of the owner's global skill library (`~/.apogee/skills/`, 24 skills as of
-2026-08-27): each `skills/<id>/SKILL.md` is the source's frontmatter block verbatim (name,
-description, any triggers) over a one-line placeholder body. Bodies are deliberately not copied —
-`Suggest` never reads them, and `suggest_library_test.go` cares only about id, display name,
-description (indexed in full — the 200-rune summary clamp is the "/" menu's alone) and triggers.
-Loaded through the ordinary `Load(Sources{Home: "testdata/library"})`.
+A synthetic, library-sized skill catalog: 22 made-up skills written for these tests. Each
+`skills/<id>/SKILL.md` holds frontmatter (name, description, the odd argument hint) over a one-line
+placeholder body. `Suggest` never reads bodies; `suggest_library_test.go` and the TUI's
+`TestSuggestBandPrecision` care only about id, display name, description (indexed in full — the
+200-rune summary clamp is the "/" menu's alone) and triggers. Loaded through the ordinary
+`Load(Sources{Home: "testdata/library"})`.
 
-Refresh it from the live library with (run from the repo root):
+The descriptions are shaped for the rows they pin:
 
-```bash
-for d in ~/.apogee/skills/*/; do id=$(basename "$d"); f="$d/SKILL.md"; [ -f "$f" ] || continue;
-  mkdir -p internal/skills/testdata/library/skills/$id;
-  { awk 'NR==1&&$0!="---"{exit} {print} NR>1&&$0=="---"{exit}' "$f";
-    echo; echo "Fixture body — see testdata/library/README.md."; } \
-    > internal/skills/testdata/library/skills/$id/SKILL.md; done
-```
+- the positive rows each have a skill that shares several content words with the draft, and
+  `project-briefing` places its phrase (`get me up to speed`) past the 200-rune summary cap;
+- the generic-edit rows each have a skill that shares one content word with the draft plus a
+  dev-generic stopword (`add`, `file`, `files`) — e.g. `feature-flags` for "add a flag to the
+  command line parser", `csv-import` for "add the missing import to this file", `log-search` for
+  "split this file into two smaller files" — so a stopword or cutoff regression makes those rows
+  return something again.
+
+Every body must be exactly `Synthetic fixture skill — see testdata/library/README.md.` —
+`TestLibraryFixtureIsSynthetic` fails on any other.

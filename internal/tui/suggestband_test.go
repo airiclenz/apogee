@@ -550,7 +550,7 @@ func TestSuggestionsSurviveARefusedLine(t *testing.T) {
 	}
 }
 
-// TestSuggestBandPrecision runs the band over the REAL matcher and the real library fixture
+// TestSuggestBandPrecision runs the band over the REAL matcher and the library fixture
 // (internal/skills/testdata/library) instead of the fake catalog the other tests use: what it pins
 // is that the matcher's precision — the relative cutoff and the dev-generic stopwords (ADR 0061,
 // amended 2026-09-14) — reaches the row a human sees through the seam unchanged. A band that showed
@@ -578,8 +578,8 @@ func TestSuggestBandPrecision(t *testing.T) {
 		first string   // the id the row must name first; empty when the band must stay dark
 		wants []string // ids the row must name somewhere
 	}{
-		{name: "a clear winner names one skill first", draft: "cut a release for homebrew", first: "brew-release"},
-		{name: "two audit skills are both named", draft: "audit the parser for security holes", wants: []string{"code-audit", "security-audit"}},
+		{name: "a clear winner names one skill first", draft: "cut a release for homebrew", first: "homebrew-publish"},
+		{name: "two audit skills are both named", draft: "audit the parser for security holes", wants: []string{"quality-audit", "vuln-scan"}},
 		{name: "a generic struct edit keeps the band dark", draft: "add a field to the config struct"},
 		{name: "a generic file move keeps the band dark", draft: "move these files into a new package"},
 	}

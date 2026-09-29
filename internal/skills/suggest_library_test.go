@@ -1,7 +1,10 @@
 package skills
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -9,9 +12,13 @@ import (
 // a fixture that lost its files would otherwise let every "nil" row pass for the wrong reason.
 const libraryFixtureMinSkills = 20
 
-// newLibraryCatalog loads testdata/library — a frontmatter-only copy of the owner's real skill
-// library (see testdata/library/README.md) — through the ordinary Load so the test sees exactly
-// the catalog a user with that library gets.
+// libraryFixtureBody is the one line every fixture skill carries as its body: the fixture is
+// synthetic (see testdata/library/README.md), and a skill without this body was not written for it.
+const libraryFixtureBody = "Synthetic fixture skill — see testdata/library/README.md."
+
+// newLibraryCatalog loads testdata/library — a synthetic, library-sized catalog (see
+// testdata/library/README.md) — through the ordinary Load so the test sees exactly the catalog a
+// user with that library gets.
 func newLibraryCatalog(t *testing.T) *Catalog {
 	t.Helper()
 	c, err := Load(Sources{Home: "testdata/library"})
@@ -24,10 +31,10 @@ func newLibraryCatalog(t *testing.T) *Catalog {
 	return c
 }
 
-// TestSuggestOnTheRealLibrary pins what the band shows for the phrases people actually type,
-// against the owner's library. Each row is binding: a row that stops holding means the matcher
+// TestSuggestOnTheLibraryFixture pins what the band shows for the phrases people actually type,
+// against a library-sized catalog. Each row is binding: a row that stops holding means the matcher
 // changed, not that the row should be relaxed.
-func TestSuggestOnTheRealLibrary(t *testing.T) {
+func TestSuggestOnTheLibraryFixture(t *testing.T) {
 	t.Parallel()
 	c := newLibraryCatalog(t)
 
@@ -38,13 +45,13 @@ func TestSuggestOnTheRealLibrary(t *testing.T) {
 		contains []string // ids that must appear anywhere in the result
 		wantNil  bool
 	}{
-		{name: "grill me on this plan", draft: "grill me on this plan", first: "grill-me"},
-		{name: "grill me about this design plan", draft: "grill me about this design plan", first: "grill-me", contains: []string{"grill-with-docs"}},
-		{name: "audit the parser for security holes", draft: "audit the parser for security holes", contains: []string{"code-audit", "security-audit"}},
-		{name: "cut a release for homebrew", draft: "cut a release for homebrew", first: "brew-release"},
-		{name: "compact this conversation into a handoff", draft: "compact this conversation into a handoff", first: "handoff"},
-		{name: "what changed since the last release and how do I test it", draft: "what changed since the last release and how do I test it", first: "test-checklist"},
-		{name: "get me up to speed on this project", draft: "get me up to speed on this project", first: "refocus"},
+		{name: "grill me on this plan", draft: "grill me on this plan", first: "plan-grill"},
+		{name: "grill me about this design plan", draft: "grill me about this design plan", first: "plan-grill", contains: []string{"docs-grill"}},
+		{name: "audit the parser for security holes", draft: "audit the parser for security holes", contains: []string{"quality-audit", "vuln-scan"}},
+		{name: "cut a release for homebrew", draft: "cut a release for homebrew", first: "homebrew-publish"},
+		{name: "compact this conversation into a handoff", draft: "compact this conversation into a handoff", first: "session-handoff"},
+		{name: "what changed since the last release and how do I test it", draft: "what changed since the last release and how do I test it", first: "release-test-plan"},
+		{name: "get me up to speed on this project", draft: "get me up to speed on this project", first: "project-briefing"},
 		{name: "two words are below the gate", draft: "fix the parser", wantNil: true},
 		{name: "pure stopwords hold no content term", draft: "the and of to", wantNil: true},
 		// Generic dev chat names no skill. Each of these drafts earned at least one row from the
@@ -81,5 +88,33 @@ func TestSuggestOnTheRealLibrary(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestLibraryFixtureIsSynthetic keeps testdata/library made of skills written for it: every
+// SKILL.md must carry libraryFixtureBody as its whole body, so a skill copied in from anywhere
+// else fails here instead of joining the fixture.
+func TestLibraryFixtureIsSynthetic(t *testing.T) {
+	t.Parallel()
+	paths, err := filepath.Glob(filepath.Join("testdata", "library", "skills", "*", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("glob testdata/library: %v", err)
+	}
+	if len(paths) < libraryFixtureMinSkills {
+		t.Fatalf("fixture holds %d SKILL.md files, want at least %d", len(paths), libraryFixtureMinSkills)
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		_, body, ok := strings.Cut(strings.TrimPrefix(string(raw), "---\n"), "\n---\n")
+		if !ok {
+			t.Errorf("%s: no closing frontmatter fence", path)
+			continue
+		}
+		if got := strings.TrimSpace(body); got != libraryFixtureBody {
+			t.Errorf("%s: body = %q, want %q", path, got, libraryFixtureBody)
+		}
 	}
 }
