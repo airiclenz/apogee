@@ -45,7 +45,9 @@ stopped workflow says how to resume it.
 - Background workflows' resume (already restart on session resume); a `/workflows` resume key.
 - The audit recipe's prompts (a helper reading `part-all/bundle.md` is a model error).
 
-## 1. Resumed workflow opens its own block
+## 1. Resumed workflow opens its own block — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the Started guard asks a new transcript.workflowRunning helper (newest block of the id with end == ""); the non-Started path returns when the newest block has ended rather than scanning past it to an older one (any older block of the id has ended too).
 
 **What:** Fix: a `WorkflowStarted` for a workflow id whose earlier block is stopped is dropped by
 the TUI, so the resumed run's item runs (spawned under the new call, e.g. `recipe-audit-1`) find no

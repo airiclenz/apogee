@@ -17,8 +17,9 @@ import (
 // A Recipe the human launches with "/<recipe-skill> <text>" runs as a Workflow BEFORE the model's
 // first request of the Exchange, so nothing the model does can show it: there is no tool call to
 // hang its progress on. The engine reports its life as WorkflowPhaseEvents instead, and this file
-// folds them into ONE block per Workflow (entryWorkflow) that grows in place as the run goes — one
-// row per stage of its Plan, shown from the start (pending, running, waiting on the human, or the
+// folds them into ONE block per run of a Workflow (entryWorkflow) that grows in place as the run
+// goes — a stopped Workflow the same Recipe resumes opens a new block, and the stopped one stays
+// frozen as it ended (workflowAt) — one row per stage of its Plan, shown from the start (pending, running, waiting on the human, or the
 // outcome its finished phase reports), a line for each item whose receipt is not ok, the question an
 // `ask` stage is waiting on, and the totals and the end it came to.
 //
@@ -152,10 +153,13 @@ func workflowStagesOf(names []string) []workflowStage {
 	return stages
 }
 
-// addWorkflowPhase folds one WorkflowPhaseEvent. A started phase opens the block — unless an open
-// fan_out call of the emitting run accounts for the Workflow — and every later phase finds the
-// block by the Workflow's id and re-renders it. A phase for a Workflow with no block (a fan_out's,
-// or one whose start this view never saw) folds nothing.
+// addWorkflowPhase folds one WorkflowPhaseEvent. A started phase opens a block — unless an open
+// fan_out call of the emitting run accounts for the Workflow, or a block of the same Workflow id is
+// still running (a duplicate start) — so a resumed run of a stopped Workflow draws a block of its
+// own, under its own call, and seats its item runs there. Every later phase folds into the newest
+// block of the Workflow's id (workflowAt) and re-renders it, unless that block has ended: an ended
+// block never changes again. A phase for a Workflow with no block (a fan_out's, or one whose start
+// this view never saw) folds nothing.
 func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 	switch e.Phase {
 	case domain.WorkflowItemStarted:
@@ -165,7 +169,7 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 	}
 	run := runOf(e.EventBase)
 	if e.Phase == domain.WorkflowStarted {
-		if t.fanOutOpen(run) || t.workflowAt(e.Workflow) >= 0 {
+		if t.fanOutOpen(run) || t.workflowRunning(e.Workflow) {
 			return
 		}
 		view := workflowView{id: e.Workflow, name: stripEscapes(e.Name), stages: workflowStagesOf(e.Stages)}
@@ -177,7 +181,7 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 		return
 	}
 	i := t.workflowAt(e.Workflow)
-	if i < 0 {
+	if i < 0 || t.entries[i].workflow.end != "" {
 		return
 	}
 	en := &t.entries[i]
@@ -199,9 +203,18 @@ func (t *transcript) fanOutOpen(run runRef) bool {
 	return false
 }
 
-// workflowAt is the index of the live block of the Workflow id names, or −1. A block replayed from
-// a record carries no Workflow id, so it is never found: its Workflow is not running in this
-// session, and a run of the same Workflow id opens a block of its own.
+// workflowRunning reports whether the newest block of the Workflow id names is still running — a
+// started phase for it is a duplicate, not a resumed run.
+func (t *transcript) workflowRunning(id string) bool {
+	i := t.workflowAt(id)
+	return i >= 0 && t.entries[i].workflow.end == ""
+}
+
+// workflowAt is the index of the newest live block of the Workflow id names, or −1. A resumed run
+// of a stopped Workflow opens a block of its own, so one id can head several blocks, and only the
+// newest is the one its phases fold into. A block replayed from a record carries no Workflow id, so
+// it is never found: its Workflow is not running in this session, and a run of the same Workflow id
+// opens a block of its own.
 func (t *transcript) workflowAt(id string) int {
 	if id == "" {
 		return -1

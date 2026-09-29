@@ -865,6 +865,86 @@ func TestResumedBlockIgnoresARunOfTheSameWorkflow(t *testing.T) {
 	}
 }
 
+// A recipe re-issued after a stop resumes the SAME Workflow id under a new call: its started phase
+// opens a block of its own, which its later phases grow and whose span seats its item runs, while
+// the stopped block stays exactly as it ended — a stray phase never reopens it.
+func TestResumedWorkflowOpensItsOwnBlock(t *testing.T) {
+	t.Parallel()
+	const first, second = "recipe-audit-0", "recipe-audit-1"
+	tr := &transcript{}
+	tr.addUser("/audit src", nil)
+	started := startedUnder(first)
+	started.Stages = []string{"items"}
+	tr.apply(started)
+	tr.apply(stageStarted("items", 1, 2, 0))
+	tr.apply(itemStartedUnder(first, "run.1", "items", "alpha", 0, 1))
+	tr.apply(workflowPhase(domain.WorkflowStopped))
+	stopped := slices.IndexFunc(tr.entries, func(e entry) bool { return e.kind == entryWorkflow })
+	frozen := tr.entries[stopped]
+
+	tr.addUser("/audit src", nil)
+	resumed := startedUnder(second)
+	resumed.Stages = []string{"items"}
+	tr.apply(resumed)
+	tr.apply(stageStarted("items", 1, 2, 0))
+	tr.apply(itemStartedUnder(second, "run.2", "items", "beta", 1, 1))
+	itemSays(tr, second, "run.2", "beta first")
+
+	var blocks []int
+	for i, e := range tr.entries {
+		if e.kind == entryWorkflow {
+			blocks = append(blocks, i)
+		}
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("workflow blocks = %d; want the stopped one and the resumed one", len(blocks))
+	}
+	old, head := tr.entries[blocks[0]], tr.entries[blocks[1]]
+	if !reflect.DeepEqual(old.workflow, frozen.workflow) || old.text != frozen.text {
+		t.Errorf("the resumed run moved the stopped block:\n%q\nwant\n%q", old.text, frozen.text)
+	}
+	if !strings.Contains(old.text, "Workflow audit — stopped") {
+		t.Errorf("the stopped block reads %q; want it still stopped", old.text)
+	}
+	if head.callID != second || head.done || !strings.Contains(head.text, "Workflow audit — running") {
+		t.Errorf("the resumed block = call %q, done %v, %q; want call %q, running", head.callID, head.done, head.text, second)
+	}
+	itemHead := workflowItemHeadAt(tr.entries, "run.2")
+	said := slices.IndexFunc(tr.entries, func(e entry) bool { return e.text == "beta first" })
+	if span := subAgentSpan(tr.entries, blocks[1]); itemHead <= blocks[1] || said > blocks[1]+span {
+		t.Errorf("the resumed item run (head %d, entry %d) is outside the new block's span (%d + %d)",
+			itemHead, said, blocks[1], span)
+	}
+
+	tr.apply(workflowPhase(domain.WorkflowFinished))
+	tr.apply(stageStarted("items", 2, 1, 0))
+	if got := tr.entries[blocks[0]]; got.text != frozen.text {
+		t.Errorf("a phase after the resumed run ended changed the stopped block:\n%q", got.text)
+	}
+	if got := tr.entries[blocks[1]]; got.workflow.end != domain.WorkflowFinished || got.workflow.stage != "" {
+		t.Errorf("a stray phase reopened the ended block: end %q, stage %q", got.workflow.end, got.workflow.stage)
+	}
+}
+
+// A second started phase for a Workflow whose block is still running is a duplicate of the run the
+// block already shows: it opens nothing, and the run's phases keep folding into that one block.
+func TestDuplicateStartedForLiveWorkflowKeepsOneBlock(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m.transcript.apply(startedWith("items"))
+	m.transcript.apply(stageStarted("items", 1, 2, 0))
+	m.transcript.apply(startedWith("items"))
+	m.transcript.apply(workflowPhase(domain.WorkflowStopped))
+
+	blocks := workflowEntries(m)
+	if len(blocks) != 1 {
+		t.Fatalf("workflow blocks = %d; want the one the run opened", len(blocks))
+	}
+	if blocks[0].workflow.end != domain.WorkflowStopped {
+		t.Errorf("the block ended as %q; want the run's stop folded into it", blocks[0].workflow.end)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // A Workflow's item runs nest under the block that started it
 // ----------------------------------------------------------------------------
