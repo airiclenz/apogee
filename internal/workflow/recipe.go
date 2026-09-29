@@ -18,7 +18,9 @@ type Recipe struct {
 	// `shipped:<id>` for one apogee ships embedded.
 	Dir string
 	// Files is the skill's folder itself, rooted at Dir, so its prompt files and scripts can be
-	// read whatever Dir spells. Nil when the folder cannot be opened.
+	// read whatever Dir spells. A folder on disk is fenced: a file resolving outside it through a
+	// symlink is refused, and a folder that will not open serves that error on every read. Nil
+	// only when Dir names no folder at all (a relative Dir, an unknown shipped folder).
 	Files fs.FS
 }
 

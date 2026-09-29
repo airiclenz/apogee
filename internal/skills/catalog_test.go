@@ -3,8 +3,10 @@ package skills
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -195,5 +197,66 @@ func TestSkillFilesOpensAShippedFolder(t *testing.T) {
 	}
 	if skillFiles("relative/dir") != nil {
 		t.Errorf("a relative folder address opened a folder")
+	}
+}
+
+// A disk skill's folder is fenced (audit 2026-09-29, "Repo skill recipes can read host files
+// through symlinks"): a file inside it reads, a relative symlink that stays inside reads, and a
+// symlink resolving outside it — relative or absolute — is refused without its bytes.
+func TestSkillFilesFencesADiskFolderAgainstEscapingSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	mustWrite(t, outside, "HOST SECRET")
+	mustWrite(t, filepath.Join(dir, "prompts", "real.md"), "in the folder")
+	mustSymlink(t, filepath.Join("prompts", "real.md"), filepath.Join(dir, "inside.md"))
+	rel, err := filepath.Rel(dir, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, rel, filepath.Join(dir, "relative-escape.md"))
+	mustSymlink(t, outside, filepath.Join(dir, "absolute-escape.md"))
+
+	files := skillFiles(dir)
+	for _, name := range []string{"prompts/real.md", "inside.md"} {
+		body, err := fs.ReadFile(files, name)
+		if err != nil || string(body) != "in the folder" {
+			t.Errorf("ReadFile(%s) = %q, %v; want the folder's file", name, body, err)
+		}
+	}
+	for _, name := range []string{"relative-escape.md", "absolute-escape.md"} {
+		body, err := fs.ReadFile(files, name)
+		if err == nil || string(body) != "" {
+			t.Errorf("ReadFile(%s) = %q, %v; want a refusal without the outside bytes", name, body, err)
+		}
+	}
+}
+
+// A disk folder that no longer opens still yields an FS — one whose every read fails — so a
+// reader holding it never mistakes it for "no folder" and falls back to another tree.
+func TestSkillFilesServesAnErrorForAnUnopenableFolder(t *testing.T) {
+	t.Parallel()
+
+	files := skillFiles(filepath.Join(t.TempDir(), "removed"))
+	if files == nil {
+		t.Fatal("skillFiles(removed folder) = nil; want an FS that refuses every read")
+	}
+	if _, err := fs.ReadFile(files, "p.md"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("ReadFile on a removed folder = %v; want its not-exist error", err)
+	}
+}
+
+// mustWrite writes content to path, creating its parent folders.
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

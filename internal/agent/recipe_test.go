@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -848,5 +849,43 @@ func TestFanOutStartedEventHasNoResume(t *testing.T) {
 				t.Errorf("started Resume = %q, want none for a fan_out", got)
 			}
 		})
+	}
+}
+
+// stageSkillFile copies through the fenced skill-folder FS a disk recipe carries: a file that is
+// a symlink out of the folder is refused and nothing of it is staged, while an in-folder file —
+// directly or through a relative symlink — is copied as before.
+func TestStageSkillFileRefusesASymlinkOutOfTheSkillFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	recipe := diskRecipe(t)
+	if err := os.MkdirAll(filepath.Join(recipe.Dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(writeOutsideSecret(t), filepath.Join(recipe.Dir, "bin", "leak.sh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipe.Dir, "bin", "real.sh"), []byte("echo ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.sh", filepath.Join(recipe.Dir, "bin", "inside.sh")); err != nil {
+		t.Fatal(err)
+	}
+	dest := t.TempDir()
+
+	if err := stageSkillFile(recipe.Files, "bin/leak.sh", dest); err == nil {
+		t.Errorf("stageSkillFile(escaping symlink) = nil; want a refusal")
+	}
+	if _, err := os.Stat(filepath.Join(dest, "bin", "leak.sh")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the escaping file was staged (stat: %v)", err)
+	}
+	for _, name := range []string{"bin/real.sh", "bin/inside.sh"} {
+		if err := stageSkillFile(recipe.Files, name, dest); err != nil {
+			t.Fatalf("stageSkillFile(%s) = %v; want it staged", name, err)
+		}
+		if body, err := os.ReadFile(filepath.Join(dest, filepath.FromSlash(name))); err != nil || string(body) != "echo ok\n" {
+			t.Errorf("staged %s = %q, %v; want the folder's file", name, body, err)
+		}
 	}
 }

@@ -86,7 +86,11 @@ not capped; a prior `locate` read then a bare read → not capped; existing full
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/floor/ ./internal/context/`
 **Commit:** `fix(floor): count only an unpruned full read as the read cache's copy`
 
-## 2. Recipe files: fence disk skills against escaping symlinks
+## 2. Recipe files: fence disk skills against escaping symlinks — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): consequential edit — internal/workflow/recipe.go: made necessary by skillFiles serving a non-nil error FS for an unopenable disk folder (the Recipe.Files comment said "Nil when the folder cannot be opened")
+NOTES (2026-09-29): the os.Root handle is not stored on the catalog entry: Catalog.Recipe opens it per call and the returned FS keeps it alive; os.Root's own finalizer closes it once the recipe run drops the FS (documented on skillFiles)
+NOTES (2026-09-29): confirmed readPrompt and stageSkillFile read only through recipe.Files, never by host path; stageSkillFile runs only for shipped skills today (a disk skill's {{SKILL_DIR}} script still runs by host path under the terminal gate), so its fence test drives it directly over a disk recipe's fenced FS
 
 **What:** Fix "Repo skill recipes can read host files through symlinks" (Medium): `skillFiles`
 hands the recipe engine `os.DirFS(dir)`, which follows symlinks out of the skill folder.

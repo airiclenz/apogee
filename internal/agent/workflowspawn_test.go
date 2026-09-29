@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -657,5 +659,98 @@ func TestWorkflowSpawn_AnItemIsNamedByItsShortName(t *testing.T) {
 		if phase.ItemName != "find" || phase.Item != folder {
 			t.Errorf("%s phase names item %q as %q, want %q as %q", phase.Phase, phase.Item, phase.ItemName, folder, "find")
 		}
+	}
+}
+
+// diskRecipeCatalog loads a recipe skill `sweep` from a user skills folder under a fresh home and
+// returns the catalog and that skill's folder.
+func diskRecipeCatalog(t *testing.T) (*skills.Catalog, string) {
+	t.Helper()
+	home := t.TempDir()
+	dir := filepath.Join(home, "skills", "sweep")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const skill = "---\nid: sweep\nsummary: s\nrecipe:\n  - name: find\n    kind: fanout\n" +
+		"    over:\n      list: [a]\n    task: look\n---\nbody"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := skills.Load(skills.Sources{Home: home})
+	if err != nil {
+		t.Fatalf("skills.Load: %v", err)
+	}
+	return catalog, dir
+}
+
+// diskRecipe is the recipe the catalog serves for diskRecipeCatalog's skill: the Files a recipe
+// run reads its prompt and staged files through.
+func diskRecipe(t *testing.T) workflow.Recipe {
+	t.Helper()
+	catalog, _ := diskRecipeCatalog(t)
+	recipe, ok := catalog.Recipe("sweep")
+	if !ok || recipe.Files == nil {
+		t.Fatalf("Recipe(sweep) = %+v, %v; want the disk recipe with its files", recipe, ok)
+	}
+	return recipe
+}
+
+// writeOutsideSecret writes a file outside every skill folder and returns its path.
+func writeOutsideSecret(t *testing.T) string {
+	t.Helper()
+	secret := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secret, []byte("HOST SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return secret
+}
+
+// A disk recipe's prompt file that is a symlink out of its skill folder is refused, and the
+// outside file's bytes never reach the brief; an in-folder relative symlink still reads.
+func TestReadPromptRefusesASymlinkOutOfTheSkillFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	recipe := diskRecipe(t)
+	if err := os.Symlink(writeOutsideSecret(t), filepath.Join(recipe.Dir, "p.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipe.Dir, "real.md"), []byte("in the folder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.md", filepath.Join(recipe.Dir, "inside.md")); err != nil {
+		t.Fatal(err)
+	}
+	spawner := &workflowSpawner{prompts: recipe.Files}
+
+	body, err := spawner.readPrompt("p.md")
+	if err == nil || strings.Contains(body, "HOST SECRET") {
+		t.Errorf("readPrompt(escaping symlink) = %q, %v; want a refusal without the outside bytes", body, err)
+	}
+	if body, err := spawner.readPrompt("inside.md"); err != nil || body != "in the folder" {
+		t.Errorf("readPrompt(in-folder symlink) = %q, %v; want the folder's file", body, err)
+	}
+}
+
+// A disk recipe whose skill folder was removed after discovery fails its prompt read — it never
+// falls back to a same-named file in the workspace.
+func TestReadPromptOfARemovedSkillFolderNeverReadsTheWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "p.md"), []byte("WORKSPACE FILE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, dir := diskRecipeCatalog(t)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	recipe, ok := catalog.Recipe("sweep")
+	if !ok {
+		t.Fatal("Recipe(sweep) not served")
+	}
+	parent := &Agent{cfg: domain.Config{WorkspaceDir: workspace}}
+	spawner := &workflowSpawner{parent: parent, prompts: recipe.Files}
+
+	if body, err := spawner.readPrompt("p.md"); err == nil || strings.Contains(body, "WORKSPACE FILE") {
+		t.Errorf("readPrompt(removed skill folder) = %q, %v; want an error, never the workspace file", body, err)
 	}
 }
