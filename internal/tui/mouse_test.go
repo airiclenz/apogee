@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -5408,6 +5409,61 @@ func TestListPaneClickOutsideTheBoxClosesItAndReachesNothing(t *testing.T) {
 			}
 			if after.clickArmed.ok {
 				t.Errorf("the dismissing click armed a row: %+v", after.clickArmed)
+			}
+		})
+	}
+}
+
+// An outside click on the workflow boundary's stop-or-keep confirm cancels it exactly as esc does
+// (answerBoundary): the confirm closes, nothing is cleared, the command queued behind the /clear
+// runs, and the message the confirm held back flushes into a new Exchange.
+func TestBoundaryConfirmPickerClickOutsideCancelsLikeEsc(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		answer func(t *testing.T, m Model) (Model, tea.Cmd)
+	}{
+		{"esc", func(t *testing.T, m Model) (Model, tea.Cmd) { t.Helper(); return stepCmd(t, m, keyEsc()) }},
+		{"a click outside the box", func(t *testing.T, m Model) (Model, tea.Cmd) {
+			t.Helper()
+			paneTop, _, ok := m.frameSpans().pane(panePicker)
+			if !ok || paneTop == 0 {
+				t.Fatalf("the confirm is not on the frame below a row to aim at (top %d, on %v)", paneTop, ok)
+			}
+			return stepCmd(t, m, leftClick(0, paneTop-1))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, eng := queuedRun(t, "/clear", "/settings", "a message")
+			m = foldEvents(t, m, bgPhase(domain.WorkflowStarted))
+			m = step(t, m, exchangeDoneMsg{})
+			assertBoundaryConfirm(t, m)
+			if n := len(m.deferredCommands); n != 1 {
+				t.Fatalf("queued commands = %d while the confirm is up; want /settings held", n)
+			}
+
+			next, cmd := tc.answer(t, m)
+
+			if next.picker.open {
+				t.Error("the confirm stayed open after the cancel")
+			}
+			if eng.clearCalls != 0 {
+				t.Errorf("ClearContext calls = %d, want the clear cancelled", eng.clearCalls)
+			}
+			if n := len(next.deferredCommands); n != 0 {
+				t.Errorf("queued commands = %d after the cancel; want /settings run", n)
+			}
+			if !slices.Contains(noteTexts(next), noSettingsNote) {
+				t.Errorf("notes %q; want the queued /settings to have run", noteTexts(next))
+			}
+			if next.state != stateRunning || len(next.pendingInterjections) != 0 {
+				t.Fatalf("state %v, staged %d after the cancel; want the message flushed into a new Exchange",
+					next.state, len(next.pendingInterjections))
+			}
+			drainCmd(t, next, cmd)
+			if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != "a message" {
+				t.Errorf("submitted = %+v; want the held message sent", eng.submitted)
 			}
 		})
 	}

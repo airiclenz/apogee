@@ -1565,13 +1565,19 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 // Outside the box: dismissed and CLAIMED, the browser's answer above, because the picker is modal
 // too. The dismissal zeroes the whole overlay — the half-built Schedule and the migration round with
 // it — which is what esc already does to it (pickerKey), and the open gate keeps a frame carrying no
-// picker out of it.
+// picker out of it. The workflow boundary's stop-or-keep confirm is the one kind whose esc is more
+// than that zeroing: it cancels through answerBoundary, which drains the commands the confirm held
+// and runs a held flush, so an outside click there cancels the same way rather than stranding them.
 func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if !m.picker.open || !pre.picker.open {
 		return m, nil, false
 	}
 	row, top, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, msg.Y)
 	if !inRect {
+		if m.boundaryConfirmOpen() {
+			next, cmd := acceptedModel(m.answerBoundary(boundaryCancel))
+			return next, cmd, true
+		}
 		m.picker = picker{} // outside the modal: dismissed, and the click is spent on that
 		return m, nil, true
 	}

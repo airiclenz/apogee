@@ -307,7 +307,7 @@ TestWorkflowsViewCtrlRRerunsTheFailedItems, workflowsPaneModel; internal/tui/act
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Rerun|Actuation' ./internal/tui/`
 **Commit:** `fix(tui): refuse the ^r re-run while an actuation is in flight`
 
-## 10. TUI: outside click on the boundary confirm cancels through answerBoundary
+## 10. TUI: outside click on the boundary confirm cancels through answerBoundary — ✅ DONE (2026-09-29)
 
 **What:** Fix "Outside click on the workflow boundary confirm strands queued commands".
 **Goal:** An outside click while the boundary confirm is open has the same effect as esc: deferred
