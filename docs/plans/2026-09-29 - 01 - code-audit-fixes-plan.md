@@ -340,7 +340,10 @@ internal/workflow/stages_test.go — TestVerifyTalliesVerdicts
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/workflow/`
 **Commit:** `fix(workflow): treat a verify child that did not end ok as unclear`
 
-## 12. Console tools settle on cancel during their wait window
+## 12. Console tools settle on cancel during their wait window — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): consoleTail now returns (tail, gathered) so console_read can return ctx.Err() only when its read gathered nothing; console_close discards the bool (its wait of 0 drains before looking at ctx).
+NOTES (2026-09-29): the console_send cancel test cancels after 250 ms rather than the plan's 50 ms, so the shell's output reliably lands before the cancel on a loaded host; the under-1 s budget is still measured from the cancel.
 
 **What:** Recast at the regression check (2026-09-29). Fix "Console tools ignore cancel during their wait window" (ADR 0088 cancel settles
 promptly).

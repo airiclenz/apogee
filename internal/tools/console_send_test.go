@@ -324,7 +324,7 @@ func TestCollectConsoleWindow_HoldsNoMoreThanTheCeiling(t *testing.T) {
 	ctx, _ := consoleTestCtx(t)
 	_, target := openUndrainedConsole(t, ctx, "yes | head -c 2000000")
 
-	output, _ := collectConsoleWindow(target, 20*time.Second)
+	output, _, _ := collectConsoleWindow(ctx, target, 20*time.Second)
 
 	body, more := cutTruncationMarker(t, output)
 	if len(body) != maxSubprocessOutputBytes {
@@ -355,5 +355,52 @@ func TestConsoleSend_FloodCarriesOneTruncationMarker(t *testing.T) {
 	cutTruncationMarker(t, res.Content)
 	if !strings.HasSuffix(res.Content, "exited with code 0") {
 		t.Errorf("result did not end with the exit status: %q", lastLine(res.Content))
+	}
+}
+
+// consoleCancelBudget is how soon after its ctx is cancelled a Console call must have returned:
+// the wait windows run to 30 s, and ADR 0088 has a cancel settle promptly, not at the window's end.
+const consoleCancelBudget = time.Second
+
+// cancelAfter returns a child of parent that is cancelled once delay has passed.
+func cancelAfter(t *testing.T, parent context.Context, delay time.Duration) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(parent)
+	timer := time.AfterFunc(delay, cancel)
+	t.Cleanup(func() {
+		timer.Stop()
+		cancel()
+	})
+	return ctx
+}
+
+// TestConsoleSend_CancelEndsTheWaitAndKeepsWhatWasPrinted pins console_send's cancel settlement
+// (ADR 0088): the input was typed, so the call still succeeds, returning promptly with what the
+// program printed before the cancel and the line saying the wait was cut short.
+func TestConsoleSend_CancelEndsTheWaitAndKeepsWhatWasPrinted(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	base, _ := consoleTestCtx(t)
+	id := openTestConsole(t, base, "sh")
+	// The delay leaves the shell time to print before the cancel on a loaded host; the budget is
+	// measured from the cancel, not from the call.
+	const cancelDelay = 250 * time.Millisecond
+	ctx := cancelAfter(t, base, cancelDelay)
+
+	started := time.Now()
+	res, err := NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "printf 'mark%s\\n' 1; sleep 30", false, 30000))
+	elapsed := time.Since(started)
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil: the typed input is finished work", err)
+	}
+	if elapsed >= cancelDelay+consoleCancelBudget {
+		t.Errorf("Execute returned after %v, want under %v of the cancel", elapsed, consoleCancelBudget)
+	}
+	if !strings.Contains(res.Content, "mark1") {
+		t.Errorf("result = %q, want the output printed before the cancel", res.Content)
+	}
+	if !strings.HasSuffix(res.Content, consoleCutShortNote) {
+		t.Errorf("result = %q, want it to end with %q", res.Content, consoleCutShortNote)
 	}
 }

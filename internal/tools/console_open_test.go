@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -393,5 +394,33 @@ func TestConsoleOpen_EmptyCommandIsAnErrorResult(t *testing.T) {
 	}
 	if !res.IsError || !strings.Contains(res.Content, "command is required") {
 		t.Errorf("result = %q, want the missing-command refusal", res.Content)
+	}
+}
+
+// TestConsoleOpen_CancelDuringTheWaitStillNamesTheConsole pins console_open's cancel settlement
+// (ADR 0088): the Console is started, which is finished work, so a cancel during the wait window
+// returns promptly with a nil error and a result naming the console and the cut-short wait.
+func TestConsoleOpen_CancelDuringTheWaitStillNamesTheConsole(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	base, _ := consoleTestCtx(t)
+	const cancelDelay = 50 * time.Millisecond
+	ctx := cancelAfter(t, base, cancelDelay)
+
+	started := time.Now()
+	res, err := NewConsoleOpen(t.TempDir(), nil).Execute(ctx, consoleOpenCall("c1", "sleep 30", 10000))
+	elapsed := time.Since(started)
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil: the started console is finished work", err)
+	}
+	if elapsed >= cancelDelay+consoleCancelBudget {
+		t.Errorf("Execute returned after %v, want under %v of the cancel", elapsed, consoleCancelBudget)
+	}
+	if first, _, _ := strings.Cut(res.Content, "\n"); first != "console 1 opened: sleep 30" {
+		t.Errorf("first line = %q, want %q", first, "console 1 opened: sleep 30")
+	}
+	if !strings.HasSuffix(res.Content, consoleCutShortNote) {
+		t.Errorf("result = %q, want it to end with %q", res.Content, consoleCutShortNote)
 	}
 }

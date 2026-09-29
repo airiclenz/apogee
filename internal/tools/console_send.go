@@ -90,8 +90,10 @@ func (t *ConsoleSend) ApprovalScope(call domain.ToolCall) string {
 //
 // An unknown id, a missing input and a terminal that refused the write are all error RESULTS —
 // each is something the model can act on, and the unknown-id refusal names the ids that are open.
-// Only ctx cancellation is a Go error: nothing here can start a process, so there is no
-// confinement demotion to make.
+// Only ctx cancellation BEFORE the write is a Go error: nothing here can start a process, so there
+// is no confinement demotion to make. A cancel during the wait window ends it promptly with a nil
+// error, returning the output collected so far and consoleCutShortNote — the input was already
+// typed, and that is finished work the model must be told about (ADR 0088).
 func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err

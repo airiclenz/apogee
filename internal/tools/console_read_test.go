@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -257,4 +258,27 @@ func cutTruncationMarker(t *testing.T, content string) (string, int) {
 		t.Fatalf("truncation marker %q does not parse: %v", lastLine(content), err)
 	}
 	return body, more
+}
+
+// TestConsoleRead_CancelOnAQuietConsoleIsTheCancel pins console_read's cancel settlement: a read
+// that gathered nothing before the cancel has nothing to report, so it returns promptly with the
+// cancellation itself rather than sitting out its window.
+func TestConsoleRead_CancelOnAQuietConsoleIsTheCancel(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	base, _ := consoleTestCtx(t)
+	id := openTestConsole(t, base, "cat")
+	const cancelDelay = 50 * time.Millisecond
+	ctx := cancelAfter(t, base, cancelDelay)
+
+	started := time.Now()
+	_, err := NewConsoleRead().Execute(ctx, consoleReadCall("c1", id, 30000))
+	elapsed := time.Since(started)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Execute err = %v, want context.Canceled", err)
+	}
+	if elapsed >= cancelDelay+consoleCancelBudget {
+		t.Errorf("Execute returned after %v, want under %v of the cancel", elapsed, consoleCancelBudget)
+	}
 }

@@ -57,8 +57,9 @@ func (t *ConsoleRead) DefaultOff() bool { return true }
 // Execute returns the Console's unread output and whether its process is still running.
 //
 // An unknown id is an error RESULT naming the ids that are open — the one thing a model that has
-// lost track of its consoles can act on. Only ctx cancellation is a Go error: reading a buffer
-// starts no process, so there is no confinement demotion to make.
+// lost track of its consoles can act on. Only ctx cancellation is a Go error — and only when the
+// read gathered nothing before it: reading a buffer starts no process, so there is no confinement
+// demotion to make.
 func (t *ConsoleRead) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -75,7 +76,13 @@ func (t *ConsoleRead) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	wait := consoleWait(args.WaitMS, consoleReadWaitDefaultMS, consoleReadWaitMaxMS)
-	return okResult(call.ID, consoleTail(ctx, target, wait)), nil
+	tail, gathered := consoleTail(ctx, target, wait)
+	if err := ctx.Err(); err != nil && !gathered {
+		// A cancel that ended the wait before anything arrived leaves nothing to report and the
+		// buffer untouched; output the read DID drain is returned, because it exists nowhere else.
+		return domain.ToolResult{}, err
+	}
+	return okResult(call.ID, tail), nil
 }
 
 var (

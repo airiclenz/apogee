@@ -1,6 +1,7 @@
 package console
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -55,6 +56,12 @@ type Console struct {
 // stripped, and how many bytes the buffer dropped over the same span. See [Process.Read] for the
 // wait semantics.
 func (c *Console) Read(wait time.Duration) (string, int) { return c.proc.Read(wait) }
+
+// ReadContext is Read whose wait also ends when ctx is cancelled, returning nothing and leaving
+// the buffered output for the next read. See [Process.ReadContext].
+func (c *Console) ReadContext(ctx context.Context, wait time.Duration) (string, int) {
+	return c.proc.ReadContext(ctx, wait)
+}
 
 // Write sends input to the Console's terminal, where its process reads it as keyboard input.
 func (c *Console) Write(input []byte) (int, error) { return c.proc.Write(input) }

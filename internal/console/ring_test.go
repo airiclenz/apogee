@@ -2,6 +2,7 @@ package console
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -207,5 +208,46 @@ func writeString(t *testing.T, r *ring, s string) {
 	}
 	if written != len(s) {
 		t.Fatalf("write %q reported %d bytes, want %d", s, written, len(s))
+	}
+}
+
+// TestRingReadContextCancelEndsTheWaitWithoutDraining pins the cancel half of ReadContext: a wait
+// far longer than the test ends promptly once ctx is cancelled, hands back nothing, and drains
+// nothing — the next Read still finds every byte written after the cancel.
+func TestRingReadContextCancelEndsTheWaitWithoutDraining(t *testing.T) {
+	t.Parallel()
+	r := newRing(64)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	started := time.Now()
+	unread, dropped := r.ReadContext(ctx, 30*time.Second)
+	elapsed := time.Since(started)
+
+	if elapsed >= time.Second {
+		t.Errorf("ReadContext returned %v after the call began, want under 1s of the cancel", elapsed)
+	}
+	if len(unread) != 0 || dropped != 0 {
+		t.Errorf("ReadContext = (%q, %d), want nothing from a cancelled wait", unread, dropped)
+	}
+	writeString(t, r, "after-cancel")
+	if unread, _ := r.Read(0); string(unread) != "after-cancel" {
+		t.Errorf("next Read = %q, want the bytes the ring still holds", unread)
+	}
+}
+
+// TestRingReadContextHandsBackWhatIsAlreadyBuffered pins that a cancelled ctx never hides output
+// the ring already holds: bytes buffered before the call are returned, not left behind.
+func TestRingReadContextHandsBackWhatIsAlreadyBuffered(t *testing.T) {
+	t.Parallel()
+	r := newRing(64)
+	writeString(t, r, "buffered")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	unread, _ := r.ReadContext(ctx, 30*time.Second)
+
+	if string(unread) != "buffered" {
+		t.Errorf("ReadContext = %q, want %q", unread, "buffered")
 	}
 }

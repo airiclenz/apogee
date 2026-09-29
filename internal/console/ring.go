@@ -1,6 +1,7 @@
 package console
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -77,13 +78,24 @@ func (r *ring) Write(p []byte) (int, error) {
 }
 
 // Read returns the output written since the previous Read together with how many bytes were
-// dropped over the same span, and empties the buffer.
-//
-// With wait <= 0 it reports what is buffered right now. With wait > 0 and nothing buffered it
-// blocks until the first new bytes arrive — returning as soon as SOME output does, not waiting
-// out the whole window — or until the deadline passes, or until close reports the process's
-// output finished, whichever comes first.
+// dropped over the same span, and empties the buffer. It is ReadContext with a context that is
+// never cancelled.
 func (r *ring) Read(wait time.Duration) ([]byte, int) {
+	return r.ReadContext(context.Background(), wait)
+}
+
+// ReadContext returns the output written since the previous read together with how many bytes
+// were dropped over the same span, and empties the buffer.
+//
+// With wait <= 0 it reports what is buffered right now, without looking at ctx. With wait > 0 and
+// nothing buffered it blocks until the first new bytes arrive — returning as soon as SOME output
+// does, not waiting out the whole window — or until the deadline passes, or until close reports
+// the process's output finished, whichever comes first.
+//
+// A cancelled ctx ends the wait at once and returns nothing WITHOUT draining: bytes that land as
+// the cancel does stay buffered for the next read rather than being handed to a caller that has
+// stopped listening. Bytes already buffered when the call begins are returned as usual.
+func (r *ring) ReadContext(ctx context.Context, wait time.Duration) ([]byte, int) {
 	deadline := time.Now().Add(wait)
 	for {
 		r.mu.Lock()
@@ -102,13 +114,24 @@ func (r *ring) Read(wait time.Duration) ([]byte, int) {
 			r.mu.Unlock()
 			return unread, dropped
 		}
-		timer := time.NewTimer(remaining)
-		select {
-		case <-wake:
-		case <-timer.C:
+		if !awaitWake(ctx, wake, remaining) {
+			return nil, 0
 		}
-		timer.Stop()
 	}
+}
+
+// awaitWake parks until wake fires, remaining passes, or ctx is cancelled, reporting false only
+// for the cancel — the one outcome after which the caller must not drain.
+func awaitWake(ctx context.Context, wake <-chan struct{}, remaining time.Duration) bool {
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-wake:
+	case <-timer.C:
+	case <-ctx.Done():
+		return false
+	}
+	return true
 }
 
 // close marks the output finished and releases every waiter. It is idempotent: the reader

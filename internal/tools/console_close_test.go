@@ -159,3 +159,28 @@ func TestConsoleClose_AnswersOnlyToTheRunThatOpenedIt(t *testing.T) {
 		})
 	}
 }
+
+// TestConsoleTail_ZeroWaitReadsTheTailUnderACancelledContext pins what console_close's tail read
+// leans on: a wait of 0 drains what is buffered before it looks at ctx, so a cancel landing after
+// the teardown cannot cost the model the last thing the program said.
+func TestConsoleTail_ZeroWaitReadsTheTailUnderACancelledContext(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, registry := consoleTestCtx(t)
+	id, target := openUndrainedConsole(t, ctx, "echo tail-bytes; exit 3")
+	waitForConsoleExit(t, target)
+	if err := registry.Close(id); err != nil {
+		t.Fatalf("closing console %d: %v", id, err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+
+	tail, gathered := consoleTail(cancelled, target, 0)
+
+	if !gathered || !strings.Contains(tail, "tail-bytes") {
+		t.Errorf("tail = %q (gathered=%t), want the output nobody had read yet", tail, gathered)
+	}
+	if !strings.HasSuffix(tail, "exited with code 3") {
+		t.Errorf("tail = %q, want it to end with the program's exit code", tail)
+	}
+}

@@ -130,15 +130,27 @@ func consoleInputBytes(input string, raw bool) []byte {
 	return []byte(input + "\n")
 }
 
+// consoleCutShortNote closes a console_open or console_send result whose wait window a ctx
+// cancellation ended early. The call still succeeds — the process it started or wrote to is
+// finished work the model must be told about (ADR 0088) — so the note is how the model learns
+// the output it reads may stop short of what the program went on to say.
+const consoleCutShortNote = "[wait cut short by cancel]"
+
 // consoleTail renders what a Console has to say, returning as soon as SOME output arrives — the
-// polling shape console_read wants, where the question is "has anything happened yet".
+// polling shape console_read wants, where the question is "has anything happened yet" — and
+// reports whether the read gathered anything (output or a dropped-bytes count).
+//
+// A ctx cancelled mid-wait ends the read at once and gathers nothing, leaving the buffered output
+// for the next read; a wait of 0 drains what is buffered before it ever looks at ctx, which is
+// what lets console_close read the tail of a Console it has just torn down.
 //
 // Its one read can hand back everything the ring holds (up to 1 MiB, four times the model's
 // ceiling), so the string is capped here, after the fact: the ring already bounds what that read
 // held in memory, and the cap bounds what the model reads.
-func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) string {
-	output, dropped := c.Read(wait)
-	return renderConsoleTail(c, capConsoleOutput(output), dropped, true, confinementBox(ctx))
+func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) (string, bool) {
+	output, dropped := c.ReadContext(ctx, wait)
+	gathered := output != "" || dropped > 0
+	return renderConsoleTail(c, capConsoleOutput(output), dropped, true, confinementBox(ctx)), gathered
 }
 
 // consoleWindowTail renders what a Console produces over the WHOLE window rather than stopping
@@ -146,16 +158,27 @@ func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) st
 // terminal echoes the line it was sent before the program answers it, so a collector returning
 // at the first output would hand the model back its own keystrokes and nothing else.
 func consoleWindowTail(ctx context.Context, c *console.Console, wait time.Duration) string {
-	output, dropped := collectConsoleWindow(c, wait)
-	return renderConsoleTail(c, output, dropped, true, confinementBox(ctx))
+	output, dropped, cutShort := collectConsoleWindow(ctx, c, wait)
+	return withCutShortNote(renderConsoleTail(c, output, dropped, true, confinementBox(ctx)), cutShort)
 }
 
 // consoleOpenTail is consoleWindowTail without the "alive" line: console_open's first line has
 // already said the Console is open, so the only liveness fact left worth adding is the one that
 // contradicts it — a program that exited before anyone could speak to it.
 func consoleOpenTail(ctx context.Context, c *console.Console, wait time.Duration) string {
-	output, dropped := collectConsoleWindow(c, wait)
-	return renderConsoleTail(c, output, dropped, false, confinementBox(ctx))
+	output, dropped, cutShort := collectConsoleWindow(ctx, c, wait)
+	return withCutShortNote(renderConsoleTail(c, output, dropped, false, confinementBox(ctx)), cutShort)
+}
+
+// withCutShortNote appends consoleCutShortNote to a rendered tail when a cancel ended its window.
+func withCutShortNote(tail string, cutShort bool) string {
+	switch {
+	case !cutShort:
+		return tail
+	case tail == "":
+		return consoleCutShortNote
+	}
+	return tail + "\n" + consoleCutShortNote
 }
 
 // consoleExitPollInterval is how often collectConsoleWindow re-asks whether a Console's exit has
@@ -164,10 +187,13 @@ func consoleOpenTail(ctx context.Context, c *console.Console, wait time.Duration
 // byte and its reaper writing down how it ended.
 const consoleExitPollInterval = 5 * time.Millisecond
 
-// collectConsoleWindow collects everything a Console produces until the window closes or its
-// process exits, whichever comes first, reporting the bytes its buffer dropped over the same
-// span. Each read parks until output arrives, so a quiet Console costs a waiting goroutine rather
-// than a poll loop.
+// collectConsoleWindow collects everything a Console produces until the window closes, its
+// process exits, or ctx is cancelled, whichever comes first, reporting the bytes its buffer
+// dropped over the same span and whether a cancel cut the window short. Each read parks until
+// output arrives, so a quiet Console costs a waiting goroutine rather than a poll loop.
+//
+// A cancel keeps what was collected before it: that output was drained from the ring and exists
+// nowhere else, so dropping it with the cancel would lose it for good.
 //
 // What it keeps is capped AS it accumulates, at the ceiling every execution tool's output has
 // (maxSubprocessOutputBytes): a program flooding its terminal for a whole 30-second window would
@@ -175,23 +201,25 @@ const consoleExitPollInterval = 5 * time.Millisecond
 // draining — the window still ends when it was going to, and the ring still never overflows on
 // the collector's account — but only counts what it no longer stores, and the returned output
 // carries the one truncation marker that count renders to.
-func collectConsoleWindow(c *console.Console, wait time.Duration) (string, int) {
+func collectConsoleWindow(ctx context.Context, c *console.Console, wait time.Duration) (string, int, bool) {
 	deadline := time.Now().Add(wait)
 	collected := subprocess.CappedBuffer{Limit: maxSubprocessOutputBytes}
 	dropped := 0
 	for {
-		chunk, lost := c.Read(time.Until(deadline))
+		chunk, lost := c.ReadContext(ctx, time.Until(deadline))
 		_, _ = collected.Write([]byte(chunk))
 		dropped += lost
 		switch {
+		case ctx.Err() != nil:
+			return collected.String(), dropped, true
 		case !c.Alive() || time.Until(deadline) <= 0:
-			return collected.String(), dropped
+			return collected.String(), dropped, false
 		case chunk == "":
 			// The terminal went quiet while the process is still recorded as running: its
 			// output has ENDED, so the only thing this window still owes the model is how
 			// the process ended, which its reaper writes down a moment later.
-			awaitConsoleExit(c, deadline)
-			return collected.String(), dropped
+			cutShort := !awaitConsoleExit(ctx, c, deadline)
+			return collected.String(), dropped, cutShort
 		}
 	}
 }
@@ -199,14 +227,22 @@ func collectConsoleWindow(c *console.Console, wait time.Duration) (string, int) 
 // awaitConsoleExit waits, inside what is left of the window, for a Console's exit to be recorded,
 // so a program that was over before the call returned is reported as exited rather than as alive.
 // The wait is bounded by the window the caller already asked for: a program that closed its
-// terminal and kept running costs that window and nothing more.
-func awaitConsoleExit(c *console.Console, deadline time.Time) {
+// terminal and kept running costs that window and nothing more. It reports false only when ctx
+// was cancelled before the exit was recorded or the window closed.
+func awaitConsoleExit(ctx context.Context, c *console.Console, deadline time.Time) bool {
+	ticker := time.NewTicker(consoleExitPollInterval)
+	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		if !c.Alive() {
-			return
+			return true
 		}
-		time.Sleep(consoleExitPollInterval)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
 	}
+	return true
 }
 
 // renderConsoleTail assembles one Console result: the fence label when the kill-on-denial watch

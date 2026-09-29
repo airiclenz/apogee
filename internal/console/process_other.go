@@ -3,6 +3,7 @@
 package console
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"time"
@@ -36,6 +37,9 @@ func Start(Spec) (*Process, error) { return nil, ErrUnsupported }
 
 // Read returns no output and no dropped bytes.
 func (p *Process) Read(time.Duration) (string, int) { return "", 0 }
+
+// ReadContext returns no output and no dropped bytes.
+func (p *Process) ReadContext(context.Context, time.Duration) (string, int) { return "", 0 }
 
 // Write reports that no process is listening.
 func (p *Process) Write([]byte) (int, error) { return 0, ErrUnsupported }

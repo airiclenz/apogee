@@ -119,7 +119,10 @@ func (t *ConsoleOpen) DefaultOff() bool { return true }
 // backend are all surfaced to the model as error RESULTS — every one of them is something it can
 // act on. Only ctx cancellation and a confinement-unavailable demotion are Go errors, the
 // terminal convention: the second is what makes the disposition gate the call instead of leaving
-// an unfenced shell running past the Turn that asked for it.
+// an unfenced shell running past the Turn that asked for it. A cancel during the wait window,
+// once the Console is open, ends the wait promptly with a nil error: the result still names the
+// console id — a started Console is finished work the model must be told about (ADR 0088) — and
+// carries the output collected so far and consoleCutShortNote.
 func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err

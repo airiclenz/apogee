@@ -171,11 +171,19 @@ func Start(spec Spec) (*Process, error) {
 }
 
 // Read returns the output produced since the previous Read, with terminal control sequences
-// stripped, together with how many bytes the ring dropped over the same span. With wait <= 0 it
-// reports what is buffered now; with wait > 0 it returns as soon as new output arrives, the
-// window passes, or the process's output ends.
+// stripped, together with how many bytes the ring dropped over the same span. It is ReadContext
+// with a context that is never cancelled.
 func (p *Process) Read(wait time.Duration) (string, int) {
-	unread, dropped := p.ring.Read(wait)
+	return p.ReadContext(context.Background(), wait)
+}
+
+// ReadContext returns the output produced since the previous read, with terminal control
+// sequences stripped, together with how many bytes the ring dropped over the same span. With
+// wait <= 0 it reports what is buffered now; with wait > 0 it returns as soon as new output
+// arrives, the window passes, the process's output ends, or ctx is cancelled — the cancel
+// returning nothing and leaving whatever is buffered for the next read.
+func (p *Process) ReadContext(ctx context.Context, wait time.Duration) (string, int) {
+	unread, dropped := p.ring.ReadContext(ctx, wait)
 	return stripEscapes(string(unread)), dropped
 }
 
