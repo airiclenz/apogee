@@ -298,8 +298,8 @@ func TestRunSubprocessDenialWatchIgnoresStdout(t *testing.T) {
 }
 
 // TestRunSubprocessMergedStdoutWatchKillsConfinedRun pins the opt-in stdout watch: a CONFINED
-// run whose spec sets WatchMergedStdout — a line that merged its own streams, so its denial
-// reaches STDOUT — is killed by the anchored stdout watch before its later, unguarded write
+// run whose spec sets WatchMergedStdout — a line that merged its own streams and chains more
+// commands after the merge, so its denial reaches STDOUT — is killed by the anchored stdout watch before its later, unguarded write
 // runs, and the stdout-only kill still reports DenialStopped, so the caller renders the
 // stopped-by-confinement label as it does for a stderr kill.
 func TestRunSubprocessMergedStdoutWatchKillsConfinedRun(t *testing.T) {

@@ -123,6 +123,20 @@ the PTY Console and payload stdout (`SplitStdout`, a streamed `RunSubprocessTo`)
 The escape battery gains `merged_stream_clobber_denied`, which wires both watches that way and
 asserts the stdout one stopped the script.
 
+*Amended (2026-09-29, code audit):* the 2026-09-26 exception arms the stdout watch **only on a
+chained line**. Armed on every merge, it re-opened the incident (1) closed: `cat build.log 2>&1`
+was killed on a data line ending in `permission denied`, exactly the `fc413fb5` shape. A merge
+only needs stdout watched when commands run on after the denial it hides, so the `terminal` tool
+now arms `WatchMergedStdout` only when a **command separator** — `&&`, `||`, `;`, `&` used as a
+separator, or a newline — follows the merge on the model's own line and more of the line follows
+that separator. A single command or pipeline with a merge (`cat build.log 2>&1`,
+`make 2>&1 | tail`) keeps the stderr-only watch and the post-run stopped-by-confinement label, as
+does a line whose separator trails with nothing after it (`… 2>&1;`, `… 2>&1 &`). The check still
+reads the model's own line before the fail-fast preamble joins it — the preamble ends in a
+newline, so a check over the prefixed script would count every line as chained. Quoting stays
+unparsed: a separator inside a quoted string arms the watch, costing only the stricter stdout
+scan. `mkdir /outside 2>&1 && cd /outside && …` is still stopped at its first denial.
+
 **3. Every session gets a scratch dir inside the confinement box.** A new dotdir root
 `~/.apogee/scratch/<session-id>/` (sibling of `sessions/`, `library/`, …), created `0700`
 when the session id is minted and **following the active session** across rotation;

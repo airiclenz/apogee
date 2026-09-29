@@ -242,8 +242,8 @@ func Probe(
 	t.Run("merged_stream_clobber_denied", func(t *testing.T) {
 		// The chained probe's incident shape with the denied mkdir's stderr merged into its
 		// STDOUT (`2>&1`), the code audit's 2026-09-26 High: the stderr watch sees nothing,
-		// so only the stricter stdout watch the terminal tool arms for a stream-merging line
-		// (anchored signature only) can stop the script before its later unguarded relative
+		// so only the stricter stdout watch the terminal tool arms for a chained stream-merging
+		// line (anchored signature only) can stop the script before its later unguarded relative
 		// write lands in the workspace. The probe wires both watches as the terminal tool's
 		// runSubprocess does and asserts the STDOUT one matched the streamed denial, the
 		// script died non-zero, and no merged.txt reached the workspace. The sleep plays the

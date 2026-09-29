@@ -574,7 +574,14 @@ repeat in its first 32.
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/skills/`
 **Commit:** `fix(skills): bound the lenient frontmatter fold`
 
-## 20. Terminal: arm the merged-stdout kill only on a chained line
+## 20. Terminal: arm the merged-stdout kill only on a chained line — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): consequential edit — internal/subprocess/subprocess_test.go: made necessary by the arm-only-when-chained rule (test doc comment said any merging line sets WatchMergedStdout)
+NOTES (2026-09-29): consequential edit — internal/platform/denialkill_test.go: made necessary by the arm-only-when-chained rule (doc comment on newProbeMergedDenialKiller)
+NOTES (2026-09-29): consequential edit — internal/platform/confinetest/confinetest.go: made necessary by the arm-only-when-chained rule (merged_stream_clobber_denied probe comment)
+NOTES (2026-09-29): the regression-guard grep also hits CHANGELOG.md's Unreleased entry "A confined terminal line that merges its streams is stopped at its first denial"; the CHANGELOG is closeout-owned, so the qualifier rides in this item's CHANGELOG text rather than an edit to that line.
+NOTES (2026-09-29): the chained check is a byte scan after the first merge, quoting and comments unparsed (a separator inside quotes or a `#` comment arms the watch — the stricter-scan-only direction); `&` directly after `>`, `<`, `|` or before `>` is a redirect, not a separator.
+
 
 **What:** Fix "Merged-stdout denial watch re-opens the incident ADR 0056 D2 closed" per the
 ratified call: `cat build.log 2>&1` is killed on a data line ending in `permission denied`.

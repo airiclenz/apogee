@@ -17,7 +17,7 @@ func newProbeDenialKiller(next io.Writer, kill func()) confinetest.DenialKiller 
 
 // newProbeMergedDenialKiller adapts NewAnchoredDenialKillWriter to the same seam: the
 // merged-stream clobber probe wires it on the script's stdout, as the terminal tool arms it
-// for a line that merges its own streams.
+// for a line that merges its own streams and chains more commands after the merge.
 func newProbeMergedDenialKiller(next io.Writer, kill func()) confinetest.DenialKiller {
 	return NewAnchoredDenialKillWriter(next, kill)
 }

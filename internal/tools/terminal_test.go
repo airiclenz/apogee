@@ -622,13 +622,17 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 	}
 }
 
-// TestTerminal_ArmsMergedStdoutWatchOnlyForAStreamMergingLine pins which lines get the
+// TestTerminal_ArmsMergedStdoutWatchOnlyForAChainedMergingLine pins which lines get the
 // merged-stdout denial watch: a line that merges its own streams — `2>&1`, `>&2`, `&>`, `|&` —
-// arms it, and a line without one keeps the stderr-only watch. The `cat build.log` row is the
-// ADR 0056 D2 guard: the fail-fast preamble prepended to that POSIX line itself carries `>&2`
-// (its bash ERR trap), so a check run over the prefixed script instead of the model's own line
-// would arm the watch on every call and bring back the 2026-09-16 stdout false positive.
-func TestTerminal_ArmsMergedStdoutWatchOnlyForAStreamMergingLine(t *testing.T) {
+// arms it only when a command separator (`&&`, `||`, `;`, a separating `&`, a newline) chains
+// another command after the merge. A single command or pipeline with a merge, a line whose
+// separator trails with nothing after it, and a line without a merge all keep the stderr-only
+// watch: the `cat build.log 2>&1` row is the ADR 0056 D2 guard against killing a data line that
+// ends in `permission denied`. The `cat build.log` row guards the preamble: the fail-fast
+// preamble prepended to that POSIX line itself carries `>&2` (its bash ERR trap) and ends in a
+// newline, so a check run over the prefixed script instead of the model's own line would arm
+// the watch on every call and bring back the 2026-09-16 stdout false positive.
+func TestTerminal_ArmsMergedStdoutWatchOnlyForAChainedMergingLine(t *testing.T) {
 	t.Parallel()
 	if hostShellIsPOSIX() && !strings.Contains(platform.FailFastPreamble(), ">&2") {
 		t.Fatalf("fail-fast preamble %q no longer carries `>&2`; the no-merge rows below have lost the guard they pin",
@@ -642,11 +646,26 @@ func TestTerminal_ArmsMergedStdoutWatchOnlyForAStreamMergingLine(t *testing.T) {
 	}{
 		{name: "plain line", command: "cat build.log", want: false},
 		{name: "stderr to a file", command: "make 2> build.err", want: false},
-		{name: "stderr into stdout", command: "make 2>&1 | tail -n 20", want: true},
-		{name: "stdout into stderr", command: "echo oops >&2", want: true},
-		{name: "both streams to a file", command: "make &> build.log", want: true},
-		{name: "both streams through a pipe", command: "make |& tee build.log", want: true},
-		{name: "the audit's chain", command: "mkdir /outside 2>&1 && cd /outside && touch clobber", want: true},
+		{name: "stderr to a file, chained", command: "make 2> build.err && echo done", want: false},
+		{name: "merged single command", command: "cat log 2>&1", want: false},
+		{name: "merged single command, chained", command: "cat log 2>&1; echo done", want: true},
+		{name: "merged pipeline", command: "cat log 2>&1 | tail", want: false},
+		{name: "stderr into stdout", command: "make 2>&1 | tail -n 20", want: false},
+		{name: "stderr into stdout, chained", command: "make 2>&1 | tail -n 20 && make install", want: true},
+		{name: "stdout into stderr", command: "echo oops >&2", want: false},
+		{name: "stdout into stderr, chained", command: "echo oops >&2 || exit 1", want: true},
+		{name: "both streams to a file", command: "make &> build.log", want: false},
+		{name: "both streams to a file, chained", command: "make &> build.log & wait", want: true},
+		{name: "both streams through a pipe", command: "make |& tee build.log", want: false},
+		{name: "both streams through a pipe, chained", command: "make |& tee build.log\nmake install", want: true},
+		{name: "semicolon chain", command: "a 2>&1; b", want: true},
+		{name: "the audit's chain", command: "mkdir /x 2>&1 && cd /x", want: true},
+		{name: "the audit's longer chain", command: "mkdir /outside 2>&1 && cd /outside && touch clobber", want: true},
+		{name: "separator before the merge only", command: "cd sub && cat log 2>&1", want: false},
+		{name: "trailing newline", command: "cat log 2>&1\n", want: false},
+		{name: "trailing semicolon", command: "cat log 2>&1;", want: false},
+		{name: "trailing background", command: "cat log 2>&1 &", want: false},
+		{name: "trailing background and newline", command: "cat log 2>&1 & \n", want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

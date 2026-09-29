@@ -982,7 +982,7 @@ harness asserts on exit status / error.
 | 11 | multi-command script: a denied `mkdir … && cd … && cat > …` heredoc chain, then an unguarded **relative** write — fail-fast preamble and kill-on-denial watch wired exactly as the terminal tool composes them | **stopped** — the watch matched the streamed denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
 | 12 | the parent seeds `<sibling-temp>/truncate.txt`, then the confined child runs `truncate -s 0 <path>` | keyed on the backend's own disclosure: `Residuals` empty ⇒ **denied** and the bytes intact; `Residuals` names `truncate(2)` ⇒ **succeeds** and the file is empty | POSIX with coreutils `truncate` (skips on macOS / `cmd.exe`) |
 | 13 | (net) the parent opens a loopback `net.ListenPacket`, then the confined child sends one datagram to it from a network-**deny** box (`exec 3<>/dev/udp/<host>/<port>; printf x >&3`) | keyed on the backend's own disclosure: `Residuals` silent on `connect(2) UDP` ⇒ **the datagram does not reach the listener** (the parent's read hits its deadline); `Residuals` names it ⇒ **the datagram is delivered** | net-capable POSIX with `bash` (skips under `cmd.exe`) |
-| 14 | row #11's denied `mkdir … && cd …` chain with the mkdir's stderr merged into stdout (`2>&1`), then an unguarded **relative** write — both watches wired as the terminal tool arms them for a stream-merging line (stderr watch, plus the anchored-only watch on stdout) | **stopped** — the **stdout** watch matched the merged denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
+| 14 | row #11's denied `mkdir … && cd …` chain with the mkdir's stderr merged into stdout (`2>&1`), then an unguarded **relative** write — both watches wired as the terminal tool arms them for a chained stream-merging line (stderr watch, plus the anchored-only watch on stdout) | **stopped** — the **stdout** watch matched the merged denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
 
 #3/#4 are the core "escape is OS-blocked" proof; #5 is the "no per-thread landlock, parent untouched"
 proof; #6 is the "after fork, before execve, inherited across exec" proof specific to the re-exec
@@ -1060,7 +1060,8 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > closes the gap row #11 cannot see: since 2026-09-16 the kill-on-denial watch reads **stderr alone**,
 > so a line that merges its own streams hands its denial to an unwatched stdout and its later lines
 > run on. The `terminal` tool now arms a second, stricter watch on stdout for such a line (a `2>&1`,
-> `>&2`, `&>` or `|&` in the model's own line, never in the fail-fast preamble it prepends); it kills
+> `>&2`, `&>` or `|&` in the model's own line, never in the fail-fast preamble it prepends — and,
+> since 2026-09-29, only when a command separator chains more commands after the merge); it kills
 > only on the line-anchored signature, never on a bare errno name, because stdout is still the
 > command's data. The row wires both watches exactly so and asserts the **stdout** one matched. The
 > battery drivers hand `Probe` a second `DenialKillerFactory` for it

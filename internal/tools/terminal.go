@@ -37,12 +37,75 @@ var terminalSpec = toolSpec{
 
 // mergedStreamsPattern matches a shell redirect that sends a command's stderr into its stdout:
 // `2>&1`, `>&2` (`1>&2` included), `&>` (`&>>` included) and bash's `|&`. A line carrying one
-// hands its denials to stdout, where the stderr-only denial watch never sees them, so Execute
-// arms the merged-stdout watch for it (subprocess.SubprocessSpec.WatchMergedStdout). It is a
-// substring match over the model's own line, quoting unparsed: a merge spelled inside a quoted
-// string arms the watch too, which costs only the stricter, anchored-only scan of that call's
-// stdout (platform.NewAnchoredDenialKillWriter), never a missed merge.
+// hands its denials to stdout, where the stderr-only denial watch never sees them — but only a
+// CHAINED line needs that stream watched (mergedStdoutNeedsWatch): Execute arms the
+// merged-stdout watch (subprocess.SubprocessSpec.WatchMergedStdout) only when a command
+// separator follows the merge. It is a substring match over the model's own line, quoting
+// unparsed: a merge spelled inside a quoted string counts too, which costs at most the
+// stricter, anchored-only scan of that call's stdout (platform.NewAnchoredDenialKillWriter),
+// never a missed merge.
 var mergedStreamsPattern = regexp.MustCompile(`2>&1|>&2|&>|\|&`)
+
+// mergedStdoutNeedsWatch reports whether the model's line both merges its streams
+// (mergedStreamsPattern) AND chains another command after the merge: a command separator
+// (`&&`, `||`, `;`, `&` used as a separator, a newline) followed by more of the line. Only then
+// can a denial the merge sends to stdout be followed by commands that run on — the 2026-08-22
+// clobber shape. A single command or pipeline with a merge (`cat build.log 2>&1`,
+// `make 2>&1 | tail`) runs nothing after its denial, so it keeps the stderr-only watch and the
+// post-run label, and a data line of its stdout ending in `permission denied` is never killed
+// (ADR 0056 D2). A trailing separator with nothing after it (`cat log 2>&1;`, `… 2>&1 &`) chains
+// nothing. Quoting and comments are unparsed, as for the merge itself: a separator inside a
+// quoted string arms the watch, which costs only the stricter stdout scan.
+func mergedStdoutNeedsWatch(line string) bool {
+	loc := mergedStreamsPattern.FindStringIndex(line)
+	if loc == nil {
+		return false
+	}
+	tail := line[loc[1]:]
+	for i := 0; i < len(tail); i++ {
+		n := commandSeparatorAt(tail, i)
+		if n == 0 {
+			continue
+		}
+		if chainsACommand(tail[i+n:]) {
+			return true
+		}
+		i += n - 1
+	}
+	return false
+}
+
+// commandSeparatorAt returns the byte length of the command separator starting at s[i] — 2 for
+// `&&` / `||`, 1 for `;`, a newline or a lone `&` — or 0 when none starts there. An `&` that is
+// part of a redirect (`>&`, `<&`, `|&`, `&>`) is not a separator.
+func commandSeparatorAt(s string, i int) int {
+	switch s[i] {
+	case ';', '\n':
+		return 1
+	case '|':
+		if i+1 < len(s) && s[i+1] == '|' {
+			return 2
+		}
+	case '&':
+		if i+1 < len(s) && s[i+1] == '&' {
+			return 2
+		}
+		if i+1 < len(s) && s[i+1] == '>' {
+			return 0
+		}
+		if i > 0 && (s[i-1] == '>' || s[i-1] == '<' || s[i-1] == '|') {
+			return 0
+		}
+		return 1
+	}
+	return 0
+}
+
+// chainsACommand reports whether rest — what follows a separator — holds anything but
+// whitespace and further separators, i.e. a command that would run after it.
+func chainsACommand(rest string) bool {
+	return strings.TrimLeft(rest, " \t\r\n;&|") != ""
+}
 
 type terminalArgs struct {
 	Command        string `json:"command"`
@@ -78,9 +141,11 @@ type terminalArgs struct {
 // process group at the first OS-denial signature. That watch reads stderr alone — stdout is
 // the command's data (ADR 0056 D2) — so a line that merges its own streams (`2>&1`, `>&2`,
 // `&>`, `|&`; mergedStreamsPattern) would hand its denials to an unwatched stream: for such a
-// line Execute also arms the stricter, anchored-only watch on stdout (WatchMergedStdout). The
-// merge is detected on the model's own line, never on the preamble-prefixed script, whose ERR
-// trap itself writes `>&2`. Windows is asymmetric by necessity:
+// line, only when it chains more commands after the merge (mergedStdoutNeedsWatch), Execute
+// also arms the stricter, anchored-only watch on stdout (WatchMergedStdout); a single command
+// or pipeline with a merge keeps the stderr-only watch and the post-run label. The merge is
+// detected on the model's own line, never on the preamble-prefixed script, whose ERR trap
+// itself writes `>&2`. Windows is asymmetric by necessity:
 // cmd.exe has no `set -e` analogue (`if errorlevel` is per-line, not a mode), so cmd
 // lines pass through verbatim with no fail-fast floor — and no denial watch either (its
 // denials print "Access is denied.", which the POSIX signature set deliberately skips).
@@ -162,10 +227,12 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// analogue — gets the line verbatim.
 	//
 	// The merge check reads args.Command — the model's own line — for the same reason, and must
-	// run before the preamble joins it: the preamble's bash ERR trap writes `>&2`, so a check
-	// over the prefixed script would arm the stdout watch on every POSIX call and bring back the
-	// stdout false positives ADR 0056 D2 (2026-09-16 amendment) closed.
-	watchMergedStdout := mergedStreamsPattern.MatchString(args.Command)
+	// run before the preamble joins it: the preamble's bash ERR trap writes `>&2` and the
+	// preamble ends in a newline, so a check over the prefixed script would arm the stdout watch
+	// on every POSIX call and bring back the stdout false positives ADR 0056 D2 (2026-09-16
+	// amendment) closed. It arms only a merge that a later command is chained after
+	// (mergedStdoutNeedsWatch).
+	watchMergedStdout := mergedStdoutNeedsWatch(args.Command)
 	command := args.Command
 	failFast := cmdline == ""
 	if failFast {
@@ -188,8 +255,9 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		Dir:      dir,
 		Timeout:  time.Duration(args.TimeoutSeconds) * time.Second,
 		FailFast: failFast,
-		// A line that merged its own streams sends its denials to stdout, so that stream is
-		// watched too (anchored signature only); every other line keeps the stderr-only watch.
+		// A line that merged its own streams and chains more commands after the merge sends its
+		// denials to stdout ahead of commands that run on, so that stream is watched too
+		// (anchored signature only); every other line keeps the stderr-only watch.
 		WatchMergedStdout: watchMergedStdout,
 		// The command line runs in the operator's own environment — minus the credential
 		// variables, which a model-chosen command line has no use for and could exfiltrate,

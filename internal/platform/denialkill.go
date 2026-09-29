@@ -107,8 +107,8 @@ func anyLineMatches(output string, matchLine func(string) bool) bool {
 // default — stdout is a command's data, and the incident this closed (session-mining
 // fc413fb5) was a confined `cat` of a log to STDOUT whose lines ended in a real Go denial
 // (`open /dev/ptmx: permission denied`), killed as if the cat itself had been denied. The
-// exception (2026-09-26) is a line that merges its streams itself (`2>&1`, `&>`, `|&`): its
-// denials reach stdout, so the caller opts that stream into a second, stricter watch built by
+// exception (2026-09-26) is a line that merges its streams itself (`2>&1`, `&>`, `|&`) and
+// chains more commands after the merge: its denials reach stdout, so the caller opts that stream into a second, stricter watch built by
 // NewAnchoredDenialKillWriter, which drops the bare errno names and keeps the anchored
 // signature alone. The PTY console keeps its single stream (a terminal has no second one)
 // under the same anchored rule. The watch is still best-effort in both directions and its caller must treat it so:
@@ -141,7 +141,8 @@ func NewDenialKillWriter(next io.Writer, kill func()) *DenialKillWriter {
 // once when a LINE of the stream ends in the anchored denial signature (denialLinePattern)
 // — never on a bare errno name (denialErrnoPattern), which a command's data mentions far
 // more often than it reports one. It is the watch for the stdout of a line that merged its
-// own stderr into it (`2>&1`, `>&2`, `&>`, `|&`): the denial the fence provoked lands there,
+// own stderr into it (`2>&1`, `>&2`, `&>`, `|&`) and chains more commands after the merge: the
+// denial the fence provoked lands there,
 // but so does the command's data, so only the stricter half of the signature may kill.
 func NewAnchoredDenialKillWriter(next io.Writer, kill func()) *DenialKillWriter {
 	return &DenialKillWriter{next: next, kill: kill, matchLine: looksLikeAnchoredDenialLine}

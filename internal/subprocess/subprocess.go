@@ -72,8 +72,9 @@ type SubprocessSpec struct {
 	SplitStdout bool
 	// WatchMergedStdout asks a CONFINED run to watch its standard output for a denial too, not
 	// its stderr alone: a caller whose shell line merges its own streams (`2>&1`, `>&2`, `&>`,
-	// `|&`) sets it, because such a line's denials reach stdout, where the stderr-only watch
-	// never sees them. That second watch is the stricter one
+	// `|&`) AND chains more commands after the merge sets it, because such a line's denials
+	// reach stdout, where the stderr-only watch never sees them, ahead of commands that run on;
+	// a single command or pipeline with a merge leaves it false. That second watch is the stricter one
 	// (platform.NewAnchoredDenialKillWriter): a stdout line must END in the anchored denial
 	// signature — a bare errno name mid-line never kills, since stdout is still the command's
 	// data. It is ignored on an unconfined run, and on a run whose stdout is a payload
@@ -316,7 +317,8 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		cmd.Stderr = denialWatch
 	}
 	// The one exception (2026-09-26): a line that merged its own streams sends its denials to
-	// stdout, so a caller that saw the merge opts stdout into the anchored-only watch. A split
+	// stdout, so a caller that saw the merge chained to later commands opts stdout into the
+	// anchored-only watch. A split
 	// or streamed stdout is a payload, not what the model reads, and is never wrapped.
 	if confined && spec.WatchMergedStdout && streamStdout == nil && !spec.SplitStdout {
 		stdoutWatch = platform.NewAnchoredDenialKillWriter(&out, cancel)
