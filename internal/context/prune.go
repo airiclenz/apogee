@@ -59,6 +59,14 @@ const (
 	pruneStubFormat = pruneStubPrefix + " %d lines%s — re-run the call if you need it]"
 )
 
+// IsPruneStub reports whether content is a tool result Prune has already rewritten into a stub —
+// the ONE recognition of pruneStubPrefix outside this package, so a caller asking "is the payload
+// still in the conversation" never copies the literal. The read cache asks it: a read whose result
+// was pruned no longer holds the file, so it cannot stand as the cached copy.
+func IsPruneStub(content string) bool {
+	return strings.HasPrefix(content, pruneStubPrefix)
+}
+
 // PruneResult reports what a Prune pass did: how many tool results were stubbed and how many
 // characters that reclaimed. The zero value is "nothing was pruned" — the caller emits its
 // user-facing notice only on a non-zero Pruned, and converts Chars to tokens through the same

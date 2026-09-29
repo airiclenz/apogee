@@ -56,7 +56,7 @@ lifecycle edges restore what they drain, and the merged-stdout denial kill stops
 - 19: guard folded
 - 20: guard folded, writer decision
 
-## 1. Read cache: only an unpruned full read counts as the cached copy
+## 1. Read cache: only an unpruned full read counts as the cached copy — ✅ DONE (2026-09-29)
 
 **What:** Fix two audit findings in one function ("Read cache counts a ranged or capped earlier
 read as a full copy", Medium; "Read cache caps a re-read of a file whose earlier result was pruned

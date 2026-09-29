@@ -304,3 +304,90 @@ func TestCacheReadOrdersANonReadOnlyCallAgainstTheRead(t *testing.T) {
 		t.Errorf("a shell call before the read voided the cache; args = %s", got.Arguments)
 	}
 }
+
+// readCallWith is a read_file call over a.go carrying extra, raw JSON argument members.
+func readCallWith(id, extra string) domain.ToolCall {
+	return domain.ToolCall{ID: id, Tool: "read_file", Arguments: json.RawMessage(`{"path":"a.go"` + extra + `}`)}
+}
+
+// A prior read that returned only a slice or windows of the file — a line range, a line limit, a
+// locate — is not a copy of the file, so a bare re-read after it goes through whole.
+func TestCacheReadLeavesReReadAfterSliceReadUntouched(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		extra string
+	}{
+		{"line range", `,"start_line":1,"end_line":40`},
+		{"start line only", `,"start_line":200`},
+		{"line limit", `,"max_lines":20`},
+		{"locate", `,"locate":"func F"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			history := []domain.Message{
+				userMsg("edit a.go"),
+				assistantCall(readCallWith("r1", tc.extra)),
+				toolResult("r1", "package a"),
+				assistantCall(readCall("r2", "a.go")),
+			}
+			got, ok := cacheRead(history, readCall("r2", "a.go"))
+			if ok || hasMaxLines(got.Arguments) {
+				t.Errorf("a bare re-read after a %s read was capped; args = %s", tc.name, got.Arguments)
+			}
+		})
+	}
+}
+
+// A full read whose result was since pruned to a stub no longer holds the file, so a bare re-read
+// of it goes through whole.
+func TestCacheReadLeavesReReadOfPrunedReadUntouched(t *testing.T) {
+	t.Parallel()
+	history := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(readCall("r1", "a.go")),
+		toolResult("r1", "[pruned: 40 lines from read_file a.go — re-run the call if you need it]"),
+		assistantCall(readCall("r2", "a.go")),
+	}
+	got, ok := cacheRead(history, readCall("r2", "a.go"))
+	if ok || hasMaxLines(got.Arguments) {
+		t.Errorf("a re-read of a pruned read was capped; args = %s", got.Arguments)
+	}
+}
+
+// A bare read this guard capped keeps its bare arguments in history (prepareCall caps a local copy)
+// while its result holds only a header, so it must never stand as the copy: after a pruned r1 and a
+// capped-looking r2, a third read still goes through whole.
+func TestCacheReadIgnoresALaterBareReadAfterAPrunedOne(t *testing.T) {
+	t.Parallel()
+	history := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(readCall("r1", "a.go")),
+		toolResult("r1", "[pruned: 40 lines from read_file a.go — re-run the call if you need it]"),
+		assistantCall(readCall("r2", "a.go")),
+		toolResult("r2", "a.go (40 lines, showing 1-1)"),
+		assistantCall(readCall("r3", "a.go")),
+	}
+	got, ok := cacheRead(history, readCall("r3", "a.go"))
+	if ok || hasMaxLines(got.Arguments) {
+		t.Errorf("a re-read after a pruned read and a header-only read was capped; args = %s", got.Arguments)
+	}
+}
+
+// A slice read before a full one does not stop the full one standing as the copy.
+func TestCacheReadCapsReReadAfterSliceThenFullRead(t *testing.T) {
+	t.Parallel()
+	history := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(readCallWith("r1", `,"start_line":1,"end_line":10`)),
+		toolResult("r1", "package a"),
+		assistantCall(readCall("r2", "a.go")),
+		toolResult("r2", "package a\nfunc F() {}"),
+		assistantCall(readCall("r3", "a.go")),
+	}
+	got, ok := cacheRead(history, readCall("r3", "a.go"))
+	if !ok || !hasMaxLines(got.Arguments) {
+		t.Errorf("a re-read after a full read was not capped; args = %s", got.Arguments)
+	}
+}

@@ -3,6 +3,7 @@ package floor
 import (
 	"encoding/json"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -11,16 +12,24 @@ import (
 // re-dump would have cost.
 const readCacheLines = 1
 
+// readSliceKeys are the read arguments that bound what comes back to a slice of the file — an
+// explicit line range or line limit. capReadArguments leaves a pending call carrying one untouched,
+// and priorSuccessfulReadUnchanged refuses a prior read carrying one as the cached copy: the ONE
+// list both ask, so a new slicing argument is added in one place.
+var readSliceKeys = []string{"start_line", "end_line", "max_lines"}
+
 // CacheRead is the read cache guard (the `read-cache` key, ADR 0071): a read of a file this
-// conversation already read successfully — with no write to it, and no call to any non-read-only
-// tool, since — is capped to a header-only slice by appending max_lines to its arguments. The
+// conversation already read in full successfully — no line range, limit or locate, its result not
+// since pruned to a stub, and with no write to the file, and no call to any non-read-only tool,
+// since — is capped to a header-only slice by appending max_lines to its arguments. The
 // model's existing copy stays the source of truth, and the window the re-dump would have cost is
 // reclaimed.
 //
 // It reports whether it capped anything. ok is false — and the pending call is left byte-identical —
 // when the call is not a read, carries no path, targets a file not read successfully before (or
 // changed since: written by name, or followed by a non-read-only call such as a shell command that
-// may have rewritten it unnamed, so the copy may be stale), already asks for an explicit line range
+// may have rewritten it unnamed, so the copy may be stale; or read only in slices, or whose full read
+// was pruned, so no copy is in the conversation), already asks for an explicit line range
 // or limit (a targeted read is not a redundant full re-dump), has arguments that are not a JSON
 // object, or names a tool whose schema does not declare max_lines. That last gate is what makes the
 // no-op literal rather than hoped-for: a strict MCP server (additionalProperties:false) rejects an
@@ -54,29 +63,39 @@ func CacheRead(view domain.LoopView, edit *domain.ToolCallEdit) (ok bool) {
 	return true
 }
 
-// priorSuccessfulReadUnchanged reports whether path np was read successfully in an earlier Turn and
-// nothing since could have changed it (apogee-sim detectCachedReread's "earlier successful read of
-// the same path" @pin, strengthened to honour "unchanged": the sim omitted the write-since check, but
-// capping a file modified after the earlier read would drop real content). Two kinds of later call
-// void the cached copy: a write-tool call naming np, and — whatever path it names, or none — any call
-// that invalidatesReadCache, because a shell line, an interpreter or an MCP server can rewrite np
-// without ever naming it. A call in the same assistant message as the read counts as after it. The
-// pending call (currentCallID) is excluded — its own assistant message is already committed to
-// history when the pre-tool-exec seam runs.
+// priorSuccessfulReadUnchanged reports whether path np was read in full, successfully, in an earlier
+// Turn, that copy is still in the conversation, and nothing since could have changed the file
+// (apogee-sim detectCachedReread's "earlier successful read of the same path" @pin, strengthened to
+// honour "unchanged": the sim omitted the write-since check, but capping a file modified after the
+// earlier read would drop real content). Two kinds of later call void the cached copy: a write-tool
+// call naming np, and — whatever path it names, or none — any call that invalidatesReadCache,
+// because a shell line, an interpreter or an MCP server can rewrite np without ever naming it. A call
+// in the same assistant message as the read counts as after it. The pending call (currentCallID) is
+// excluded — its own assistant message is already committed to history when the pre-tool-exec seam
+// runs.
+//
+// Only the EARLIEST full read since the last change stands as the copy, and only while its result is
+// unpruned. A read carrying any readSliceKeys key or a locate returned a slice or windows, never the
+// file, so it is skipped. The earliest is the one to judge because a later bare read may be one this
+// guard capped to a header: prepareCall caps a local copy of the call, so history still holds the
+// bare arguments, and only an earlier full read can vouch for it. That earliest read being pruned to
+// a stub means the file is no longer in the conversation, and the re-read must go through whole —
+// the guard never leaves the model worse off than the bare loop would.
 func priorSuccessfulReadUnchanged(conv domain.ConversationView, tools []domain.ToolDef, np, currentCallID string) bool {
-	lastSuccessfulRead := -1
-	lastChange := -1
+	copyCallID := ""
 	for i := 0; i < conv.Len(); i++ {
 		m := conv.At(i)
 		if m.Role != domain.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue
 		}
+		changed := false
+		firstFullRead := ""
 		for _, tc := range m.ToolCalls {
 			if tc.ID == currentCallID {
 				continue
 			}
 			if invalidatesReadCache(tools, tc.Tool) {
-				lastChange = i
+				changed = true
 			}
 			p := toolCallPath(tc.Arguments)
 			if p == "" || normalizePath(p) != np {
@@ -84,13 +103,44 @@ func priorSuccessfulReadUnchanged(conv domain.ConversationView, tools []domain.T
 			}
 			switch {
 			case isFileMutatingTool(tc.Tool):
-				lastChange = i
-			case isReadTool(tc.Tool) && !resultIsReadError(conv, tc.ID):
-				lastSuccessfulRead = i
+				changed = true
+			case firstFullRead == "" && isReadTool(tc.Tool) && isFullRead(tc.Arguments) && !resultIsReadError(conv, tc.ID):
+				firstFullRead = tc.ID
 			}
 		}
+		switch {
+		case changed:
+			copyCallID = ""
+		case copyCallID == "":
+			copyCallID = firstFullRead
+		}
 	}
-	return lastSuccessfulRead >= 0 && lastChange < lastSuccessfulRead
+	if copyCallID == "" {
+		return false
+	}
+	res, _, ok := conv.ResultFor(copyCallID)
+	return !ok || !apogeectx.IsPruneStub(res.Content)
+}
+
+// isFullRead reports whether a read call's arguments asked for the whole file: no readSliceKeys key
+// and no locate (a locate without a range returns the windows around its hits, not the file). An
+// argument set that is not a JSON object is not a full read — nothing vouches for what it returned.
+func isFullRead(args json.RawMessage) bool {
+	var m map[string]any
+	if json.Unmarshal(args, &m) != nil {
+		return false
+	}
+	return !hasAnyKey(m, readSliceKeys) && !hasAnyKey(m, []string{"locate"})
+}
+
+// hasAnyKey reports whether m carries any of keys.
+func hasAnyKey(m map[string]any, keys []string) bool {
+	for _, k := range keys {
+		if _, ok := m[k]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // invalidatesReadCache reports whether a call to toolName may have changed a file the conversation
@@ -120,10 +170,8 @@ func capReadArguments(args json.RawMessage) (json.RawMessage, bool) {
 	if json.Unmarshal(args, &m) != nil {
 		return nil, false
 	}
-	for _, k := range []string{"start_line", "end_line", "max_lines"} {
-		if _, ok := m[k]; ok {
-			return nil, false
-		}
+	if hasAnyKey(m, readSliceKeys) {
+		return nil, false
 	}
 	m["max_lines"] = readCacheLines
 	out, err := json.Marshal(m)
