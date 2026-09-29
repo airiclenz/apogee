@@ -8,6 +8,46 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed:** the read cache no longer caps a re-read when the earlier read returned only part of the file (a line range, a `max_lines` limit or a `locate`), or when that earlier read's result has since been pruned from the conversation — the model now gets the file's content instead of a one-line header, where before it could be left with no copy of the file at all.
+
+- **Fixed:** a skill recipe loaded from disk can no longer read files outside its own skill folder: a `prompt:` file (or a `{{SKILL_DIR}}` file a recipe stages) that is a symlink resolving outside the folder is now refused with an error instead of read. Symlinks whose target is an absolute path are refused too, even when they point back inside the folder; use a relative link for an in-folder alias. A skill folder removed after discovery now fails its prompt reads instead of reading a same-named file from the workspace.
+
+- **The scratch-dir exemption no longer masks a `..` escape.** A shell token that starts at the session's scratch dir and carries a `..` path segment is now left whole and unmasked, so `rm -rf <scratch>/../../..` and `echo x > <scratch>/../../.ssh/authorized_keys` are judged by the dangerous-action rules exactly as without the exemption. The token is refused the mask, never cleaned, so a `..` that stays inside the dir (`ls <scratch>/repo/../out`) now asks the `~/.apogee` control-plane approval too; `<scratch>/sub/file` and a `..` inside a file name (`<scratch>/a..b`) stay exempt. ADR 0049 carries a dated amendment.
+
+- An MCP server's message is now capped at 4 MiB in total, not per line: a stdio message (a JSON value, however many lines it spans), an SSE event (up to its blank line, `\n` or `\r\n`), or a plain `application/json` reply body past the cap fails the read with `apogee: mcp message exceeds the 4 MiB limit` — a non-SSE body errors rather than truncating. Many small messages still pass whatever their total, so a long-lived SSE stream is never cut. Supersedes the 2026-09-21 "per line, never cumulative" bound. Closes the 2026-09-29 audit's Medium "MCP size cap is per line, so one hostile server can exhaust memory".
+
+- **A same-length rewrite of a probed git config no longer slips past the command-config refusal.** The memoised repo-local command-config probe fingerprinted each config file by size, mtime, mode and inode/device, so an in-place rewrite of the same length that restored the mtime with a `utimes` call (`touch -r`, `os.Chtimes`) kept the stale "no command-valued keys" answer, and the next git tool could run a newly written `filter.<x>.clean` unconfined. The fingerprint now also carries the inode change time (ctime), which no userland call can put back, on Linux and macOS; Windows, which exposes no ctime, keeps the previous fingerprint.
+
+- **Fixed:** stopping a re-run of a finished workflow (`RerunFailed`) while it still waited in line behind another workflow marked the finished workflow stopped, so every later re-run was refused as "has not finished". The finished workflow now stays done and can be re-run again; stopping a queued new or resumed-while-running workflow still marks it stopped.
+
+- A finished background workflow's note is no longer lost when the Exchange it was delivered into is aborted (Esc on the opening, or on the wake reply's first Turn): the note is held again and reaches the next Exchange, and a completed Exchange never re-delivers it.
+
+- `^r` (re-run failed items) in a workflow's detail is now refused while a profile load, model unload or server stop is in flight, with the same note `/bg` gets, instead of launching into a server mid-restart.
+
+- Clicking outside the "stop running workflows?" confirm now cancels it exactly as esc does: commands queued behind the `/clear`, `/sessions` switch or `/fork` run and a held message is sent, instead of being stranded until the next completion.
+
+- A verify stage's child that ended blocked or partial now counts as unclear even when its receipt carries a `confirmed` or `refuted` verdict, so an unfinished check no longer inflates the confirmed/refuted tally.
+
+- **Fixed:** stopping a turn while `console_open` or `console_send` is waiting for output now ends the wait at once instead of sitting out its window (up to 30 s). The call still answers with the output gathered so far and a closing `[wait cut short by cancel]` line, so the model is told the console was opened or the input typed. A `console_read` stopped mid-wait ends as promptly, returning the cancellation only when it had read nothing.
+
+- **Fixed:** a patch edit (`edit_existing_file` with `*** Begin Patch`) no longer lands mid-line or on the wrong copy of repeated text: a hunk must match whole lines (`-x = 1` no longer edits `x = 10`), a hunk that matches more than one place is refused with an error naming the lines it matched so the model can add context, and a line added to the end of a file that lacks a final newline now starts a line of its own instead of being glued onto the last one. In a CRLF file a single-line hunk still matches line by line; a hunk of several lines does not match there yet.
+
+- A delegate's report is judged degenerate only when one *content* line — a trimmed line of 4 or more characters carrying a letter or digit — repeats 50 times or more. Structural lines such as `}`, `)`, `end`, `---` or a code fence no longer count, so a sub-agent that returns real code is no longer rejected as degenerate narration; this supersedes the earlier "one line repeated 50 times" rule.
+
+- **Fixed:** editing a recipe stage's `prompt:` file between two runs on the same scope now redoes that stage's finished items instead of resuming them with receipts written for the old prompt: the prompt file's content is now part of every item's key, as a context file's already was. A prompt file that cannot be read now stops the run before any item starts. Upgrade note: items of a stage that names a `prompt:` file (fan-out, verify or merge) get new keys once across this upgrade, so re-running or resuming a workflow folder started before it redoes those stages' finished items; stages written with an inline `task:` keep their keys.
+
+- A workflow fanout stage whose `out:` path lacks `{item}` is now refused at validation, naming the stage, instead of letting every child write the same file at once.
+
+- Fixed: a scheduled `run: workflow:` firing whose workflow did not run, was stopped, failed or blocked on every item is now logged and notified as a failed firing — the same judgement `apogee headless --recipe` exits 1 on — instead of as a completed one.
+
+- Fixed: a recipe skill found on disk on Windows could not find its stage prompt files; stage prompts now stay slash-separated and relative to the skill folder on every OS, and a prompt an embedder spells under the recipe's folder (with either separator) still opens.
+
+- **Fixed:** a SKILL.md with malformed frontmatter can no longer stall skill loading. Recovering such a block used to take time quadratic in its size, so a 1 MiB file of one-character lines behind an unclosed quote could hang every load; the recovery is now linear. A recovered value stops growing at 4096 characters and a recovered `triggers:` list at 32 distinct phrases. The loaded skill is unchanged: the same description, summary and triggers as before.
+
+- **Fixed:** a confined `terminal` line that merges its streams is no longer killed on its own data. The stdout denial watch added on 2026-09-26 armed for every `2>&1`, `>&2`, `&>` or `|&`, so `cat build.log 2>&1` was stopped on a log line ending in `permission denied` — the false positive ADR 0056 D2 had closed. The watch now arms only when a command separator (`&&`, `||`, `;`, a separating `&`, a newline) chains another command after the merge, as in `mkdir /outside 2>&1 && cd /outside && …`, which is still stopped at its first denial; a single command or pipeline with a merge, or one ending in a bare trailing separator, keeps the stderr-only watch and the post-run label. This narrows the earlier "merges its streams is stopped at its first denial" entry to chained lines (ADR 0056 D2, amended 2026-09-29).
+
+- A stop of every background workflow (quit, or a context clear or session restore not told to keep them) during an open Exchange no longer lets a later abort bring back that stopped session's workflow finish notes.
+
 - A recipe re-issued to resume a stopped workflow now draws its own workflow block: its item runs are seated under it instead of rendering loose in the conversation, and the stopped block stays frozen as it ended.
 
 - Stopping a recipe launch (`/<recipe>`) no longer erases it from the conversation: your line and the stopped run's result stay, marked as cancelled, so the model knows what ran; no model request is sent after the stop.
