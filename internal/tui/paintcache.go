@@ -170,8 +170,8 @@ type paintKey struct {
 	depth int        // the sub-agent nesting level the block is railed at
 	width int        // the width the block was wrapped to
 
-	// measure is the display-width authority the paint was laid out with (width.go). It is the one
-	// part of [theme] this key NAMES, and the only one that has to be named: the terminal's mode-2027
+	// measure is the display-width authority the paint was laid out with (width.go). It is one of
+	// the two parts of [theme] this key NAMES, beside padPrompts: the terminal's mode-2027
 	// answer switches it from WcWidth to GraphemeWidth mid-session (model.go, tea.ModeReportMsg),
 	// which re-wraps everything, and the key would otherwise serve paints wrapped by the other
 	// method.
@@ -184,6 +184,10 @@ type paintKey struct {
 	// sound for the same reason transcript.reset's clear is: after it, nothing memoised in the
 	// previous palette remains to be found.
 	measure widthAuthority
+	// padPrompts is the other part of [theme] this key names, for the same reason: the terminal's
+	// colour-profile answer switches it mid-session (model.go, tea.ColorProfileMsg), and a prompt
+	// block painted with its half rows is a different paint from the same block without them.
+	padPrompts bool
 
 	// root is the run the paint was rooted at ([transcript.setRoot], render.go), and the zero value
 	// is the whole transcript. It is named because a rooted paint of the SAME entry is a different
@@ -409,11 +413,13 @@ type frameKey struct {
 	// generation is the transcript's write counter ([transcript.generation]): the entries, the live
 	// buffer, the root and the fold seed, folded into one integer by the writers themselves.
 	generation uint64
-	// scheme and measure are the theme's identity: the palette is rebuilt whole on a scheme switch
-	// (applyColorScheme) and the measure moves on the terminal's mode-2027 answer (foldModeReport),
-	// and nothing else about a theme changes mid-session.
-	scheme  string
-	measure widthAuthority
+	// scheme, measure and padPrompts are the theme's identity: the palette is rebuilt whole on a
+	// scheme switch (applyColorScheme), the measure moves on the terminal's mode-2027 answer
+	// (foldModeReport) and the prompt padding on its colour-profile answer (Update's
+	// tea.ColorProfileMsg case), and nothing else about a theme changes mid-session.
+	scheme     string
+	measure    widthAuthority
+	padPrompts bool
 	// width and showScrollbar are the column budget: the window's columns less the gutter the bar
 	// reserves (layout()), which is the width renderView wraps to and the widget measures at.
 	width         int
@@ -433,6 +439,7 @@ func (m Model) frameKey() frameKey {
 		generation:    m.transcript.generation,
 		scheme:        m.opts.UI.ColorScheme,
 		measure:       m.th.measure,
+		padPrompts:    m.th.padPrompts,
 		width:         m.width,
 		showScrollbar: m.opts.UI.ShowScrollbar,
 		blink:         m.spin.blink() && m.transcript.hasOpenToolCall(),
@@ -453,20 +460,21 @@ func (m Model) frameKey() frameKey {
 // is read off the records and the frame.
 func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, live bool, root paintRoot, fold umbrellaFold) paintKey {
 	return paintKey{
-		shape:   shape,
-		kind:    ins[0].kind,
-		depth:   ins[0].depth,
-		width:   width,
-		measure: th.measure,
-		root:    root.ref,
-		stage:   root.stage,
-		span:    len(ins),
-		live:    live,
-		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
-		flags:   spanFlags(ins),
-		fills:   spanFills(ins),
-		large:   fold.large,
-		folded:  fold.folded,
+		shape:      shape,
+		kind:       ins[0].kind,
+		depth:      ins[0].depth,
+		width:      width,
+		measure:    th.measure,
+		padPrompts: th.padPrompts,
+		root:       root.ref,
+		stage:      root.stage,
+		span:       len(ins),
+		live:       live,
+		blink:      blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
+		flags:      spanFlags(ins),
+		fills:      spanFills(ins),
+		large:      fold.large,
+		folded:     fold.folded,
 	}
 }
 

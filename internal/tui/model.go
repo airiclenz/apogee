@@ -1126,8 +1126,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// The --tui-diag observation point (diagnostics.go). It consumes nothing — every message it
 	// recognises still reaches the switch below — so a session with the flag on behaves exactly
 	// like one without it, and with the flag off (the normal case) m.diag is nil and this is a
-	// nil check. It sits above the switch rather than inside three cases because one of the three
-	// (the colour profile) has no case of its own and adding one would change what happens to it.
+	// nil check. It sits above the switch rather than inside the cases because the colour profile's
+	// case hands its message on to the widgets as well, and recording it here keeps every
+	// observation in one place.
 	m.diag.observe(msg)
 
 	switch msg := msg.(type) {
@@ -1146,6 +1147,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// The terminal answered one of the mode queries bubbletea sends at start-up: the width
 		// authority takes the one that concerns the layout, and the frame follows it (width.go).
 		return m.foldModeReport(msg)
+
+	case tea.ColorProfileMsg:
+		// The terminal's colour profile decides whether a sent prompt block is padded: a profile with
+		// no colour paints no half rows and the blank separators return (padsPrompts, theme.go). The
+		// frame follows through settle's frameKey compare, and the message still reaches the widgets
+		// it reached before this case existed.
+		m.th.padPrompts = padsPrompts(msg.Profile)
+		return m.foldWidgetMsg(msg)
 
 	case tea.KeyboardEnhancementsMsg:
 		// The terminal answered bubbletea's kitty-keyboard query: the prompt legend learns whether

@@ -380,9 +380,12 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	// painter's WcWidth — but the painter did not move here, only the palette did. Carry the live
 	// measure across the rebuild, the same posture foldModeReport takes when the painter DOES move
 	// (width.go): a scheme switch must not un-learn what the terminal already told the program.
-	measure := m.th.measure
+	// The prompt padding is the same kind of fact: the terminal's colour-profile answer decided it
+	// (Update's tea.ColorProfileMsg case), and a new palette does not give a colourless terminal
+	// colour to paint the half rows in.
+	measure, padPrompts := m.th.measure, m.th.padPrompts
 	m.th = newTheme(s)
-	m.th.measure = measure
+	m.th.measure, m.th.padPrompts = measure, padPrompts
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
 	m.opts.ColorScheme, m.opts.UI.ColorScheme = s, name

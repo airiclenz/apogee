@@ -188,7 +188,9 @@ internal/tui/mouse_test.go — TestTranscriptSelectionText, armTranscriptSelecti
 
 **Commit:** `feat(tui): leave prompt pad rows out of a transcript copy`
 
-## 3. Suppress the pad rows on a colourless profile
+## 3. Suppress the pad rows on a colourless profile — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the new tea.ColorProfileMsg case hands the message on to foldWidgetMsg after setting th.padPrompts, so the widgets still receive it exactly as they did through the default arm; the repaint rides a padPrompts term added to frameKey (settle's compare), and the paint cache is kept apart by a padPrompts field in paintKey (set by blockKey) rather than a clear() in the new arm.
 
 **What:**
 **Goal:** when the program's colour profile is `colorprofile.Ascii` or `colorprofile.NoTTY`,

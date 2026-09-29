@@ -4,6 +4,7 @@ import (
 	"image/color"
 
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -134,7 +135,9 @@ type theme struct {
 	userBlock lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
 	promptPad lipgloss.Style // the ▄/▀ half rows padding a sent prompt block (renderUserBlock): the block's `chrome` gray as the glyph's FOREGROUND on no background, so half of each cell is the block's field and the other half the terminal's own
 	// padPrompts says whether a sent prompt block is painted with its half rows (promptPad). newTheme
-	// sets it; a profile with no colour to paint the half in has nothing to draw them with.
+	// sets it; a profile with no colour to paint the half in has nothing to draw them with, so the
+	// terminal's colour-profile answer clears it (Update's tea.ColorProfileMsg case, padsPrompts) and
+	// the blank separators come back. applyColorScheme carries it across a rebuild like measure.
 	padPrompts    bool
 	breadcrumb    lipgloss.Style // the run view's sticky header (breadcrumbRow): prompt-white on the `surface` field the input box and the status line already share, so the header reads as one of the frame's black bands rather than as a prompt block it is not
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
@@ -454,4 +457,13 @@ func newTheme(s scheme.Scheme) theme {
 		modeAllowEdits: modeAllowEdits,
 		modeAuto:       modeAuto,
 	}
+}
+
+// padsPrompts says whether a terminal of this colour profile paints a sent prompt block's half rows.
+// A half row is a ▄ or ▀ drawn in the block's gray, so a profile that carries no colour
+// (colorprofile.Ascii, colorprofile.NoTTY) would draw a row of bare glyphs instead; every other
+// profile paints them. The two are named rather than compared by order: `> Ascii` would also reject
+// colorprofile.Unknown, the zero value, which says nothing about the terminal's colour.
+func padsPrompts(p colorprofile.Profile) bool {
+	return p != colorprofile.Ascii && p != colorprofile.NoTTY
 }
