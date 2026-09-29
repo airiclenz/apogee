@@ -77,7 +77,9 @@ internal/security/urlsafety.go — NormalizeURL; internal/mcp/mcp_test.go — li
 - `go test -race -count=1 -run 'Redact' ./internal/mcp/`
 **Commit:** `fix(mcp): redact endpoint credentials from surfaced errors`
 
-## 3. Cap server tool descriptions at 8 KiB
+## 3. Cap server tool descriptions at 8 KiB — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): `clipResult` replaced by the shared `clipText(text, limit, marker)` helper used by both `renderContent` and `newServerTool`, as the item's "share one clip helper" instruction asks; `clipResult` had no other callers.
 
 **What:**
 **Goal:** A surfaced MCP tool's `Description()` is never longer than `maxMCPToolDescriptionBytes` (8 KiB) plus its truncation marker; a description within the cap is returned unchanged.

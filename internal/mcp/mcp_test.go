@@ -1107,6 +1107,28 @@ func TestListServerTools_CapsPagesAndTools(t *testing.T) {
 	})
 }
 
+// TestListServerTools_ClipsOversizeDescription proves the description cap holds on the discovery
+// path: a server advertising a 1 MiB description surfaces the tool, its description clipped to
+// maxMCPToolDescriptionBytes and marked.
+func TestListServerTools_ClipsOversizeDescription(t *testing.T) {
+	t.Parallel()
+	tools := listFromInProcessServer(t, 0, func(server *mcpsdk.Server) {
+		server.AddTool(
+			&mcpsdk.Tool{Name: "verbose", Description: strings.Repeat("v", 1<<20), InputSchema: map[string]any{"type": "object"}},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+				return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}, nil
+			},
+		)
+	})
+	marker := fmt.Sprintf(mcpDescriptionTruncatedMarker, maxMCPToolDescriptionBytes)
+
+	got := findTool(t, tools, "many__verbose").Description()
+
+	if want := strings.Repeat("v", maxMCPToolDescriptionBytes) + marker; got != want {
+		t.Errorf("surfaced Description() has length %d; want the %d-byte cap followed by %q", len(got), maxMCPToolDescriptionBytes, marker)
+	}
+}
+
 // listFromInProcessServer connects to an in-memory MCP server paging pageSize tools at a time,
 // with addTools having populated it, and returns what listServerTools surfaces under the alias
 // "many".

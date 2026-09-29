@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,34 @@ func TestServerToolDescriptionFallback(t *testing.T) {
 	if !strings.Contains(tool.Description(), "thing") {
 		t.Errorf("fallback description %q does not name the tool", tool.Description())
 	}
+}
+
+// TestServerToolDescriptionCap pins the 8 KiB description cap: a description one byte past it is
+// clipped to the cap and marked; one exactly at it is returned unchanged.
+func TestServerToolDescriptionCap(t *testing.T) {
+	t.Parallel()
+	marker := fmt.Sprintf(mcpDescriptionTruncatedMarker, maxMCPToolDescriptionBytes)
+
+	t.Run("one byte past the cap is clipped and marked", func(t *testing.T) {
+		t.Parallel()
+		tool := newServerTool("srv", &mcpsdk.Tool{Name: "long", Description: strings.Repeat("d", maxMCPToolDescriptionBytes+1)}, &fakeCaller{}, nil)
+
+		got := tool.Description()
+
+		if want := strings.Repeat("d", maxMCPToolDescriptionBytes) + marker; got != want {
+			t.Errorf("Description() has length %d; want the %d-byte cap followed by %q", len(got), maxMCPToolDescriptionBytes, marker)
+		}
+	})
+
+	t.Run("exactly the cap is unchanged", func(t *testing.T) {
+		t.Parallel()
+		description := strings.Repeat("d", maxMCPToolDescriptionBytes)
+		tool := newServerTool("srv", &mcpsdk.Tool{Name: "full", Description: description}, &fakeCaller{}, nil)
+
+		if got := tool.Description(); got != description {
+			t.Errorf("Description() has length %d; want the %d-byte description unchanged", len(got), len(description))
+		}
+	})
 }
 
 // TestServerToolDeclaresNoArgRoles pins that an MCP server tool declares no argument roles,

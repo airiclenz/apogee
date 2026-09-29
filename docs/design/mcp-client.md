@@ -100,9 +100,12 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   truncation) once the whole body passes the cap. The HTTP-lane outcome is not stdio's
   dead connection: the body read errors; a plain JSON reply fails its call, and a streamable SSE
   reply stalls the call until its ctx, the SDK's retry budget or the 5-minute per-call deadline
-  ends it. Above the transport, two post-decode
+  ends it. Above the transport, three post-decode
   caps: `renderContent` clips a flattened result at `maxMCPResultBytes` (2 MiB) and appends
-  `[mcp result truncated at 2097152 bytes]`; `listServerTools` asks for at most
+  `[mcp result truncated at 2097152 bytes]`; `newServerTool` clips a tool's advertised description
+  at `maxMCPToolDescriptionBytes` (8 KiB, 2026-09-29) and appends
+  `[mcp description truncated at 8192 bytes]` — a description within the cap is kept unchanged,
+  and the empty-description stand-in is unaffected; `listServerTools` asks for at most
   `maxMCPToolListPages` (64) pages and surfaces at most `maxMCPToolsPerServer` (512) tools — past
   either it stops and returns the capped list silently, `Connect` having no report path but tools
   and errors — and skips a tool whose normalised schema exceeds `maxMCPToolSchemaBytes` (64 KiB)

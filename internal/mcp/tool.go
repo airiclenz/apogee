@@ -56,13 +56,15 @@ type toolCaller interface {
 // with the server alias and normalising its input schema to JSON for the model. A tool whose
 // schema does not marshal (an exotic server value) still surfaces, with an empty-object schema
 // — the call can still be made; only the model's argument hint is degraded, never the tool lost.
-// redactor cuts the server's endpoint from the error text Execute surfaces; nil for stdio.
+// The description is clipped at maxMCPToolDescriptionBytes, so one server cannot flood the
+// model's tool menu. redactor cuts the server's endpoint from the error text Execute surfaces;
+// nil for stdio.
 func newServerTool(serverAlias string, t *mcpsdk.Tool, caller toolCaller, redactor *endpointRedactor) serverTool {
 	return serverTool{
 		name:        qualifyToolName(serverAlias, t.Name),
 		remoteName:  t.Name,
 		alias:       serverAlias,
-		description: t.Description,
+		description: clipText(t.Description, maxMCPToolDescriptionBytes, mcpDescriptionTruncatedMarker),
 		schema:      normaliseSchema(t.InputSchema),
 		caller:      caller,
 		redactor:    redactor,
@@ -202,6 +204,15 @@ const maxMCPResultBytes = 2 << 20
 // tools' `[response truncated at %d bytes]` form, so the model knows the text is cut.
 const mcpResultTruncatedMarker = "\n[mcp result truncated at %d bytes]"
 
+// maxMCPToolDescriptionBytes is the most of a server's advertised tool description the model is
+// handed: 8 KiB. A description rides into the model's tool menu on every request, so an
+// oversize one would crowd out the context of every Turn, not just one call's.
+const maxMCPToolDescriptionBytes = 8 << 10
+
+// mcpDescriptionTruncatedMarker is the line appended to a clipped tool description, in the
+// mcpResultTruncatedMarker form, so the model knows the description is cut.
+const mcpDescriptionTruncatedMarker = "\n[mcp description truncated at %d bytes]"
+
 // renderContent flattens an MCP CallToolResult's content blocks into the single text string
 // Apogee's ToolResult carries. Text blocks are joined verbatim; a non-text block (image, audio,
 // embedded resource) is rendered as a typed placeholder line so the model knows the server
@@ -224,16 +235,17 @@ func renderContent(res *mcpsdk.CallToolResult) string {
 			fmt.Fprintf(&b, "[mcp %T content omitted]", c)
 		}
 	}
-	return clipResult(b.String())
+	return clipText(b.String(), maxMCPResultBytes, mcpResultTruncatedMarker)
 }
 
-// clipResult returns text unchanged when it fits maxMCPResultBytes, else its first
-// maxMCPResultBytes bytes followed by mcpResultTruncatedMarker.
-func clipResult(text string) string {
-	if len(text) <= maxMCPResultBytes {
+// clipText returns text unchanged when it fits limit bytes, else its first limit bytes followed
+// by marker formatted with limit — the one clip rule shared by a call's result and a tool's
+// description.
+func clipText(text string, limit int, marker string) string {
+	if len(text) <= limit {
 		return text
 	}
-	return text[:maxMCPResultBytes] + fmt.Sprintf(mcpResultTruncatedMarker, maxMCPResultBytes)
+	return text[:limit] + fmt.Sprintf(marker, limit)
 }
 
 // Compile-time proof serverTool satisfies the external-effect tool surface the dispatch

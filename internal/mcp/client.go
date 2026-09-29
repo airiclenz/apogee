@@ -184,7 +184,9 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 // its cursor chain, advertises tools without end, or hands one tool a schema the size of a book
 // would otherwise grow the registry (and the model's tool menu) without bound. Past either list
 // cap discovery stops and the capped list is returned SILENTLY: Connect returns tools and errors
-// only, and there is no Client report or notice path to carry a "cut short" line.
+// only, and there is no Client report or notice path to carry a "cut short" line. A surfaced
+// tool's description is not a skip bound: newServerTool clips it at maxMCPToolDescriptionBytes
+// (tool.go).
 const (
 	// maxMCPToolListPages is the most ListTools pages one server is asked for.
 	maxMCPToolListPages = 64
