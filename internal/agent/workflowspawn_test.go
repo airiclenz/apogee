@@ -387,6 +387,55 @@ func TestWorkflowSpawn_ARepeatedStageReportsEachRound(t *testing.T) {
 	}
 }
 
+// TestWorkflowSpawn_EachStageFinishesWithItsOutcome pins the outcome a stage's finished phase
+// carries, which a Driver paints its row from: a fanout that ran its item ends done, a merge whose
+// child wrote no report ends failed, and a stage its `when:` skipped — which never started — ends
+// skipped.
+func TestWorkflowSpawn_EachStageFinishesWithItsOutcome(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore, nil,
+		finishTurn("f1", `{"status":"ok","summary":"audited"}`),
+		finishTurn("f2", `{"status":"ok","summary":"merged, but wrote nothing"}`),
+	)
+	plan := fanoutPlan("a.go")
+	plan.Stages = append(plan.Stages,
+		workflow.Stage{Name: "report", Kind: workflow.StageMerge, Task: "merge the findings into {out}"},
+		workflow.Stage{
+			Name: "recheck", Kind: workflow.StageFanout, Task: "recheck {item}", When: "find.blocked > 0",
+			Over: &workflow.ItemSource{List: []string{"a.go"}},
+		},
+	)
+
+	phases := observedRun(t, a, sink, plan, 0, 0)
+
+	type stageEnd struct {
+		stage   string
+		outcome domain.WorkflowStageOutcome
+	}
+	var ends []stageEnd
+	for _, phase := range phasesAt(phases, domain.WorkflowStageFinished) {
+		ends = append(ends, stageEnd{phase.Stage, phase.Outcome})
+	}
+	want := []stageEnd{
+		{"find", domain.WorkflowStageDone},
+		{"report", domain.WorkflowStageFailed},
+		{"recheck", domain.WorkflowStageSkipped},
+	}
+	if !slices.Equal(ends, want) {
+		t.Fatalf("stage finishes = %+v, want %+v", ends, want)
+	}
+	for _, phase := range phasesAt(phases, domain.WorkflowStageStarted) {
+		if phase.Stage == "recheck" {
+			t.Errorf("skipped stage reported %+v, want no start", phase)
+		}
+		if phase.Outcome != "" {
+			t.Errorf("stage_started %+v carries an outcome, want it on stage_finished only", phase)
+		}
+	}
+}
+
 func TestWorkflowSpawn_ARetriedItemReportsEachAttempt(t *testing.T) {
 	t.Parallel()
 

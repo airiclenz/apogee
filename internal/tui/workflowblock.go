@@ -18,9 +18,9 @@ import (
 // first request of the Exchange, so nothing the model does can show it: there is no tool call to
 // hang its progress on. The engine reports its life as WorkflowPhaseEvents instead, and this file
 // folds them into ONE block per Workflow (entryWorkflow) that grows in place as the run goes — one
-// row per stage of its Plan, shown from the start (pending, running, waiting on the human, or how it
-// ended), a line for each item whose receipt is not ok, the question an `ask` stage is waiting on,
-// and the totals and the end it came to.
+// row per stage of its Plan, shown from the start (pending, running, waiting on the human, or the
+// outcome its finished phase reports), a line for each item whose receipt is not ok, the question an
+// `ask` stage is waiting on, and the totals and the end it came to.
 //
 // A Workflow a fan_out call started is the call block's business instead: that block already stands
 // in the transcript, its children nest under it, and its result IS the result lines. So only a
@@ -121,9 +121,10 @@ type workflowStageState int
 const (
 	stagePending workflowStageState = iota // nothing has started the stage yet
 	stageRunning                           // started, and not yet ended
-	stageDone                              // ended with every item it ran finished
-	stageFailed                            // the Workflow failed while the stage ran
+	stageDone                              // ran to its end
+	stageFailed                            // it could not do its work, or the Workflow failed while it ran
 	stageStopped                           // a cancel ended it with an item unfinished
+	stageSkipped                           // it never ran: its `when:` was false, or its source was skipped
 )
 
 // workflowStage is one stage row: the stage's name and the round it shows — a stage a repeat
@@ -246,7 +247,7 @@ func (v workflowView) fold(e domain.WorkflowPhaseEvent) workflowView {
 		if v.waitingOn == stripEscapes(e.Stage) {
 			v.question = ""
 		}
-		v = v.withStage(e, func(s *workflowStage) { s.state = s.endState() })
+		v = v.withStage(e, func(s *workflowStage) { s.state = s.endState(e.Outcome) })
 	case domain.WorkflowWaiting:
 		v.question, v.waitingOn = stripEscapes(firstLine(e.Detail)), stripEscapes(e.Stage)
 	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
@@ -321,9 +322,21 @@ func (v workflowView) retitled(text string) string {
 	return v.header() + "\n" + body
 }
 
-// endState is how a stage that ended stands: stopped when an item it counted never finished — the
-// engine ends a stage stopped only on a cancel that left one unfinished — and done otherwise.
-func (s workflowStage) endState() workflowStageState {
+// endState is how a stage that ended stands: the outcome its finished phase carries. A phase with no
+// outcome this build knows — an emitter that reports none — is read off the row's counts instead:
+// stopped when an item it counted never finished (the engine ends a stage stopped only on a cancel
+// that left one unfinished), done otherwise.
+func (s workflowStage) endState(outcome domain.WorkflowStageOutcome) workflowStageState {
+	switch outcome {
+	case domain.WorkflowStageDone:
+		return stageDone
+	case domain.WorkflowStageFailed:
+		return stageFailed
+	case domain.WorkflowStageStopped:
+		return stageStopped
+	case domain.WorkflowStageSkipped:
+		return stageSkipped
+	}
 	if s.finished < s.items {
 		return stageStopped
 	}
@@ -468,8 +481,9 @@ func renderWorkflowStages(th theme, v workflowView, width int) blockPaint {
 
 // stageRow paints the i'th stage row in the leader row a delegation's wears: the branch marker, the
 // stage's name — with ✓ once it is done with every item ok — the dotted leader, and its state in the
-// outcome slot (workflowStage.slot), failed in red. A pending row is painted dim whole and opens
-// nothing; a row one of whose item runs has started wears ▶ at the block's edge.
+// outcome slot (workflowStage.slot), failed in red. A row that never ran — pending, or skipped — is
+// painted dim whole and opens nothing; a row one of whose item runs has started wears ▶ at the
+// block's edge.
 func (v workflowView) stageRow(th theme, i, width, room int) string {
 	stage := v.stages[i]
 	waiting := v.question != "" && v.waitingOn == stage.name
@@ -482,7 +496,7 @@ func (v workflowView) stageRow(th theme, i, width, room int) string {
 	view := toolView{Target: stage.name, finished: succeeded, Summary: summary}
 	row := leaderRow(th, view, branchMarker(i == len(v.stages)-1), room, false, noRemainder)
 	switch {
-	case stage.state == stagePending && !waiting:
+	case (stage.state == stagePending || stage.state == stageSkipped) && !waiting:
 		return th.toolLeader.Render(ansi.Strip(row))
 	case stage.entered:
 		return indicatorRow(th, row, width, glyphCollapsed)
@@ -496,8 +510,8 @@ func (s workflowStage) succeeded() bool {
 }
 
 // slot is the stage row's outcome slot: `pending`, `running` (`n/m · running` for a stage of more
-// than one item), `waiting for you`, `done`, `failed` or `stopped` — led, on a round a repeat re-ran,
-// by `round n/m` (`round n` when the most rounds are not known).
+// than one item), `waiting for you`, `done`, `failed`, `stopped` or `skipped` — led, on a round a
+// repeat re-ran, by `round n/m` (`round n` when the most rounds are not known).
 func (s workflowStage) slot(waiting bool) string {
 	word := workflowPendingWord
 	switch {
@@ -513,6 +527,8 @@ func (s workflowStage) slot(waiting bool) string {
 		word = string(domain.WorkflowFailed)
 	case s.state == stageStopped:
 		word = string(domain.WorkflowStopped)
+	case s.state == stageSkipped:
+		word = string(domain.WorkflowStageSkipped)
 	}
 	if s.round <= 1 {
 		return word

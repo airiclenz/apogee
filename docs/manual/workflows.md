@@ -309,8 +309,9 @@ all of them from the start (the sketch shortens `audit`'s list):
 
 - A stage row says where the stage stands: `pending` (dim — it has not started), `running`
   (`2/5 · running` while items finish), `waiting for you`, `done` (with a ✓ when every item came
-  back `ok`), `failed` or `stopped`. A stage a repeat runs again keeps one row and adds the round:
-  `round 2/3 · running`.
+  back `ok`), `failed` (a merge that wrote no report, a script that blocked), `stopped`, or
+  `skipped` (dim — its `when:` was false). A stage a repeat runs again keeps one row and adds the
+  round: `round 2/3 · running`.
 - Beneath the rows the block keeps one line for each item that did **not** come back `ok`, an ask
   stage's question, and once the workflow ends the totals line and, if it failed, the cause.
 - The helpers' own work — their narration and tool calls — never fills the conversation. A row

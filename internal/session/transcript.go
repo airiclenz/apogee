@@ -189,6 +189,7 @@ const (
 	WorkflowStageDone    = "done"
 	WorkflowStageFailed  = "failed"
 	WorkflowStageStopped = "stopped"
+	WorkflowStageSkipped = "skipped"
 )
 
 // Workflow is the structure of one Workflow's block: its name, the end it came to (a

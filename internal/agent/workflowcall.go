@@ -633,8 +633,8 @@ func repeatedRounds(plan workflow.Plan) map[string]int {
 	return rounds
 }
 
-// StagePhase reports a stage that began running, with its item count, and one that ended — done,
-// failed, stopped or skipped — each in its round.
+// StagePhase reports a stage that began running, with its item count, and one that ended with how
+// it ended — done, failed, stopped or skipped — each in its round.
 func (o *workflowObserver) StagePhase(event workflow.StageEvent) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -649,8 +649,19 @@ func (o *workflowObserver) StagePhase(event workflow.StageEvent) {
 			Items: event.Items, Rounds: o.rounds[event.Stage],
 		})
 	default:
-		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStageFinished, Stage: event.Stage, Round: round})
+		o.emitLocked(domain.WorkflowPhaseEvent{
+			Phase: domain.WorkflowStageFinished, Stage: event.Stage, Round: round,
+			Outcome: stageOutcomes[event.Phase],
+		})
 	}
+}
+
+// stageOutcomes is how a stage ended, by the phase the Runner settled it in.
+var stageOutcomes = map[workflow.Phase]domain.WorkflowStageOutcome{
+	workflow.PhaseDone:    domain.WorkflowStageDone,
+	workflow.PhaseFailed:  domain.WorkflowStageFailed,
+	workflow.PhaseStopped: domain.WorkflowStageStopped,
+	workflow.PhaseSkipped: domain.WorkflowStageSkipped,
 }
 
 // ItemPhase reports an item that ended on a receipt — a resumed one, which never ran, included —

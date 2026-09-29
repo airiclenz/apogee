@@ -363,6 +363,17 @@ const (
 	WorkflowFailed        = domain.WorkflowFailed
 )
 
+// WorkflowStageOutcome is how a stage ended, on a WorkflowPhaseEvent at WorkflowStageFinished.
+type WorkflowStageOutcome = domain.WorkflowStageOutcome
+
+// The ways a Workflow's stage ends.
+const (
+	WorkflowStageDone    = domain.WorkflowStageDone
+	WorkflowStageFailed  = domain.WorkflowStageFailed
+	WorkflowStageStopped = domain.WorkflowStageStopped
+	WorkflowStageSkipped = domain.WorkflowStageSkipped
+)
+
 // The two values WireEvent.Direction takes.
 const (
 	WireDirectionRequest  = domain.WireDirectionRequest

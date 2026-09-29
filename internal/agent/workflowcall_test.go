@@ -891,8 +891,8 @@ type stageShape struct {
 
 // assertWorkflowShape checks that events report one Workflow that ran stages to its end, in order:
 // started with the stage names; for each stage a stage started with its item count, then one item
-// started and one item finished per item — however the items interleave — then a stage finished;
-// and finished last.
+// started and one item finished per item — however the items interleave — then a stage finished
+// done; and finished last.
 func assertWorkflowShape(t *testing.T, events []domain.Event, stages []stageShape) {
 	t.Helper()
 	phases := workflowPhaseEvents(events)
@@ -919,6 +919,9 @@ func assertWorkflowShape(t *testing.T, events []domain.Event, stages []stageShap
 		})
 		if end < 0 {
 			t.Fatalf("workflow phases = %v, want stage %q to finish", phaseNames(phases), stage.name)
+		}
+		if rest[end].Outcome != domain.WorkflowStageDone {
+			t.Errorf("stage %q finished with outcome %q, want %q", stage.name, rest[end].Outcome, domain.WorkflowStageDone)
 		}
 		assertItemRuns(t, events, rest[1:end], stage)
 		rest = rest[end+1:]
@@ -1058,6 +1061,9 @@ func TestWorkflowCall_ACancelEndsItsPhasesStopped(t *testing.T) {
 	last := len(phases) - 1
 	if phases[last].Phase != domain.WorkflowStopped || phases[last-1].Phase != domain.WorkflowStageFinished {
 		t.Fatalf("workflow phases = %v, want the stage finished then stopped at the end", phaseNames(phases))
+	}
+	if outcome := phases[last-1].Outcome; outcome != domain.WorkflowStageStopped {
+		t.Errorf("the cancelled stage finished with outcome %q, want %q", outcome, domain.WorkflowStageStopped)
 	}
 	started, finished := map[string]int{}, map[string]int{}
 	for _, phase := range phases {

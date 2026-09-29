@@ -11,9 +11,11 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -217,10 +219,18 @@ func stageStarted(stage string, round, items, rounds int) domain.WorkflowPhaseEv
 	return e
 }
 
-// stageFinished is one stage of testWorkflowID ending in round.
+// stageFinished is one stage of testWorkflowID ending in round, carrying no outcome — as an emitter
+// that reports none sends it, so the row reads how it ended off its counts.
 func stageFinished(stage string, round int) domain.WorkflowPhaseEvent {
 	e := workflowPhase(domain.WorkflowStageFinished)
 	e.Stage, e.Round = stage, round
+	return e
+}
+
+// stageEndedAs is one stage of testWorkflowID ending in round with outcome, as the engine reports it.
+func stageEndedAs(stage string, round int, outcome domain.WorkflowStageOutcome) domain.WorkflowPhaseEvent {
+	e := stageFinished(stage, round)
+	e.Outcome = outcome
 	return e
 }
 
@@ -347,8 +357,10 @@ func TestWorkflowBlockShowsProgressAndResultLines(t *testing.T) {
 }
 
 // Each stage row says where its stage stands in the round it shows: pending until it starts, its
-// item count while it runs, waiting on the human, done — ✓ when every item ended ok — or the
-// failed or stopped word; ▶ once one of its item runs has started, never on a pending row.
+// item count while it runs, waiting on the human, then the outcome its finished phase carries — done
+// (✓ when every item ended ok), failed, stopped or skipped; ▶ once one of its item runs has started,
+// never on a row that did not run. A finished phase with no outcome this build knows reads the row's
+// counts, and never paints the outcome it carried.
 func TestWorkflowStageRowsSayWhereEachStageStands(t *testing.T) {
 	t.Parallel()
 	running := []domain.Event{
@@ -399,6 +411,40 @@ func TestWorkflowStageRowsSayWhereEachStageStands(t *testing.T) {
 			name:   "an ask stage waits for the human",
 			events: []domain.Event{startedWith("ask", "scan"), stageStarted("ask", 1, 0, 0), waitingIn("ask", "which?")},
 			stage:  "ask", slot: "waiting for you",
+		},
+		{
+			name: "a merge that wrote no report is failed",
+			events: []domain.Event{
+				startedWith("scan", "report"), stageStarted("report", 1, 1, 0), stageItemStarted("report", 1, 0),
+				stageItemFinished("report", 1, 0, "ok"), stageEndedAs("report", 1, domain.WorkflowStageFailed),
+			},
+			stage: "report", slot: "failed", opens: true,
+		},
+		{
+			name:   "a stage its when skipped is skipped",
+			events: slices.Concat(running, []domain.Event{stageEndedAs("fix", 1, domain.WorkflowStageSkipped)}),
+			stage:  "fix", slot: "skipped",
+		},
+		{
+			name: "a script a cancel ended is stopped",
+			events: []domain.Event{
+				startedWith("run"), stageStarted("run", 1, 0, 0), stageEndedAs("run", 1, domain.WorkflowStageStopped),
+			},
+			stage: "run", slot: "stopped",
+		},
+		{
+			name: "a stage that ended done is done",
+			events: slices.Concat(running, []domain.Event{
+				stageItemFinished("scan", 1, 2, "ok"), stageEndedAs("scan", 1, domain.WorkflowStageDone),
+			}),
+			stage: "scan", slot: "done", opens: true, done: true,
+		},
+		{
+			name: "an outcome this build does not know reads the counts",
+			events: slices.Concat(running, []domain.Event{
+				stageItemFinished("scan", 1, 2, "ok"), stageEndedAs("scan", 1, "\x1b[31mexploded"),
+			}),
+			stage: "scan", slot: "done", opens: true, done: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -615,6 +661,85 @@ func TestWorkflowBlockFromARecordWithAForeignEndPaintsItStopped(t *testing.T) {
 	if strings.Contains(painted, "owned") || !strings.Contains(painted, workflowLineSep+string(domain.WorkflowStopped)) {
 		t.Errorf("the replayed block paints\n%s\nwant a stopped header and none of the recorded end", painted)
 	}
+}
+
+// A skipped stage never ran, so its row is painted dim whole, as a pending one is, and opens nothing.
+func TestASkippedStageRowIsDim(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	tr := feed(
+		startedWith("scan", "fix", "later"),
+		stageStarted("scan", 1, 1, 0),
+		stageItemStarted("scan", 1, 0),
+		stageItemFinished("scan", 1, 0, "ok"),
+		stageEndedAs("scan", 1, domain.WorkflowStageDone),
+		stageEndedAs("fix", 1, domain.WorkflowStageSkipped),
+	)
+	view := tr.entries[tr.workflowAt(testWorkflowID)].workflow
+
+	for i, stage := range view.stages {
+		row := view.stageRow(th, i, 80, toolRowCells(th, 80))
+		dim := row == th.toolLeader.Render(ansi.Strip(row))
+		if want := stage.name != "scan"; dim != want {
+			t.Errorf("stage %q row painted dim %v, want %v: %q", stage.name, dim, want, row)
+		}
+	}
+}
+
+// A stage's outcome survives the record: a merge that failed on a missing report and a skipped stage
+// replay as the live block painted them, not as done.
+func TestAStageOutcomeSurvivesTheRecord(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	for _, e := range []domain.Event{
+		startedWith("items", "report", "recheck"),
+		stageStarted("items", 1, 1, 0),
+		stageItemFinished("items", 1, 0, "ok"),
+		stageEndedAs("items", 1, domain.WorkflowStageDone),
+		stageStarted("report", 1, 1, 0),
+		stageItemStarted("report", 1, 0),
+		stageItemFinished("report", 1, 0, "ok"),
+		stageEndedAs("report", 1, domain.WorkflowStageFailed),
+		stageEndedAs("recheck", 1, domain.WorkflowStageSkipped),
+		workflowPhase(domain.WorkflowFinished),
+	} {
+		m.transcript.apply(e)
+	}
+	live := workflowPaint(m)
+	assertStageRow(t, live, "report", "failed", true, false)
+	assertStageRow(t, live, "recheck", "skipped", false, false)
+
+	replayed := newTestModel(t)
+	replayed.transcript.entries = roundTrip(t, &m.transcript)
+	replayed.transcript.touch()
+
+	if painted := workflowPaint(replayed); painted != live {
+		t.Errorf("the replayed block paints\n%s\nwhere the live one painted\n%s", painted, live)
+	}
+}
+
+// A record whose stage state is not one this build knows — an escape sequence planted in the file —
+// replays that row as pending: the recorded string never reaches the row as text.
+func TestWorkflowBlockFromARecordWithAForeignStageStatePaintsItPending(t *testing.T) {
+	t.Parallel()
+	const planted = `"\u001b]0;pwned\u0007\u001b[31mowned"` // JSON-escaped, as a record file carries it
+	blob := `{"version":1,"entries":[{"kind":"workflow","callID":"w1","done":true,` +
+		`"text":"Workflow audit — finished","workflow":{"name":"audit","end":"finished",` +
+		`"stages":[{"name":"items","round":1,"items":1,"finished":1,"state":` + planted + `}]}}]}`
+
+	entries, err := decodeTranscript([]byte(blob))
+
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	m := newTestModel(t)
+	m.transcript.entries = entries
+	m.transcript.touch()
+	painted := workflowPaint(m)
+	if strings.Contains(painted, "owned") {
+		t.Errorf("the replayed block paints the recorded state:\n%s", painted)
+	}
+	assertStageRow(t, painted, "items", "pending", false, false)
 }
 
 // resumedRecipe is modelWithRecipeStages' Workflow run to its end — beta ends partial — saved to the

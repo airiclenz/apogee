@@ -705,9 +705,9 @@ const (
 	// before its stage's WorkflowStageStarted. Run names the item's last run, "" when none began
 	// (a resumed item, or one whose child could not be built).
 	WorkflowItemFinished WorkflowPhase = "item_finished"
-	// WorkflowStageFinished reports that one of the Workflow's stages ended, in Round — done,
-	// failed, stopped or skipped. A skipped stage, or a script or ask stage a resume replays, gets
-	// it with no WorkflowStageStarted before it.
+	// WorkflowStageFinished reports that one of the Workflow's stages ended, in Round, and how:
+	// Outcome is done, failed, stopped or skipped. A skipped stage, or a script or ask stage a
+	// resume replays, gets it with no WorkflowStageStarted before it.
 	WorkflowStageFinished WorkflowPhase = "stage_finished"
 	// WorkflowWaiting reports that an `ask` stage has put its question to the user and waits for
 	// the answer; Detail carries the question. A background workflow reports it too for an approval
@@ -722,6 +722,25 @@ const (
 	// WorkflowFailed reports that the Workflow could not go on — its store could not be written;
 	// Detail carries the cause.
 	WorkflowFailed WorkflowPhase = "failed"
+)
+
+// WorkflowStageOutcome is how one stage of a Workflow ended, as its WorkflowStageFinished reports
+// it. The zero value is no outcome: every other phase, and a WorkflowStageFinished from an emitter
+// that does not report one.
+type WorkflowStageOutcome string
+
+const (
+	// WorkflowStageDone is a stage that ran to its end: every item it ran finished on a receipt, or
+	// a stage that runs no child settled.
+	WorkflowStageDone WorkflowStageOutcome = "done"
+	// WorkflowStageFailed is a stage that could not do its work: a merge that left no report, a
+	// script that blocked or could not run, a pick that found nothing to read. The Workflow goes on.
+	WorkflowStageFailed WorkflowStageOutcome = "failed"
+	// WorkflowStageStopped is a stage a cancel ended with an item, or its script, unfinished.
+	WorkflowStageStopped WorkflowStageOutcome = "stopped"
+	// WorkflowStageSkipped is a stage that never ran: its `when:` was false, or the stage it works
+	// over was skipped.
+	WorkflowStageSkipped WorkflowStageOutcome = "skipped"
 )
 
 // WorkflowReceipt is the receipt a workflow item ended on, in the shape an Event carries it: its
@@ -754,7 +773,8 @@ type WorkflowReceipt struct {
 // Round is the 1-based round of the stage on the stage and item phases: 1 for its own run, one
 // more for each time a repeat re-runs it; a Driver keys a stage by (Stage, Round). Rounds is, on
 // the WorkflowStageStarted of a stage a repeat re-runs, the most rounds it can run — its own
-// included, so Round never exceeds it — and 0 otherwise. Run is the item child's RunID on
+// included, so Round never exceeds it — and 0 otherwise. Outcome is how the stage ended, on
+// WorkflowStageFinished only. Run is the item child's RunID on
 // WorkflowItemStarted and WorkflowItemFinished, and Attempt the 1-based run of the item that
 // WorkflowItemStarted opens.
 //
@@ -795,6 +815,7 @@ type WorkflowPhaseEvent struct {
 	Items      int
 	Round      int
 	Rounds     int
+	Outcome    WorkflowStageOutcome
 	Run        string
 	Attempt    int
 }

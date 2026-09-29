@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed:** a recipe's workflow block no longer reads `done` on a stage that did not succeed. A merge stage that wrote no report now reads `failed`, a stage its `when:` skipped reads `skipped` (dim, like a stage not yet started), and a script a cancel ended reads `stopped`, both live and after a resume. The engine now reports how each stage ended: a `WorkflowPhaseEvent` at `WorkflowStageFinished` carries its `Outcome` — `WorkflowStageDone`, `WorkflowStageFailed`, `WorkflowStageStopped` or `WorkflowStageSkipped` — and the workflow block paints the row from it. `apogee run --format json` and the daemon write the same lines as before.
+
 - **Engine API:** a `WorkflowPhaseEvent` now carries enough for a Driver to redraw the workflow from its events alone. `started` lists the stage names (`Stages`), `stage_started` carries the stage's item count (`Items`) and, for a stage a repeat re-runs, the most rounds it can run (`Rounds`). Two new phases, `WorkflowItemStarted` and `WorkflowStageFinished`, report each item run as it begins, with the child's `Run` id and its `Attempt`, and each stage as it ends. `item_finished` names the item's last `Run`, and the stage and item phases carry the stage's `Round`. `apogee run --format json` and the daemon write the same lines as before: the two new phases and the new fields are not on the `workflow_phase` line.
 
 - A workflow item that asked for the sub-agents server and ran on the session server because none was available now says so: its result line ends on the same "ran on the session server" note a `sub_agent` delegation carries, and the workflow's answer to the model carries that note once.

@@ -438,6 +438,7 @@ func TestTranscriptRoundTripsAWorkflowBlock(t *testing.T) {
 			Stages: []WorkflowStage{
 				{Name: "plan", Round: 1, Items: 1, Finished: 1, Entered: true, State: WorkflowStageDone},
 				{Name: "build", Round: 2, Rounds: 3, Items: 2, Finished: 2, Troubled: true, Entered: true, State: WorkflowStageDone},
+				{Name: "recheck", Round: 1, State: WorkflowStageSkipped},
 			},
 			Items: []WorkflowItemResult{{Stage: "build", Label: "beta", Status: "partial", Summary: "half of it"}},
 		},

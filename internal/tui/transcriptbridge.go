@@ -212,6 +212,7 @@ var workflowStageStateNames = map[workflowStageState]string{
 	stageDone:    session.WorkflowStageDone,
 	stageFailed:  session.WorkflowStageFailed,
 	stageStopped: session.WorkflowStageStopped,
+	stageSkipped: session.WorkflowStageSkipped,
 }
 
 // toWireWorkflow projects a workflow block's view onto the wire: its name, end and cause, its stage

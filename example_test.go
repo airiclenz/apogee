@@ -203,6 +203,11 @@ var (
 	_ = apogee.WorkflowStopped
 	_ = apogee.WorkflowFailed
 
+	_ = apogee.WorkflowStageDone
+	_ = apogee.WorkflowStageFailed
+	_ = apogee.WorkflowStageStopped
+	_ = apogee.WorkflowStageSkipped
+
 	_ = apogee.StageFanout
 	_ = apogee.StageVerify
 	_ = apogee.StageMerge

@@ -1208,12 +1208,14 @@ question is out, then `finished`, `stopped` or `failed`). Beneath it stands **on
 of the Plan, in its order, from the moment the Workflow starts — every stage is shown, not only the
 ones that have begun. A stage row wears a delegation row's leader shape: the branch marker, the
 stage's name, the dotted leader, and its state in the outcome slot — `pending`, `running`
-(`2/5 · running` for a stage of more than one item), `waiting for you`, `done`, `failed` (in the
-failure red) or `stopped`. A stage that ended with every item `ok` earns the ✓. A stage a repeat
+(`2/5 · running` for a stage of more than one item), `waiting for you`, and once it has ended the
+outcome the engine reports for it: `done`, `failed` (in the failure red — a merge that left no
+report, a script that blocked), `stopped`, or `skipped` (its `when:` was false, or the stage it
+works over was skipped). A stage that ended with every item `ok` earns the ✓. A stage a repeat
 re-runs keeps **one** row that moves on to each round and says so, `round 2/3 · running` (`round
-2` where the most rounds are not known). A stage that has not started is painted dim whole and has
-no ▶; a stage one of whose item runs has started wears ▶ at the block's edge, because it now has
-something to open. Beneath the rows, in the detail tone: one line for each item whose receipt is
+2` where the most rounds are not known). A stage that has not started, or was skipped, is painted
+dim whole and has no ▶; a stage one of whose item runs has started wears ▶ at the block's edge,
+because it now has something to open. Beneath the rows, in the detail tone: one line for each item whose receipt is
 not `ok` (`<stage> · <item> — <status> — <summary>`), the question an `ask` stage waits on, and —
 once the Workflow has ended — the totals line (`items N · ok a · partial b · blocked c`) and a
 failed run's cause. An item that ended `ok` is read on its own row in its stage's view (below), not

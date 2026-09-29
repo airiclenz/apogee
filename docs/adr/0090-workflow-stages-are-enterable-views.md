@@ -37,6 +37,13 @@ on to each round and says so: `round 2/3 · running`. Beneath the rows the block
 each item whose receipt is not `ok` (`<stage> · <item> — <status> — <summary>`), an `ask` stage's
 question, and — once the Workflow has ended — the totals line and a failure's cause.
 
+> **Amended 2026-09-29.** A row can also read `skipped`: the stage never ran, because its `when:` was
+> false or the stage it works over was skipped. Like a pending row, it is dim and has no ▶. A stage's
+> finished phase now carries its outcome (`done`, `failed`, `stopped` or `skipped`), and the row
+> paints that outcome. It no longer infers the outcome from its item counts, so a merge that left no
+> report reads `failed` and not `done`. An empty outcome, from an emitter that reports none, falls
+> back to the counts: `stopped` when an item the stage counted never finished, `done` otherwise.
+
 **D2 — Each item run has a run head of its own.** When an item's run starts, a head for it is seated
 under the Workflow's block, inside the block's span. It is a delegation's head in every way a view
 asks: it opens as the run's view, `^x` stops that one run, a message typed in its view reaches its
