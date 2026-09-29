@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -276,6 +277,50 @@ func TestPlanHash(t *testing.T) {
 	}
 	if other := hash(samplePlan("review"), map[string]string{"path": "internal/", "depth": "2"}, items); other == base {
 		t.Error("a different plan hashed the same")
+	}
+}
+
+func TestItemStatusNameRoundTripsAndLeavesKeyAndHashAlone(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	created := createWorkflow(t, store, "audit", "hash-1", storeClock)
+	item := Item{Label: "/w/wf-1/part-a", Units: []string{"/w/wf-1/part-a"}}
+	key := sampleKey(t, item.Label)
+	created.Stages[0].Items = []ItemStatus{
+		{Key: key, Label: item.Label, Name: "part-a", Phase: PhaseDone},
+		{Label: "flags", Phase: PhaseDone},
+	}
+
+	if err := store.WriteStatus(created); err != nil {
+		t.Fatalf("WriteStatus: %v", err)
+	}
+	gotStatus, err := store.ReadStatus(created.ID)
+	dir, _ := store.Dir(created.ID)
+	raw, readErr := os.ReadFile(filepath.Join(dir, "status.json"))
+	gotKey, keyErr := ItemKey("audit {item}", item, nil, fstest.MapFS{})
+	gotHash, hashErr := PlanHash(samplePlan("audit"), nil, []Item{item})
+
+	if err != nil || !reflect.DeepEqual(gotStatus, created) {
+		t.Errorf("ReadStatus = %+v, %v; want %+v", gotStatus, err, created)
+	}
+	var onDisk struct {
+		Stages []struct {
+			Items []map[string]any `json:"items"`
+		} `json:"stages"`
+	}
+	if readErr != nil || json.Unmarshal(raw, &onDisk) != nil {
+		t.Fatalf("status.json = %s, %v; want it readable", raw, readErr)
+	}
+	lines := onDisk.Stages[0].Items
+	if _, unnamedHasName := lines[1]["name"]; lines[0]["name"] != "part-a" || unnamedHasName {
+		t.Errorf("status.json item lines = %v; want \"name\": \"part-a\" on the named line and no name on the other", lines)
+	}
+	// Pinned at the base before ItemStatus.Name existed: the short name is display only.
+	if want := "bfc0c4a939f645150fe89f4d0b573e60103b318ae69b3d903d6e6ce005a744d1"; keyErr != nil || gotKey != want {
+		t.Errorf("ItemKey = %q, %v; want %q", gotKey, keyErr, want)
+	}
+	if want := "e51ae7d97917f094ec4d2e4440bf95263c2ed47f6817ddf6fc432bdc1761a65d"; hashErr != nil || gotHash != want {
+		t.Errorf("PlanHash = %q, %v; want %q", gotHash, hashErr, want)
 	}
 }
 

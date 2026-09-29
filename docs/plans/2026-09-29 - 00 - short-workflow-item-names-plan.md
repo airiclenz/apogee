@@ -39,7 +39,13 @@ result lines).
 - Changing the audit recipe's `split.sh` to write relative entries (would change `ItemKey`s and break resume of in-flight runs).
 - Shortening the model-facing workflow result lines (`internal/workflow/format.go`).
 
-## 1. Engine derives a short item name
+## 1. Engine derives a short item name — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): ItemStatus.Name is tagged `json:"name,omitempty"` rather than a bare `"name"`, so script/ask lines and pre-plan folders write no empty key; the store test pins that the named line reads "name": "part-a" and an unnamed line has no name key.
+NOTES (2026-09-29): the runner keeps the workflow folder on runState (a new `dir` field set in Run from Store.Dir) and the short name on itemJob (`name`), computed once in prepareItems; ItemSpec.Name, ItemEvent.Name and ItemStatus.Name all read it, so a resumed item's event carries it too.
+NOTES (2026-09-29): ItemName also falls back to Label for an item with no units, and when the respelled name is blank (the folder itself under a blank stage name); a unit that is a sibling sharing the folder's prefix (`<dir>-other`) reads as its basename, not a relative `../` path.
+NOTES (2026-09-29): the store test pins ItemKey and PlanHash golden values, computed identically on the base tree and the changed tree.
+NOTES (2026-09-29): the full-package Acceptance run (`go test -race -count=1 ./internal/workflow/`) was refused by this session's permission classifier; only `go build ./...`, `go vet ./internal/workflow/` and a narrowed `-race -run` over the new and adjacent resume/round-trip tests were run (all pass). The verifier needs to run the full Acceptance command.
 
 **What:**
 Recast at the regression check (2026-09-29).

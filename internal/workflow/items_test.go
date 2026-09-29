@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -221,5 +222,54 @@ func TestNewSplitBudgetReadsTheContextLimitLessTheBriefReserve(t *testing.T) {
 		if got := NewSplitBudget(tc.contextLimit); got != tc.want {
 			t.Errorf("NewSplitBudget(%d) = %d, want %d", tc.contextLimit, got, tc.want)
 		}
+	}
+}
+
+func TestItemNameRespellsADerivedLabelForShow(t *testing.T) {
+	t.Parallel()
+	const stage = "find"
+	dir := filepath.Join(string(filepath.Separator), "home", "u", ".apogee", "workflows", "wf-1")
+	inDir := func(parts ...string) string { return filepath.Join(append([]string{dir}, parts...)...) }
+	derived := func(units ...string) Item { return Item{Label: itemLabel(units), Units: units} }
+	manifest := inDir("stages", "report", "manifest.md")
+
+	cases := []struct {
+		name string
+		item Item
+		want string
+	}{
+		{name: "the workflow folder itself", item: derived(dir), want: stage},
+		{name: "the folder with a trailing separator", item: derived(dir + string(filepath.Separator)), want: stage},
+		{name: "a part inside the folder", item: derived(inDir("part-foo")), want: "part-foo"},
+		{name: "a nested path inside the folder", item: derived(inDir("a", "b")), want: "a/b"},
+		{name: "a sibling sharing the folder's prefix", item: derived(dir + "-other"), want: "wf-1-other"},
+		{name: "an absolute path outside the folder", item: derived(filepath.Join(string(filepath.Separator), "elsewhere", "x.md")), want: "x.md"},
+		{name: "a workspace-relative path", item: derived("src/main.go"), want: "src/main.go"},
+		{name: "a literal entry", item: derived("alpha"), want: "alpha"},
+		{name: "several absolute units", item: derived(inDir("part-a"), inDir("part-b"), inDir("part-c")), want: "part-a … part-c (3)"},
+		{name: "a merge stage's engine-set label", item: Item{Label: "report", Units: []string{manifest}}, want: "report"},
+		{name: "an item with no units", item: Item{Label: "lonely"}, want: "lonely"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ItemName(tc.item, dir, stage)
+
+			if got != tc.want {
+				t.Errorf("ItemName(%q) = %q, want %q", tc.item.Label, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestItemNameFallsBackToTheLabelWhenTheFolderReadsAsNoStage(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(string(filepath.Separator), "workflows", "wf-1")
+
+	got := ItemName(Item{Label: dir, Units: []string{dir}}, dir, "")
+
+	if got != dir {
+		t.Errorf("ItemName with a blank stage = %q, want the label %q", got, dir)
 	}
 }

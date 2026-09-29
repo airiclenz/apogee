@@ -61,6 +61,9 @@ type ItemSpec struct {
 	// stage may share a Key (a fanout list is not deduplicated); Index tells them apart.
 	Item Item
 	Key  string
+	// Name is the item's short name (ItemName), the one a Driver names its child by; Item.Label
+	// stays the item's identity.
+	Name string
 	// Index is the item's 0-based place in its stage.
 	Index int
 	// RepeatRound is the repeat round the stage runs in: 0 for its own run, n for a repeat's n-th
@@ -122,12 +125,14 @@ type StageEvent struct {
 // ItemEvent is one item's phase change. Attempt and Round are 1-based and zero for an item that
 // never ran (pending, or skipped on resume) — Round is the continuation round within the attempt;
 // RepeatRound is the stage's repeat round, as on StageEvent. Receipt is set once the item is done.
+// Name is the item's short name (ItemName) for a Driver to show; Label stays its identity.
 type ItemEvent struct {
 	Workflow    string
 	Stage       string
 	Index       int
 	Key         string
 	Label       string
+	Name        string
 	Phase       Phase
 	Attempt     int
 	Round       int
@@ -280,7 +285,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		return Result{}, err
 	}
 
-	state := &runState{runner: r, status: status, replay: replay}
+	state := &runState{runner: r, status: status, replay: replay, dir: dir}
 	result := Result{ID: status.ID, Dir: dir, Phase: PhaseDone, Stages: make([]StageResult, 0, len(plan.Stages))}
 	for index := range plan.Stages {
 		if ctx.Err() != nil {
@@ -368,12 +373,14 @@ func (r *Runner) now() time.Time {
 
 // runState is one Run's shared state: the status.json it keeps current, under mu, which also
 // serialises the Observer's calls, and whether the run resumes an unfinished folder whose recorded
-// script and ask stages it replays (openStatus). replay is fixed before the first stage runs.
+// script and ask stages it replays (openStatus), and the workflow's folder, which item short names
+// are read relative to (ItemName). replay and dir are fixed before the first stage runs.
 type runState struct {
 	runner *Runner
 	mu     sync.Mutex
 	status RunStatus
 	replay bool
+	dir    string
 }
 
 // runFanout runs one fanout stage's items in the given repeat round and returns the stage's result.
@@ -476,12 +483,13 @@ type itemDraft struct {
 	output   string
 }
 
-// itemJob is one item made ready to run: its key, the brief its children get, and the result it
-// starts from — pending, or done and Resumed when the store already holds its ok or partial
+// itemJob is one item made ready to run: its key, its short name, the brief its children get, and
+// the result it starts from — pending, or done and Resumed when the store already holds its ok or partial
 // receipt.
 type itemJob struct {
 	item   Item
 	key    string
+	name   string
 	brief  string
 	result ItemResult
 }
@@ -516,8 +524,9 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 		if draft.lead != nil {
 			brief = joinBrief(draft.lead(output), brief)
 		}
-		jobs[index] = itemJob{item: item, key: key, brief: brief, result: result}
-		statuses[index] = ItemStatus{Key: key, Label: item.Label, Phase: result.Phase, Receipt: result.Receipt}
+		name := ItemName(item, s.dir, stage.Name)
+		jobs[index] = itemJob{item: item, key: key, name: name, brief: brief, result: result}
+		statuses[index] = ItemStatus{Key: key, Label: item.Label, Name: name, Phase: result.Phase, Receipt: result.Receipt}
 	}
 
 	s.mu.Lock()
@@ -550,7 +559,7 @@ func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, ind
 			return result, err
 		}
 		spec := ItemSpec{
-			Workflow: s.status.ID, Stage: stage, Item: job.item, Key: job.key,
+			Workflow: s.status.ID, Stage: stage, Item: job.item, Key: job.key, Name: job.name,
 			Index: index, RepeatRound: repeatRound,
 			Brief: job.brief, Output: result.Output,
 			Attempt: attempt, Prior: append([]Round(nil), prior...),
@@ -705,7 +714,7 @@ func (s *runState) notifyItem(stageIndex int, stage Stage, index int, job itemJo
 	}
 	observer.ItemPhase(ItemEvent{
 		Workflow: s.status.ID, Stage: stage.Name, Index: index, Key: job.key, Label: job.item.Label,
-		Phase: phase, Attempt: attempt, Round: round, RepeatRound: s.status.Stages[stageIndex].Round,
+		Name: job.name, Phase: phase, Attempt: attempt, Round: round, RepeatRound: s.status.Stages[stageIndex].Round,
 		Receipt: receipt,
 	})
 }

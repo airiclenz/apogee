@@ -110,12 +110,15 @@ type StageStatus struct {
 }
 
 // ItemStatus is one item's line in status.json: its key (the folder name under items/), its label,
-// its phase, and the receipt its child handed back once it has one. A script or ask stage's one
-// line has no key: it runs no child and keeps no item folder, so its receipt lives here and in the
-// stage's record under results/ (StageRecord), the copy a resume replays.
+// its short name (ItemName, the one a Driver shows; empty on a script or ask line and in a
+// status.json written before it existed, where the label serves), its phase, and the receipt its
+// child handed back once it has one. A script or ask stage's one line has no key: it runs no child
+// and keeps no item folder, so its receipt lives here and in the stage's record under results/
+// (StageRecord), the copy a resume replays.
 type ItemStatus struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
+	Name    string   `json:"name,omitempty"`
 	Phase   Phase    `json:"phase"`
 	Receipt *Receipt `json:"receipt,omitempty"`
 }

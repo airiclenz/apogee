@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -173,6 +174,46 @@ func itemLabel(units []string) string {
 		return units[0]
 	}
 	return fmt.Sprintf("%s … %s (%d)", units[0], units[len(units)-1], len(units))
+}
+
+// ItemName is the short name a Driver shows an item by, where Label stays its identity (ItemKey,
+// PlanHash, `{item}`, the model-facing result lines). It respells a derived label over each unit:
+// an absolute unit inside dir — the workflow's folder — reads relative to it, dir itself reads as
+// stage (the stage's name), an absolute unit outside dir reads as its basename, and any other unit
+// is unchanged; several units join the way the label does. A label the engine set itself (one that
+// is not the units' own label, such as a merge stage's) is returned unchanged, as is the label of
+// an item with no units.
+func ItemName(item Item, dir, stage string) string {
+	if len(item.Units) == 0 || item.Label != itemLabel(item.Units) {
+		return item.Label
+	}
+	shown := make([]string, len(item.Units))
+	for index, unit := range item.Units {
+		shown[index] = unitName(unit, dir, stage)
+	}
+	if name := itemLabel(shown); strings.TrimSpace(name) != "" {
+		return name
+	}
+	return item.Label
+}
+
+// unitName is one unit as ItemName shows it: relative to dir when it is an absolute path inside
+// it, stage when it is dir itself, its basename when it is an absolute path outside dir, and the
+// unit unchanged otherwise.
+func unitName(unit, dir, stage string) string {
+	if !filepath.IsAbs(unit) {
+		return unit
+	}
+	if dir != "" {
+		relative, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(unit))
+		if err == nil && relative == "." {
+			return stage
+		}
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(relative)
+		}
+	}
+	return filepath.Base(unit)
 }
 
 // globFiles returns the regular files under fsys matching pattern in lexical order. A `**`

@@ -440,3 +440,76 @@ func TestRunnerRefusesWhatItCannotRunYet(t *testing.T) {
 		})
 	}
 }
+
+// itemEventLog is an Observer that records every item event it is told of.
+type itemEventLog struct {
+	items []ItemEvent
+}
+
+func (l *itemEventLog) StagePhase(StageEvent)     {}
+func (l *itemEventLog) ItemPhase(event ItemEvent) { l.items = append(l.items, event) }
+
+// namesFor returns the Name of every event of stage whose item is labelled label, in order.
+func (l *itemEventLog) namesFor(stage, label string) []string {
+	var names []string
+	for _, event := range l.items {
+		if event.Stage == stage && event.Label == label {
+			names = append(names, event.Name)
+		}
+	}
+	return names
+}
+
+func TestRunnerNamesAnItemByItsShortNameAndKeepsItOnResume(t *testing.T) {
+	t.Parallel()
+	plan := Plan{Name: "audit", Stages: []Stage{
+		{Name: "scan", Kind: StageFanout, Task: "scan {item}", Over: &ItemSource{List: []string{"x"}}, Returns: ReceiptSpec{"parts": "list"}},
+		{Name: "parts", Kind: StagePick, From: "scan", Field: "parts"},
+		{Name: "find", Kind: StageFanout, Task: "audit {item} into {out}", Over: &ItemSource{Stage: "parts"}},
+	}}
+	var runner *Runner
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		receipt := okReceipt(spec.Item.Label)
+		if spec.Stage.Name == "scan" {
+			dir, err := runner.Store.Dir(spec.Workflow)
+			if err != nil {
+				return Outcome{}, err
+			}
+			receipt.Fields = map[string]any{"parts": []any{dir, filepath.Join(dir, "part-a")}}
+		}
+		return Outcome{Ending: EndCompleted, Receipt: receipt}, nil
+	}}
+	runner = newTestRunner(t, spawner)
+	firstLog := &itemEventLog{}
+	runner.Observer = firstLog
+
+	first := runPlan(t, runner, context.Background(), plan)
+	resumedLog := &itemEventLog{}
+	runner.Observer = resumedLog
+	second := runPlan(t, runner, context.Background(), plan)
+
+	if second.ID != first.ID {
+		t.Fatalf("re-issue ran in %q, want the first run's folder %q", second.ID, first.ID)
+	}
+	specs := spawner.specsFor(first.Dir)
+	if len(specs) != 1 || specs[0].Name != "find" {
+		t.Fatalf("specs for the workflow folder item = %+v, want one named %q", specs, "find")
+	}
+	if specs := spawner.specsFor(filepath.Join(first.Dir, "part-a")); len(specs) != 1 || specs[0].Name != "part-a" {
+		t.Errorf("specs for the part item = %+v, want one named %q", specs, "part-a")
+	}
+	if got := strings.Join(firstLog.namesFor("find", first.Dir), " "); got != "find find find" {
+		t.Errorf("first run's event names = %q, want find on pending, running and done", got)
+	}
+	if got := strings.Join(resumedLog.namesFor("find", first.Dir), " "); got != "find" {
+		t.Errorf("resumed run's event names = %q, want the one resumed event named find", got)
+	}
+	status, err := runner.Store.ReadStatus(second.ID)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	lines := status.Stages[2].Items
+	if len(lines) != 2 || lines[0].Name != "find" || lines[0].Label != first.Dir || lines[1].Name != "part-a" {
+		t.Errorf("find's status.json lines = %+v, want the folder item named find, the part named part-a", lines)
+	}
+}
