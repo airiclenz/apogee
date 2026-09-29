@@ -1615,7 +1615,12 @@ margin belongs to the slot, not to any one occupant: the gauge and every hint en
 and nothing in the slot ever touches the edge. The black field runs past it to the edge
 regardless — the row is one unbroken band, as it is on the left. In a window too narrow to hold
 both slots the right one is dropped whole rather than squeezed, two columns sooner than it used
-to be.
+to be. The **gauge** is the one occupant the left slot makes room for: while it holds the slot the
+left one is composed to the window less the gauge, its margin and a one-column gap, so a long
+phrase — a delegate named by a long item label — is trimmed to leave the gauge standing rather than
+pushing it off the row. The room comes out of the phrase alone; the gauge is dropped as before only
+where the lead and the trail after the phrase (the queued count and the workflows' readout, whole)
+cannot stand beside it. The hints get no such reservation and keep the drop rule.
 
 **How a size is spelled.** Every context size on screen goes through one formatter — both halves
 of the gauge, the sub-agent block's middle cell, the startup box's window, the rebind and
@@ -1643,6 +1648,9 @@ exactly as a pane's title row is: the **count** is the last thing it gives up an
 what is trimmed around it (`⣾ read… · 5 queued` at 20 columns), because on the short windows where
 the band has been dropped that count is the only thing the whole frame says about the queue. Below
 two columns of room the phrase goes whole, separator and all, rather than reading as an ellipsis.
+While the context gauge holds the right slot the width the slot is composed to is the window less
+the gauge's room, so the phrase is also what gives way to the gauge — never the count, and never an
+idle or trail-only slot, beside which the gauge is dropped instead.
 The trimming is now the rare case rather than the ordinary one: a running phrase is a **verb and a
 clock** (`reading · 3s`) since the tool's target left this slot, so on any window with room for the
 gauge it arrives whole — which is the point of it having left. The order above is what happens on

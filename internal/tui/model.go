@@ -3923,7 +3923,9 @@ func (m Model) throughputSuffix() string {
 // the model's own state — never off the Engine mid-step.
 //
 // The LEFT slot is composed to the window's width rather than composed long and clipped to it
-// (statusLeft) — the popupTitleLine posture, one row down.
+// (statusLeft) — the popupTitleLine posture, one row down — and, while the gauge holds the right
+// slot, to the width the gauge leaves it (statusLeftBeside), so a long phrase gives way to the
+// gauge rather than dropping it.
 func (m Model) statusLine() string {
 	left := m.statusLeft()
 	// Fill the whole width with black-bg cells — segments, the justify gap and the right slot's
@@ -3941,6 +3943,16 @@ func (m Model) statusLine() string {
 	// a long and a short form and picks between them by that room (escStopHint); every other
 	// occupant ignores it and is dropped whole below as before.
 	right := m.statusRight(m.width - m.th.measure.Width(left) - len(bodyIndent) - 1)
+	// The gauge is the one occupant the left slot makes room for: a long phrase — a delegate named
+	// by a 150-character item label — must not cost the row its only reading of the window's fill.
+	// The room comes out of the PHRASE alone (statusLeftBeside); where even the lead and the trail
+	// cannot stand beside it, the slot is composed to the full width and the gauge dropped below as
+	// before. The hints keep that drop rule: they are not a reading the phrase should yield to.
+	if gauge := m.contextGauge(); right != "" && right == gauge {
+		if reserved, ok := m.statusLeftBeside(gauge); ok {
+			left = reserved
+		}
+	}
 	if right != "" {
 		right += m.th.statusBar.Render(bodyIndent)
 	}
@@ -3974,6 +3986,26 @@ func (m Model) statusLine() string {
 // whole and its separator with it — the slot never reads " · 2 queued" with no phrase in front of
 // the separator.
 func (m Model) statusLeft() string {
+	return m.statusLeftWithin(m.width)
+}
+
+// statusLeftBeside composes the left slot to leave the context gauge its room on the row: the
+// window less the gauge, its bodyIndent margin and the one-column justify gap (statusLine). Only
+// the phrase is trimmed for it — the lead and the trail stay whole, which is what the slot's own
+// spend order already guarantees (statusLeftWithin) — so ok is false wherever the composed slot
+// still overruns that width: the idle or trail-only slot the gauge would have to cut into, or a
+// window too narrow for the lead and the trail beside the gauge at all. The caller then drops the
+// gauge, exactly as it did before the room was reserved.
+func (m Model) statusLeftBeside(gauge string) (string, bool) {
+	width := m.width - m.th.measure.Width(gauge) - len(bodyIndent) - 1
+	left := m.statusLeftWithin(width)
+	return left, m.th.measure.Width(left) <= width
+}
+
+// statusLeftWithin is statusLeft composed to width columns rather than to the window's: the same
+// spend order, the phrase trimmed around the lead and the trail. A slot with no phrase is its lead
+// and trail whatever the width, so it can overrun a width narrower than those two.
+func (m Model) statusLeftWithin(width int) string {
 	lead := m.th.statusBar.Render(bodyIndent)
 
 	// qualified is the running slot composed WITH the stall guard's `quiet` qualifier — the same row
@@ -4020,7 +4052,7 @@ func (m Model) statusLeft() string {
 	}
 
 	queued := m.statusTrail(true)
-	room := m.width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
+	room := width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
 	// The quiet qualifier is the FIRST thing the slot gives up, one rung below the phrase it
 	// qualifies: a row too tight for the qualified form falls back to the plain one, so the
 	// qualifier goes whole and never truncates into "· quie…", which would report neither the

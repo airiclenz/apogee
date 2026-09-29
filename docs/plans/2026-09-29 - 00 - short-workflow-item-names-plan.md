@@ -124,7 +124,10 @@ internal/tui/workflows_test.go — workflowsFixture, workflowsPaneModel, TestWor
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Workflows' ./internal/tui/`
 **Commit:** `fix(tui): name items by their short name in the workflows pane`
 
-## 5. The status line keeps the context gauge
+## 5. The status line keeps the context gauge — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the gauge is identified as the right slot's occupant by `right == m.contextGauge()` (statusRight returns it verbatim and it reads no room), so statusRight's precedence is not duplicated; the new composers are `statusLeftWithin(width)` (statusLeft wraps it) and `statusLeftBeside(gauge)`.
+NOTES (2026-09-29): the long-name test drives a single live `sub_agent` child with a 150-character name — the same shownSlot path a workflow item's child takes; new tests are `TestStatusLineGaugeStandsBesideALongDelegateName` and `TestStatusLineKeepsTheQueuedCountOverTheGauge`, their subtests sequential because they resize one shared model.
 
 **What:**
 **Goal:** whenever the window is wide enough to hold the gauge beside a one-column gap and the left slot's lead, the status line shows the gauge; the left slot's phrase is trimmed to leave it that room. Fix for the reported defect: a long run name dropped the gauge.

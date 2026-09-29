@@ -5746,6 +5746,110 @@ func widestDroppedGauge(t *testing.T, m Model) int {
 	return widest
 }
 
+// runningWithLitGauge is a running frame whose right slot holds the context gauge: a top-level
+// usage reading has landed, and nothing primed or flashed outranks it.
+func runningWithLitGauge(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
+	if m.contextGauge() == "" {
+		t.Fatal("context gauge unlit after usage: nothing in the right slot to keep")
+	}
+	return m
+}
+
+// TestStatusLineGaugeStandsBesideALongDelegateName is the reported defect: a workflow run whose
+// single live child was named by a long label put that name in the running phrase, the left slot
+// was composed to the whole window, and the gap the right slot needs was gone — so the gauge
+// dropped off the row on every width. The left slot now leaves the gauge its room, trimming the
+// phrase; only a window too narrow for the lead beside the gauge still drops it, and that row
+// still squares onto the band.
+func TestStatusLineGaugeStandsBesideALongDelegateName(t *testing.T) {
+	t.Parallel()
+	name := strings.Repeat("n", 150)
+	m := runningWithLitGauge(t)
+	m = m.foldEvent(domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"` + name + `","task":"audit"}`)},
+	})
+	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "working"})
+	if got := strip(m.runningPhrase(runRef{}, time.Now(), false)); !strings.Contains(got, name) {
+		t.Fatalf("running phrase = %q; want the delegate's whole name — test premise broken", got)
+	}
+
+	tests := []struct {
+		width     int
+		wantGauge bool
+	}{
+		{80, true},
+		{120, true},
+		{20, false},
+	}
+
+	for _, tc := range tests {
+		// Sequential: every case resizes the one shared model, whose editor and viewport are
+		// pointers a parallel resize would race on.
+		t.Run(fmt.Sprintf("width %d", tc.width), func(t *testing.T) {
+			sized := step(t, m, tea.WindowSizeMsg{Width: tc.width, Height: 24})
+
+			line, cells := sized.statusLine(), statusCells(t, sized)
+
+			if got := strings.ContainsAny(cells, gaugeMarks); got != tc.wantGauge {
+				t.Errorf("status line = %q; gauge shown %v, want %v", cells, got, tc.wantGauge)
+			}
+			if !strings.Contains(cells, "nnnn") {
+				t.Errorf("status line = %q; want the phrase trimmed, not dropped", cells)
+			}
+			if got := ansi.StringWidth(line); got != tc.width {
+				t.Errorf("status line renders %d columns, want exactly %d", got, tc.width)
+			}
+			if col, ok := firstCellWithoutBackground(line); !ok {
+				t.Errorf("status line has a bare (no-background) cell at column %d: %q", col, cells)
+			}
+		})
+	}
+}
+
+// TestStatusLineKeepsTheQueuedCountOverTheGauge pins what the gauge's room is taken from: the
+// phrase, never the queued count. A window one column too narrow for the lead, the whole count, the
+// gap, the gauge and its margin keeps the count and drops the gauge, as it always did; one column
+// wider seats both, the phrase given up entirely to make the room.
+func TestStatusLineKeepsTheQueuedCountOverTheGauge(t *testing.T) {
+	t.Parallel()
+	m := withStagedRows(runningWithLitGauge(t), 5)
+	fits := len(bodyIndent) + m.th.measure.Width(m.statusTrail(false)) + 1 +
+		m.th.measure.Width(m.contextGauge()) + len(bodyIndent)
+
+	tests := []struct {
+		width     int
+		wantGauge bool
+	}{
+		{fits - 1, false},
+		{fits, true},
+	}
+
+	for _, tc := range tests {
+		// Sequential: every case resizes the one shared model, whose editor and viewport are
+		// pointers a parallel resize would race on.
+		t.Run(fmt.Sprintf("width %d", tc.width), func(t *testing.T) {
+			sized := step(t, m, tea.WindowSizeMsg{Width: tc.width, Height: 24})
+
+			line, cells := sized.statusLine(), statusCells(t, sized)
+
+			if !strings.Contains(cells, "5 queued") {
+				t.Errorf("status line = %q; want the count %q whole", cells, "5 queued")
+			}
+			if got := strings.ContainsAny(cells, gaugeMarks); got != tc.wantGauge {
+				t.Errorf("status line = %q; gauge shown %v, want %v", cells, got, tc.wantGauge)
+			}
+			if got := ansi.StringWidth(line); got != tc.width {
+				t.Errorf("status line renders %d columns, want exactly %d", got, tc.width)
+			}
+		})
+	}
+}
+
 // assertStatusRightTail pins the right slot's last columns, styling stripped and untrimmed, and
 // re-checks that the margin is paid for out of the window rather than overhanging it.
 func assertStatusRightTail(t *testing.T, m Model, want string) {
