@@ -106,6 +106,32 @@ func TestVerifyTalliesVerdicts(t *testing.T) {
 	}
 }
 
+// A verify child's verdict counts only when it ended ok: a blocked or partial receipt is unclear
+// whatever verdict it wrote, and an unfinished item has none.
+func TestVerdictOfCountsOnlyAnOKReceipt(t *testing.T) {
+	t.Parallel()
+	confirmed := map[string]any{VerdictField: string(VerdictConfirmed)}
+	for _, tc := range []struct {
+		name string
+		item ItemResult
+		want Verdict
+	}{
+		{"ok and confirmed", ItemResult{Phase: PhaseDone, Receipt: &Receipt{Status: StatusOK, Fields: confirmed}}, VerdictConfirmed},
+		{"ok without a verdict", ItemResult{Phase: PhaseDone, Receipt: &Receipt{Status: StatusOK}}, VerdictUnclear},
+		{"blocked but confirmed", ItemResult{Phase: PhaseDone, Receipt: &Receipt{Status: StatusBlocked, Fields: confirmed}}, VerdictUnclear},
+		{"partial but confirmed", ItemResult{Phase: PhaseDone, Receipt: &Receipt{Status: StatusPartial, Fields: confirmed}}, VerdictUnclear},
+		{"partial but refuted", ItemResult{Phase: PhaseDone, Receipt: &Receipt{Status: StatusPartial, Fields: map[string]any{VerdictField: string(VerdictRefuted)}}}, VerdictUnclear},
+		{"unfinished", ItemResult{Receipt: &Receipt{Status: StatusOK, Fields: confirmed}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := verdictOf(tc.item); got != tc.want {
+				t.Errorf("verdictOf = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMergeSeesEveryOutputPath(t *testing.T) {
 	t.Parallel()
 	var manifest string

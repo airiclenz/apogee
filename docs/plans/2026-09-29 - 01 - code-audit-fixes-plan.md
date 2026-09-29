@@ -325,7 +325,7 @@ the deferred command ran (same observable as the esc test).
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'PickerClick|Boundary' ./internal/tui/`
 **Commit:** `fix(tui): cancel the boundary confirm on an outside click like esc`
 
-## 11. Workflow: a verify child counts only when it ended ok
+## 11. Workflow: a verify child counts only when it ended ok — ✅ DONE (2026-09-29)
 
 **What:** Fix "A blocked or partial verify child still counts as confirmed or refuted".
 **Goal:** `verdictOf` returns `VerdictUnclear` for any receipt whose status is not `StatusOK`.

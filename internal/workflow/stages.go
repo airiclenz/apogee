@@ -50,8 +50,8 @@ const VerdictField = "verdict"
 // Verdict is a verify child's judgement of the item it checked.
 type Verdict string
 
-// The three verdicts. A verify child that ended blocked, or without a readable verdict, counts as
-// unclear; an item no verify stage checked has none.
+// The three verdicts. A verify child that did not end ok (blocked or partial), or ended without a
+// readable verdict, counts as unclear; an item no verify stage checked has none.
 const (
 	VerdictConfirmed Verdict = "confirmed"
 	VerdictRefuted   Verdict = "refuted"
@@ -300,11 +300,15 @@ func fieldText(value any) string {
 	return string(encoded)
 }
 
-// verdictOf reads a verify item's verdict off its receipt: unclear when the child blocked or sent
-// no readable verdict, none when a cancel left the item unfinished.
+// verdictOf reads a verify item's verdict off its receipt: unclear when the child did not end ok
+// (blocked or partial, whatever verdict it wrote) or sent no readable verdict, none when a cancel
+// left the item unfinished.
 func verdictOf(item ItemResult) Verdict {
 	if item.Phase != PhaseDone || item.Receipt == nil {
 		return ""
+	}
+	if item.Receipt.Status != StatusOK {
+		return VerdictUnclear
 	}
 	value, _ := item.Receipt.Fields[VerdictField].(string)
 	switch verdict := Verdict(value); verdict {
