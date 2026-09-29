@@ -387,7 +387,10 @@ buffered bytes for the next `Read`. The direct `collectConsoleWindow` call in
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/console/`
 **Commit:** `fix(tools): settle console waits on cancel`
 
-## 13. apply_patch: whole-line, unique matches and newline-safe inserts
+## 13. apply_patch: whole-line, unique matches and newline-safe inserts — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): edit_existing_file's model-facing description left unchanged — a golden tool-menu byte pin covers it; the ambiguity and mismatch errors carry the guidance instead.
+NOTES (2026-09-29): the rewritten TestEditExistingFile_RegionsFollowWhereThePatchLanded asserts the regions editRegions already cuts (Trailing ["end", ""] — the file's final newline yields an empty trailing line), unchanged behaviour of the region cutter.
 
 **What:** Fix "`apply_patch` edits land mid-line and glue text onto unterminated files" (silent
 corruption).

@@ -475,17 +475,19 @@ func TestEditExistingFile_FullReplacementRecordsEditRegions(t *testing.T) {
 	}
 }
 
-// The applier locates a hunk by its text, so a hunk whose old text repeats lands on the FIRST
-// occurrence — not necessarily the one the model pictured. The regions report what actually
-// landed, because they are cut from the file as read against the file as written and never from
-// the patch's own account of itself.
+// The applier locates a hunk by its text, so a hunk whose old text repeats is ambiguous: it is
+// refused rather than landed on whichever occurrence comes first, and a context line makes it
+// unique. The regions report where the unique hunk actually landed, because they are cut from the
+// file as read against the file as written and never from the patch's own account of itself.
 func TestEditExistingFile_RegionsFollowWhereThePatchLanded(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
-	writeTempFile(t, root, "repeat.txt", "head\nsame\ntail\nsame\nend\n")
+	const original = "head\nsame\ntail\nsame\nend\n"
+	path := writeTempFile(t, root, "repeat.txt", original)
+	tool := NewEditExistingFile(root)
 
-	patch := strings.Join([]string{
+	ambiguous := strings.Join([]string{
 		"*** Begin Patch",
 		"*** Update File: repeat.txt",
 		"@@",
@@ -493,9 +495,30 @@ func TestEditExistingFile_RegionsFollowWhereThePatchLanded(t *testing.T) {
 		"+SAME",
 		"*** End Patch",
 	}, "\n")
+	refused, err := tool.Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "repeat.txt", "content": ambiguous}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !refused.IsError || !strings.Contains(refused.Content, "matched 2 places") ||
+		!strings.Contains(refused.Content, "at lines 2, 4") {
+		t.Fatalf("ambiguous hunk result = %+v, want a refusal naming both matches", refused)
+	}
+	if got := string(mustRead(t, path)); got != original {
+		t.Fatalf("file changed by a refused hunk:\n%s", got)
+	}
 
-	result, err := NewEditExistingFile(root).Execute(context.Background(),
-		callWith(t, "c1", map[string]any{"path": "repeat.txt", "content": patch}))
+	unique := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: repeat.txt",
+		"@@",
+		" tail",
+		"-same",
+		"+SAME",
+		"*** End Patch",
+	}, "\n")
+	result, err := tool.Execute(context.Background(),
+		callWith(t, "c2", map[string]any{"path": "repeat.txt", "content": unique}))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
@@ -506,13 +529,13 @@ func TestEditExistingFile_RegionsFollowWhereThePatchLanded(t *testing.T) {
 	want := []domain.EditRegion{{
 		BeforeStart: 1,
 		AfterStart:  1,
-		Leading:     []string{"head"},
+		Leading:     []string{"head", "same", "tail"},
 		Removed:     []string{"same"},
 		Inserted:    []string{"SAME"},
-		Trailing:    []string{"tail", "same", "end"},
+		Trailing:    []string{"end", ""},
 	}}
 	if got := editRegionsOf(t, result).Regions; !reflect.DeepEqual(got, want) {
-		t.Errorf("regions = %+v, want the change at the first occurrence %+v", got, want)
+		t.Errorf("regions = %+v, want the change at the anchored occurrence %+v", got, want)
 	}
 }
 
@@ -720,5 +743,82 @@ func TestParsePatchHunks_AddFileFlagFollowsTheSection(t *testing.T) {
 	}
 	if !hunks[0].addFile || hunks[1].addFile {
 		t.Errorf("addFile = [%v %v], want [true false]", hunks[0].addFile, hunks[1].addFile)
+	}
+}
+
+// A hunk lands only on whole lines, and a pure insertion onto text lacking a final newline starts a
+// line of its own instead of gluing onto the last one.
+func TestApplyPatch_WholeLinesAndNewlines(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		original string
+		hunk     patchHunk
+		want     string
+		wantErr  string
+	}{
+		{
+			name:     "a prefix of a longer line does not match",
+			original: "x = 10\n",
+			hunk:     patchHunk{oldLines: []string{"x = 1"}, newLines: []string{"x = 2"}},
+			wantErr:  "did not match",
+		},
+		{
+			name:     "a suffix of a longer line does not match",
+			original: "max = 1\n",
+			hunk:     patchHunk{oldLines: []string{"x = 1"}, newLines: []string{"x = 2"}},
+			wantErr:  "did not match",
+		},
+		{
+			name:     "a hunk present twice is ambiguous",
+			original: "a\nb\na\nb\n",
+			hunk:     patchHunk{oldLines: []string{"a", "b"}, newLines: []string{"c"}},
+			wantErr:  "matched 2 places",
+		},
+		{
+			name:     "a crlf line ends at its carriage return",
+			original: "x = 1\r\n",
+			hunk:     patchHunk{oldLines: []string{"x = 1"}, newLines: []string{"x = 2"}},
+			want:     "x = 2\r\n",
+		},
+		{
+			name:     "a match may end at the end of the text",
+			original: "a\nx = 1",
+			hunk:     patchHunk{oldLines: []string{"x = 1"}, newLines: []string{"x = 2"}},
+			want:     "a\nx = 2",
+		},
+		{
+			name:     "a trailing empty context line is not demanded of the file",
+			original: "a\nb\nc\n",
+			hunk:     patchHunk{oldLines: []string{"a", "b", ""}, newLines: []string{"a", "B", ""}},
+			want:     "a\nB\nc\n",
+		},
+		{
+			name:     "an insertion onto text lacking a final newline",
+			original: "a",
+			hunk:     patchHunk{newLines: []string{"new"}, addFile: true},
+			want:     "a\nnew\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := applyPatch(tc.original, []patchHunk{tc.hunk})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("applyPatch = %q, %v; want an error containing %q", got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("applyPatch returned an error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("applyPatch = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

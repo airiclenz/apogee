@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -33,7 +34,8 @@ type fileEditArgs struct {
 // a patch in the "*** Begin Patch" format (a sequence of @@ hunks of -/+/space lines).
 // It is a write tool scoped to a sandbox root and carries the workspaceScopedWriter
 // marker (Apogee's own path-safety-bounded write). Ported from the oracle's
-// file-edit-tool, including its hunk parser and indexOf-based applier.
+// file-edit-tool, including its hunk parser; its applier matches each hunk on whole lines and
+// refuses a hunk that matches more than one place.
 type EditExistingFile struct {
 	toolSpec
 	root string
@@ -225,39 +227,111 @@ func parsePatchHunks(content string) []patchHunk {
 var errUnanchoredHunk = errors.New("patch hunk has only '+' lines, so its position in the file is unknown: " +
 	"include at least one unchanged context line (prefixed with a space) or a '-' line next to the insertion")
 
-// errHunkMismatch reports a hunk whose joined oldLines do not occur in the file.
+// errHunkMismatch reports a hunk whose joined oldLines do not occur in the file as whole lines.
 var errHunkMismatch = errors.New("patch hunk did not match file content")
 
-// applyPatch applies each hunk to original by locating its joined oldLines verbatim and
-// substituting its joined newLines. A pure-insertion hunk (no oldLines) has no anchor, so it
+// applyPatch applies each hunk to original by locating its joined oldLines as whole lines —
+// starting at a line start and ending at a line end ("\n" or "\r\n") or the end of the text —
+// and substituting its joined newLines. Trailing empty context lines are dropped from both
+// sides first, so a patch's closing blank context line does not demand a blank line in the
+// file. A hunk that matches nowhere returns errHunkMismatch; one that matches more than once
+// is refused as ambiguous, as find_replace refuses repeated old text, rather than landing on
+// whichever occurrence comes first. A pure-insertion hunk (no oldLines) has no anchor, so it
 // appends only when original is empty or the hunk sits under "*** Add File"; anywhere else it
-// is refused with errUnanchoredHunk. Any refusal or unmatched hunk returns an error, leaving
-// the caller to discard the result so the file is never corrupted. Ported from the oracle's
-// indexOf-based applier.
+// is refused with errUnanchoredHunk. An append onto text lacking a final newline adds the
+// separator first and ends the appended lines with a newline, so it never glues onto the last
+// line. Any refusal returns an error, leaving the caller to discard the result so the file is
+// never corrupted.
 func applyPatch(original string, hunks []patchHunk) (string, error) {
 	result := original
 
 	for _, hunk := range hunks {
-		if len(hunk.oldLines) == 0 {
+		oldLines, newLines := trimTrailingEmptyContext(hunk.oldLines, hunk.newLines)
+
+		if len(oldLines) == 0 {
 			if original != "" && !hunk.addFile {
 				return "", errUnanchoredHunk
 			}
-			result += strings.Join(hunk.newLines, "\n")
+			result = appendLines(result, newLines)
 			continue
 		}
 
-		needle := strings.Join(hunk.oldLines, "\n")
-		idx := strings.Index(result, needle)
-		if idx == -1 {
+		needle := strings.Join(oldLines, "\n")
+		matches := wholeLineMatches(result, needle)
+		switch {
+		case len(matches) == 0:
 			return "", errHunkMismatch
+		case len(matches) > 1:
+			return "", fmt.Errorf("patch hunk matched %d places (must match exactly one)%s: "+
+				"add unchanged context lines (prefixed with a space) until the hunk is unique",
+				len(matches), matchLinesNote(result, matches))
 		}
 
-		before := result[:idx]
-		after := result[idx+len(needle):]
-		result = before + strings.Join(hunk.newLines, "\n") + after
+		idx := matches[0]
+		result = result[:idx] + strings.Join(newLines, "\n") + result[idx+len(needle):]
 	}
 
 	return result, nil
+}
+
+// trimTrailingEmptyContext drops the empty lines both sides of a hunk end with — trailing blank
+// context lines, which a model's patch often carries as an artefact and which would otherwise
+// have to match a blank line in the file.
+func trimTrailingEmptyContext(oldLines, newLines []string) ([]string, []string) {
+	for len(oldLines) > 0 && len(newLines) > 0 &&
+		oldLines[len(oldLines)-1] == "" && newLines[len(newLines)-1] == "" {
+		oldLines = oldLines[:len(oldLines)-1]
+		newLines = newLines[:len(newLines)-1]
+	}
+	return oldLines, newLines
+}
+
+// appendLines appends lines to text. Text that is empty or already ends with a newline takes
+// the joined lines as they are; non-empty text lacking a final newline gets a separator first,
+// and the appended lines end with a newline so the file ends on a whole line.
+func appendLines(text string, lines []string) string {
+	joined := strings.Join(lines, "\n")
+	if text == "" || strings.HasSuffix(text, "\n") {
+		return text + joined
+	}
+	return text + "\n" + joined + "\n"
+}
+
+// wholeLineMatches returns the byte offset of every place needle occurs in text as whole lines:
+// preceded by the text's start or a "\n", and followed by the text's end, a "\n" or a "\r\n".
+// Overlapping matches all count, since each is a place the hunk could land.
+func wholeLineMatches(text, needle string) []int {
+	var matches []int
+	for offset := 0; offset <= len(text); {
+		i := strings.Index(text[offset:], needle)
+		if i < 0 {
+			break
+		}
+		at := offset + i
+		offset = at + 1
+
+		// A zero-length needle (a lone empty line) at the very end of newline-terminated text
+		// sits after the last line, not on one.
+		if at == len(text) && at > 0 {
+			break
+		}
+		startsLine := at == 0 || text[at-1] == '\n'
+		rest := text[at+len(needle):]
+		endsLine := rest == "" || rest[0] == '\n' || strings.HasPrefix(rest, "\r\n")
+		if startsLine && endsLine {
+			matches = append(matches, at)
+		}
+	}
+	return matches
+}
+
+// matchLinesNote names the 1-based lines where each match starts, as " — at lines 2, 4".
+func matchLinesNote(text string, matches []int) string {
+	spelled := make([]string, len(matches))
+	for i, at := range matches {
+		spelled[i] = strconv.Itoa(strings.Count(text[:at], "\n") + 1)
+	}
+	return " — at lines " + strings.Join(spelled, ", ")
 }
 
 var (
