@@ -457,13 +457,30 @@ func TestParseSkillTriggersCapped(t *testing.T) {
 // A hostile SKILL.md must not stall a load: the lenient fold of ~500k one-char continuation lines
 // behind an unterminated quote (a malformed block, so the scan runs) is linear, and the folded
 // description still reaches the matcher clamped as before.
+//
+// Linearity is asserted by SCALING, not by a wall-clock budget, so the guard holds under the race
+// detector and on slow hosts alike: the full fixture has foldScaleFactor times the lines of the
+// small one, so a linear fold takes about foldScaleFactor times as long and the quadratic fold it
+// replaced up to foldScaleFactor^2 times (48x measured against it). The limit sits between the two
+// with room for noise; the small parse takes its best of foldSmallRuns so a GC pause or scheduler
+// stall in one small run cannot shrink the ratio and hide the growth.
 func TestParseSkillLenientFoldIsBounded(t *testing.T) {
-	const lines = 500_000
-	content := "---\nname: plan\ndescription: \"hostile\n" + strings.Repeat("a\n", lines) + "---\nbody"
+	const (
+		lines           = 500_000
+		foldScaleFactor = 8
+		foldSmallRuns   = 3
+		maxGrowth       = 3 * foldScaleFactor // linear ≈ 8x, quadratic ≈ 48-64x
+	)
+	content := hostileFoldSkill(lines)
 	if len(content) > maxSkillFileBytes+64 {
 		t.Fatalf("fixture is %d bytes, want it near the %d-byte file cap", len(content), maxSkillFileBytes)
 	}
+	small := hostileFoldSkill(lines / foldScaleFactor)
 
+	smallElapsed := time.Duration(1<<63 - 1)
+	for range foldSmallRuns {
+		smallElapsed = min(smallElapsed, timeParse(t, small))
+	}
 	start := time.Now()
 	sk, err := parseSkill(content, "dir")
 	elapsed := time.Since(start)
@@ -471,13 +488,32 @@ func TestParseSkillLenientFoldIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseSkill: %v", err)
 	}
-	if elapsed > time.Second {
-		t.Errorf("parse took %v, want the fold linear (< 1s)", elapsed)
+	growth := float64(elapsed) / float64(max(smallElapsed, time.Microsecond))
+	t.Logf("%d lines: %v, %d lines: %v, growth %.1fx", lines/foldScaleFactor, smallElapsed, lines, elapsed, growth)
+	if growth > maxGrowth {
+		t.Errorf("parse of %d lines took %v, %.1fx the %v of %d lines, want near-linear growth (<= %dx)",
+			lines, elapsed, growth, smallElapsed, lines/foldScaleFactor, maxGrowth)
 	}
 	want := sanitize.ClampRunes("hostile"+strings.Repeat(" a", lines), maxDescriptionLen)
 	if sk.Description != want {
 		t.Errorf("Description = %d runes, want the unbounded fold clamped to %d", len([]rune(sk.Description)), maxDescriptionLen)
 	}
+}
+
+// hostileFoldSkill is a SKILL.md whose description opens an unterminated quote and then runs
+// lines one-char continuation lines, so the strict parse fails and the lenient scan folds them all.
+func hostileFoldSkill(lines int) string {
+	return "---\nname: plan\ndescription: \"hostile\n" + strings.Repeat("a\n", lines) + "---\nbody"
+}
+
+// timeParse reports how long parseSkill takes on content, failing the test on a parse error.
+func timeParse(t *testing.T, content string) time.Duration {
+	t.Helper()
+	start := time.Now()
+	if _, err := parseSkill(content, "dir"); err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	return time.Since(start)
 }
 
 // The bounded fold keeps the outputs the unbounded one gave: a triggers: list longer than
