@@ -481,72 +481,130 @@ func TestVetEndpoint_TheEgressProxyComesFromTheEnvironment(t *testing.T) {
 // TestGuardedClient_DoesNotFollowRedirects pins the redirect policy the MCP client builder
 // reproduced field-for-field from the native funnel except for this one line: a redirect could
 // send a vetted connection to an unvetted host, stepping around the endpoint's string-level
-// allow/deny decision. The response is the redirect itself and the target is never fetched.
+// allow/deny decision. The response is the redirect itself and the target is never fetched —
+// whether the Location is another path on the pinned endpoint or another private address, which
+// following would dial (and the floor would refuse) instead of handing the 302 back.
 func TestGuardedClient_DoesNotFollowRedirects(t *testing.T) {
 	t.Parallel()
 
-	var followed atomic.Int64
-	mux := http.NewServeMux()
-	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/elsewhere", http.StatusFound)
-	})
-	mux.HandleFunc("/elsewhere", func(w http.ResponseWriter, _ *http.Request) {
-		followed.Add(1)
-		w.WriteHeader(http.StatusOK)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
-	client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportSSE, Endpoint: endpoint},
-		security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
-
-	resp, err := client.Get(endpoint)
-	if err != nil {
-		t.Fatalf("GET the redirecting endpoint: %v", err)
+	tests := []struct {
+		name     string
+		location string
+	}{
+		{name: "another path on the pinned endpoint", location: "/elsewhere"},
+		{name: "another private address", location: "http://10.9.8.7:9/mcp"},
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusFound {
-		t.Errorf("status = %d; want the 302 itself (redirects are not followed)", resp.StatusCode)
-	}
-	if got := followed.Load(); got != 0 {
-		t.Errorf("the redirect target was fetched %d time(s); want 0", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var followed atomic.Int64
+			mux := http.NewServeMux()
+			mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, tt.location, http.StatusFound)
+			})
+			mux.HandleFunc("/elsewhere", func(w http.ResponseWriter, _ *http.Request) {
+				followed.Add(1)
+				w.WriteHeader(http.StatusOK)
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
+			client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportSSE, Endpoint: endpoint},
+				security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
+
+			resp, err := client.Get(endpoint)
+
+			if err != nil {
+				t.Fatalf("GET the redirecting endpoint: %v; want the 302 handed back unfollowed", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusFound {
+				t.Errorf("status = %d; want the 302 itself (redirects are not followed)", resp.StatusCode)
+			}
+			if got := resp.Header.Get("Location"); got != tt.location {
+				t.Errorf("Location = %q; want %q", got, tt.location)
+			}
+			if got := followed.Load(); got != 0 {
+				t.Errorf("the redirect target was fetched %d time(s); want 0", got)
+			}
+		})
 	}
 }
 
+// TestGuardedClient_AnOversizeBodyFailsTheRead pins the message bound on the HTTP lane, through
+// the client the production path installs: a response body that grows one message past
+// maxMCPMessageBytes fails its read with errMCPMessageTooLarge, and no byte past the cap reaches
+// the caller. The bound is cumulative per message, never per line, so the many-short-line cases
+// carry no message boundary anywhere — a per-line bound would let every one of them through.
 func TestGuardedClient_AnOversizeBodyFailsTheRead(t *testing.T) {
 	t.Parallel()
 
-	// One line past the bound, no newline anywhere — the shape of a streamable JSON reply from a
-	// server that never stops writing.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(bytes.Repeat([]byte("x"), maxMCPMessageBytes+1))
-	}))
-	defer srv.Close()
+	tests := []struct {
+		name        string
+		contentType string
+		body        []byte
+	}{
+		{
+			// The shape of a streamable JSON reply from a server that never stops writing.
+			name:        "json: one newline-free line",
+			contentType: "application/json",
+			body:        bytes.Repeat([]byte("x"), maxMCPMessageBytes+1),
+		},
+		{
+			// A plain JSON reply is one whole-body message: its newlines are no boundary.
+			name:        "json: many short lines",
+			contentType: "application/json",
+			body:        append([]byte("[\n"), manyShortBodyLines(`"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",`+"\n")...),
+		},
+		{
+			// One SSE event whose lines never reach the blank line that would complete it.
+			name:        "sse: many short lines of one event",
+			contentType: "text/event-stream",
+			body:        append([]byte("event: message\n"), manyShortBodyLines("data: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n")...),
+		},
+	}
 
-	endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
-	client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
-		security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("POST the endpoint: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(tt.body)
+			}))
+			defer srv.Close()
+			endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
+			client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+				security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
+			req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("POST the endpoint: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
 
-	got, err := io.ReadAll(resp.Body)
-	if !errors.Is(err, errMCPMessageTooLarge) {
-		t.Fatalf("read the body: err = %v (%d bytes read); want %v", err, len(got), errMCPMessageTooLarge)
+			got, err := io.ReadAll(resp.Body)
+
+			if !errors.Is(err, errMCPMessageTooLarge) {
+				t.Fatalf("read the body: err = %v (%d bytes read); want %v", err, len(got), errMCPMessageTooLarge)
+			}
+			if len(got) > maxMCPMessageBytes {
+				t.Errorf("%d bytes reached the caller; want at most %d", len(got), maxMCPMessageBytes)
+			}
+		})
 	}
-	if len(got) > maxMCPMessageBytes {
-		t.Errorf("%d bytes reached the caller; want at most %d", len(got), maxMCPMessageBytes)
-	}
+}
+
+// manyShortBodyLines repeats line until the result is longer than maxMCPMessageBytes, so a body
+// built from it passes the bound only by accumulation — no single line comes near the cap.
+func manyShortBodyLines(line string) []byte {
+	return bytes.Repeat([]byte(line), maxMCPMessageBytes/len(line)+1)
 }
 
 // closeRecordingTransport forwards to next and counts the closes of each response body it hands

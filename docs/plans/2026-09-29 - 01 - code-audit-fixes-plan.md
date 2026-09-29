@@ -188,7 +188,10 @@ row moves to its framing mode; `TestGuardedClient_PinsTheEndpointAndRefusesEvery
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/mcp/`
 **Commit:** `fix(mcp): bound each message cumulatively, not per line`
 
-## 5. MCP HTTP transport: behavioural tests for pinning, redirects and body bound
+## 5. MCP HTTP transport: behavioural tests for pinning, redirects and body bound — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): (b) proxy pinning is already covered by TestGuardedClient_ProxiedEndpointPinsBothHosts (the endpoint connects only through the pinned loopback proxy; an unproxied private address is refused), so no new test was added; checked by hand that it fails when the proxy host is dropped from the pin list.
+NOTES (2026-09-29): (a) extended TestGuardedClient_DoesNotFollowRedirects into a table with a Location pointing at another private address (10.9.8.7); (c) extended TestGuardedClient_AnOversizeBodyFailsTheRead into a table adding a many-short-line JSON body and a many-short-line SSE event with no blank line. Checked by hand: dropping CheckRedirect fails both redirect cases; a per-line bound fails both many-short-line cases.
 
 **What:** Recast at the regression check (2026-09-29). Test-only; closes "MCP HTTP transport pinning, redirect and body-bound lane has no
 behavioural test" (Medium). Depends on item 4.
