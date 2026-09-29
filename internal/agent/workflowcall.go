@@ -105,6 +105,13 @@ const (
 	resumeFanOutLine        = "to resume: call fan_out again with the same arguments — finished items are kept"
 )
 
+// The resume command a recipe launch's started phase carries for the user (resumeCommand,
+// domain.WorkflowPhaseEvent.Resume): the same launch facts resumeHint reads, worded for a person.
+const (
+	resumeCommandTypedFormat = "re-run `%s` to resume"
+	resumeCommandStartFormat = "run `/%s` again with the same inputs to resume"
+)
+
 // launchKind is how a blocking Workflow was launched, the one fact its resume line is read from.
 type launchKind int
 
@@ -135,6 +142,20 @@ func resumeHint(launch workflowLaunch) string {
 		return fmt.Sprintf(resumeStartRecipeFormat, launch.recipe)
 	default:
 		return resumeFanOutLine
+	}
+}
+
+// resumeCommand is the text telling the user how to resume a workflow launched as launch, carried
+// on its started phase (domain.WorkflowPhaseEvent.Resume): the typed line or the recipe's id for a
+// recipe launch, "" for a fan_out, which the user never typed.
+func resumeCommand(launch workflowLaunch) string {
+	switch launch.kind {
+	case launchTypedRecipe:
+		return fmt.Sprintf(resumeCommandTypedFormat, launch.line)
+	case launchStartRecipe:
+		return fmt.Sprintf(resumeCommandStartFormat, launch.recipe)
+	default:
+		return ""
 	}
 }
 
@@ -618,6 +639,9 @@ type workflowObserver struct {
 	// (domain.WorkflowPhaseEvent.Call); every caller of observeWorkflow sets it before the run
 	// starts.
 	call string
+	// resume is the resume command the started phase carries (domain.WorkflowPhaseEvent.Resume):
+	// runRecipe sets it from a recipe launch's resumeCommand before the run starts; "" otherwise.
+	resume string
 
 	mu sync.Mutex
 	id string // the Workflow's id, once started was emitted
@@ -781,14 +805,14 @@ func (o *workflowObserver) end(result workflow.Result, err error) {
 	}
 }
 
-// startLocked emits started, with the stage names, the first time a notification names the
-// Workflow's id. The caller holds mu.
+// startLocked emits started, with the stage names and the resume command, the first time a
+// notification names the Workflow's id. The caller holds mu.
 func (o *workflowObserver) startLocked(id string) {
 	if o.id != "" || id == "" {
 		return
 	}
 	o.id = id
-	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Stages: slices.Clone(o.stages)})
+	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Stages: slices.Clone(o.stages), Resume: o.resume})
 }
 
 // emitLocked stamps event with this Agent's identity, the Workflow's id and name, and emits it.

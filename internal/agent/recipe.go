@@ -294,6 +294,7 @@ func (a *Agent) runRecipe(
 	}
 	observer := a.observeWorkflow(runner, turn, plan)
 	observer.call = call.ID
+	observer.resume = resumeCommand(asked.launch)
 	result, err = runner.Run(ctx, plan)
 	observer.end(result, err)
 	return result, seatFellBack(runner), err

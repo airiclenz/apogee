@@ -797,6 +797,11 @@ type WorkflowReceipt struct {
 // It is what a Driver hangs the item runs off: the block that started the Workflow, whose call
 // the children name as their spawning call.
 //
+// Resume is, on the WorkflowStarted of a Recipe launch, the text telling the user how to resume
+// the Workflow should it stop — "re-run `/<id> <text>` to resume" for a typed launch, "run `/<id>`
+// again with the same inputs to resume" for one StartRecipe made — and "" on every other
+// phase and on a fan_out's or a background workflow's started phase.
+//
 // It is OBSERVATION ONLY: nothing in the loop reads it, and the result the Workflow's caller reads
 // is its result lines, not these events. A Driver that ignores it loses the Workflow's liveness
 // and nothing else.
@@ -821,6 +826,7 @@ type WorkflowPhaseEvent struct {
 	Outcome    WorkflowStageOutcome
 	Run        string
 	Attempt    int
+	Resume     string
 }
 
 // BackgroundWorkflowCallPrefix leads the synthetic call id a background workflow's item children

@@ -155,7 +155,10 @@ listing path is cut before it).
 - `go test -count=1 -run 'ResumeLine|TestRecipe|TestFanOut|TestWorkflowCall_ACancel' ./internal/agent/`
 **Commit:** `feat(agent): tell the model how to resume a stopped workflow`
 
-## 4. The workflow's started phase carries its resume command
+## 4. The workflow's started phase carries its resume command — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): Resume is derived by a new resumeCommand(workflowLaunch) beside resumeHint, from item 3's launch-kind value; runRecipe sets it on the observer, so a fan_out's recipe form (launchFanOut) and a background workflow (driveBackground's own observer, never set) carry "". The background case is empty by construction and has no dedicated test; TestFanOutStartedEventHasNoResume covers plain and recipe-form fan_out.
+NOTES (2026-09-29): no CHANGELOG entry — the field is not user-visible until item 5 draws it; not added to the NDJSON workflow_phase line (encode.go comment names it among the Driver-only members).
 
 **What:** Depends on item 3. Add `Resume string` to `domain.WorkflowPhaseEvent`, set on
 `WorkflowStarted` for a recipe launch only: the user-facing text ``re-run `/<id> <text>` to

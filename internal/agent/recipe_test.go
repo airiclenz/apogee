@@ -754,3 +754,99 @@ func TestStoppedRecipeAnswerCarriesResumeLine(t *testing.T) {
 		})
 	}
 }
+
+// startedPhase is the one WorkflowStarted among events.
+func startedPhase(t *testing.T, events []domain.Event) domain.WorkflowPhaseEvent {
+	t.Helper()
+	var started []domain.WorkflowPhaseEvent
+	for _, phase := range workflowPhaseEvents(events) {
+		if phase.Phase == domain.WorkflowStarted {
+			started = append(started, phase)
+		}
+	}
+	if len(started) != 1 {
+		t.Fatalf("started phases = %d, want one", len(started))
+	}
+	return started[0]
+}
+
+// TestRecipeStartedEventCarriesResume pins the resume command a recipe launch's started phase
+// carries for the user: the typed line for a typed launch, the recipe's id for a StartRecipe one.
+func TestRecipeStartedEventCarriesResume(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		scope  string
+		launch func(a *Agent) error
+		want   string
+	}{
+		{
+			name:  "typed line",
+			scope: "src",
+			launch: func(a *Agent) error {
+				return a.Submit(domain.UserInput{Text: "  /review src \n", SkillIDs: []string{"review"}})
+			},
+			want: "re-run `/review src` to resume",
+		},
+		{
+			name:  "StartRecipe",
+			scope: "lib",
+			launch: func(a *Agent) error {
+				_, err := a.StartRecipe(context.Background(), RecipeLaunch{SkillID: "review", Text: "scope=lib"})
+				return err
+			},
+			want: "run `/review` again with the same inputs to resume",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			a, err := newAgent(recipeConfig(t, sink, reviewRecipe()), reviewUpstream(tc.scope))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := tc.launch(a); err != nil {
+				t.Fatalf("launch: %v", err)
+			}
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			if got := startedPhase(t, sink.events).Resume; got != tc.want {
+				t.Errorf("started Resume = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFanOutStartedEventHasNoResume pins that a model's fan_out — plain or naming a recipe — starts
+// its workflow with no resume command: the user never typed it, so there is nothing to re-run.
+func TestFanOutStartedEventHasNoResume(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args string
+	}{
+		{name: "plain", args: seatArgsJSON("", false, "alpha")},
+		{name: "recipe form", args: `{"recipe":"review","inputs":{"scope":"src"},"task":"","over":[]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			cfg := recipeConfig(t, sink, reviewRecipe())
+			up := recipeFanOutUpstream(tc.args).route("check alpha carefully", nil, finishScript("f3", "alpha is fine"))
+
+			runWorkflowParent(t, context.Background(), cfg, up, "please run it")
+
+			if got := startedPhase(t, sink.events).Resume; got != "" {
+				t.Errorf("started Resume = %q, want none for a fan_out", got)
+			}
+		})
+	}
+}
