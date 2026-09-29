@@ -8,6 +8,14 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- Sent prompt blocks (a submitted `❯` prompt, a delivered `⧖` interjection, and the run view's task row) now have a row of `▄` above them and a row of `▀` below them in the block's gray, so the block looks half a row taller at each end. These half rows take the place of the blank separator lines around the block.
+
+- A drag-copy over the transcript leaves out the sent prompt blocks' half-block padding rows, so the clipboard text is the same as before the padding existed, and the selection highlight does not shade those rows.
+
+- On a terminal without colour (an Ascii or no-TTY colour profile) a sent prompt block is drawn without its ▄/▀ half rows, and the blank separator rows around it return; a colour-scheme switch keeps that choice.
+
+- A running workflow block's header `✦` now blinks like a running sub-agent's — while the workflow is waiting on an ask's answer too — and settles to a steady `✦` once it finishes, stops or fails.
+
 - **Fixed:** the read cache no longer caps a re-read when the earlier read returned only part of the file (a line range, a `max_lines` limit or a `locate`), or when that earlier read's result has since been pruned from the conversation — the model now gets the file's content instead of a one-line header, where before it could be left with no copy of the file at all.
 
 - **Fixed:** a skill recipe loaded from disk can no longer read files outside its own skill folder: a `prompt:` file (or a `{{SKILL_DIR}}` file a recipe stages) that is a symlink resolving outside the folder is now refused with an error instead of read. Symlinks whose target is an absolute path are refused too, even when they point back inside the folder; use a relative link for an in-folder alias. A skill folder removed after discovery now fails its prompt reads instead of reading a same-named file from the workspace.
