@@ -404,8 +404,9 @@ The model is woken with a workflow's result when it ends, so it has no need to p
 not — one row each with its state (`running`, `waiting for you` while an approval or a question of
 it waits on you, `queued`, or how it ended) and its items done of all.
 
-- `⏎` opens one to its stages and their items, each with its status and summary; `⏎` on an item
-  opens it read-only — its receipt, the detail output it wrote and its whole conversation.
+- `⏎` opens one to its stages and their items, each by its short name with its status and
+  summary; `⏎` on an item opens it read-only — its receipt, the detail output it wrote and its
+  whole conversation.
 - `^a` answers what the workflow waits on: the pane closes and its oldest waiting approval or
   question opens — one `esc` sent back included — only while the agent is idle; mid-turn it says
   so and opens nothing.

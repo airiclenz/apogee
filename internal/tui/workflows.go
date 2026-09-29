@@ -721,7 +721,8 @@ type workflowRowTarget struct {
 }
 
 // workflowDetailRows is one workflow's detail rows — each stage's row (name, kind and phase, and
-// its note), then its items (number, label, and status and summary) — with what each row stands for.
+// its note), then its items (number, shown name, and status and summary) — with what each row stands
+// for.
 func workflowDetailRows(info workflow.Info) ([]popupRow, []workflowRowTarget) {
 	var (
 		rows    []popupRow
@@ -739,7 +740,7 @@ func workflowDetailRows(info workflow.Info) ([]popupRow, []workflowRowTarget) {
 		targets = append(targets, workflowRowTarget{stage: s, item: -1})
 		for i, item := range stage.Items {
 			rows = append(rows, popupRow{
-				"  #" + strconv.Itoa(i+1) + " " + sanitize.StripEscapesToLine(item.Label),
+				"  #" + strconv.Itoa(i+1) + " " + workflowItemName(item),
 				"· " + workflowItemStatus(item),
 			})
 			targets = append(targets, workflowRowTarget{stage: s, item: i})
@@ -761,13 +762,23 @@ func workflowItemStatus(item workflow.ItemStatus) string {
 	return status + " — " + sanitize.StripEscapesToLine(item.Receipt.Summary)
 }
 
-// workflowItemTitle is the item level's title: the stage, the item's number and its label.
+// workflowItemTitle is the item level's title: the stage, the item's number and its shown name.
 func workflowItemTitle(pane workflowsPane) string {
 	_, stage, item, ok := pane.itemAt(pane.ref)
 	if !ok {
 		return "item"
 	}
-	return sanitize.StripEscapesToLine(stage.Name) + "  #" + strconv.Itoa(pane.ref.item+1) + "  " + sanitize.StripEscapesToLine(item.Label)
+	return sanitize.StripEscapesToLine(stage.Name) + "  #" + strconv.Itoa(pane.ref.item+1) + "  " + workflowItemName(item)
+}
+
+// workflowItemName is the escape-stripped name an item is shown by: its short name (item.Name), else
+// its label — a script or ask stage's line records no short name, nor does a status.json written
+// before items had one. The label stays the item's identity: its output path is spelled from it.
+func workflowItemName(item workflow.ItemStatus) string {
+	if item.Name != "" {
+		return sanitize.StripEscapesToLine(item.Name)
+	}
+	return sanitize.StripEscapesToLine(item.Label)
 }
 
 // workflowItemLines composes one item's detail from its folder dir: its outcome and receipt fields,

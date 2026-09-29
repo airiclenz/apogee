@@ -219,6 +219,72 @@ func TestWorkflowsViewAScriptItemHasNoChild(t *testing.T) {
 	assertPaneHas(t, m, "status: ok — ran", workflowItemNoChild)
 }
 
+// The pane shows an item by its short name — the list row and the item's title — and by its label
+// where it records none (a script stage's line), while its output path stays spelled from the label:
+// the name is for display, the label is the item's identity.
+func TestWorkflowsViewShowsAnItemByItsShortName(t *testing.T) {
+	t.Parallel()
+	infos := workflowsFixture(t)
+	dir := infos[0].Dir
+	items := infos[0].Status.Stages[0].Items
+	items[0].Label, items[0].Name = dir, "find"
+	items[1].Label, items[1].Name = filepath.Join(dir, "part-a"), "part-a"
+	setStageOut(t, dir, "find", "{item}/tools.md")
+	eng := &fakeEngine{workflowInfos: infos}
+	m := step(t, newTestModelEng(t, eng, testOpts), tea.WindowSizeMsg{Width: 200, Height: 60})
+	m = openWorkflowsLine(t, m)
+
+	m = workflowsKeyStep(t, m, keyEnter())
+
+	assertPaneHas(t, m, "#1 find", "#2 part-a", "#1 flags")
+	if painted := strip(m.renderWorkflows()); strings.Contains(painted, dir) {
+		t.Errorf("the detail carries the workflow folder %s:\n%s", dir, painted)
+	}
+	for i, tc := range []struct {
+		title  string
+		output string
+	}{
+		{"find  #1  find", filepath.Join(dir, "tools.md")},
+		{"find  #2  part-a", filepath.Join(dir, "part-a", "tools.md")},
+	} {
+		m = workflowsKeyStep(t, m, keyDown())
+		m = workflowsKeyStep(t, m, keyEnter())
+		assertPaneHas(t, m, tc.title)
+		if !slices.ContainsFunc(m.workflowsPane.lines, func(line string) bool {
+			return strings.HasPrefix(line, "output: "+tc.output)
+		}) {
+			t.Errorf("item #%d's rows %q do not name its output %s", i+1, m.workflowsPane.lines, tc.output)
+		}
+		m = workflowsKeyStep(t, m, keyEsc())
+	}
+}
+
+// setStageOut rewrites the plan.json of the workflow folder dir so the stage named stage writes its
+// items' output to out.
+func setStageOut(t *testing.T, dir, stage, out string) {
+	t.Helper()
+	path := filepath.Join(dir, "plan.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatal(err)
+	}
+	for i := range plan.Stages {
+		if plan.Stages[i].Name == stage {
+			plan.Stages[i].Out = out
+		}
+	}
+	if data, err = json.Marshal(plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A session with no workflows opens nothing and says so, and a listing that fails is noted with the
 // engine's error.
 func TestWorkflowsViewEmptyOrFailedListingOpensNothing(t *testing.T) {

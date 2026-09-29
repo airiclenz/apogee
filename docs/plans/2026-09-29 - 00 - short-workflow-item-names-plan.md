@@ -103,7 +103,12 @@ internal/tui/workflowblock_test.go — itemStartedUnder, itemFinishedUnder
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Workflow|FanOut|RunView|Breadcrumb|StageView' ./internal/tui/`
 **Commit:** `fix(tui): show a workflow item by its short name`
 
-## 4. `/workflows` pane shows the short name
+## 4. `/workflows` pane shows the short name — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): one helper, `workflowItemName(item)` (Name, else Label, escape-stripped), feeds both the detail's item rows and `workflowItemTitle`; `workflowOutputLines` still passes `item.Label` to `ItemOutputPath`.
+NOTES (2026-09-29): the new test `TestWorkflowsViewShowsAnItemByItsShortName` sets the `find` stage's `out:` by rewriting the fixture folder's plan.json (a `setStageOut` test helper), since `workflowsFixture` creates the plan without one; it fails with the workflows.go change reverted.
+NOTES (2026-09-29): docs/manual/workflows.md ("The workflows view") and docs/manual/commands.md (`/workflows` row) now say the pane shows items by their short name.
+NOTES (2026-09-29): per this machine's rules Acceptance was run as `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Workflows' ./internal/tui/` (the plan's own narrowed command, memory-capped).
 
 Depends on item 1.
 
