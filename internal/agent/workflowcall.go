@@ -526,7 +526,8 @@ func fanOutArgumentPath(problem workflow.Problem) string {
 // lines, for a stopped one the item listing written so far when Format has not named it, and —
 // when any item child asked for the Sub-agent server and ran on the session one (fellBack,
 // seatFellBack) — SeatFallbackNote once, last, because that note is for the MODEL (ADR 0069
-// decision 9) and the model reads this answer, not the items' phase results.
+// decision 9) and the model reads this answer, not the items' phase results. A background run
+// answers through its finish note instead, which carries the same line (finishNote).
 func workflowAnswer(result workflow.Result, fellBack bool) string {
 	text := workflow.Format(result)
 	if result.Stopped() && result.Listing != "" {

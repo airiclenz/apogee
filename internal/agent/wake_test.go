@@ -254,10 +254,11 @@ func TestFinishNote_SaysHowTheWorkflowEnded(t *testing.T) {
 		return workflow.StageResult{Name: "find", Kind: workflow.StageFanout, Phase: phase, Tally: tally}
 	}
 	for _, tc := range []struct {
-		name   string
-		result workflow.Result
-		err    error
-		want   string
+		name     string
+		result   workflow.Result
+		err      error
+		fellBack bool
+		want     string
 	}{
 		{
 			name: "finished with a report and verdicts",
@@ -288,11 +289,27 @@ func TestFinishNote_SaysHowTheWorkflowEnded(t *testing.T) {
 			err:  errors.New("workflow: store\nunwritable"),
 			want: "workflow audit failed — workflow: store unwritable",
 		},
+		{
+			name: "an item fell back from the sub-agents server, the note last",
+			result: workflow.Result{
+				Phase:   workflow.PhaseDone,
+				Stages:  []workflow.StageResult{fanout(workflow.PhaseDone, workflow.Tally{OK: 1})},
+				Listing: "/s/workflows/w1/items.md",
+			},
+			fellBack: true,
+			want:     "workflow audit finished — items 1 · ok 1 · partial 0 · blocked 0 — items: /s/workflows/w1/items.md — " + SeatFallbackNote,
+		},
+		{
+			name:     "failed, no seat note however its items ran",
+			err:      errors.New("workflow: store unwritable"),
+			fellBack: true,
+			want:     "workflow audit failed — workflow: store unwritable",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := finishNote("audit\n", tc.result, tc.err)
+			got := finishNote("audit\n", tc.result, tc.err, tc.fellBack)
 
 			if got != tc.want {
 				t.Errorf("finishNote = %q\nwant         %q", got, tc.want)

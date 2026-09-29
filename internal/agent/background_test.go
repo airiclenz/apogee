@@ -186,6 +186,62 @@ func TestBackground_ASessionSeatedFanOutQueuesOnTheSessionServer(t *testing.T) {
 	}
 }
 
+// TestBackground_AFinishNoteSaysAnItemFellBackFromTheSubAgentsServer launches a background fan_out
+// whose `run_on` asks for the Sub-agent server (ADR 0069 decision 9). With nothing latched its items
+// run on the session server, and the finish note — the one line the model reads of a background
+// run — ends on SeatFallbackNote, once. With a target latched the ask is honoured and the note
+// carries none.
+func TestBackground_AFinishNoteSaysAnItemFellBackFromTheSubAgentsServer(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		latched  bool
+		wantNote bool
+	}{
+		{"nothing latched falls back to the session server and says so", false, true},
+		{"a latched target runs the items where asked and adds no note", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := withSeatChoiceFanOut(workflowConfig(t, newLockedSink()), true)
+			items := []string{"alpha", "beta"}
+			up := (&workflowResponder{}).
+				route("launch far", nil, toolCallScript("fo1", tools.FanOutToolName,
+					seatArgsJSON(tools.RunOnSubAgentsServer, true, items...))).
+				route("launch far", nil, contentScript("started it"))
+			grunt := &workflowResponder{}
+			for _, item := range items {
+				up.route("check "+item, nil, finishScript("s-"+item, item+" is fine"))
+				grunt.route("check "+item, nil, finishScript("g-"+item, item+" is fine"))
+			}
+			a := newBackgroundParent(t, cfg, up)
+			if tc.latched {
+				a.dial = dialerTo(grunt).dial
+				a.SetDelegationTarget(gruntTarget(gruntEndpoint, 2))
+			}
+
+			runSubmitted(t, context.Background(), a, "launch far")
+			a.background.waitAll()
+
+			notes := a.background.takeNotes()
+			if len(notes) != 1 {
+				t.Fatalf("held notes = %q, want the one finish note", notes)
+			}
+			note := notes[0]
+			if got := strings.Count(note, SeatFallbackNote); got != boolCount(tc.wantNote) {
+				t.Errorf("finish note carries the seat-fallback note %d times, want %d:\n%s", got, boolCount(tc.wantNote), note)
+			}
+			if tc.wantNote && !strings.HasSuffix(note, finishSeparator+SeatFallbackNote) {
+				t.Errorf("finish note does not end on the seat-fallback note:\n%s", note)
+			}
+			if strings.Contains(note, "\n") {
+				t.Errorf("finish note spans more than one line:\n%s", note)
+			}
+		})
+	}
+}
+
 // TestBackground_TheIdleOnlyMutatorsDoNotRaceARunningWorkflow runs each idle-only mutator over and
 // over while a background workflow spawns its children one after another. Nothing orders the two
 // goroutines, so under -race a child built off the live Agent's fields is a reported race; built

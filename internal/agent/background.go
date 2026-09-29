@@ -648,7 +648,7 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 // held before the end is reported, so a Driver that wakes on that event finds it.
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	result, err := run.runner.Run(ctx, run.plan)
-	a.background.hold(finishNote(run.plan.Name, result, err))
+	a.background.hold(finishNote(run.plan.Name, result, err, seatFellBack(run.runner)))
 	run.observer.end(result, err)
 	a.endBackground(run)
 }
@@ -1199,8 +1199,12 @@ func (a *Agent) Wake(ctx context.Context) (bool, error) {
 // finishNote is the one line a background workflow's end leaves for the parent (ADR 0089 D3): its
 // name and how it ended, its items counted by status across its fan-outs (with the unfinished ones
 // and the verify verdicts when there are any), and where to read more — the report a merge wrote,
-// else the full item listing. A run that could not proceed says so with its cause instead.
-func finishNote(name string, result workflow.Result, runErr error) string {
+// else the full item listing. A run that could not proceed says so with its cause instead. When any
+// item child asked for the Sub-agent server and ran on the session one (fellBack, seatFellBack), a
+// finished or stopped run's note ends on SeatFallbackNote, once — the answer-level line a blocking
+// workflow's call gets from workflowAnswer, since this note is what the model reads of a background
+// run (ADR 0069 decision 9). It joins as one more part, so the note stays one line.
+func finishNote(name string, result workflow.Result, runErr error, fellBack bool) string {
 	name = oneLine(name)
 	if runErr != nil {
 		return fmt.Sprintf(finishFailedFormat, name, oneLine(runErr.Error()))
@@ -1215,6 +1219,9 @@ func finishNote(name string, result workflow.Result, runErr error) string {
 		parts = append(parts, finishReportPrefix+result.Report)
 	case result.Listing != "":
 		parts = append(parts, finishListingPrefix+result.Listing)
+	}
+	if fellBack {
+		parts = append(parts, SeatFallbackNote)
 	}
 	return strings.Join(parts, finishSeparator)
 }

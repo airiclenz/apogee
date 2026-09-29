@@ -12,6 +12,8 @@ point is a **minor** bump, not a breaking change.
 
 - A workflow item that asked for the sub-agents server and ran on the session server because none was available now says so: its result line ends on the same "ran on the session server" note a `sub_agent` delegation carries, and the workflow's answer to the model carries that note once.
 
+- **Fixed:** a background workflow whose items asked for the sub-agents server and ran on the session server now says so too: its one-line finish note ends on the same "ran on the session server" note, once. Before this only a foreground workflow's answer carried it.
+
 - An embedder can now offer background workflows on the engine's own tool set: setting the new `Config.OffersBackground` makes fan_out publish its `background` field and offers the `workflow` control tool wherever the roster lifts them (both stay default-off). The field defaults to false, which keeps today's menu, and it survives a model switch or profile edit.
 
 - **A workflow's items are rows you can open.** A recipe run or a `fan_out` call no longer pours every helper's work into the conversation. Each item shows as one sub-agent row with its name, ✓, token cells, verdict and ▶. Click the row, or pick it with `⌥↑/⌥↓` and press `⏎`, to open that helper's run view. There `^x` stops it, a typed message goes to it, and the gauge shows its context fill. An item that was retried keeps one row, which opens its latest attempt. The rows survive a save and resume. Background workflows are unchanged.

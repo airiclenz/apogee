@@ -176,8 +176,9 @@ type workflowSpawner struct {
 	observer *workflowObserver
 	// fellBack is set once any item child this spawner built asked for the Sub-agent server and was
 	// built on the session server instead (Agent.seatFallback, ADR 0069 decision 9): the fact the
-	// workflow's answer adds its one SeatFallbackNote line on (workflowAnswer). Items spawn
-	// concurrently, so it is atomic.
+	// workflow's answer — or, run in the background, its finish note — adds its one
+	// SeatFallbackNote line on (workflowAnswer, finishNote). Items spawn concurrently, so it is
+	// atomic.
 	fellBack atomic.Bool
 }
 

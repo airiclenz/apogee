@@ -357,7 +357,9 @@ workflow's [`/workflows`](#the-workflows-view--workflows) detail opens it at onc
 
 **The wake.** When a background workflow ends — finished, stopped or failed — apogee writes a
 one-line finish note into the transcript: its name, how it ended, its items counted by status (and
-the verify verdicts) and the path of its report. Then:
+the verify verdicts) and the path of its report — ending on the
+[seat-fallback note](configuration.md#letting-the-model-pick-the-seat) when its helpers asked for
+the sub-agents server and ran on the session server instead. Then:
 
 - an **idle** agent is woken: apogee opens a turn of its own on the note, shown as a
   `(background workflow report)` prompt row, which `esc` cancels like any other;
