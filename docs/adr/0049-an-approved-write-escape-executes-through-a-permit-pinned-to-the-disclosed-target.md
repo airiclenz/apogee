@@ -177,7 +177,17 @@ only the dir's prefix — `<scratch>/repo/.git/config` collapses to the placehol
 repo cloned under the scratch dir no longer trips `write-git-control-plane` on its own metadata.
 The token ends at whitespace or a shell metacharacter, so `cat <scratch>/x;rm -rf /` still
 hard-refuses on its second half. The width is unchanged: everything under the token is inside
-the session's own writable box.
+the session's own writable box — for a token with no `..` segment (see the 2026-09-29 amendment).
+
+*Amended 2026-09-29:* "everything under the token is inside the box" held only while the token
+never climbs out of it, and a `..` segment does: `rm -rf <scratch>/../../..` and
+`echo x > <scratch>/../../.ssh/authorized_keys` masked to the placeholder and reached no rule. A
+matched token with a `..` path segment is now left whole and unmasked (`maskSpelling`), so every
+rule — hard-refuse ones included — judges it as if no exemption applied. The token is refused,
+never cleaned or cut at the `..`: the guard does not reason about where a traversal lands, so one
+that stays inside the dir (`ls <scratch>/repo/../out`) is judged in full too, and its `/.apogee`
+spelling asks the `write-apogee-control-plane` look — intended. A `..` inside a name
+(`<scratch>/a..b`) is not a segment and still masks.
 
 ## Note (2026-09-14) — the git control-plane rule reads a shell line for what it writes
 

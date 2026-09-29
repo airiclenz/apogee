@@ -120,7 +120,10 @@ workspace; `TestCatalogRecipeServesOnlyRecipeSkills`' `recipe.Files == nil` chec
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'ReadPrompt|StageSkillFile|Symlink' ./internal/agent/`
 **Commit:** `fix(skills): fence disk recipe files through os.Root`
 
-## 3. Scratch-dir exemption never masks a `..` escape
+## 3. Scratch-dir exemption never masks a `..` escape — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the `<scratch>/../../.ssh` rows earn TierForceApproval via write-apogee-control-plane, not TierHardRefuse: that is the tier the unexempted path gets (the .ssh rule is home-anchored and does not see a path spelled through the scratch dir); the test asserts each judged row equals the no-exemption decision
+NOTES (2026-09-29): the whole-token prose grep also hits CHANGELOG.md's released 2026-09-15 entry ("masks the whole shell token"); left as history — the CHANGELOG is the closeout's to write, and the new entry above qualifies it
 
 **What:** Fix "Scratch-dir exemption masks `..` traversal out of the writable area" (Medium).
 **Regression guard.** A `..` token that stays inside the scratch dir (`ls <scratch>/repo/../out`) is left unmasked

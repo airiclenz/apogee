@@ -405,9 +405,10 @@ const apogeeHomeSegment = "/.apogee/"
 // the WHOLE path token that starts at the dir: a deeper path or a trailing separator collapses
 // with it (`<dir>/gocache` → `<exempt>`, `<dir>/repo/.git/config` → `<exempt>`), so a rule
 // keyed on a segment deeper down — `write-git-control-plane` on a repo cloned under the scratch
-// dir — never sees that segment. The token ends at whitespace or a shell metacharacter, so what
-// follows a `;`, `&&` or `|` stays fully judged (`cat <dir>/x;rm -rf /` → `cat <exempt>;rm -rf /`),
-// and a sibling whose name merely extends the dir (`<dir>x`) does not mask at all.
+// dir — never sees that segment. A token with a `..` segment is the exception: it is left whole
+// and unmasked (maskSpelling), since it may name a path outside the dir. The token ends at
+// whitespace or a shell metacharacter, so what follows a `;`, `&&` or `|` stays fully judged
+// (`cat <dir>/x;rm -rf /` → `cat <exempt>;rm -rf /`), and a sibling whose name merely extends the dir (`<dir>x`) does not mask at all.
 //
 // The patterns are compiled per call: an exemption list is a handful of paths and the guard is
 // not a hot path. Cache by path string only if a benchmark says otherwise.
@@ -437,10 +438,31 @@ const exemptTokenTail = `(?:/[^\s;|&<>()'"\x60]*|\b)`
 // maskSpelling replaces every occurrence of one path pattern, extended over the rest of its
 // shell token (exemptTokenTail), with exemptPlaceholder. A pattern that fails to compile
 // leaves the text untouched, which is the stricter answer: the rules still see the path.
+//
+// A matched token with a `..` path segment is left whole and unmasked: `<dir>/../../.ssh`
+// names a path outside the dir, so the rules judge it as if no exemption applied. The token is
+// refused outright rather than cleaned or cut at the `..`, so the guard never has to reason
+// about where a traversal lands — even one that stays inside the dir is judged in full. A `..`
+// inside a name (`<dir>/a..b`) is not a segment and still masks.
 func maskSpelling(text, pattern string) string {
 	re, err := regexp.Compile(pattern + exemptTokenTail)
 	if err != nil {
 		return text
 	}
-	return re.ReplaceAllLiteralString(text, exemptPlaceholder)
+	return re.ReplaceAllStringFunc(text, func(token string) string {
+		if hasDotDotSegment(token) {
+			return token
+		}
+		return exemptPlaceholder
+	})
+}
+
+// hasDotDotSegment reports whether a slash-separated path token carries a `..` segment.
+func hasDotDotSegment(token string) bool {
+	for _, segment := range strings.Split(token, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }

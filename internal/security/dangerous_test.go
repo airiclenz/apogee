@@ -960,6 +960,24 @@ func TestMaskExempt(t *testing.T) {
 			exempt: []string{scratch},
 			want:   "cat \"<exempt> y\"",
 		},
+		{
+			name:   "a token with a .. segment is left whole and unmasked",
+			text:   "rm -rf /root/.apogee/scratch/sess-1/../../..",
+			exempt: []string{scratch},
+			want:   "rm -rf /root/.apogee/scratch/sess-1/../../..",
+		},
+		{
+			name:   "a .. segment in one token leaves the others masked",
+			text:   "cp /root/.apogee/scratch/sess-1/a ~/.apogee/scratch/sess-1/../b",
+			exempt: []string{scratch},
+			want:   "cp <exempt> ~/.apogee/scratch/sess-1/../b",
+		},
+		{
+			name:   "a .. inside a file name is not a segment and masks",
+			text:   "cat /root/.apogee/scratch/sess-1/a..b",
+			exempt: []string{scratch},
+			want:   "cat <exempt>",
+		},
 	}
 
 	for _, tc := range cases {
@@ -970,6 +988,83 @@ func TestMaskExempt(t *testing.T) {
 
 			if got != tc.want {
 				t.Errorf("maskExempt(%q, %v) = %q, want %q", tc.text, tc.exempt, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestInspectScratchExemptionNeverMasksADotDotEscape pins the ADR 0049 amendment (2026-09-29):
+// a scratch-dir token with a `..` segment reaches the rules as if no exemption applied — the
+// token is refused the mask whole, never cleaned — while a plain deeper path, and a `..` that
+// only sits inside a file name, stay exempt. Every judged row must match the decision the same
+// command earns with no exemption at all; a climb to ~/.ssh spelled through the scratch dir is
+// not a home-anchored .ssh spelling, so it earns the control-plane look the bare path gets.
+func TestInspectScratchExemptionNeverMasksADotDotEscape(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	exempt := []string{scratchDirExemption}
+
+	cases := []struct {
+		name     string
+		command  string
+		wantTier Tier
+		wantRule string
+	}{
+		{
+			name:     "a recursive delete climbing out of the dir",
+			command:  "rm -rf " + scratchDirExemption + "/../../..",
+			wantTier: TierHardRefuse,
+		},
+		{
+			name:     "a redirect climbing out to ~/.ssh",
+			command:  "echo x > " + scratchDirExemption + "/../../.ssh/authorized_keys",
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+		{
+			name:     "a list climbing out to ~/.ssh",
+			command:  "ls " + scratchDirExemption + "/../../.ssh",
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+		{
+			name:     "a .. that stays inside the dir is judged in full too",
+			command:  "touch " + scratchDirExemption + "/a/../b",
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+		{
+			name:     "a deeper path stays exempt",
+			command:  "touch " + scratchDirExemption + "/a/b",
+			wantTier: TierNone,
+		},
+		{
+			name:     "a .. inside a file name stays exempt",
+			command:  "touch " + scratchDirExemption + "/a..b",
+			wantTier: TierNone,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), nil, exempt)
+
+			if d.Tier != tc.wantTier {
+				t.Fatalf("Inspect(%q) tier = %d, want %d (rule=%q reason=%q)",
+					tc.command, d.Tier, tc.wantTier, d.RuleID, d.Reason)
+			}
+			if tc.wantRule != "" && d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) rule = %q, want %q", tc.command, d.RuleID, tc.wantRule)
+			}
+			if tc.wantTier == TierNone {
+				return
+			}
+			bare := g.Inspect(terminalCall(tc.command), nil, nil)
+			if d.Tier != bare.Tier || d.RuleID != bare.RuleID {
+				t.Errorf("Inspect(%q) = (%d, %q) with the exemption, want the unexempted (%d, %q)",
+					tc.command, d.Tier, d.RuleID, bare.Tier, bare.RuleID)
 			}
 		})
 	}
