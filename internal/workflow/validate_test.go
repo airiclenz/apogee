@@ -59,7 +59,7 @@ func TestValidateAcceptsAWellFormedRecipeUsingEveryKind(t *testing.T) {
 		fanoutStage("find"),
 		{Name: "check", Kind: StageVerify, When: "verdict == confirmed", Task: "Look hard."},
 		{Name: "paths", Kind: StagePick, From: "find", Field: "paths", Cap: 20, Batch: 2},
-		{Name: "deep", Kind: StageFanout, Prompt: "prompts/deep.md", Over: &ItemSource{Stage: "paths"}},
+		{Name: "deep", Kind: StageFanout, Prompt: "prompts/deep.md", Out: "{item}/x.md", Over: &ItemSource{Stage: "paths"}},
 		{Name: "again", Kind: StageRepeat, Repeat: "deep", When: "ok < 3", Max: 2},
 		{Name: "report", Kind: StageMerge, From: "find", Task: "Merge every finding."},
 	}}
@@ -83,6 +83,7 @@ func TestValidateNamesEachProblemsStageAndField(t *testing.T) {
 		{name: "misplaced key", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Max = 3; return s }()}, wantStage: "find", wantField: "max", wantMessage: "only repeat stages do"},
 		{name: "fanout without a brief", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Task = ""; return s }()}, wantStage: "find", wantField: "task", wantMessage: "needs a brief"},
 		{name: "brief given twice", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Prompt = "p.md"; return s }()}, wantStage: "find", wantField: "task", wantMessage: "given twice"},
+		{name: "fanout out without an item", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Out = "results/report.md"; return s }()}, wantStage: "find", wantField: "out", wantMessage: "has no {item}"},
 		{name: "fanout without items", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Over = nil; return s }()}, wantStage: "find", wantField: "over", wantMessage: "needs items"},
 		{name: "two item sources", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Over.Lines = "parts.txt"; return s }()}, wantStage: "find", wantField: "over", wantMessage: "exactly one item source"},
 		{name: "negative item batch", stages: []Stage{func() Stage { s := fanoutStage("find"); s.Over.Batch = -1; return s }()}, wantStage: "find", wantField: "over", wantMessage: "batch is negative"},

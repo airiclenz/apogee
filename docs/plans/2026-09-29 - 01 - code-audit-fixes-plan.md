@@ -473,7 +473,7 @@ runVerify, runMerge; internal/agent/recipe.go — newRecipeRunner, bindPlanInput
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Recipe' ./internal/agent/`
 **Commit:** `fix(workflow): fold prompt file contents into item keys`
 
-## 16. Workflow: a fanout `out:` must name `{item}`
+## 16. Workflow: a fanout `out:` must name `{item}` — ✅ DONE (2026-09-29)
 
 **What:** Fix "A fanout `out:` without `{item}` makes concurrent children share one file".
 **Goal:** `Validate` rejects a fanout stage whose `out:` lacks `{item}`, with an error naming the

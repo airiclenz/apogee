@@ -135,6 +135,7 @@ func validateStage(stages []Stage, index int) []Problem {
 	case StageFanout:
 		problems = append(problems, childStageProblems(stage, true)...)
 		problems = append(problems, itemSourceProblems(stages, index)...)
+		problems = append(problems, outProblems(stage)...)
 		problems = append(problems, receiptSpecProblems(stage)...)
 	case StageVerify:
 		problems = append(problems, childStageProblems(stage, false)...)
@@ -216,6 +217,17 @@ func childStageProblems(stage Stage, isBriefRequired bool) []Problem {
 	}
 	problems = append(problems, blankEntryProblems(stage.Name, "context", stage.Context)...)
 	return append(problems, blankEntryProblems(stage.Name, "tools", stage.Tools)...)
+}
+
+// outProblems reports a fanout's `out:` that does not name {item}: without it every child of
+// the stage would write the same file concurrently.
+func outProblems(stage Stage) []Problem {
+	if stage.Out == "" || strings.Contains(stage.Out, placeholderItem) {
+		return nil
+	}
+	return []Problem{{Stage: stage.Name, Field: "out", Message: fmt.Sprintf(
+		"out %q has no {item}, so every child would write the same file; put {item} in the path, e.g. \"{item}/report.md\"", stage.Out,
+	)}}
 }
 
 // itemSourceProblems reports a fanout's `over` problems: no source or not exactly one, a blank literal
