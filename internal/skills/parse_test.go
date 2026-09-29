@@ -5,6 +5,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 func TestParseSkillFrontmatter(t *testing.T) {
@@ -451,6 +454,86 @@ func TestParseSkillTriggersCapped(t *testing.T) {
 	}
 }
 
+// A hostile SKILL.md must not stall a load: the lenient fold of ~500k one-char continuation lines
+// behind an unterminated quote (a malformed block, so the scan runs) is linear, and the folded
+// description still reaches the matcher clamped as before.
+func TestParseSkillLenientFoldIsBounded(t *testing.T) {
+	const lines = 500_000
+	content := "---\nname: plan\ndescription: \"hostile\n" + strings.Repeat("a\n", lines) + "---\nbody"
+	if len(content) > maxSkillFileBytes+64 {
+		t.Fatalf("fixture is %d bytes, want it near the %d-byte file cap", len(content), maxSkillFileBytes)
+	}
+
+	start := time.Now()
+	sk, err := parseSkill(content, "dir")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if elapsed > time.Second {
+		t.Errorf("parse took %v, want the fold linear (< 1s)", elapsed)
+	}
+	want := sanitize.ClampRunes("hostile"+strings.Repeat(" a", lines), maxDescriptionLen)
+	if sk.Description != want {
+		t.Errorf("Description = %d runes, want the unbounded fold clamped to %d", len([]rune(sk.Description)), maxDescriptionLen)
+	}
+}
+
+// The bounded fold keeps the outputs the unbounded one gave: a triggers: list longer than
+// maxTriggers, with a case-variant repeat among its first 32 items, still yields the first 32
+// UNIQUE phrases — the repeat must not use up a slot, so the 33rd item makes the list.
+func TestParseSkillLenientTriggerListKeepsFirstUniquePhrases(t *testing.T) {
+	var list strings.Builder
+	want := make([]string, 0, maxTriggers)
+	for i := range maxTriggers + 1 {
+		fmt.Fprintf(&list, "  - Phrase %d\n", i)
+		if i == 3 {
+			list.WriteString("  - PHRASE   1\n") // a case- and space-variant repeat of item 1
+		}
+		if i < maxTriggers {
+			want = append(want, fmt.Sprintf("phrase %d", i))
+		}
+	}
+	content := "---\nname: plan\ndescription: \"unterminated\ntriggers:\n" + list.String() + "---\nbody"
+
+	sk, err := parseSkill(content, "dir")
+
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if !slices.Equal(sk.Triggers, want) {
+		t.Errorf("Triggers = %q, want %q", sk.Triggers, want)
+	}
+}
+
+// The first folded line joins its value with no leading space, and a quoted value's leading space
+// is dropped once a line folds on — the TrimSpace(value + " " + line) shape the fold replaced.
+func TestScanFrontmatterFieldsFoldSpacing(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "empty value takes the line bare", text: "name: plan\ndescription:\n  first\n  second", want: "first second"},
+		{name: "value then folded line", text: "name: plan\ndescription: lead\n  tail", want: "lead tail"},
+		{name: "leading space trimmed on fold", text: "name: plan\ndescription: \" lead\n  tail", want: "lead tail"},
+		{name: "whitespace-only value takes the line bare", text: "name: plan\ndescription: \"  \"\n  tail", want: "tail"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fm, ok := scanFrontmatterFields(tt.text)
+
+			if !ok {
+				t.Fatal("scan found no naming field")
+			}
+			if fm.Description != tt.want {
+				t.Errorf("Description = %q, want %q", fm.Description, tt.want)
+			}
+		})
+	}
+}
+
 // A triggers: value the loader cannot read is a SOFT FIELD error, not a block error: it must not
 // fail the strict unmarshal, because falling through to the lenient scan would cost the rest of
 // the block its YAML meaning — quoting, escapes, block scalars, comments — over one optional field
@@ -631,6 +714,27 @@ func TestParseSkillRecipeRefused(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestClipToNonSpace(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		n    int
+		want string
+	}{
+		{name: "cut on a letter", line: "abc def", n: 2, want: "ab"},
+		{name: "cut on a space extends to the next letter", line: "abc  def", n: 4, want: "abc  d"},
+		{name: "n past the end keeps the line", line: "abc", n: 10, want: "abc"},
+		{name: "multi-byte runes counted as runes", line: "äöü", n: 2, want: "äö"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clipToNonSpace(tt.line, tt.n); got != tt.want {
+				t.Errorf("clipToNonSpace(%q, %d) = %q, want %q", tt.line, tt.n, got, tt.want)
 			}
 		})
 	}

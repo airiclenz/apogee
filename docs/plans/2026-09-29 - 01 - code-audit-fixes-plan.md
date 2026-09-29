@@ -550,7 +550,11 @@ the folder-relative form: `TestLoadRecipePromptsResolveUnderTheSkillDir`,
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Recipe' ./internal/agent/`
 **Commit:** `fix(skills): keep recipe stage prompts folder-relative`
 
-## 19. Skills: bound the lenient frontmatter fold
+## 19. Skills: bound the lenient frontmatter fold — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the fold keeps a strings.Builder per key (foldedField) instead of re-concatenating; list items are recorded only while their normalised phrase is new, stopping at maxTriggers unique phrases (the guard's second option), so normalizeTriggers' output is unchanged; its per-phrase rule moved into a shared normalizeTrigger helper.
+NOTES (2026-09-29): the value ceiling applies to folded continuation text only — a key line's own value is kept whole — and a clip is extended to the next non-space rune (clipToNonSpace) so TrimSpace plus the later ClampRunes gives the unbounded fold's description/summary exactly.
+NOTES (2026-09-29): residual edge — a displayName, or a triggers: scalar (no list items) folded past 4096 runes, is now cut at that ceiling where it used to be kept whole; per the item's Goal, and reachable only by a block with more than 4096 runes of continuation text for that key.
 
 **What:** Fix "Hostile SKILL.md frontmatter causes a quadratic stall on every skill load".
 **Regression guard.** `normalizeTriggers` dedupes after the fold, so cap raw items at a looser bound (e.g.

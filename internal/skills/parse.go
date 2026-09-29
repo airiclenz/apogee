@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -179,10 +180,7 @@ func normalizeTriggers(raw []string) []string {
 	phrases := make([]string, 0, min(len(raw), maxTriggers))
 	seen := make(map[string]bool, len(raw))
 	for _, phrase := range raw {
-		phrase = strings.ToLower(strings.Join(strings.Fields(phrase), " "))
-		if r := []rune(phrase); len(r) > maxTriggerLen {
-			phrase = string(r[:maxTriggerLen])
-		}
+		phrase = normalizeTrigger(phrase)
 		if phrase == "" || seen[phrase] {
 			continue
 		}
@@ -193,6 +191,14 @@ func normalizeTriggers(raw []string) []string {
 		}
 	}
 	return phrases
+}
+
+// normalizeTrigger is normalizeTriggers' per-phrase rule: lowercased, internal whitespace
+// collapsed, trimmed, clipped to maxTriggerLen runes. The lenient scan applies it too, to tell a
+// new phrase from a repeat while it folds a list.
+func normalizeTrigger(phrase string) string {
+	phrase = strings.ToLower(strings.Join(strings.Fields(phrase), " "))
+	return sanitize.ClampRunes(phrase, maxTriggerLen)
 }
 
 // parseSkill turns one SKILL.md's content into a Skill, deriving the ID from dirName when the
@@ -460,10 +466,16 @@ func parseFrontmatterFields(text string) (frontmatter, error) {
 //
 // ok reports whether any NAMING key came back with a value (hasNamingField); false means there is
 // nothing here worth preferring over the strict parser's error.
+//
+// The fold is BOUNDED so a hostile block cannot stall a load: continuation text stops growing a
+// value once it holds maxDescriptionLen runes, the cap a description or summary later meets, and
+// an open key keeps only the sequence items whose normalised form is new, stopping at maxTriggers
+// of them. Both bounds drop only what the Skill would have discarded anyway — normalizeTriggers
+// keeps the first maxTriggers unique phrases and nothing else — so the result is the unbounded
+// fold's, reached in time linear in the block.
 func scanFrontmatterFields(text string) (frontmatter, bool) {
-	values := map[string]string{}
-	items := map[string][]string{}
-	openKey := ""
+	fields := map[string]*foldedField{}
+	var open *foldedField
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -471,32 +483,126 @@ func scanFrontmatterFields(text string) (frontmatter, bool) {
 		}
 		m := keyLineRe.FindStringSubmatch(line)
 		if m == nil { // not a key line — continuation text for whatever field is open
-			if openKey == "" {
+			if open == nil {
 				continue
 			}
 			if item, isItem := sequenceItem(line); isItem {
-				items[openKey] = append(items[openKey], item)
+				open.addItem(item)
 			}
-			values[openKey] = strings.TrimSpace(values[openKey] + " " + line)
+			open.fold(line)
 			continue
 		}
 		key := strings.ToLower(m[1])
-		if _, declared := values[key]; declared || !recognisedKeys[key] {
-			openKey = "" // a repeat, or a key we do not model: end the run rather than absorb it
+		if _, declared := fields[key]; declared || !recognisedKeys[key] {
+			open = nil // a repeat, or a key we do not model: end the run rather than absorb it
 			continue
 		}
-		values[key] = stripBlockScalar(unquoteValue(strings.TrimSpace(m[2])))
-		openKey = key
+		open = newFoldedField(stripBlockScalar(unquoteValue(strings.TrimSpace(m[2]))))
+		fields[key] = open
 	}
 	fm := frontmatter{
-		ID:          values["id"],
-		Name:        values["name"],
-		DisplayName: values["displayname"],
-		Summary:     values["summary"],
-		Description: values["description"],
-		Triggers:    splitTriggers(items["triggers"], values["triggers"]),
+		ID:          fields["id"].String(),
+		Name:        fields["name"].String(),
+		DisplayName: fields["displayname"].String(),
+		Summary:     fields["summary"].String(),
+		Description: fields["description"].String(),
+		Triggers:    splitTriggers(fields["triggers"].itemList(), fields["triggers"].String()),
 	}
 	return fm, fm.hasNamingField()
+}
+
+// foldedField is one recognised key's value as the lenient scan builds it: the key line's own
+// value with every continuation line folded on after a single space, plus the block-sequence
+// items among those lines. Both parts grow under a ceiling (see scanFrontmatterFields), so
+// folding N lines costs O(N) rather than the O(N^2) of re-concatenating the whole value per line.
+type foldedField struct {
+	value     strings.Builder
+	runes     int
+	folded    bool
+	items     []string
+	seenItems map[string]bool
+}
+
+// newFoldedField starts a field from its key line's value, which is kept whole: only the FOLD is
+// bounded, and one line of the block is already linear to read.
+func newFoldedField(first string) *foldedField {
+	f := &foldedField{}
+	f.value.WriteString(first)
+	f.runes = utf8.RuneCountInString(first)
+	return f
+}
+
+// fold appends one trimmed, non-empty continuation line, separated by a space from any text
+// already there, clipping at maxDescriptionLen runes and ignoring the line once the value is full.
+// The first fold drops the key line value's leading whitespace, so an empty value takes the line
+// with no leading space — the TrimSpace(value + " " + line) form this replaces.
+func (f *foldedField) fold(line string) {
+	if !f.folded {
+		f.folded = true
+		first := strings.TrimLeftFunc(f.value.String(), unicode.IsSpace)
+		f.value.Reset()
+		f.value.WriteString(first)
+		f.runes = utf8.RuneCountInString(first)
+	}
+	if f.runes >= maxDescriptionLen {
+		return
+	}
+	if f.value.Len() > 0 {
+		f.value.WriteByte(' ')
+		f.runes++
+	}
+	line = clipToNonSpace(line, max(maxDescriptionLen-f.runes, 1))
+	f.value.WriteString(line)
+	f.runes += utf8.RuneCountInString(line)
+}
+
+// clipToNonSpace keeps the first n runes of a trimmed line, extended to the next non-space rune
+// when the cut would end on whitespace. A bounded value must never END in whitespace the full one
+// had in its interior: the TrimSpace every caller applies would strip it, and the value's clamp
+// would then keep fewer runes than the unbounded fold gave it.
+func clipToNonSpace(line string, n int) string {
+	count := 0
+	for i, r := range line {
+		count++
+		if count >= n && !unicode.IsSpace(r) {
+			return line[:i+utf8.RuneLen(r)]
+		}
+	}
+	return line
+}
+
+// addItem records a sequence item unless its normalised phrase is empty or already recorded, and
+// stops recording once maxTriggers phrases are held. The dropped items are exactly those
+// normalizeTriggers would drop, so the list it is handed later yields the same phrases.
+func (f *foldedField) addItem(item string) {
+	if len(f.items) == maxTriggers {
+		return
+	}
+	phrase := normalizeTrigger(item)
+	if phrase == "" || f.seenItems[phrase] {
+		return
+	}
+	if f.seenItems == nil {
+		f.seenItems = map[string]bool{}
+	}
+	f.seenItems[phrase] = true
+	f.items = append(f.items, item)
+}
+
+// String returns the folded value, or "" for a key the block never declared.
+func (f *foldedField) String() string {
+	if f == nil {
+		return ""
+	}
+	return f.value.String()
+}
+
+// itemList returns the recorded sequence items, or nil for a key the block never declared.
+func (f *foldedField) itemList() []string {
+	if f == nil {
+		return nil
+	}
+	return f.items
 }
 
 // sequenceItem reports whether a continuation line is a YAML block-sequence entry ("- phrase"),
