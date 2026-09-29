@@ -95,7 +95,9 @@ internal/mcp/mcp_test.go — listFromInProcessServer; internal/mcp/tool_test.go 
 - `go test -count=1 ./internal/mcp/`
 **Commit:** `fix(mcp): cap server tool descriptions at 8 KiB`
 
-## 4. Pin HTTP-transport requests to the configured endpoint's origin
+## 4. Pin HTTP-transport requests to the configured endpoint's origin — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the origin layer (`originPinTransport`) sits outermost with `boundedBodyTransport` as its `next`; the recorder subtest unwraps it through a `beneathOriginPin` helper, and the two `10.9.8.7` subtests now assert `ErrURLBlocked` on the client plus `ErrSSRFBlocked` on the transport beneath the pin (the guard's second option).
 
 **What:**
 **Goal:** Every request the MCP HTTP client sends (SSE GET and POSTs, streamable-http) targets the configured endpoint's origin (scheme + host + port, default ports canonicalised); an SSE server whose `endpoint` event names another origin fails `Connect` with an error naming the server, and no request reaches the other origin.

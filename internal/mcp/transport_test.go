@@ -198,9 +198,9 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		// every connection leaks. The recorder sits between the bound and the real transport.
 		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 			security.URLGuard{}.WithResolver(fixedResolver(loopback...)))
-		bounded, ok := client.Transport.(*boundedBodyTransport)
+		bounded, ok := beneathOriginPin(t, client).(*boundedBodyTransport)
 		if !ok {
-			t.Fatalf("client.Transport = %T; want the bounded-body RoundTripper", client.Transport)
+			t.Fatalf("the transport beneath the origin pin is not the bounded-body RoundTripper")
 		}
 		recorder := &closeRecordingTransport{next: bounded.next}
 		bounded.next = recorder
@@ -269,19 +269,39 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 	t.Run("another private address on the pinned client is refused", func(t *testing.T) {
 		// Where a redirect Location or an SSE endpoint event would point the transport: a
 		// private address that is NOT the one the user configured. The exemption is one
-		// endpoint, not "private addresses are fine on this connection".
+		// endpoint, not "private addresses are fine on this connection". The origin pin refuses
+		// it first; beneath the pin, the dial control's SSRF floor still refuses it on its own.
 		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 			security.URLGuard{}.WithResolver(fixedResolver(loopback...)))
 
-		resp, err := client.Get("http://10.9.8.7:9/mcp")
-		if err == nil {
-			_ = resp.Body.Close()
-			t.Fatal("a dial to an unpinned private address succeeded; want the SSRF floor to refuse it")
-		}
-		if !errors.Is(err, security.ErrSSRFBlocked) {
-			t.Errorf("error = %v; want the SSRF floor", err)
-		}
+		assertRefused(t, client, "http://10.9.8.7:9/mcp", security.ErrURLBlocked)
+		assertRefused(t, &http.Client{Transport: beneathOriginPin(t, client)}, "http://10.9.8.7:9/mcp", security.ErrSSRFBlocked)
 	})
+}
+
+// beneathOriginPin returns the RoundTripper a guarded client's origin pin forwards to — the
+// bounded, dial-controlled chain — so a test can prove what that chain refuses on its own.
+func beneathOriginPin(t *testing.T, client *http.Client) http.RoundTripper {
+	t.Helper()
+	pin, ok := client.Transport.(*originPinTransport)
+	if !ok {
+		t.Fatalf("client.Transport = %T; want the origin pin outermost", client.Transport)
+	}
+	return pin.next
+}
+
+// assertRefused GETs target through client and requires the request to fail with an error
+// wrapping want.
+func assertRefused(t *testing.T, client *http.Client, target string, want error) {
+	t.Helper()
+	resp, err := client.Get(target)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("GET %s succeeded; want a refusal wrapping %v", target, want)
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("GET %s error = %v; want it to wrap %v", target, err, want)
+	}
 }
 
 // TestGuardedClient_ProxiedEndpointPinsBothHosts pins the proxy half of the dial-time control:
@@ -341,14 +361,9 @@ func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
 	})
 
 	t.Run("an unproxied private address is still refused", func(t *testing.T) {
-		resp, err := client.Get("http://10.9.8.7:9/mcp")
-		if err == nil {
-			_ = resp.Body.Close()
-			t.Fatal("a direct dial to an unpinned private address succeeded; want the SSRF floor to refuse it")
-		}
-		if !errors.Is(err, security.ErrSSRFBlocked) {
-			t.Errorf("error = %v; want the SSRF floor", err)
-		}
+		// The origin pin refuses it first; beneath the pin, the direct dial still meets the floor.
+		assertRefused(t, client, "http://10.9.8.7:9/mcp", security.ErrURLBlocked)
+		assertRefused(t, &http.Client{Transport: beneathOriginPin(t, client)}, "http://10.9.8.7:9/mcp", security.ErrSSRFBlocked)
 	})
 }
 
@@ -817,5 +832,153 @@ func TestExecute_RedactsTheEndpointWhenTheServerDies(t *testing.T) {
 	}
 	if strings.Contains(res.Content, "SECRET") || strings.Contains(res.Content, "/mcp") {
 		t.Errorf("Execute error result = %q; want the endpoint cut to its origin", res.Content)
+	}
+}
+
+// TestCanonicalOrigin_ComparesSchemeHostAndPort pins the origin comparator the request pin rests
+// on: spellings of one origin compare equal (a default port written or not, a host's case or
+// trailing root dot), and a different port, scheme or host does not.
+func TestCanonicalOrigin_ComparesSchemeHostAndPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		vetted    string
+		requested string
+		wantEqual bool
+	}{
+		{name: "https default port written", vetted: "https://h/mcp", requested: "https://h:443/other", wantEqual: true},
+		{name: "http default port written", vetted: "http://h:80/mcp", requested: "http://h/mcp?sessionid=1", wantEqual: true},
+		{name: "upper-case host", vetted: "https://mcp.example/mcp", requested: "https://MCP.Example/mcp", wantEqual: true},
+		{name: "trailing root dot", vetted: "https://mcp.example/mcp", requested: "https://mcp.example./mcp", wantEqual: true},
+		{name: "different port", vetted: "https://h/mcp", requested: "https://h:8443/mcp", wantEqual: false},
+		{name: "different scheme", vetted: "https://h/mcp", requested: "http://h/mcp", wantEqual: false},
+		{name: "different host", vetted: "https://h/mcp", requested: "https://other/mcp", wantEqual: false},
+		{name: "http port 443 is not https", vetted: "https://h/mcp", requested: "http://h:443/mcp", wantEqual: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			vetted, requested := mustParseURL(t, tt.vetted), mustParseURL(t, tt.requested)
+
+			vettedOrigin, vettedOK := canonicalOrigin(vetted)
+			requestedOrigin, requestedOK := canonicalOrigin(requested)
+
+			if !vettedOK || !requestedOK {
+				t.Fatalf("canonicalOrigin ok = %v / %v; want both origins derived", vettedOK, requestedOK)
+			}
+			if got := vettedOrigin == requestedOrigin; got != tt.wantEqual {
+				t.Errorf("%q vs %q: equal = %v (%q vs %q); want %v",
+					tt.vetted, tt.requested, got, vettedOrigin, requestedOrigin, tt.wantEqual)
+			}
+		})
+	}
+
+	t.Run("a hostless URL names no origin", func(t *testing.T) {
+		t.Parallel()
+		if origin, ok := canonicalOrigin(mustParseURL(t, "/mcp?sessionid=1")); ok {
+			t.Errorf("canonicalOrigin(relative) = %q, true; want no origin", origin)
+		}
+	})
+}
+
+// mustParseURL parses raw or fails the test.
+func mustParseURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	return u
+}
+
+// TestConnect_SSEEndpointEventToAnotherOriginFails is the audit finding's exploit: an SSE server
+// whose `endpoint` event names a DIFFERENT origin — here another port on the same loopback
+// address, which the dial pin alone lets through — must fail Connect with a url-safety refusal
+// naming the server, and the other origin must never see a request.
+func TestConnect_SSEEndpointEventToAnotherOriginFails(t *testing.T) {
+	t.Parallel()
+
+	var otherReached atomic.Int64
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		otherReached.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer other.Close()
+	hijacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "event: endpoint\ndata: %s/message?sessionid=1\n\n", other.URL)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer func() {
+		hijacker.CloseClientConnections()
+		hijacker.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := Connect(ctx, []ServerConfig{{Name: "hijacker", Transport: TransportSSE, Endpoint: hijacker.URL + "/sse"}},
+		security.URLGuard{}, t.TempDir())
+
+	if err == nil {
+		_ = c.Close()
+		t.Fatal("Connect followed an endpoint event to another origin; want it refused")
+	}
+	if !errors.Is(err, security.ErrURLBlocked) {
+		t.Errorf("Connect error = %v; want it to wrap security.ErrURLBlocked", err)
+	}
+	if !strings.Contains(err.Error(), `"hijacker"`) {
+		t.Errorf("Connect error = %q; want it to name the server", err.Error())
+	}
+	if got := otherReached.Load(); got != 0 {
+		t.Errorf("the other origin saw %d request(s); want 0", got)
+	}
+}
+
+// TestConnect_SSESameOriginEndpointEventConnects is the pin's negative control: the SDK's own SSE
+// server announces its POST channel as a same-origin relative "/path?sessionid=…", which the pin
+// admits, so the connection comes up and a tool call round-trips.
+func TestConnect_SSESameOriginEndpointEventConnects(t *testing.T) {
+	t.Parallel()
+
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "sse", Version: "v0.0.1"}, nil)
+	server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}}}, nil
+		})
+	srv := httptest.NewServer(mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+	defer func() {
+		srv.CloseClientConnections()
+		srv.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := Connect(ctx, []ServerConfig{{Name: "local", Transport: TransportSSE, Endpoint: srv.URL + "/sse"}},
+		security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	var ping domain.Tool
+	for _, tool := range c.Tools() {
+		if tool.Name() == "local__ping" {
+			ping = tool
+		}
+	}
+	if ping == nil {
+		t.Fatal("local__ping was not surfaced")
+	}
+
+	res, err := ping.Execute(ctx, domain.ToolCall{ID: "call-1", Tool: "local__ping"})
+
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.IsError || res.Content != "pong" {
+		t.Errorf("Execute = %+v; want the pong result", res)
 	}
 }

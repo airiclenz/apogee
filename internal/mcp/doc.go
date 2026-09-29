@@ -29,7 +29,13 @@
 //     MCP server is an ordinary, supported configuration (ADR 0012, Amendment
 //     (2026-07-26)); the floor stays blanket over everything the model drives.
 //     Redirects are not followed, the same policy the native network tools apply, so a
-//     server that redirects must be configured at its final URL. The endpoint never
+//     server that redirects must be configured at its final URL. Every request is also
+//     pinned to the configured endpoint's ORIGIN (scheme + host + port, default ports
+//     canonicalised; originPinTransport): an SSE `endpoint` event naming another origin
+//     fails the connect with a url-safety refusal naming the server, and no request
+//     reaches that origin — the dial pin judges IPs only, so it alone cannot tell
+//     another port or virtual host on the endpoint's address, or any target behind an
+//     egress proxy, from the endpoint. The endpoint never
 //     reaches surfaced error text whole: a connect, list-tools or call-failed error that
 //     quotes it is cut to its bare scheme://host[:port] (endpointRedactor), so a token in
 //     its userinfo, path or query stays out. A stdio server is a

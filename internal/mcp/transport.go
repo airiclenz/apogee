@@ -27,7 +27,9 @@ import (
 // Client connects through. The two HTTP transports (SSE / streamable-http) ride
 // security.URLGuard's scheme/host allow-deny before connecting, and dial under a control that
 // PINS the configured endpoint's own resolved addresses — permitting them, and keeping the SSRF
-// floor over every other address the transport is later pointed at. A stdio server is a LOCAL
+// floor over every other address the transport is later pointed at — and send every request only
+// to the endpoint's own origin (originPinTransport), so an SSE `endpoint` event naming another
+// host, port or scheme fails the connect instead of moving the channel. A stdio server is a LOCAL
 // launched subprocess — the host chose the command, a different trust model — so no URL floor
 // applies; it meets the exec fence instead (an absolute program resolved on PATH, refused if it
 // resolves inside the workspace) and is held in a process group / Job Object the Client reaps at
@@ -383,7 +385,11 @@ func vetEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard)
 	if err != nil {
 		return "", nil, fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
 	}
-	return u.String(), newGuardedHTTPClient(control), nil
+	origin, ok := canonicalOrigin(u)
+	if !ok {
+		return "", nil, fmt.Errorf("mcp: server %q: %w: the endpoint has no origin to pin", cfg.Name, security.ErrURLBlocked)
+	}
+	return u.String(), newGuardedHTTPClient(control, origin, cfg.Name), nil
 }
 
 // ErrEndpointDenied marks the one refusal of an HTTP-transported endpoint that is the OPERATOR's
@@ -494,6 +500,14 @@ func (e *redactedError) Unwrap() error { return e.err }
 // egress proxy's when one applies, pass; every other address meets the SSRF floor), so an MCP
 // HTTP connection can never skip it.
 //
+// Above the dial control, every request is pinned to origin — the vetted endpoint's canonical
+// scheme://host:port (canonicalOrigin) — by originPinTransport, the outermost layer; serverName
+// names the server in its refusal. The dial control judges IPs only, which cannot tell a second
+// origin on the endpoint's own address (another port, another virtual host) from the endpoint,
+// and with an egress proxy in force it sees only the proxy's address; the origin pin is what
+// keeps an SSE `endpoint` event, which the SDK resolves with no origin check, from moving the
+// POST channel anywhere the operator's allow/deny decision was never made.
+//
 // The order of judgement matches the native network funnel's. The pre-flight (checkEndpoint)
 // judges the DESTINATION by string — the operator's scheme/host allow-deny lists — whether or not
 // a proxy applies, so a denied host is refused before anything leaves the process. The dial-time
@@ -510,28 +524,80 @@ func (e *redactedError) Unwrap() error { return e.err }
 // long-lived on purpose — it is a session-long server connection, not a one-shot tool call. The
 // two builders are deliberately NOT consolidated here; that seam is an architecture-deepening
 // candidate, not this change.)
-func newGuardedHTTPClient(control func(network, address string, c syscall.RawConn) error) *http.Client {
+func newGuardedHTTPClient(
+	control func(network, address string, c syscall.RawConn) error,
+	origin string,
+	serverName string,
+) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
 		Control: control,
 	}
+	bounded := &boundedBodyTransport{next: &http.Transport{
+		Proxy:                 proxyForRequest,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}}
 	return &http.Client{
-		Transport: &boundedBodyTransport{next: &http.Transport{
-			Proxy:                 proxyForRequest,
-			DialContext:           dialer.DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          10,
-			IdleConnTimeout:       30 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		}},
+		Transport: &originPinTransport{origin: origin, serverName: serverName, next: bounded},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 }
 
-// boundedBodyTransport is the RoundTripper the guarded client speaks through: it hands every
+// defaultPortByScheme is the port an origin without an explicit one carries, so `https://h` and
+// `https://h:443` compare as the one origin they are.
+var defaultPortByScheme = map[string]string{"http": "80", "https": "443"}
+
+// canonicalOrigin reduces u to the origin form both sides of the pin are compared in:
+// scheme://host:port, the host in security.NormalizeURL's normal form (lower-cased, root dots
+// removed, IDNA-mapped) and the scheme's default port filled in when none is written. ok is false
+// for a URL that does not parse back or carries no host — it names no origin, so nothing matches it.
+func canonicalOrigin(u *url.URL) (origin string, ok bool) {
+	normalised, err := security.NormalizeURL(u.String())
+	if err != nil || normalised.Hostname() == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(normalised.Scheme)
+	port := normalised.Port()
+	if port == "" {
+		port = defaultPortByScheme[scheme]
+	}
+	return scheme + "://" + net.JoinHostPort(normalised.Hostname(), port), true
+}
+
+// originPinTransport is the guarded client's outermost RoundTripper: it forwards a request only
+// when its URL's canonical origin equals the vetted endpoint's, and refuses every other one before
+// anything is dialled. The SSE transport POSTs to whatever URL the server's `endpoint` event names
+// and the SDK resolves that with no origin check, so this layer is where a server's attempt to
+// move the channel to another host, port or scheme ends. The refusal wraps security.ErrURLBlocked
+// and names the server; it never interpolates the refused URL (net/http's *url.Error around it
+// quotes that server-named URL, which carries no operator secret).
+type originPinTransport struct {
+	origin     string // the vetted endpoint's canonicalOrigin
+	serverName string // the configured server's name, for the refusal
+	next       http.RoundTripper
+}
+
+// RoundTrip forwards a same-origin request to next and refuses any other, closing the request
+// body as the RoundTripper contract requires on every path.
+func (t *originPinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if origin, ok := canonicalOrigin(req.URL); !ok || origin != t.origin {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, fmt.Errorf("mcp: server %q: %w: a request left the configured endpoint's origin",
+			t.serverName, security.ErrURLBlocked)
+	}
+	return t.next.RoundTrip(req)
+}
+
+// boundedBodyTransport is the RoundTripper beneath the origin pin: it hands every
 // response body to the SDK wrapped in a boundedBody, so an HTTP-transported server meets the
 // same 4 MiB message bound (bounded.go) as a stdio server's stdout. The bound is cumulative per
 // message, never per line, and the message is read off the Content-Type's base media type: a
