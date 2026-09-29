@@ -102,8 +102,9 @@
 // While anything behind a block's header is still waiting for a result, that header's ✦ blinks
 // against a bare cell ([blockState.star]) on the STATUS SPINNER's half-second phase
 // ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick repaints
-// the viewport only on the tick that flips that phase and only while [transcript.hasOpenToolCall]
-// holds, so an idle chain costs no repaints.
+// the viewport only on the tick that flips that phase and only while [transcript.hasLiveStar]
+// holds (an open tool call, or a workflow block whose Workflow has not ended), so an idle chain
+// costs no repaints.
 //
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):

@@ -268,7 +268,7 @@ run view "The header is four rows" paragraph; docs/layout/tool-layout.md — Key
 
 **Commit:** `docs(layout): describe the prompt block's half-row padding`
 
-## 5. Blink a running workflow block's header star
+## 5. Blink a running workflow block's header star — ✅ DONE (2026-09-29)
 
 **What:**
 **Goal:** a workflow block whose view is live and has not ended (`workflowView.live()` and

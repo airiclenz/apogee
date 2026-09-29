@@ -400,12 +400,13 @@ func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 	}
 	wasBlink := m.spin.blink()
 	m.spin.frame++
-	if m.spin.blink() != wasBlink && m.transcript.hasOpenToolCall() {
+	if m.spin.blink() != wasBlink && m.transcript.hasLiveStar() {
 		// The frame the status line spins on is also the LIVE STAR's clock: a block still holding
-		// an open call paints its header glyph from this frame's blink phase (layout.md, "The live
-		// star"; blockState.star), so the flip needs a repaint the tick did not use to do. It is
-		// asked for only on the tick that actually FLIPS the phase, and only while something is
-		// open — every other tick paints byte-identically, and re-rendering the whole scrollback
+		// an open call, or a workflow block whose Workflow has not ended, paints its header glyph
+		// from this frame's blink phase (layout.md, "The live star"; blockState.star), so the flip
+		// needs a repaint the tick did not use to do. It is asked for only on the tick that
+		// actually FLIPS the phase, and only while some header is live (transcript.hasLiveStar) —
+		// every other tick paints byte-identically, and re-rendering the whole scrollback
 		// ten to twenty times a second for an identical result would be work for its own sake, and
 		// would put the keep-if-unchanged rule (refreshViewport) between the human and every
 		// drag-selection they hold through a turn. A selection spanning a header that DOES flip is

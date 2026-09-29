@@ -1190,7 +1190,10 @@ its cell is bare for half a second. The bare phase is a space that holds the sta
 label beside it never shifts. The phase is carried on the spinner's own tick, so the transcript
 carries no timer of its own. A selection spanning that header drops when the glyph flips, which is
 the keep-if-unchanged rule doing its ordinary job on a line that changed. When the result lands the
-glyph settles to `✦` and the block repaints once, final.
+glyph settles to `✦` and the block repaints once, final. A workflow block's header blinks the
+same way while its Workflow has not ended — waiting on an ask's answer included — and settles to
+`✦` once it finishes, stops or fails; a workflow block replayed from a record never blinks. While a
+turn is paused (an ask or an approval) the spinner's tick stops, and so every live star holds still.
 
 **The firing block.** A scheduled Firing wears this same shape and is deliberately not a tool call
 of this session's: its header leads with `⟳ Schedule` — the glyph `/sessions` tags a Firing's record

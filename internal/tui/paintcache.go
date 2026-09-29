@@ -424,9 +424,10 @@ type frameKey struct {
 	// reserves (layout()), which is the width renderView wraps to and the widget measures at.
 	width         int
 	showScrollbar bool
-	// blink is the live star's phase, and only while a block still holds an open call: a settled
-	// transcript paints identically at either phase, so folding the bare phase in would repaint the
-	// scrollback on every flip of an idle session's clock (foldSpinnerTick's decision, spinner.go).
+	// blink is the live star's phase, and only while some header is still live
+	// (transcript.hasLiveStar): a settled transcript paints identically at either phase, so folding
+	// the bare phase in would repaint the scrollback on every flip of an idle session's clock
+	// (foldSpinnerTick's decision, spinner.go).
 	blink bool
 	// backHint is the wording a rooted paint's breadcrumb advertises for esc ([Model.backHint]).
 	backHint string
@@ -442,7 +443,7 @@ func (m Model) frameKey() frameKey {
 		padPrompts:    m.th.padPrompts,
 		width:         m.width,
 		showScrollbar: m.opts.UI.ShowScrollbar,
-		blink:         m.spin.blink() && m.transcript.hasOpenToolCall(),
+		blink:         m.spin.blink() && m.transcript.hasLiveStar(),
 		backHint:      m.backHint(),
 	}
 }

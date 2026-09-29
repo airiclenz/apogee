@@ -907,3 +907,33 @@ func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
 		t.Errorf("a zero spinner key renders %q at frame 0; want the bare classic cell %q", got, want)
 	}
 }
+
+// TestSpinnerFlipRepaintsForRunningWorkflow pins that a running workflow block is a live header the
+// flip repaints for on its own: with no tool call open, the tick that crosses the half-period still
+// redraws the transcript so the block's star can blink (transcript.hasLiveStar).
+func TestSpinnerFlipRepaintsForRunningWorkflow(t *testing.T) {
+	t.Parallel()
+
+	const sentinel = "left standing by a tick that drew nothing"
+
+	m := newTestModel(t)
+	m.input.SetValue("run the tests")
+	m = step(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v after a submit, want running", m.state)
+	}
+	m.transcript.apply(startedWith("scan"))
+	if m.transcript.hasOpenToolCall() {
+		t.Fatal("precondition: a tool call is open; the workflow block must be the only live header")
+	}
+	if !m.transcript.hasLiveStar() {
+		t.Fatal("precondition: the running workflow block is not a live header")
+	}
+	m.refreshViewport()
+	m.spin.frame = m.spin.framesPerBlinkHalf() - 1
+	m.lines = []string{sentinel}
+	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
+	if got := strings.Join(m.lines, "\n"); got == sentinel {
+		t.Error("the flipping tick with a running workflow block did not repaint — its star would never blink")
+	}
+}

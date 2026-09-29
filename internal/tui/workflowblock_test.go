@@ -1531,3 +1531,82 @@ func TestItemRunsAreClimbedThroughTheirWorkflowHead(t *testing.T) {
 		t.Error("an item of a top-level fan_out card is inside a collapsed run; the card's fold hides its own body, never its item rows")
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The workflow block's live star
+// ----------------------------------------------------------------------------
+
+// liveWorkflowView is testWorkflowID's view as a live block holds it once each phase has folded.
+func liveWorkflowView(phases ...domain.WorkflowPhaseEvent) workflowView {
+	v := workflowView{id: testWorkflowID, name: "audit", stages: workflowStagesOf([]string{"scan", "confirm"})}
+	for _, e := range phases {
+		v = v.fold(e)
+	}
+	return v
+}
+
+// workflowHeaderCell is the cell the workflow block's header leads with — its star, or the bare
+// cell of the star's blinked-out phase — painted at the given blink phase.
+func workflowHeaderCell(t *testing.T, v workflowView, blink bool) string {
+	t.Helper()
+	in := paintInput{kind: entryWorkflow, workflowView: v, text: v.text()}
+	lines := renderEntryLines(newTheme(scheme.Default()), in, 80, blink).lines
+	if len(lines) == 0 {
+		t.Fatal("the workflow block painted no lines")
+	}
+	header := []rune(ansi.Strip(lines[0]))
+	if len(header) < 2 || header[1] != ' ' {
+		t.Fatalf("header %q does not lead with a star cell and a space", string(header))
+	}
+	return string(header[0])
+}
+
+// TestWorkflowStarBlinksWhileRunning pins the running block's header star on the frame's phase: a
+// bare cell (holding the star's column) on the blinked-out phase, ✦ on the other.
+func TestWorkflowStarBlinksWhileRunning(t *testing.T) {
+	t.Parallel()
+
+	v := liveWorkflowView(stageStarted("scan", 1, 2, 0))
+	if got := workflowHeaderCell(t, v, true); got != " " {
+		t.Errorf("running block at the blinked-out phase leads with %q, want a bare cell", got)
+	}
+	if got := workflowHeaderCell(t, v, false); got != glyphAssistant {
+		t.Errorf("running block at the settled phase leads with %q, want %q", got, glyphAssistant)
+	}
+}
+
+// TestWorkflowStarSteadyOnceEnded pins that a block whose Workflow ended — whichever way — and a block
+// replayed from a record wait for nothing: ✦ at both phases.
+func TestWorkflowStarSteadyOnceEnded(t *testing.T) {
+	t.Parallel()
+
+	failed := workflowPhase(domain.WorkflowFailed)
+	failed.Detail = "boom"
+	cases := map[string]workflowView{
+		"finished": liveWorkflowView(stageStarted("scan", 1, 2, 0), workflowPhase(domain.WorkflowFinished)),
+		"stopped":  liveWorkflowView(stageStarted("scan", 1, 2, 0), workflowPhase(domain.WorkflowStopped)),
+		"failed":   liveWorkflowView(stageStarted("scan", 1, 2, 0), failed),
+		"replayed": {replayed: true, name: "audit", stages: workflowStagesOf([]string{"scan"})},
+	}
+	for name, v := range cases {
+		for _, blink := range []bool{false, true} {
+			if got := workflowHeaderCell(t, v, blink); got != glyphAssistant {
+				t.Errorf("%s block at blink=%v leads with %q, want a steady %q", name, blink, got, glyphAssistant)
+			}
+		}
+	}
+}
+
+// TestWorkflowStarBlinksWhileWaitingOnAsk pins that a Workflow waiting on an ask's answer is still
+// running: its star blinks like any other running block's.
+func TestWorkflowStarBlinksWhileWaitingOnAsk(t *testing.T) {
+	t.Parallel()
+
+	v := liveWorkflowView(stageStarted("confirm", 1, 0, 0), waitingIn("confirm", "Proceed?"))
+	if got := workflowHeaderCell(t, v, true); got != " " {
+		t.Errorf("waiting block at the blinked-out phase leads with %q, want a bare cell", got)
+	}
+	if got := workflowHeaderCell(t, v, false); got != glyphAssistant {
+		t.Errorf("waiting block at the settled phase leads with %q, want %q", got, glyphAssistant)
+	}
+}

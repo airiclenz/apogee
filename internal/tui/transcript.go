@@ -1861,6 +1861,24 @@ func (t *transcript) hasOpenToolCall() bool {
 	return false
 }
 
+// hasLiveStar reports whether any header on the transcript is still waiting for something, and so
+// blinks on the spinner's phase (layout.md, "The live star"; blockState.star): a tool call with no
+// result yet (hasOpenToolCall), or a workflow block whose Workflow has not ended
+// (workflowView.running). It is the ONE predicate the live star's repaint rides on — the spinner
+// tick's flip (foldSpinnerTick) and the frame key's blink (Model.frameKey) both ask it — so a header
+// that blinks is never one the viewport forgets to repaint.
+func (t *transcript) hasLiveStar() bool {
+	if t.hasOpenToolCall() {
+		return true
+	}
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if e := &t.entries[i]; e.kind == entryWorkflow && e.workflow.running() {
+			return true
+		}
+	}
+	return false
+}
+
 // setExpanded puts one block into the collapsed or the expanded paint and reports whether it found
 // a block to set. index addresses t.entries, and only a kind carriesBlockState admits carries one:
 // every other kind paints one way whatever is asked of it, and an index outside the slice is a

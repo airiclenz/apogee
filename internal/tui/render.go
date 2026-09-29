@@ -967,11 +967,14 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// entered — so the item heads behind it, and their runs, are stepped over with it. A block with
 	// no view (one replayed from an older record) paints its text, and the walk goes on to the item
 	// rows its span holds, which are then the only way in.
+	//
+	// A workflow block's liveness is its view's rather than an entry flag's: it waits while its
+	// Workflow has not ended (workflowView.running), an ask it is waiting on included.
 	next := head + 1
 	if in.kind == entryWorkflow && in.workflowView.drawsStages() {
 		next += subAgentSpan(t.entries, head)
 	}
-	live := in.kind.hasLiveStar() && !in.done
+	live := in.kind.hasLiveStar() && !in.done || in.kind == entryWorkflow && in.workflowView.running()
 	ins := append(buf[:0], in)
 	return resolvedBlock{
 		shape: shapeEntry,
@@ -1197,7 +1200,8 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 	case entryStartup:
 		return plainPaint(railLines(th, renderStartupBox(th, in.startup, inner), in.depth))
 	case entryWorkflow:
-		return renderWorkflowBlock(th, in.workflowView, in.text, inner).railed(th, in.depth)
+		return renderWorkflowBlock(th, in.workflowView, in.text, inner,
+			blockState{live: in.workflowView.running(), blink: blink}).railed(th, in.depth)
 	case entryWorkflowItem:
 		// A Workflow item's head with no run behind it yet — its child has not recorded a thing — is
 		// still the delegation row it will be, never a tool block: it has no call to show.

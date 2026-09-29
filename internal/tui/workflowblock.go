@@ -107,6 +107,12 @@ func (v workflowView) live() bool { return v.id != "" }
 // block's text instead.
 func (v workflowView) drawsStages() bool { return v.live() || v.replayed }
 
+// running reports whether the view is a live one whose Workflow has not ended — waiting on an ask's
+// answer included, since the run is still going while it waits. It is what makes the block's header
+// star blink (layout.md, "The live star"): a replayed block, and one whose Workflow finished, stopped
+// or failed, is waiting for nothing and holds a steady ✦.
+func (v workflowView) running() bool { return v.live() && v.end == "" }
+
 // workflowItem is one finished item: the stage it belongs to, the name it is shown by
 // (itemShownName — its short name, or an older phase's label), its receipt's status and summary,
 // and its result line.
@@ -497,20 +503,21 @@ func (v workflowView) totals() string {
 
 // renderWorkflowBlock paints a workflow block: from its view where it has one to draw
 // (renderWorkflowStages), and from its text for a block replayed from a record older than the kept
-// structure (renderWorkflowText).
-func renderWorkflowBlock(th theme, view workflowView, text string, width int) blockPaint {
+// structure (renderWorkflowText). The header leads with state's star, so a running Workflow's ✦
+// blinks on the frame's phase like any other live header's (blockState.star).
+func renderWorkflowBlock(th theme, view workflowView, text string, width int, state blockState) blockPaint {
 	if view.drawsStages() {
-		return renderWorkflowStages(th, view, width)
+		return renderWorkflowStages(th, view, width, state)
 	}
-	return plainPaint(renderWorkflowText(th, text, width))
+	return plainPaint(renderWorkflowText(th, text, width, state))
 }
 
 // renderWorkflowStages paints a workflow block from its view: the header under the star in the tool label's
 // tone, one row per stage (workflowView.stageRow) marked as that stage's surface, then the body lines
 // (workflowView.stageBody) hung beneath them in the detail tone.
-func renderWorkflowStages(th theme, v workflowView, width int) blockPaint {
+func renderWorkflowStages(th theme, v workflowView, width int, state blockState) blockPaint {
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolLabel, glyphAssistant+" ", v.header(), width), targetNone)
+	out.add(hangingWrap(th, th.toolLabel, state.star()+" ", v.header(), width), targetNone)
 	room := toolRowCells(th, width)
 	for i := range v.stages {
 		out.addStage(i, []string{v.stageRow(th, i, width, room)})
@@ -615,9 +622,9 @@ func (v workflowView) stageBody() []string {
 // renderWorkflowText paints a workflow block from its text: the header under the star in the tool
 // label's tone, each body line hung beneath it in the detail tone. It reads the text alone, which is
 // what lets a block replayed from an older record — which kept no view — paint as its record did.
-func renderWorkflowText(th theme, text string, width int) []string {
+func renderWorkflowText(th theme, text string, width int, state blockState) []string {
 	header, body, _ := strings.Cut(text, "\n")
-	lines := hangingWrap(th, th.toolLabel, glyphAssistant+" ", header, width)
+	lines := hangingWrap(th, th.toolLabel, state.star()+" ", header, width)
 	if body == "" {
 		return lines
 	}
