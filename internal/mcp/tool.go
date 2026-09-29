@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -130,6 +132,11 @@ func (t serverTool) ExternalEffect() domain.ExternalEffectKind { return domain.E
 // (ADR 0007). Only a cancelled context (or a lost connection, which ctx cancellation subsumes)
 // returns a Go error.
 //
+// Every call is bounded by mcpCallTimeout (5 minutes) on top of the caller's ctx, so a silent
+// or wedged server can never hold the agent indefinitely: a call that outlives the deadline while
+// the caller's ctx is still live returns an error result naming the timeout — never a Go error,
+// which would end the Turn (ADR 0007).
+//
 // Note: in production this Execute is typically NOT reached — the dispatch loop routes an
 // ExternalEffectTool through Config.ExternalEffects when the host injects one (the bench's
 // stub). Execute is the LIVE path the host uses when it injects no stub: a real call to a real
@@ -150,10 +157,19 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		params.Arguments = json.RawMessage(call.Arguments)
 	}
 
-	res, err := t.caller.CallTool(ctx, params)
+	callCtx, cancel := context.WithTimeout(ctx, mcpCallTimeout)
+	defer cancel()
+
+	res, err := t.caller.CallTool(callCtx, params)
 	if err != nil {
+		// The caller's own ctx is checked first: its cancellation is the one Go error (ADR 0007).
 		if ctx.Err() != nil {
 			return domain.ToolResult{}, ctx.Err()
+		}
+		// The per-call deadline fired while the caller is still live: the server is too slow or
+		// wedged. Surface it as an error result so the Turn survives.
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			return domain.ErrorResult(call.ID, fmt.Sprintf("mcp: call timed out after %s", mcpCallTimeout)), nil
 		}
 		// A transport / protocol error (tool missing, server gone) is surfaced to the model as
 		// an error result so the Turn survives and the model can route around it (ADR 0007).
@@ -166,6 +182,11 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	}
 	return domain.OKResult(call.ID, content), nil
 }
+
+// mcpCallTimeout bounds how long one Execute waits on a server before surfacing a timeout error
+// result: 5 minutes, fixed (no config key). It is a package var only to give the timeout test a
+// seam short enough to run in milliseconds (a test that shrinks it must not run in parallel).
+var mcpCallTimeout = 5 * time.Minute
 
 // maxMCPResultBytes is the most of a server's flattened result the model is handed: 2 MiB. The
 // transport's message bound (bounded.go) already keeps one message under 4 MiB; this is the

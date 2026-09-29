@@ -13,7 +13,7 @@
 // confine: its advertised tools execute on the server side, outside any OS fence.
 // Every tool description, schema, and result this package surfaces is therefore
 // UNTRUSTED input — it is passed to the model and rendered, never executed or
-// interpreted as a command by Apogee. Two consequences shape the design:
+// interpreted as a command by Apogee. Three consequences shape the design:
 //
 //   - MCP tools are non-forkable external effects (ADR 0008): they carry the mcp
 //     effect kind, so the dispatch disposition gates them through Approval in Auto
@@ -39,6 +39,9 @@
 //     configured server outlives the session. The process joins that container the
 //     moment it starts, before the handshake, so a failed handshake is reaped as a
 //     tree too.
+//   - A server is never waited on indefinitely: every tool call is bounded by a
+//     5-minute per-call deadline on top of the caller's ctx, and a call that
+//     outlives it surfaces as an error result, not a Go error (ADR 0007).
 //
 // # Lifecycle
 //

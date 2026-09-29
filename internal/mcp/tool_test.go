@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -126,5 +128,74 @@ func TestExecuteNilCaller(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Errorf("Execute with nil caller did not surface an error result")
+	}
+}
+
+// stallingTool connects an in-memory server advertising one tool, "stall", whose handler blocks
+// until its request ctx ends (or the test finishes), and returns the surfaced tool — the silent,
+// wedged server the per-call deadline exists for.
+func stallingTool(t *testing.T) domain.Tool {
+	t.Helper()
+	release := make(chan struct{})
+	tools := listFromInProcessServer(t, 0, func(server *mcpsdk.Server) {
+		server.AddTool(
+			&mcpsdk.Tool{Name: "stall", Description: "Never answers.", InputSchema: map[string]any{"type": "object"}},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-release:
+					return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "late"}}}, nil
+				}
+			},
+		)
+	})
+	// Registered after the sessions' own cleanups, so it runs first and frees the handler.
+	t.Cleanup(func() { close(release) })
+	return findTool(t, tools, "many__stall")
+}
+
+// TestExecute_CallTimeoutIsErrorResult proves a server that never answers cannot hold a call past
+// mcpCallTimeout: the call returns an error result naming the timeout and a nil Go error, so the
+// Turn survives (ADR 0007). Not parallel: it shrinks the package-level mcpCallTimeout.
+func TestExecute_CallTimeoutIsErrorResult(t *testing.T) {
+	saved := mcpCallTimeout
+	mcpCallTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { mcpCallTimeout = saved })
+	tool := stallingTool(t)
+
+	start := time.Now()
+	res, err := tool.Execute(context.Background(), domain.ToolCall{ID: "c", Tool: "many__stall"})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Execute past the call deadline returned a Go error %v; want an error result", err)
+	}
+	if !res.IsError {
+		t.Fatalf("Execute past the call deadline returned %+v; want an error result", res)
+	}
+	if !strings.Contains(res.Content, "timed out after 100ms") {
+		t.Errorf("timeout result text = %q; want it to name the deadline", res.Content)
+	}
+	if bound := 20 * mcpCallTimeout; elapsed > bound {
+		t.Errorf("Execute took %v; want it back within %v of a %v deadline", elapsed, bound, mcpCallTimeout)
+	}
+}
+
+// TestExecute_CancelMidCallIsGoError proves the per-call deadline does not swallow the caller's
+// own cancellation: a ctx cancelled while the server is still working returns the Go error
+// context.Canceled, never an error result. Not parallel: it reads the mcpCallTimeout the timeout
+// test shrinks.
+func TestExecute_CancelMidCallIsGoError(t *testing.T) {
+	tool := stallingTool(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timer := time.AfterFunc(50*time.Millisecond, cancel)
+	defer timer.Stop()
+
+	_, err := tool.Execute(ctx, domain.ToolCall{ID: "c", Tool: "many__stall"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Execute with a ctx cancelled mid-call returned err %v; want context.Canceled", err)
 	}
 }

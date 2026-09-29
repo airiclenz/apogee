@@ -96,13 +96,20 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   one message, and its read errors with the same `errMCPMessageTooLarge` (never a silent
   truncation) once the whole body passes the cap. The HTTP-lane outcome is not stdio's
   dead connection: the body read errors; a plain JSON reply fails its call, and a streamable SSE
-  reply stalls the call to its ctx or the SDK's retry budget. Above the transport, two post-decode
+  reply stalls the call until its ctx, the SDK's retry budget or the 5-minute per-call deadline
+  ends it. Above the transport, two post-decode
   caps: `renderContent` clips a flattened result at `maxMCPResultBytes` (2 MiB) and appends
   `[mcp result truncated at 2097152 bytes]`; `listServerTools` asks for at most
   `maxMCPToolListPages` (64) pages and surfaces at most `maxMCPToolsPerServer` (512) tools — past
   either it stops and returns the capped list silently, `Connect` having no report path but tools
   and errors — and skips a tool whose normalised schema exceeds `maxMCPToolSchemaBytes` (64 KiB)
   as it skips one with no name.
+- **Every tool call is bounded by a 5-minute deadline** (2026-09-29). `serverTool.Execute` derives
+  its call context from the caller's with `mcpCallTimeout` (5 minutes, a fixed package value, no
+  config key), so a silent or wedged server can never hold the agent past it. The caller's own
+  cancellation is checked first and still returns the Go error `ctx.Err()`; a deadline that fires
+  while the caller is live surfaces as an error result, `mcp: call timed out after 5m0s`, so the
+  Turn survives and the model can route around the server (ADR 0007).
 
 Every tool **description, schema, and result** the client surfaces is untrusted input: it is passed
 to the model and rendered, **never executed or interpreted** as a command by Apogee.

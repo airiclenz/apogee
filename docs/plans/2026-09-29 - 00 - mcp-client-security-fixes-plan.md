@@ -35,7 +35,7 @@ server tool descriptions, and a same-origin constraint on the SSE `endpoint` eve
 - Consolidating `newGuardedHTTPClient` with `internal/tools`' client builder.
 - Machine-check findings (vet/lint/race/coverage) — none were reported.
 
-## 1. Bound every MCP tool call with a 5-minute deadline
+## 1. Bound every MCP tool call with a 5-minute deadline — ✅ DONE (2026-09-29)
 
 **What:**
 **Goal:** `serverTool.Execute` never waits on a server longer than `mcpCallTimeout` (5 min): a call that outlives it returns an error `ToolResult` (IsError, text naming the timeout) with a nil Go error while the caller's ctx is still live; a cancelled caller ctx still returns the Go error `ctx.Err()`.

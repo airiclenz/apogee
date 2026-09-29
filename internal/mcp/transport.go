@@ -476,7 +476,8 @@ func newGuardedHTTPClient(control func(network, address string, c syscall.RawCon
 // cannot fit; any other body — a streamable JSON reply above all — is one message, and the read
 // errors (never silently truncates) once the whole body passes the cap. The HTTP-lane outcome
 // differs from stdio's dead connection: the body read errors; a plain JSON reply fails its call,
-// and a streamable SSE reply stalls the call to its ctx or the SDK's retry budget.
+// and a streamable SSE reply stalls the call until its ctx, the SDK's retry budget or the
+// 5-minute per-call deadline (mcpCallTimeout, tool.go) ends it.
 type boundedBodyTransport struct {
 	next http.RoundTripper
 }
