@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -157,6 +159,9 @@ type Runner struct {
 	Store *Store
 	// Workspace is the workspace the items and context files are read from. Required.
 	Workspace fs.FS
+	// Prompts is where a stage's `prompt:` file is read from to key its items: the recipe skill's
+	// folder (Recipe.Files), the same source its children read the file from. Nil means Workspace.
+	Prompts fs.FS
 	// Split is the part size a `split:` source cuts to (NewSplitBudget).
 	Split SplitBudget
 	// Width is how many children run at once; below 1 means one.
@@ -363,6 +368,14 @@ func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, repla
 	return status, replay, r.Store.WriteStatus(status)
 }
 
+// promptSource is where a stage's prompt file is read from: Prompts, else the workspace.
+func (r *Runner) promptSource() fs.FS {
+	if r.Prompts != nil {
+		return r.Prompts
+	}
+	return r.Workspace
+}
+
 // now reads the Runner's clock.
 func (r *Runner) now() time.Time {
 	if r.Now != nil {
@@ -385,7 +398,7 @@ type runState struct {
 
 // runFanout runs one fanout stage's items in the given repeat round and returns the stage's result.
 func (s *runState) runFanout(ctx context.Context, stageIndex, round int, stage Stage, items []Item) (StageResult, error) {
-	keyBrief, err := stageKeyBrief(stage, round)
+	keyBrief, err := stageKeyBrief(stage, round, s.runner.promptSource())
 	if err != nil {
 		return StageResult{}, err
 	}
@@ -726,25 +739,54 @@ func (s *runState) writeStatus() error {
 }
 
 // stageKeyBrief is the brief an item key is taken over: every field of the stage a child's work
-// depends on, the task as a template, and the repeat round. The rendered brief cannot serve — its
-// {out} is inside the item's folder, which the key names. The round (0 for the stage's own run,
-// left out of the encoding) gives a repeat's re-run of the stage keys of its own, so it spawns its
-// items afresh instead of finding the earlier round's receipts, while a resume of the same round
-// still finds them.
-func stageKeyBrief(stage Stage, round int) (string, error) {
+// depends on, the task as a template, the contents of the stage's prompt file read from prompts,
+// and the repeat round. The rendered brief cannot serve — its {out} is inside the item's folder,
+// which the key names. The prompt file's contents, not only its path, go in, so an edit to the
+// file between two runs gives the stage's items new keys and they are redone rather than resumed;
+// a prompt file that cannot be read is an error. The round (0 for the stage's own run, left out of
+// the encoding) gives a repeat's re-run of the stage keys of its own, so it spawns its items
+// afresh instead of finding the earlier round's receipts, while a resume of the same round still
+// finds them.
+func stageKeyBrief(stage Stage, round int, prompts fs.FS) (string, error) {
+	promptBody, err := readStagePrompt(stage, prompts)
+	if err != nil {
+		return "", err
+	}
 	encoded, err := json.Marshal(struct {
-		Stage   string      `json:"stage"`
-		Task    string      `json:"task,omitempty"`
-		Prompt  string      `json:"prompt,omitempty"`
-		Out     string      `json:"out,omitempty"`
-		Returns ReceiptSpec `json:"returns,omitempty"`
-		Tools   []string    `json:"tools,omitempty"`
-		Round   int         `json:"round,omitempty"`
-	}{stage.Name, stage.Task, stage.Prompt, stage.Out, stage.Returns, stage.Tools, round})
+		Stage      string      `json:"stage"`
+		Task       string      `json:"task,omitempty"`
+		Prompt     string      `json:"prompt,omitempty"`
+		PromptBody string      `json:"prompt_body,omitempty"`
+		Out        string      `json:"out,omitempty"`
+		Returns    ReceiptSpec `json:"returns,omitempty"`
+		Tools      []string    `json:"tools,omitempty"`
+		Round      int         `json:"round,omitempty"`
+	}{stage.Name, stage.Task, stage.Prompt, promptBody, stage.Out, stage.Returns, stage.Tools, round})
 	if err != nil {
 		return "", fmt.Errorf("workflow: stage %q: encode the item key brief: %w", stage.Name, err)
 	}
 	return string(encoded), nil
+}
+
+// readStagePrompt reads the stage's prompt file from prompts, cleaned and checked the way the
+// spawner opens it for the child: a path inside that source, never absolute and never climbing
+// out. A stage without a prompt file reads nothing.
+func readStagePrompt(stage Stage, prompts fs.FS) (string, error) {
+	if stage.Prompt == "" {
+		return "", nil
+	}
+	clean := path.Clean(filepath.ToSlash(stage.Prompt))
+	if !fs.ValidPath(clean) {
+		return "", fmt.Errorf("workflow: stage %q: prompt file %q is not a path inside its folder", stage.Name, stage.Prompt)
+	}
+	if prompts == nil {
+		return "", fmt.Errorf("workflow: stage %q: prompt file %q: no folder to read it from", stage.Name, stage.Prompt)
+	}
+	body, err := fs.ReadFile(prompts, clean)
+	if err != nil {
+		return "", fmt.Errorf("workflow: stage %q: prompt file %q: %w", stage.Name, stage.Prompt, err)
+	}
+	return string(body), nil
 }
 
 // outputPath is where an item's child writes its detail output: the stage's `out:` with {item}

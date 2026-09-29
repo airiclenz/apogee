@@ -475,7 +475,7 @@ func (s *Store) itemDir(id, key string) (string, error) {
 }
 
 // ItemKey is the SHA-256 (lower-case hex) that names an item's folder: over the brief (the Runner
-// passes the stage's child-facing fields and its repeat round), the item, and the path and contents of every context file read from the workspace fsys, in the order
+// passes the stage's child-facing fields, its prompt file's contents and its repeat round), the item, and the path and contents of every context file read from the workspace fsys, in the order
 // given. The same work gets the same key, so a re-issued workflow skips it; a changed context file
 // gives a new key, so stale work is redone. A context file that cannot be read is an error.
 func ItemKey(brief string, item Item, contextFiles []string, fsys fs.FS) (string, error) {

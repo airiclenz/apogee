@@ -227,7 +227,9 @@ ignored.
 A **brief** is `task:` written inline or `prompt:`, a file in the skill's folder. In it `{item}`
 is the item and `{out}` the file the helper writes its detail to. A verify or merge helper's brief
 is led by apogee's own, which names the item's receipt and output to check, or the manifest to
-read and where the report goes; yours adds what to look for.
+read and where the report goes; yours adds what to look for. A `prompt:` file's content is part
+of every item's key, like a context file's: edit it and a re-run of the recipe redoes that stage's
+finished items instead of keeping them.
 
 A **script** runs as a `terminal` call — under exactly the mode, guard, confinement and approval
 rules the model's own shell calls meet, so in Ask-Before you approve it. Plan is the one

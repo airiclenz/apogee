@@ -440,7 +440,13 @@ completedResult; internal/agent/subagent_test.go — TestSubAgent_DegenerateNarr
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Degenerate|Subagent|SubAgent' ./internal/agent/`
 **Commit:** `fix(agent): ignore punctuation-only lines in the degenerate-repeat check`
 
-## 15. Workflow: a recipe's prompt file contents enter the item key
+## 15. Workflow: a recipe's prompt file contents enter the item key — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): new `Runner.Prompts fs.FS` (set from `recipe.Files` in newRecipeRunner; nil falls back to `Workspace`, matching the spawner's readPrompt fallback); the prompt path is cleaned with readPrompt's `path.Clean(filepath.ToSlash(...))` + `fs.ValidPath`. internal/agent/workflowspawn.go needed no change.
+NOTES (2026-09-29): internal/workflow/stages.go edited — runVerify and runMerge (named in Read first) call stageKeyBrief, whose signature now takes the prompt source.
+NOTES (2026-09-29): consequential edit — internal/workflow/store.go: made necessary by stageKeyBrief folding prompt contents (ItemKey's doc comment lists what the brief carries).
+NOTES (2026-09-29): consequential edit — docs/manual/workflows.md: made necessary by prompt contents entering the item key (the brief paragraph now says editing a prompt file redoes the stage's items).
+NOTES (2026-09-29): rekey scope — only stages that name a `prompt:` file rekey across the upgrade; the new `prompt_body` field is omitempty, so a task-only stage's key brief encodes byte-identically.
 
 **What:** Fix "Editing a recipe prompt file does not change the resume key" (ItemKey promises a
 changed context file gives a new key).

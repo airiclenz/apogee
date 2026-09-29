@@ -136,7 +136,7 @@ func (s *runState) runVerify(ctx context.Context, plan Plan, index, round int, s
 	}
 	child := stage
 	child.Returns = verifyReturns()
-	keyBrief, err := stageKeyBrief(child, round)
+	keyBrief, err := stageKeyBrief(child, round, s.runner.promptSource())
 	if err != nil {
 		return StageResult{}, err
 	}
@@ -183,7 +183,7 @@ func (s *runState) runMerge(ctx context.Context, plan Plan, index, round int, re
 	if err != nil {
 		return StageResult{}, err
 	}
-	keyBrief, err := stageKeyBrief(stage, round)
+	keyBrief, err := stageKeyBrief(stage, round, s.runner.promptSource())
 	if err != nil {
 		return StageResult{}, err
 	}

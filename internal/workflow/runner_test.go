@@ -153,6 +153,81 @@ func TestRunnerSkipsFinishedItemsOnResume(t *testing.T) {
 	}
 }
 
+// promptPlan is a one-fanout plan over a literal list whose brief is the prompt file p.md.
+func promptPlan(items ...string) Plan {
+	return Plan{Name: "audit", Stages: []Stage{{
+		Name: "find", Kind: StageFanout, Prompt: "p.md",
+		Over: &ItemSource{List: items},
+	}}}
+}
+
+func TestRunnerRedoesItemsWhenThePromptFileChanges(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+	runner.Prompts = prompts
+	plan := promptPlan("a", "b")
+
+	first := runPlan(t, runner, context.Background(), plan)
+	unchanged := runPlan(t, runner, context.Background(), plan)
+	prompts["p.md"] = &fstest.MapFile{Data: []byte("audit {item} for races")}
+	edited := runPlan(t, runner, context.Background(), plan)
+
+	if unchanged.ID != first.ID || edited.ID != first.ID {
+		t.Errorf("runs used folders %q, %q, %q; want the first run's folder each time", first.ID, unchanged.ID, edited.ID)
+	}
+	if stage := onlyStage(t, unchanged); stage.Tally.Resumed != 2 {
+		t.Errorf("unchanged prompt file: resumed = %d, want both items resumed", stage.Tally.Resumed)
+	}
+	if stage := onlyStage(t, edited); stage.Tally.Resumed != 0 || stage.Tally.OK != 2 {
+		t.Errorf("edited prompt file: tally = %+v, want both items re-run, none resumed", stage.Tally)
+	}
+	for _, label := range []string{"a", "b"} {
+		if got := len(spawner.specsFor(label)); got != 2 {
+			t.Errorf("item %q spawned %d times over three runs, want 2 (first run and after the edit)", label, got)
+		}
+	}
+}
+
+func TestRunnerKeysThePromptFileFromTheWorkspaceWithoutPrompts(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	workspace := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+	runner.Workspace = workspace
+
+	runPlan(t, runner, context.Background(), promptPlan("a"))
+	workspace["p.md"] = &fstest.MapFile{Data: []byte("audit {item} again")}
+	edited := runPlan(t, runner, context.Background(), promptPlan("a"))
+
+	if stage := onlyStage(t, edited); stage.Tally.Resumed != 0 {
+		t.Errorf("edited workspace prompt file: resumed = %d, want the item re-run", stage.Tally.Resumed)
+	}
+}
+
+func TestRunnerRefusesAMissingPromptFile(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	runner.Prompts = fstest.MapFS{}
+
+	_, err := runner.Run(context.Background(), promptPlan("a"))
+
+	if err == nil || !strings.Contains(err.Error(), `prompt file "p.md"`) {
+		t.Errorf("Run with a missing prompt file: err = %v, want an error naming the file", err)
+	}
+	if got := len(spawner.specsFor("a")); got != 0 {
+		t.Errorf("item spawned %d times, want none: a missing prompt file cannot key the item", got)
+	}
+}
+
 func TestRunnerRecordsTheRecipeInStatus(t *testing.T) {
 	t.Parallel()
 	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
