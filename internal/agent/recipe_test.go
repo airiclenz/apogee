@@ -536,7 +536,7 @@ func TestBindPlanInputs(t *testing.T) {
 
 	recipe := workflow.Recipe{ID: "r", Dir: "shipped:r", Plan: workflow.Plan{Stages: []workflow.Stage{
 		{Name: "s", Kind: workflow.StageScript, Run: "sh x {scope} {focus}"},
-		{Name: "f", Kind: workflow.StageFanout, Task: "look at {item} for {focus}", Prompt: "shipped:r/prompts/f.md",
+		{Name: "f", Kind: workflow.StageFanout, Task: "look at {item} for {focus}", Prompt: "prompts/f.md",
 			Over: &workflow.ItemSource{Files: "{scope}/*.go"}},
 	}}}
 
@@ -559,6 +559,45 @@ func TestBindPlanInputs(t *testing.T) {
 	}
 	if recipe.Plan.Stages[1].Over.Files != "{scope}/*.go" {
 		t.Errorf("binding rewrote the recipe's own plan")
+	}
+}
+
+// A recipe's stage prompt reaches the spawner folder-relative and opens through the recipe's Files,
+// whatever its Dir spells — a Windows host path included — and an embedder's prompt spelled under
+// Dir, joined with either separator, still opens.
+func TestBindPlanInputsPromptsOpenThroughFiles(t *testing.T) {
+	t.Parallel()
+
+	files := fstest.MapFS{
+		"prompts/f.md": &fstest.MapFile{Data: []byte("nested prompt")},
+		"f.md":         &fstest.MapFile{Data: []byte("top prompt")},
+	}
+	for _, tc := range []struct {
+		name, dir, prompt, wantRel, wantBody string
+	}{
+		{"folder-relative under a slash Dir", "/home/u/skills/sweep", "prompts/f.md", "prompts/f.md", "nested prompt"},
+		{"folder-relative under a backslash Dir", `C:\Users\u\skills\sweep`, "prompts/f.md", "prompts/f.md", "nested prompt"},
+		{"slash Dir-prefixed", "/home/u/skills/sweep", "/home/u/skills/sweep/prompts/f.md", "prompts/f.md", "nested prompt"},
+		{"backslash Dir-prefixed", `C:\Users\u\skills\sweep`, `C:\Users\u\skills\sweep\f.md`, "f.md", "top prompt"},
+		{"shipped Dir-prefixed", "shipped:sweep", "shipped:sweep/prompts/f.md", "prompts/f.md", "nested prompt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			recipe := workflow.Recipe{ID: "sweep", Dir: tc.dir, Files: files, Plan: workflow.Plan{Stages: []workflow.Stage{
+				{Name: "f", Kind: workflow.StageFanout, Prompt: tc.prompt, Over: &workflow.ItemSource{List: []string{"a"}}},
+			}}}
+
+			plan := bindPlanInputs(recipe, nil)
+
+			if got := plan.Stages[0].Prompt; got != tc.wantRel {
+				t.Errorf("prompt = %q, want %q", got, tc.wantRel)
+			}
+			spawner := &workflowSpawner{prompts: recipe.Files}
+			if body, err := spawner.readPrompt(plan.Stages[0].Prompt); err != nil || body != tc.wantBody {
+				t.Errorf("readPrompt(%q) = %q, %v; want %q", plan.Stages[0].Prompt, body, err, tc.wantBody)
+			}
+		})
 	}
 }
 

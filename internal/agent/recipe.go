@@ -333,7 +333,7 @@ func completeInputs(decls []workflow.InputDecl, given map[string]string) (map[st
 
 // bindPlanInputs is recipe's plan with every `{<input>}` replaced by its value — in a stage's
 // task, question, default, item source, output path, context files and pick file as written, in a
-// script's command shell-quoted — and each prompt path made relative to the skill's folder, where
+// script's command shell-quoted — and each prompt path kept relative to the skill's folder, where
 // the spawner reads it (recipe.Files). The plan is named after the recipe when it has no name.
 func bindPlanInputs(recipe workflow.Recipe, inputs map[string]string) workflow.Plan {
 	plain, quoted := inputReplacers(inputs)
@@ -355,12 +355,26 @@ func bindPlanInputs(recipe workflow.Recipe, inputs map[string]string) workflow.P
 			over.Files, over.Lines, over.Split = plain.Replace(over.Files), plain.Replace(over.Lines), plain.Replace(over.Split)
 			stage.Over = &over
 		}
-		if rel, under := strings.CutPrefix(stage.Prompt, recipe.Dir+"/"); under {
-			stage.Prompt = rel
-		}
+		stage.Prompt = folderRelativePrompt(stage.Prompt, recipe.Dir)
 		plan.Stages[index] = stage
 	}
 	return plan
+}
+
+// folderRelativePrompt is prompt relative to the skill folder dir: a prompt already
+// folder-relative (the RecipeSource contract) is returned as is, and one an embedder spelled under
+// dir — joined with "/" or, from a Windows host path, `\` — has that prefix stripped, so the
+// spawner opens it through the recipe's Files on every OS.
+func folderRelativePrompt(prompt, dir string) string {
+	if dir == "" {
+		return prompt
+	}
+	for _, separator := range []string{"/", `\`} {
+		if rel, under := strings.CutPrefix(prompt, dir+separator); under {
+			return rel
+		}
+	}
+	return prompt
 }
 
 // inputReplacers are the two renderings of `{<input>}`: the value as written, and the value

@@ -9,8 +9,9 @@ import "io/fs"
 type Recipe struct {
 	// ID is the skill's id — the `/<id>` the user invokes it by.
 	ID string
-	// Plan is the recipe's stages. A stage's prompt file is named under Dir, the address the
-	// skill's own folder is announced by.
+	// Plan is the recipe's stages. A stage's prompt file is named folder-relative and
+	// slash-separated (`prompts/find.md`), whatever the host OS, and is read through Files. A
+	// prompt spelled under Dir (Dir + "/" or Dir + `\`) is still accepted and made relative.
 	Plan Plan
 	// Inputs are the recipe's declared inputs, in the order bare tokens bind (BindInputs).
 	Inputs []InputDecl

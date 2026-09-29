@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/security"
-	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // skillFileName is the marker file that makes a folder a skill. The match is case-insensitive
@@ -491,25 +490,8 @@ func loadSkillFile(cat *Catalog, src sourceTree, p string) error {
 		return nil
 	}
 	sk.Dir = src.dirFor(skillDirRel)
-	resolveRecipePrompts(sk.Recipe, src, skillDirRel)
 	cat.set(sk, abs)
 	return nil
-}
-
-// resolveRecipePrompts turns each recipe stage's folder-relative prompt path (normalizePromptPath
-// left it clean and inside the folder) into the address the skill's own Dir is announced under, by
-// the same dirFor seam: a host path for a disk source, `shipped:<id>/…` for the embedded one — the
-// spelling {{SKILL_DIR}} expands to, so a shipped recipe's prompts stay on the virtual mount. A
-// skill without a recipe is untouched.
-func resolveRecipePrompts(recipe *workflow.Plan, src sourceTree, skillDirRel string) {
-	if recipe == nil {
-		return
-	}
-	for index := range recipe.Stages {
-		if prompt := recipe.Stages[index].Prompt; prompt != "" {
-			recipe.Stages[index].Prompt = src.dirFor(path.Join(skillDirRel, prompt))
-		}
-	}
 }
 
 // absSkillPath resolves a walk-relative SKILL.md path back to a path under the source's name, so a

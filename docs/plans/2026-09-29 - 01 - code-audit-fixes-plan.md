@@ -519,7 +519,10 @@ cmd/apogee/headless_test.go — stubRunner, TestHeadlessRecipeWithEveryItemBlock
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Fire|Firing|RecipeWorkflowFailure' ./cmd/apogee/`
 **Commit:** `fix(daemon): judge scheduled recipe firings like headless`
 
-## 18. Skills: recipe stage prompts stay folder-relative on every OS
+## 18. Skills: recipe stage prompts stay folder-relative on every OS — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): consequential edit — internal/skills/parse.go: normalizePromptPath's comment named resolveRecipePrompts, which this item removed.
+NOTES (2026-09-29): the separator-tolerant strip lives in a new helper folderRelativePrompt (internal/agent/recipe.go) that bindPlanInputs calls; an empty Dir strips nothing. A backslash Dir-prefixed prompt's remainder is left in its own spelling (readPrompt's filepath.ToSlash normalizes it on Windows).
 
 **What:** Fix "Windows disk recipe skills cannot find their stage prompts".
 **Regression guard.** Keep a separator-tolerant strip (Dir+"/" or Dir+`\`) in `bindPlanInputs` for an embedder's

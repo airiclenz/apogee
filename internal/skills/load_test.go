@@ -1054,8 +1054,9 @@ const recipePromptSkill = "---\nid: sweep\nsummary: sweep a tree\nrecipe:\n" +
 	"  - name: report\n    kind: merge\n    prompt: \"{{SKILL_DIR}}/prompts/merge.md\"\n" +
 	"---\nRun the sweep."
 
-// Once Load places a recipe skill, each prompt path is an address under the skill's own folder —
-// the same one Dir announces and {{SKILL_DIR}} expands to — whichever spelling the author used.
+// Once Load places a recipe skill, each prompt path is slash-separated and relative to the skill's
+// own folder — on every OS, whichever spelling the author used — so the spawner opens it through
+// the recipe's Files rather than as a host path.
 func TestLoadRecipePromptsResolveUnderTheSkillDir(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, filepath.Join(home, "skills"), "sweep", recipePromptSkill)
@@ -1068,16 +1069,15 @@ func TestLoadRecipePromptsResolveUnderTheSkillDir(t *testing.T) {
 	if !ok || sk.Recipe == nil {
 		t.Fatalf("the recipe skill did not load with its recipe: %+v", cat.Skipped())
 	}
-	dir := filepath.Join(home, "skills", "sweep")
-	want := []string{filepath.Join(dir, "prompts", "find.md"), filepath.Join(dir, "prompts", "merge.md")}
+	want := []string{"prompts/find.md", "prompts/merge.md"}
 	got := []string{sk.Recipe.Stages[0].Prompt, sk.Recipe.Stages[1].Prompt}
 	if !slices.Equal(got, want) {
 		t.Errorf("prompts = %v, want %v", got, want)
 	}
 }
 
-// A shipped recipe's prompts stay on the virtual mount its Dir is announced under — never a host
-// path, which no host folder would answer to.
+// A shipped recipe's prompts stay folder-relative too — never a host path, which no host folder
+// would answer to — and are read through the recipe's Files on the virtual mount.
 func TestShippedRecipePromptsStayVirtual(t *testing.T) {
 	cat := newCatalog()
 	walkSkills(cat, sourceTree{
@@ -1089,7 +1089,7 @@ func TestShippedRecipePromptsStayVirtual(t *testing.T) {
 	if !ok || sk.Recipe == nil {
 		t.Fatalf("the shipped recipe skill did not load with its recipe: %+v", cat.Skipped())
 	}
-	want := []string{ShippedMountPrefix + "sweep/prompts/find.md", ShippedMountPrefix + "sweep/prompts/merge.md"}
+	want := []string{"prompts/find.md", "prompts/merge.md"}
 	got := []string{sk.Recipe.Stages[0].Prompt, sk.Recipe.Stages[1].Prompt}
 	if !slices.Equal(got, want) {
 		t.Errorf("prompts = %v, want %v", got, want)
@@ -1186,17 +1186,12 @@ func TestShippedAuditPromptsAreEmbeddedAndFinishShaped(t *testing.T) {
 		t.Fatalf("the shipped audit skill did not load with its recipe: %+v", cat.Skipped())
 	}
 
-	folder := ShippedMountPrefix + "audit/"
 	var named []string
 	for _, stage := range sk.Recipe.Stages {
 		if stage.Prompt == "" {
 			continue
 		}
-		rel, under := strings.CutPrefix(stage.Prompt, folder)
-		if !under {
-			t.Errorf("stage %q names prompt %q, outside the skill's own folder %s", stage.Name, stage.Prompt, folder)
-			continue
-		}
+		rel := stage.Prompt
 		body, err := fs.ReadFile(shippedFiles, shippedDir+"/audit/"+rel)
 		if err != nil {
 			t.Errorf("stage %q names prompt %s, which the embedded skill folder does not carry: %v", stage.Name, rel, err)

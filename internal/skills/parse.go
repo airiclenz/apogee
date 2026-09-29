@@ -323,7 +323,8 @@ func parseRecipe(node yaml.Node, name string) (*workflow.Plan, error) {
 
 // normalizePromptPath turns a stage's prompt path as the author wrote it — relative to the skill
 // folder (`prompts/find.md`) or led by the folder token (`{{SKILL_DIR}}/prompts/find.md`) — into
-// the clean folder-relative path the loader later joins onto the skill's Dir (resolveRecipePrompts).
+// the clean, slash-separated folder-relative path the recipe keeps, which the spawner opens
+// through the recipe's Files on every OS.
 // A path that leaves the folder — absolute, a `..` climb, the token anywhere but the lead, the
 // folder itself — is refused: a skill from an untrusted repo must not be able to have the engine
 // read a host file into a child's brief.
