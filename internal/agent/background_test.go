@@ -1228,3 +1228,32 @@ func TestBackground_ACancelDuringTheWakeReplyHoldsTheNoteAgain(t *testing.T) {
 		t.Errorf("messages carrying the note = %d, want 1", got)
 	}
 }
+
+func TestBackground_AStopAllDuringAnOpenExchangeLeavesNoNoteForAnAbortToHoldAgain(t *testing.T) {
+	t.Parallel()
+
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
+		route(wakeUserText, nil, toolCallScript("c1", "read_thing", `{}`)).
+		route("try again", nil, contentScript("done"))
+	a, log := newPairParent(t, newLockedSink(), up, nil)
+	launchBackground(t, a, "pair")
+	a.background.waitAll()
+	if err := a.Submit(domain.UserInput{Text: wakeUserText}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res, err := a.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+		t.Fatalf("first Step = %+v, %v; want a Turn that leaves the Exchange open", res, err)
+	}
+
+	a.stopAllBackground()
+	a.AbortExchange()
+
+	if notes := a.background.heldNotes(); len(notes) != 0 {
+		t.Errorf("held notes after a stop-all then an abort = %q, want none: the stop dropped them", notes)
+	}
+	runInput(t, a, domain.UserInput{Text: "try again"})
+	if sent := log.first(t, "try again"); strings.Contains(sent, workflowNoteHeader) {
+		t.Errorf("the Exchange after the abort = %q, want no note from the stopped session", sent)
+	}
+}

@@ -62,8 +62,9 @@ package agent
 // with one — the record saved at quit, before Close stops the set — hands it to the resumed
 // conversation: a restore loads the notes beside the `workflows` set and ResumeWorkflows adopts
 // them as held. Stopping the whole set (Close, and a ClearContext or RestoreSession not told to
-// keep it) drops the held notes with the session they were meant for, and a stop that drops them
-// leaves none behind to wake on — though a ClearContext with no workflow live stops nothing and so
+// keep it) drops the held notes with the session they were meant for — and the record of those
+// delivered into an Exchange still open, so an abort after the stop holds none of them again — and
+// a stop that drops them leaves none behind to wake on — though a ClearContext with no workflow live stops nothing and so
 // drops nothing: the notes it finds held reach the new conversation. A note delivered into an
 // Exchange that is then aborted (AbortExchange, or a settle that scraps it) is held again — the
 // abort dropped every message that carried it, whether the opening, a wake's input or a drained
@@ -701,8 +702,10 @@ func (a *Agent) stopAllBackground() {
 	// The whole set stops only when its session ends (Close, and a ClearContext or RestoreSession not
 	// told to keep it), so the notes held for that session — the ones these stops just left included
 	// — have no one left to read them. Taking them here, after every run has ended, is also what
-	// leaves a Driver that wakes on those runs' end events nothing to wake on.
-	a.background.takeNotes()
+	// leaves a Driver that wakes on those runs' end events nothing to wake on. The record of the notes
+	// delivered into an Exchange still open goes with them: an abort after the stop must not hold
+	// again a note of the session the stop ended.
+	a.background.dropNotes()
 	m.mu.Lock()
 	m.launched = nil
 	m.mu.Unlock()
@@ -1304,6 +1307,14 @@ func (m *backgroundManager) takeNotes() []string {
 	notes := m.notes
 	m.notes = nil
 	return notes
+}
+
+// dropNotes drops every held note and the record of the notes delivered into the open Exchange, so
+// neither a wake nor an abort (restoreDelivered) brings any of them back (stopAllBackground).
+func (m *backgroundManager) dropNotes() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notes, m.delivered = nil, nil
 }
 
 // putBack returns notes a taker could not deliver to the front of the held ones, ahead of any held
