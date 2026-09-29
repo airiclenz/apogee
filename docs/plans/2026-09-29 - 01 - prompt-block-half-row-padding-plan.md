@@ -138,7 +138,11 @@ internal/tui/mouse_test.go — promptRow, TestTranscriptSelectionOnStickyHeaderR
 
 **Commit:** `feat(tui): pad sent prompt blocks with half-block rows`
 
-## 2. Drop the pad rows from a transcript copy and its selection shading
+## 2. Drop the pad rows from a transcript copy and its selection shading — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): `transcriptSelectionText` takes a new `padRows` value (the pad map `Model.pads` plus `floor`, the end of the run-view header), built by `Model.padRows()` in mouse.go. It replaces a bare `[]bool` because an added `▄` under the run-view header can only be told apart from a stand-in by that header bound. The zero `padRows{}` is the "nil pads" the plan names for fake lines. model.go needed no change, since item 1 already stores `m.pads`.
+NOTES (2026-09-29): stand-in vs added is read back from the paint. A `▄` stands in when it sits below the header floor and the row above is not a pad. A `▀` stands in when a row follows it. A `┊` closer next to either one means the pad was added. At depth > 0 the stand-in copies the rail at min(pad depth, neighbour's leading `│ ` count), so a depth-0 neighbour whose text itself starts with `│ ` would copy one rail too deep there (a rare case; depth 0 is unaffected).
+NOTES (2026-09-29): added one test the plan did not list, `TestTranscriptCopySkipsPadRowsAtTheSpanEnds`, which pins the span-end trimming (start on `▀`, end on `▄`, `▄`..`▀`, pads only).
 
 **What:**
 Recast at the regression check (2026-09-29).

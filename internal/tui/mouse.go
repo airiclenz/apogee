@@ -28,7 +28,9 @@ import (
 // + display cell) and slices the cached rendered lines on release, so markers, rail gutters, and
 // the painter's own wrap breaks are copied verbatim (the accepted terminal-native semantics, D4) —
 // and verbatim is exact here, because the viewport no longer wraps: a rendered line is a row
-// (newModel, model.go). The mouse handlers arbitrate by region — a point in the input rect drives
+// (newModel, model.go). The one row not copied verbatim is a prompt block's ▄/▀ half row: it copies
+// as the blank separator it stands in for, or as nothing where the paint added it, and is never
+// shaded, so the clipboard holds what the unpadded transcript would (transcriptSelectionText). The mouse handlers arbitrate by region — a point in the input rect drives
 // the editor, a point in the viewport drives the transcript — so the two selections never coexist.
 //
 // A transcript selection SURVIVES a repaint by the keep-if-unchanged rule (transcriptSel.
@@ -51,7 +53,9 @@ import (
 //     those rows name the header's own lines, not the reply lines the scroll offset hides beneath
 //     them. A drag that starts on the header and runs down into the reply therefore spans the
 //     content between the two — the lines the header covers included, since a screen-space span
-//     stays a contiguous run of content lines.
+//     stays a contiguous run of content lines. The header's ▄/▀ half rows are the exception to
+//     "copy what you see": a drag starting on the ▄ copies from the ❯ row, and one crossing a
+//     half row copies the separator it stands in for (transcriptSelectionText).
 //   - At the bottom, the approval and ask popups, the /sessions browser, the picker, the
 //     autocomplete dropdown and the staged-interjection strip take their rows OFF the transcript
 //     (Model.transcriptRows measures what is left; View composes the frame from it). Those rows map
@@ -752,7 +756,9 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 			toggled, cmd := m.toggleBlockAt(pressed, msg.Y)
 			return toggled, cmd
 		}
-		text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+		text := transcriptSelectionText(
+			m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head,
+		)
 		if strings.TrimSpace(text) == "" {
 			m.transcriptSel.active = false // a drag that took only blank rows copies nothing
 			return m, nil
@@ -983,17 +989,43 @@ func shadeCells(measure widthAuthority, line string, c0, c1 int, style lipgloss.
 // selection can meet are the painter's alone: the viewport does not wrap, so one cached line is one
 // row (newModel, model.go).
 //
+// The one exception to verbatim is a prompt block's ▄/▀ half row (pads): it is paint, not text,
+// so the clipboard holds exactly what the unpadded transcript would have given. A span that starts
+// or ends ON half rows copies from or to the nearest content row instead, whole; a half row inside
+// the span copies as the blank separator it stands in for, or as nothing where the paint added it
+// ([padRows.copyText]). A zero padRows — hand-built lines, or a colourless paint — copies as before.
+//
 // The measure is the authority's (width.go) rather than ansi.Cut's hard-wired GraphemeWidth
 // because the columns came from a mouse report, which counts PAINTED cells: cutting in the measure
 // the terminal paints in is what makes the clipboard hold the glyphs the pointer ran over.
-func transcriptSelectionText(measure widthAuthority, lines []string, a, b contentCell) string {
+func transcriptSelectionText(
+	measure widthAuthority,
+	lines []string,
+	pads padRows,
+	a, b contentCell,
+) string {
 	top, bot := a, b
 	if bot.line < top.line || (bot.line == top.line && bot.col < top.col) {
 		top, bot = bot, top // normalise to reading order
 	}
-	out := make([]string, 0, bot.line-top.line+1)
+	// A half row at either end of the span is breathing room the pointer happened to land on, not a
+	// separator the human meant to take: the span shrinks to the content rows, taken whole.
+	isBotWhole := false
+	for top.line <= bot.line && pads.isPad(top.line) {
+		top = contentCell{line: top.line + 1}
+	}
+	for bot.line >= top.line && pads.isPad(bot.line) {
+		bot, isBotWhole = contentCell{line: bot.line - 1}, true
+	}
+	out := make([]string, 0, max(0, bot.line-top.line+1))
 	for row := top.line; row <= bot.line; row++ {
 		if row < 0 || row >= len(lines) {
+			continue
+		}
+		if pads.isPad(row) {
+			if text, ok := pads.copyText(lines, row); ok {
+				out = append(out, text)
+			}
 			continue
 		}
 		line := lines[row]
@@ -1001,7 +1033,7 @@ func transcriptSelectionText(measure widthAuthority, lines []string, a, b conten
 		if row == top.line {
 			c0 = top.col
 		}
-		if row == bot.line {
+		if row == bot.line && !isBotWhole {
 			c1 = bot.col
 		}
 		if c1 <= c0 {
@@ -1011,6 +1043,76 @@ func transcriptSelectionText(measure widthAuthority, lines []string, a, b conten
 		out = append(out, strings.TrimRight(ansi.Strip(measure.Cut(line, c0, c1)), " "))
 	}
 	return strings.Join(out, "\n")
+}
+
+// padRows is what a copy needs to know about the prompt blocks' ▄/▀ half rows: which rows they are
+// (rows, the paint's own map — Model.pads) and the first row a separator may stand above (floor,
+// the end of a run view's header: renderView lays no separator under the header's own spacer). A
+// zero padRows names no half row at all, so a copy over it is verbatim.
+type padRows struct {
+	rows  []bool
+	floor int
+}
+
+// padRows is the model's half-row map with the header bound its paint was laid under.
+func (m Model) padRows() padRows {
+	return padRows{rows: m.pads, floor: m.header.start + m.header.count}
+}
+
+// isPad reports whether row is a half row. It is bounds-checked, so a map shorter than the lines —
+// or none at all — reads as "no half row".
+func (p padRows) isPad(row int) bool {
+	return row >= 0 && row < len(p.rows) && p.rows[row]
+}
+
+// copyText is what the half row at row copies as, and ok is false where it copies as nothing.
+// renderView's placement rule (render.go, appendJoined) read backwards: a half row STANDS IN for
+// the blank separator on the side it pads wherever one would have been drawn, and was ADDED where
+// none would — above a block at the transcript's top or under a run view's header, the ▄ of the
+// lower block at a seam between two padded blocks (the upper ▀ stands in for the one separator
+// there), the ▀ closing the transcript, and a ▀ followed by a ┊ closer, which is never stood in
+// for. A stand-in copies as that separator's own text: bare at depth 0, and otherwise the rail
+// gutter of the join — the shallower of the half row's depth and its neighbour's (railJoin).
+func (p padRows) copyText(lines []string, row int) (string, bool) {
+	own := ansi.Strip(lines[row])
+	neighbour := row + 1
+	if strings.Contains(own, glyphPadAbove) {
+		neighbour = row - 1
+		if row <= p.floor || p.isPad(neighbour) {
+			return "", false
+		}
+	}
+	if neighbour < 0 || neighbour >= len(lines) {
+		return "", false
+	}
+	other := ansi.Strip(lines[neighbour])
+	if isCloserRow(other) {
+		return "", false
+	}
+	depth := railDepth(strings.TrimRight(own, glyphPadAbove+glyphPadBelow+" "))
+	if depth > 0 {
+		depth = min(depth, railDepth(other))
+	}
+	return strings.TrimRight(strings.Repeat(glyphSubRail+" ", depth), " "), true
+}
+
+// railDepth counts the rail gutters ("│ ", or a spacer's trimmed final "│") a stripped row opens with.
+func railDepth(text string) int {
+	depth := 0
+	for strings.HasPrefix(text, glyphSubRail) {
+		depth++
+		text = strings.TrimPrefix(strings.TrimPrefix(text, glyphSubRail), " ")
+	}
+	return depth
+}
+
+// isCloserRow reports whether a stripped row is railJoin's ┊ closer: rail gutters and the ┊ alone.
+func isCloserRow(text string) bool {
+	text = strings.TrimRight(text, " ")
+	for strings.HasPrefix(text, glyphSubRail+" ") {
+		text = strings.TrimPrefix(text, glyphSubRail+" ")
+	}
+	return text == glyphRailClose
 }
 
 // ----------------------------------------------------------------------------
@@ -1802,7 +1904,9 @@ func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 // ([Model.transcriptRows]) once as a loop bound and maps each row through drawnLineAt, the same
 // mapping contentLineAt gives the mouse. So the highlight tracks the selection through a mid-drag
 // wheel-scroll, and a header row highlights exactly when the header line under the span is the one
-// drawn there. With no active (non-empty) selection the view is returned unchanged.
+// drawn there. A prompt block's ▄/▀ half row is never shaded: it is paint the copy leaves out
+// (transcriptSelectionText), so shading it would show a selection the clipboard does not hold.
+// With no active (non-empty) selection the view is returned unchanged.
 func (m Model) highlightTranscript(view string) string {
 	if !m.transcriptSel.active || m.transcriptSel.anchor == m.transcriptSel.head {
 		return view
@@ -1818,8 +1922,8 @@ func (m Model) highlightTranscript(view string) string {
 			break // past the transcript: an overlay owns these rows, nothing of ours is drawn on them
 		}
 		absRow := m.drawnLineAt(r)
-		if absRow < top.line || absRow > bot.line {
-			continue
+		if absRow < top.line || absRow > bot.line || m.padRows().isPad(absRow) {
+			continue // a prompt block's half row copies as no text of its own, so it shows none selected
 		}
 		c0, c1 := 0, m.th.measure.Width(lines[r])
 		if absRow == top.line {

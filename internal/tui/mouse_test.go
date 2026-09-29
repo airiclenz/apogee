@@ -1042,7 +1042,7 @@ func TestTranscriptSelectionText(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := transcriptSelectionText(measure, lines, c.a, c.b)
+			got := transcriptSelectionText(measure, lines, padRows{}, c.a, c.b)
 			if got != c.want {
 				t.Fatalf("transcriptSelectionText(%+v,%+v) = %q, want %q", c.a, c.b, got, c.want)
 			}
@@ -1066,7 +1066,7 @@ func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 	if !m.transcriptSel.active {
 		t.Fatal("a transcript drag did not arm a selection")
 	}
-	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Fatalf("selected text = %q, want %q (the rendered user block, pad trimmed)", got, want)
 	}
@@ -2224,7 +2224,7 @@ func TestTranscriptClickSelectsThePaintedGlyph(t *testing.T) {
 			m = step(t, m, leftClick(col, row))
 			m = step(t, m, leftDrag(col+paintedWidth(target, tc.method), row))
 
-			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 			if got != target {
 				t.Fatalf("a drag from painted column %d copied %q, want the %q painted there", col, got, target)
 			}
@@ -2249,7 +2249,7 @@ func TestTranscriptHighlightExtentMatchesTheCopy(t *testing.T) {
 			m = step(t, m, leftClick(0, row))
 			m = step(t, m, leftDrag(end, row))
 
-			text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			text := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 			if got := m.th.measure.Width(text); got != end {
 				t.Errorf("the copied text paints %d columns, want the %d the drag covered: %q", got, end, text)
 			}
@@ -2348,7 +2348,7 @@ func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("release of the kept selection should return a copy Cmd, got nil")
 	}
-	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Fatalf("copied %q, want %q — a kept selection must copy what is on screen", got, want)
 	}
@@ -2407,7 +2407,7 @@ func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("release after a surviving drag should return a copy Cmd, got nil")
 	}
-	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Fatalf("copied %q, want %q", got, want)
 	}
@@ -2664,7 +2664,7 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 			if !m.transcriptSel.active {
 				t.Fatal("a transcript drag armed no selection")
 			}
-			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 			if want := glyphUser + " hello world"; got != want {
 				t.Fatalf("selected text = %q, want %q", got, want)
 			}
@@ -2754,12 +2754,184 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 			w := m.viewport.Width()
 			m = step(t, m, leftClick(0, 1))
 			m = step(t, m, leftDrag(w, 1))
-			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 			if !strings.Contains(got, "HEADERPROMPT") {
 				t.Fatalf("selecting the sticky-header row copied %q, want it to contain the prompt text", got)
 			}
 			if !strings.Contains(m.View().Content, selectionBg) {
 				t.Fatal("a selection over the sticky-header row did not reach the rendered View")
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The prompt block's half rows in a copy
+// ----------------------------------------------------------------------------
+
+// copyWhole copies every row of a paint through transcriptSelectionText, with the paint's own half-row
+// map and header bound, the way a drag from the first row to past the end of the last one does.
+func copyWhole(t *testing.T, r renderedTranscript) string {
+	t.Helper()
+	pads := padRows{rows: r.pads, floor: r.header.start + r.header.count}
+	last := contentCell{line: len(r.lines) - 1, col: 1 << 16}
+	return transcriptSelectionText(newWidthAuthority(), r.lines, pads, contentCell{}, last)
+}
+
+// TestTranscriptCopySkipsPromptPadRows is the copy rule for the prompt block's half rows: a half row
+// standing in for a separator copies as that blank separator and one the paint added copies as
+// nothing, so a selection over the whole transcript puts on the clipboard exactly what the unpadded
+// transcript did — no ▄/▀ in it — including at the seam between two interjections, whose lower ▄ is
+// the added one.
+func TestTranscriptCopySkipsPromptPadRows(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  string
+	}{
+		{"answer, prompt, answer", func(tr *transcript) {
+			tr.commitAssistant("answer", runRef{})
+			tr.addUser("prompt", nil)
+			tr.commitAssistant("answer", runRef{})
+		}, glyphAssistant + " answer\n\n" + glyphUser + " prompt\n\n" + glyphAssistant + " answer"},
+		{"two adjacent interjections", func(tr *transcript) {
+			tr.addInterjected("a", nil)
+			tr.addInterjected("b", nil)
+		}, glyphInterject + " a\n\n" + glyphInterject + " b"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+			c.build(tr)
+
+			padded, unpadded := copyWhole(t, paintPadded(tr, true)), copyWhole(t, paintPadded(tr, false))
+
+			if padded != c.want {
+				t.Errorf("the padded copy = %q, want %q", padded, c.want)
+			}
+			if padded != unpadded {
+				t.Errorf("the padded copy %q differs from the unpadded one %q", padded, unpadded)
+			}
+		})
+	}
+}
+
+// TestTranscriptCopySkipsPadRowsAtTheSpanEnds pins the ends of a span: a selection that starts or
+// ends ON a half row copies from or to the nearest content row, whole, and never opens or closes
+// on the blank separator the half row would otherwise stand in for.
+func TestTranscriptCopySkipsPadRowsAtTheSpanEnds(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.commitAssistant("answer", runRef{})
+	tr.addUser("prompt", nil)
+	tr.commitAssistant("answer", runRef{})
+	r := paintPadded(tr, true)
+	pads := padRows{rows: r.pads}
+	// answer, ▄, ❯ prompt, ▀, answer
+	if len(r.lines) != 5 || !pads.isPad(1) || !pads.isPad(3) {
+		t.Fatalf("setup: want answer, ▄, prompt, ▀, answer; got %q", strip(strings.Join(r.lines, "\n")))
+	}
+	cases := []struct {
+		name string
+		a, b contentCell
+		want string
+	}{
+		{"starting on the ▀", contentCell{3, 5}, contentCell{4, 80}, glyphAssistant + " answer"},
+		{"ending on the ▄", contentCell{0, 0}, contentCell{1, 3}, glyphAssistant + " answer"},
+		{"from ▄ to ▀", contentCell{1, 40}, contentCell{3, 2}, glyphUser + " prompt"},
+		{"only half rows", contentCell{1, 0}, contentCell{1, 80}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := transcriptSelectionText(newWidthAuthority(), r.lines, pads, c.a, c.b)
+
+			if got != c.want {
+				t.Fatalf("copy %+v..%+v = %q, want %q", c.a, c.b, got, c.want)
+			}
+		})
+	}
+}
+
+// TestTranscriptSelectionLeavesPadRowsUnshaded is copy equal to sight on the half rows: a drag over
+// answer, prompt and answer shades the prompt's own row and leaves its ▄ and ▀ exactly as painted,
+// because the clipboard holds no text of theirs.
+func TestTranscriptSelectionLeavesPadRowsUnshaded(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m.transcript.commitAssistant("answer", runRef{})
+	m.transcript.addUser("prompt", nil)
+	m.transcript.commitAssistant("answer", runRef{})
+	m.refreshViewport()
+	m = step(t, m, leftClick(0, screenRow(t, m, 0)))
+	m = step(t, m, leftDrag(m.viewport.Width(), screenRow(t, m, len(m.lines)-1)))
+	if !m.transcriptSel.active {
+		t.Fatal("precondition: no transcript selection armed")
+	}
+	rows := make([]string, m.transcriptRows())
+	for r := range rows {
+		if line := m.drawnLineAt(r); line >= 0 && line < len(m.lines) {
+			rows[r] = m.lines[line]
+		}
+	}
+
+	shaded := strings.Split(m.highlightTranscript(strings.Join(rows, "\n")), "\n")
+
+	sawPad, sawPrompt := false, false
+	for r := range rows {
+		line := m.drawnLineAt(r)
+		switch {
+		case m.padRows().isPad(line):
+			sawPad = true
+			if shaded[r] != rows[r] {
+				t.Errorf("half row %d was shaded: %q", r, shaded[r])
+			}
+		case strings.Contains(strip(rows[r]), glyphUser+" prompt"):
+			sawPrompt = true
+			if !strings.Contains(shaded[r], selectionBg) {
+				t.Errorf("the prompt row %d under the selection is unshaded: %q", r, shaded[r])
+			}
+		}
+	}
+	if !sawPad || !sawPrompt {
+		t.Fatalf("setup: the screen showed half rows %v and the prompt row %v; want both", sawPad, sawPrompt)
+	}
+}
+
+// TestTranscriptCopyFromStickyHeaderSkipsPadRows drags over the sticky header while the prompt's
+// replies scroll beneath it: a drag starting on the header's ▄ copies from the ❯ row, with no
+// leading blank line, and one ending on its ▀ copies to the end of that row.
+func TestTranscriptCopyFromStickyHeaderSkipsPadRows(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		lastRow int
+	}{
+		{"from the ▄ to the ❯ row", 1},
+		{"from the ▄ to the ▀", 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(t)
+			m.transcript.addUser("HEADERPROMPT", nil)
+			for i := 0; i < 40; i++ {
+				m.transcript.commitAssistant("reply", runRef{})
+			}
+			m.refreshViewport()
+			if start, count := m.stickyHeaderSpan(); count != 3 || !m.padRows().isPad(start) {
+				t.Fatalf("setup: the sticky header spans %d rows from %d; want the 3-row padded prompt", count, start)
+			}
+			m = step(t, m, leftClick(0, 0))
+			m = step(t, m, leftDrag(m.viewport.Width(), c.lastRow))
+
+			got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
+
+			if want := glyphUser + " HEADERPROMPT"; got != want {
+				t.Fatalf("the copy from the sticky header = %q, want %q", got, want)
 			}
 		})
 	}
@@ -3635,7 +3807,7 @@ func TestTranscriptDragOutlivesASettingsHighlight(t *testing.T) {
 		t.Fatalf("transcript selection = %+v, want its head at the dragged cell (col 20)", m.transcriptSel)
 	}
 
-	want := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	want := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 	if len([]rune(want)) <= 4 {
 		t.Fatalf("the transcript span is %q, too short to tell from the field's stale one", want)
 	}
@@ -5968,7 +6140,7 @@ func TestAskClickOutsideTheBoxReachesTheTranscriptAndThePrompt(t *testing.T) {
 	if !m.transcriptSel.active {
 		t.Fatal("a drag over the transcript armed no selection; the question must not swallow the rows above it")
 	}
-	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Errorf("selected text = %q, want %q", got, want)
 	}
