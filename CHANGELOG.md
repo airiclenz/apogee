@@ -8,6 +8,14 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **MCP tool calls now time out after 5 minutes.** A server that never answers can no longer hold the agent indefinitely: the call ends with an error result (`mcp: call timed out after 5m0s`) the model can route around, and the Turn carries on. Cancelling the Turn still stops the call immediately.
+
+- **Fixed:** an MCP server's configured endpoint no longer leaks into error text. When a streamable-http or SSE server cannot be reached, fails to list its tools, or drops a tool call, the error the model (or the startup message) sees now names the endpoint only as `scheme://host[:port]` — a token in its userinfo, path or query (`https://host/mcp?token=…`) is cut out. Closes the 2026-09-29 audit's "endpoint credentials leak into tool-error text".
+
+- MCP server tool descriptions are now capped at 8 KiB; a longer description is clipped and marked `[mcp description truncated at 8192 bytes]`, so one server can no longer flood the model's tool menu.
+
+- **Fixed:** an SSE MCP server can no longer move its message channel to another host, port or scheme. Every request apogee's MCP client sends (the SSE stream and its POSTs, streamable-http) must go to the configured endpoint's own origin (scheme + host + port, `https://h` and `https://h:443` counting as one); an SSE `endpoint` event naming another origin now fails that server's connect with a url-safety error naming the server, and no request reaches the other origin. Before, only the dialled IP address was checked, so another port on the same address, or any target behind an egress proxy, got through.
+
 - Sent prompt blocks (a submitted `❯` prompt, a delivered `⧖` interjection, and the run view's task row) now have a row of `▄` above them and a row of `▀` below them in the block's gray, so the block looks half a row taller at each end. These half rows take the place of the blank separator lines around the block.
 
 - A drag-copy over the transcript leaves out the sent prompt blocks' half-block padding rows, so the clipboard text is the same as before the padding existed, and the selection highlight does not shade those rows.
