@@ -764,8 +764,10 @@ type WorkflowReceipt struct {
 // Recipe's name). Stage names the stage on the stage and item phases; Item, Index, Resumed and
 // Receipt are the finished item's label, its 0-based place in the stage, whether an earlier run
 // had already finished it, and the receipt it ended on — all zero on every other phase (a started
-// item carries its label and place). Detail is the question on WorkflowWaiting and the cause on
-// WorkflowFailed, "" otherwise.
+// item carries its label and place). ItemName is the item's short name (workflow.ItemName) on
+// WorkflowItemStarted and WorkflowItemFinished — the name its child is named by and a Driver shows
+// it under — and "" otherwise; Item stays the full label, the item's identity. Detail is the
+// question on WorkflowWaiting and the cause on WorkflowFailed, "" otherwise.
 //
 // The rest describe the Workflow's shape, so a Driver can rebuild it from these events alone.
 // Stages lists the plan's stage names in order, on WorkflowStarted only. Items is a stage's item
@@ -805,6 +807,7 @@ type WorkflowPhaseEvent struct {
 	Name       string
 	Stage      string
 	Item       string
+	ItemName   string
 	Index      int
 	Resumed    bool
 	Receipt    WorkflowReceipt

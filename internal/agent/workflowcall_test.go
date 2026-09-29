@@ -1510,6 +1510,49 @@ func TestWorkflowControl_MessageReachesTheRunningItem(t *testing.T) {
 	}
 }
 
+// TestWorkflowControl_AnItemIsAddressedByItsShortNameOrItsLabel pins that a running item over an
+// absolute path is listed and answered by its short name (the path's basename), and that a message
+// addressed by that name or by the item's full label queues to the same run.
+func TestWorkflowControl_AnItemIsAddressedByItsShortNameOrItsLabel(t *testing.T) {
+	t.Parallel()
+
+	const label, name = "/src/pkg/alpha.go", "alpha.go"
+	const key = "check " + label
+	sink := newLockedSink()
+	cfg := backgroundWorkflowConfig(t, sink)
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, backgroundArgsJSON(label))).
+		route("please fan out", nil, contentScript("started it")).
+		route(key, signalThenWait(started, release), toolCallScript("r1", "read_thing", `{}`)).
+		route(key, nil, finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	runSubmitted(t, context.Background(), a, "please fan out")
+	awaitClosed(t, started, "alpha's child")
+	id := soleWorkflowID(t, a)
+	running := a.runningItems(id)
+	if len(running) != 1 {
+		t.Fatalf("running items = %+v, want alpha's one", running)
+	}
+	run := running[0].runID
+
+	detail := controlCall(a, `{"action":"status","id":"`+id+`"}`)
+	byName := controlCall(a, `{"action":"message","item":"`+name+`","text":"`+key+`: by name"}`)
+	byLabel := controlCall(a, `{"action":"message","item":"`+label+`","text":"`+key+`: by label"}`)
+	close(release)
+	a.background.waitAll()
+
+	if want := "\n  " + run + " " + name; detail.IsError || !strings.Contains(detail.Content, want) {
+		t.Errorf("status %s = %q (error %v), want the running line %q", id, detail.Content, detail.IsError, want)
+	}
+	want := "message queued for " + name + " (" + run + ")"
+	for _, got := range []domain.ToolResult{byName, byLabel} {
+		if got.IsError || !strings.Contains(got.Content, want) {
+			t.Errorf("message answer = %q (error %v), want %q", got.Content, got.IsError, want)
+		}
+	}
+}
+
 func TestWorkflowControl_StatusStopAndRefusals(t *testing.T) {
 	t.Parallel()
 

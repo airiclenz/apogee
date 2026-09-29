@@ -84,9 +84,12 @@ const (
 	workflowFaultResultPrefix   = "faulted: "
 )
 
-// workflowChild is a workflow item child's own state (Agent.workflowItem): the receipt its finish
-// tool accepted. The tool may run on a pool worker, so the receipt is guarded.
+// workflowChild is a workflow item child's own state (Agent.workflowItem): the item's full label
+// and the receipt its finish tool accepted. The child is named by the item's short name, so label
+// is what still addresses it by the item's identity (runningItems); it is fixed at construction.
+// The tool may run on a pool worker, so the receipt is guarded.
 type workflowChild struct {
+	label   string
 	mu      sync.Mutex
 	receipt *workflow.Receipt
 }
@@ -242,7 +245,7 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		})
 	}()
 
-	sub, err := a.newChildAgentOn(s.seat, s.call.ID, runID, task, delegationName(spec.Item.Label))
+	sub, err := a.newChildAgentOn(s.seat, s.call.ID, runID, task, delegationName(spec.Name))
 	if err != nil {
 		return workflow.Outcome{}, fmt.Errorf("could not construct the item's child: %w", err)
 	}
@@ -250,7 +253,7 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	if seatFallback = sub.seatFallback; seatFallback {
 		s.fellBack.Store(true)
 	}
-	item := &workflowChild{}
+	item := &workflowChild{label: spec.Item.Label}
 	sub.workflowItem = item
 	sub.tools = withFinish(sub.tools, narrowed, tools.NewFinish(spec.Stage.Returns, item.accept))
 	var ending workflow.Ending

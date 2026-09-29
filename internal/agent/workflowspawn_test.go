@@ -27,12 +27,14 @@ func finishTurn(id, args string) stubllm.Turn {
 	return toolCallTurn(id, tools.FinishToolName, args)
 }
 
-// itemSpec is a fanout item spec over label whose stage declares returns.
+// itemSpec is a fanout item spec over label whose stage declares returns. Its short name is label,
+// as workflow.ItemName names an item over one relative unit.
 func itemSpec(label string, returns workflow.ReceiptSpec) workflow.ItemSpec {
 	return workflow.ItemSpec{
 		Workflow: "wf",
 		Stage:    workflow.Stage{Name: "find", Kind: workflow.StageFanout, Task: "audit {item}", Returns: returns},
 		Item:     workflow.Item{Label: label, Units: []string{label}},
+		Name:     label,
 		Key:      "k1",
 		Brief:    "audit " + label,
 		Output:   "/tmp/out.md",
@@ -611,4 +613,49 @@ func boolCount(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// TestWorkflowSpawn_AnItemIsNamedByItsShortName pins that an item whose unit is the workflow's own
+// folder runs as a child named by its short name — the stage name — which is the name an approval
+// it raises carries and the ItemName its phases carry, while Item stays the full path.
+func TestWorkflowSpawn_AnItemIsNamedByItsShortName(t *testing.T) {
+	t.Parallel()
+
+	const folder = "/home/u/.apogee/scratch/s1/workflows/wf"
+	sink := &recordingSink{}
+	approver := &queueProbeApprover{allow: func(domain.ApprovalRequest) bool { return true }}
+	a, _ := newWorkflowParent(t, sink, domain.ModeAskBefore,
+		func(cfg *domain.Config) {
+			_ = cfg.Tools.Register(fakeTool{name: "touch_thing", result: "touched"})
+			cfg.Approver = approver
+		},
+		toolCallTurn("t1", "touch_thing", `{}`),
+		finishTurn("f1", `{"status":"ok","summary":"done"}`),
+	)
+	spec := itemSpec(folder, nil)
+	spec.Name = spec.Stage.Name
+	spawner := a.newWorkflowSpawner(0, fanOutCall, nil)
+	observer := a.observeWorkflow(&workflow.Runner{Spawner: spawner}, 0, fanoutPlan(folder))
+
+	outcome, err := spawner.Spawn(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	observer.ItemPhase(workflow.ItemEvent{
+		Workflow: spec.Workflow, Stage: spec.Stage.Name, Label: folder, Name: spec.Name,
+		Phase: workflow.PhaseDone, Attempt: 1, Receipt: outcome.Receipt,
+	})
+
+	if len(approver.seen) != 1 || approver.seen[0].SubAgentName != "find" {
+		t.Errorf("approvals = %+v, want one naming the child %q", approver.seen, "find")
+	}
+	items := phasesAt(workflowPhaseEvents(sink.events), domain.WorkflowItemStarted, domain.WorkflowItemFinished)
+	if len(items) != 2 {
+		t.Fatalf("item phases = %+v, want started then finished", items)
+	}
+	for _, phase := range items {
+		if phase.ItemName != "find" || phase.Item != folder {
+			t.Errorf("%s phase names item %q as %q, want %q as %q", phase.Phase, phase.Item, phase.ItemName, folder, "find")
+		}
+	}
 }

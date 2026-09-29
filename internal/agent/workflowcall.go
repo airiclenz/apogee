@@ -676,7 +676,7 @@ func (o *workflowObserver) ItemPhase(event workflow.ItemEvent) {
 	runs := o.runs[itemPlace{stage: event.Stage, repeatRound: event.RepeatRound, index: event.Index}]
 	o.emitLocked(domain.WorkflowPhaseEvent{
 		Phase: domain.WorkflowItemFinished, Stage: event.Stage, Item: event.Label, Index: event.Index,
-		Resumed: event.Attempt == 0, Receipt: event.Receipt.Domain(),
+		ItemName: event.Name, Resumed: event.Attempt == 0, Receipt: event.Receipt.Domain(),
 		Round: event.RepeatRound + 1, Run: runs.run, Attempt: runs.attempts,
 	})
 }
@@ -695,7 +695,7 @@ func (o *workflowObserver) itemStarted(spec workflow.ItemSpec, run string) {
 	o.runs[place] = runs
 	o.emitLocked(domain.WorkflowPhaseEvent{
 		Phase: domain.WorkflowItemStarted, Stage: spec.Stage.Name, Item: spec.Item.Label, Index: spec.Index,
-		Round: spec.RepeatRound + 1, Run: run, Attempt: runs.attempts,
+		ItemName: spec.Name, Round: spec.RepeatRound + 1, Run: run, Attempt: runs.attempts,
 	})
 }
 
@@ -807,10 +807,12 @@ type workflowControlArgs struct {
 }
 
 // runningItem is one running item child of a background workflow, as the status listing names it
-// and a message addresses it: its run id, its item name and the workflow it runs in.
+// and a message addresses it: its run id, its item's short name (the child's name), its item's full
+// label and the workflow it runs in.
 type runningItem struct {
 	runID    string
 	name     string
+	label    string
 	workflow string
 }
 
@@ -867,8 +869,10 @@ func (a *Agent) workflowStopResult(callID, id string) domain.ToolResult {
 	return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStopped, id)}
 }
 
-// workflowMessageResult queues args.Text for the one running item args.Item names — by run id, or by
-// item name when no run id matches — narrowed to the workflow args.ID when it is set. It rides the
+// workflowMessageResult queues args.Text for the one running item args.Item names — by run id, else
+// by short name, else by full label (namedItems) — narrowed to the workflow args.ID when it is set.
+// Two items may share a short name (/a/x.go and /b/x.go both read x.go); the full label or the run
+// id then tells them apart. It rides the
 // item child's mailbox exactly as a human Interjection does (InterjectChild, ADR 0063): the message
 // lands at the child's next between-Steps boundary and grants it nothing.
 func (a *Agent) workflowMessageResult(callID string, args workflowControlArgs) domain.ToolResult {
@@ -876,16 +880,7 @@ func (a *Agent) workflowMessageResult(callID string, args workflowControlArgs) d
 		return errorToolResult(callID, workflowControlNeedsItem)
 	}
 	running := a.runningItems(args.ID)
-	var named []runningItem
-	for _, item := range running {
-		if item.runID == args.Item {
-			named = []runningItem{item}
-			break
-		}
-		if item.name == args.Item {
-			named = append(named, item)
-		}
-	}
+	named := namedItems(running, args.Item)
 	switch len(named) {
 	case 0:
 		return errorToolResult(callID, fmt.Sprintf(workflowControlNoItemFormat, args.Item, runningItemNames(running)))
@@ -900,11 +895,37 @@ func (a *Agent) workflowMessageResult(callID string, args workflowControlArgs) d
 	return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlQueuedFormat, target.name, target.runID)}
 }
 
+// namedItems is the running items target addresses: the one whose run id it is, else every one
+// whose short name it is, else every one whose full label it is — so a short name wins over a label
+// that happens to read the same, and a label still reaches an item whose short name differs.
+func namedItems(running []runningItem, target string) []runningItem {
+	for _, item := range running {
+		if item.runID == target {
+			return []runningItem{item}
+		}
+	}
+	for _, match := range []func(runningItem) bool{
+		func(item runningItem) bool { return item.name == target },
+		func(item runningItem) bool { return item.label == target },
+	} {
+		var named []runningItem
+		for _, item := range running {
+			if match(item) {
+				named = append(named, item)
+			}
+		}
+		if len(named) > 0 {
+			return named
+		}
+	}
+	return nil
+}
+
 // runningItems lists the item children of this Agent's background workflows that are running now —
 // of the workflow id only, when id is set — ordered by run id. A background workflow's children are
 // registered on this Agent (startBackground) under the call id `workflow-<id>`, which is how they are
 // told from the conversation's own delegations; a child's run id and call id are fixed at its
-// construction, so reading them here races nothing.
+// construction, and so is its item's label (workflowChild), so reading them here races nothing.
 func (a *Agent) runningItems(id string) []runningItem {
 	var items []runningItem
 	for _, child := range a.children.all() {
@@ -912,7 +933,11 @@ func (a *Agent) runningItems(id string) []runningItem {
 		if !ok || (id != "" && workflowID != id) {
 			continue
 		}
-		items = append(items, runningItem{runID: child.runID, name: child.displayName(), workflow: workflowID})
+		item := runningItem{runID: child.runID, name: child.displayName(), workflow: workflowID}
+		if child.workflowItem != nil {
+			item.label = child.workflowItem.label
+		}
+		items = append(items, item)
 	}
 	slices.SortFunc(items, func(x, y runningItem) int { return strings.Compare(x.runID, y.runID) })
 	return items

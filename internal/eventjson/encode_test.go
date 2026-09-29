@@ -181,6 +181,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 				Name:      "check each package",
 				Stage:     "items",
 				Item:      "internal/tui",
+				ItemName:  "tui", // a Driver display field: the line below has no key for it
 				Index:     2,
 				Resumed:   true,
 				Receipt: domain.WorkflowReceipt{

@@ -329,6 +329,12 @@ all of them from the start (the sketch shortens `audit`'s list):
   `^x` in [`/workflows`](#the-workflows-view--workflows).
 - A `fan_out` call the model makes draws its own block with **one row per item**, since it has one
   stage; each opens that helper's run view.
+- Each item's helper goes by the item's **short name**, not its full entry: a path inside the
+  workflow folder reads relative to it (`part-a`, `group-1/x.md`), the workflow folder itself reads
+  as the stage's name, and a path outside it reads as its file name. Any other entry reads as
+  written. That is the name an approval the helper asks for carries. Two items can share a short
+  name — `/a/x.go` and `/b/x.go` both read `x.go` — so the `workflow` tool's `message` still takes
+  the item's full entry, or its run id, to tell them apart.
 - **After a resume** the block comes back with the same rows, and they open read-only views of what
   each helper did. A workflow that was still running when the session was saved reads `stopped`.
 
@@ -388,7 +394,7 @@ the sub-agents server and ran on the session server instead. Then:
 |---|---|
 | `status` | Lists every workflow of the session with its items — or, with `id`, one in detail |
 | `stop` | Stops the workflow `id` and keeps its finished items |
-| `message` | Sends `text` to one running item's helper, named by `item` (the run id or item name `status` shows; `id` narrows it to one workflow). It reaches the helper between its steps, as a note from you would |
+| `message` | Sends `text` to one running item's helper, named by `item` (the run id or short name `status` shows, or the item's full entry when two share a short name; `id` narrows it to one workflow). It reaches the helper between its steps, as a note from you would |
 
 The model is woken with a workflow's result when it ends, so it has no need to poll.
 

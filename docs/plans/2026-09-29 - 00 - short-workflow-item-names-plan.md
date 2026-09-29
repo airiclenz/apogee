@@ -60,7 +60,13 @@ internal/workflow/store.go — ItemStatus; internal/workflow/stages.go — runMe
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(workflow): derive a short display name for each item`
 
-## 2. Children and phase events carry the short name
+## 2. Children and phase events carry the short name — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the spawn test drives the finished phase by calling the observer's `ItemPhase` with the item's event rather than through a Runner, since the item's unit has to be the workflow folder and that folder's id is only known once a run has started; the Runner filling `ItemEvent.Name` is item 1's runner test.
+NOTES (2026-09-29): the eventjson "no new key" pin sets `ItemName` on the existing item_finished row of the Encode table and leaves its expected `data` unchanged, rather than adding a new test.
+NOTES (2026-09-29): `workflowMessageResult`'s matching moved into a new `namedItems` helper: run id, else every item with that short name, else every item with that full label; a short name therefore wins over another item's label that reads the same.
+NOTES (2026-09-29): per this machine's rules the Acceptance `go test -race -count=1 ./internal/agent/` was run as a non-race whole-package run plus `-race -run 'TestWorkflowSpawn|TestWorkflowControl|TestWorkflowCall|TestDelegationName'`; eventjson and domain were race-run whole, one package at a time.
+NOTES (2026-09-29): ADR 0089 ("by the run id or item name") and the `workflow` tool's `item` description ("run id or name, as status lists it") were left as written; both still hold, since status now lists the short name.
 
 Depends on item 1.
 
