@@ -79,7 +79,12 @@ reads `running` and heads the item run. `TestDuplicateStartedForLiveWorkflowKeep
 - `go test -count=1 -run 'TestResumedWorkflowOpensItsOwnBlock|TestDuplicateStartedForLiveWorkflowKeepsOneBlock|TestWorkflowBlock|TestWorkflowStage' ./internal/tui/`
 **Commit:** `fix(tui): give a resumed workflow its own block`
 
-## 2. A cancelled recipe launch keeps its opening
+## 2. A cancelled recipe launch keeps its opening — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): re-derived from "composeUserMessage records the flag" — the flag is set by `launchRecipe` (recipe.go) through the new `turnLifecycle.carryRecipeResult` verb, only after `runRecipe` returned without error (a refused launch is still scrapped).
+NOTES (2026-09-29): the ctx.Err() check after the opening sets `t.rollback`/`t.deferredFloor` to the current length before `end(t, endCancelled)` — armRequest has not run yet there, and an unset rollback of 0 would drop the whole conversation.
+NOTES (2026-09-29): consequential edit — internal/agent/agent.go: made necessary by settle keeping a recipe opening (SettleExchange doc comment named the abort fallback as unconditional).
+NOTES (2026-09-29): consequential edit — internal/domain/advice.go: made necessary by settle noting the opening (NoteMessage doc comment named only the last-tool-result use).
 
 **What:** Fix: on cancel, `turnLifecycle.settle` finds no tool result (a recipe launch commits
 none) and falls back to `abort`, which drops the opening holding the user's `/<recipe>` line and

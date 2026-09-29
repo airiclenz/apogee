@@ -173,6 +173,8 @@ func (a *Agent) recipeLaunch(in domain.UserInput) (workflow.Recipe, bool) {
 
 // launchRecipe runs the recipe in opens and returns what the opening message carries after the
 // user's line: the result lines, or — reported as an ErrorEvent too — why the recipe did not run.
+// A run that produced result lines marks the opening as carrying them (carryRecipeResult), so a
+// cancel keeps it; a refusal does not, and a cancelled refused launch is scrapped as before.
 // The inputs are in.RecipeInputs when StartRecipe bound them, else bound from the text after
 // "/<id>".
 func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput, recipe workflow.Recipe) string {
@@ -190,6 +192,8 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 	if err != nil {
 		return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 	}
+	// The workflow ran, so the opening carries its result: a cancel now keeps the opening (settle).
+	a.turns.carryRecipeResult()
 	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack))
 }
 

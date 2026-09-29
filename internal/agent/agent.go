@@ -1136,7 +1136,8 @@ func (a *Agent) AbortExchange() { a.turns.abort() }
 // the reply was not given — and the note is ephemeral: a saved record and a resumed conversation
 // keep the tool results with no marker (ADR 0076 D6). When it holds nothing beyond the opening
 // user message (or that plus an interjection with no tool result to carry the note), it falls
-// back to AbortExchange's rollback. dropped reports which: true when the Exchange was scrapped,
+// back to AbortExchange's rollback — unless the opening carries a recipe launch's result lines,
+// which is then kept with the note on it, so the model reads what the stopped run did. dropped reports which: true when the Exchange was scrapped,
 // false when its Turns were kept. It is a no-op returning false when no Exchange is open, and
 // like AbortExchange it is valid only at a quiescent boundary.
 func (a *Agent) SettleExchange() (dropped bool) { return a.turns.settle() }

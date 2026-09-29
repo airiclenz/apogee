@@ -142,7 +142,8 @@ func (m Message) hasEngineNote(topic string) bool {
 // NoteMessage fences text onto the committed message at index i as an engine note on topic
 // (Message.WithEngineNote) — the history-side counterpart of Request.NoteOnTail, for a note that
 // must ride a message already in the conversation rather than a request under construction: a
-// settled Exchange's cut on its last tool result (internal/agent, turnLifecycle.settle). The
+// settled Exchange's cut on its last tool result, or on a cancelled recipe launch's opening
+// (internal/agent, turnLifecycle.settle). The
 // ledger row it records is what keeps the note ephemeral — recordContent strips it from the
 // session record and dropStaleAdvice retires it with a rewrite — so a noted history is a noted
 // history only for the live conversation. An out-of-range i is ignored; a fresh note bumps the

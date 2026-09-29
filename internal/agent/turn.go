@@ -77,6 +77,14 @@ type turnLifecycle struct {
 	// Written on the Agent's own loop goroutine, read by the parent only after Run has returned.
 	lastFault string
 
+	// recipeOpening marks an open Exchange whose opening user message carries a recipe launch's
+	// result lines (carryRecipeResult, set by launchRecipe once the workflow ran). It is what lets
+	// settle keep a cancelled launch that committed no tool result: the opening holds the user's
+	// line and the workflow's stopped result, so scrapping it would leave the model's next request
+	// knowing nothing of the run. openExchange, closeExchange and abort clear it, so it never
+	// outlives the Exchange it describes. Transient like wrapUp: never serialized.
+	recipeOpening bool
+
 	// observer is told the three MOMENTS this type owns that mean something outside it: an Exchange
 	// ENDING (exchangeClosed, fired by closeExchange), a cancelled Turn's ROLLBACK (turnRolledBack,
 	// fired by end()'s endCancelled row, never by the endSettled row that keeps the Turn) and an Exchange's ABORT (exchangeAborted, fired by abort).
@@ -296,6 +304,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 // capture point, and the row that does not end an Exchange does not take an image either.
 func (l *turnLifecycle) closeExchange() {
 	l.inExchange = false
+	l.recipeOpening = false
 	l.conv.ClearDeferred()
 	// And the one thing an Exchange's END means outside this type: the undo journal's closing
 	// capture (ADR 0074 decision 3). It runs AFTER the state flips so an observer reached from it
@@ -325,6 +334,7 @@ func (l *turnLifecycle) restoreDeferred(deferred []string) {
 func (l *turnLifecycle) openExchange() {
 	l.exchangeStart = l.conv.Len()
 	l.inExchange = true
+	l.recipeOpening = false
 	// A new Exchange is a new step-cap budget: the cap bounds the Turns of ONE Exchange, so the
 	// count starts over here rather than accumulating across a delegation's life (Agent.Run).
 	l.exchangeTurns = 0
@@ -364,6 +374,15 @@ func (l *turnLifecycle) open() *domain.UserInput {
 	return in
 }
 
+// carryRecipeResult records that the open Exchange's opening user message carries a recipe
+// launch's result lines (recipeOpening), so a cancel that leaves no tool result settles by keeping
+// that opening rather than scrapping it (settle). No-op when no Exchange is open.
+func (l *turnLifecycle) carryRecipeResult() {
+	if l.inExchange {
+		l.recipeOpening = true
+	}
+}
+
 // abort scraps the open Exchange (Agent.AbortExchange's engine half): it rolls the conversation
 // back to the boundary the Exchange began at — dropping the un-answered user message and any tool
 // Turns committed so far — re-arms the context-fill ladder, closes the Exchange and drops any
@@ -382,6 +401,7 @@ func (l *turnLifecycle) abort() {
 		return
 	}
 	l.conv.DropRange(l.exchangeStart, l.conv.Len())
+	l.recipeOpening = false
 	l.rearmFill()
 	if l.observer != nil {
 		l.observer.exchangeAborted()
@@ -413,7 +433,11 @@ var cancelledNoteLine = mustPrompt("cancelled-note.txt")
 // abandoned Exchange's tail already does (endAbandoned). Without a finished Turn there is no
 // tool result to carry the note, so the lone opening — or the opening plus an interjection
 // Turn 0's cancel left behind while its reply streamed — falls through to abort; a Turn 0
-// settled on a tool call is a finished Turn, so its prompt is kept. The fill ladder is NOT re-armed: the
+// settled on a tool call is a finished Turn, so its prompt is kept. The one exception is a recipe
+// launch (recipeOpening): its opening already carries the workflow's result lines — the stopped
+// run's `stopped by the user: K of N done` among them — so with no tool result it is the opening
+// that is kept and carries the note, whatever Turn of the launch's first the cancel reached, and
+// the next request reads the user's line and what the run did. The fill ladder is NOT re-armed: the
 // kept results are still the ones the model has seen, so the climb they measured stands.
 // dropped reports which way it went: true means abort ran. No-op when no Exchange is open.
 func (l *turnLifecycle) settle() (dropped bool) {
@@ -421,6 +445,9 @@ func (l *turnLifecycle) settle() (dropped bool) {
 		return false
 	}
 	last := l.lastToolResult()
+	if last < 0 && l.recipeOpening && l.exchangeStart < l.conv.Len() {
+		last = l.exchangeStart
+	}
 	if last < 0 {
 		l.abort()
 		return true

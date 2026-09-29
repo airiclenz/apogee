@@ -576,3 +576,104 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+// parentRequests is how many recorded requests were the launching parent's — told apart by the
+// "/review" its opening message starts with.
+func (r *requestLog) parentRequests() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, last := range r.lasts {
+		if strings.HasPrefix(last, "/review") {
+			count++
+		}
+	}
+	return count
+}
+
+// cancelledReviewLaunch launches the review recipe on a over up with ctx, whose every item child
+// cancels the run, and settles the stopped Exchange. It returns whether the settle dropped it.
+func cancelledReviewLaunch(t *testing.T, a *Agent, up *requestLog) bool {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	inner := up.inner.(*workflowResponder)
+	inner.route("check alpha in src", cancelWith(cancel, nil), cancelledScript()).
+		route("check beta in src", cancelWith(cancel, nil), cancelledScript())
+	if err := a.Submit(domain.UserInput{Text: "/review src", SkillIDs: []string{"review"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("launch result = %+v, want a cancel", res)
+	}
+	return a.SettleExchange()
+}
+
+// TestCancelledRecipeLaunchKeepsItsOpening pins the cancel trace of a recipe launch: the opening
+// holding the user's line and the stopped result lines stays in the conversation with the
+// cancelled note, the settle reports it kept, and no model request follows the stopped run.
+func TestCancelledRecipeLaunchKeepsItsOpening(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, &recordingSink{}, reviewRecipe())
+	up := &requestLog{inner: &workflowResponder{}}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if dropped := cancelledReviewLaunch(t, a, up); dropped {
+		t.Error("SettleExchange dropped the cancelled launch, want its opening kept")
+	}
+
+	messages := a.conv.Messages()
+	if len(messages) != 1 {
+		t.Fatalf("conversation holds %d messages, want the opening alone: %+v", len(messages), messages)
+	}
+	last := messages[0]
+	if last.Role != domain.RoleUser {
+		t.Fatalf("last message role = %q, want the user opening", last.Role)
+	}
+	for _, want := range []string{"/review src", "recipe /review ran as a workflow:", "stopped by the user:", cancelledNoteLine} {
+		if !strings.Contains(last.Content, want) {
+			t.Errorf("the opening lacks %q:\n%s", want, last.Content)
+		}
+	}
+	if n := up.parentRequests(); n != 0 {
+		t.Errorf("the provider saw %d parent requests, want none after a stopped launch", n)
+	}
+}
+
+// TestCancelledPlainExchangeStillAborts pins that the kept opening is a recipe launch's alone: a
+// plain Exchange cancelled with no tool result, on the same Agent after a cancelled launch, is
+// still scrapped — a recipe flag leaked across the Exchange would keep it.
+func TestCancelledPlainExchangeStillAborts(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, &recordingSink{}, reviewRecipe())
+	up := &requestLog{inner: &workflowResponder{}}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	cancelledReviewLaunch(t, a, up)
+	before := a.conv.Len()
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	up.inner.(*workflowResponder).route("just a question", cancelWith(cancel, nil), cancelledScript())
+	if res := runSubmitted(t, ctx, a, "just a question"); res.Status != domain.StatusCancelled {
+		t.Fatalf("plain result = %+v, want a cancel", res)
+	}
+
+	if dropped := a.SettleExchange(); !dropped {
+		t.Error("SettleExchange kept a plain Exchange with no tool result, want it scrapped")
+	}
+	if got := a.conv.Len(); got != before {
+		t.Errorf("conversation holds %d messages, want the %d before the plain Exchange", got, before)
+	}
+}

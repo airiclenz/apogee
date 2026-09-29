@@ -117,6 +117,14 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			opening.Content += workflowNoteSeparator + renderWorkflowNotes(notes)
 		}
 		a.conv.Append(opening)
+		// A cancel that landed while the opening was composed — a recipe launch the user stopped
+		// is the case that matters — ends the Turn here, before any request is sent: the model is
+		// not asked to answer a run the user has just stopped. The rollback boundary is the
+		// current length, so the opening stays for the host's settle to keep or scrap.
+		if ctx.Err() != nil {
+			t.rollback, t.deferredFloor = a.conv.Len(), a.conv.DeferredLen()
+			return a.turns.end(t, endCancelled), nil
+		}
 	}
 
 	// The history-rewrite Moment: reactions edit conversation state before it is projected
