@@ -2810,8 +2810,9 @@ func completedChild(answer string, steered int) *Agent {
 }
 
 // TestSubAgent_DegenerateNarrationIsAFault pins the fourth shape: a closing text whose most
-// frequent line occurs fifty times or more is an error result naming the count and carrying the
-// first twenty lines only, while a long report of distinct lines is the report it always was.
+// frequent content line occurs fifty times or more is an error result naming the count and
+// carrying the first twenty lines only, while a long report of distinct lines — or of real code,
+// whose repeated lines are structure — is the report it always was.
 func TestSubAgent_DegenerateNarrationIsAFault(t *testing.T) {
 	t.Parallel()
 
@@ -2834,6 +2835,44 @@ func TestSubAgent_DegenerateNarrationIsAFault(t *testing.T) {
 			t.Errorf("sub_agent result = %+v, want the report byte for byte", got)
 		}
 	})
+
+	t.Run("a report of real code is not degenerate", func(t *testing.T) {
+		t.Parallel()
+		report := goLikeReport(60)
+
+		got, _ := completedChild(report, 0).delegationResult("c1", domain.StepResult{}, nil)
+
+		if got.IsError || got.Content != report {
+			t.Errorf("sub_agent result = %+v, want the report byte for byte", got)
+		}
+	})
+
+	t.Run("sixty of one content line is degenerate", func(t *testing.T) {
+		t.Parallel()
+		report := strings.TrimSuffix(strings.Repeat("Now I will write the file.\n", 60), "\n")
+
+		got, _ := completedChild(report, 0).delegationResult("c1", domain.StepResult{}, nil)
+
+		if !got.IsError || !strings.HasPrefix(got.Content, fmt.Sprintf(degenerateResultFormat, 60)+"\n") {
+			t.Errorf("sub_agent result = %+v, want the degenerate error naming 60", got)
+		}
+	})
+}
+
+// goLikeReport is a child answer of n small Go-like functions and Ruby-like blocks between
+// `---` rules — eight lines per n, so n=60 is ~480 lines — whose only repeated lines are
+// structure: `}`, `)`, `end`, `---`, a fence. Each occurs n times, well past the threshold.
+func goLikeReport(n int) string {
+	var b strings.Builder
+	b.WriteString("```go\n")
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "func step%d() error {\n\treturn run%d(\n\t\t%d,\n\t)\n}\n", i, i, i)
+	}
+	b.WriteString("```\n")
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "---\ndef block_%d\nend\n", i)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // TestSubAgent_ResultIsCappedAtSixtyFourKiB pins the absolute cap on a completed report: a 200 KB

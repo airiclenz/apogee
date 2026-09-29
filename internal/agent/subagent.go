@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
@@ -374,14 +376,18 @@ func isAcknowledgement(text string) bool {
 // count, and whose body keeps only the first degenerateResultHeadLines lines — enough to see what
 // the child was saying, not the whole recital.
 const (
-	// degenerateRepeatThreshold is how many times the most frequent non-blank line must occur for
-	// the text to be degenerate. Real reports repeat a line — a table rule, a fence — a handful of
-	// times; fifty of one line is a loop.
+	// degenerateRepeatThreshold is how many times the most frequent content line must occur for
+	// the text to be degenerate. Real reports repeat a content line a handful of times; fifty of
+	// one is a loop. Structural lines — `}`, `)`, `end`, `---`, a fence — are not content lines and
+	// never count, so a reply of real code is not a loop however many of them it closes on.
 	degenerateRepeatThreshold = 50
+	// degenerateContentMinRunes is the content floor: a trimmed line shorter than this is
+	// structure, not narration, and is not counted.
+	degenerateContentMinRunes = 4
 	// degenerateResultHeadLines is how many leading lines of a degenerate text the fault carries.
 	degenerateResultHeadLines = 20
 	// degenerateResultFormat heads the error result of a degenerate closing text; %d is the
-	// repeat count of its most frequent line.
+	// repeat count of its most frequent content line.
 	degenerateResultFormat = "sub-agent reply is degenerate (one line repeated %d times)"
 )
 
@@ -402,21 +408,32 @@ const (
 	delegateResultHeadBytes = 48 * 1024
 )
 
-// degenerateRepeat reports whether text is degenerate narration — its most frequent non-blank line
-// (compared trimmed of surrounding space) occurs at least degenerateRepeatThreshold times — and
-// that line's count.
+// degenerateRepeat reports whether text is degenerate narration — its most frequent content line
+// (see isContentLine; compared trimmed of surrounding space) occurs at least
+// degenerateRepeatThreshold times — and that line's count.
 func degenerateRepeat(text string) (int, bool) {
 	counts := map[string]int{}
 	most := 0
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if !isContentLine(line) {
 			continue
 		}
 		counts[line]++
 		most = max(most, counts[line])
 	}
 	return most, most >= degenerateRepeatThreshold
+}
+
+// isContentLine reports whether a trimmed line is narration the degenerate check counts: at
+// least degenerateContentMinRunes runes long and carrying a letter or a digit. A blank line, a
+// short keyword (`end`, "GO.") and a line of punctuation or symbols alone (`}`, `---`, a fence)
+// are structure and never count.
+func isContentLine(line string) bool {
+	if utf8.RuneCountInString(line) < degenerateContentMinRunes {
+		return false
+	}
+	return strings.IndexFunc(line, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0
 }
 
 // headLines returns the first n lines of text, joined as they were.

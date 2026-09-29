@@ -419,7 +419,9 @@ pass unchanged; other existing patch tests pass.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Patch|FileEdit|Edit' ./internal/tools/`
 **Commit:** `fix(tools): match apply_patch hunks on whole lines and keep newlines`
 
-## 14. Sub-agent: degenerateRepeat counts only content lines
+## 14. Sub-agent: degenerateRepeat counts only content lines — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): CHANGELOG.md's "one line repeated 50 times" wording sits under the released [0.22.0] heading, so it is left as history; the superseding rule and its content floor are stated in this item's CHANGELOG entry instead of rewording the released line.
 
 **What:** Fix "Delegate reports with many repeated lines are rejected as degenerate".
 **Regression guard.** A "content line" is a trimmed line of 4+ runes with a letter or digit: `end` and "GO." no
