@@ -188,13 +188,23 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 		inputs = bound
 	}
 	call := domain.ToolCall{ID: fmt.Sprintf("recipe-%s-%d", recipe.ID, turn), Tool: recipeCallTool}
-	result, fellBack, err := a.runRecipe(ctx, turn, call, recipeCall{id: recipe.ID, inputs: inputs})
+	asked := recipeCall{id: recipe.ID, inputs: inputs, launch: recipeLaunchKind(in, recipe.ID)}
+	result, fellBack, err := a.runRecipe(ctx, turn, call, asked)
 	if err != nil {
 		return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 	}
 	// The workflow ran, so the opening carries its result: a cancel now keeps the opening (settle).
 	a.turns.carryRecipeResult()
-	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack))
+	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack, asked.launch))
+}
+
+// recipeLaunchKind is how the user launched recipe id through in: from StartRecipe when it bound
+// the inputs (in.RecipeInputs), else by the "/<id>" line they typed, kept trimmed.
+func recipeLaunchKind(in domain.UserInput, id string) workflowLaunch {
+	if in.RecipeInputs != nil {
+		return workflowLaunch{kind: launchStartRecipe, recipe: id}
+	}
+	return workflowLaunch{kind: launchTypedRecipe, recipe: id, line: strings.TrimSpace(in.Text)}
 }
 
 // recipeRefusal reports a launch that could not run and returns the line the model reads it by.

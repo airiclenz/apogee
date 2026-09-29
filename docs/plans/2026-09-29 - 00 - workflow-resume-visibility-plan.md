@@ -120,7 +120,10 @@ flag fails it.
 - `go test -count=1 -run 'TestCancelledRecipeLaunch|TestCancelledPlainExchange|TestRecipe' ./internal/agent/`
 **Commit:** `fix(agent): keep a cancelled recipe launch in the conversation`
 
-## 3. The stopped result tells the model how to resume
+## 3. The stopped result tells the model how to resume — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the launch-kind value is `workflowLaunch` (kind: launchFanOut / launchTypedRecipe / launchStartRecipe, plus the recipe id and the trimmed typed line) carried on `recipeCall.launch`; plain fan_out passes `workflowLaunch{kind: launchFanOut}` straight to `workflowAnswer`, which gained a third parameter. `recipeLaunchKind` (recipe.go) builds it from the UserInput; item 4 can derive the Started event's Resume from the same value.
+NOTES (2026-09-29): the resume line is added to every stopped answer, also one whose Result has no Listing path (the Goal says every stopped answer carries it).
 
 **What:** Add one resume line to a stopped workflow's result text, after the listing line.
 Wording, binding:

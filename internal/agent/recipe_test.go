@@ -677,3 +677,80 @@ func TestCancelledPlainExchangeStillAborts(t *testing.T) {
 		t.Errorf("conversation holds %d messages, want the %d before the plain Exchange", got, before)
 	}
 }
+
+// auditRecipe is a one-fanout recipe over alpha and beta with two positional inputs, so a typed
+// line like `/audit internal/mcp security` binds both.
+func auditRecipe() workflow.Recipe {
+	return workflow.Recipe{
+		ID: "audit",
+		Plan: workflow.Plan{Name: "audit", Stages: []workflow.Stage{{
+			Name:    "items",
+			Kind:    workflow.StageFanout,
+			Task:    "check {item} in {scope} for {lens}",
+			Over:    &workflow.ItemSource{List: []string{"alpha", "beta"}},
+			Returns: workflow.ReceiptSpec{"count": "int"},
+		}}},
+		Inputs: []workflow.InputDecl{{Name: "scope", Required: true}, {Name: "lens", Required: true}},
+		Dir:    "/skills/audit",
+	}
+}
+
+// TestStoppedRecipeAnswerCarriesResumeLine pins the resume line a cancelled recipe launch's result
+// lines end on: the user's typed line for a typed launch, the recipe's id for a StartRecipe one.
+func TestStoppedRecipeAnswerCarriesResumeLine(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		launch func(a *Agent) error
+		want   string
+	}{
+		{
+			name: "typed line",
+			launch: func(a *Agent) error {
+				return a.Submit(domain.UserInput{Text: "  /audit internal/mcp security \n", SkillIDs: []string{"audit"}})
+			},
+			want: "to resume: re-run `/audit internal/mcp security` — finished items are kept",
+		},
+		{
+			name: "StartRecipe",
+			launch: func(a *Agent) error {
+				_, err := a.StartRecipe(context.Background(), RecipeLaunch{SkillID: "audit", Text: "internal/mcp security"})
+				return err
+			},
+			want: "to resume: run `/audit` again with the same inputs — finished items are kept",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			cfg := recipeConfig(t, &recordingSink{}, auditRecipe())
+			up := (&workflowResponder{}).
+				route("check alpha in internal/mcp for security", nil, finishScript("f1", "alpha is fine")).
+				route("check beta in internal/mcp for security", cancelWith(cancel, nil), cancelledScript())
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := tc.launch(a); err != nil {
+				t.Fatalf("launch: %v", err)
+			}
+			if res, err := a.Run(ctx); err != nil || res.Status != domain.StatusCancelled {
+				t.Fatalf("Run = %+v, %v; want a cancel", res, err)
+			}
+			a.SettleExchange()
+
+			messages := a.conv.Messages()
+			if len(messages) == 0 {
+				t.Fatal("the conversation kept no opening")
+			}
+			opening := messages[0].Content
+			if !strings.Contains(opening, "stopped by the user:") || !strings.Contains(opening, "\n"+tc.want+"\n") {
+				t.Errorf("the opening = %q, want the stopped result lines with %q", opening, tc.want)
+			}
+		})
+	}
+}

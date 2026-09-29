@@ -420,9 +420,12 @@ func TestWorkflowCall_ACancelKeepsFinishedItemsAndAnswersTheCall(t *testing.T) {
 		!strings.Contains(got.Content, "#1 alpha — ok — alpha is fine") || strings.Contains(got.Content, cancelledWhileRunningContent) {
 		t.Errorf("fan_out result = %+v, want the non-error stopped answer keeping alpha", got)
 	}
-	listing := got.Content[strings.LastIndex(got.Content, "items: ")+len("items: "):]
+	listing, _, _ := strings.Cut(got.Content[strings.LastIndex(got.Content, "items: ")+len("items: "):], "\n")
 	if _, err := os.Stat(listing); err != nil {
 		t.Errorf("the listing so far %q: %v", listing, err)
+	}
+	if !strings.HasSuffix(got.Content, "\n"+resumeFanOutLine) {
+		t.Errorf("fan_out result = %q, want it to end on the resume line", got.Content)
 	}
 	if next := callResult(t, sink.events, "r1"); next.Content != notRunCancelledContent {
 		t.Errorf("the next call's result = %+v, want %q", next, notRunCancelledContent)
@@ -432,6 +435,83 @@ func TestWorkflowCall_ACancelKeepsFinishedItemsAndAnswersTheCall(t *testing.T) {
 	})
 	if !kept {
 		t.Error("the history does not keep the stopped answer for fo1")
+	}
+}
+
+// wantFanOutResumeLine is the resume line a stopped fan_out's answer ends on, spelled out so the
+// wording the model reads is pinned.
+const wantFanOutResumeLine = "to resume: call fan_out again with the same arguments — finished items are kept"
+
+// TestStoppedFanOutAnswerCarriesResumeLine pins that a cancelled fan_out — plain or naming a
+// recipe — answers with the line telling the model how to resume it, after the listing line.
+func TestStoppedFanOutAnswerCarriesResumeLine(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		args      string
+		cancelKey string
+	}{
+		{"plain", fanOutArgsJSON("alpha", "beta"), "check beta"},
+		{"recipe form", `{"recipe":"review","inputs":{"scope":"src"}}`, "check beta in src"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			cfg := recipeConfig(t, sink, reviewRecipe())
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			up := (&workflowResponder{}).
+				route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, tc.args)).
+				route("check alpha", nil, finishScript("f1", "alpha is fine")).
+				route(tc.cancelKey, cancelWith(cancel, nil), cancelledScript())
+
+			runWorkflowParent(t, ctx, cfg, up, "please fan out")
+
+			got := callResult(t, sink.events, "fo1")
+			if !strings.HasPrefix(got.Content, "stopped by the user:") {
+				t.Fatalf("fan_out result = %q, want the stopped answer", got.Content)
+			}
+			if !strings.HasSuffix(got.Content, "\n"+wantFanOutResumeLine) {
+				t.Errorf("fan_out result = %q, want it to end on %q", got.Content, wantFanOutResumeLine)
+			}
+			if listing, resume := strings.LastIndex(got.Content, "items: "), strings.Index(got.Content, "to resume:"); listing < 0 || listing > resume {
+				t.Errorf("fan_out result = %q, want the resume line after the listing line", got.Content)
+			}
+		})
+	}
+}
+
+// TestFinishedWorkflowAnswerHasNoResumeLine pins that only a stopped workflow's answer says how to
+// resume it: a fan_out, a fan_out naming a recipe and a typed recipe launch that finish carry none.
+func TestFinishedWorkflowAnswerHasNoResumeLine(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range []string{fanOutArgsJSON("alpha", "beta"), `{"recipe":"review","inputs":{"scope":"src"}}`} {
+		sink := &recordingSink{}
+		cfg := recipeConfig(t, sink, reviewRecipe())
+		up := recipeFanOutUpstream(args).
+			route("check alpha", nil, finishScript("f3", "alpha is fine")).
+			route("check beta", nil, finishScript("f4", "beta is fine"))
+
+		runWorkflowParent(t, context.Background(), cfg, up, "please run it")
+
+		if got := callResult(t, sink.events, "fo1"); got.IsError || strings.Contains(got.Content, "to resume:") {
+			t.Errorf("finished fan_out %s answered %+v, want no resume line", args, got)
+		}
+	}
+
+	cfg := recipeConfig(t, &recordingSink{}, reviewRecipe())
+	up := reviewUpstream("src")
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runInput(t, a, domain.UserInput{Text: "/review src", SkillIDs: []string{"review"}})
+	if opening := up.first(t, "/review"); strings.Contains(opening, "to resume:") {
+		t.Errorf("finished recipe launch opening = %q, want no resume line", opening)
 	}
 }
 

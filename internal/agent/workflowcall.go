@@ -15,11 +15,11 @@ package agent
 // its plan hash and skips the items already finished.
 //
 // A cancel stops the running items and keeps every finished one on disk: the call is answered with
-// `stopped by the user: K of N done` and the path of the item listing written so far, and dispatch
-// settles the Turn on it. A stopped item child is never folded — the Runner restarts it fresh on
-// resume and keeps no report of it — so the only folds under the cancel are those of the item
-// children's own delegations, which foldStoppedChild holds to the inherited cancel bound and skips
-// on a quit or a daemon's shutdown.
+// `stopped by the user: K of N done`, the path of the item listing written so far and the line
+// telling the model how to resume it (resumeHint), and dispatch settles the Turn on it. A stopped
+// item child is never folded — the Runner restarts it fresh on resume and keeps no report of it —
+// so the only folds under the cancel are those of the item children's own delegations, which
+// foldStoppedChild holds to the inherited cancel bound and skips on a quit or a daemon's shutdown.
 //
 // A call setting `background` (ADR 0089 D1) hands the same plan — or the same recipe — to the
 // background manager (background.go) and is answered at once with the workflow's id and status
@@ -96,6 +96,47 @@ const workflowStatusFileName = "status.json"
 // already named the item listing: the report so far, in Format's own `items:` spelling so the model
 // reads one name for the one file.
 const fanOutListingLineFormat = "items: %s"
+
+// The resume lines a stopped workflow's answer carries after its listing line (resumeHint): the
+// same launch again finds the stored workflow by its plan hash and keeps the finished items.
+const (
+	resumeTypedLineFormat   = "to resume: re-run `%s` — finished items are kept"
+	resumeStartRecipeFormat = "to resume: run `/%s` again with the same inputs — finished items are kept"
+	resumeFanOutLine        = "to resume: call fan_out again with the same arguments — finished items are kept"
+)
+
+// launchKind is how a blocking Workflow was launched, the one fact its resume line is read from.
+type launchKind int
+
+const (
+	// launchFanOut is a model's fan_out call, plain or naming a recipe — the zero value.
+	launchFanOut launchKind = iota
+	// launchTypedRecipe is a recipe the user launched by typing its "/<id>" line.
+	launchTypedRecipe
+	// launchStartRecipe is a recipe StartRecipe launched with its inputs already bound.
+	launchStartRecipe
+)
+
+// workflowLaunch is how a blocking Workflow was launched: its kind, the recipe a recipe launch
+// ran, and — for a typed launch — the user's line, trimmed. It is the single input the resume line
+// of a stopped workflow's answer is derived from (resumeHint).
+type workflowLaunch struct {
+	kind   launchKind
+	recipe string
+	line   string
+}
+
+// resumeHint is the line that tells the model how to resume a stopped workflow launched as launch.
+func resumeHint(launch workflowLaunch) string {
+	switch launch.kind {
+	case launchTypedRecipe:
+		return fmt.Sprintf(resumeTypedLineFormat, launch.line)
+	case launchStartRecipe:
+		return fmt.Sprintf(resumeStartRecipeFormat, launch.recipe)
+	default:
+		return resumeFanOutLine
+	}
+}
 
 // fanOutArgs is a fan_out call's arguments as the tool publishes them (tools.fanOutSchemaTemplate).
 // `run_on` is read by fanOutSeat, `recipe` and `inputs`, the recipe form, by parseFanOutRecipe, and
@@ -241,7 +282,8 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		if refusal != "" {
 			return errorToolResult(call.ID, refusal)
 		}
-		return a.recipeCallResult(ctx, turn, call, recipeCall{id: recipe, inputs: inputs, seat: seat}, background)
+		asked := recipeCall{id: recipe, inputs: inputs, seat: seat, launch: workflowLaunch{kind: launchFanOut, recipe: recipe}}
+		return a.recipeCallResult(ctx, turn, call, asked, background)
 	}
 	plan, refusal := parseFanOutPlan(call.Arguments)
 	if refusal != "" {
@@ -265,15 +307,16 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if err != nil {
 		return errorToolResult(call.ID, fanOutRunFailedPrefix+err.Error())
 	}
-	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome, seatFellBack(runner))}
+	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome, seatFellBack(runner), workflowLaunch{kind: launchFanOut})}
 }
 
-// recipeCall is what a fan_out call's recipe form asks for: the recipe's id, its keyed inputs and
-// the Delegation seat its item children run on.
+// recipeCall is what a fan_out call's recipe form — or a recipe launch — asks for: the recipe's id,
+// its keyed inputs, the Delegation seat its item children run on, and how it was launched.
 type recipeCall struct {
 	id     string
 	inputs map[string]string
 	seat   delegationSeat
+	launch workflowLaunch
 }
 
 // recipeCallResult runs the recipe one fan_out call names over its keyed inputs, on the seat the
@@ -307,7 +350,7 @@ func (a *Agent) recipeCallResult(
 	if err != nil {
 		return errorToolResult(call.ID, fmt.Sprintf(fanOutRecipeFailed, asked.id, err))
 	}
-	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result, fellBack)}
+	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result, fellBack, asked.launch)}
 }
 
 // parseFanOutRecipe reads a fan_out call that names a recipe: the recipe id and its inputs, or the
@@ -523,17 +566,21 @@ func fanOutArgumentPath(problem workflow.Problem) string {
 }
 
 // workflowAnswer is the text a finished or stopped Workflow answers its call with: Format's result
-// lines, for a stopped one the item listing written so far when Format has not named it, and —
+// lines, for a stopped one the item listing written so far when Format has not named it and the
+// line telling the model how to resume it (resumeHint, from how launch started it), and —
 // when any item child asked for the Sub-agent server and ran on the session one (fellBack,
 // seatFellBack) — SeatFallbackNote once, last, because that note is for the MODEL (ADR 0069
 // decision 9) and the model reads this answer, not the items' phase results. A background run
 // answers through its finish note instead, which carries the same line (finishNote).
-func workflowAnswer(result workflow.Result, fellBack bool) string {
+func workflowAnswer(result workflow.Result, fellBack bool, launch workflowLaunch) string {
 	text := workflow.Format(result)
-	if result.Stopped() && result.Listing != "" {
-		if line := fmt.Sprintf(fanOutListingLineFormat, result.Listing); !strings.Contains(text, line) {
-			text += "\n" + line
+	if result.Stopped() {
+		if result.Listing != "" {
+			if line := fmt.Sprintf(fanOutListingLineFormat, result.Listing); !strings.Contains(text, line) {
+				text += "\n" + line
+			}
 		}
+		text += "\n" + resumeHint(launch)
 	}
 	if fellBack {
 		text += "\n" + SeatFallbackNote
