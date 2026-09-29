@@ -213,7 +213,9 @@ round-trips) and `TestDecodeStripsTheWorkflowRecord` (an escape in Resume is str
 - `go test -count=1 ./internal/session/`
 **Commit:** `feat(tui): show how to resume a stopped workflow`
 
-## 6. Document resume, the kept trace and the new block
+## 6. Document resume, the kept trace and the new block — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): ADR 0088 gets two dated amendments (after D1 for the kept recipe opening, after D3 for the resume lines); ADR 0090 D1 gets one (a block per run, frozen stopped block, footer command, kept across a session resume); CONTEXT.md **Workflow**, **Recipe** and **Exchange** amended inline with dated references, and **Workflow**'s "a blocking workflow draws one block" now reads "each run of a blocking workflow draws one block".
 
 **What:** Depends on items 1–5. Rule: every doc sentence that says how a stopped workflow is
 resumed, what a cancel leaves in the conversation, or that a workflow has one block. Find them with

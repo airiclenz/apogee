@@ -36,6 +36,16 @@ The Exchange then closes without an answer, with the `[engine — cancelled]` ma
 places. A Turn cancelled before its reply finished streaming issued nothing that ran, and is dropped
 as today. An Exchange with no finished Turn is still scrapped (`Agent.AbortExchange`).
 
+> **Amended 2026-09-29.** A recipe launch is the one exception to "an Exchange with no finished
+> Turn is still scrapped". A `/<id>` line runs its Workflow before the model's first request, and
+> the Exchange's opening user message then carries the user's line and the Workflow's result lines.
+> A cancel of that launch keeps the opening, with the stopped result lines —
+> `stopped by the user: K of N done` among them — and the `[engine — cancelled]` marker on it,
+> however far the launch's first Turn got; no model request follows. Scrapping it would leave the
+> model's next request knowing nothing of a run whose finished items stay on disk (D4). A launch
+> the engine refused before any Workflow ran carries no result lines and is still scrapped
+> (`turnLifecycle.settle`).
+
 **D2 — A delegation pool keeps its finished children.** Under a cancel:
 - a finished child's report is its result;
 - a running child is **stopped** exactly as `^x` stops it (ADR 0086 D4): it gets a fold, a non-error
@@ -51,6 +61,16 @@ left is kept. This closes Stage B of `apogee-2un`.
 items and answers the call with how many items finished and the report-so-far path. A later
 `fan_out` with the same brief, items and inputs resumes it (ADR 0087 D4). `esc` never touches a
 **Background workflow** (ADR 0089); the `/workflows` view and the `workflow` tool stop those.
+
+> **Amended 2026-09-29.** A stopped Workflow's answer now ends on the line that says how to re-run
+> it, keeping its finished items: `` to resume: re-run `<line>` — finished items are kept `` for a
+> recipe the user typed, `` to resume: run `/<id>` again with the same inputs — finished items are
+> kept `` for one launched with its inputs bound, and
+> `to resume: call fan_out again with the same arguments — finished items are kept` for a
+> `fan_out` call. A recipe launch also carries that command on its started phase, and its stopped
+> block's footer shows it to the user (ADR 0090 D1, amended 2026-09-29). A recipe launch re-run the
+> same way resumes the stored Workflow by its plan hash exactly as a `fan_out` does (ADR 0087 D4);
+> its cancel keeps the launch's opening (D1, amended 2026-09-29).
 
 **D4 — Finished work written to disk stays written.** Nothing apogee does on a cancel reverts a
 file. A settled Turn's results tell the model what happened, so its next request starts from the

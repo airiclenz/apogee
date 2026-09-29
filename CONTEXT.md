@@ -498,13 +498,19 @@ A workflow lives in a folder under the session's **Scratch dir**, so it survives
 a resume: cancel stops it and keeps every finished item, and asking again with the same task,
 items and inputs picks it up where it stopped. It runs **blocking** by default, or as a
 **Background workflow**. Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
-In the TUI a blocking workflow draws one block — a Recipe's own, or the `fan_out` call's card — and
+In the TUI each run of a blocking workflow draws one block — a Recipe's own, or the `fan_out` call's card — and
 its item runs never paint in the conversation: a Recipe's block shows one row per stage from the
 start (dim and `pending` until the stage starts), each opening its **Stage view** or, for a one-item
 stage, that item's **Run view**; a `fan_out` card, having one stage, shows one row per item. Every
 item run has a head of its own, so it is opened, messaged and stopped as a delegation is, and the
 block's structure is kept in the **Session record** so its rows reopen after a resume
-([ADR 0090](docs/adr/0090-workflow-stages-are-enterable-views.md), 2026-09-28).
+([ADR 0090](docs/adr/0090-workflow-stages-are-enterable-views.md), 2026-09-28). A stopped
+workflow says how to re-run it: its result ends on a `to resume: …` line the model reads (the typed
+recipe line, the recipe with the same inputs, or `fan_out` with the same arguments), and a stopped
+Recipe block's footer shows the user the same command. Re-running it opens a **new block** for the
+new run and leaves the stopped block frozen as it ended; this re-run is distinct from a session
+resume (`--resume`, `--continue`, `/sessions`), after which a replayed stopped block still shows its
+command (ADR 0088 D3 and ADR 0090 D1, amended 2026-09-29).
 _Avoid_: "run" (one child's execution — a workflow is made of runs), "job", "batch" (a count of
 items per child, not the whole), "sweep", "pipeline".
 
@@ -516,6 +522,9 @@ fields between them. Anything computed (splitting a repo into parts, renumbering
 script stage, never a language feature. Invoking the skill starts a workflow from its recipe with
 only its declared inputs filled in (for `audit`: scope and focus) — the model never writes a multi-stage workflow itself.
 Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D6).
+A cancelled `/<id>` launch keeps the user's line and the stopped result lines in the conversation
+(the **Exchange**'s kept recipe opening), and re-running the same line picks the workflow up where it
+stopped (amended 2026-09-29, [ADR 0088](docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md) D1).
 _Avoid_: "workflow" for the definition (the workflow is one execution of a recipe), "plan" (a
 `docs/plans/` document), "script" (one stage kind). The one exception to "plan" is the in-memory
 Go type `workflow.Plan`, the parsed stage list either source (a recipe or a `fan_out` call) produces;
@@ -830,7 +839,11 @@ the kept results — a closed Exchange with its finished Turns — and no marker
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D6;
 [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)'s
 2026-09-19 note). An Exchange with no finished Turn has no tool result to carry the note and is
-scrapped instead (`Agent.AbortExchange`, the explicit throw-away `/clear` also takes), and a kept
+scrapped instead (`Agent.AbortExchange`, the explicit throw-away `/clear` also takes) — except a
+**Recipe** launch whose Workflow ran: its opening user message already carries the user's line and
+the Workflow's result lines, so a cancel keeps that opening, the `[engine — cancelled]` note rides on
+it, and no model request follows (amended 2026-09-29,
+[ADR 0088](docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md) D1) — and a kept
 interjection leaves the next Submit opening user→user — the tail a faulted Exchange already
 leaves ([ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md)'s
 2026-09-19 note). The TUI's cancel and loop-error folds and a fresh message on a restored

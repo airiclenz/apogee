@@ -44,6 +44,20 @@ question, and — once the Workflow has ended — the totals line and a failure'
 > report reads `failed` and not `done`. An empty outcome, from an emitter that reports none, falls
 > back to the counts: `stopped` when an item the stage counted never finished, `done` otherwise.
 
+> **Amended 2026-09-29.** A block is one **run** of a Workflow, not the Workflow itself. Re-running
+> a stopped Recipe's Workflow — the same recipe line, which finds it by its plan hash (ADR 0087
+> D4) — opens a new block under the new call and seats its item runs there; the stopped block stays
+> frozen as it ended, and no later phase of the same Workflow id repaints it. A re-issued `fan_out`
+> call draws a card of its own, as every call does.
+> Every phase folds into the newest block of its Workflow id, and a started phase for an id whose
+> newest block is still running is a duplicate, not a new run. A stopped Recipe block also ends on
+> the command that re-runs it, carried on its started phase: `` re-run `<line>` to resume `` for a
+> typed launch, `` run `/<id>` again with the same inputs to resume `` for one launched with its
+> inputs bound. A `fan_out` card shows none; its model reads the equivalent line in the call's
+> result (ADR 0088 D3, amended 2026-09-29). The command is kept in the session record with the block's
+> structure (D5), so after a session resume a replayed stopped block still shows it, and re-running
+> it in the resumed session opens a new block exactly as in the live one.
+
 **D2 — Each item run has a run head of its own.** When an item's run starts, a head for it is seated
 under the Workflow's block, inside the block's span. It is a delegation's head in every way a view
 asks: it opens as the run's view, `^x` stops that one run, a message typed in its view reaches its

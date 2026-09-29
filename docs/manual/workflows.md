@@ -115,8 +115,14 @@ report: /…/workflows/20260928-101500-audit/report.md
 - `report: <path>` appears when a merge wrote the report.
 - **Past 40 items** only the items that did not end `ok` are listed, and `items: <path>` points
   to the full listing, so a big fan-out cannot flood the agent's context.
-- A cancelled workflow leads with `stopped by the user: K of N done` and still lists everything
-  that finished.
+- A cancelled workflow leads with `stopped by the user: K of N done`, still lists everything
+  that finished, and ends with a line saying how to re-run the same workflow, which keeps its
+  finished items:
+  `` to resume: re-run `/audit internal/` — finished items are kept `` for a recipe you typed,
+  `` to resume: run `/<id>` again with the same inputs — finished items are kept `` for one
+  started with its inputs already bound, and
+  `to resume: call fan_out again with the same arguments — finished items are kept` for a
+  `fan_out` call.
 
 ### The workflow folder
 
@@ -283,6 +289,12 @@ an enum does not allow is caught when the skill loads, not half-way through a ru
   message attaches the skill's body as usual, and a recipe line sent while the agent is working is
   refused and stays in the box. What the block shows, and how you read each helper's work, is
   [below](#watching-a-workflow-in-the-tui).
+  If you cancel it with `esc` twice while it runs, your line and the stopped result lines stay in
+  the conversation, closed with the usual cancelled note, and no model request follows. The
+  model's next request reads what the run did. To pick the workflow up where it stopped, re-run the
+  same line — re-running `/audit internal/` skips the items already finished. This re-runs the
+  workflow inside the current session; it is not a session resume (`--resume`, `--continue`,
+  `/sessions`).
 - **In the background**, with [`/bg`](#background-workflows): `/bg /audit internal/`.
 - **Headless**, with [`apogee headless --recipe audit internal/`](headless.md).
 - **On a schedule**, with a daemon entry's [`workflow:`](daemon.md) in place of `prompt:`.
@@ -313,7 +325,13 @@ all of them from the start (the sketch shortens `audit`'s list):
   `skipped` (dim — its `when:` was false). A stage a repeat runs again keeps one row and adds the
   round: `round 2/3 · running`.
 - Beneath the rows the block keeps one line for each item that did **not** come back `ok`, an ask
-  stage's question, and once the workflow ends the totals line and, if it failed, the cause.
+  stage's question, and once the workflow ends the totals line and, if it failed, the cause. A
+  recipe's block that `stopped` ends on the command that re-runs it:
+  `` re-run `/audit internal/` to resume ``, or `` run `/audit` again with the same inputs to resume ``
+  for a recipe started with its inputs already bound. A `fan_out` card shows no such line; the
+  model reads its own in the call's result.
+- Re-running a stopped workflow draws a **new block** for the new run, and the stopped block stays
+  frozen as it ended — its rows still open what its helpers did.
 - The helpers' own work — their narration and tool calls — never fills the conversation. A row
   wearing **▶** at its right end has work to open: click it, or `⏎` on it with the block cursor.
   A stage of one item opens that helper's **run view** straight away, the same full-transcript view a sub-agent
@@ -337,6 +355,9 @@ all of them from the start (the sketch shortens `audit`'s list):
   the item's full entry, or its run id, to tell them apart.
 - **After a resume** the block comes back with the same rows, and they open read-only views of what
   each helper did. A workflow that was still running when the session was saved reads `stopped`.
+  A replayed `stopped` block keeps its re-run line: after a session resume (`--resume`,
+  `--continue`, `/sessions`), re-running that same `/<id>` line in the resumed session continues the
+  workflow from its folder, and draws a new block of its own.
 
 ## Background workflows
 
