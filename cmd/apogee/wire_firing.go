@@ -874,6 +874,31 @@ func raise(
 	return res, notices, err
 }
 
+// recipeWorkflowFailure reports why a recipe run's workflow counts as a failed run, nil when it
+// does not — no recipe was named, or its workflow finished with at least one item not blocked (or
+// with no items at all: a recipe of steps alone has nothing to block). It is the ONE judgement
+// every Driver that runs a recipe applies — `apogee headless --recipe` exits 1 on it and the
+// daemon records a scheduled `run: workflow:` Firing as failed on it — so the error is returned
+// unprefixed and each Driver wraps it in its own clause.
+func recipeWorkflowFailure(recipe string, outcome run.WorkflowOutcome) error {
+	if recipe == "" {
+		return nil
+	}
+	switch {
+	case outcome.ID == "":
+		return fmt.Errorf("recipe /%s did not run", recipe)
+	case outcome.End == domain.WorkflowStopped:
+		return fmt.Errorf("recipe /%s's workflow %s was stopped before every item finished",
+			recipe, outcome.ID)
+	case outcome.End == domain.WorkflowFailed:
+		return fmt.Errorf("recipe /%s's workflow %s failed", recipe, outcome.ID)
+	case outcome.Items > 0 && outcome.Blocked == outcome.Items:
+		return fmt.Errorf("every item of recipe /%s's workflow %s blocked (%d of %d)",
+			recipe, outcome.ID, outcome.Blocked, outcome.Items)
+	}
+	return nil
+}
+
 // firingOutcome is what a raised Firing reports to the scheduler: everything the run learned about
 // itself, mapped onto [schedule.Outcome] in ONE place so every Driver's Firing tells the same
 // story from the same fields. The library reads none of it — it is runner-agnostic (ADR 0033) and

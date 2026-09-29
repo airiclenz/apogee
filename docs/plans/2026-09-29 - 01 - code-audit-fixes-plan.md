@@ -491,7 +491,11 @@ skill under `internal/skills/shipped/` still loads.
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/skills/`
 **Commit:** `fix(workflow): require {item} in a fanout stage's out path`
 
-## 17. Daemon: scheduled recipe firings apply the recipe-failure judgement
+## 17. Daemon: scheduled recipe firings apply the recipe-failure judgement — ✅ DONE (2026-09-29)
+
+NOTES (2026-09-29): the daemon wraps the shared unprefixed judgement as `apogee: daemon: the %q schedule's firing: <judgement>` (plus partialRunSuffix) — "firing:" completes the clause the plan names.
+NOTES (2026-09-29): consequential edit — docs/manual/daemon.md: made necessary by the daemon now failing a firing whose recipe workflow did not land; the manual said a firing runs the recipe exactly as headless does but named only pre-send failures.
+NOTES (2026-09-29): also added TestDaemonFireDoesNotJudgeAPromptEntryAsARecipe (a prompt entry's workflow-less Result stays an answer).
 
 **What:** Fix "Scheduled `run: workflow:` firings never apply the recipe-failure judgement".
 **Regression guard.** "The same error text" means the same judgement: the shared helper returns it unprefixed;

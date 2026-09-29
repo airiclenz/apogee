@@ -149,6 +149,9 @@ func TestDaemonFireRunsTheEntrysRecipe(t *testing.T) {
 		},
 	}
 	harness.wiring.adopt([]daemon.Entry{entry})
+	// A workflow that finished with its item not blocked: a zero Result would be a recipe that
+	// "did not run", which the Firing rightly reports as failed (recipeWorkflowFailure).
+	harness.runner.res = run.Result{Workflow: run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished, Items: 1}}
 
 	_, err := harness.wiring.fire(context.Background(), schedule.Firing{
 		ScheduleID:   "sched-1",
@@ -166,6 +169,85 @@ func TestDaemonFireRunsTheEntrysRecipe(t *testing.T) {
 	}
 	if spec.Prompt != "internal/ depth=2" {
 		t.Errorf("run.Spec.Prompt = %q; want the entry's inputs text, not the launch-line label", spec.Prompt)
+	}
+}
+
+// A scheduled recipe whose workflow did not end in usable work is a FAILED Firing, judged exactly
+// as `apogee headless --recipe` judges it (recipeWorkflowFailure): the run reached an answer and
+// returned no error, yet a workflow that stopped, failed or blocked on every item must reach the
+// daemon's log as a failure — with the Outcome still carried as the salvage.
+func TestDaemonFireFailsARecipeWorkflowThatDidNotLand(t *testing.T) {
+	cases := []struct {
+		name     string
+		workflow run.WorkflowOutcome
+		says     string
+	}{
+		{"every item blocked",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished, Items: 2, Blocked: 2},
+			"every item of recipe /audit's workflow wf-1 blocked (2 of 2)"},
+		{"stopped",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowStopped, Items: 2},
+			"recipe /audit's workflow wf-1 was stopped before every item finished"},
+		{"failed",
+			run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFailed},
+			"recipe /audit's workflow wf-1 failed"},
+		{"never ran",
+			run.WorkflowOutcome{},
+			"recipe /audit did not run"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newDaemonFireHarness(t, config.Options{})
+			entry := daemon.Entry{
+				Name: "weekly-audit",
+				On:   daemon.Trigger{Cycle: schedule.MinCycle},
+				Run: daemon.Action{
+					Workflow:  daemon.WorkflowAction{Recipe: "audit", Inputs: "internal/"},
+					Workspace: t.TempDir(),
+					Mode:      domain.ModePlan,
+				},
+			}
+			harness.wiring.adopt([]daemon.Entry{entry})
+			harness.runner.res = run.Result{
+				SessionID: "rec-7", FinalText: "the model's answer", Turns: 1, Workflow: tc.workflow,
+			}
+
+			out, err := harness.wiring.fire(context.Background(), schedule.Firing{
+				ScheduleID:   "sched-1",
+				ScheduleName: entry.Name,
+				Prompt:       entry.Spec().Prompt,
+				Mode:         entry.Run.Mode,
+			})
+
+			if err == nil {
+				t.Fatal("fire returned no error; want the recipe-failure judgement")
+			}
+			want := `apogee: daemon: the "weekly-audit" schedule's firing: ` + tc.says +
+				" " + partialRunSuffix("rec-7")
+			if err.Error() != want {
+				t.Errorf("err = %q\nwant   %q", err.Error(), want)
+			}
+			if out.RecordID != "rec-7" || out.FinalText != "the model's answer" {
+				t.Errorf("out = %+v; want the run's Outcome carried beside the failure", out)
+			}
+		})
+	}
+}
+
+// A prompt entry is never judged as a recipe: a Result with no workflow is its ordinary answer.
+func TestDaemonFireDoesNotJudgeAPromptEntryAsARecipe(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{})
+	entry := entryFor(t, "audit", daemon.Action{Prompt: "/code-audit internal/tui"})
+	harness.wiring.adopt([]daemon.Entry{entry})
+	harness.runner.res = run.Result{SessionID: "rec-8", FinalText: "done", Turns: 1}
+
+	if _, err := harness.wiring.fire(context.Background(), schedule.Firing{
+		ScheduleID:   "sched-1",
+		ScheduleName: entry.Name,
+		Prompt:       entry.Run.Prompt,
+		Mode:         entry.Run.Mode,
+	}); err != nil {
+		t.Fatalf("fire: %v; a prompt entry has no workflow to judge", err)
 	}
 }
 

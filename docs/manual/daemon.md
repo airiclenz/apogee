@@ -58,7 +58,9 @@ the engine runs as a workflow, like the shipped `audit`:
 runs the recipe exactly as [`apogee headless --recipe`](headless.md) does: the workflow runs to
 its end before the model is asked anything, an `ask` stage takes its declared default (the result
 lines say `(default taken: no one to ask)`), and a recipe no skill answers to, or a required
-input the text leaves unbound, fails the firing before anything is sent. The log's fired line names the recipe as you would type it —
+input the text leaves unbound, fails the firing before anything is sent. A workflow that did not
+run, was stopped, failed or blocked on every item fails the firing too — the same judgement
+headless exits 1 on — and the log's failed line says which. The log's fired line names the recipe as you would type it —
 `fired     weekly-audit — /audit internal/`.
 
 The daemon watches the file and picks up every saved edit within a second or two — no

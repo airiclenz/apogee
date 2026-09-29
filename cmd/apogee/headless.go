@@ -1167,7 +1167,10 @@ func runHeadlessBody(
 	// itself went on to its answer: the answer speaks over result lines that record the stop, the
 	// failure or a blocked receipt on every item, and a script reading only the exit status would
 	// otherwise take that for a completed run. Like the failure above it outranks a fault.
+	// The judgement is the one the daemon's scheduled recipe firings share (recipeWorkflowFailure,
+	// wire_firing.go); this Driver only says whose failure it is.
 	if err := recipeWorkflowFailure(recipe, res.Workflow); err != nil {
+		err = fmt.Errorf("apogee headless: %w", err)
 		if res.SessionID != "" {
 			err = fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))
 		}
@@ -1186,28 +1189,6 @@ func runHeadlessBody(
 		return res, exitError{code: exitRunFaulted, err: err}
 	}
 	return res, nil
-}
-
-// recipeWorkflowFailure reports why a --recipe run's workflow counts as a failed run, nil when it
-// does not — no recipe was named, or its workflow finished with at least one item not blocked (or
-// with no items at all: a recipe of steps alone has nothing to block).
-func recipeWorkflowFailure(recipe string, outcome run.WorkflowOutcome) error {
-	if recipe == "" {
-		return nil
-	}
-	switch {
-	case outcome.ID == "":
-		return fmt.Errorf("apogee headless: recipe /%s did not run", recipe)
-	case outcome.End == domain.WorkflowStopped:
-		return fmt.Errorf("apogee headless: recipe /%s's workflow %s was stopped before every item finished",
-			recipe, outcome.ID)
-	case outcome.End == domain.WorkflowFailed:
-		return fmt.Errorf("apogee headless: recipe /%s's workflow %s failed", recipe, outcome.ID)
-	case outcome.Items > 0 && outcome.Blocked == outcome.Items:
-		return fmt.Errorf("apogee headless: every item of recipe /%s's workflow %s blocked (%d of %d)",
-			recipe, outcome.ID, outcome.Blocked, outcome.Items)
-	}
-	return nil
 }
 
 // serialWriter guards one io.Writer with a mutex, so goroutines that narrate at the same time can
