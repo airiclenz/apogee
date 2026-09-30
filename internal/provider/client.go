@@ -354,6 +354,9 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 		chatPath: defaultChatPath,
 		model:    model,
 		httpClient: &http.Client{
+			// The shared provider transport: DefaultTransport's settings plus the `.local` mDNS
+			// fallback (localdial.go).
+			Transport: providerTransport,
 			// No client-level Timeout: it would also kill streams. A 3xx is handed back as
 			// the response instead of being followed (see above).
 			CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -429,8 +432,9 @@ func (c *Client) activeModel() string {
 // again. Concurrency follows the type's contract: closing while another goroutine is mid-Respond
 // or mid-Stream is allowed and costs that call nothing.
 //
-// One caveat about reach: a Client built without WithHTTPClient uses net/http's shared
-// DefaultTransport, so Close reaps the idle sockets in THAT pool rather than in a pool of its own.
+// One caveat about reach: a Client built without WithHTTPClient uses the package's shared
+// provider transport (localdial.go), so Close reaps the idle sockets in THAT pool — shared by every
+// such Client — rather than in a pool of its own.
 // This is safe by construction (idle only, and every holder re-dials on demand) but it is not
 // confined to this Client. Pass WithHTTPClient carrying a Transport of its own where a private
 // connection pool matters.

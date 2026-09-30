@@ -58,7 +58,10 @@ internal/provider/client.go — NewClient (the one consumer item 2 adds)
 - `go vet ./internal/mdns/`
 **Commit:** `feat(mdns): add one-shot .local address lookup`
 
-## 2. Provider transport falls back to mDNS for `.local` hosts
+## 2. Provider transport falls back to mDNS for `.local` hosts — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): when mDNS answers but no returned address connects, the dial returns the last address's dial error (a real "server offline"), not the original *net.DNSError; the DNSError is kept only when the host is not `.local`, the failure is not DNS, or mDNS finds nothing — as the Goal requires.
+NOTES (2026-09-30): the dial seam `dialAddress` takes the captured original DialContext as an argument, so a stub resolves host names and still dials IP literals through that captured dialer; `withLocalFallback(t)` is the testable wrapper that `providerTransport` applies to the DefaultTransport clone.
 
 **What:** fixes the defect in `apogee-mdns-local-unresolved`: a `CGO_ENABLED=0` binary cannot dial an endpoint named `*.local`.
 **Regression guard.** Clone `DefaultTransport`, capture its `DialContext` (`orig := t.DialContext`, the 30 s-timeout `net.Dialer`) and wrap THAT for both the first dial and every per-address fallback dial; never construct a fresh zero `net.Dialer` (drops the 30 s connect cap).
