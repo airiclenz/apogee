@@ -102,7 +102,8 @@ type RunStatus struct {
 }
 
 // StageStatus is one stage's line in status.json, in the plan's stage order. Note is the stage's
-// one-line note (why it was skipped, what a pick picked, that an ask took its default) and Round
+// one-line note (why it was skipped, what a pick picked, that an ask took its default, how many
+// finished items it redid) and Round
 // the repeat round its items come from (0 for the stage's own run).
 type StageStatus struct {
 	Name  string       `json:"name"`

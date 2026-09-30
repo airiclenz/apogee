@@ -208,7 +208,12 @@ internal/workflow/store.go — ItemOutputPath; internal/workflow/runner_test.go 
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/workflow/`
 **Commit:** fix(workflow): rebuild merge and verify keys under every older scheme
 
-## 4. Say when a resumed stage redid finished work
+## 4. Say when a resumed stage redid finished work — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): the redone mark is carried on ItemResult (unexported `redone`, set in prepareItems) rather than a count kept on runState; endStage counts only the redone items that ran to done, so a cancel that leaves a redone item unfinished does not report it as redid. An item whose prior line names one of its own scheme keys (receipt file gone, inputs unchanged) is not counted.
+NOTES (2026-09-30): priorItemKey (item 2) became priorItem, returning the whole prior ItemStatus so the redid check can read its receipt; adoptable reads `.Key` from it — behaviour unchanged.
+NOTES (2026-09-30): consequential edit — internal/workflow/store.go: made necessary by the new stage note (StageStatus.Note comment enumerates the notes).
+NOTES (2026-09-30): consequential edit — internal/workflow/format.go: made necessary by the new stage note (noteLine comment enumerates the notes).
 
 **What:** Depends on item 3. Today, when a re-issued workflow redoes an item an earlier run of the
 same folder had finished, nothing says so. That covers the same stage, round and label with an

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // dirToken stands in for a run's workflow folder in a golden, so the goldens do not depend on the
@@ -177,6 +178,26 @@ func TestFormatAskThatTookItsDefault(t *testing.T) {
 		"items 1 · ok 1 · partial 0 · blocked 0",
 		"ask scope: ok — took the default no answer=no (default taken: no one to ask)",
 		"fanout deep: skipped: scope.answer == yes is false",
+	}, "\n"))
+}
+
+func TestFormatStageThatRedidFinishedItems(t *testing.T) {
+	t.Parallel()
+	runner := newTestRunner(t, okSpawner())
+	prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+	runner.Prompts = prompts
+	plan := promptPlan("a", "b")
+	runPlan(t, runner, context.Background(), plan)
+	prompts["p.md"] = &fstest.MapFile{Data: []byte("audit {item} for races")}
+
+	result := runPlan(t, runner, context.Background(), plan)
+	got := Format(result)
+
+	assertGolden(t, got, strings.Join([]string{
+		"#1 a — ok — checked a",
+		"#2 b — ok — checked b",
+		"items 2 · ok 2 · partial 0 · blocked 0",
+		"fanout find: redid 2 finished items: their inputs changed since they ran",
 	}, "\n"))
 }
 

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -194,6 +195,45 @@ func TestRunnerRedoesItemsWhenThePromptFileChanges(t *testing.T) {
 	}
 }
 
+// redidOne is the note a stage carries when it redid one item an earlier run had finished.
+const redidOne = "redid 1 finished item: their inputs changed since they ran"
+
+func TestRunnerNotesTheFinishedItemsItRedid(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+	runner.Prompts = prompts
+	plan := promptPlan("a")
+
+	first := runPlan(t, runner, context.Background(), plan)
+	unchanged := runPlan(t, runner, context.Background(), plan)
+	prompts["p.md"] = &fstest.MapFile{Data: []byte("audit {item} for races")}
+	edited := runPlan(t, runner, context.Background(), plan)
+
+	if note := onlyStage(t, first).Note; note != "" {
+		t.Errorf("first run: note = %q, want none", note)
+	}
+	if note := onlyStage(t, unchanged).Note; note != "" {
+		t.Errorf("plain resume: note = %q, want none", note)
+	}
+	if note := onlyStage(t, edited).Note; note != redidOne {
+		t.Errorf("edited prompt file: note = %q, want %q", note, redidOne)
+	}
+	status, err := runner.Store.ReadStatus(edited.ID)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if note := status.Stages[0].Note; note != redidOne {
+		t.Errorf("status.json note = %q, want %q", note, redidOne)
+	}
+	if want := "fanout find: " + redidOne; !slices.Contains(strings.Split(Format(edited), "\n"), want) {
+		t.Errorf("Format =\n%s\nwant a line %q", Format(edited), want)
+	}
+}
+
 // schemeKey is the key scheme keySchemes[index] gives the item labelled label of promptPlan's stage
 // over prompts, failing the test on error.
 func schemeKey(t *testing.T, index int, label string, prompts fstest.MapFS) string {
@@ -277,6 +317,9 @@ func TestRunnerAdoptsAReceiptAnOlderKeySchemeStored(t *testing.T) {
 			if stage := onlyStage(t, resumed); !stage.Items[0].Resumed || stage.Items[0].Key != scheme2 {
 				t.Errorf("item = resumed %v, key %s; want resumed under the current key", stage.Items[0].Resumed, stage.Items[0].Key)
 			}
+			if note := onlyStage(t, resumed).Note; note != "" {
+				t.Errorf("adopted item: note = %q, want none", note)
+			}
 			if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, scheme2, receiptName)); err != nil {
 				t.Errorf("receipt under the current key: %v, want it present", err)
 			}
@@ -310,6 +353,9 @@ func TestRunnerRedoesAnItemWhoseOlderSchemeReceiptIsStale(t *testing.T) {
 	}
 	if stage := onlyStage(t, edited); stage.Items[0].Resumed {
 		t.Error("item resumed from the stale scheme-1 receipt, want it redone")
+	}
+	if note := onlyStage(t, edited).Note; note != redidOne {
+		t.Errorf("stale receipt: note = %q, want %q", note, redidOne)
 	}
 	if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, scheme1, receiptName)); err != nil {
 		t.Errorf("stale scheme-1 folder: %v, want it left alone", err)

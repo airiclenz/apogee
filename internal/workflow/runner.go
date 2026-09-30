@@ -20,6 +20,10 @@ import (
 // the item's own folder, next to its receipt.
 const outputName = "output.md"
 
+// redidFormat is the note a stage carries when it redid items an earlier run of its folder had
+// finished (redidNote): the count, then "item" or "items".
+const redidFormat = "redid %d finished %s: their inputs changed since they ran"
+
 // The brief placeholders a stage's task is rendered with.
 const (
 	placeholderItem = "{item}"
@@ -213,7 +217,8 @@ func (r Result) Stopped() bool { return r.Phase == PhaseStopped }
 // that ended blocked, or a pick that could not read its file. A script or ask stage has one item,
 // labelled with the stage's name, carrying its receipt; a pick has none (its items are the next
 // fanout's). Note says in one line what the stage came to when its items do not — why it was
-// skipped, what a pick picked, that an ask took its default. Round is the repeat round the result
+// skipped, what a pick picked, that an ask took its default, how many finished items a
+// child-running stage redid because their inputs changed. Round is the repeat round the result
 // comes from: 0 for the stage's own run, n for a repeat stage's n-th re-run of it.
 type StageResult struct {
 	Name  string
@@ -232,7 +237,9 @@ type StageResult struct {
 //
 // older is the item under every older key scheme, keySchemes[1:] index for index: a verify or
 // merge downstream keys its own items under each older scheme from these, so a folder an older
-// build wrote resumes the whole chain (nil on a result no child-running stage keyed).
+// build wrote resumes the whole chain (nil on a result no child-running stage keyed). redone marks
+// an item the folder's last run had finished that no key scheme found a receipt for: its inputs
+// changed since, so it runs again (endStage's redidNote counts it once it is done).
 type ItemResult struct {
 	Key           string
 	Label         string
@@ -244,6 +251,7 @@ type ItemResult struct {
 	Resumed       bool
 	Verdict       Verdict
 	older         []schemeItem
+	redone        bool
 }
 
 // schemeItem is an item as one key scheme saw it: its key, its output path and — on a source item a
@@ -506,16 +514,40 @@ func (s *runState) runItems(ctx context.Context, stageIndex int, stage Stage, dr
 
 // endStage settles a stage whose items have run: stopped when a cancel left an item unfinished,
 // else finished — the phase the caller judged the stage to end in (done, or failed for a merge
-// that left no report). It records the phase and returns the stage's result with its tally.
+// that left no report). It records the phase and the stage's note — the finished items it redid
+// (redidNote), "" when none — and returns the stage's result with its tally and that note.
 func (s *runState) endStage(ctx context.Context, stageIndex int, stage Stage, results []ItemResult, finished Phase) (StageResult, error) {
 	phase := finished
 	if ctx.Err() != nil && hasUnfinished(results) {
 		phase = PhaseStopped
 	}
+	note := redidNote(results)
+	s.mu.Lock()
+	s.status.Stages[stageIndex].Note = note
+	s.mu.Unlock()
 	if err := s.setStagePhase(stageIndex, stage, phase, 0); err != nil {
 		return StageResult{}, err
 	}
-	return StageResult{Name: stage.Name, Kind: stage.Kind, Phase: phase, Items: results, Tally: tallyOf(results)}, nil
+	return StageResult{Name: stage.Name, Kind: stage.Kind, Phase: phase, Items: results, Tally: tallyOf(results), Note: note}, nil
+}
+
+// redidNote says how many finished items a stage redid — the redone results that ran to done — or
+// "" when it redid none.
+func redidNote(results []ItemResult) string {
+	redid := 0
+	for _, result := range results {
+		if result.redone && result.Phase == PhaseDone {
+			redid++
+		}
+	}
+	if redid == 0 {
+		return ""
+	}
+	noun := "items"
+	if redid == 1 {
+		noun = "item"
+	}
+	return fmt.Sprintf(redidFormat, redid, noun)
 }
 
 // itemDraft is an item before it is keyed: the item, the stage's repeat round, the text its key
@@ -546,7 +578,9 @@ type itemJob struct {
 // prepareItems keys every item through every key scheme — the current one (keySchemes[0]) is its
 // key, the older ones are kept on its result for the stages downstream — looks for a receipt an
 // earlier run of the workflow stored (resumeReceipt), resolves its output path — from the current
-// key, after any adoption — and brief, and writes the stage's items into status.json.
+// key, after any adoption — and brief, and writes the stage's items into status.json. An item no
+// scheme found a receipt for, which the folder's last run had finished (wasFinished), is marked
+// redone.
 func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft) ([]itemJob, error) {
 	store, id := s.runner.Store, s.status.ID
 	jobs := make([]itemJob, len(drafts))
@@ -565,6 +599,8 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 		}
 		if found {
 			result.Phase, result.Receipt, result.Resumed = PhaseDone, &receipt, true
+		} else {
+			result.redone = s.wasFinished(stage.Name, draft, keys)
 		}
 		output := draft.output
 		if output == "" {
@@ -685,7 +721,8 @@ func (s *runState) resumeReceipt(stage Stage, draft itemDraft, keys []string) (R
 // item last finished under that other key, after an input olderKey's receipt predates changed:
 // the older receipt is stale and the item is redone.
 func (s *runState) adoptable(stageName string, draft itemDraft, olderKey string) (bool, error) {
-	priorKey, found := s.priorItemKey(stageName, draft.round, draft.item.Label)
+	priorLine, found := s.priorItem(stageName, draft.round, draft.item.Label)
+	priorKey := priorLine.Key
 	if !found || priorKey == olderKey {
 		return true, nil
 	}
@@ -696,20 +733,32 @@ func (s *runState) adoptable(stageName string, draft itemDraft, olderKey string)
 	return !finished, err
 }
 
-// priorItemKey is the key the folder's last run recorded for the item labelled label of the stage
+// wasFinished reports whether the folder's last run recorded draft's item (same stage name, repeat
+// round and label) as finished — an ok or partial receipt — under a key none of its scheme keys
+// (keys) matches: the item's inputs changed since it ran. A line under one of keys whose receipt
+// is gone is not such a change.
+func (s *runState) wasFinished(stageName string, draft itemDraft, keys []string) bool {
+	line, found := s.priorItem(stageName, draft.round, draft.item.Label)
+	if !found || line.Receipt == nil || slices.Contains(keys, line.Key) {
+		return false
+	}
+	return line.Receipt.Status == StatusOK || line.Receipt.Status == StatusPartial
+}
+
+// priorItem is the line the folder's last run recorded for the item labelled label of the stage
 // named stageName in the given repeat round; found is false when prior has no such line.
-func (s *runState) priorItemKey(stageName string, round int, label string) (key string, found bool) {
+func (s *runState) priorItem(stageName string, round int, label string) (line ItemStatus, found bool) {
 	for _, stage := range s.prior {
 		if stage.Name != stageName || stage.Round != round {
 			continue
 		}
 		for _, item := range stage.Items {
 			if item.Label == label {
-				return item.Key, true
+				return item, true
 			}
 		}
 	}
-	return "", false
+	return ItemStatus{}, false
 }
 
 // runItem runs one item to its end: fresh children and continuations under the Runner's bounds,
