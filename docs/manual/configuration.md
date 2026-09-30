@@ -44,11 +44,12 @@ applies itself to the session you are in — whoever wrote it: the `/settings` p
 GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal.
 Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
-for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Thirteen
+for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Sixteen
 keys are the exception to "applied now", because they are read only while a session is being wired:
 `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five delegation bounds
 (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
-`delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, `sessions.max-age` and
+`delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the three workflow keys
+(`workflow-continuations`, `workflow-retries`, `workflow-wake`), `sessions.max-age` and
 `sessions.max-count` take the save and honour it at the next start, as their `/settings` rows say. An
 edit reaches the runs this session raises, too: a `/schedule` firing composes itself from the
 settings the session is running at the moment it fires, so a tool you disabled or a host you denied
@@ -705,7 +706,7 @@ ui:
 that `/inspect` then shows you. The observer is installed while the engine is built, so an edit here
 is honoured at the **next start** — until then the row goes on reporting what this run is actually
 capturing, which is the key's contract rather than a write that failed. The quiet-turn threshold,
-`ui.stall-after`, is a `ui:` key too; it is described further down this section, with the effort dial
+`ui.stall-after`, is a `ui:` key too; it is described [with the effort dial](#how-hard-a-model-thinks--effort)
 whose long silences it is there to report.
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter
@@ -733,6 +734,8 @@ the general one, that a draft carry at least three words before anything is sugg
 Phrases are lowercased and their whitespace normalised, capped at 64 characters each and 32 to a
 skill, and `/skills` lists them back so you can see what a skill declared.
 
+## Keeping the window from overflowing — compaction and pruning
+
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the
 older turns into a summary (the same reducer as the `/compact` command) before the
@@ -758,6 +761,8 @@ results went and roughly how many tokens that freed. Like Compaction it is struc
 stays on even under `--bypass` — so it is on by default; set the file-only
 `prune-tool-results:` key to `false` to keep every result verbatim and manage the window
 yourself.
+
+## Delegated sub-agents — what one may spend
 
 A **delegated sub-agent** runs its task in one exchange of its own, and how long that
 exchange lasts is the sub-agent's call, not yours: it reads, greps and edits until it
@@ -965,6 +970,8 @@ remove tools, never add one your agent lacks; a name that is not on its menu is 
 a result naming it, so the model learns the spelling instead of silently losing the tool,
 and an empty list is the same as no list at all.
 
+## The context window and the reply stream
+
 The context **window** these budgets are measured against is discovered from the
 server — live, not once: apogee asks about once a minute, so switching the loaded model
 under a running session re-binds the window with it. Set `context-window:` (a file-only
@@ -1052,6 +1059,8 @@ existed. `0` never re-sends: the first transient fault fails the Turn. Like
 `stream-idle-timeout:`, it is read when the session (or a sub-agent) is built, so an edit
 applies at the next start.
 
+## Workflow retries
+
 **A workflow gives each item two kinds of second chance**, and two file-only keys bound
 them. A workflow — a fan-out your agent asks for, or a recipe a skill ships — runs one
 sub-agent per item. A sub-agent that runs out of room before it reports is *continued*: a
@@ -1066,6 +1075,8 @@ agent a turn of its own to read the result, `off` shows you that it finished and
 result ride on your next message instead. It takes the two words only — `true` is
 refused. All three are read when the session is built, so an edit applies at the next
 start.
+
+## How hard a model thinks — effort
 
 **How hard a model thinks** is a property of the model, so it rides its profile: a
 `model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` and
@@ -1130,6 +1141,8 @@ written the way Go spells one (`90s`, `2m`), default `120s`, `0` turns it off �
 long the engine may say nothing before the status line adds a warning-tinted `quiet`
 qualifier to its running phrase: `thinking · quiet · 12m`. It reports a fact, not a
 verdict — nothing has arrived in that long — and any engine event clears it.
+
+## The cursor and the external editor
 
 The prompt's caret is the **real terminal cursor**, and it never blinks. Set
 `cursor-shape:` (a file-only key) to `block` (the default), `underline`, or `bar` to say
@@ -1329,7 +1342,11 @@ server: workstation
 An entry's `name` is the label `/server` lists it under, the argument
 `/server <name>` takes, the value `server:` points at, and the host name the status
 footer shows while the session is on it — one name for all four jobs, so no two
-entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
+entries may share one. What the footer says about that server — reachable or offline, the
+model it serves and its context window — is refreshed by the heartbeat, which asks the server
+about every 60 seconds, timed from its last answer — so a server you start, stop or reload
+outside apogee shows in the footer on the next beat, a minute or so later.
+`endpoint` is required; `api-key` (or `api-key-cmd` /
 `api-key-env` — exactly one of the three), `model`, `parallel-agents`,
 `working-window` (the room a session on that server works in, above),
 `effort-dialect` (which of the three wires carries the
@@ -1631,7 +1648,7 @@ lines by [`apogee headless`](headless.md).
   `provider:` block is the way to name providers yourself.
 - **Keep-alives count as the stream being alive.** While a provider queues a request,
   OpenRouter sends SSE comment lines (`: OPENROUTER PROCESSING`) before the first
-  token. Those reset [`stream-idle-timeout:`](#the-terminal-ui--ui)'s clock like any
+  token. Those reset [`stream-idle-timeout:`](#the-context-window-and-the-reply-stream)'s clock like any
   other bytes, so a request that sits in a queue is not cut however long it waits —
   the timeout only catches a connection that goes wholly silent. The picker's `ttft`
   is what shows a slow queue.

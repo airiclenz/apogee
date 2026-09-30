@@ -123,7 +123,7 @@ still remembers.
   either: its result — the engine's summary of what it had done — is saved like any other.
 - The delegations your agent can **continue** — every one its call named, and every one
   that was capped, faulted or stopped (see
-  [configuration](configuration.md#the-terminal-ui--ui)) — are saved with the session, so
+  [configuration](configuration.md#delegated-sub-agents--what-one-may-spend)) — are saved with the session, so
   `--continue` and `--resume` bring them back and `continue: "<name>"` works on a session
   reopened months later. `/clear` drops them with the session it closes; a `/fork` keeps
   only the ones that ran within the history it keeps; and a turn you cancel puts them back

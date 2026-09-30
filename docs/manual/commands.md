@@ -164,7 +164,7 @@ sub-agent it started in turn — while the rest of the turn goes on. It asks for
 because nothing is rolled back: files the sub-agent already wrote stay written, apogee summarizes
 what it had done, and your agent receives that as the delegation's result under
 `[stopped by the user — engine summary follows]`, followed by the sub-agent's last words and
-the line that lets your agent [continue it](configuration.md#the-terminal-ui--ui). A
+the line that lets your agent [continue it](configuration.md#delegated-sub-agents--what-one-may-spend). A
 delegation still waiting for a slot is stopped before it starts: it runs nothing, and your agent
 is told it was never started. The run's row then reads `stopped by you`, and a message you had
 sent it that never landed is noted as `<name> was stopped by you before your message landed`.
@@ -217,7 +217,7 @@ window is dominated by scheduling jitter rather than by generation, so it is sho
 at all rather than as an invented one.
 
 A run that goes silent for longer than `ui.stall-after` adds a `quiet` qualifier to whatever
-phrase the row is holding; see [the terminal UI](configuration.md#the-terminal-ui--ui).
+phrase the row is holding; see [the effort dial](configuration.md#how-hard-a-model-thinks--effort).
 
 ## Approving a call — how far an approval reaches
 
@@ -592,7 +592,8 @@ the row: the `context-files:` keys are part of the prefix every request is cache
 effect at the next `/clear` — `· applies at next clear`. A few keys are read only while apogee
 starts — `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five
 delegation bounds (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`,
-`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`,
+`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the three
+workflow keys (`workflow-continuations`, `workflow-retries`, `workflow-wake`),
 `sessions.max-age` and `sessions.max-count` — so an edit there is written and takes effect at the
 next start; the row's
 `Description:` says so, and the value cell shows what was written. On a key an environment variable or

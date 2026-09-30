@@ -74,7 +74,7 @@
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                 ◐ ask before
+  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ ~/Repos/apogee          ◐ ask before
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
 ---
@@ -1792,7 +1792,7 @@ with nothing under it, and read as cut off rather than as light.
 
 **Where the window went.** The context window used to close that run, and it does not any more:
 the status line's gauge states it, beside what the conversation has actually spent
-(`8k/98k 8% █░░░░░`), which is the only place the number tells the reader something that changes.
+(`8k/98k 8% ▉░░░░░░░░░`), which is the only place the number tells the reader something that changes.
 The window is still a session fact — a change to it is still noted in the transcript — it simply
 has one home in the chrome now. It keeps exactly one: the fill a collapsed sub-agent run states on
 its summary line is a *different agent's* window said on that run's own block, which is transcript

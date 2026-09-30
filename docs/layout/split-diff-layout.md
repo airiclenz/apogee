@@ -64,18 +64,27 @@ are untouched.
 
 ## Split diff (wide)
 
+Both sketches were redrawn 2026-09-30 to the block the transcript paints now:
+the `✦ Edit` header and its `┕` leader row (target, damped dots, `+3 −2` for
+this change, `▼`), the body hung at the branch marker's four-cell indent, and
+no `┌─┶` header or `│` rail — that frame belonged to the retired in-place
+sub-agent span (ADR 0063). The wide body is `splitDiffRows` at 100 columns
+(`TestSplitDiffRowsPaintsTheLayoutSketch`); the narrow one is a 50-column
+block, which the width rule reads stacked.
+
 ```
-┌─┶ Edit ⋯ internal/tui/render.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +2 −1 ▼
-│   88   func paint(w int) error {      │  88   func paint(w int) error {
-│   89     if w < minWidth {            │  89     if w < minWidth {
-│   90 -    return errNarrow           │  90 +    return fmt.Errorf("width %d
-│                                       │           under %d", w, minWidth)
-│   91     }                            │  91     }
-│  ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯
-│  204     return nil                   │ 205     return nil
-│  205 - }                              │ 206 +  }
-│                                       │ 207 +
-    see less…
+✦ Edit
+  ┕ internal/tui/render.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +3 −2 ▼
+     88   func paint(w int) error {                  │  88   func paint(w int) error {
+     89     if w < minWidth {                        │  89     if w < minWidth {
+     90 -     return errNarrow                       │  90 +     return fmt.Errorf("width %d under %d",
+                                                     │       w, minWidth)
+     91     }                                        │  91     }
+    ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯
+    204     return nil                               │ 205     return nil
+    205 - }                                          │ 206 +   }
+                                                     │ 207 +
+                                                                                               see less…
 ```
 
 - row 90: one removed line left (red band), its replacement right (turquoise
@@ -88,19 +97,20 @@ are untouched.
 ## Stacked diff (narrow)
 
 ```
-┌─┶ Edit ⋯ internal/tui/render.go ⋯⋯⋯⋯⋯⋯ +2 −1 ▼
-│    88   func paint(w int) error {
-│    89     if w < minWidth {
-│    90 -    return errNarrow
-│    90 +    return fmt.Errorf("width %d under
-│             %d", w, minWidth)
-│    91     }
-│   ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯
-│   204     return nil
-│   205 -  }
-│   206 +  }
-│   207 +
-     see less…
+✦ Edit
+  ┕ internal/tui/render.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +3 −2 ▼
+     88   func paint(w int) error {
+     89     if w < minWidth {
+     90 -     return errNarrow
+     90 +     return fmt.Errorf("width %d under
+        %d", w, minWidth)
+     91     }
+    ⋯⋯⋯⋯⋯⋯⋯⋯
+    204     return nil
+    205 - }
+    206 +   }
+    207 +
+                                         see less…
 ```
 
 - per region: context, then `-` rows (before numbers), then `+` rows (after

@@ -92,7 +92,7 @@ vocabulary, because the same moment is not filtered the same way in both. They a
 frames that are *not* Events — `run_started` and `run_finished`, the latter carrying the run's
 summary and exit code and written on every exit path, including one whose run never started. Lossless and ordered: they never drop, the
 deliberate contrast with an observe **[Reaction](#reactions-and-moments)**, which does — a stalled
-reader stalls the loop instead. Versioned `v:1` and additive within it. See
+reader stalls the loop instead. Versioned `v:2` and additive within it. See
 [ADR 0075](docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
 _Avoid_: "Event stream" for the lines (that is the engine's sequence these render), "log" (apogee
 owns no log files or retention policy — this is a contract), "API" / "server mode" (a wire surface
@@ -643,7 +643,11 @@ _Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower t
 The LLM server that runs the model — Ollama, llama.cpp, LM Studio, vLLM, or any endpoint
 speaking one of the two **Wires** (below) apogee has a codec for: the OpenAI chat-completions surface
 (the default) or the Anthropic Messages API. Apogee reaches the Upstream directly through
-its `provider/` package; there is no intervening proxy. A session is not married to one: the
+its `provider/` package; there is no intervening proxy. An `endpoint` host ending in `.local` that
+the system resolver cannot find is resolved by apogee itself — one in-process IPv4 mDNS query
+(`internal/mdns`), tried only after the system lookup fails — so a release build, which has no cgo
+and so no route to the OS's mDNS responder, still reaches a server named by its mDNS name
+([ADR 0091](docs/adr/0091-endpoint-local-names-resolve-over-mdns-in-process.md)). A session is not married to one: the
 [Heartbeat](#probing-and-model-identity)'s Rebind half moves it to another configured server
 mid-session (`/server`), unbound until that server's first Beat says what it serves.
 The Upstreams apogee knows are exactly the entries of config's **`servers:` list — the single
@@ -654,8 +658,7 @@ last one a `/server` switch chose, recorded automatically — and asks with the 
 is unset or names an entry that is gone; a raw `--endpoint`/`APOGEE_ENDPOINT` override builds an
 unlisted, unpersisted entry for one run
 ([ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md)).
-_Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
-it detects Upstreams — it is not the Upstream).
+_Avoid_: "the model server", "the backend".
 
 **Wire**:
 The request/response protocol family a server speaks — the codec the provider Client encodes a

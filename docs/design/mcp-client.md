@@ -31,7 +31,7 @@ An MCP server is an **external, untrusted** process or endpoint Apogee **cannot 
 tools execute on the server side, outside any OS fence. Two consequences shape the design:
 
 - **MCP tools are non-forkable external effects (ADR 0008).** Each surfaced tool carries the `mcp`
-  effect kind, so the disposition classifies it `classMCP` and gates it through Approval in Auto
+  effect kind, so the disposition classifies it `tools.ClassMCP` and gates it through Approval in Auto
   (server-grain "allow for session"), and it routes through `Config.ExternalEffects` when the host
   injects a stub (the bench's deterministic, process-free swap). This is **distinct from `network`-
   kind** tools, which auto-run url-filtered — MCP is unfenceable, so it asks.
@@ -155,13 +155,16 @@ Connect(ctx, []ServerConfig, URLGuard, workspaceRoot) → *Client  // dial every
 
 ## 4. Where it plugs in
 
-- `internal/mcp` depends only on the SDK, `internal/domain`, and `internal/security` — it never
-  imports the root facade (ADR 0010). It exports `Client`, `Connect`, `ServerConfig`, `Transport`.
+- `internal/mcp` depends only on the SDK, `internal/domain`, `internal/security`, and
+  `internal/platform` — the last for a stdio server's process-tree teardown (stopping a server
+  kills its whole process tree, not just the first process) and for scoping its `env-allowlist`
+  environment. It never imports the root facade (ADR 0010). It exports `Client`, `Connect`,
+  `ServerConfig`, `Transport`.
 - `cmd/apogee` owns the wiring: `config.yaml`'s `mcp-servers:` block (config-file-only, default-
   empty) → `mcp.ServerConfig` values → `mcp.Connect` → `registryWithMCP` registers the discovered
   tools on top of the default registry → `Config.Tools`. A discovered tool whose qualified name
   collides with a built-in is dropped with a stderr notice (the built-in wins).
-- The disposition's `classMCP` gating is proven in `internal/agent/dispatch_test.go`; this package's
+- The disposition's `tools.ClassMCP` gating is proven in `internal/agent/dispatch_test.go`; this package's
   tests prove a **real** surfaced tool reports `EffectMCP` (the property the gate keys on) and
   exercise the live stdio path end to end (a fork-and-exec fixture server).
 
@@ -170,7 +173,7 @@ Connect(ctx, []ServerConfig, URLGuard, workspaceRoot) → *Client  // dial every
 | Criterion | Mechanism |
 |---|---|
 | A hermetic stdio server exposes a tool that appears in the menu, is callable | `TestConnect_SurfacesServerToolsAndCalls` over a fork-and-exec stdio fixture |
-| Raises Approval in Auto (asserted) | `EffectMCP` ⇒ `classMCP` ⇒ `resolveGate` (the Resolution ladder, `internal/agent/resolution.go`; `dispatch_test.go`); the real tool's kind asserted in `TestServerTool_IsMCPExternalEffect` |
+| Raises Approval in Auto (asserted) | `EffectMCP` ⇒ `tools.ClassMCP` ⇒ `resolve` (the Resolution ladder, `internal/agent/resolution.go`; `dispatch_test.go`); the real tool's kind asserted in `TestServerTool_IsMCPExternalEffect` |
 | A resumed session re-establishes from scratch | `TestResume_ReconnectsFresh` (Close, then a fresh Connect rediscovers the tools) |
 | The bench swaps a deterministic stub with no process | the `mcp`-kind tool routes through `Config.ExternalEffects.Do` (ADR 0008; `dispatch_test.go`) |
 | `Close` tears down cleanly (no orphan) | all-or-nothing Connect rollback + `TestClose_TearsDownSessions` |

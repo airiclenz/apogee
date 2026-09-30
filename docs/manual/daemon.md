@@ -30,7 +30,7 @@ schedules:
     on:
       cycle: 24h               # required; a Go duration, 30s floor
     run:
-      prompt: "/code-audit internal/tui"  # required, unless workflow: below replaces it —
+      prompt: "/code-review internal/tui" # required, unless workflow: below replaces it —
                                           # what you would type into apogee; @file and /skill
                                           # references resolve as in a session
       workspace: ~/repos/apogee           # required; `~` expands, must exist
@@ -158,7 +158,7 @@ whatever the run completed is still saved. Either way the daemon exits `0`.
 $ apogee daemon
 2026-08-22T21:00:00+02:00 created   nightly-audit — on the clock
 2026-08-22T21:00:00+02:00 watching /home/you/.apogee/daemon/schedules.yaml — 1 schedule on the clock
-2026-08-23T21:00:00+02:00 fired     nightly-audit — /code-audit internal/tui
+2026-08-23T21:00:00+02:00 fired     nightly-audit — /code-review internal/tui
 2026-08-23T21:07:41+02:00 completed nightly-audit in 7m41s — 9 turns, 0 denied, 41k tokens, 2 sub-agents, saved as 20260823-210000-3b7d
 ```
 

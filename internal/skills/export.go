@@ -15,7 +15,7 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The shipped skills are embedded and never installed (doc.go, ADR 0065 §2), which is what keeps
-// every user's four current across an upgrade — and also what leaves nothing to open in an editor.
+// every user's five current across an upgrade — and also what leaves nothing to open in an editor.
 // Export is the answer to that: it writes ONE shipped skill's whole folder into the user's global
 // library, where the ordinary layering makes the copy win the id from then on (ADR 0032). It is
 // the skills counterpart of scheme.Export, down to the two rules that matter — the bytes go out

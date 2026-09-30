@@ -13,6 +13,8 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 > custom answer like any other key. So the `[1]` / `[2]` / `[3]` cells the multi-option sketch below
 > draws are **not** painted — the always-painted hint row under it is. The approval prompt's `[a]` /
 > `[s]` / `[d]` / `[esc]` cells are unaffected: those shortcuts are live (`approvalMenu`).
+> *(2026-09-30: the multi-option sketch below is redrawn without the digit cells, its options
+> re-wrapped to the width they free, so it now shows what `askChoiceRows` paints.)*
 
 > Amended 2026-09-06 by `docs/plans/archived/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`:
 > the arrows are no longer the only way onto a row. **Both prompts take a POINTER**, on the terms
@@ -71,14 +73,13 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 │ How to continue with the implementation of the feature "The best.      │
 │ Feature in the world"?                                                 │ 
 │                                                                        │
-│ ❯ [1] Just do it all in one shot and commit once.                      │
+│ ❯ Just do it all in one shot and commit once.                          │
 │                                                                        │
-│ · [2] Commit each piece as you go and run make check after every       │
-│   commit.                                                              │
+│ · Commit each piece as you go and run make check after every commit.   │
 │                                                                        │
-│ · [3] Implement the config redesign first, commit it, then do the TUI  │
-│   part in a separate commit. Run make check after each. The config     │
-│   change is the riskier part — get it stable first.                    │
+│ · Implement the config redesign first, commit it, then do the TUI part │
+│   in a separate commit. Run make check after each. The config change   │
+│   is the riskier part — get it stable first.                           │
 │                                                                        │
 │  ↑↓ select · ⏎ send · type for a custom answer · esc cancel            │
 ╰────────────────────────────────────────────────────────────────────────╯

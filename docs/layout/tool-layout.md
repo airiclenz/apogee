@@ -397,6 +397,8 @@ its body whole while collapsed, and it appears only when the two differ.
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask user | the question | `answered` / `pending` | question + choices + the answer |
 | sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed/capped at its step cap/stopped by you/ended without a report` | task text + result summary |
+| fan_out | Fan-Out | the brief's first line (`task`) | the result's first line | the card's item rows, one delegation-shaped row per item run, each opening its run view |
+| workflow | Workflow | the action (`status` / `stop` / `message`) | the result's first line | — |
 | task_list | Task list (done/total) | — | — | the list, one row per task; collapsed = header only |
 | load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
@@ -436,6 +438,14 @@ Notes:
   its label. The result text is the model's and reaches it unchanged
   (ADR 0031) — the strip is a render-time act on a retained result, like
   every extractor's.
+- **2026-09-30** — the `fan_out` (ADR 0087) and `workflow` (ADR 0089) rows
+  above complete the table: it now lists all 36 built-in tools the build
+  carries (`KnownToolNames`). Both ship default-off, and both take the plain
+  presenter floor in `internal/tui/toolregistry.go` — a target, the result's
+  first line as the slot, no typed stat. `fan_out` heads a run like
+  `sub_agent` and never joins a list; its card paints the Workflow's item
+  rows (`workflowblock.go`), and its fold hides the card's own body, never
+  those rows.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.
