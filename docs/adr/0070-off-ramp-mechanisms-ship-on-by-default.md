@@ -1,9 +1,16 @@
 ---
-Status: accepted; rejected option C superseded by ADR 0071
+Status: superseded by ADR 0071 (the two off-ramps became Floor guards, on by default) and ADR 0076 (the Mechanism layer it amended is deleted)
 Amends: ADR 0006 (Bypass floor), ADR 0015 ("EnableMechanisms is the one enable path" — the empty-list engine floor is the one exception, stated below), ADR 0016 (manual-control rule unchanged), ADR 0045 §2 (a present `mechanisms:` map still replaces whole, above the floor)
 ---
 
 # Off-ramp Mechanisms ship on by default
+
+(Amended 2026-09-30: wholly superseded. [ADR 0071](0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
+made `tool_use_enforcer` and `empty_response_recovery` Floor guards — engine behaviour, on by
+default, each behind one file-only boolean key — and
+[ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) deleted the catalogue,
+the `off-ramp` Capability, `mechanisms:` and `withOffRampFloor`. The outcome this record wanted
+holds; the mechanism it used does not. Kept as the reasoning of its day.)
 
 ## Context
 

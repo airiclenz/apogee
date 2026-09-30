@@ -1,5 +1,5 @@
 ---
-Status: accepted; decision 4 and rejected alternative B superseded by ADR 0076
+Status: accepted; decision 4, rejected alternative B and the `FloorGuardEvent` consequence superseded by ADR 0076
 Supersedes: ADR 0009 for structural behaviour; ADR 0070 Option C
 Amends: ADR 0006, ADR 0014, ADR 0015 D1, ADR 0016 (2026-08-29 amendment)
 ---
@@ -213,7 +213,9 @@ rejected. Six booleans are cheap, and they keep the floor an opinion rather than
   `internal/probe`, serving `probe model`'s drift check alone; ADR 0021 §3 carries the amendment.)*
 - Guard firings surface as `domain.FloorGuardEvent`s keyed by config key, reaching every Driver;
   `MechanismFiredEvent` stays for lab hooks. A Driver that only knew about Mechanism firings would
-  otherwise have gone quiet the moment the catalogue emptied.
+  otherwise have gone quiet the moment the catalogue emptied. *(Amended 2026-09-30: both events
+  are gone; every firing, a Floor guard's included, is now one `domain.ReactionFiredEvent` keyed by
+  the same config key — ADR 0076 decision 13, `internal/domain/events.go`.)*
 - The catalogue document is archived with a per-row verdict — promoted, retired, or deferred —
   so the record of what was measured, and what was decided without measurement, survives the
   deletions.

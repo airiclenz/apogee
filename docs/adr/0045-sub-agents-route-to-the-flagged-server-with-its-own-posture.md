@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decisions 1-2 (the `sub-agents: true` flag and flagged-only posture) superseded by ADR 0066, the entry's `mechanisms:` key by ADR 0076
 ---
 
 # Sub-agents route to the flagged server, with its own posture
@@ -35,7 +35,10 @@ server**. All delegations at every depth route to it (a routed child's own deleg
 to the same place — identity once there). Absent flag = today's behavior, children share the
 parent's Upstream. Two flagged entries are a startup error from `ValidateServers` — a
 delegation routes to ONE server, so a second flag is a defect in the file, not a preference
-(the duplicate-name reasoning verbatim).
+(the duplicate-name reasoning verbatim). (Amended 2026-09-30: the flag is removed —
+[ADR 0066](0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md) decision 1 routes by the
+root `sub-agents-server:` key, and `internal/config/configmigrate.go` offers to migrate an old
+`sub-agents: true` line.)
 
 **2 — Posture rides the entry, and applies wherever the routing lands.** The flagged entry
 may carry `bypass:` and `mechanisms:` (the existing top-level shapes verbatim): "delegations
@@ -46,7 +49,11 @@ absent key inherits the parent's LIVE value at spawn, exactly today's rule. Both
 refused on an UNflagged entry (loud at startup, the negative-parallel-agents posture).
 Posture follows the ROUTING, not the parent's location: a parent that starts on — or
 `/server`-switches onto ([ADR 0028](0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)) —
-the flagged server changes nothing about what its children run with.
+the flagged server changes nothing about what its children run with. (Amended 2026-09-30:
+[ADR 0066](0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md) decision 2 makes
+`bypass:` valid on ANY entry, applying whenever that entry is the target. The `mechanisms:` key is
+gone with the Mechanism catalogue, [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md);
+`ServerEntry` keeps `bypass:` only.)
 
 **3 — A second heartbeat monitor observes the flagged server; its facts latch as the
 Delegation target.** Same beat machinery as the session's own monitor (ADR 0024's
@@ -142,7 +149,8 @@ the rest — the first debugging clue when routing surprises.
 ## Consequences
 
 - `ServerEntry` grows `sub-agents:`, `bypass:`, `mechanisms:`, and `context-window:`;
-  `ValidateServers` grows the two-flags and posture-on-unflagged refusals.
+  `ValidateServers` grows the two-flags and posture-on-unflagged refusals. (Amended 2026-09-30:
+  `sub-agents:`, `mechanisms:` and both refusals are gone, per ADR 0066 and ADR 0076.)
 - The engine gains the Delegation-target latch and its setter; `newChildAgent` consults it
   for upstream, window, profile, posture, and the **effort dialect** instead of inheriting all
   five from the parent. *Amended 2026-08-31 — this record originally said "all four", before

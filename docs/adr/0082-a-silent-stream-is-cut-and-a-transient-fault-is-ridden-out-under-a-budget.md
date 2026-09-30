@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; "a cancel retains nothing" and the rejected "retaining a cancelled child" superseded by ADR 0088 D2
 Amends: ADR 0039 decision 4 (a faulted child's result carries a continue line and a draft note, and the child is retained); ADR 0013's 2026-09-18 amendment (retention is the capped OR faulted child's); ADR 0046 decision 4's 2026-09-19 note (the `restreamSpent` latch is a per-Turn budget)
 ---
 
@@ -116,7 +116,10 @@ This record ratifies the owner's calls of 2026-09-20 (plan `2026-09-20 - 04`).
    a fold request, its fold the marker saying so, because the continuation task renders the fold
    under its head unconditionally; and a **cancel still unwinds the whole delegation and retains
    nothing** (`runSubAgent` D2) — a top-level Run is exempt too, its faults being the human's to
-   read.
+   read. (Amended 2026-09-30: a cancel no longer unwinds the delegation.
+   [ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D2 stops a running child as
+   `^x` does — folded, given a partial result and retained under its name — and keeps a finished
+   one's report; `internal/agent/subagent.go`.)
 
    The result the parent reads is still the ERROR result: its head still says
    `sub-agent faulted before finishing the delegated task: …` and why, and its body now carries,
@@ -161,6 +164,7 @@ This record ratifies the owner's calls of 2026-09-20 (plan `2026-09-20 - 04`).
   wrap-up that itself faults would delay the error result by another budget's worth of windows.
 - **Retaining a cancelled child**: ADR 0013 §5 and `runSubAgent` D2 — Esc unwinds the whole
   delegation; a finer cut inside the pool is `apogee-2un` Stage B and needs its own grill.
+  (Amended 2026-09-30: adopted since — ADR 0088 D2 closed Stage B and retains a cancelled child.)
 - **A per-server `request-extra:` passthrough** (pinning a provider behind an aggregator so the
   stall does not recur): filed as `apogee-glh`, a separate concern.
 - **Retrying at the HTTP layer instead** (`client.send`'s constants): the stall is past the headers,

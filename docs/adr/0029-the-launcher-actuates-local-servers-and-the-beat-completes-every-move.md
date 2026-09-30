@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 3's verbs and the top-level `llama-launcher:` key superseded by its own 2026-07-29 and 2026-08-07 amendments
 ---
 
 # The launcher actuates local servers, and the beat completes every move
@@ -197,6 +197,9 @@ local cross-repo dev via an untracked `go.work`.
   clone keeps working because the requirement is a pushed tag (decision 7).
 - The public config surface gains `llama-launcher:`; the command table gains `/load`,
   `/unload`, `/stop`; `tui.Options` gains the nil-degrading launcher seams. Minor bump.
+  (Amended 2026-09-30: per the amendments above, `/load` folded into `/model`, the other two are
+  `/unload-model` and `/stop-server` (`internal/tui/command.go`), and `llama-launcher:` lives on
+  the `servers:` entry, not at the top level.)
 - CI covers the seams with a fake launcher behind the closures; the end-to-end pass (real
   launcher, real llama.cpp) is owner-run on a same-machine host — recorded in the integration
   plan, the `APOGEE_LIVE_ENDPOINT` convention's sibling.

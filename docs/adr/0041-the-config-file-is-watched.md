@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 1's top-level `llama-launcher` sibling retired by ADR 0029's 2026-08-07 amendment
 ---
 
 # The config file is watched
@@ -74,7 +74,9 @@ and [ADR 0036](0036-the-servers-list-is-the-single-definition-and-the-last-switc
 
 **1. A top-level `editor` key names the command.** It sits beside `server` and `llama-launcher` as a
 top-level scalar, not under `ui:`: it does not describe how the pane looks, it names a program in the
-user's environment, which is the same thing `llama-launcher:` does. It is free text split on
+user's environment, which is the same thing `llama-launcher:` does. (Amended 2026-09-30: there is no
+top-level `llama-launcher:` key — ADR 0029's 2026-08-07 amendment moved it onto the `servers:` entry,
+and `internal/config/configmigrate.go` refuses the old spelling. `editor` stays top-level.) It is free text split on
 whitespace, so `editor: code -w` resolves to `["code", "-w"]` and `emacsclient -nw` keeps its flag —
 the same shape a `$EDITOR` carrying flags has always had. It is an ordinary editable string row with
 no validator (a command line is not a vocabulary apogee can check without running it — the posture

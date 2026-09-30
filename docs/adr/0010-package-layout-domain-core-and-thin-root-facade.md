@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; the Mechanism types, `NewMechanismRegistry` and `internal/mechanisms` superseded by ADR 0076
 ---
 
 # Package layout: a domain core, an engine, and a thin root facade
@@ -69,6 +69,12 @@ Three layers:
    unit-testable against fakes — the same access pattern the bench uses through the public API,
    the one the `Responder` seam already prefigures.
 
+   (Amended 2026-09-30: this list is the Phase-1 snapshot. `internal/mechanisms` and the
+   `Mechanism` types, registry and `NewMechanismRegistry` forwarder are deleted — the Reaction
+   core of [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) replaced
+   them — and some forty packages have joined since; `ls internal/` is the current list. The
+   invariant and the three layers stand.)
+
 3. **`apogee` (root)** — a **thin facade**: type aliases (`type Tool = domain.Tool`),
    re-exported consts and sentinel errors (`const ModePlan = domain.ModePlan`;
    `var ErrAutoUnavailable = domain.ErrAutoUnavailable`), and forwarding constructors (`New`,
@@ -131,5 +137,3 @@ definition sits where both the loop and the backends see it without an upward im
   additively extensible: a new `Event` variant is a new `domain` type + a new root alias (a
   minor bump), with the sealing (an unexported method on the `domain` interface) preserved
   through the alias.
-</content>
-</invoke>

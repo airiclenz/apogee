@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; the 2026-06-25 "v1.0.0 tagged, semver begins" amendment overtaken by the 2026-07-23 restart at v0.x
 ---
 
 # The agent loop is an embeddable library, driven by an external bench
@@ -95,6 +95,11 @@ disables them with deterministic stubs for v1 — see
   > public-surface additions reviewed at the freeze (§3 D7 of the Phase-3 detail plan): the
   > `Asker` host delegate (struct-typed for additive growth) and the `ModeAllowEdits` constant.
   > The changelog is tracked from this release in [`CHANGELOG.md`](../../CHANGELOG.md).
+
+  > (Amended 2026-09-30: that v1.x series was an accidental pre-production run. The project
+  > restarted at v0.x on 2026-07-23, the v1 tags were deleted, and `go.mod` carries
+  > `retract [v1.0.0, v1.8.0]` so `@latest` resolves to the current 0.x release. Versioning is
+  > deliberately 0.x while pre-production — `AGENTS.md`, "Distribution", and `VERSION`.)
 
 ## Amendment (2026-08-10) — hook mutation is index-addressed, and `Message.Content` is string-only
 

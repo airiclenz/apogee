@@ -136,7 +136,7 @@ handlers, each under its own class's posture; adding a blocking key never silent
 notifier beside it.
 
 > **Note (2026-09-12, stage 3 —
-> [plan `2026-09-09 - 01`](../plans/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md)).** This
+> [plan `2026-09-09 - 01`](../plans/archived/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md)).** This
 > decision's reading as shipped. *The redactor:* "the terminal tool's secret redaction" is
 > `tools.RedactSecrets(text, secretEnv)`, an output-side value redactor that replaces every non-empty
 > configured secret value (`Config.SecretEnvVars`, the `api-key-env` names of ADR 0047) with

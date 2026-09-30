@@ -58,7 +58,10 @@ nouns: neither is spelled "health check" or "poller", and `apogee probe` is unto
 answering" is precisely the observation the caller needs in order to say so, not a failure of the
 observation.
 
-**2. The cadence is a named constant, and the chain re-arms from the LANDED beat.** `Interval = 10
+**2. The cadence is a named constant, and the chain re-arms from the LANDED beat.** (Amended
+2026-09-30: the cadence is now `Interval = 2 * provider.DiscoveryTimeout`, about 60 s —
+`internal/heartbeat/heartbeat.go` records that it supersedes the ten seconds below. The
+constant-not-a-key rule stands.) `Interval = 10
 * time.Second` is a const in `internal/heartbeat`, deliberately **not** a config key: the owner
 fixed ten seconds, and a knob nobody turns is surface to maintain. The first beat fires immediately
 from `Model.Init` — startup discovery **is** that beat now — and the `beatMsg` fold schedules the

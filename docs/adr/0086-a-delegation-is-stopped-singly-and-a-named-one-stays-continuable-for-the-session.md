@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; D3's cancel row and the "cancel rolls that Turn back" consequence superseded by ADR 0088
 Amends: ADR 0013 §5 and its 2026-09-18 amendment (a stopped child returns a partial result; retention outlives the Exchange), ADR 0022's 2026-09-18 addendum (retention is session state), ADR 0063 D4 and its "What stays out" consequence (per-child stop; prompting a finished child)
 ---
 
@@ -131,7 +131,9 @@ here.
 
 - **ADR 0013 §5 gains a third ending.** A child either completes inside the parent's Turn, or a
   cancel rolls that Turn back with no partial result — or, from this ADR, the human stops it and
-  the parent receives a partial result and goes on. §5's coarse resume and "no snapshot mid-child"
+  the parent receives a partial result and goes on. (Amended 2026-09-30: a cancel no longer rolls
+  the Turn back; [ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) D1-D2 settle it
+  and stop each running child as a stop does.) §5's coarse resume and "no snapshot mid-child"
   are unchanged; its 2026-09-18 amendment's "engine memory that dies with the Exchange" no longer
   holds.
 - **ADR 0022's 2026-09-18 addendum is reversed.** "A `continue` after a resume is refused with

@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 8's catalogued-Mechanism route retired by ADR 0076
 ---
 
 # The daemon is an in-repo subcommand over a declarative trigger-action file
@@ -92,7 +92,11 @@ for a turnkey daemon, accepting three OS-specific surfaces into v1 testing.
 named steps: first a **payload-discarded** webhook (localhost-bound listener, bearer token,
 fires a named entry, body dropped — no model-visible injection, so no Mechanism obligation),
 then payload injection, which is model-visible content and therefore lands as a catalogued
-Mechanism per ADR 0031 invariant 4, never as daemon plumbing.
+Mechanism per ADR 0031 invariant 4, never as daemon plumbing. (Amended 2026-09-30: the Mechanism
+catalogue is gone — [ADR 0071](0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
+froze it and [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) deleted it —
+so there is no catalogued route to land in. ADR 0031 invariant 4 is the rule that still binds
+payload injection; the daemon ships no webhook trigger yet.)
 
 **9. Contention: accepted in v1; the slot broker is the fix.** The daemon sends to the
 configured endpoint unconditionally; the server queues; interactive latency may dip during a

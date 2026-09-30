@@ -201,7 +201,7 @@ own initiative when the backend is incapable — that is the "unsupervised *and*
 ADR and ADR 0004 exist to close. The only thing that ever loosens is a user act; this amendment adds
 a smaller-scoped way to express one and a shorter route to making it, and nothing else.
 
-Implementation lives in [`docs/plans/auto-confinement-degradation-plan.md`](../plans/auto-confinement-degradation-plan.md);
+Implementation lives in [`docs/plans/auto-confinement-degradation-plan.md`](../plans/archived/auto-confinement-degradation-plan.md);
 CONTEXT.md carries the term **Host acknowledgement**.
 
 ## Amendment (2026-07-25) — url-safety is vouched-for by construction; an unvouched network tool gates
@@ -254,7 +254,7 @@ remains out of scope by this ADR's own reasoning (*"a subprocess can already `cu
 host"*). One security property generalizes as a side effect: the host-only, key-scrubbed failure
 message that was `web_search`'s private discipline is now **every** network tool's, by construction.
 
-Implementation lives in [`docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`](../plans/2026-07-25%20-%2000%20-%20url-safety-choke-point-plan.md);
+Implementation lives in [`docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`](../plans/archived/2026-07-25%20-%2000%20-%20url-safety-choke-point-plan.md);
 the class row and gate reason are in
 [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
 and CONTEXT.md's **Confinement** and **Safety guardrails** entries carry the prose.
@@ -366,7 +366,7 @@ read-only subprocess tool cannot claim the class — the same second-class stand
 network axes already have (amendment 2026-07-25(c)), and the safe direction: an embedder's tool
 gates rather than running unattended.
 
-Implementation lives in [`docs/plans/2026-09-06 - 04 - read-only-subprocess-class-plan.md`](../plans/2026-09-06%20-%2004%20-%20read-only-subprocess-class-plan.md);
+Implementation lives in [`docs/plans/2026-09-06 - 04 - read-only-subprocess-class-plan.md`](../plans/archived/2026-09-06%20-%2004%20-%20read-only-subprocess-class-plan.md);
 the class definition, the ladder row and the dated record are in
 [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
 and CONTEXT.md's **Agent mode** and **Confinement** entries carry the prose.
@@ -424,7 +424,7 @@ proposes, and drafts into the one directory nothing else reads. Every sentence i
 contract, CONTEXT.md and the manual that says Plan is read-only or writes nothing is to be read
 with that qualification; the ones this amendment could reach carry it or a dated note.
 
-Implementation lives in [`docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md`](../plans/2026-09-14%20-%2001%20-%20queued-message-preemption-and-scratch-in-lower-modes-plan.md);
+Implementation lives in [`docs/plans/2026-09-14 - 01 - queued-message-preemption-and-scratch-in-lower-modes-plan.md`](../plans/archived/2026-09-14%20-%2001%20-%20queued-message-preemption-and-scratch-in-lower-modes-plan.md);
 the ladder row and the qualified legend are in
 [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
 the announcing side is ADR 0056 D3 and ADR 0023 §6 (each with a dated reversal note), and

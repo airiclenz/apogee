@@ -1,5 +1,5 @@
 ---
-Status: accepted; decision 5's session-scoped half superseded by ADR 0036
+Status: accepted; decision 5's session-scoped half superseded by ADR 0036; decision 3's validated Mechanism set retired by ADR 0076 A9
 ---
 
 # A server switch rehomes the session, and the first beat completes it
@@ -15,7 +15,8 @@ unblocked… `Rebind` deliberately never touches `Endpoint`, and `errMissingEndp
 
 So apogee could follow a model the *server* changed, but a human could not change one. Switching
 model meant restarting the server from a launcher beside apogee and waiting ten seconds for the
-heartbeat to notice; switching **server** meant quitting apogee, editing `endpoint:` in
+heartbeat to notice *(Amended 2026-09-30: the cadence is now `heartbeat.Interval`, twice
+`provider.DiscoveryTimeout` — 60 s — in `internal/heartbeat/heartbeat.go`)*; switching **server** meant quitting apogee, editing `endpoint:` in
 `config.yaml`, and starting a new session — losing the conversation, the approvals and the mode to
 a change that describes none of them. `TODO.md`'s "[P1] Server / model switching" had been parked
 on exactly that gap since before the heartbeat existed.
@@ -66,7 +67,10 @@ human, moved the binding away from the config'd model.
 section below: the spec grew the two token bounds the new entry PINS, which are config facts rather
 than discovered ones.)* It guesses **nothing** about the new
 server: its model, window, system-prompt template and validated Mechanism set are facts only that
-server can report, so the heartbeat discovers them and the ordinary `Rebind` applies them — one
+server can report *(Amended 2026-09-30: the Mechanism registry and Validated sets are gone —
+[ADR 0071](0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),
+[ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) A9 — so there is no
+set left to re-resolve)*, so the heartbeat discovers them and the ordinary `Rebind` applies them — one
 code path with the cold start again, one Interval later at worst, and immediately in practice
 because the fold fires the first beat at once. `errNoModelBound` guards `Submit` in the gap exactly
 as it does before a session's first bind, and `blockedUpstream` refuses the three Exchange-opening

@@ -1,5 +1,5 @@
 ---
-Status: accepted; §8's "no compiled-in fallback" rule and its rejected alternative superseded by ADR 0064, §1's key count by ADR 0067
+Status: accepted; §8's "no compiled-in fallback" rule and its rejected alternative superseded by ADR 0064, §1's key count by ADR 0067, §2's Validated-set tie by ADR 0076 A9
 ---
 
 # The system prompt is a configured template, rendered per request
@@ -55,7 +55,9 @@ config across every project it is used in.
 **2. A matching per-model entry REPLACES the global prompt; a non-matching entry is inert.**
 Matching is exact string equality against the **resolved** model name — the label discovery or
 `--model` settled on, the same one the Validated sets key on
-([ADR 0016](0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)) — so selection can
+([ADR 0016](0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)) *(Amended 2026-09-30:
+Validated sets are deleted, [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+A9; the matching rule stands on its own)* — so selection can
 only happen in the composition root *after* model resolution, and `resolveSystemPrompt` is called
 from `runRoot` for that reason. Replacement is **whole-entry**: an entry setting only
 `system-prompt-file` does not inherit the global `system-prompt-text`, because a prompt is one

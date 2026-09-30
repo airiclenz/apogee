@@ -1,5 +1,5 @@
 ---
-Status: accepted; decision 6's editor ladder and diff-on-exit trigger superseded by ADR 0041
+Status: accepted; decision 6's editor ladder and diff-on-exit trigger superseded by ADR 0041, its key list by ADR 0076
 ---
 
 # Every settings edit applies to the running session
@@ -156,6 +156,12 @@ ADR 0035 decision 3**, whose read-only pointer is deleted everywhere.
   file; a clean parse is diffed key-by-key against the previous config and each changed key is applied
   through the same dispatcher an in-pane edit uses, with per-key notes and errors landing on their own
   rows.
+  (Amended 2026-09-30: the list has moved on. `mechanisms` and `validated-sets` are deleted
+  ([ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) A9) and the global `model-profile`
+  retired in favour of `model-profiles`; the structured rows today are `servers`, `system-prompt-models`,
+  `system-prompt-layers`, `unconfined-hosts`, `mcp-servers`, `reactions` and `model-profiles` —
+  the `KindStructured` rows of `internal/config/registry.go`. [ADR 0041](0041-the-config-file-is-watched.md)
+  replaced the editor ladder.)
 
 The list/map editor ADR 0035 declined is still declined — this record does not build one. It routes
 around it: the user already has a text editor they trust, the file is already the documented shape
@@ -282,7 +288,7 @@ never rewrites what it just read.
 ## Amendment (2026-08-24) — the promise reaches the runs a session raises
 
 This record's promise stopped at the session's own Agent. A **Firing** raised INSIDE a session — a
-Schedule due while the human works ([ADR 0033](0033-a-schedule-is-a-cycle-and-a-firing-is-one-headless-run.md))
+Schedule due while the human works ([ADR 0033](0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md))
 — is a second, short-lived Agent, and its `apogee.Config` was built by copying the one the session
 BOOTED with and overriding a handful of fields. Everything not overridden was therefore the launch
 snapshot: `tools.disabled`, the two `url-safety:` host lists, `web-search-endpoint`, `bypass`,

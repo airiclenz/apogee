@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; the Mechanism mechanics (Capability switch, inert Library) superseded by ADR 0076 decision 9
 ---
 
 # Bypass mode is the honest "Mechanisms-off" floor
@@ -33,6 +33,13 @@ off while leaving the agent's structure intact:
   *functional*;
 - Budget, Compaction, tool dispatch, and the rest of the loop **still run**.
 
+(Amended 2026-09-30: Mechanisms, the Library and the `Capability` field are gone. The off-ramps
+became Floor guards ([ADR 0071](0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)),
+and Bypass now turns off every `advise` and `shape` Reaction of user or bench-armed origin, plus
+the engine's context-fill notice; the seven Floor guards, `observe` and `gate` stay on
+([ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) decision 9,
+`internal/agent/reactions.go`). The floor principle and the control-arm role below stand.)
+
 Bypass is **orthogonal to Agent mode** (Plan / Ask-Before / Auto): any mode can run with or
 without Bypass.
 
@@ -52,7 +59,11 @@ judged on the **subpopulation where it fires** (see ADR 0009).
   `response-repair`) is what Bypass switches on: Bypass = "disable proactive-nudge +
   response-repair, keep off-ramp." The descriptor is the single source of truth for what
   Bypass turns off.
+  (Amended 2026-09-30: no descriptor or `Capability` field exists any more; the Reaction's
+  class decides, per ADR 0076 decision 9.)
 - The Library must support an **inert** state distinct from "empty" — present but
   non-observing — so a Bypass run never pollutes the store.
+  (Amended 2026-09-30: the Library retired with the Mechanism surface; there is no store to
+  keep inert.)
 - "Without Apogee" in the hard constraint is reworded throughout to mean **Bypass**, not the
   naked model (see `CONTEXT.md`).

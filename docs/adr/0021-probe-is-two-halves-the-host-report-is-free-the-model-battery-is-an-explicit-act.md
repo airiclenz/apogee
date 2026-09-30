@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; §4's Validated-set promotion superseded by ADR 0076 A9
 ---
 
 # `apogee probe` is two halves: the host report is free, the model battery is an explicit act
@@ -130,7 +130,11 @@ The record's shape and posture:
   and `internal/session` already take for a private per-model record.
 
 **4. Writing a Medium fingerprint switches Validated-set automatism ON for that model — say so,
-out loud, at the moment it happens.** This is the consequence that makes `probe model` an act
+out loud, at the moment it happens.** (Amended 2026-09-30: Validated sets are gone
+([ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) A9), so a probe
+record promotes nothing and nothing auto-applies. What stands of §4 is the posture: `probe model`
+says it writes, `--no-save` writes nothing, and the printed path is the undo
+(`cmd/apogee/probemodel.go`). `cmd/apogee/validatedsets.go` no longer exists.) This is the consequence that makes `probe model` an act
 rather than a report. Under ADR 0016 §5 a model at Low confidence gets an **offer** (the
 `offerNotice` paste-the-alias line, `cmd/apogee/validatedsets.go:104`); the same model at Medium
 gets the set **auto-applied**. So **running `apogee probe model` is the act that promotes a

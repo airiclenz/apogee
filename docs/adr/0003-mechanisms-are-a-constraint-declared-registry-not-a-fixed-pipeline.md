@@ -99,5 +99,5 @@ behaviour changes; the enable surface (`Config.EnableMechanisms`, `CataloguedMec
 registration.
 
 Implementation lives in
-[`docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`](../plans/2026-07-25%20-%2001%20-%20mechanism-registration-collapse-plan.md);
+[`docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`](../plans/archived/2026-07-25%20-%2001%20-%20mechanism-registration-collapse-plan.md);
 CONTEXT.md's **Mechanism descriptor** entry carries the prose.

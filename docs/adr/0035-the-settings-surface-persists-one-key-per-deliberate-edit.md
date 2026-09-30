@@ -1,5 +1,5 @@
 ---
-Status: accepted; decision 9 superseded by ADR 0037
+Status: accepted; decision 9 superseded by ADR 0037; decision 4's registry home moved by ADR 0043
 ---
 
 # The settings surface persists one key per deliberate edit
@@ -80,7 +80,9 @@ text) and shipping a half-built one over a file the user hand-edits is worse tha
 file.
 
 **4. A declarative key registry is the screen's source of truth, and the schema's.** One table in
-`cmd/apogee` carries a row per config key — path, kind, default, env-var and flag names,
+`cmd/apogee` *(amended 2026-09-30: now `KeyRegistry` in `internal/config/registry.go`, moved by
+[ADR 0043](0043-files-split-by-concern-and-config-gets-a-package.md) decision 3; its restart-required
+column retired with ADR 0037 decision 8)* carries a row per config key — path, kind, default, env-var and flag names,
 global-only, restart-required, editability, masking, one-line description — and **both** the pane
 and `resolveSettings`' multi-source precedence read their metadata from it. A reflection guard
 asserts a **bijection between registry paths and `fileConfig`'s yaml tags** (structured rows

@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 5's restart gate and decision 7's read-only `servers` row and no-rescan rule superseded by ADR 0037 and ADR 0041; decision 1's entry shape widened by ADR 0078
 ---
 
 # The servers list is the single definition, and the last switch is the startup choice
@@ -58,6 +58,9 @@ schema** — they described one server in a shape the list already describes bet
 that survives them is the one ADR 0028 D5 already gave three jobs: `name` labels the picker row, is
 the `/server` argument, and **is** the footer's host alias. The standalone `host-alias:` key
 therefore has nothing left to do; the alias of the server you are on is the name you call it.
+(Amended 2026-09-30: the entry has grown well past these four fields — among them `wire:`,
+[ADR 0078](0078-a-servers-wire-is-a-per-entry-codec-inside-the-provider-client.md); `ServerEntry`
+in `internal/config/config.go` is the current shape.)
 
 What does not change: models are still **discovered**, never declared — the heartbeat (and, on a
 host that has one, the launcher linkage) reports what a server actually serves, `model` in an entry
@@ -109,7 +112,9 @@ send to file surgery, and the file is not wrong so much as out of date.
 to their parse sites by `TestRegistryEnumValuesMatchParseSites`, and server names are whatever the
 user's file says. Validity is therefore checked **at selection time**, where decision 4 already
 defines what an unmatched name does. The key is editable and restart-required, and it rides the
-ordinary flag > env > file precedence like `mode` and `bypass`.
+ordinary flag > env > file precedence like `mode` and `bypass`. (Amended 2026-09-30: no key is
+restart-gated any more — [ADR 0037](0037-every-settings-edit-applies-to-the-running-session.md)
+decision 8 retired `RestartRequired`.)
 
 **6. Raw overrides build an EPHEMERAL unnamed startup entry; `--server` selects a named one.**
 `--endpoint` / `APOGEE_ENDPOINT` do not edit a config key any more — they construct an unnamed
@@ -150,7 +155,11 @@ override → the TUI starts pre-bound and opens the `/settings` pane, with a sta
 structured add-form is the list-editor problem that ADR was right to decline, and shipping a
 half-built one over the user's hand-edited file is worse than pointing at the file. A live rescan of
 `servers:` mid-session is out of scope for the same reason the pointer says *restart*: the resolved
-list is frozen at wire time, and pretending otherwise is a second source of truth.
+list is frozen at wire time, and pretending otherwise is a second source of truth. (Amended
+2026-09-30: [ADR 0037](0037-every-settings-edit-applies-to-the-running-session.md) decision 6 deleted
+the read-only pointer — the `servers` row opens the editor — and
+[ADR 0041](0041-the-config-file-is-watched.md) watches the file, so an edited list is re-read and
+installed mid-session (`reloadServers` in `cmd/apogee/wire_settings.go`).)
 
 **8. Only the TUI gets the pre-bound flows; every other Driver gets a determinate error.**
 `apogee headless`, `probe`, `probe model` and bench paths cannot open a picker and must not block on

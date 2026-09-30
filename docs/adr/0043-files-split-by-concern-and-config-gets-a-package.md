@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 3's `configwatch.go` placement overtaken by `internal/filewatch`
 ---
 
 # Files split by concern, and the config cluster gets a package
@@ -83,7 +83,9 @@ binary.**
 
 `config.go`, `configwrite.go`, `configmigrate.go`, `configwatch.go`, the key registry
 (`registry.go`) and the `options` struct move to `internal/config` as a package with a name that
-answers the findability question directly. `settingsrows.go` and `settingsedit.go` do **not** move.
+answers the findability question directly. (Amended 2026-09-30: `configwatch.go` did not land in
+`internal/config`. The stat-poll watcher is its own package, `internal/filewatch`, which knows only
+that a file changed; parsing, the diff and the apply stay in `cmd/apogee`.) `settingsrows.go` and `settingsedit.go` do **not** move.
 Their file headers already state the reason and it survives the move unchanged: the schema, the
 precedence that decided which source won, the config file's own spelling of a value, the masking of
 a secret, and the `$EDITOR` round trip are the **binary's** knowledge, and the renderer that draws

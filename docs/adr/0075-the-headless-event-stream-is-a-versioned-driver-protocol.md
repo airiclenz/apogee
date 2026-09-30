@@ -78,7 +78,8 @@ line kinds: `token`, `reasoning`, `stream_reset`, `message`, `tool_call`, `tool_
 `floor_guard`, `error`, `prune`, `usage`, `audit`, plus the two frames. (Amended 2026-09-16: twenty
 kinds today, at `v:2` — `mechanism_fired` and `floor_guard` folded into the one `reaction_fired`
 kind (ADR 0076 D1, the bump), and `ref_clipped` and `seam_closed` were added. Amended 2026-09-24:
-twenty-one, `upstream_attempt` added within `v:2` (ADR 0085); the list is
+twenty-one, `upstream_attempt` added within `v:2` (ADR 0085). Amended 2026-09-30: twenty-two,
+`workflow_phase` added within `v:2`; the list is
 `Kinds()` in `internal/eventjson/encode.go`.) The case difference is the
 signal: a Hooks name and an Event-line name for the same moment are *not* the same moment —
 `turn-finished` is Depth-0 only, `turn` is every depth. `error` collides benignly and means the same
@@ -170,7 +171,10 @@ Two consequences of blocking are owned here rather than discovered later:
   **outermost** sink wrapper — never inside `hooks.Runner`, whose `Report` callback is documented
   must-not-block (`internal/hooks/runner.go:66-70`).
 
-**10. Versioned `v:1`, per line, additive within it.** Every line carries the version, because JSONL
+**10. Versioned `v:1`, per line, additive within it.** (Amended 2026-09-30: the version is `v:2`
+since the 2026-09-16 bump recorded under decision 4 — ADR 0076 D1; `lineVersion` in
+`internal/eventjson/writer.go`. The rule below is unchanged; read `v:1` as the current version
+wherever it appears in this decision and decision 14.) Every line carries the version, because JSONL
 lines are tailed, split, grepped and merged across runs — a version living only in a frame is invisible
 in all four cases. New line kinds and new `data` members may appear in any release; a consumer must
 ignore unknown names, members and enum values (`StepStatus`, `ApprovalPhase` and `SubAgentPhase` are

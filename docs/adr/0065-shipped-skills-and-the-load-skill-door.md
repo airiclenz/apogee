@@ -42,7 +42,8 @@ Decision 4's B2 deferral only**; B1 stays deferred on its own terms.
 
 ## Decision
 
-**1. Four skills ship embedded in the binary, as the LOWEST-priority source.** `debugging`,
+**1. Four skills ship embedded in the binary, as the LOWEST-priority source.** (Amended
+2026-09-30: a fifth, `audit`, ships too — five in all.) `debugging`,
 `planning`, `code-review`, `commit-hygiene` — each a directory of bytes compiled in with
 `go:embed`, the built-in color schemes' pattern
 ([ADR 0040](0040-color-schemes-are-embedded-roles-with-user-shadowing.md) §1) — merged into the

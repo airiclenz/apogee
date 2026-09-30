@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 1's OFF default superseded by its own 2026-09-16 amendment (default ON)
 ---
 
 # apogee remembers the model choice per server
@@ -40,7 +40,9 @@ file mean two things, and the first casualty is the human's own recipe list.
 made on — the wire model id into a plain entry's existing `model:` key, the Launch profile name into a
 new per-entry `launch-profile:` pointer on a launcher-fronted one — gated by a single top-level
 `remember-model` toggle that is OFF by default, and restores the profile at the next interactive
-start-up through the existing actuation latch, yielding to anything already serving.**
+start-up through the existing actuation latch, yielding to anything already serving.** (Amended
+2026-09-30: the toggle now defaults ON — see decision 1's note and the 2026-09-16 Amendment below;
+`remember-model` in `internal/config/registry.go`.)
 
 **1 — One toggle, off by default, gating both halves.** *(Amended 2026-09-16 — the default is now ON,
 matching the starter template's active `remember-model: true` line; see the Amendment section

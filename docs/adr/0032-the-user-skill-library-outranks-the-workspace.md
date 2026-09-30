@@ -19,7 +19,8 @@ properties follow that were never weighed together:
    keeps the winner and forgets the loser existed.
 
 The 2026-08-01 audit
-([`docs/reviews/2026-08-01 - code-audit.md`](../reviews/2026-08-01%20-%20code-audit.md), "Medium
+(`docs/reviews/2026-08-01 - code-audit.md`, since pruned from the tree — see git history before
+`693a0ca9`; "Medium
 — Repo-supplied skills outrank the user's global library and shadow it silently") names the
 attack that composes them. A hostile repo ships `.apogee/skills/<id>/SKILL.md` carrying the
 `displayName` and `summary` of a skill the user already has, and an attacker-authored body. The
