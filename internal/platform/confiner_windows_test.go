@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -863,6 +865,96 @@ func restoreFileDACL(t *testing.T, path, sddl string) {
 	}
 }
 
+// requireLabelWriteDenied checks the precondition of a test that plants a DACL withholding
+// WRITE_OWNER so that a label write on path is refused: it attempts that very write (sddl,
+// named by operation) itself. Refused, it returns and the test runs unchanged, so a later
+// failure stays a real one. Granted — some hosts let the write through anyway — the host
+// cannot produce the denial under test: it puts path's prior label back and skips, naming
+// the token facts that explain the grant. A failed prior read or restore is fatal, never a
+// skip, because it would leave the path in a state the test did not create.
+func requireLabelWriteDenied(t *testing.T, path, sddl, operation string) {
+	t.Helper()
+	prior, err := winlabel.ReadSDDL(path)
+	if err != nil {
+		t.Fatalf("read the label of %q before probing the %s: %v", path, operation, err)
+	}
+	if err := winlabel.SetSDDL(path, sddl); err != nil {
+		return
+	}
+
+	// ReadSDDL reports "no label" as "", which SetSDDL cannot write back (it carries no
+	// SACL); "S:" is the clear spelling winlabel itself writes.
+	restore := prior
+	if restore == "" {
+		restore = "S:"
+	}
+	if err := winlabel.SetSDDL(path, restore); err != nil {
+		t.Fatalf("the %s on %q was granted, and restoring its prior label %q failed: %v", operation, path, prior, err)
+	}
+	if got, err := winlabel.ReadSDDL(path); err != nil || got != prior {
+		t.Fatalf("label of %q = %q (err %v) after restoring it, want the prior %q", path, got, err, prior)
+	}
+	t.Skipf("the %s on %q succeeded despite the planted DACL withholding WRITE_OWNER, so this host "+
+		"cannot produce the denial under test (token elevated: %s; %s)",
+		operation, path, tokenElevation(), labelPrivilegeStates())
+}
+
+// tokenElevation reports whether this process's token is UAC-elevated, as "true" or
+// "false", or "unknown" when the token cannot be queried.
+func tokenElevation() string {
+	var elevation, returned uint32
+	err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), windows.TokenElevation,
+		(*byte)(unsafe.Pointer(&elevation)), uint32(unsafe.Sizeof(elevation)), &returned)
+	if err != nil {
+		return "unknown"
+	}
+	return strconv.FormatBool(elevation != 0)
+}
+
+// labelPrivilegeStates reports, for each privilege that can let a label write through a DACL
+// withholding WRITE_OWNER, whether this process's token has it enabled — "unknown" where the
+// token or the privilege name cannot be resolved.
+func labelPrivilegeStates() string {
+	names := []string{"SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeSecurityPrivilege"}
+	enabled, ok := enabledPrivileges()
+	states := make([]string, 0, len(names))
+	for _, name := range names {
+		state := "unknown"
+		var luid windows.LUID
+		nameW, err := windows.UTF16PtrFromString(name)
+		if ok && err == nil && windows.LookupPrivilegeValue(nil, nameW, &luid) == nil {
+			state = "not enabled"
+			if enabled[luid] {
+				state = "enabled"
+			}
+		}
+		states = append(states, name+" "+state)
+	}
+	return strings.Join(states, ", ")
+}
+
+// enabledPrivileges returns the LUIDs of the privileges enabled in this process's token, and
+// false when the token cannot be queried.
+func enabledPrivileges() (map[windows.LUID]bool, bool) {
+	token := windows.GetCurrentProcessToken()
+	var size uint32
+	_ = windows.GetTokenInformation(token, windows.TokenPrivileges, nil, 0, &size)
+	if size == 0 {
+		return nil, false
+	}
+	buf := make([]byte, size)
+	if err := windows.GetTokenInformation(token, windows.TokenPrivileges, &buf[0], size, &size); err != nil {
+		return nil, false
+	}
+	enabled := make(map[windows.LUID]bool)
+	for _, privilege := range (*windows.Tokenprivileges)(unsafe.Pointer(&buf[0])).AllPrivileges() {
+		if privilege.Attributes&windows.SE_PRIVILEGE_ENABLED != 0 {
+			enabled[privilege.Luid] = true
+		}
+	}
+	return enabled, true
+}
+
 func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
 	// Half (a) of the verified-revert item: teardown may retire the journal only when every
 	// label it describes is verifiably gone. A descendant whose clear fails at Close — here a
@@ -901,6 +993,7 @@ func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
 	// clear's label write — and only that write — is denied by the kernel.
 	setFileDACL(t, child, "D:P(A;;0x170080;;;OW)")
 	t.Cleanup(func() { restoreFileDACL(t, child, "D:(A;;FA;;;WD)") })
+	requireLabelWriteDenied(t, child, "S:", "clear of apogee's Low label")
 
 	err := c.Close()
 	closed = true
@@ -1008,6 +1101,7 @@ func TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry(t *testing.T) {
 	// the named-object API put the DACL back afterwards.
 	setFileDACL(t, ws, "D:P(A;;0x170080;;;OW)")
 	t.Cleanup(func() { setFileDACL(t, ws, "D:(A;;FA;;;WD)") })
+	requireLabelWriteDenied(t, ws, "S:(ML;;NW;;;LW)", "Low-label write")
 
 	cmd := exec.Command("cmd", "/c", "echo hi")
 	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ws}, cmd)

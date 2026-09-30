@@ -61,7 +61,10 @@ docs/adr/0056-terminal-fail-fast-and-session-scratch.md — decision 2
 
 **Commit:** `fix(tools): word confinement denial labels without asserting a blocked write`
 
-## 2. Windows label-denial tests check their own precondition
+## 2. Windows label-denial tests check their own precondition — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): .beads/issues.jsonl is in FILES because `bd comments add apogee-windows-confiner-test-failures ...` (the item's required owner note) rewrites the tracker export; the ticket stays OPEN.
+NOTES (2026-09-30): elevation is read via GetTokenInformation(TokenElevation) rather than Token.IsElevated, which folds a query failure into false; the goal requires failing soft to "unknown". The helper also re-reads the label after the restore and calls t.Fatalf on a mismatch.
 
 **What:** `TestWindowsUnclearableDescendantKeepsTheJournal` and `TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry` in `internal/platform/confiner_windows_test.go` fail on the owner's windows/arm64 box (already at `ea51204c`); both assume the planted DACL `D:P(A;;0x170080;;;OW)` makes the label write fail, which that host apparently grants. Test-only change; CI (windows-latest) must keep running both tests in full.
 
