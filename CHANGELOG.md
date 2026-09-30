@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.24.2] — 2026-09-30
+
 - **Fixed:** release builds now reach an LLM server named by an mDNS `.local` host (for example `http://Apollo-II.local:1111`). When the system resolver cannot find a `.local` name, apogee asks the local network itself with a one-shot mDNS query and connects to the address that answers. Every other host name, and a `.local` name the system already resolves, behaves exactly as before. A host name that resolves nowhere is now reported as such instead of a bare `lookup … no such host` behind "server offline": `cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts`.
 
 - **Confinement denial labels no longer blame a write.** A confined command refused by the sandbox (for example `ps` failing with "Operation not permitted") was told "writes are allowed only inside <roots>", pointing the model at a write that never happened. Both labels now say only that the sandbox refused an operation (or that an operation was denied and the command stopped), then state the sandbox's rules: writes are allowed only inside the named roots, and setuid programs run without their privileges.
