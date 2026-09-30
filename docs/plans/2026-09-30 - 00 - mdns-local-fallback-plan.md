@@ -102,7 +102,7 @@ cmd/apogee/wire_firing.go — routing.Beat.Failure refusal
 - `GOMEMLIMIT=2GiB go test -count=1 -run Beat ./internal/heartbeat/`
 **Commit:** `fix(heartbeat): report an unresolved endpoint host by name`
 
-## 4. Document `.local` endpoints and record the decision
+## 4. Document `.local` endpoints and record the decision — ✅ DONE (2026-09-30)
 
 **What:**
 **Goal:** the manual says `.local` endpoints work in release builds via apogee's own mDNS fallback and what the unresolved-host refusal means; an ADR records the in-process resolution decision.

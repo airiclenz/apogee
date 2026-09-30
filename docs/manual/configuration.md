@@ -1349,6 +1349,21 @@ rather than how the server itself behaves — further down this section — and 
 is `request-extra`, fields added to every request body sent to that server
 ([below](#extra-fields-in-every-request--request-extra)).
 
+**A `.local` endpoint works in every build.** An `endpoint` may name a host by its
+mDNS `.local` name — `http://Apollo-II.local:1111` — and the release binaries reach it
+as a source build does. apogee asks the system resolver first; only when that fails for a
+name ending in `.local` does it send one mDNS query of its own to the local network
+(IPv4, waiting at most a second) and connect to the address the server announces. Every
+other name, and every `.local` name the system resolves, is looked up exactly as before.
+When neither answers, the session says it is the **name** that failed rather than
+reporting a bare lookup error:
+
+    cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts
+
+The cure is the one it names: put the server's IP address in `endpoint`, or give the
+name an `/etc/hosts` line. See
+[ADR 0091](../adr/0091-endpoint-local-names-resolve-over-mdns-in-process.md).
+
 **A `model:` is used as written.** When an entry names a model, that id is the
 model apogee asks for, whether or not the server's `/v1/models` lists it. A listed
 id takes its context window from the listing; an id with a `:` suffix the server
