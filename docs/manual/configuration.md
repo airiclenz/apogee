@@ -1759,8 +1759,9 @@ source exists to protect. So a wrapper script of your own belongs outside the wo
 absolute path. `api-key-env:` names an
 environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
 from the environment apogee itself was started in — and dropped from the environment every
-tool subprocess and every reaction command is handed, so a command the model chose cannot
-read that key back out. That scrub is one list, whichever server the session is on: the
+tool subprocess and every `advise:` or `gate:` reaction command is handed, so a command the model chose cannot
+read that key back out. A `run:` reaction command is your own notifier, its output never reaches
+the model, and it inherits the environment whole. That scrub is one list, whichever server the session is on: the
 union of every entry's `api-key-env:` name, every webhook reaction's `headers-env:` names and
 `APOGEE_API_KEY`. A stdio MCP server is the exception — it inherits apogee's full environment
 unless its entry sets `env-allowlist:`. Both resolve the first time this session actually
