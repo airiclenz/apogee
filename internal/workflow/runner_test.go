@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -189,6 +191,128 @@ func TestRunnerRedoesItemsWhenThePromptFileChanges(t *testing.T) {
 		if got := len(spawner.specsFor(label)); got != 2 {
 			t.Errorf("item %q spawned %d times over three runs, want 2 (first run and after the edit)", label, got)
 		}
+	}
+}
+
+// schemeKey is the key scheme keySchemes[index] gives the item labelled label of promptPlan's stage
+// over prompts, failing the test on error.
+func schemeKey(t *testing.T, index int, label string, prompts fstest.MapFS) string {
+	t.Helper()
+	key, err := keySchemes[index].key(keyInput{
+		stage: promptPlan(label).Stages[0], item: Item{Label: label, Units: []string{label}},
+		prompts: prompts, workspace: fstest.MapFS{},
+	})
+	if err != nil {
+		t.Fatalf("scheme %d key: %v", keySchemes[index].id, err)
+	}
+	return key
+}
+
+// rewriteItemLine sets the key status.json's "find" line records for its one item: to key, or
+// drops the item lines when key is empty — the line an older build's run left behind.
+func rewriteItemLine(t *testing.T, store *Store, id, key string) {
+	t.Helper()
+	status, err := store.ReadStatus(id)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if key == "" {
+		status.Stages[0].Items = nil
+	} else {
+		status.Stages[0].Items[0].Key = key
+	}
+	if err := store.WriteStatus(status); err != nil {
+		t.Fatalf("WriteStatus: %v", err)
+	}
+}
+
+// moveItemFolder renames the item folder items/<from>/ of the workflow in dir to items/<to>/.
+func moveItemFolder(t *testing.T, dir, from, to string) {
+	t.Helper()
+	if err := os.Rename(filepath.Join(dir, itemsDirName, from), filepath.Join(dir, itemsDirName, to)); err != nil {
+		t.Fatalf("move item folder: %v", err)
+	}
+}
+
+func TestRunnerAdoptsAReceiptAnOlderKeySchemeStored(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// priorLine is the key the folder's status.json records for the item: "scheme1", "scheme2",
+		// or "" for no line at all.
+		priorLine string
+		// unfinishedCurrent leaves a transcript-only folder under the current key, as a run cut
+		// off on the new build does.
+		unfinishedCurrent bool
+	}{
+		{name: "line names the older key", priorLine: "scheme1"},
+		{name: "no line for the item", priorLine: ""},
+		{name: "line names an unfinished current key", priorLine: "scheme2", unfinishedCurrent: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+				return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+			}}
+			runner := newTestRunner(t, spawner)
+			prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+			runner.Prompts = prompts
+			plan := promptPlan("a")
+			scheme1, scheme2 := schemeKey(t, 1, "a", prompts), schemeKey(t, 0, "a", prompts)
+			first := runPlan(t, runner, context.Background(), plan)
+			moveItemFolder(t, first.Dir, scheme2, scheme1)
+			rewriteItemLine(t, runner.Store, first.ID, map[string]string{"scheme1": scheme1, "scheme2": scheme2}[tc.priorLine])
+			if tc.unfinishedCurrent {
+				if err := runner.Store.WriteTranscript(first.ID, scheme2, nil); err != nil {
+					t.Fatalf("WriteTranscript: %v", err)
+				}
+			}
+
+			resumed := runPlan(t, runner, context.Background(), plan)
+
+			if got := len(spawner.specsFor("a")); got != 1 {
+				t.Errorf("item spawned %d times over two runs, want 1: the older scheme's receipt resumes it", got)
+			}
+			if stage := onlyStage(t, resumed); !stage.Items[0].Resumed || stage.Items[0].Key != scheme2 {
+				t.Errorf("item = resumed %v, key %s; want resumed under the current key", stage.Items[0].Resumed, stage.Items[0].Key)
+			}
+			if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, scheme2, receiptName)); err != nil {
+				t.Errorf("receipt under the current key: %v, want it present", err)
+			}
+			if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, scheme1)); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("older scheme's folder: stat err = %v, want it gone", err)
+			}
+		})
+	}
+}
+
+func TestRunnerRedoesAnItemWhoseOlderSchemeReceiptIsStale(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+	runner.Prompts = prompts
+	plan := promptPlan("a")
+	first := runPlan(t, runner, context.Background(), plan)
+	scheme1 := schemeKey(t, 1, "a", prompts)
+	if err := runner.Store.WriteReceipt(first.ID, scheme1, *okReceipt("a")); err != nil {
+		t.Fatalf("WriteReceipt: %v", err)
+	}
+	prompts["p.md"] = &fstest.MapFile{Data: []byte("audit {item} for races")}
+
+	edited := runPlan(t, runner, context.Background(), plan)
+
+	if got := len(spawner.specsFor("a")); got != 2 {
+		t.Errorf("item spawned %d times over two runs, want 2: it last finished under the scheme-2 key", got)
+	}
+	if stage := onlyStage(t, edited); stage.Items[0].Resumed {
+		t.Error("item resumed from the stale scheme-1 receipt, want it redone")
+	}
+	if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, scheme1, receiptName)); err != nil {
+		t.Errorf("stale scheme-1 folder: %v, want it left alone", err)
 	}
 }
 

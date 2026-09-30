@@ -229,7 +229,10 @@ is the item and `{out}` the file the helper writes its detail to. A verify or me
 is led by apogee's own, which names the item's receipt and output to check, or the manifest to
 read and where the report goes; yours adds what to look for. A `prompt:` file's content is part
 of every item's key, like a context file's: edit it and a re-run of the recipe redoes that stage's
-finished items instead of keeping them.
+finished items instead of keeping them. A workflow folder an older apogee started still resumes its
+finished items after an upgrade, even when a `prompt:` file was edited before the folder's first
+run on the new build: that build is the first to key an item by the file's content, so it cannot
+tell the edit apart.
 
 A **script** runs as a `terminal` call — under exactly the mode, guard, confinement and approval
 rules the model's own shell calls meet, so in Ask-Before you approve it. Plan is the one

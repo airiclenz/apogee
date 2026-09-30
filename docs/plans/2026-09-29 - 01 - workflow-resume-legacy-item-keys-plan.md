@@ -98,7 +98,11 @@ internal/workflow/store.go — ItemKey; internal/workflow/doc.go — file map; i
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/workflow/`
 **Commit:** refactor(workflow): pin every item-key formula as a numbered scheme
 
-## 2. Resume an item from the receipt an older key scheme stored
+## 2. Resume an item from the receipt an older key scheme stored — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): the stale guard treats a prior status line naming any key other than the older one, not just a current-scheme key, as admitting only when that key's folder holds no ok/partial receipt; the older-scheme walk continues past a receipt the guard rejects instead of stopping, so a line naming an even older scheme's key still adopts that one
+NOTES (2026-09-30): prepareItems now resolves the receipt (and any adoption) before the output path, since outputPath's Store.Path pre-creates items/<key>/; a prior line whose key is not a valid item key counts as the item having finished elsewhere (redo, never adopt)
+NOTES (2026-09-30): the docs/manual/workflows.md sentence says a pre-upgrade folder keeps its finished items; until item 3 lands this holds for fan-out stages only, not verify or merge
 
 **What:** Recast at the regression check (2026-09-29). Depends on item 1. Fixes a regression from
 `5f1cba20`: a folder written by v0.23.4 or any earlier build loses every finished item on resume.

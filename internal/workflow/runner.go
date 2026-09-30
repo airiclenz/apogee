@@ -281,7 +281,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	status, replay, err := r.openStatus(plan, planHash)
+	status, prior, replay, err := r.openStatus(plan, planHash)
 	if err != nil {
 		return Result{}, err
 	}
@@ -290,7 +290,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		return Result{}, err
 	}
 
-	state := &runState{runner: r, status: status, replay: replay, dir: dir}
+	state := &runState{runner: r, status: status, prior: prior, replay: replay, dir: dir}
 	result := Result{ID: status.ID, Dir: dir, Phase: PhaseDone, Stages: make([]StageResult, 0, len(plan.Stages))}
 	for index := range plan.Stages {
 		if ctx.Err() != nil {
@@ -340,22 +340,23 @@ func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
 }
 
 // openStatus resumes the newest workflow carrying planHash, its stages reset to pending, or creates
-// a new one. replay reports that the folder it resumes had not finished — stopped, or cut off while
+// a new one. prior is the resumed folder's stages as its last run left them, before the reset (nil
+// for a new folder): the stale guard on an older key scheme's receipt reads them (adoptable). replay reports that the folder it resumes had not finished — stopped, or cut off while
 // running — so its recorded script and ask stages are replayed rather than run again (StageRecord).
 // A re-issue of a workflow that ran to its end still skips its finished items, but runs its scripts
 // and asks its questions afresh: it is a new run of finished work, not the resume of unfinished work.
-func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, replay bool, err error) {
+func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, prior []StageStatus, replay bool, err error) {
 	now := r.now()
 	status, found, err := r.Store.Find(planHash)
 	if err != nil {
-		return RunStatus{}, false, err
+		return RunStatus{}, nil, false, err
 	}
 	if found {
-		replay = status.Phase != PhaseDone
+		prior, replay = status.Stages, status.Phase != PhaseDone
 	} else {
 		status, err = r.Store.Create(plan, planHash, now)
 		if err != nil {
-			return RunStatus{}, false, err
+			return RunStatus{}, nil, false, err
 		}
 	}
 	status.Stages = make([]StageStatus, 0, len(plan.Stages))
@@ -365,7 +366,7 @@ func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, repla
 	status.Phase = PhaseRunning
 	status.Recipe = r.Recipe
 	status.Updated = now
-	return status, replay, r.Store.WriteStatus(status)
+	return status, prior, replay, r.Store.WriteStatus(status)
 }
 
 // promptSource is where a stage's prompt file is read from: Prompts, else the workspace.
@@ -385,13 +386,15 @@ func (r *Runner) now() time.Time {
 }
 
 // runState is one Run's shared state: the status.json it keeps current, under mu, which also
-// serialises the Observer's calls, and whether the run resumes an unfinished folder whose recorded
+// serialises the Observer's calls, the resumed folder's stages as its last run left them (prior,
+// nil for a new folder), and whether the run resumes an unfinished folder whose recorded
 // script and ask stages it replays (openStatus), and the workflow's folder, which item short names
-// are read relative to (ItemName). replay and dir are fixed before the first stage runs.
+// are read relative to (ItemName). prior, replay and dir are fixed before the first stage runs.
 type runState struct {
 	runner *Runner
 	mu     sync.Mutex
 	status RunStatus
+	prior  []StageStatus
 	replay bool
 	dir    string
 }
@@ -505,20 +508,26 @@ type itemJob struct {
 	result ItemResult
 }
 
-// prepareItems keys every item through the current key scheme (keySchemes[0]), resolves its output path and brief, looks for a receipt an earlier
-// run of the workflow stored, and writes the stage's items into status.json.
+// prepareItems keys every item through the current key scheme (keySchemes[0]), looks for a
+// receipt an earlier run of the workflow stored (resumeReceipt), resolves its output path — from
+// the current key, after any adoption — and brief, and writes the stage's items into status.json.
 func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft) ([]itemJob, error) {
 	store, id := s.runner.Store, s.status.ID
 	jobs := make([]itemJob, len(drafts))
 	statuses := make([]ItemStatus, len(drafts))
 	for index, draft := range drafts {
 		item := draft.item
-		key, err := keySchemes[0].key(keyInput{
-			stage: stage, round: draft.round, suffix: draft.keySuffix, item: item,
-			prompts: s.runner.promptSource(), workspace: s.runner.Workspace,
-		})
+		key, err := keySchemes[0].key(s.keyInput(stage, draft))
 		if err != nil {
 			return nil, err
+		}
+		result := ItemResult{Key: key, Label: item.Label, Phase: PhasePending}
+		receipt, found, err := s.resumeReceipt(stage, draft, key)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			result.Phase, result.Receipt, result.Resumed = PhaseDone, &receipt, true
 		}
 		output := draft.output
 		if output == "" {
@@ -526,14 +535,7 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 				return nil, err
 			}
 		}
-		result := ItemResult{Key: key, Label: item.Label, Phase: PhasePending, Output: output}
-		receipt, found, err := store.ReadReceipt(id, key)
-		if err != nil {
-			return nil, err
-		}
-		if found && (receipt.Status == StatusOK || receipt.Status == StatusPartial) {
-			result.Phase, result.Receipt, result.Resumed = PhaseDone, &receipt, true
-		}
+		result.Output = output
 		brief := renderBrief(stage.Task, item, output)
 		if draft.lead != nil {
 			brief = joinBrief(draft.lead(output), brief)
@@ -550,6 +552,91 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 		s.notifyItem(stageIndex, stage, index, job, job.result.Phase, 0, 0, job.result.Receipt)
 	}
 	return jobs, s.writeStatus()
+}
+
+// keyInput is what every key scheme keys draft's item over in stage.
+func (s *runState) keyInput(stage Stage, draft itemDraft) keyInput {
+	return keyInput{
+		stage: stage, round: draft.round, suffix: draft.keySuffix, item: draft.item,
+		prompts: s.runner.promptSource(), workspace: s.runner.Workspace,
+	}
+}
+
+// resumeReceipt looks for the ok or partial receipt an earlier run stored for draft's item, keyed
+// key by the current scheme: under key itself, else — for a fanout, whose key brief depends on no
+// upstream item's key — under the key each older scheme gives it, newest first. The first such
+// receipt the stale guard admits (adoptable) is adopted: its folder is renamed to key
+// (Store.AdoptItem) and the item resumes from it. found is false when the item must run.
+func (s *runState) resumeReceipt(stage Stage, draft itemDraft, key string) (Receipt, bool, error) {
+	store, id := s.runner.Store, s.status.ID
+	receipt, found, err := store.finishedReceipt(id, key)
+	if err != nil || found || stage.Kind != StageFanout {
+		return receipt, found, err
+	}
+	tried := map[string]bool{key: true}
+	for _, scheme := range keySchemes[1:] {
+		olderKey, err := scheme.key(s.keyInput(stage, draft))
+		if err != nil {
+			return Receipt{}, false, err
+		}
+		if tried[olderKey] {
+			continue
+		}
+		tried[olderKey] = true
+		receipt, found, err := store.finishedReceipt(id, olderKey)
+		if err != nil {
+			return Receipt{}, false, err
+		}
+		if !found {
+			continue
+		}
+		admitted, err := s.adoptable(stage.Name, draft, olderKey)
+		if err != nil {
+			return Receipt{}, false, err
+		}
+		if !admitted {
+			continue
+		}
+		if err := store.AdoptItem(id, olderKey, key); err != nil {
+			return Receipt{}, false, err
+		}
+		return receipt, true, nil
+	}
+	return Receipt{}, false, nil
+}
+
+// adoptable is the stale guard on the receipt an older key scheme stored for draft's item under
+// olderKey. It admits the receipt when the folder's last run recorded no line for the item (same
+// stage name, repeat round and label), or a line naming olderKey, or one naming a key whose
+// folder holds no ok or partial receipt — the item never finished since. Any other line means the
+// item last finished under that other key, after an input olderKey's receipt predates changed:
+// the older receipt is stale and the item is redone.
+func (s *runState) adoptable(stageName string, draft itemDraft, olderKey string) (bool, error) {
+	priorKey, found := s.priorItemKey(stageName, draft.round, draft.item.Label)
+	if !found || priorKey == olderKey {
+		return true, nil
+	}
+	if !isValidKey(priorKey) {
+		return false, nil
+	}
+	_, finished, err := s.runner.Store.finishedReceipt(s.status.ID, priorKey)
+	return !finished, err
+}
+
+// priorItemKey is the key the folder's last run recorded for the item labelled label of the stage
+// named stageName in the given repeat round; found is false when prior has no such line.
+func (s *runState) priorItemKey(stageName string, round int, label string) (key string, found bool) {
+	for _, stage := range s.prior {
+		if stage.Name != stageName || stage.Round != round {
+			continue
+		}
+		for _, item := range stage.Items {
+			if item.Label == label {
+				return item.Key, true
+			}
+		}
+	}
+	return "", false
 }
 
 // runItem runs one item to its end: fresh children and continuations under the Runner's bounds,

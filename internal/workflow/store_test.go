@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -159,6 +160,79 @@ func TestReadReceiptOfAnUnfinishedItemIsNotFound(t *testing.T) {
 
 	if err != nil || found {
 		t.Errorf("ReadReceipt of an item with no receipt = found %v, err %v; want not found, nil", found, err)
+	}
+}
+
+func TestAdoptItemRenamesTheOlderSchemeFolder(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	status := createWorkflow(t, store, "audit", "hash-1", storeClock)
+	fromKey, toKey := sampleKey(t, "a.go"), sampleKey(t, "b.go")
+	if err := store.WriteReceipt(status.ID, fromKey, *okReceipt("a.go")); err != nil {
+		t.Fatalf("WriteReceipt: %v", err)
+	}
+	if err := store.WriteTranscript(status.ID, toKey, nil); err != nil {
+		t.Fatalf("WriteTranscript: %v", err)
+	}
+
+	err := store.AdoptItem(status.ID, fromKey, toKey)
+
+	if err != nil {
+		t.Fatalf("AdoptItem over an unfinished folder: %v", err)
+	}
+	receipt, found, err := store.ReadReceipt(status.ID, toKey)
+	if err != nil || !found || receipt.Summary != "checked a.go" {
+		t.Errorf("receipt under the adopted key = %+v, found %v, err %v; want the older folder's", receipt, found, err)
+	}
+	dir, _ := store.Dir(status.ID)
+	if _, err := os.Stat(filepath.Join(dir, itemsDirName, fromKey)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("older folder after adoption: stat err = %v, want it gone", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, itemsDirName, toKey, transcriptName)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("unfinished work under the adopted key: stat err = %v, want it removed", err)
+	}
+}
+
+func TestAdoptItemNeverOverwritesAFinishedReceipt(t *testing.T) {
+	t.Parallel()
+	for _, status := range []Status{StatusOK, StatusPartial} {
+		t.Run(string(status), func(t *testing.T) {
+			t.Parallel()
+			store := newTestStore(t)
+			workflow := createWorkflow(t, store, "audit", "hash-1", storeClock)
+			fromKey, toKey := sampleKey(t, "a.go"), sampleKey(t, "b.go")
+			for key, summary := range map[string]string{fromKey: "older", toKey: "current"} {
+				if err := store.WriteReceipt(workflow.ID, key, Receipt{Status: status, Summary: summary}); err != nil {
+					t.Fatalf("WriteReceipt: %v", err)
+				}
+			}
+
+			err := store.AdoptItem(workflow.ID, fromKey, toKey)
+
+			if !errors.Is(err, ErrItemFinished) {
+				t.Errorf("AdoptItem onto a %s receipt: err = %v, want ErrItemFinished", status, err)
+			}
+			for key, want := range map[string]string{fromKey: "older", toKey: "current"} {
+				if receipt, _, _ := store.ReadReceipt(workflow.ID, key); receipt.Summary != want {
+					t.Errorf("receipt under %s after a refused adoption = %q, want %q untouched", key[:8], receipt.Summary, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAdoptItemRefusesInvalidKeys(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	status := createWorkflow(t, store, "audit", "hash-1", storeClock)
+	key := sampleKey(t, "a.go")
+
+	for _, pair := range [][2]string{
+		{"../x", key}, {key, "../x"}, {"", key}, {key, strings.Repeat("A", 64)}, {key, key},
+	} {
+		if err := store.AdoptItem(status.ID, pair[0], pair[1]); !errors.Is(err, ErrInvalidKey) {
+			t.Errorf("AdoptItem(%q, %q) err = %v, want ErrInvalidKey", pair[0], pair[1], err)
+		}
 	}
 }
 

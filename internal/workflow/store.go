@@ -67,6 +67,10 @@ var ErrInvalidKey = errors.New("workflow: invalid item key")
 // ErrInvalidName is returned for a stage-output name that is not a local path inside the folder.
 var ErrInvalidName = errors.New("workflow: invalid output name")
 
+// ErrItemFinished is returned by AdoptItem when the item's folder under its current key already
+// holds an ok or partial receipt, which an adoption never overwrites.
+var ErrItemFinished = errors.New("workflow: item already finished under its current key")
+
 // Phase is where a workflow, a stage or an item stands.
 type Phase string
 
@@ -265,6 +269,52 @@ func (s *Store) ReadReceipt(id, key string) (receipt Receipt, found bool, err er
 		return receipt, false, nil
 	}
 	return receipt, err == nil, err
+}
+
+// finishedReceipt reads an item's receipt and reports found only for an ok or partial one: the
+// receipt a resume skips the item for. A blocked receipt, or none, is not found.
+func (s *Store) finishedReceipt(id, key string) (Receipt, bool, error) {
+	receipt, found, err := s.ReadReceipt(id, key)
+	if err != nil || !found {
+		return Receipt{}, false, err
+	}
+	return receipt, receipt.Status == StatusOK || receipt.Status == StatusPartial, nil
+}
+
+// AdoptItem renames the folder an older key scheme gave an item, items/<fromKey>/, to the one its
+// current key names, items/<toKey>/, so the item resumes from the receipt kept there. A toKey
+// folder without an ok or partial receipt holds only unfinished work and is removed first; one
+// with such a receipt is refused with ErrItemFinished and nothing moves. ErrInvalidKey refuses a
+// key that is not a SHA-256 in lower-case hex, and fromKey equal to toKey.
+func (s *Store) AdoptItem(id, fromKey, toKey string) error {
+	dir, err := s.Dir(id)
+	if err != nil {
+		return err
+	}
+	for _, key := range []string{fromKey, toKey} {
+		if !isValidKey(key) {
+			return fmt.Errorf("%w: %q", ErrInvalidKey, key)
+		}
+	}
+	if fromKey == toKey {
+		return fmt.Errorf("%w: %q adopted onto itself", ErrInvalidKey, toKey)
+	}
+	_, finished, err := s.finishedReceipt(id, toKey)
+	if err != nil {
+		return err
+	}
+	if finished {
+		return fmt.Errorf("%w: %q", ErrItemFinished, toKey)
+	}
+	from := filepath.Join(dir, itemsDirName, fromKey)
+	to := filepath.Join(dir, itemsDirName, toKey)
+	if err := os.RemoveAll(to); err != nil {
+		return fmt.Errorf("workflow: clear item folder %q for adoption: %w", toKey, err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		return fmt.Errorf("workflow: adopt item folder %q as %q: %w", fromKey, toKey, err)
+	}
+	return nil
 }
 
 // StageRecord is a script or ask stage's settled outcome as the folder keeps it — the stage's phase,
