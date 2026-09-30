@@ -229,6 +229,10 @@ type StageResult struct {
 // unfinished), the receipt it ended on, where its detail output is, how many fresh children and
 // continuations it took, whether an earlier run of the same workflow had already finished it, and
 // — once a verify stage checked it — the verdict (empty when no verify stage selected it).
+//
+// older is the item under every older key scheme, keySchemes[1:] index for index: a verify or
+// merge downstream keys its own items under each older scheme from these, so a folder an older
+// build wrote resumes the whole chain (nil on a result no child-running stage keyed).
 type ItemResult struct {
 	Key           string
 	Label         string
@@ -239,6 +243,36 @@ type ItemResult struct {
 	Continuations int
 	Resumed       bool
 	Verdict       Verdict
+	older         []schemeItem
+}
+
+// schemeItem is an item as one key scheme saw it: its key, its output path and — on a source item a
+// verify stage checked — the verdict that scheme's rule reads off the verify receipt.
+type schemeItem struct {
+	key     string
+	output  string
+	verdict Verdict
+}
+
+// underScheme is the item as keySchemes[scheme] sees it: the result's own key, output and verdict
+// for the current scheme, its older entry for an older one (zero when it has none).
+func (r ItemResult) underScheme(scheme int) schemeItem {
+	if scheme == 0 {
+		return schemeItem{key: r.Key, output: r.Output, verdict: r.Verdict}
+	}
+	if scheme > len(r.older) {
+		return schemeItem{}
+	}
+	return r.older[scheme-1]
+}
+
+// setVerdicts records the verdict every key scheme reads off verify, the verify item that checked
+// r: Verdict by the current rule, each older entry's by its scheme's own.
+func (r *ItemResult) setVerdicts(verify ItemResult) {
+	r.Verdict = keySchemes[0].verdict(verify)
+	for index := range r.older {
+		r.older[index].verdict = keySchemes[index+1].verdict(verify)
+	}
 }
 
 // Tally counts a stage's items by how they ended: receipts by status, Unfinished for items a
@@ -485,14 +519,15 @@ func (s *runState) endStage(ctx context.Context, stageIndex int, stage Stage, re
 }
 
 // itemDraft is an item before it is keyed: the item, the stage's repeat round, the text its key
-// covers beside the stage's brief (a verify's source key and claim, a merge's manifest; empty for
-// a fanout), the engine's lead that comes before the stage's own rendered brief (a verify or merge;
-// rendered once the output path is known, nil for a fanout), and a fixed output path (a merge's
-// report; empty lets outputPath choose). prepareItems keys it through the current key scheme.
+// covers beside the stage's brief under a given key scheme (a verify's source key and claim, a
+// merge's manifest, each as that scheme renders them; nil for a fanout), the engine's lead that
+// comes before the stage's own rendered brief (a verify or merge; rendered once the output path is
+// known, nil for a fanout), and a fixed output path (a merge's report; empty lets outputPath
+// choose). prepareItems keys it through every key scheme.
 type itemDraft struct {
 	item      Item
 	round     int
-	keySuffix string
+	keySuffix func(scheme int) string
 	lead      func(output string) string
 	output    string
 }
@@ -508,21 +543,23 @@ type itemJob struct {
 	result ItemResult
 }
 
-// prepareItems keys every item through the current key scheme (keySchemes[0]), looks for a
-// receipt an earlier run of the workflow stored (resumeReceipt), resolves its output path — from
-// the current key, after any adoption — and brief, and writes the stage's items into status.json.
+// prepareItems keys every item through every key scheme — the current one (keySchemes[0]) is its
+// key, the older ones are kept on its result for the stages downstream — looks for a receipt an
+// earlier run of the workflow stored (resumeReceipt), resolves its output path — from the current
+// key, after any adoption — and brief, and writes the stage's items into status.json.
 func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft) ([]itemJob, error) {
 	store, id := s.runner.Store, s.status.ID
 	jobs := make([]itemJob, len(drafts))
 	statuses := make([]ItemStatus, len(drafts))
 	for index, draft := range drafts {
 		item := draft.item
-		key, err := keySchemes[0].key(s.keyInput(stage, draft))
+		keys, err := s.schemeKeys(stage, draft)
 		if err != nil {
 			return nil, err
 		}
-		result := ItemResult{Key: key, Label: item.Label, Phase: PhasePending}
-		receipt, found, err := s.resumeReceipt(stage, draft, key)
+		key := keys[0]
+		result := ItemResult{Key: key, Label: item.Label, Phase: PhasePending, older: s.olderItems(stage, draft, keys[1:])}
+		receipt, found, err := s.resumeReceipt(stage, draft, keys)
 		if err != nil {
 			return nil, err
 		}
@@ -554,31 +591,67 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 	return jobs, s.writeStatus()
 }
 
-// keyInput is what every key scheme keys draft's item over in stage.
-func (s *runState) keyInput(stage Stage, draft itemDraft) keyInput {
+// schemeKeys keys draft's item in stage under every key scheme, keySchemes index for index.
+func (s *runState) schemeKeys(stage Stage, draft itemDraft) ([]string, error) {
+	keys := make([]string, len(keySchemes))
+	for index, scheme := range keySchemes {
+		key, err := scheme.key(s.keyInput(stage, draft, index))
+		if err != nil {
+			return nil, err
+		}
+		keys[index] = key
+	}
+	return keys, nil
+}
+
+// keyInput is what keySchemes[scheme] keys draft's item over in stage: the draft's suffix as that
+// scheme renders it.
+func (s *runState) keyInput(stage Stage, draft itemDraft, scheme int) keyInput {
+	suffix := ""
+	if draft.keySuffix != nil {
+		suffix = draft.keySuffix(scheme)
+	}
 	return keyInput{
-		stage: stage, round: draft.round, suffix: draft.keySuffix, item: draft.item,
+		stage: stage, round: draft.round, suffix: suffix, item: draft.item,
 		prompts: s.runner.promptSource(), workspace: s.runner.Workspace,
 	}
 }
 
+// olderItems is draft's item in stage under each older key scheme, given its olderKeys
+// (keySchemes[1:] index for index). Each output path is where that scheme's build pointed the
+// child: the draft's fixed output, the stage's `out:`, or output.md in the folder the older key
+// names — a pure path, never created, so an adoption can still rename that folder.
+func (s *runState) olderItems(stage Stage, draft itemDraft, olderKeys []string) []schemeItem {
+	items := make([]schemeItem, len(olderKeys))
+	for index, key := range olderKeys {
+		output := draft.output
+		switch {
+		case output != "":
+		case stage.Out != "":
+			output = strings.ReplaceAll(stage.Out, placeholderItem, draft.item.Label)
+		default:
+			output = filepath.Join(s.dir, itemsDirName, key, outputName)
+		}
+		items[index] = schemeItem{key: key, output: output}
+	}
+	return items
+}
+
 // resumeReceipt looks for the ok or partial receipt an earlier run stored for draft's item, keyed
-// key by the current scheme: under key itself, else — for a fanout, whose key brief depends on no
-// upstream item's key — under the key each older scheme gives it, newest first. The first such
-// receipt the stale guard admits (adoptable) is adopted: its folder is renamed to key
+// keys by every scheme (keySchemes index for index): under the current key, else under the key
+// each older scheme gives it, newest first — a verify's or merge's older key rendered from its
+// source items' keys, outputs and verdicts under that same scheme. The first such receipt the
+// stale guard admits (adoptable) is adopted: its folder is renamed to the current key
 // (Store.AdoptItem) and the item resumes from it. found is false when the item must run.
-func (s *runState) resumeReceipt(stage Stage, draft itemDraft, key string) (Receipt, bool, error) {
+func (s *runState) resumeReceipt(stage Stage, draft itemDraft, keys []string) (Receipt, bool, error) {
 	store, id := s.runner.Store, s.status.ID
+	key := keys[0]
 	receipt, found, err := store.finishedReceipt(id, key)
-	if err != nil || found || stage.Kind != StageFanout {
+	if err != nil || found {
 		return receipt, found, err
 	}
 	tried := map[string]bool{key: true}
-	for _, scheme := range keySchemes[1:] {
-		olderKey, err := scheme.key(s.keyInput(stage, draft))
-		if err != nil {
-			return Receipt{}, false, err
-		}
+	for _, olderKey := range keys[1:] {
 		if tried[olderKey] {
 			continue
 		}

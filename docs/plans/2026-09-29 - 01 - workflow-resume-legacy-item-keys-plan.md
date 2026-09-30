@@ -156,7 +156,10 @@ internal/workflow/runner_test.go — TestRunnerRedoesItemsWhenThePromptFileChang
 - `GOMEMLIMIT=2GiB go test -count=1 ./internal/workflow/`
 **Commit:** fix(workflow): resume items whose receipt an older key scheme stored
 
-## 3. Rebuild merge and verify keys under every older scheme
+## 3. Rebuild merge and verify keys under every older scheme — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): the per-scheme verdict rule is a `verdict` field on each keyScheme (scheme 1: `verdictOfAnyStatus`, v0.23.4's rule; scheme 2: the current `verdictOf`), since the verdict a merge manifest names is a key input; `ItemResult` keeps older schemes in an unexported `older []schemeItem` (key, output, verdict), read through `underScheme`
+NOTES (2026-09-30): the four new goldens (verify item and merge item under schemes 1 and 2) were cross-checked by running the equivalent computation against throwaway worktrees of v0.23.4 and 1e3efe44 — all four matched; the older-scheme adoption walk now runs for every child-running stage kind, not just fanouts
 
 **What:** Recast at the regression check (2026-09-29) — new item, inserted by a ratified design
 call. Depends on item 2. Every item's key is computed under every registered scheme and kept on the

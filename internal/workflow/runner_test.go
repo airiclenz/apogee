@@ -316,6 +316,123 @@ func TestRunnerRedoesAnItemWhoseOlderSchemeReceiptIsStale(t *testing.T) {
 	}
 }
 
+// chainPlan is fanout → verify → merge over the one item "a", every stage's brief the prompt file
+// p.md and the fanout setting no `out:`, so each item's scheme-1 key differs from its scheme-2 key.
+func chainPlan() Plan {
+	return Plan{Name: "audit", Stages: []Stage{
+		{Name: "find", Kind: StageFanout, Prompt: "p.md", Over: &ItemSource{List: []string{"a"}}},
+		{Name: "check", Kind: StageVerify, Prompt: "p.md"},
+		{Name: "report", Kind: StageMerge, Prompt: "p.md"},
+	}}
+}
+
+// chainScheme1Keys is the key v0.23.4 (scheme 1) gave each of chainPlan's items in the workflow
+// folder dir, by stage name, rendered by hand from what that build fed its key: the verify item's
+// source key and claim, the merge item's manifest with scheme 1's output paths and verdict.
+func chainScheme1Keys(t *testing.T, dir string, prompts fstest.MapFS, verdict Verdict) map[string]string {
+	t.Helper()
+	plan := chainPlan()
+	item := Item{Label: "a", Units: []string{"a"}}
+	check := plan.Stages[1]
+	check.Returns = verifyReturns()
+	manifestPath := filepath.Join(dir, stagesDirName, "report", manifestFileName)
+	keyOf := func(stage Stage, item Item, suffix string) string {
+		key, err := keySchemes[1].key(keyInput{stage: stage, suffix: suffix, item: item, prompts: prompts, workspace: fstest.MapFS{}})
+		if err != nil {
+			t.Fatalf("scheme 1 key of stage %q: %v", stage.Name, err)
+		}
+		return key
+	}
+	find := keyOf(plan.Stages[0], item, "")
+	manifest := "# Manifest — 1 items\n\n- #1 a — ok — checked a — verdict: " + string(verdict) +
+		" — output: " + filepath.Join(dir, itemsDirName, find, outputName) + "\n"
+	return map[string]string{
+		"find":   find,
+		"check":  keyOf(check, item, "\n"+find+"\nstatus: ok\nsummary: checked a"),
+		"report": keyOf(plan.Stages[2], Item{Label: "report", Units: []string{manifestPath}}, "\n"+manifest),
+	}
+}
+
+// rewriteStageKeys sets the key status.json records for each named stage's one item.
+func rewriteStageKeys(t *testing.T, store *Store, id string, keys map[string]string) {
+	t.Helper()
+	status, err := store.ReadStatus(id)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	for index, stage := range status.Stages {
+		if key, isNamed := keys[stage.Name]; isNamed {
+			status.Stages[index].Items[0].Key = key
+		}
+	}
+	if err := store.WriteStatus(status); err != nil {
+		t.Fatalf("WriteStatus: %v", err)
+	}
+}
+
+func TestRunnerResumesAChainWhoseReceiptsAllSitUnderScheme1Keys(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// verifyStatus is the status the verify child ends on, always saying confirmed: a partial
+		// one is confirmed under scheme 1's verdict rule and unclear under scheme 2's.
+		verifyStatus Status
+	}{
+		{name: "ok verify", verifyStatus: StatusOK},
+		{name: "partial verify saying confirmed", verifyStatus: StatusPartial},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+				switch spec.Stage.Kind {
+				case StageVerify:
+					return Outcome{Ending: EndCompleted, Receipt: &Receipt{
+						Status: tc.verifyStatus, Summary: "held", Fields: map[string]any{VerdictField: string(VerdictConfirmed)},
+					}}, nil
+				case StageMerge:
+					if err := os.WriteFile(spec.Output, []byte("# Report\n"), 0o600); err != nil {
+						return Outcome{}, err
+					}
+				}
+				return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+			}}
+			runner := newTestRunner(t, spawner)
+			prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+			runner.Prompts = prompts
+			first := runPlan(t, runner, context.Background(), chainPlan())
+			scheme1 := chainScheme1Keys(t, first.Dir, prompts, VerdictConfirmed)
+			current := map[string]string{}
+			for _, stage := range first.Stages {
+				current[stage.Name] = stage.Items[0].Key
+				moveItemFolder(t, first.Dir, stage.Items[0].Key, scheme1[stage.Name])
+			}
+			rewriteStageKeys(t, runner.Store, first.ID, scheme1)
+
+			resumed := runPlan(t, runner, context.Background(), chainPlan())
+
+			if got := len(spawner.specs); got != 3 {
+				t.Errorf("children spawned over two runs = %d, want 3: the second run resumes every item", got)
+			}
+			if len(resumed.Stages) != 3 {
+				t.Fatalf("stages = %d, want 3", len(resumed.Stages))
+			}
+			for _, stage := range resumed.Stages {
+				item := stage.Items[0]
+				if !item.Resumed || item.Key != current[stage.Name] {
+					t.Errorf("stage %q item = resumed %v, key %s; want resumed under the current key %s", stage.Name, item.Resumed, item.Key, current[stage.Name])
+				}
+				if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, item.Key, receiptName)); err != nil {
+					t.Errorf("stage %q receipt under the current key: %v, want it present", stage.Name, err)
+				}
+				if _, err := os.Stat(filepath.Join(first.Dir, itemsDirName, scheme1[stage.Name])); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("stage %q scheme-1 folder: stat err = %v, want it gone", stage.Name, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRunnerKeysThePromptFileFromTheWorkspaceWithoutPrompts(t *testing.T) {
 	t.Parallel()
 	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {

@@ -148,7 +148,7 @@ func (s *runState) runVerify(ctx context.Context, plan Plan, index, round int, s
 
 	for position, at := range selected {
 		results[position].Verdict = verdictOf(results[position])
-		source.Items[at].Verdict = results[position].Verdict
+		source.Items[at].setVerdicts(results[position])
 	}
 	source.Tally = tallyOf(source.Items)
 	return s.endStage(ctx, index, child, results, PhaseDone)
@@ -165,7 +165,11 @@ func (s *runState) runMerge(ctx context.Context, plan Plan, index, round int, re
 		return StageResult{}, err
 	}
 	store, id := s.runner.Store, s.status.ID
-	manifest := renderManifest(source.Items)
+	manifests := make([]string, len(keySchemes))
+	for scheme := range keySchemes {
+		manifests[scheme] = renderManifest(source.Items, scheme)
+	}
+	manifest := manifests[0]
 	manifestName := stagesDirName + "/" + stage.Name + "/" + manifestFileName
 	if err := store.WriteFile(id, manifestName, []byte(manifest)); err != nil {
 		return StageResult{}, err
@@ -181,7 +185,7 @@ func (s *runState) runMerge(ctx context.Context, plan Plan, index, round int, re
 	draft := itemDraft{
 		item:      Item{Label: stage.Name, Units: []string{manifestPath}},
 		round:     round,
-		keySuffix: "\n" + manifest,
+		keySuffix: func(scheme int) string { return "\n" + manifests[scheme] },
 		lead: func(output string) string {
 			return strings.NewReplacer(placeholderManifest, manifestPath, placeholderOut, output).Replace(mergeLead)
 		},
@@ -247,14 +251,16 @@ func selectForVerify(stage Stage, items []ItemResult) ([]int, error) {
 }
 
 // verifyDraft is the verify child's draft for one source item. Its key covers the source item's
-// key and claim as well as the verify stage, so a source item redone with a new receipt is checked
-// again; its lead is the engine's verify brief rendered with the item and its claim.
+// key — under each key scheme, the key that scheme gave the source item — and claim as well as the
+// verify stage, so a source item redone with a new receipt is checked again; its lead is the engine's verify brief rendered with the item and its claim.
 func verifyDraft(round int, item Item, source ItemResult) itemDraft {
 	claim := renderClaim(*source.Receipt)
 	return itemDraft{
-		item:      item,
-		round:     round,
-		keySuffix: "\n" + source.Key + "\n" + claim,
+		item:  item,
+		round: round,
+		keySuffix: func(scheme int) string {
+			return "\n" + source.underScheme(scheme).key + "\n" + claim
+		},
 		lead: func(output string) string {
 			return strings.NewReplacer(
 				placeholderItem, strings.Join(item.Units, ", "),
@@ -313,8 +319,10 @@ func verdictOf(item ItemResult) Verdict {
 
 // renderManifest lists every source item for a merge child, one line each in item order: number,
 // label, status and summary (or unfinished), the verdict when a verify gave one, and the output
-// path.
-func renderManifest(items []ItemResult) string {
+// path — the verdict and output path as keySchemes[scheme] saw them. The current scheme's (0) is
+// the manifest the child reads; an older one's is what that scheme's build wrote, for the merge's
+// older key.
+func renderManifest(items []ItemResult, scheme int) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "# Manifest — %d items\n\n", len(items))
 	for index, item := range items {
@@ -324,10 +332,11 @@ func renderManifest(items []ItemResult) string {
 		} else {
 			builder.WriteString("unfinished")
 		}
-		if item.Verdict != "" {
-			fmt.Fprintf(&builder, " — verdict: %s", item.Verdict)
+		seen := item.underScheme(scheme)
+		if seen.verdict != "" {
+			fmt.Fprintf(&builder, " — verdict: %s", seen.verdict)
 		}
-		fmt.Fprintf(&builder, " — output: %s\n", item.Output)
+		fmt.Fprintf(&builder, " — output: %s\n", seen.output)
 	}
 	return builder.String()
 }
