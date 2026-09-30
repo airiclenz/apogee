@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-09-30
+
 - **Fixed:** a `reactions:` entry's `workspace:` filter now scopes its `advise:` and `gate:` actions too. Before, only `run:` honoured it: a gate or adviser scoped to one workspace was armed in every workspace, so a policy gate meant for one repository asked on tool calls in all of them.
 
 - A re-run workflow stage that redoes items an earlier run of the same folder had finished now says so: its result line and the `/workflows` detail read `redid <n> finished item(s): their inputs changed since they ran`, whether a `prompt:` or context file was edited or an upstream item changed (such as a merge redone after a rerun of failed items). A plain resume carries no such line.
