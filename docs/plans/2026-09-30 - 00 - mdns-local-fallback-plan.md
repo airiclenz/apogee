@@ -36,7 +36,9 @@
 - mDNS service discovery (browsing `_http._tcp`), caching resolved addresses, IPv6 multicast.
 - Changing `make dist` / cross-build flags.
 
-## 1. `internal/mdns`: one-shot `.local` address lookup
+## 1. `internal/mdns`: one-shot `.local` address lookup — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): Lookup reads A/AAAA records from the answer and additional sections of a reply (class compared with the RFC 6762 cache-flush bit masked off); the reply's DNS ID is not checked, a matching name is required instead. The no-answer sentinel stays unexported (errNoAnswer) so callers see only Lookup.
 
 **What:**
 **Goal:** a new package `internal/mdns` exports `Lookup(ctx context.Context, host string) ([]netip.Addr, error)` that returns the A/AAAA addresses a responder on the LAN announces for `host`, and a non-nil error when none answer before the deadline.
