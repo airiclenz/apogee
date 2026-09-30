@@ -8,6 +8,10 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed:** release builds now reach an LLM server named by an mDNS `.local` host (for example `http://Apollo-II.local:1111`). When the system resolver cannot find a `.local` name, apogee asks the local network itself with a one-shot mDNS query and connects to the address that answers. Every other host name, and a `.local` name the system already resolves, behaves exactly as before.
+- **Fixed:** when the server's host name does not resolve, the "server offline" refusal now says so and suggests the fix instead of showing a bare `lookup … no such host`: `cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts`.
+- **`.local` server endpoints work in release builds.** An `endpoint` naming a host by its mDNS `.local` name (`http://Apollo-II.local:1111`) is now reached by the release binaries too: when the system resolver cannot find a `.local` name, apogee asks the local network itself with one mDNS query. A host name that resolves nowhere is now reported as such — `host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts` — instead of a raw `lookup … no such host` behind "server offline".
+
 ## [0.24.0] — 2026-09-30
 
 - **Fixed:** a `reactions:` entry's `workspace:` filter now scopes its `advise:` and `gate:` actions too. Before, only `run:` honoured it: a gate or adviser scoped to one workspace was armed in every workspace, so a policy gate meant for one repository asked on tool calls in all of them.
