@@ -47,12 +47,20 @@ watch that forwards every byte and kills the call's process group (contract §2.
 the first streamed OS-denial signature. A denied command therefore ends the script instead of
 handing its remaining lines a half-done state — the job `set -e` cannot do. The stopped call
 renders a definitive error label (`[blocked by workspace confinement: an operation was
-denied, so the command was stopped; writes are allowed only inside the workspace <root> and
-<the box's other writable paths>]` — **amended 2026-08-25**: both labels are rendered from the
-`domain.ConfinementBox` the run was fenced by and NAME the writable roots by path, the session
-scratch dir among them, because a model that is only told a fence exists has nowhere to put the
-file); a confined *unstopped* failure whose output merely looks denial-shaped gets the weaker
-`[likely blocked by workspace confinement: …]` heuristic label; a clean exit is never forced
+denied, so the command was stopped; the sandbox allows writes only inside the workspace <root>
+and <the box's other writable paths>; setuid programs run without their privileges]` —
+**amended 2026-08-25**: both labels are rendered from the `domain.ConfinementBox` the run was
+fenced by and NAME the writable roots by path, the session scratch dir among them, because a
+model that is only told a fence exists has nowhere to put the file; **amended 2026-09-30**
+(apogee-denial-label-blames-writes): neither label claims any longer that a write was blocked —
+a confined `ps` failing with "Operation not permitted" was told "writes are allowed only
+inside …", pointing the model at a write that never happened. Both now name no operation and
+state the sandbox's rules as facts: the writable roots, which the model can act on when the
+denied operation was a write, and that setuid programs run without their privileges (landlock
+sets PR_SET_NO_NEW_PRIVS, so they run unprivileged rather than being refused)); a confined
+*unstopped* failure whose output merely looks denial-shaped gets the weaker `[likely blocked by
+workspace confinement: the sandbox refused an operation; it allows writes only inside <roots>;
+setuid programs run without their privileges]` heuristic label; a clean exit is never forced
 into an error. The **shared signature set lives in `internal/platform`**
 (`platform.LooksLikeConfinementDenial` — the watch and both labels key on the same list) and
 is the source of truth. It matches **both errnos' spellings**: strerror(EPERM) ("Operation

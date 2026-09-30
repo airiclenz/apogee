@@ -101,36 +101,43 @@ func isApogeeSecretEnv(entry string) bool {
 }
 
 // confinementDenialLabel is the line appended to a FAILED confined result whose output looks
-// like an OS confinement denial. It NAMES the roots the run may write to, because a model that
-// is only told a fence exists has nowhere to put the file: the paths are what let it route the
-// write instead of treating the EPERM as a broken command and blindly retrying around it.
+// like an OS confinement denial. It does not claim WHICH operation was refused: the denial
+// signature is errno text, and an EPERM from a confined `ps` is no write at all, so the label
+// says only that the sandbox refused an operation and then states the sandbox's rules as facts.
+// The writable roots are one such fact, named by path: when the denied operation WAS a write,
+// they are what the model can act on, and a model only told a fence exists has nowhere to put
+// the file. The setuid clause is another: landlock sets PR_SET_NO_NEW_PRIVS, so a setuid program
+// runs without its privileges rather than being refused.
 func confinementDenialLabel(box domain.ConfinementBox) string {
-	return "[likely blocked by workspace confinement: writes are allowed only inside " +
-		confinementWritableRoots(box) + "]"
+	return "[likely blocked by workspace confinement: the sandbox refused an operation; it allows" +
+		" writes only inside " + confinementWritableRoots(box) +
+		"; setuid programs run without their privileges]"
 }
 
 // confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
 // the run itself (subprocess.SubprocessResult.DenialStopped, console.Console.DenialStopped): stronger than
 // the "likely" label above, because here the harness matched the denial as it streamed and
 // killed the process group, so the model is told plainly that the rest of its script did not
-// run. It names the writable roots for the same reason that one does — the model's next act is
-// to re-aim the write, and it can only do that against real paths. The OS-denial spellings both
-// labels key on live in internal/platform (platform.LooksLikeConfinementDenial), which is also
-// what the watch scans with.
+// run. Like that one it names no operation — the watch matched errno text, not a write — and
+// carries the same sandbox facts: the writable roots by path, which the model can act on when
+// the denied operation was a write, and the setuid clause. The OS-denial spellings both labels
+// key on live in internal/platform (platform.LooksLikeConfinementDenial), which is also what
+// the watch scans with.
 //
 // Both labels sit beside the funnel rather than beside one tool: the one-shot execution tools
 // read them off subprocess.SubprocessResult and the Console family reads the stop label off a live
 // Console, and there is one wording for the fence however the model met it.
 func confinementDenialStopLabel(box domain.ConfinementBox) string {
 	return "[blocked by workspace confinement: an operation was denied, so the command was" +
-		" stopped; writes are allowed only inside " + confinementWritableRoots(box) + "]"
+		" stopped; the sandbox allows writes only inside " + confinementWritableRoots(box) +
+		"; setuid programs run without their privileges]"
 }
 
-// confinementWritableRoots renders the box's writable roots as the tail both denial labels end
-// with: the workspace by path, then every extra writable path the box carries — the session
-// scratch dir among them, which Config.ConfinementBox already folds in. A box naming no root at
-// all (an unconfined zero box reaching a label, which the callers below never do) falls back to
-// the abstract wording rather than pointing the model at an empty path.
+// confinementWritableRoots renders the box's writable roots as both denial labels name them:
+// the workspace by path, then every extra writable path the box carries — the session scratch
+// dir among them, which Config.ConfinementBox already folds in. A box naming no root at all (an
+// unconfined zero box reaching a label, which the callers above never do) falls back to the
+// abstract wording rather than pointing the model at an empty path.
 func confinementWritableRoots(box domain.ConfinementBox) string {
 	roots := make([]string, 0, len(box.WritablePaths)+1)
 	if box.WorkspaceRoot != "" {

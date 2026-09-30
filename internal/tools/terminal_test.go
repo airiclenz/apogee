@@ -915,6 +915,34 @@ func TestSubprocessToolResultDenialLabel(t *testing.T) {
 	}
 }
 
+// TestSubprocessToolResultDenialLabelBlamesNoWrite pins the apogee-denial-label-blames-writes
+// fix: a confined `ps` failing with "Operation not permitted" attempted no write, so its likely
+// label must say only that the sandbox refused an operation — never lead with a write rule that
+// points the model at a write that never happened. It is a subprocessToolResult case rather
+// than a Terminal.Execute journey because end to end the live watch trips the stop label.
+func TestSubprocessToolResultDenialLabelBlamesNoWrite(t *testing.T) {
+	t.Parallel()
+	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
+	res := subprocessToolResult("c1", subprocess.SubprocessResult{
+		CombinedOutput: "ps: Operation not permitted", ExitCode: 1,
+		Confined: true, DenialStopped: false, Box: box})
+
+	if !res.IsError {
+		t.Errorf("IsError = false, want the failed ps to stay an error (content = %q)", res.Content)
+	}
+	if !strings.Contains(res.Content, "the sandbox refused an operation") {
+		t.Errorf("content = %q, want the likely label to name no particular operation", res.Content)
+	}
+	if strings.Contains(res.Content, "writes are allowed only inside") {
+		t.Errorf("content = %q, want no label leading with a claim that a write was blocked", res.Content)
+	}
+	for _, root := range []string{"the workspace /ws", "/scratch/s1"} {
+		if !strings.Contains(res.Content, root) {
+			t.Errorf("content = %q, want the label still to name writable root %q", res.Content, root)
+		}
+	}
+}
+
 // TestTerminal_ConfinementDenialLabelEndToEnd drives Execute with a fake Confiner and a
 // command whose output mimics the incident's OS denial, proving the denial plumbing travels
 // from runSubprocess into the rendered result. On the confined run the live kill-on-denial

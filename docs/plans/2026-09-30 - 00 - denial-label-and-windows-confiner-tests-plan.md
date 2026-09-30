@@ -31,7 +31,10 @@
 - 2: guard folded — empty-prior restore spelled "S:" with Fatalf on restore/read failure; Acceptance grep pins the helper call in each test.
 - 1: guard folded (re-check) — `ps` denial test pinned as a `subprocessToolResult` case, not end-to-end; doc-comment rule widened to every `internal/tools` comment on the label's shape or write-re-aim rationale.
 
-## 1. Denial labels no longer claim a write was blocked
+## 1. Denial labels no longer claim a write was blocked — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): docs/design/confinement-execution-contract.md not edited — it quotes both labels only as `[… workspace confinement: …]` with an ellipsis, so no quote of the old wording exists there.
+NOTES (2026-09-30): confinementWritableRoots doc comment reworded from "the tail both denial labels end with" to "as both denial labels name them" (roots order and zero-box fallback rationale kept) — the roots are no longer the labels' tail now that the setuid clause follows them.
 
 **What:** Recast at the regression check (2026-09-30). fix for `apogee-denial-label-blames-writes`: a confined `ps` failing with "Operation not permitted" was told "writes are allowed only inside <roots>", pointing the model at a write that never happened.
 

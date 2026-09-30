@@ -314,21 +314,31 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 }
 
 // TestConfinementDenialLabelsNameTheWritableRoots pins what the two fence labels now tell the
-// model: the roots it MAY write to, by path. A box with a scratch dir beside the workspace names
-// both, in that order; a box with the workspace alone stops there rather than trailing an empty
+// model: that the sandbox refused an operation — never which one, since a denied `ps` is no
+// write — followed by the sandbox's rules, the roots it MAY write to named by path among them.
+// A box with a scratch dir beside the workspace names both, in that order, in exactly the
+// ratified wording; a box with the workspace alone stops there rather than trailing an empty
 // "and"; and a box naming nothing keeps the abstract wording rather than pointing at "".
 func TestConfinementDenialLabelsNameTheWritableRoots(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name      string
-		box       domain.ConfinementBox
-		want      []string
-		wantNoAnd bool
+		name       string
+		box        domain.ConfinementBox
+		want       []string
+		wantNoAnd  bool
+		wantLikely string
+		wantStop   string
 	}{
 		{
 			name: "workspace and scratch",
 			box:  domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/home/u/.apogee/scratch/s1"}},
 			want: []string{"the workspace /ws", "/home/u/.apogee/scratch/s1"},
+			wantLikely: "[likely blocked by workspace confinement: the sandbox refused an operation; it allows" +
+				" writes only inside the workspace /ws and /home/u/.apogee/scratch/s1;" +
+				" setuid programs run without their privileges]",
+			wantStop: "[blocked by workspace confinement: an operation was denied, so the command was stopped;" +
+				" the sandbox allows writes only inside the workspace /ws and /home/u/.apogee/scratch/s1;" +
+				" setuid programs run without their privileges]",
 		},
 		{
 			name:      "workspace alone",
@@ -362,6 +372,18 @@ func TestConfinementDenialLabelsNameTheWritableRoots(t *testing.T) {
 				if !strings.HasPrefix(label, "[") || !strings.HasSuffix(label, "]") {
 					t.Errorf("%s label = %q, want it bracketed like every other result marker", kind, label)
 				}
+				if strings.Contains(label, "writes are allowed only inside") {
+					t.Errorf("%s label = %q, want no leading claim that a write was blocked", kind, label)
+				}
+			}
+			if tc.wantLikely != "" && labels["likely"] != tc.wantLikely {
+				t.Errorf("likely label = %q, want %q", labels["likely"], tc.wantLikely)
+			}
+			if tc.wantStop != "" && labels["stop"] != tc.wantStop {
+				t.Errorf("stop label = %q, want %q", labels["stop"], tc.wantStop)
+			}
+			if !strings.Contains(labels["likely"], "the sandbox refused an operation") {
+				t.Errorf("likely label = %q, want it to name no particular operation", labels["likely"])
 			}
 			if !strings.Contains(labels["likely"], "likely blocked by workspace confinement") {
 				t.Errorf("likely label = %q, want it to stay the hedged wording", labels["likely"])
