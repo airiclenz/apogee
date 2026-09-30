@@ -53,7 +53,12 @@ every stage. The plan hash still found the same folder; only the item keys moved
 - Plan-hash changes, background `ResumeWorkflows`, TUI rendering changes.
 - Migrating folders outside a Run (no startup sweep).
 
-## 1. Put the item-key formula behind a numbered, pinned scheme registry
+## 1. Put the item-key formula behind a numbered, pinned scheme registry — ✅ DONE (2026-09-30)
+
+NOTES (2026-09-30): itemDraft carries the round and the verify/merge key suffix but not the stage — prepareItems keys with the stage it is already handed (the same value each caller used to pass to stageKeyBrief, the verify `child` included).
+NOTES (2026-09-30): the prompt file is now read while keying each item, not once per stage up front, so a verify or fanout stage with zero items and an unreadable prompt file no longer errors; error text for every item-bearing case is unchanged.
+NOTES (2026-09-30): TestKeySchemeGolden pins two cases per scheme (fanout, and a verify-style suffix); scheme 1 values computed in a v0.23.4 worktree, scheme 2 in a HEAD (=1e3efe44 code) worktree. Extra TestKeySchemesAreNewestFirst guards the registry order.
+NOTES (2026-09-30): store.go change is ItemKey's doc comment only (every scheme ends in ItemKey, so its encoding moves every golden key).
 
 **What:** A behaviour-neutral refactor that makes every key formula ever shipped reproducible.
 **Regression guard.** Verify and merge append `source.Key`+claim / the manifest to the brief

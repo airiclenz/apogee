@@ -136,15 +136,10 @@ func (s *runState) runVerify(ctx context.Context, plan Plan, index, round int, s
 	}
 	child := stage
 	child.Returns = verifyReturns()
-	keyBrief, err := stageKeyBrief(child, round, s.runner.promptSource())
-	if err != nil {
-		return StageResult{}, err
-	}
-
 	items := stageItems[sourceIndex]
 	drafts := make([]itemDraft, len(selected))
 	for position, at := range selected {
-		drafts[position] = verifyDraft(keyBrief, items[at], source.Items[at])
+		drafts[position] = verifyDraft(round, items[at], source.Items[at])
 	}
 	results, err := s.runItems(ctx, index, child, drafts)
 	if err != nil {
@@ -183,14 +178,10 @@ func (s *runState) runMerge(ctx context.Context, plan Plan, index, round int, re
 	if err != nil {
 		return StageResult{}, err
 	}
-	keyBrief, err := stageKeyBrief(stage, round, s.runner.promptSource())
-	if err != nil {
-		return StageResult{}, err
-	}
-
 	draft := itemDraft{
-		item:     Item{Label: stage.Name, Units: []string{manifestPath}},
-		keyBrief: keyBrief + "\n" + manifest,
+		item:      Item{Label: stage.Name, Units: []string{manifestPath}},
+		round:     round,
+		keySuffix: "\n" + manifest,
 		lead: func(output string) string {
 			return strings.NewReplacer(placeholderManifest, manifestPath, placeholderOut, output).Replace(mergeLead)
 		},
@@ -258,11 +249,12 @@ func selectForVerify(stage Stage, items []ItemResult) ([]int, error) {
 // verifyDraft is the verify child's draft for one source item. Its key covers the source item's
 // key and claim as well as the verify stage, so a source item redone with a new receipt is checked
 // again; its lead is the engine's verify brief rendered with the item and its claim.
-func verifyDraft(keyBrief string, item Item, source ItemResult) itemDraft {
+func verifyDraft(round int, item Item, source ItemResult) itemDraft {
 	claim := renderClaim(*source.Receipt)
 	return itemDraft{
-		item:     item,
-		keyBrief: keyBrief + "\n" + source.Key + "\n" + claim,
+		item:      item,
+		round:     round,
+		keySuffix: "\n" + source.Key + "\n" + claim,
 		lead: func(output string) string {
 			return strings.NewReplacer(
 				placeholderItem, strings.Join(item.Units, ", "),

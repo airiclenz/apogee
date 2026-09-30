@@ -398,13 +398,9 @@ type runState struct {
 
 // runFanout runs one fanout stage's items in the given repeat round and returns the stage's result.
 func (s *runState) runFanout(ctx context.Context, stageIndex, round int, stage Stage, items []Item) (StageResult, error) {
-	keyBrief, err := stageKeyBrief(stage, round, s.runner.promptSource())
-	if err != nil {
-		return StageResult{}, err
-	}
 	drafts := make([]itemDraft, len(items))
 	for index, item := range items {
-		drafts[index] = itemDraft{item: item, keyBrief: keyBrief}
+		drafts[index] = itemDraft{item: item, round: round}
 	}
 	results, err := s.runItems(ctx, stageIndex, stage, drafts)
 	if err != nil {
@@ -485,15 +481,17 @@ func (s *runState) endStage(ctx context.Context, stageIndex int, stage Stage, re
 	return StageResult{Name: stage.Name, Kind: stage.Kind, Phase: phase, Items: results, Tally: tallyOf(results)}, nil
 }
 
-// itemDraft is an item before it is keyed: the item, the text its key covers beside the item and
-// the stage's context files, the engine's lead that comes before the stage's own rendered brief
-// (a verify or merge; rendered once the output path is known, nil for a fanout), and a fixed output
-// path (a merge's report; empty lets outputPath choose).
+// itemDraft is an item before it is keyed: the item, the stage's repeat round, the text its key
+// covers beside the stage's brief (a verify's source key and claim, a merge's manifest; empty for
+// a fanout), the engine's lead that comes before the stage's own rendered brief (a verify or merge;
+// rendered once the output path is known, nil for a fanout), and a fixed output path (a merge's
+// report; empty lets outputPath choose). prepareItems keys it through the current key scheme.
 type itemDraft struct {
-	item     Item
-	keyBrief string
-	lead     func(output string) string
-	output   string
+	item      Item
+	round     int
+	keySuffix string
+	lead      func(output string) string
+	output    string
 }
 
 // itemJob is one item made ready to run: its key, its short name, the brief its children get, and
@@ -507,7 +505,7 @@ type itemJob struct {
 	result ItemResult
 }
 
-// prepareItems keys every item, resolves its output path and brief, looks for a receipt an earlier
+// prepareItems keys every item through the current key scheme (keySchemes[0]), resolves its output path and brief, looks for a receipt an earlier
 // run of the workflow stored, and writes the stage's items into status.json.
 func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft) ([]itemJob, error) {
 	store, id := s.runner.Store, s.status.ID
@@ -515,9 +513,12 @@ func (s *runState) prepareItems(stageIndex int, stage Stage, drafts []itemDraft)
 	statuses := make([]ItemStatus, len(drafts))
 	for index, draft := range drafts {
 		item := draft.item
-		key, err := ItemKey(draft.keyBrief, item, stage.Context, s.runner.Workspace)
+		key, err := keySchemes[0].key(keyInput{
+			stage: stage, round: draft.round, suffix: draft.keySuffix, item: item,
+			prompts: s.runner.promptSource(), workspace: s.runner.Workspace,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("workflow: stage %q, item %q: %w", stage.Name, item.Label, err)
+			return nil, err
 		}
 		output := draft.output
 		if output == "" {
@@ -738,7 +739,7 @@ func (s *runState) writeStatus() error {
 	return s.runner.Store.WriteStatus(s.status)
 }
 
-// stageKeyBrief is the brief an item key is taken over: every field of the stage a child's work
+// stageKeyBrief is the current key scheme's (scheme 2's) stage brief: every field of the stage a child's work
 // depends on, the task as a template, the contents of the stage's prompt file read from prompts,
 // and the repeat round. The rendered brief cannot serve — its {out} is inside the item's folder,
 // which the key names. The prompt file's contents, not only its path, go in, so an edit to the

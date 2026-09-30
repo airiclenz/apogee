@@ -27,6 +27,9 @@
 // plan.json, status.json, items/<key>/ with receipt and transcript, results/<stage>/ with the script
 // and ask outcomes a resume replays, stage outputs, the items.md listing a run ends with — written
 // atomically, its items keyed by content so a re-issue found by PlanHash skips finished work.
+// keyscheme.go is the item-key schemes: every key formula ever shipped, numbered and newest first,
+// keySchemes[0] the one a run keys its items with. A change to any key input or its encoding adds
+// a scheme and never edits an existing one — TestKeySchemeGolden pins each scheme's exact keys.
 // runner.go is Runner.Run and the Spawner seam the agent implements: a fanout stage's items run as
 // fresh children at most Width at a time, a capped child continued (ItemSpec.Prior) and a faulted
 // or receipt-less one retried within configured bounds, each receipt stored as it lands, so a
