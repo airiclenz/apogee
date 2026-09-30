@@ -8,10 +8,6 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
-- **Fixed:** resuming or re-running a workflow folder that an earlier apogee build (v0.23.4 or before) started now keeps the finished items of its fan-out stages again, instead of redoing every one after the upgrade. The item's folder is moved to the new key the first time it resumes. This replaces the upgrade note on the `prompt:` file fix above: a folder from before the upgrade keeps its finished items even when a `prompt:` file was edited before the folder's first run on this build, since that build cannot tell the edit apart. An item that has already finished once on this build is still redone when its `prompt:` file changes afterwards.
-
-- **Fixed:** a workflow folder an earlier apogee build (v0.23.4 or before) started now also keeps the finished items of its verify and merge stages after the upgrade, not just its fan-out items — a finished audit resumes with its report instead of re-checking every finding and rewriting the report.
-
 - A re-run workflow stage that redoes items an earlier run of the same folder had finished now says so: its result line and the `/workflows` detail read `redid <n> finished item(s): their inputs changed since they ran`, whether a `prompt:` or context file was edited or an upstream item changed (such as a merge redone after a rerun of failed items). A plain resume carries no such line.
 
 - **MCP tool calls now time out after 5 minutes.** A server that never answers can no longer hold the agent indefinitely: the call ends with an error result (`mcp: call timed out after 5m0s`) the model can route around, and the Turn carries on. Cancelling the Turn still stops the call immediately.
@@ -56,7 +52,7 @@ point is a **minor** bump, not a breaking change.
 
 - A delegate's report is judged degenerate only when one *content* line — a trimmed line of 4 or more characters carrying a letter or digit — repeats 50 times or more. Structural lines such as `}`, `)`, `end`, `---` or a code fence no longer count, so a sub-agent that returns real code is no longer rejected as degenerate narration; this supersedes the earlier "one line repeated 50 times" rule.
 
-- **Fixed:** editing a recipe stage's `prompt:` file between two runs on the same scope now redoes that stage's finished items instead of resuming them with receipts written for the old prompt: the prompt file's content is now part of every item's key, as a context file's already was. A prompt file that cannot be read now stops the run before any item starts. Upgrade note: items of a stage that names a `prompt:` file (fan-out, verify or merge) get new keys once across this upgrade, so re-running or resuming a workflow folder started before it redoes those stages' finished items; stages written with an inline `task:` keep their keys.
+- **Fixed:** editing a recipe stage's `prompt:` file between two runs on the same scope now redoes that stage's finished items instead of resuming them with receipts written for the old prompt: the prompt file's content is now part of every item's key, as a context file's already was. A prompt file that cannot be read now stops the run before any item starts. Upgrade note: a workflow folder an earlier build started keeps the finished items of its fan-out, verify and merge stages — each item's folder moves to its new key the first time it resumes — even when a `prompt:` file was edited before the folder's first run on this build, since that build cannot tell the edit apart. From then on, editing the `prompt:` file redoes the items as described.
 
 - A workflow fanout stage whose `out:` path lacks `{item}` is now refused at validation, naming the stage, instead of letting every child write the same file at once.
 
