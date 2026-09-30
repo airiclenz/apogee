@@ -1124,7 +1124,7 @@ Reach for `effort-dialect:` on the `servers:` entry when you are on a provider l
 # ~/.apogee/config.yaml
 servers:
   - name: openai
-    endpoint: https://api.openai.com/v1
+    endpoint: https://api.openai.com
     api-key-env: OPENAI_API_KEY
     effort-dialect: openai
 ```
@@ -1597,7 +1597,7 @@ servers:
         order: [cerebras, groq]   # try these providers first, in this order
         allow_fallbacks: false    # and no others
   - name: openai
-    endpoint: https://api.openai.com/v1
+    endpoint: https://api.openai.com
     api-key-env: OPENAI_API_KEY
     request-extra:
       prompt_cache_key: apogee-main   # keep this workload's prompt cache together
