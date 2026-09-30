@@ -27,3 +27,16 @@ func TestServerOfflineWithoutAFailureNamesTheEndpointAlone(t *testing.T) {
 		t.Errorf("refusal = %q, want %q", got, want)
 	}
 }
+
+// An unresolved host name is the one failure detail worded here rather than carried through
+// verbatim: the refusal names the host and the two ways out, pinned verbatim as the full sentence
+// a Driver shows.
+func TestServerOfflineNamesAnUnresolvedHost(t *testing.T) {
+	got := notice.ServerOffline("http://Apollo-II.local:1111", notice.UnresolvedHost("Apollo-II.local"))
+
+	want := "cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local did not " +
+		"resolve — use the server's IP address or add it to /etc/hosts"
+	if got != want {
+		t.Errorf("refusal = %q, want %q", got, want)
+	}
+}

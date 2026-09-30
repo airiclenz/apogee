@@ -82,7 +82,7 @@ internal/provider/discovery_test.go — httptest-backed Discover tests; docs/pla
 **Commit:** `fix(provider): resolve .local endpoints over mDNS when the system lookup fails`
 Depends on item 1.
 
-## 3. Unresolved host names get their own offline detail
+## 3. Unresolved host names get their own offline detail — ✅ DONE (2026-09-30)
 
 **What:** fixes the diagnosis half of `apogee-mdns-local-unresolved`: a DNS failure reads as a bare `lookup … no such host`.
 **Regression guard.** Map only when `errors.As(err, &dnsErr) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)` — a cancelled/timed-out lookup is a `*net.DNSError` whose `Unwrap` yields the ctx error, and `cmd/apogee/headless_test.go` pins the ctx-reason suffix.

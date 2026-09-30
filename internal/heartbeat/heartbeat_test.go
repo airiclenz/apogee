@@ -2,10 +2,14 @@ package heartbeat
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"slices"
+	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
@@ -422,4 +426,74 @@ func TestIntervalOutlastsOneDiscoveryProbe(t *testing.T) {
 			Interval, provider.DiscoveryTimeout,
 		)
 	}
+}
+
+// dialFailingMonitor builds a Monitor whose every dial fails with dialErr, so a beat observes that
+// exact transport failure without any network or resolver involved.
+func dialFailingMonitor(endpoint string, dialErr error) *Monitor {
+	transport := &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) { return nil, dialErr },
+	}
+	return NewMonitor(endpoint, "", "", provider.WithHTTPClient(&http.Client{Transport: transport}))
+}
+
+// A host name that did not resolve is named as such rather than left as a bare `lookup … no such
+// host`: the beat still answered nothing, and the refusal a Driver builds from it reads the ratified
+// sentence verbatim. A refused dial and a cancelled lookup keep their raw text — only the name
+// failing is re-worded, and a cancelled lookup's context reason is what callers pin.
+func TestBeatNamesAnUnresolvedHost(t *testing.T) {
+	t.Parallel()
+
+	const endpoint = "http://Apollo-II.local:1111"
+
+	t.Run("unresolved host", func(t *testing.T) {
+		t.Parallel()
+
+		beat := dialFailingMonitor(endpoint, &net.DNSError{
+			Err: "no such host", Name: "Apollo-II.local", IsNotFound: true,
+		}).Beat(context.Background())
+
+		if beat.Answered {
+			t.Error("Answered = true on an unresolved host; nothing replied")
+		}
+		wantFailure := "host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts"
+		if beat.Failure != wantFailure {
+			t.Errorf("Failure = %q, want %q", beat.Failure, wantFailure)
+		}
+		wantRefusal := "cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local " +
+			"did not resolve — use the server's IP address or add it to /etc/hosts"
+		if got := notice.ServerOffline(endpoint, beat.Failure); got != wantRefusal {
+			t.Errorf("refusal = %q, want %q", got, wantRefusal)
+		}
+	})
+
+	t.Run("refused dial keeps its raw text", func(t *testing.T) {
+		t.Parallel()
+
+		dialErr := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		beat := dialFailingMonitor(endpoint, dialErr).Beat(context.Background())
+
+		if beat.Answered {
+			t.Error("Answered = true on a refused dial; nothing replied")
+		}
+		if !strings.HasSuffix(beat.Failure, dialErr.Error()) {
+			t.Errorf("Failure = %q, want the raw dial error %q carried through", beat.Failure, dialErr.Error())
+		}
+	})
+
+	t.Run("cancelled lookup keeps its raw text", func(t *testing.T) {
+		t.Parallel()
+
+		dialErr := &net.DNSError{
+			Err: context.Canceled.Error(), Name: "Apollo-II.local", UnwrapErr: context.Canceled,
+		}
+		beat := dialFailingMonitor(endpoint, dialErr).Beat(context.Background())
+
+		if beat.Answered {
+			t.Error("Answered = true on a cancelled lookup; nothing replied")
+		}
+		if !strings.HasSuffix(beat.Failure, dialErr.Error()) {
+			t.Errorf("Failure = %q, want the raw lookup error %q carried through", beat.Failure, dialErr.Error())
+		}
+	})
 }

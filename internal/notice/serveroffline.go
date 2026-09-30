@@ -20,3 +20,11 @@ func ServerOffline(endpoint, failure string) string {
 	}
 	return note
 }
+
+// UnresolvedHost words the failure detail ServerOffline carries when the beat never reached the
+// server because its host name did not resolve. A bare `lookup … no such host` behind "server
+// offline" reads as a dead box; naming the host and the two ways out — its IP address, or an
+// /etc/hosts entry — tells the reader the box may be fine and the name is what failed.
+func UnresolvedHost(name string) string {
+	return "host name " + name + " did not resolve — use the server's IP address or add it to /etc/hosts"
+}

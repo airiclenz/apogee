@@ -19,7 +19,9 @@
 //
 //   - ServerOffline (serveroffline.go) words the refusal all three Drivers reach when the startup
 //     beat never answered. It was spelled out three times before it lived here, bound only by
-//     comments asking whoever edited one copy to go and visit the other two.
+//     comments asking whoever edited one copy to go and visit the other two. UnresolvedHost
+//     (same file) is the detail that sentence carries when the endpoint's host name did not
+//     resolve, in place of a bare `lookup … no such host`.
 //
 //   - WindowUnknown (window.go) is the honesty line for a binding whose context window nobody
 //     could name — the Budget and auto-compaction bind against the window, so with none known

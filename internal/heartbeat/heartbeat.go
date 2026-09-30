@@ -18,8 +18,10 @@ package heartbeat
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 
+	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -182,7 +184,7 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		// else — every status code, and a reply whose body would not decode — is a box that spoke.
 		var transport *provider.TransportError
 		return Beat{
-			Failure:   err.Error(),
+			Failure:   beatFailure(err),
 			Throttled: throttled,
 			Answered:  !errors.As(err, &transport),
 		}
@@ -207,4 +209,17 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		})
 	}
 	return beat
+}
+
+// beatFailure words a failed discovery for Beat.Failure. A host name that did not resolve is named
+// as such — a bare `lookup … no such host` behind "server offline" reads as a dead box, when it is
+// the NAME that failed. A cancelled or timed-out lookup is a *net.DNSError too, one that unwraps to
+// the context error; it keeps its raw text, whose context reason callers rely on. Every other
+// failure is carried verbatim.
+func beatFailure(err error) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return notice.UnresolvedHost(dnsErr.Name)
+	}
+	return err.Error()
 }
