@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/reactions/scope"
 )
 
 const (
@@ -53,7 +54,7 @@ type Options struct {
 	// events are discarded after matching, which is what a root with no other observer wants.
 	Inner domain.EventSink
 
-	// Workspace is the run's workspace root. It is resolved through ResolveWorkspace once, and
+	// Workspace is the run's workspace root. It is resolved through scope.Resolve once, and
 	// the result is both the payload's "workspace" field and the value a Reaction's `workspace:`
 	// filter is compared against — so the two readings can never disagree (ratified call C).
 	Workspace string
@@ -168,7 +169,7 @@ type worker struct {
 // It fails when a workspace path cannot be resolved, or when a Reaction would have to run with no
 // Options.Exec to run it.
 func New(list []domain.Reaction, o Options) (*Runner, error) {
-	workspace, err := ResolveWorkspace(o.Workspace)
+	workspace, err := scope.Resolve(o.Workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -327,16 +328,9 @@ func (r *Runner) Close(ctx context.Context) error {
 
 // buildSet reduces the list to the Reactions active at this root and starts a worker for each.
 func (r *Runner) buildSet(list []domain.Reaction) (*hookSet, error) {
-	active := make([]domain.Reaction, 0, len(list))
-	for _, entry := range list {
-		scope, err := ResolveWorkspace(entry.Workspace)
-		if err != nil {
-			return nil, reactionError(entry.ID, "%v", err)
-		}
-		if scope != "" && scope != r.workspace {
-			continue
-		}
-		active = append(active, entry)
+	active, err := scope.ActiveAt(list, r.workspace)
+	if err != nil {
+		return nil, err
 	}
 	if len(active) > 0 && r.exec == nil {
 		return nil, fmt.Errorf(

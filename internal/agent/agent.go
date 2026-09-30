@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions/scope"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/undo"
@@ -1420,7 +1421,8 @@ func (a *Agent) closeUndoGroup() {
 // value to both, which is what keeps the two halves of one swap in step.
 //
 // gen.Sync is the user's advise and gate list, and it is TAKEN — this is the seam that arms the
-// sync lane live. It is stored beside Floor and Bypass under the same lock, so a reader never sees
+// sync lane live. An entry scoped to another workspace is dropped on the way in (scopeSync), so
+// Generation reports the lane as it is armed here, which may be shorter than the one handed over. It is stored beside Floor and Bypass under the same lock, so a reader never sees
 // one entry's gate armed against another generation's Bypass, and it REPLACES the previous list
 // wholesale: a caller dropping a reaction hands back a Generation without it. The armed leg of a
 // cascade is then the construction-time list (Config.Reactions — the bench and embedder route)
@@ -1464,8 +1466,29 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 	if err := refuseReservedIDs(gen.Sync); err != nil {
 		return err
 	}
+	scoped, err := a.scopeSync(gen.Sync)
+	if err != nil {
+		return err
+	}
+	gen.Sync = scoped
 	a.installGeneration(gen)
 	return nil
+}
+
+// scopeSync reduces a sync lane to the entries active in this Agent's workspace (scope.ActiveAt):
+// an entry whose `workspace:` names another root is not armed here at all, exactly as the Runner
+// never starts a worker for an observe entry scoped elsewhere. Scoping at the swap rather than per
+// fire keeps the path resolution off the loop, and it means Generation, and every child that
+// inherits the lane from it, carries only what is live here.
+func (a *Agent) scopeSync(list []domain.Reaction) ([]domain.Reaction, error) {
+	if len(list) == 0 {
+		return list, nil
+	}
+	root, err := scope.Resolve(a.cfg.WorkspaceDir)
+	if err != nil {
+		return nil, err
+	}
+	return scope.ActiveAt(list, root)
 }
 
 // installGeneration is SetReactions' install half — the swap itself, under the generation lock,

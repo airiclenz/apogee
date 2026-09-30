@@ -417,10 +417,10 @@ type Reaction struct {
 	// IGNORES it: the engine's own reactions run without a deadline, exactly as today's Floor
 	// guards do.
 	Timeout time.Duration
-	// Workspace narrows a path-bearing notice to one workspace root: set, the reaction fires only
-	// for a path inside that root; empty, it fires for every workspace. Like Timeout it belongs to
-	// the async lane — the Runner resolves it against the firing path — and a Go handler ignores
-	// it.
+	// Workspace scopes the reaction to one workspace root: set, it is armed only for a run rooted
+	// exactly there; empty, it is armed in every workspace. Both lanes honour it — the Runner when
+	// it builds its set, the Agent when SetReactions installs the sync lane — each comparing it
+	// against its own root through scope.Resolve (internal/reactions/scope).
 	Workspace string
 	// TopLevelOnly opts OUT of sub-agent inheritance. The zero value is inherited by every child
 	// agent — today's unconditional membership inheritance — while true keeps the reaction at

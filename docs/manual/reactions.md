@@ -421,6 +421,9 @@ filter and the run's own workspace — go through the same resolution first: a l
 the path made absolute, every symlink evaluated. That is why `/tmp/w` and `/private/tmp/w` are one
 workspace on macOS rather than two, and why a filter written either way still matches.
 
+The filter scopes every action key the entry spells: a scoped `gate:` is not asked and a scoped
+`advise:` adds nothing outside its workspace, exactly as a scoped `run:` does not fire there.
+
 Leave the key out and the entry is active in every workspace.
 
 ## When a reaction is slow

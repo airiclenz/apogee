@@ -29,9 +29,10 @@
 // match.go is the pure
 // mapping from one domain.Event to the Reaction events it produces, built over the SUBSCRIBED set
 // so an unsubscribed event costs nothing; it is also where a closed seam's working value is
-// projected, while the engine's Emit is still running. workspace.go is the one path resolution the
-// `workspace:` filter and the root's own workspace are both compared through, so the two readings
-// can never disagree. runner.go is the sink decorator itself — the Executor seam, the per-Reaction
+// projected, while the engine's Emit is still running. The `workspace:` filter lives in the scope
+// subpackage — the one path resolution the filter and a root's own workspace are both compared
+// through, shared with the Agent's sync lane so the two lanes can never read a filter differently.
+// runner.go is the sink decorator itself — the Executor seam, the per-Reaction
 // queues and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown
 // (Close) paths. exec.go is the production Executor — DefaultExecutor's dispatch onto whichever
 // action the entry configured, and the one JSON encoding both actions send. command.go runs a

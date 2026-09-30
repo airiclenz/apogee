@@ -2,8 +2,6 @@ package reactions
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -322,84 +320,6 @@ func TestSubscribedEventsIsTheUnion(t *testing.T) {
 	}
 	if len(SubscribedEvents(nil)) != 0 {
 		t.Errorf("SubscribedEvents(nil) = %v, want an empty set", SubscribedEvents(nil))
-	}
-}
-
-// TestResolveWorkspaceFollowsSymlinks — the filter and the root are compared through this one
-// resolution, so a workspace reached through a link must reduce to the same string either way.
-func TestResolveWorkspaceFollowsSymlinks(t *testing.T) {
-	t.Parallel()
-
-	realDir := filepath.Join(t.TempDir(), "workspace")
-	if err := os.MkdirAll(realDir, 0o755); err != nil {
-		t.Fatalf("create the workspace: %v", err)
-	}
-	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(realDir, link); err != nil {
-		t.Skipf("this host cannot create a symlink: %v", err)
-	}
-
-	viaLink, err := ResolveWorkspace(link)
-	direct, directErr := ResolveWorkspace(realDir)
-
-	if err != nil || directErr != nil {
-		t.Fatalf("ResolveWorkspace returned %v / %v, want no error", err, directErr)
-	}
-	want, symErr := filepath.EvalSymlinks(realDir)
-	if symErr != nil {
-		t.Fatalf("EvalSymlinks(%q): %v", realDir, symErr)
-	}
-	if viaLink != want || direct != want {
-		t.Errorf("ResolveWorkspace(link) = %q and ResolveWorkspace(real) = %q, want both %q", viaLink, direct, want)
-	}
-}
-
-// TestResolveWorkspaceEmptyIsTheUnsetFilter — an entry that scopes itself to nothing is active
-// everywhere, and callers get that without special-casing the empty string first.
-func TestResolveWorkspaceEmptyIsTheUnsetFilter(t *testing.T) {
-	t.Parallel()
-
-	got, err := ResolveWorkspace("")
-
-	if err != nil || got != "" {
-		t.Errorf("ResolveWorkspace(\"\") = (%q, %v), want (\"\", nil)", got, err)
-	}
-}
-
-// TestResolveWorkspaceExpandsALeadingTilde — a config may name the path the way a shell would.
-func TestResolveWorkspaceExpandsALeadingTilde(t *testing.T) {
-	t.Parallel()
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("this host has no home directory: %v", err)
-	}
-
-	got, err := ResolveWorkspace("~/projects/apogee")
-
-	if err != nil {
-		t.Fatalf("ResolveWorkspace = %v, want no error", err)
-	}
-	want, _ := ResolveWorkspace(filepath.Join(home, "projects", "apogee"))
-	if got != want {
-		t.Errorf("ResolveWorkspace(\"~/projects/apogee\") = %q, want %q", got, want)
-	}
-}
-
-// TestResolveWorkspaceLeavesANonLeadingTildeAlone — `~` is a legal filename character.
-func TestResolveWorkspaceLeavesANonLeadingTildeAlone(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	odd := filepath.Join(dir, "backup~")
-
-	got, err := ResolveWorkspace(odd)
-
-	if err != nil {
-		t.Fatalf("ResolveWorkspace = %v, want no error", err)
-	}
-	if !strings.HasSuffix(got, "backup~") {
-		t.Errorf("ResolveWorkspace(%q) = %q, want the trailing ~ preserved", odd, got)
 	}
 }
 

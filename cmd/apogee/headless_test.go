@@ -30,6 +30,7 @@ import (
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/reactions/scope"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -4031,7 +4032,7 @@ func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
 //
 // The stub stamps WriteTarget the way the engine does — under the workspace's REAL path, since
 // dispatch resolves every target through the fence — and the payload's "workspace" is the same
-// real path (reactions.ResolveWorkspace). On macOS t.TempDir() lives under the /var → /private/var
+// real path (scope.Resolve). On macOS t.TempDir() lives under the /var → /private/var
 // link, so the unresolved spelling would make both assertions fail there for no fault of the code.
 func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	requireHookShell(t)
@@ -4041,7 +4042,7 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	var workspace string
 	stub.emit = func(sink domain.EventSink) {
 		var err error
-		if workspace, err = reactions.ResolveWorkspace(stub.spec.Config.WorkspaceDir); err != nil {
+		if workspace, err = scope.Resolve(stub.spec.Config.WorkspaceDir); err != nil {
 			t.Errorf("resolve workspace: %v", err)
 		}
 		sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{

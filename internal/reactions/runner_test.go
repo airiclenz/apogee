@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/reactions/scope"
 )
 
 // awaitDeadline is how long a test waits for a goroutine it expects to make progress. It is
@@ -229,9 +230,9 @@ func TestRunnerStampsTheIdentityFields(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
-	resolved, err := ResolveWorkspace(workspace)
+	resolved, err := scope.Resolve(workspace)
 	if err != nil {
-		t.Fatalf("ResolveWorkspace: %v", err)
+		t.Fatalf("scope.Resolve: %v", err)
 	}
 	schedule := ScheduleRef{ID: "sched-1", Name: "docs sweep"}
 	fixed := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)

@@ -237,6 +237,38 @@ func TestSetReactionsFloorOnlySwapLeavesTheSyncLaneArmed(t *testing.T) {
 	}
 }
 
+// A `workspace:` filter scopes a sync entry exactly as it scopes an observe one: a gate scoped to
+// another workspace is not armed here at all — the call runs and Generation does not carry it —
+// while the same gate scoped to this Agent's own workspace denies.
+func TestSetReactionsArmsAScopedGateOnlyInItsWorkspace(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	ran := 0
+	a := gateAgent(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran)
+	deny := domain.GateDecision{Verdict: domain.GateDeny, Reason: "not here"}
+	elsewhere := goGate("warden", deny)
+	elsewhere.Workspace = t.TempDir()
+	mustSetReactions(t, a, syncGen(a, elsewhere))
+
+	if live := a.Generation().Sync; len(live) != 0 {
+		t.Fatalf("live sync lane = %+v, want the gate scoped elsewhere left unarmed", live)
+	}
+	result, _ := prepareAndRun(a, readCallOnly())
+	if result.IsError || ran != 1 {
+		t.Fatalf("scoped elsewhere: result %+v after %d runs, want the call executed once", result, ran)
+	}
+
+	here := goGate("warden", deny)
+	here.Workspace = a.cfg.WorkspaceDir
+	mustSetReactions(t, a, syncGen(a, here))
+
+	result, _ = prepareAndRun(a, readCallOnly())
+	if !result.IsError || ran != 1 {
+		t.Fatalf("scoped here: result %+v after %d runs, want a refusal and no further run", result, ran)
+	}
+}
+
 // A child spawned AFTER the swap inherits the sync lane, so a gate the user armed mid-session
 // still answers for the calls a delegation makes. Inheritance is spawn-time, like Floor's: the
 // child holds the list as its own construction-time set, and a later swap on the parent does not

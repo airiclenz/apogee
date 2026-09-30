@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/reactions/scope"
 )
 
 // defaultReactionTimeout bounds an OBSERVE entry that spells no `timeout:`. Every user-origin
@@ -332,7 +333,7 @@ func (r reactionConfig) resolvedWorkspace(id string) (string, error) {
 	if err != nil {
 		return "", reactionEntryError(id, "workspace: %v", err)
 	}
-	resolved, err := reactions.ResolveWorkspace(expanded)
+	resolved, err := scope.Resolve(expanded)
 	if err != nil {
 		return "", reactionEntryError(id, "%v", err)
 	}
