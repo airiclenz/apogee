@@ -3,6 +3,7 @@ package mdns
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"slices"
@@ -21,11 +22,13 @@ type record struct {
 	addr netip.Addr
 }
 
-// replyFunc builds the packets a fake responder sends back for one received query.
-type replyFunc func(t *testing.T, query []byte) [][]byte
+// replyFunc builds the packets a fake responder sends back for one received query. It runs on
+// the responder's goroutine, so it reports failure by error, never through t.Fatal.
+type replyFunc func(query []byte) ([][]byte, error)
 
 // startResponder runs a loopback UDP responder that answers every query with reply's packets,
-// and returns its address. The socket closes when the test ends.
+// and returns its address. A reply error fails the test and stops the responder. The socket
+// closes when the test ends.
 func startResponder(t *testing.T, reply replyFunc) netip.AddrPort {
 	t.Helper()
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -40,7 +43,12 @@ func startResponder(t *testing.T, reply replyFunc) netip.AddrPort {
 			if err != nil {
 				return
 			}
-			for _, packet := range reply(t, slices.Clone(buf[:n])) {
+			packets, err := reply(slices.Clone(buf[:n]))
+			if err != nil {
+				t.Errorf("fake responder: %v", err)
+				return
+			}
+			for _, packet := range packets {
 				if _, err := conn.WriteToUDPAddrPort(packet, from); err != nil {
 					return
 				}
@@ -52,17 +60,20 @@ func startResponder(t *testing.T, reply replyFunc) netip.AddrPort {
 
 // answering replies with one response carrying records in its answer section.
 func answering(records ...record) replyFunc {
-	return func(t *testing.T, _ []byte) [][]byte {
-		return [][]byte{buildResponse(t, records)}
+	return func([]byte) ([][]byte, error) {
+		packet, err := buildResponse(records)
+		if err != nil {
+			return nil, err
+		}
+		return [][]byte{packet}, nil
 	}
 }
 
 // buildResponse encodes an mDNS response whose answer section holds records.
-func buildResponse(t *testing.T, records []record) []byte {
-	t.Helper()
+func buildResponse(records []record) ([]byte, error) {
 	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{Response: true, Authoritative: true})
 	if err := builder.StartAnswers(); err != nil {
-		t.Fatalf("start answers: %v", err)
+		return nil, fmt.Errorf("start answers: %w", err)
 	}
 	for _, rec := range records {
 		header := dnsmessage.ResourceHeader{Name: dnsmessage.MustNewName(rec.name), Class: cacheFlushIN, TTL: 120}
@@ -73,14 +84,14 @@ func buildResponse(t *testing.T, records []record) []byte {
 			err = builder.AAAAResource(header, dnsmessage.AAAAResource{AAAA: rec.addr.As16()})
 		}
 		if err != nil {
-			t.Fatalf("add record: %v", err)
+			return nil, fmt.Errorf("add record: %w", err)
 		}
 	}
 	packet, err := builder.Finish()
 	if err != nil {
-		t.Fatalf("finish response: %v", err)
+		return nil, fmt.Errorf("finish response: %w", err)
 	}
-	return packet
+	return packet, nil
 }
 
 func TestLookupReturnsAnnouncedAddresses(t *testing.T) {
@@ -120,21 +131,29 @@ func TestLookupReturnsAnnouncedAddresses(t *testing.T) {
 		{
 			name: "malformed packet then valid answer",
 			host: "apollo-ii.local",
-			reply: func(t *testing.T, _ []byte) [][]byte {
-				valid := buildResponse(t, []record{{"apollo-ii.local.", v4}})
+			reply: func([]byte) ([][]byte, error) {
+				valid, err := buildResponse([]record{{"apollo-ii.local.", v4}})
+				if err != nil {
+					return nil, err
+				}
 				truncated := valid[:len(valid)-3]
-				return [][]byte{{0xff, 0x00, 0x13}, truncated, valid}
+				return [][]byte{{0xff, 0x00, 0x13}, truncated, valid}, nil
 			},
 			want: []netip.Addr{v4},
 		},
 		{
 			name: "other name's answer skipped for the matching one",
 			host: "apollo-ii.local",
-			reply: func(t *testing.T, _ []byte) [][]byte {
-				return [][]byte{
-					buildResponse(t, []record{{"gemini.local.", netip.MustParseAddr("10.0.0.9")}}),
-					buildResponse(t, []record{{"gemini.local.", v6}, {"apollo-ii.local.", v4}}),
+			reply: func([]byte) ([][]byte, error) {
+				other, err := buildResponse([]record{{"gemini.local.", netip.MustParseAddr("10.0.0.9")}})
+				if err != nil {
+					return nil, err
 				}
+				mixed, err := buildResponse([]record{{"gemini.local.", v6}, {"apollo-ii.local.", v4}})
+				if err != nil {
+					return nil, err
+				}
+				return [][]byte{other, mixed}, nil
 			},
 			want: []netip.Addr{v4},
 		},
@@ -157,14 +176,13 @@ func TestLookupReturnsAnnouncedAddresses(t *testing.T) {
 func TestLookupAsksForAAndAAAA(t *testing.T) {
 	t.Parallel()
 	questions := make(chan []dnsmessage.Question, 1)
-	dest := startResponder(t, func(t *testing.T, query []byte) [][]byte {
+	dest := startResponder(t, func(query []byte) ([][]byte, error) {
 		var msg dnsmessage.Message
 		if err := msg.Unpack(query); err != nil {
-			t.Errorf("unpack query: %v", err)
-			return nil
+			return nil, fmt.Errorf("unpack query: %w", err)
 		}
 		questions <- msg.Questions
-		return [][]byte{buildResponse(t, []record{{"apollo-ii.local.", netip.MustParseAddr("192.168.1.42")}})}
+		return answering(record{"apollo-ii.local.", netip.MustParseAddr("192.168.1.42")})(query)
 	})
 	r := resolver{dest: dest, timeout: 5 * time.Second}
 	if _, err := r.lookup(t.Context(), "Apollo-II.local"); err != nil {
@@ -195,7 +213,7 @@ func TestLookupTimesOutWithoutMatchingAnswer(t *testing.T) {
 
 func TestLookupReturnsPromptlyWhenContextCancelled(t *testing.T) {
 	t.Parallel()
-	silent := startResponder(t, func(*testing.T, []byte) [][]byte { return nil })
+	silent := startResponder(t, func([]byte) ([][]byte, error) { return nil, nil })
 	r := resolver{dest: silent, timeout: time.Minute}
 	ctx, cancel := context.WithCancel(t.Context())
 	time.AfterFunc(50*time.Millisecond, cancel)
@@ -211,7 +229,7 @@ func TestLookupReturnsPromptlyWhenContextCancelled(t *testing.T) {
 
 func TestLookupHonoursEarlierContextDeadline(t *testing.T) {
 	t.Parallel()
-	silent := startResponder(t, func(*testing.T, []byte) [][]byte { return nil })
+	silent := startResponder(t, func([]byte) ([][]byte, error) { return nil, nil })
 	r := resolver{dest: silent, timeout: time.Minute}
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()

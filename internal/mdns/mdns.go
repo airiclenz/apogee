@@ -56,7 +56,7 @@ func Lookup(ctx context.Context, host string) ([]netip.Addr, error) {
 
 // lookup sends one query for host's A and AAAA records to r.dest and returns the addresses of
 // the first reply that answers for host.
-func (r resolver) lookup(ctx context.Context, host string) ([]netip.Addr, error) {
+func (r resolver) lookup(ctx context.Context, host string) (addrs []netip.Addr, err error) {
 	fqdn, err := fullyQualified(host)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,12 @@ func (r resolver) lookup(ctx context.Context, host string) ([]netip.Addr, error)
 	if err != nil {
 		return nil, fmt.Errorf("mdns: open socket: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	// A close failure joins a failed lookup's error; it never voids addresses already received.
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil && err != nil {
+			err = errors.Join(err, fmt.Errorf("mdns: close socket: %w", closeErr))
+		}
+	}()
 
 	deadline := time.Now().Add(r.timeout)
 	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
@@ -93,7 +98,7 @@ func (r resolver) lookup(ctx context.Context, host string) ([]netip.Addr, error)
 		if err != nil {
 			return nil, r.waitError(ctx, host, err)
 		}
-		if addrs := parseReply(buf[:n], fqdn); len(addrs) > 0 {
+		if addrs = parseReply(buf[:n], fqdn); len(addrs) > 0 {
 			return addrs, nil
 		}
 	}
