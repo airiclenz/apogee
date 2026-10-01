@@ -35,7 +35,7 @@ that keeps it so.
   rule); supersedes transcript.go `hasLiveStar`'s doc where it names `foldSpinnerTick` as a repaint.
 - 6: guard folded (Bites fixture test; source-scan precedent is seams_guard_test.go).
 
-## 1. Count the elision notice against the compaction budget
+## 1. Count the elision notice against the compaction budget — ✅ DONE (2026-10-01)
 
 **What:**
 **Goal:** when `renderBudgetedTranscript` elides middle messages, its output length is

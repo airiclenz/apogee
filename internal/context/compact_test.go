@@ -353,6 +353,73 @@ func TestRenderBudgetedTranscriptAlwaysKeepsMostRecentMessage(t *testing.T) {
 	}
 }
 
+// TestRenderBudgetedTranscriptCountsElisionNoticeAgainstBudget pins that the elision notice is
+// written inside the budget, not on top of it: when the tail fills the budget exactly, the oldest
+// kept tail message gives way so prefix + notice + tail still fit.
+func TestRenderBudgetedTranscriptCountsElisionNoticeAgainstBudget(t *testing.T) {
+	prefix := domain.Message{Role: domain.RoleUser, Content: "OVERARCHING-GOAL"}
+	last := domain.Message{Role: domain.RoleAssistant, Content: "MOST-RECENT-REPLY"}
+	mid := func(i int) domain.Message {
+		return domain.Message{Role: domain.RoleUser, Content: fmt.Sprintf("MIDDLE-%d %s", i, strings.Repeat("x", 100))}
+	}
+	msgs := []domain.Message{prefix, mid(1), mid(2), mid(3), mid(4), mid(5), mid(6), last}
+
+	// Sized so the fix can pass: each middle renders longer than the notice, so dropping one
+	// makes room for it, and prefix + last + notice sit well inside the budget.
+	notice := elisionNotice(5)
+	if len(renderMessage(mid(5))) < len(notice) {
+		t.Fatalf("fixture: a middle message (%d chars) must render at least the notice's length (%d)",
+			len(renderMessage(mid(5))), len(notice))
+	}
+	// A budget the tail fills exactly: prefix + mid(5) + mid(6) + last, no room for a notice.
+	budget := len(renderMessage(prefix)) + len(renderMessage(mid(5))) + len(renderMessage(mid(6))) + len(renderMessage(last))
+
+	got := renderBudgetedTranscript(msgs, 1, budget)
+
+	if len(got) > budget {
+		t.Errorf("output is %d chars, over the %d-char budget:\n%s", len(got), budget, got)
+	}
+	if !strings.Contains(got, "OVERARCHING-GOAL") || !strings.Contains(got, "MOST-RECENT-REPLY") {
+		t.Errorf("protected prefix or most recent message dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "5 earlier message(s) omitted") {
+		t.Errorf("missing/incorrect elision notice for the 5 dropped middles:\n%s", got)
+	}
+	if strings.Contains(got, "MIDDLE-5") || !strings.Contains(got, "MIDDLE-6") {
+		t.Errorf("want only the oldest kept tail message (MIDDLE-5) dropped for the notice:\n%s", got)
+	}
+}
+
+// TestRenderBudgetedTranscriptNoticeOverBudgetKeepsMostRecentMessage pins the stated exception:
+// when the prefix, the most recent message and the notice alone exceed the budget, the most recent
+// message is still kept and the output runs over budget rather than losing it.
+func TestRenderBudgetedTranscriptNoticeOverBudgetKeepsMostRecentMessage(t *testing.T) {
+	prefix := domain.Message{Role: domain.RoleUser, Content: "OVERARCHING-GOAL"}
+	last := domain.Message{Role: domain.RoleAssistant, Content: "MOST-RECENT-REPLY"}
+	mid := func(i int) domain.Message {
+		return domain.Message{Role: domain.RoleUser, Content: fmt.Sprintf("MIDDLE-%d %s", i, strings.Repeat("x", 100))}
+	}
+	msgs := []domain.Message{prefix, mid(1), mid(2), last}
+
+	// 10 chars short of prefix + last + notice; the output's trailing "\n\n" trim recovers only 2.
+	budget := len(renderMessage(prefix)) + len(renderMessage(last)) + len(elisionNotice(2)) - 10
+
+	got := renderBudgetedTranscript(msgs, 1, budget)
+
+	if !strings.Contains(got, "MOST-RECENT-REPLY") {
+		t.Errorf("most recent message dropped:\n%s", got)
+	}
+	if strings.Contains(got, "MIDDLE-") {
+		t.Errorf("a middle message survived though only the most recent should be kept:\n%s", got)
+	}
+	if !strings.Contains(got, "2 earlier message(s) omitted") {
+		t.Errorf("missing/incorrect elision notice for the 2 dropped middles:\n%s", got)
+	}
+	if len(got) <= budget {
+		t.Errorf("output is %d chars, want over the %d-char budget in the exception case:\n%s", len(got), budget, got)
+	}
+}
+
 // TestCompactAppliesTranscriptBudget proves the budget threads through Compact into the summary
 // call: with a small budget an over-budget conversation's request carries the prefix and recent
 // tail plus an elision notice, not the earliest middle turns.

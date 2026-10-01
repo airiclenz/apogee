@@ -245,6 +245,9 @@ func renderMessage(m domain.Message) string {
 // the budget; the most recent message is always kept (the next turn depends on it) even if it
 // alone is over budget. When any middle messages are dropped, an elision notice marks the gap so
 // the summarizer treats the prefix and tail as non-contiguous rather than one continuous history.
+// The notice counts against the budget: the oldest kept tail messages give way to it, down to the
+// most recent message, so the output stays within maxChars unless the prefix, the most recent
+// message and the notice alone exceed it.
 func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) string {
 	if maxChars <= 0 {
 		return renderTranscript(msgs)
@@ -273,15 +276,32 @@ func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) st
 		keepFrom = i
 	}
 
+	// The elision notice is written into the same budget. Make room for it by dropping the oldest
+	// kept tail message — never the most recent one — and recompute it each time, since the
+	// elided count (and so its digit count) grows with every drop.
+	notice := ""
+	if keepFrom > prefixEnd {
+		notice = elisionNotice(keepFrom - prefixEnd)
+		for used+len(notice) > maxChars && keepFrom < len(msgs)-1 {
+			used -= len(rendered[keepFrom])
+			keepFrom++
+			notice = elisionNotice(keepFrom - prefixEnd)
+		}
+	}
+
 	var b strings.Builder
 	for i := 0; i < prefixEnd; i++ {
 		b.WriteString(rendered[i])
 	}
-	if keepFrom > prefixEnd {
-		fmt.Fprintf(&b, "[... %d earlier message(s) omitted to fit the compaction budget ...]\n\n", keepFrom-prefixEnd)
-	}
+	b.WriteString(notice)
 	for i := keepFrom; i < len(msgs); i++ {
 		b.WriteString(rendered[i])
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// elisionNotice is the marker renderBudgetedTranscript writes where elided middle messages were
+// dropped, so the summarizer treats the prefix and tail as non-contiguous.
+func elisionNotice(elided int) string {
+	return fmt.Sprintf("[... %d earlier message(s) omitted to fit the compaction budget ...]\n\n", elided)
 }
