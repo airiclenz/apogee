@@ -1059,3 +1059,65 @@ func TestNewHTTPClient_UnusableOrUnpinnableProxyRefusesTheCall(t *testing.T) {
 		})
 	}
 }
+
+// TestNetworkTool_ProxyRefusalWordingsAreExact pins, as whole strings, the two messages the
+// model reads when the egress proxy refuses a call: an unusable proxy value, and a proxy whose
+// own addresses cannot be learned. The client builder moved into internal/security; these
+// wordings are the funnel's and must survive any such move byte for byte, so each is asserted
+// in full rather than by fragment — and neither may name the proxy's password.
+func TestNetworkTool_ProxyRefusalWordingsAreExact(t *testing.T) {
+	t.Parallel()
+
+	unresolvableProxy := security.URLGuard{}.WithResolver(func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "proxy.invalid" {
+			return nil, errors.New("no such host")
+		}
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	credentialed, err := url.Parse(credentialedProxy)
+	if err != nil {
+		t.Fatalf("parse proxy %q: %v", credentialedProxy, err)
+	}
+
+	cases := map[string]struct {
+		tool networkTool
+		want string
+	}{
+		"an unusable proxy value": {
+			tool: networkTool{
+				guard: publicNameGuard(),
+				proxy: func(*http.Request) (*url.URL, error) {
+					return nil, errors.New(`invalid proxy address "` + credentialedProxy + `"`)
+				},
+			},
+			want: "url blocked by url-safety (host example.test): " +
+				"the configured egress proxy is not a usable URL",
+		},
+		"a proxy whose addresses cannot be learned": {
+			tool: networkTool{guard: unresolvableProxy, proxy: http.ProxyURL(credentialed)},
+			want: "url blocked by url-safety (host example.test): " +
+				`egress proxy proxy.invalid could not be pinned: could not resolve host "proxy.invalid": no such host`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			resp, msg, err := tc.tool.do(context.Background(), netRequest{url: "http://example.test/"})
+
+			if err != nil {
+				t.Fatalf("do Go error: %v", err)
+			}
+			if msg != tc.want {
+				t.Errorf("message = %q\nwant      %q", msg, tc.want)
+			}
+			if strings.Contains(msg, credentialedProxyPassword) {
+				t.Errorf("message %q names the proxy's password", msg)
+			}
+			if resp.statusCode != 0 {
+				t.Errorf("a refused call must yield the zero netResponse; got %+v", resp)
+			}
+		})
+	}
+}

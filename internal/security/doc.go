@@ -172,6 +172,11 @@
 // the denied v4 and v6 ranges, the NAT64-embedded decode, and the dial-time SafeDialControl /
 // PinnedDialControl that re-check the address the connection actually goes to, so a name that
 // rebinds between the check and the connect cannot walk past it.
+// httpclient.go is the USE over both: GuardedClient, the one recipe for "a client for this vetted
+// destination" — egress-proxy resolution, the dial-time control a DialPolicy picks (the blanket
+// floor or the destination's own pin, the proxy pinned either way), the fixed transport and the
+// never-follow redirect policy — with its typed ErrProxyUnusable / PinError refusals. The
+// pre-flight stays with each adapter.
 //
 // And doc.go this map.
 package security

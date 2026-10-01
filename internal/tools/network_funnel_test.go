@@ -329,11 +329,12 @@ func TestNetworkFunnel_DoBlockedURL(t *testing.T) {
 // TestNetworkFunnel_DialTimeFloorBlocksAfterPreflightPasses drives the half of url-safety the
 // rest of the suite never exercises: a URL that PASSES the pre-flight Check and is stopped at
 // CONNECT. Every other funnel test either turns the floor off (loopbackGuard) or is refused
-// pre-flight, so the dial-time Control hook installed at newHTTPClient — the DNS-rebinding
-// backstop, and the floor's real bound (security/ssrf.go: "the pre-flight Check is the cheap
-// first line; the dial-time control is the real bound") — was carried by nothing. A refactor
-// that dropped the hook, swapped in a shared client or wrapped the transport left the whole
-// suite green while a prompt-injected model regained an IMDS/loopback path in Auto.
+// pre-flight, so the dial-time Control hook installed at newHTTPClient (security.GuardedClient)
+// — the DNS-rebinding backstop, and the floor's real bound (security/ssrf.go: "the pre-flight
+// Check is the cheap first line; the dial-time control is the real bound") — was carried by
+// nothing. A refactor that dropped the hook, swapped in a shared client or wrapped the
+// transport left the whole suite green while a prompt-injected model regained an
+// IMDS/loopback path in Auto.
 //
 // The rebinding is simulated without a rebinding nameserver: the guard's injected resolver
 // answers PUBLIC for the pre-flight, while the transport resolves the same name for real and

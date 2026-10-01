@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -307,25 +306,20 @@ func blockedReason(err error, rawURL string) string {
 	return strings.Trim(reason, ": ")
 }
 
-// newHTTPClient builds an http.Client for ONE outbound call: it resolves the operator's
-// egress proxy for target, sets the dial-time control the resulting connection needs, and
-// applies the given overall timeout. It is the single place the network tools obtain a
-// client so neither the proxy nor the dial-time floor is ever accidentally skipped.
+// newHTTPClient builds the http.Client for ONE outbound call through the security package's
+// guarded-client recipe (security.GuardedClient) — the single place the network tools obtain a
+// client, so neither the proxy nor the dial-time floor is ever accidentally skipped. The policy
+// is security.DialFloor: a model-supplied destination meets the blanket SafeDialControl at dial
+// time (the DNS-rebinding backstop), and with an egress proxy in force the proxy's own addresses
+// are pinned instead, because the proxy is then what the transport connects to. The pre-flight
+// over the destination (do, above) runs whether or not a proxy applies, so a proxy can never
+// launder a private target. Redirects are never followed.
 //
-// The order of judgement is the point. The PRE-FLIGHT (do, above) judges the DESTINATION —
-// the scheme/host allow-deny lists and the resolved-IP SSRF floor — and it runs whether or
-// not a proxy applies, so a private destination is refused before anything leaves the
-// process and a proxy can never launder one. The dial-time control judges what is actually
-// DIALLED: with a proxy in force the transport connects to the PROXY rather than to the
-// destination, so the control pins the proxy's own resolved addresses (a proxy on loopback
-// or the LAN is the normal case, and the blanket floor would refuse it); with no proxy —
-// NO_PROXY, or none configured — it stays the blanket SafeDialControl, the DNS-rebinding
-// backstop over the destination itself. Redirects are still never followed either way.
-//
-// A nil proxy means http.ProxyFromEnvironment: the process's HTTP_PROXY / HTTPS_PROXY /
-// NO_PROXY, which is what the LLM client already honours through Go's default transport.
-// An unusable proxy value, or a proxy whose addresses cannot be resolved, fails the call
-// closed rather than dialling around it.
+// A nil proxy means http.ProxyFromEnvironment. An unusable proxy value, or a proxy whose
+// addresses cannot be resolved, fails the call closed rather than dialling around it, and is
+// worded here — the funnel's own refusal text, which blockedMessage then renders for the model.
+// Neither wording names the proxy's credentials: the resolver's error text is never
+// interpolated, and the pin failure names the bare host alone.
 //
 // The timeout is a backstop, not the operative bound: do runs the request under a context whose
 // deadline is the same budget started BEFORE the pre-flight lookup, so that deadline always
@@ -342,47 +336,25 @@ func newHTTPClient(
 	proxy func(*http.Request) (*url.URL, error),
 	timeout time.Duration,
 ) (*http.Client, error) {
-	if proxy == nil {
-		proxy = http.ProxyFromEnvironment
+	client, err := guard.GuardedClient(ctx, target, security.GuardedClientOptions{
+		Proxy:   proxy,
+		Timeout: timeout,
+		Policy:  security.DialFloor,
+	})
+	if err == nil {
+		return client, nil
 	}
-	control := guard.SafeDialControl() // re-check the connected IP — closes DNS-rebinding TOCTOU
-	if target != nil {
-		proxyURL, err := proxy(&http.Request{URL: target})
-		if err != nil {
-			// The proxy value is deliberately NOT interpolated: the resolver quotes it back and
-			// a proxy URL may carry credentials (the reasoning mcp's checkEndpoint rests on).
-			return nil, fmt.Errorf("%w: the configured egress proxy is not a usable URL", security.ErrURLBlocked)
-		}
-		if proxyURL != nil {
-			control, err = guard.PinnedDialControl(ctx, proxyURL.Hostname())
-			if err != nil {
-				return nil, fmt.Errorf("egress proxy %s could not be pinned: %w", proxyURL.Hostname(), err)
-			}
-		}
+
+	var pinErr *security.PinError
+	switch {
+	case errors.Is(err, security.ErrProxyUnusable):
+		return nil, fmt.Errorf("%w: the configured egress proxy is not a usable URL", security.ErrURLBlocked)
+	case errors.As(err, &pinErr):
+		// Under DialFloor the only pinned host is the proxy's.
+		return nil, fmt.Errorf("egress proxy %s could not be pinned: %w", strings.Join(pinErr.Hosts, ", "), pinErr.Err)
+	default:
+		return nil, err
 	}
-	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
-		Control: control,
-	}
-	transport := &http.Transport{
-		Proxy:                 proxy,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          10,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-	return &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-		// Do not follow redirects automatically: a redirect could send a vetted request to
-		// an unvetted (private) host, sidestepping the pre-flight Check. The model sees the
-		// redirect Location and can choose to follow it through a fresh, re-checked call.
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}, nil
 }
 
 // readCappedBody reads at most maxNetworkResponseBytes from r. It reports truncated when the
