@@ -116,8 +116,9 @@
 // boundaries, and InterjectChild, which addresses a child by its run id (ADR 0063, ADR 0086).
 // childrun.go is the one lifecycle a child's run goes through on that registry — register, arm,
 // Run, disarm, the stop verdict and an optional fold of a stopped child — and its teardown,
-// reapChild; the workflow spawner runs its item children on it with fold off. rebind.go swaps every per-model binding together when the Upstream's
-// loaded model changes, and moves the session to another server (ADR 0024); serverbinding.go is
+// reapChild; sub_agent delegation (runSubAgent) runs its child on it with fold on, the workflow
+// spawner its item children with fold off. rebind.go swaps every per-model binding together when
+// the Upstream's loaded model changes, and moves the session to another server (ADR 0024); serverbinding.go is
 // the one presence-typed value a model change, a server switch or a routed target states its
 // bindings as, with the one pure projection onto a Config. setprofile.go is
 // the separate, explicit door for changing the model PROFILE, which Rebind deliberately leaves

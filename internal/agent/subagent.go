@@ -1086,8 +1086,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2). The
 		// report itself waits for the outer defer, which alone knows how the run ended and so why
 		// the message did not land — this defer runs before a recovered panic is even classified.
-		a.children.unregister(runID)
-		leftover, turn := append(stopLeftover, sub.mailbox.close()...), sub.turns.index
+		leftover, turn := append(stopLeftover, reapChild(&a.children, runID, sub)...), sub.turns.index
 		reportLeftover = func(reason domain.UndeliveredReason) {
 			sub.reportUndelivered(turn, leftover, reason)
 		}
@@ -1098,57 +1097,60 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		giveBack()
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
 	}
-	// The child is addressable for exactly as long as it runs: published under its run id — the
+	// The child runs on the shared child-run lifecycle (runChild): published under its run id — the
 	// engine-minted identity the child stamps on every Event it emits, so a Driver addresses it by
 	// the identity it already paints (ADR 0063 D1), and two delegations whose call ids collide stay
-	// two addresses (ADR 0086).
-	a.children.register(runID, sub)
-	// And stoppable for as long as its Run can still be cut short (ADR 0086 D4): the child runs on a
-	// context of its own, a child of the parent's, whose cancel is the run's stop handle. It is
+	// two addresses (ADR 0086) — and stoppable for as long as its Run can still be cut short (ADR
+	// 0086 D4), on a context of its own whose cancel is the run's stop handle. The handle is
 	// withdrawn the moment Run returns, so a stop landing while the namer is joined or the result
 	// rendered finds nothing armed and leaves a completed or capped result exactly as it is. A
 	// pooled delegation the human stopped after a worker took it but before this point carries the
-	// stop in here: arm cancels the context at once, and the run is stopped like any other.
-	childCtx, stopRun := context.WithCancelCause(ctx)
-	defer stopRun(nil)
-	a.children.arm(runID, childCtx, stopRun)
-	// A name a continuation INHERITED is re-announced for the new spawn id: the call that spawned
-	// this child named nothing, so every Driver reads its block off the call's `task` — the
-	// continuation instructions — until told the name the continued delegation already wears. It is
-	// the one rename that is not the namer's (ADR 0068), and it reaches the same readers by the same
-	// event, stamped with the child's identity as every rename is.
-	if inheritedName != "" {
-		a.emitSubAgentNamed(a.turns.index, call.ID, sub.runID, inheritedName)
-	}
-	// Named CONCURRENTLY with the run it names, and only once the child is addressable: the name is
-	// worth having while the delegation is still on screen, so waiting for a completion before
-	// starting the work would buy a better label at the price of the thing it labels.
-	stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
-	ran = true
-	res, err = sub.Run(childCtx)
-	a.children.disarm(runID)
-	// The namer is stopped and JOINED here, before the run is read, rather than left to the defer
-	// alone (whose copies are then no-ops): the name a retained child is kept under below must be
-	// the name it ended its run wearing, and the namer's late-drop check reads its context — still
-	// live while the result was rendered ahead of the defer — so a reply landing during that
-	// rendering would have renamed a delegation the retention had already read under the old name.
-	if stopNaming != nil {
-		stopNaming()
-	}
-	naming.Wait()
-	ledgerName = sub.displayName()
-	// A STOP is read where something cut the Run short — it returned cancelled, or faulted with
-	// finishAtFault's fold cancelled under it — and that something is either the human's stop (the
-	// cause of the child's own context) or the cancel of the parent's whole Turn, which reaches
-	// every running child and is answered the same way (ADR 0088 D2). A stop or cancel that landed
-	// as the child finished leaves the finished result standing.
-	stopped = err == nil && (res.Status == domain.StatusCancelled || (res.Faulted && sub.capFold == "")) &&
-		(ctx.Err() != nil || errors.Is(context.Cause(childCtx), errDelegationStopped))
+	// stop in: arm cancels the context at once, and the run is stopped like any other. A STOP is read
+	// where something cut the Run short and that something is the human's stop or the cancel of the
+	// parent's whole Turn (childRunStopped, ADR 0088 D2).
+	res, stopped, stopLeftover, err = runChild(ctx, childRun{
+		registry: &a.children,
+		runID:    runID,
+		sub:      sub,
+		onArmed: func(context.Context) {
+			// A name a continuation INHERITED is re-announced for the new spawn id: the call that
+			// spawned this child named nothing, so every Driver reads its block off the call's
+			// `task` — the continuation instructions — until told the name the continued delegation
+			// already wears. It is the one rename that is not the namer's (ADR 0068), and it reaches
+			// the same readers by the same event, stamped with the child's identity as every rename is.
+			if inheritedName != "" {
+				a.emitSubAgentNamed(a.turns.index, call.ID, sub.runID, inheritedName)
+			}
+			// Named CONCURRENTLY with the run it names, and only once the child is addressable: the
+			// name is worth having while the delegation is still on screen, so waiting for a
+			// completion before starting the work would buy a better label at the price of the
+			// thing it labels.
+			stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
+			// The LAST act before Run: a panic anywhere earlier reads as a refused delegation.
+			ran = true
+		},
+		settled: func() {
+			// The namer is stopped and JOINED here, before the run is read, rather than left to the
+			// defer alone (whose copies are then no-ops): the name a retained child is kept under
+			// below must be the name it ended its run wearing, and the namer's late-drop check reads
+			// its context — still live while the result was rendered ahead of the defer — so a reply
+			// landing during that rendering would have renamed a delegation the retention had
+			// already read under the old name.
+			if stopNaming != nil {
+				stopNaming()
+			}
+			naming.Wait()
+			ledgerName = sub.displayName()
+		},
+		foldStopped: func(ctx context.Context) {
+			// stopped is set BEFORE the fold, so a fold that panics still reads stopped. runChild
+			// closes the mailbox after it, so the result can list what the human wrote to the child
+			// that never reached it; the reaping defer still reports each one undelivered.
+			stopped = true
+			a.foldStoppedChild(ctx, runID, sub)
+		},
+	})
 	if stopped {
-		a.foldStoppedChild(ctx, runID, sub)
-		// Closed HERE rather than in the reaping defer, so the result can list what the human
-		// wrote to the child that never reached it; the defer still reports each one undelivered.
-		stopLeftover = sub.mailbox.close()
 		sub.stoppedByUser, sub.stopUndelivered = true, stopLeftover
 	}
 	result, outcome = sub.delegationResult(call.ID, res, err)

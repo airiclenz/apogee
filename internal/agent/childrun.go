@@ -4,9 +4,10 @@ package agent
 // built and handed its task — published in a registry under its run id (register), made stoppable
 // on a context of its own (arm), Run, withdrawn from stopping the moment Run returns (disarm), the
 // caller's settle hook, the stop verdict, and — for a caller that keeps what a stopped child did —
-// the fold of its stopped work. reapChild is the matching teardown. A workflow item's child
-// (workflowSpawner.Spawn) runs on it with fold off: a stopped item is re-run on resume, so nothing
-// of it is kept.
+// the fold of its stopped work. reapChild is the matching teardown. A sub_agent delegation
+// (runSubAgent) runs on it with fold on: a stopped delegate is folded and retained so the parent
+// can continue it (ADR 0086 D4). A workflow item's child (workflowSpawner.Spawn) runs on it with
+// fold off: a stopped item is re-run on resume, so nothing of it is kept.
 //
 // The helper owns no recover frame (each caller keeps its own, so a panic is classified where the
 // caller can report it) and takes the registry explicitly: a background workflow's children are

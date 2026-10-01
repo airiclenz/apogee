@@ -133,6 +133,13 @@ the spawn.
 has to set more fields than the constructor takes, or a delegate-only field added that a flat
 layout leaves readable at depth 0 and a bug results from it.
 
+> **Note 2026-10-01 (review 09-30 #3; plan `2026-09-30 - 00`, item 17).** This section stands:
+> what moved is the run protocol, not the runtime-state value. `runSubAgent`'s register → arm →
+> Run → disarm → stop verdict → fold sequence is now the shared child-run lifecycle
+> (`internal/agent/childrun.go`, `runChild` and `reapChild`) the workflow spawner also runs on;
+> the delegate's fields stay flat, and `runSubAgent` still makes its call-derived writes after
+> construction and reads the child's fields for the report.
+
 ## 4. The bound entry stays six host-side assembly sites — `Options.StartupEntry` only (2026-09-15, review 09-14 #7)
 
 **Proposed.** "The Upstream this session is on" as one value in `internal/config` — the entry plus

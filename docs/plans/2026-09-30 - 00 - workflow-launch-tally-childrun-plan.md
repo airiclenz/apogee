@@ -269,7 +269,11 @@ NOTES (2026-10-01): `make lint` fails on internal/agent/workflowcall.go:121 (con
 **Acceptance:** `go test ./internal/agent -run 'TestChildRun|TestWorkflowSpawn|TestBackground_|TestWorkflowCall_ACancelEndsItsPhasesStopped|TestStoppedFanOutAnswerCarriesResumeLine|TestWorkflowControl|TestDocMap'`; `grep -n 'runChild(' internal/agent/workflowspawn.go`; `! grep -n 'children.arm(\|errDelegationStopped' internal/agent/workflowspawn.go`
 **Commit:** `refactor(agent): one child-run lifecycle, used by the workflow spawner`
 
-## 17. agent: sub-agent delegation runs on the child-run helper
+## 17. agent: sub-agent delegation runs on the child-run helper — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): consequential edit — internal/agent/childrun.go: made necessary by runSubAgent now running on runChild (the header named only the workflow spawner as a user)
+NOTES (2026-10-01): consequential edit — internal/agent/doc.go: made necessary by runSubAgent now running on runChild (the package map named only the workflow spawner as a user)
+NOTES (2026-10-01): the registry is passed as &a.children (childRegistry is a value field on Agent), matching the workflow spawner's call
 
 **Depends on:** item 16.
 **Files:** `internal/agent/subagent.go`, `docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md`
