@@ -263,7 +263,7 @@ func (v workflowView) fold(e domain.WorkflowPhaseEvent) workflowView {
 			stage:   stripEscapes(e.Stage),
 			label:   stripEscapes(itemShownName(e)),
 			status:  stripEscapes(e.Receipt.Status),
-			summary: stripEscapes(firstLine(e.Receipt.Summary)),
+			summary: stripEscapes(workflow.FirstLine(e.Receipt.Summary)),
 			line:    workflowItemLine(e),
 		}
 		v.items = append(slices.Clip(v.items), item)
@@ -401,7 +401,7 @@ func itemShownName(e domain.WorkflowPhaseEvent) string {
 // workflowItemLine renders one finished item the way the result lines do, the item shown by its
 // short name (itemShownName): `#<n> <item> — <status> — <summary>[ k=v…]`, fields in key order.
 func workflowItemLine(e domain.WorkflowPhaseEvent) string {
-	summary := firstLine(e.Receipt.Summary)
+	summary := workflow.FirstLine(e.Receipt.Summary)
 	if summary == "" {
 		summary = workflowNoSummary
 	}
@@ -412,18 +412,9 @@ func workflowItemLine(e domain.WorkflowPhaseEvent) string {
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
-		line += " " + key + "=" + workflowFieldValue(e.Receipt.Fields[key])
+		line += " " + key + "=" + workflow.FieldValue(e.Receipt.Fields[key])
 	}
 	return stripEscapes(line)
-}
-
-// workflowFieldValue quotes a field value that would blur its pair — empty, or holding a space or
-// an `=` — as the result lines do.
-func workflowFieldValue(value string) string {
-	if value == "" || strings.ContainsAny(value, " \t=") {
-		return strconv.Quote(value)
-	}
-	return value
 }
 
 // text renders the block: its header line, then its body — the stage running, the item lines (past
@@ -720,7 +711,7 @@ func (t *transcript) finishWorkflowItem(e domain.WorkflowPhaseEvent) {
 	en := &t.entries[i]
 	status := stripEscapes(e.Receipt.Status)
 	en.tool.stat = plainStat(status)
-	en.tool.Summary = workflowItemSummary(status, stripEscapes(firstLine(e.Receipt.Summary)))
+	en.tool.Summary = workflowItemSummary(status, stripEscapes(workflow.FirstLine(e.Receipt.Summary)))
 	en.done = true
 	t.touch()
 }

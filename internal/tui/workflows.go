@@ -681,40 +681,32 @@ func workflowName(info workflow.Info) string {
 	return sanitize.StripEscapesToLine(info.Status.ID)
 }
 
-// workflowState is how a workflow stands: queued or running when the session's manager holds it in
-// the background — waiting for you, running, when a prompt of it waits on the human (the folded
-// backgroundWorkflows count, never the engine) — else the phase its status.json records.
+// workflowState is how a workflow stands, as the engine's StateOf reads it: queued or running when
+// the session's manager holds it in the background — waiting for you, running, when a prompt of it
+// waits on the human (the folded backgroundWorkflows count, never the engine) — else the phase its
+// status.json records.
 func workflowState(info workflow.Info, waiting bool) string {
+	state := workflow.StateOf(info)
 	switch {
-	case info.Queued:
+	case state.Kind == workflow.StateQueued:
 		return workflowStateQueued
-	case info.Background && waiting:
+	case state.Kind == workflow.StateBackground && waiting:
 		return workflowStateWaiting
-	case info.Background:
+	case state.Kind == workflow.StateBackground:
 		return workflowStateRunning
 	}
-	return sanitize.StripEscapesToLine(string(info.Status.Phase))
+	return sanitize.StripEscapesToLine(string(state.Phase))
 }
 
 // workflowListRow is one workflow's row: its name, its state (waiting says a prompt of it waits on
-// the human), its fan-out items done of all, its id.
+// the human), its fan-out items done of all (the engine's TallyOfStatus — verify and merge items
+// are not items, a skipped fan-out is left out), its id.
 func workflowListRow(info workflow.Info, waiting bool) popupRow {
-	done, total := 0, 0
-	for _, stage := range info.Status.Stages {
-		if stage.Kind != workflow.StageFanout {
-			continue
-		}
-		for _, item := range stage.Items {
-			total++
-			if item.Phase == workflow.PhaseDone {
-				done++
-			}
-		}
-	}
+	tally := workflow.TallyOfStatus(info.Status)
 	return popupRow{
 		workflowName(info),
 		"· " + workflowState(info, waiting),
-		fmt.Sprintf("· %d/%d items", done, total),
+		fmt.Sprintf("· %d/%d items", tally.Total()-tally.Unfinished, tally.Total()),
 		"· " + sanitize.StripEscapesToLine(info.Status.ID),
 	}
 }

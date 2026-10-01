@@ -132,7 +132,10 @@ internal/tui/transcriptbridge.go — toWireWorkflow, fromWireWorkflow
 **Acceptance:** `go test ./internal/tui -run 'TestBackgroundWorkflow_|TestWorkflowBlock|TestStoppedRecipeBlock|TestResumeHint|TestFinishedBlockHasNoResumeHint|TestResumedWorkflow|TestAStageOutcome|TestWorkflowStage|TestDuplicateStarted'`; `go test ./internal/session -run 'TestTranscript|TestDecode'`; `! grep -n 'func (.*backgroundWorkflow) count' internal/tui/*.go`; `! grep -nE 'receiptPartial|receiptBlocked' internal/tui/*.go`
 **Commit:** `fix(tui): workflow totals and finish line count the engine's item set`
 
-## 8. tui: list row, state and item line come from the engine
+## 8. tui: list row, state and item line come from the engine — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): re-derived from the assumed inline `itemCounts` copy in workflowListRow — the tree held an inline done/total loop instead; it is replaced by `workflow.TallyOfStatus` (done = Total − Unfinished), which also leaves out a skipped fan-out stage's items.
+NOTES (2026-10-01): TestWorkflowsStateMapsTheEngineState passes on the pre-change tree by design — workflowState's mapping is behaviour-preserving (a regression guard, not a fix).
 
 **Depends on:** items 2, 7.
 **Files:** `internal/tui/workflows.go`, `internal/tui/workflows_test.go`, `internal/tui/workflowblock.go`, `internal/tui/workflowblock_test.go`

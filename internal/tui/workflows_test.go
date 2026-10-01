@@ -892,3 +892,55 @@ func TestWorkflowsViewCtrlAWithNothingWaitingDoesNothing(t *testing.T) {
 		t.Errorf("state %v, pane open %v at level %d; want ^a to do nothing", m.state, m.workflowsPane.open, m.workflowsPane.level)
 	}
 }
+
+// A list row counts the items the engine's tally counts: a fan-out stage's, done when it holds a
+// receipt — never a verify stage's item, and never a skipped fan-out's.
+func TestWorkflowsListRowCountsFanOutItemsOnly(t *testing.T) {
+	t.Parallel()
+	done := func(status workflow.Status) workflow.ItemStatus {
+		return workflow.ItemStatus{Phase: workflow.PhaseDone, Receipt: &workflow.Receipt{Status: status}}
+	}
+	info := workflow.Info{Status: workflow.RunStatus{ID: "wf-1", Name: "audit", Phase: workflow.PhaseDone, Stages: []workflow.StageStatus{
+		{Name: "find", Kind: workflow.StageFanout, Phase: workflow.PhaseDone, Items: []workflow.ItemStatus{
+			done(workflow.StatusOK), done(workflow.StatusBlocked), {Phase: workflow.PhaseStopped},
+		}},
+		{Name: "check", Kind: workflow.StageVerify, Phase: workflow.PhaseDone, Items: []workflow.ItemStatus{
+			done(workflow.StatusOK), done(workflow.StatusOK),
+		}},
+		{Name: "again", Kind: workflow.StageFanout, Phase: workflow.PhaseSkipped, Items: []workflow.ItemStatus{
+			{Phase: workflow.PhasePending},
+		}},
+	}}}
+	row := workflowListRow(info, false)
+	if got, want := row[2], "· 2/3 items"; got != want {
+		t.Errorf("item count cell = %q, want %q (row %q)", got, want, row)
+	}
+}
+
+// A workflow's state is the engine's StateOf, the TUI adding only `waiting for you` for a background
+// run whose prompt waits on the human; a recorded phase reads with its escapes stripped.
+func TestWorkflowsStateMapsTheEngineState(t *testing.T) {
+	t.Parallel()
+	recorded := func(phase workflow.Phase) workflow.Info {
+		return workflow.Info{Status: workflow.RunStatus{Phase: phase}}
+	}
+	for _, tc := range []struct {
+		name    string
+		info    workflow.Info
+		waiting bool
+		want    string
+	}{
+		{"queued", workflow.Info{Queued: true, Background: true}, true, workflowStateQueued},
+		{"waiting", workflow.Info{Background: true}, true, workflowStateWaiting},
+		{"running", workflow.Info{Background: true}, false, workflowStateRunning},
+		{"recorded running", recorded(workflow.PhaseRunning), true, "running"},
+		{"escape in the phase", recorded(workflow.Phase("do\x1b[31mne")), false, "done"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := workflowState(tc.info, tc.waiting); got != tc.want {
+				t.Errorf("state = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

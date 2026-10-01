@@ -1703,3 +1703,66 @@ func TestWorkflowStarBlinksWhileWaitingOnAsk(t *testing.T) {
 		t.Errorf("waiting block at the settled phase leads with %q, want %q", got, glyphAssistant)
 	}
 }
+
+// An item line quotes a field value holding a newline or a carriage return, as the engine's result
+// lines do, so the value never breaks the line or blurs its pair.
+func TestWorkflowItemLineEscapesNewlines(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"newline", "first\nsecond", `#1 a.go — ok — done note="first\nsecond"`},
+		{"carriage return", "first\rsecond", `#1 a.go — ok — done note="first\rsecond"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := workflowItemLine(itemFinished(0, "a.go", "ok", "done", map[string]string{"note": tc.value}))
+			if got != tc.want {
+				t.Errorf("item line = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A receipt summary opening on a blank line or padded with spaces reads as its first non-blank line,
+// trimmed — in the item line, the stage body beneath the rows and the gist on the item's run head —
+// never as "(no summary)" or an empty gist.
+func TestWorkflowItemLineReadsALeadingNewlineSummary(t *testing.T) {
+	t.Parallel()
+	const call = "recipe-audit-1"
+	for _, tc := range []struct {
+		name    string
+		summary string
+	}{
+		{"leading newline", "\n\nfirst real line\nsecond line"},
+		{"padded with spaces", "   first real line   "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := itemFinished(0, "a.go", "partial", tc.summary, nil)
+			if got, want := workflowItemLine(e), "#1 a.go — partial — first real line"; got != want {
+				t.Errorf("item line = %q, want %q", got, want)
+			}
+
+			v := workflowView{id: testWorkflowID, name: "audit", stages: workflowStagesOf([]string{"items"})}.fold(e)
+			if body, want := strings.Join(v.stageBody(), "\n"), "items · a.go — partial — first real line"; !strings.Contains(body, want) {
+				t.Errorf("stage body = %q, want it to carry %q", body, want)
+			}
+
+			tr := &transcript{}
+			tr.addUser("/audit src", nil)
+			tr.apply(startedUnder(call))
+			tr.apply(itemStartedUnder(call, "run.1", "items", "a.go", 0, 1))
+			tr.apply(itemFinishedUnder(call, "run.1", "items", "a.go", 0, "partial", tc.summary))
+			head := workflowItemHeadAt(tr.entries, "run.1")
+			if head < 0 {
+				t.Fatalf("no item head for run.1 in %+v", tr.entries)
+			}
+			if got := tr.entries[head].tool.Summary.Text; got != "first real line" {
+				t.Errorf("item head gist = %q, want %q", got, "first real line")
+			}
+		})
+	}
+}
