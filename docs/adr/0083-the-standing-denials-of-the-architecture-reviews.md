@@ -170,6 +170,24 @@ not covered by this section.
 needs an edit at every one of the six — the "adding an entry key: 12 edits → 3" leverage the
 candidate claimed, once it is measured against a key that actually arrives.
 
+> **Amended 2026-09-30 (review 2026-09-30 #6; plan `2026-09-30 - 02`, *Ratified design calls*).**
+> The second trigger fired: `request-extra:` (commit 5e41fe15, 2026-09-24) was an entry key that
+> arrived, and it edited seven non-test `cmd/apogee` files (22 files in all), five of them this
+> section's assembly sites. **Reopened, narrowly** (owner, 2026-09-30): an entry's *dial facts* —
+> endpoint, key, wire, model, request-extra and the forced `effort-dialect:` — are one host-side
+> value, `upstreamBinding`, which depend on no observed state. That value builds the Client and the
+> heartbeat Monitor, and it fills the four dial fields (endpoint, key, wire, request-extra) of the
+> engine's `Config`, `UpstreamSpec` and `DelegationTarget`, and of `probe.Inputs` (which carries
+> no request-extra); `DelegationTarget.EffortDialect` comes from the beat. A new Client-side dial
+> key is then one host edit — the binding's field and `cmd/apogee/dial.go`. `Config.EffortDialect`
+> stays hand-ranked in `firingConfig` and `probeContextConfig`, and the four-argument
+> `firingInputs.beat` seam stands, so a key that reaches those needs edits there too. The six
+> arrival sites and the three `Resolve*` ranking ladders stand: this section's reason — each site
+> ranks against a different observed state — does not reach the dial facts, and it still holds for
+> the ranking. One `internal/config` function turning the entry into engine-facing facts and
+> replacing the arrival-site ladders — the *Proposed* design above — stays denied; this is a
+> narrower reopen, so it is a dated amendment and no superseding ADR.
+
 ## 5. Host boot stays three Drivers, not one module (2026-09-15, review 09-14 #18)
 
 **Proposed.** `hostBoot(mode, confine, narrator) → {roots, store, keys, confiner, sweeps, close()}`
@@ -256,9 +274,9 @@ recurring after ADR 0078's dial seam.
   denied topic, so no other link is added.
 - The residues are accepted, and their sizes are on record: ten settings × six places; the
   delegate-only fields flat on `Agent`; six assembly sites and three ranking ladders for the bound
-  entry; three boot bodies with their cross-reference comments; the wire branches outside the
-  adapters. A change to one of those numbers is a fact for the next review to report, not a
-  reason to reopen.
+  entry, whose dial facts are one value since §4's 2026-09-30 amendment; three boot bodies with
+  their cross-reference comments; the wire branches outside the adapters. A change to one of
+  those numbers is a fact for the next review to report, not a reason to reopen.
 - Reopening any section is a dated amendment to it, made on the evidence the section names; a
   denial that is reversed gets its own ADR for the design that replaces it, and this record's
   section is marked superseded with a pointer.

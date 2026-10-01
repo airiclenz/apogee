@@ -21,7 +21,9 @@
 **Out of scope:** the `firingInputs.beat` seam signature; the engine's own Client built from `Config` (`internal/agent`); the `Resolve*` ranking ladders; `firingConfig`'s own-server effort-dialect ladder (its `observeServer` beat carries no forced dialect); `resolveDelegationTarget`'s pin-else-observe model and window; bead `apogee-arm-layout-calls-residue`; any version identifier.
 **Not covered by plans 00–02:** review 2026-09-30 candidates #9, #11, #12, #13, #14, #16, #18, #20 (except its bead) and #17 (plan 00 item 10 only reuses `domain.RecipeLaunch`).
 
-## 1. docs: amend ADR 0083 §4 for one dial-facts value
+## 1. docs: amend ADR 0083 §4 for one dial-facts value — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): the amendment names `cmd/apogee/dial.go` as the one host edit for a new dial key; that file does not exist yet at this commit — later items of this plan create it.
 
 **Files:** `docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md`
 **Read first:** docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md — §4 "Reopens on", §2 "Note 2026-09-24" blockquote (style model), Consequences residue and "Reopening any section" bullets; docs/reviews/architecture-review-2026-09-30.html — candidate #6 card (c6)
