@@ -117,8 +117,8 @@ const (
 type launchKind int
 
 const (
-	// launchFanOut is a model's fan_out call, plain or naming a recipe — the zero value.
-	launchFanOut launchKind = iota
+	// The zero value is a model's fan_out call, plain or naming a recipe.
+	_ launchKind = iota
 	// launchTypedRecipe is a recipe the user launched by typing its "/<id>" line.
 	launchTypedRecipe
 	// launchStartRecipe is a recipe StartRecipe launched with its inputs already bound.
