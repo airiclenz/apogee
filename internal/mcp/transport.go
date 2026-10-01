@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -28,7 +27,7 @@ import (
 // security.URLGuard's scheme/host allow-deny before connecting, and dial under a control that
 // PINS the configured endpoint's own resolved addresses — permitting them, and keeping the SSRF
 // floor over every other address the transport is later pointed at — and send every request only
-// to the endpoint's own origin (originPinTransport), so an SSE `endpoint` event naming another
+// to the endpoint's own origin (security.OriginPinTransport), so an SSE `endpoint` event naming another
 // host, port or scheme fails the connect instead of moving the channel. A stdio server is a LOCAL
 // launched subprocess — the host chose the command, a different trust model — so no URL floor
 // applies; it meets the exec fence instead (an absolute program resolved on PATH, refused if it
@@ -105,19 +104,20 @@ type ServerConfig struct {
 // missing or unparseable endpoint, an endpoint url-safety denies, and an endpoint that cannot be
 // resolved are all connect-time errors (the Client surfaces them per server).
 //
+// host supplies the egress proxy resolver the two HTTP transports' client honours (see Host).
 // workspaceRoot is the exec fence a stdio server's command is measured against; it is unused by
 // the two HTTP transports, which launch nothing. The returned cmd, ProcessTeardown and CancelFunc
 // are the launched process, the container holding its tree, and the cancel that ends the Cmd's own
 // context — all three nil for an HTTP transport, and all three the caller's to run (Client.Close).
-func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
+func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
 	switch cfg.Transport {
 	case TransportStdio:
 		return buildStdioTransport(cfg, workspaceRoot)
 	case TransportSSE:
-		transport, err := buildSSETransport(ctx, cfg, guard)
+		transport, err := buildSSETransport(ctx, host, cfg, guard)
 		return transport, nil, nil, nil, err
 	case TransportStreamableHTTP:
-		transport, err := buildStreamableTransport(ctx, cfg, guard)
+		transport, err := buildStreamableTransport(ctx, host, cfg, guard)
 		return transport, nil, nil, nil, err
 	case "":
 		return nil, nil, nil, nil, fmt.Errorf("mcp: server %q has no transport configured", cfg.Name)
@@ -318,8 +318,8 @@ func (s *stdinLadder) Close() error {
 
 // buildSSETransport builds an SSE client transport after vetting the endpoint, over an
 // http.Client pinned to that endpoint's own addresses.
-func buildSSETransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
-	endpoint, client, err := vetEndpoint(ctx, cfg, guard)
+func buildSSETransport(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
+	endpoint, client, err := vetEndpoint(ctx, host, cfg, guard)
 	if err != nil {
 		return nil, err
 	}
@@ -331,8 +331,8 @@ func buildSSETransport(ctx context.Context, cfg ServerConfig, guard security.URL
 
 // buildStreamableTransport builds a streamable-http client transport the same way — same vetting,
 // same pinned client.
-func buildStreamableTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
-	endpoint, client, err := vetEndpoint(ctx, cfg, guard)
+func buildStreamableTransport(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
+	endpoint, client, err := vetEndpoint(ctx, host, cfg, guard)
 	if err != nil {
 		return nil, err
 	}
@@ -342,54 +342,72 @@ func buildStreamableTransport(ctx context.Context, cfg ServerConfig, guard secur
 	}, nil
 }
 
-// proxyForRequest resolves the operator's egress proxy for one outbound request: the process's
-// HTTP_PROXY / HTTPS_PROXY / NO_PROXY, the same environment the LLM client already honours
-// through Go's default transport. There is no per-server `proxy:` config key — the environment
-// is the whole surface.
-//
-// It is a package var only to give the tests a seam (a test that swaps it must not run in
-// parallel); production never reassigns it.
-var proxyForRequest = http.ProxyFromEnvironment
-
 // vetEndpoint turns a configured HTTP endpoint into the two things an SDK transport needs: the
 // ONE normalised endpoint string and the http.Client to speak it over. Both come from the same
 // checked form, which is the point — the SDK used to be handed the RAW cfg.Endpoint while the
 // guard judged the normalised one, the same check-one-string/dial-another divergence the native
 // funnel removed (M-1). Whatever this returns as the endpoint is exactly what url-safety
 // approved.
-func vetEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
+//
+// The client is security's guarded client (URLGuard.GuardedClient) under DialPinDestination: the
+// connection is pinned to the endpoint's own resolved addresses — and, when host's egress proxy
+// applies to this endpoint, to the PROXY's addresses too, because that is what the transport
+// actually dials. This is where a private endpoint (or a proxy on loopback or the LAN) becomes
+// reachable — and where a redirect or a rebind to a DIFFERENT private address stays refused. An
+// endpoint, or a proxy, that cannot be resolved fails the connect here, as the endpoint did under
+// the pre-flight floor. Redirects are not followed (a server that redirects must be configured
+// at the URL it redirects to), and there is no client timeout: the connection is session-long,
+// its requests bounded by their contexts and the per-call deadline instead.
+//
+// Above the dial control, every request is pinned to the endpoint's canonical origin by
+// security's OriginPinTransport, the outermost layer, worded with this package's refusal; the
+// SSE transport resolves a server's `endpoint` event with no origin check, and the pin is what
+// keeps that event from moving the POST channel anywhere the operator's allow/deny decision was
+// never made. Beneath the pin, boundedBodyTransport holds every response body to the message
+// bound.
+//
+// Every refusal names the server — the settings row's reconnect note has no other source for it —
+// and none names a proxy value or its credentials.
+func vetEndpoint(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
 	u, err := checkEndpoint(ctx, cfg, guard)
 	if err != nil {
 		return "", nil, err
 	}
-	// Pin the connection to the endpoint's own resolved addresses — and, when an egress proxy
-	// applies to this endpoint, to the PROXY's addresses too, because that is what the transport
-	// actually dials. This is where a private endpoint (or a proxy on loopback or the LAN)
-	// becomes reachable — and where a redirect or a rebind to a DIFFERENT private address stays
-	// refused. An endpoint, or a proxy, that cannot be resolved fails the connect here, as the
-	// endpoint did under the pre-flight floor.
-	pinned := []string{u.Hostname()}
-	proxyURL, err := proxyForRequest(&http.Request{URL: u})
+	client, err := guard.GuardedClient(ctx, u, security.GuardedClientOptions{
+		Proxy:  host.Proxy,
+		Policy: security.DialPinDestination,
+		OriginRefusal: fmt.Errorf("mcp: server %q: %w: a request left the configured endpoint's origin",
+			cfg.Name, security.ErrURLBlocked),
+		WrapTransport: func(next http.RoundTripper) http.RoundTripper {
+			return &boundedBodyTransport{next: next}
+		},
+	})
 	if err != nil {
+		return "", nil, endpointRefusal(cfg.Name, err)
+	}
+	return u.String(), client, nil
+}
+
+// endpointRefusal words a GuardedClient refusal in this package's own sentences, unchanged from
+// the ones the connect has always produced. An unusable proxy and an origin-less endpoint wrap
+// security.ErrURLBlocked bare; a dial target that could not be pinned wraps the pin's own
+// failure, never security's PinError text, so the sentence names the host that failed and
+// nothing else.
+func endpointRefusal(serverName string, err error) error {
+	var pinErr *security.PinError
+	switch {
+	case errors.Is(err, security.ErrProxyUnusable):
 		// The proxy value is deliberately NOT interpolated: the resolver quotes it back and a
 		// proxy URL may carry credentials — the same reasoning checkEndpoint's bare wording rests on.
-		// It wraps security.ErrURLBlocked like the funnel's own unusable-proxy refusal
-		// (internal/tools/network.go) so a caller matching on the sentinel sees this one too, and
-		// keeps naming the server, which the settings row's reconnect note has no other source for.
-		return "", nil, fmt.Errorf("mcp: server %q: %w: the configured egress proxy is not a usable URL", cfg.Name, security.ErrURLBlocked)
+		return fmt.Errorf("mcp: server %q: %w: the configured egress proxy is not a usable URL",
+			serverName, security.ErrURLBlocked)
+	case errors.Is(err, security.ErrNoOrigin):
+		return fmt.Errorf("mcp: server %q: %w: the endpoint has no origin to pin", serverName, security.ErrURLBlocked)
+	case errors.As(err, &pinErr):
+		return fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", serverName, pinErr.Err)
+	default:
+		return fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", serverName, err)
 	}
-	if proxyURL != nil {
-		pinned = append(pinned, proxyURL.Hostname())
-	}
-	control, err := guard.PinnedDialControl(ctx, pinned...)
-	if err != nil {
-		return "", nil, fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
-	}
-	origin, ok := canonicalOrigin(u)
-	if !ok {
-		return "", nil, fmt.Errorf("mcp: server %q: %w: the endpoint has no origin to pin", cfg.Name, security.ErrURLBlocked)
-	}
-	return u.String(), newGuardedHTTPClient(control, origin, cfg.Name), nil
 }
 
 // ErrEndpointDenied marks the one refusal of an HTTP-transported endpoint that is the OPERATOR's
@@ -494,108 +512,6 @@ type redactedError struct {
 
 func (e *redactedError) Error() string { return e.msg }
 func (e *redactedError) Unwrap() error { return e.err }
-
-// newGuardedHTTPClient builds the http.Client the HTTP transports use: control is the dial-time
-// check on the ACTUAL connected IP (PinnedDialControl — the endpoint's own addresses, and the
-// egress proxy's when one applies, pass; every other address meets the SSRF floor), so an MCP
-// HTTP connection can never skip it.
-//
-// Above the dial control, every request is pinned to origin — the vetted endpoint's canonical
-// scheme://host:port (canonicalOrigin) — by originPinTransport, the outermost layer; serverName
-// names the server in its refusal. The dial control judges IPs only, which cannot tell a second
-// origin on the endpoint's own address (another port, another virtual host) from the endpoint,
-// and with an egress proxy in force it sees only the proxy's address; the origin pin is what
-// keeps an SSE `endpoint` event, which the SDK resolves with no origin check, from moving the
-// POST channel anywhere the operator's allow/deny decision was never made.
-//
-// The order of judgement matches the native network funnel's. The pre-flight (checkEndpoint)
-// judges the DESTINATION by string — the operator's scheme/host allow-deny lists — whether or not
-// a proxy applies, so a denied host is refused before anything leaves the process. The dial-time
-// control judges what is actually DIALLED: the proxy when one is in force, the endpoint itself
-// otherwise.
-//
-// Redirects are NOT followed, the same policy the native network tools apply: a redirect could
-// send a vetted connection to an unvetted host, sidestepping the endpoint check. The dial-time
-// control would still refuse a private redirect target, but a string-level allow/deny decision
-// is made once, on the endpoint, and auto-following would step around it. A server that
-// redirects must be configured at the URL it redirects to.
-//
-// (internal/tools builds the same shape per CALL and drains its pool on the way out; this one is
-// long-lived on purpose — it is a session-long server connection, not a one-shot tool call. The
-// two builders are deliberately NOT consolidated here; that seam is an architecture-deepening
-// candidate, not this change.)
-func newGuardedHTTPClient(
-	control func(network, address string, c syscall.RawConn) error,
-	origin string,
-	serverName string,
-) *http.Client {
-	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
-		Control: control,
-	}
-	bounded := &boundedBodyTransport{next: &http.Transport{
-		Proxy:                 proxyForRequest,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          10,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}}
-	return &http.Client{
-		Transport: &originPinTransport{origin: origin, serverName: serverName, next: bounded},
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}
-
-// defaultPortByScheme is the port an origin without an explicit one carries, so `https://h` and
-// `https://h:443` compare as the one origin they are.
-var defaultPortByScheme = map[string]string{"http": "80", "https": "443"}
-
-// canonicalOrigin reduces u to the origin form both sides of the pin are compared in:
-// scheme://host:port, the host in security.NormalizeURL's normal form (lower-cased, root dots
-// removed, IDNA-mapped) and the scheme's default port filled in when none is written. ok is false
-// for a URL that does not parse back or carries no host — it names no origin, so nothing matches it.
-func canonicalOrigin(u *url.URL) (origin string, ok bool) {
-	normalised, err := security.NormalizeURL(u.String())
-	if err != nil || normalised.Hostname() == "" {
-		return "", false
-	}
-	scheme := strings.ToLower(normalised.Scheme)
-	port := normalised.Port()
-	if port == "" {
-		port = defaultPortByScheme[scheme]
-	}
-	return scheme + "://" + net.JoinHostPort(normalised.Hostname(), port), true
-}
-
-// originPinTransport is the guarded client's outermost RoundTripper: it forwards a request only
-// when its URL's canonical origin equals the vetted endpoint's, and refuses every other one before
-// anything is dialled. The SSE transport POSTs to whatever URL the server's `endpoint` event names
-// and the SDK resolves that with no origin check, so this layer is where a server's attempt to
-// move the channel to another host, port or scheme ends. The refusal wraps security.ErrURLBlocked
-// and names the server; it never interpolates the refused URL (net/http's *url.Error around it
-// quotes that server-named URL, which carries no operator secret).
-type originPinTransport struct {
-	origin     string // the vetted endpoint's canonicalOrigin
-	serverName string // the configured server's name, for the refusal
-	next       http.RoundTripper
-}
-
-// RoundTrip forwards a same-origin request to next and refuses any other, closing the request
-// body as the RoundTripper contract requires on every path.
-func (t *originPinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if origin, ok := canonicalOrigin(req.URL); !ok || origin != t.origin {
-		if req.Body != nil {
-			_ = req.Body.Close()
-		}
-		return nil, fmt.Errorf("mcp: server %q: %w: a request left the configured endpoint's origin",
-			t.serverName, security.ErrURLBlocked)
-	}
-	return t.next.RoundTrip(req)
-}
 
 // boundedBodyTransport is the RoundTripper beneath the origin pin: it hands every
 // response body to the SDK wrapped in a boundedBody, so an HTTP-transported server meets the

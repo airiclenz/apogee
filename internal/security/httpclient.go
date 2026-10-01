@@ -40,6 +40,11 @@ const (
 // may carry credentials.
 var ErrProxyUnusable = fmt.Errorf("%w: the egress proxy is not a usable URL", ErrURLBlocked)
 
+// ErrNoOrigin is the refusal for an origin-pinned client whose destination names no origin to
+// pin (no host survives normalisation, so CanonicalOrigin has nothing to compare requests
+// against). It wraps ErrURLBlocked.
+var ErrNoOrigin = fmt.Errorf("%w: the destination has no origin to pin", ErrURLBlocked)
+
 // PinError is the refusal for a dial-time control that could not be pinned: one of Hosts —
 // the egress proxy's, and under DialPinDestination the destination's — could not be resolved.
 // Hosts are bare host names (url.URL.Hostname), never userinfo, so the error cannot carry a
@@ -88,6 +93,17 @@ type GuardedClientOptions struct {
 
 	// Policy is the dial-time floor policy over the destination; the zero value is DialFloor.
 	Policy DialPolicy
+
+	// OriginRefusal, when non-nil, pins every request to the destination's canonical origin
+	// (CanonicalOrigin): an OriginPinTransport, the outermost layer, forwards a same-origin
+	// request and refuses any other with exactly this error. The caller words it, so its own
+	// refusal text survives; it should wrap ErrURLBlocked. Nil leaves requests unpinned.
+	OriginRefusal error
+
+	// WrapTransport, when non-nil, wraps the dial-controlled transport before the origin pin
+	// goes on top, so a caller's own RoundTripper (a response-body bound) sits beneath the pin
+	// and above the dial. Nil adds no layer.
+	WrapTransport func(http.RoundTripper) http.RoundTripper
 }
 
 // GuardedClient builds the http.Client for target, a destination the caller's pre-flight has
@@ -102,12 +118,18 @@ type GuardedClientOptions struct {
 // DIALLED: with a proxy in force that is the PROXY, whose own addresses are pinned (a proxy on
 // loopback or the LAN is the normal case, and the blanket floor would refuse it).
 //
+// The layers, outermost first: the origin pin (with opts.OriginRefusal), the caller's
+// opts.WrapTransport, then the dial-controlled transport. The builder judges in a fixed order —
+// proxy resolution, then the dial pin, then the origin — so the first refusal a destination
+// earns is always the same one.
+//
 // ctx bounds the pin's lookups. A nil target resolves no proxy: under DialFloor it gets the
 // blanket control, under DialPinDestination it is a PinError (nothing to pin).
 //
 // It fails closed, never dialling around the proxy: an unusable proxy value is
-// ErrProxyUnusable, and a proxy or destination that cannot be resolved is a *PinError. Both
-// wrap ErrURLBlocked; neither names a proxy's credentials.
+// ErrProxyUnusable, a proxy or destination that cannot be resolved is a *PinError, and an
+// origin-pinned destination with no origin is ErrNoOrigin. All wrap ErrURLBlocked; none names a
+// proxy's credentials.
 func (g URLGuard) GuardedClient(ctx context.Context, target *url.URL, opts GuardedClientOptions) (*http.Client, error) {
 	proxy := opts.Proxy
 	if proxy == nil {
@@ -116,6 +138,13 @@ func (g URLGuard) GuardedClient(ctx context.Context, target *url.URL, opts Guard
 	control, err := g.guardedDialControl(ctx, target, proxy, opts.Policy)
 	if err != nil {
 		return nil, err
+	}
+	var origin string
+	if opts.OriginRefusal != nil {
+		var ok bool
+		if origin, ok = CanonicalOrigin(target); !ok {
+			return nil, ErrNoOrigin
+		}
 	}
 
 	dialer := &net.Dialer{
@@ -131,8 +160,15 @@ func (g URLGuard) GuardedClient(ctx context.Context, target *url.URL, opts Guard
 		TLSHandshakeTimeout:   guardedTLSHandshakeTimeout,
 		ExpectContinueTimeout: guardedExpectContinueTimeout,
 	}
+	var layered http.RoundTripper = transport
+	if opts.WrapTransport != nil {
+		layered = opts.WrapTransport(layered)
+	}
+	if opts.OriginRefusal != nil {
+		layered = &OriginPinTransport{Origin: origin, Refusal: opts.OriginRefusal, Next: layered}
+	}
 	return &http.Client{
-		Transport: transport,
+		Transport: layered,
 		Timeout:   opts.Timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -172,4 +208,60 @@ func (g URLGuard) guardedDialControl(
 		return nil, &PinError{Hosts: pinned, Err: err}
 	}
 	return control, nil
+}
+
+// defaultPortByScheme is the port an origin without an explicit one carries, so `https://h` and
+// `https://h:443` compare as the one origin they are.
+var defaultPortByScheme = map[string]string{"http": "80", "https": "443"}
+
+// CanonicalOrigin reduces u to the origin form both sides of an origin pin are compared in:
+// scheme://host:port, the host in NormalizeURL's normal form (lower-cased, root dots removed,
+// IDNA-mapped) and the scheme's default port filled in when none is written. ok is false for a
+// nil URL, one that does not parse back, or one that carries no host — it names no origin, so
+// nothing matches it.
+func CanonicalOrigin(u *url.URL) (origin string, ok bool) {
+	if u == nil {
+		return "", false
+	}
+	normalised, err := NormalizeURL(u.String())
+	if err != nil || normalised.Hostname() == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(normalised.Scheme)
+	port := normalised.Port()
+	if port == "" {
+		port = defaultPortByScheme[scheme]
+	}
+	return scheme + "://" + net.JoinHostPort(normalised.Hostname(), port), true
+}
+
+// OriginPinTransport is an origin-pinned guarded client's outermost RoundTripper: it forwards a
+// request only when its URL's canonical origin equals Origin, and refuses every other one before
+// anything is dialled. The dial-time control judges IPs only, which cannot tell a second origin
+// on the destination's own address (another port, another virtual host) from the destination,
+// and with an egress proxy in force it sees only the proxy's address; this layer is what keeps a
+// server-named URL (an SSE `endpoint` event) from moving a session anywhere the pre-flight never
+// judged. The refusal is Refusal itself; it never interpolates the refused URL (net/http's
+// *url.Error around it quotes that, and it carries no operator secret).
+type OriginPinTransport struct {
+	// Origin is the vetted destination's CanonicalOrigin.
+	Origin string
+
+	// Refusal is the error a cross-origin request fails with, worded by the caller.
+	Refusal error
+
+	// Next is the RoundTripper a same-origin request is forwarded to.
+	Next http.RoundTripper
+}
+
+// RoundTrip forwards a same-origin request to Next and refuses any other, closing the request
+// body as the RoundTripper contract requires on every path.
+func (t *OriginPinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if origin, ok := CanonicalOrigin(req.URL); !ok || origin != t.Origin {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, t.Refusal
+	}
+	return t.Next.RoundTrip(req)
 }

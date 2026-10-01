@@ -133,7 +133,15 @@ Only the typed-error half of `TestNewHTTPClient_UnusableOrUnpinnableProxyRefuses
 **Acceptance:** `go test ./internal/security -run 'GuardedClient|DocMap|PinnedDialControl|SafeDialControl'`; `go test ./internal/tools -run 'WebFetch|HTTPRequest|WebSearch|NetworkTools|BlockedMessage|NetworkFunnel|RedactSubstring|NewHTTPClient|ProxyRefusalWordings'`
 **Commit:** `refactor(security): own the guarded HTTP client; network tools use it`
 
-## 7. mcp: the HTTP transports use the security client; proxyForRequest goes
+## 7. mcp: the HTTP transports use the security client; proxyForRequest goes — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): `TestVetEndpoint_RefusalWordingsAreExact` (4 rows) and `TestOriginPin_RefusalWordingIsExact` were written first and passed at the unmodified tree (serial `proxyForRequest` swap); after the move they inject `Host.Proxy` and run `t.Parallel`.
+NOTES (2026-10-01): security gains `GuardedClientOptions.OriginRefusal` (non-nil turns the origin pin on; the caller's error is returned verbatim) and `GuardedClientOptions.WrapTransport` (the layer between pin and dial, where mcp puts `boundedBodyTransport`), plus `ErrNoOrigin`, `CanonicalOrigin` and `OriginPinTransport{Origin, Refusal, Next}`; option names are this item's choice.
+NOTES (2026-10-01): mcp maps GuardedClient refusals in a new `endpointRefusal` helper (ErrProxyUnusable / ErrNoOrigin / *PinError → pinErr.Err); its default branch (unreachable today) reuses the "endpoint blocked by url-safety" wording.
+NOTES (2026-10-01): added `TestGuardedClient_PinsRequestsToTheDestinationsOrigin` in security (same-origin through the wrapped layer, cross-origin refused with the caller's error, hostless destination → ErrNoOrigin); `TestCanonicalOrigin_ComparesSchemeHostAndPort` moved there unchanged but for the exported name.
+NOTES (2026-10-01): test helper `endpointClient` gained a `Host` parameter (all callers pass `Host{}` except the proxied test); the three proxy tests now inject `Host.Proxy` and run `t.Parallel`.
+NOTES (2026-10-01): consequential edit — internal/mcp/doc.go: trust-boundary paragraph named `originPinTransport`, now `security.OriginPinTransport`.
+NOTES (2026-10-01): consequential edit — docs/design/mcp-client.md: named `originPinTransport`; also records the shared GuardedClient recipe and the `Host` / `ConnectWith` surface.
 
 **Depends on:** item 6.
 **Files:** `internal/mcp/transport.go`, `internal/mcp/client.go`, `internal/mcp/transport_test.go`, `internal/mcp/doc.go`, `internal/security/httpclient.go`, `internal/security/httpclient_test.go`, `docs/design/mcp-client.md`, `internal/mcp/mcp_test.go`

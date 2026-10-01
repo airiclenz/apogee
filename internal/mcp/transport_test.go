@@ -39,7 +39,7 @@ func TestBuildTransportHTTPKinds(t *testing.T) {
 	t.Parallel()
 	guard := security.URLGuard{}.WithResolver(publicResolver)
 
-	sse, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE, Endpoint: "https://mcp.example.com/"}, guard, t.TempDir())
+	sse, _, _, _, err := buildTransport(context.Background(), Host{}, ServerConfig{Name: "s", Transport: TransportSSE, Endpoint: "https://mcp.example.com/"}, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("sse buildTransport: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestBuildTransportHTTPKinds(t *testing.T) {
 		t.Errorf("sse transport = %T; want *mcpsdk.SSEClientTransport", sse)
 	}
 
-	sh, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}, guard, t.TempDir())
+	sh, _, _, _, err := buildTransport(context.Background(), Host{}, ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("streamable-http buildTransport: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestBuildTransport_HandsTheSDKTheNormalisedEndpoint(t *testing.T) {
 	// Whitespace, an upper-case host and a trailing DNS root dot — three spellings that reach
 	// the same server and that Go's transport normalises away before dialling.
 	cfg := ServerConfig{Name: "s", Transport: TransportSSE, Endpoint: "  http://MCP.Example.COM./sse  "}
-	tr, _, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
+	tr, _, _, _, err := buildTransport(context.Background(), Host{}, cfg, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("buildTransport: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestBuildTransport_EndpointRidesHostPolicyNotTheFloor(t *testing.T) {
 	for _, endpoint := range []string{"http://127.0.0.1:7331/mcp", "http://192.168.64.1:7331/mcp", "http://[::1]:7331/mcp"} {
 		for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
 			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: endpoint}
-			if _, _, _, _, err := buildTransport(context.Background(), cfg, security.URLGuard{}, workspace); err != nil {
+			if _, _, _, _, err := buildTransport(context.Background(), Host{}, cfg, security.URLGuard{}, workspace); err != nil {
 				t.Errorf("%s endpoint %s: %v; want it to build (config-file endpoints are floor-exempt)", transport, endpoint, err)
 			}
 		}
@@ -114,7 +114,7 @@ func TestBuildTransport_EndpointRidesHostPolicyNotTheFloor(t *testing.T) {
 	}
 	for _, tc := range blocked {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, _, _, err := buildTransport(context.Background(), tc.cfg, tc.guard, t.TempDir())
+			_, _, _, _, err := buildTransport(context.Background(), Host{}, tc.cfg, tc.guard, t.TempDir())
 			if err == nil {
 				t.Fatalf("endpoint %q built without error; want a refusal", tc.cfg.Endpoint)
 			}
@@ -135,7 +135,7 @@ func TestBuildTransport_UnresolvableEndpointFailsClosed(t *testing.T) {
 		return nil, errors.New("no such host")
 	})
 	cfg := ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}
-	_, _, _, _, err := buildTransport(context.Background(), cfg, unresolvable, t.TempDir())
+	_, _, _, _, err := buildTransport(context.Background(), Host{}, cfg, unresolvable, t.TempDir())
 	if err == nil {
 		t.Fatal("unresolvable endpoint built a transport; want a connect-time error")
 	}
@@ -177,7 +177,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 
 	t.Run("the endpoint's own private address connects", func(t *testing.T) {
 		reached.Store(0)
-		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+		client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 			security.URLGuard{}.WithResolver(fixedResolver(loopback...)))
 
 		resp, err := client.Get(endpoint)
@@ -196,7 +196,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 	t.Run("closing the bounded body closes the real one", func(t *testing.T) {
 		// The SDK closes resp.Body itself; the bound wraps it, so Close must reach through or
 		// every connection leaks. The recorder sits between the bound and the real transport.
-		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+		client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 			security.URLGuard{}.WithResolver(fixedResolver(loopback...)))
 		bounded, ok := beneathOriginPin(t, client).(*boundedBodyTransport)
 		if !ok {
@@ -250,7 +250,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		// `localhost` for real and reaches the loopback server — a different private address,
 		// which the floor still refuses.
 		reached.Store(0)
-		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+		client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 			security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(10, 1, 2, 3))))
 
 		resp, err := client.Get(endpoint)
@@ -271,7 +271,7 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		// private address that is NOT the one the user configured. The exemption is one
 		// endpoint, not "private addresses are fine on this connection". The origin pin refuses
 		// it first; beneath the pin, the dial control's SSRF floor still refuses it on its own.
-		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+		client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 			security.URLGuard{}.WithResolver(fixedResolver(loopback...)))
 
 		assertRefused(t, client, "http://10.9.8.7:9/mcp", security.ErrURLBlocked)
@@ -283,11 +283,11 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 // bounded, dial-controlled chain — so a test can prove what that chain refuses on its own.
 func beneathOriginPin(t *testing.T, client *http.Client) http.RoundTripper {
 	t.Helper()
-	pin, ok := client.Transport.(*originPinTransport)
+	pin, ok := client.Transport.(*security.OriginPinTransport)
 	if !ok {
 		t.Fatalf("client.Transport = %T; want the origin pin outermost", client.Transport)
 	}
-	return pin.next
+	return pin.Next
 }
 
 // assertRefused GETs target through client and requires the request to fail with an error
@@ -313,9 +313,9 @@ func assertRefused(t *testing.T, client *http.Client, target string, want error)
 // The second case is the bound: a destination the proxy does NOT carry (the NO_PROXY shape)
 // dials direct and still meets the floor, so pinning the proxy widens the exemption by exactly
 // two hosts and not by "every address this client reaches".
-//
-// It swaps the proxyForRequest seam, so it must not run in parallel.
 func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
+	t.Parallel()
+
 	var proxied atomic.Int64
 	proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxied.Add(1)
@@ -334,16 +334,14 @@ func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
 	// A proxy that carries the endpoint's host only — the NO_PROXY shape, and what makes the
 	// second case a direct dial rather than another trip through the proxy.
 	const endpoint = "http://mcp.example/mcp"
-	restore := proxyForRequest
-	proxyForRequest = func(r *http.Request) (*url.URL, error) {
+	host := Host{Proxy: func(r *http.Request) (*url.URL, error) {
 		if r.URL.Hostname() == "mcp.example" {
 			return proxyURL, nil
 		}
 		return nil, nil
-	}
-	t.Cleanup(func() { proxyForRequest = restore })
+	}}
 
-	client := endpointClient(t, ServerConfig{Name: "proxied", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+	client := endpointClient(t, host, ServerConfig{Name: "proxied", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 		security.URLGuard{}.WithResolver(publicResolver))
 
 	t.Run("the endpoint connects through the proxy", func(t *testing.T) {
@@ -403,16 +401,13 @@ func proxiedServer() ServerConfig {
 // a proxy URL may carry credentials — but it does name the SERVER, and it wraps
 // security.ErrURLBlocked like its sibling below, so a caller partitioning on the sentinel sees
 // an unusable proxy as the url-safety refusal it is.
-//
-// It swaps the proxyForRequest seam, so it must not run in parallel.
 func TestVetEndpoint_AnUnusableProxyRefusesTheEndpoint(t *testing.T) {
-	restore := proxyForRequest
-	proxyForRequest = func(*http.Request) (*url.URL, error) {
+	t.Parallel()
+	host := Host{Proxy: func(*http.Request) (*url.URL, error) {
 		return nil, errors.New(`invalid proxy address "` + credentialedProxy + `"`)
-	}
-	t.Cleanup(func() { proxyForRequest = restore })
+	}}
 
-	endpoint, client, err := vetEndpoint(context.Background(), proxiedServer(), security.URLGuard{}.WithResolver(publicResolver))
+	endpoint, client, err := vetEndpoint(context.Background(), host, proxiedServer(), security.URLGuard{}.WithResolver(publicResolver))
 
 	if err == nil {
 		t.Fatal("an unusable egress proxy vetted the endpoint; want the connect refused")
@@ -439,18 +434,15 @@ func TestVetEndpoint_AnUnusableProxyRefusesTheEndpoint(t *testing.T) {
 // connect for the same reason an unresolvable endpoint does — the addresses the connection would
 // actually go to are unknown. The refusal names the proxy's HOST, which is all of a proxy URL
 // that is ever safe to surface.
-//
-// It swaps the proxyForRequest seam, so it must not run in parallel.
 func TestVetEndpoint_AnUnpinnableProxyRefusesTheEndpoint(t *testing.T) {
+	t.Parallel()
 	proxyURL, err := url.Parse(credentialedProxy)
 	if err != nil {
 		t.Fatalf("parse proxy URL: %v", err)
 	}
-	restore := proxyForRequest
-	proxyForRequest = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
-	t.Cleanup(func() { proxyForRequest = restore })
+	host := Host{Proxy: func(*http.Request) (*url.URL, error) { return proxyURL, nil }}
 
-	endpoint, client, err := vetEndpoint(context.Background(), proxiedServer(), unresolvableProxyGuard())
+	endpoint, client, err := vetEndpoint(context.Background(), host, proxiedServer(), unresolvableProxyGuard())
 
 	if err == nil {
 		t.Fatal("an unpinnable egress proxy vetted the endpoint; want the connect refused")
@@ -471,22 +463,22 @@ func TestVetEndpoint_AnUnpinnableProxyRefusesTheEndpoint(t *testing.T) {
 
 // TestVetEndpoint_TheEgressProxyComesFromTheEnvironment pins the surface itself: there is no
 // per-server `proxy:` config key, so the process's HTTP_PROXY / HTTPS_PROXY / NO_PROXY is the
-// whole of it. It deliberately does NOT swap proxyForRequest — that the default IS
+// whole of it. It deliberately passes an empty Host — that a nil Host.Proxy IS
 // http.ProxyFromEnvironment is the claim under test — and drives the unpinnable path, which is
 // the observable consequence of the environment having been consulted at all.
 //
 // net/http reads the proxy environment ONCE per process (a sync.Once behind
 // http.ProxyFromEnvironment), so this test sees its own t.Setenv only while no earlier
 // non-parallel test in the package has resolved a proxy through the real function. Every other
-// proxy test here swaps the seam, which is what keeps that true; a failure here with no
-// production change is that invariant breaking, not the proxy path.
+// proxy test here injects its resolver through Host.Proxy, which is what keeps that true; a
+// failure here with no production change is that invariant breaking, not the proxy path.
 func TestVetEndpoint_TheEgressProxyComesFromTheEnvironment(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
 	// Neutralise any exclusion list the developer's own environment carries rather than inherit it.
 	t.Setenv("NO_PROXY", "127.0.0.1")
 	t.Setenv("no_proxy", "127.0.0.1")
 
-	_, _, err := vetEndpoint(context.Background(), proxiedServer(), unresolvableProxyGuard())
+	_, _, err := vetEndpoint(context.Background(), Host{}, proxiedServer(), unresolvableProxyGuard())
 
 	if err == nil {
 		t.Fatal("the endpoint vetted with no proxy pinned; want HTTPS_PROXY to have been consulted")
@@ -496,8 +488,106 @@ func TestVetEndpoint_TheEgressProxyComesFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// TestGuardedClient_DoesNotFollowRedirects pins the redirect policy the MCP client builder
-// reproduced field-for-field from the native funnel except for this one line: a redirect could
+// TestVetEndpoint_RefusalWordingsAreExact pins, byte for byte, the three sentences vetEndpoint
+// refuses an HTTP endpoint with once its pre-flight has passed: an unusable egress proxy, a dial
+// target that cannot be pinned (the proxy's host, or an endpoint with no host while the floor is
+// on), and an endpoint with no origin for the request pin (the same endpoint with the floor off).
+// The wording reaches the settings row's reconnect note verbatim, so a builder change must not
+// move a word of it.
+//
+// Every row injects its own proxy resolver through Host.Proxy: net/http memoises the proxy
+// environment, so a row that read it would decide what
+// TestVetEndpoint_TheEgressProxyComesFromTheEnvironment sees.
+func TestVetEndpoint_RefusalWordingsAreExact(t *testing.T) {
+	t.Parallel()
+	credentialed, err := url.Parse(credentialedProxy)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	noProxy := func(*http.Request) (*url.URL, error) { return nil, nil }
+	hostless := ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "http://:8080/mcp"}
+
+	tests := []struct {
+		name  string
+		cfg   ServerConfig
+		guard security.URLGuard
+		proxy func(*http.Request) (*url.URL, error)
+		want  string
+	}{
+		{
+			name:  "unusable proxy",
+			cfg:   proxiedServer(),
+			guard: security.URLGuard{}.WithResolver(publicResolver),
+			proxy: func(*http.Request) (*url.URL, error) {
+				return nil, errors.New(`invalid proxy address "` + credentialedProxy + `"`)
+			},
+			want: `mcp: server "proxied": security: url blocked by url-safety: the configured egress proxy is not a usable URL`,
+		},
+		{
+			name:  "unpinnable proxy",
+			cfg:   proxiedServer(),
+			guard: unresolvableProxyGuard(),
+			proxy: func(*http.Request) (*url.URL, error) { return credentialed, nil },
+			want: `mcp: server "proxied" endpoint blocked by url-safety: security: url blocked by url-safety: ` +
+				`could not resolve host "proxy.invalid": no such host`,
+		},
+		{
+			name:  "no origin with the floor off",
+			cfg:   hostless,
+			guard: security.URLGuard{}.DisableIPFloor(),
+			proxy: noProxy,
+			want:  `mcp: server "s": security: url blocked by url-safety: the endpoint has no origin to pin`,
+		},
+		{
+			name:  "no host to pin with the floor on",
+			cfg:   hostless,
+			guard: security.URLGuard{},
+			proxy: noProxy,
+			want:  `mcp: server "s" endpoint blocked by url-safety: security: url blocked by url-safety: no host to pin`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := vetEndpoint(context.Background(), Host{Proxy: tt.proxy}, tt.cfg, tt.guard)
+
+			if err == nil {
+				t.Fatalf("vetEndpoint accepted %q; want %q", tt.cfg.Endpoint, tt.want)
+			}
+			if got := err.Error(); got != tt.want {
+				t.Errorf("refusal =\n  %s\nwant\n  %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOriginPin_RefusalWordingIsExact pins, byte for byte, the sentence the guarded client's
+// origin pin refuses a cross-origin request with, as net/http surfaces it to the SDK.
+func TestOriginPin_RefusalWordingIsExact(t *testing.T) {
+	t.Parallel()
+	const (
+		endpoint    = "http://mcp.example/mcp"
+		crossOrigin = "http://mcp.example:8080/mcp"
+	)
+	client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportSSE, Endpoint: endpoint},
+		security.URLGuard{}.WithResolver(publicResolver))
+	want := `Get "` + crossOrigin + `": mcp: server "local": security: url blocked by url-safety: ` +
+		`a request left the configured endpoint's origin`
+
+	resp, err := client.Get(crossOrigin)
+
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("GET %s succeeded; want the origin pin to refuse it", crossOrigin)
+	}
+	if got := err.Error(); got != want {
+		t.Errorf("refusal =\n  %s\nwant\n  %s", got, want)
+	}
+}
+
+// TestGuardedClient_DoesNotFollowRedirects pins the redirect policy the MCP transports inherit
+// from the shared guarded-client builder (security.URLGuard.GuardedClient): a redirect could
 // send a vetted connection to an unvetted host, stepping around the endpoint's string-level
 // allow/deny decision. The response is the redirect itself and the target is never fetched —
 // whether the Location is another path on the pinned endpoint or another private address, which
@@ -529,7 +619,7 @@ func TestGuardedClient_DoesNotFollowRedirects(t *testing.T) {
 			srv := httptest.NewServer(mux)
 			defer srv.Close()
 			endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
-			client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportSSE, Endpoint: endpoint},
+			client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportSSE, Endpoint: endpoint},
 				security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
 
 			resp, err := client.Get(endpoint)
@@ -595,7 +685,7 @@ func TestGuardedClient_AnOversizeBodyFailsTheRead(t *testing.T) {
 			}))
 			defer srv.Close()
 			endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
-			client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+			client := endpointClient(t, Host{}, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
 				security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
 			req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
 			if err != nil {
@@ -654,12 +744,12 @@ func (c *countingCloser) Close() error {
 	return c.ReadCloser.Close()
 }
 
-// endpointClient builds cfg's transport and returns the http.Client the SDK would speak over, so
-// a test drives the client the production path actually installs — pinned dial control, redirect
-// policy and all — rather than a rebuild of it.
-func endpointClient(t *testing.T, cfg ServerConfig, guard security.URLGuard) *http.Client {
+// endpointClient builds cfg's transport over host and returns the http.Client the SDK would speak
+// over, so a test drives the client the production path actually installs — pinned dial control,
+// redirect policy and all — rather than a rebuild of it.
+func endpointClient(t *testing.T, host Host, cfg ServerConfig, guard security.URLGuard) *http.Client {
 	t.Helper()
-	tr, _, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
+	tr, _, _, _, err := buildTransport(context.Background(), host, cfg, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("buildTransport(%s): %v", cfg.Endpoint, err)
 	}
@@ -833,63 +923,6 @@ func TestExecute_RedactsTheEndpointWhenTheServerDies(t *testing.T) {
 	if strings.Contains(res.Content, "SECRET") || strings.Contains(res.Content, "/mcp") {
 		t.Errorf("Execute error result = %q; want the endpoint cut to its origin", res.Content)
 	}
-}
-
-// TestCanonicalOrigin_ComparesSchemeHostAndPort pins the origin comparator the request pin rests
-// on: spellings of one origin compare equal (a default port written or not, a host's case or
-// trailing root dot), and a different port, scheme or host does not.
-func TestCanonicalOrigin_ComparesSchemeHostAndPort(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		vetted    string
-		requested string
-		wantEqual bool
-	}{
-		{name: "https default port written", vetted: "https://h/mcp", requested: "https://h:443/other", wantEqual: true},
-		{name: "http default port written", vetted: "http://h:80/mcp", requested: "http://h/mcp?sessionid=1", wantEqual: true},
-		{name: "upper-case host", vetted: "https://mcp.example/mcp", requested: "https://MCP.Example/mcp", wantEqual: true},
-		{name: "trailing root dot", vetted: "https://mcp.example/mcp", requested: "https://mcp.example./mcp", wantEqual: true},
-		{name: "different port", vetted: "https://h/mcp", requested: "https://h:8443/mcp", wantEqual: false},
-		{name: "different scheme", vetted: "https://h/mcp", requested: "http://h/mcp", wantEqual: false},
-		{name: "different host", vetted: "https://h/mcp", requested: "https://other/mcp", wantEqual: false},
-		{name: "http port 443 is not https", vetted: "https://h/mcp", requested: "http://h:443/mcp", wantEqual: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			vetted, requested := mustParseURL(t, tt.vetted), mustParseURL(t, tt.requested)
-
-			vettedOrigin, vettedOK := canonicalOrigin(vetted)
-			requestedOrigin, requestedOK := canonicalOrigin(requested)
-
-			if !vettedOK || !requestedOK {
-				t.Fatalf("canonicalOrigin ok = %v / %v; want both origins derived", vettedOK, requestedOK)
-			}
-			if got := vettedOrigin == requestedOrigin; got != tt.wantEqual {
-				t.Errorf("%q vs %q: equal = %v (%q vs %q); want %v",
-					tt.vetted, tt.requested, got, vettedOrigin, requestedOrigin, tt.wantEqual)
-			}
-		})
-	}
-
-	t.Run("a hostless URL names no origin", func(t *testing.T) {
-		t.Parallel()
-		if origin, ok := canonicalOrigin(mustParseURL(t, "/mcp?sessionid=1")); ok {
-			t.Errorf("canonicalOrigin(relative) = %q, true; want no origin", origin)
-		}
-	})
-}
-
-// mustParseURL parses raw or fails the test.
-func mustParseURL(t *testing.T, raw string) *url.URL {
-	t.Helper()
-	u, err := url.Parse(raw)
-	if err != nil {
-		t.Fatalf("parse %q: %v", raw, err)
-	}
-	return u
 }
 
 // TestConnect_SSEEndpointEventToAnotherOriginFails is the audit finding's exploit: an SSE server

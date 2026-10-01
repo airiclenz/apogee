@@ -31,7 +31,7 @@
 //     Redirects are not followed, the same policy the native network tools apply, so a
 //     server that redirects must be configured at its final URL. Every request is also
 //     pinned to the configured endpoint's ORIGIN (scheme + host + port, default ports
-//     canonicalised; originPinTransport): an SSE `endpoint` event naming another origin
+//     canonicalised; security.OriginPinTransport): an SSE `endpoint` event naming another origin
 //     fails the connect with a url-safety refusal naming the server, and no request
 //     reaches that origin — the dial pin judges IPs only, so it alone cannot tell
 //     another port or virtual host on the endpoint's address, or any target behind an

@@ -519,7 +519,7 @@ func TestBuildStdioTransport_CancelArmsTheCmdsTeardown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fixture wedges itself by ignoring a POSIX SIGTERM; the Windows half of the seam is verified on the owner's box")
 	}
-	_, cmd, td, cancel, err := buildTransport(context.Background(), wedgedStdioServerConfig(t), security.URLGuard{}, t.TempDir())
+	_, cmd, td, cancel, err := buildTransport(context.Background(), Host{}, wedgedStdioServerConfig(t), security.URLGuard{}, t.TempDir())
 	if err != nil {
 		t.Fatalf("buildTransport: %v", err)
 	}
@@ -685,7 +685,7 @@ func TestConnect_FailedStdioHandshakeReapsAContainedTree(t *testing.T) {
 // the fence the allowlist's PATH is scoped against.
 func buildStdioCmd(t *testing.T, workspaceRoot string, cfg ServerConfig) *exec.Cmd {
 	t.Helper()
-	_, cmd, td, cancel, err := buildTransport(context.Background(), cfg, security.URLGuard{}, workspaceRoot)
+	_, cmd, td, cancel, err := buildTransport(context.Background(), Host{}, cfg, security.URLGuard{}, workspaceRoot)
 	if err != nil {
 		t.Fatalf("buildTransport: %v", err)
 	}
@@ -943,7 +943,7 @@ func TestConnect_RejectsBadServerNames(t *testing.T) {
 // TestBuildTransport_StdioRequiresCommand proves a stdio server with no command is refused at
 // build time rather than launching nothing.
 func TestBuildTransport_StdioRequiresCommand(t *testing.T) {
-	_, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStdio}, security.URLGuard{}, t.TempDir())
+	_, _, _, _, err := buildTransport(context.Background(), Host{}, ServerConfig{Name: "s", Transport: TransportStdio}, security.URLGuard{}, t.TempDir())
 	if err == nil {
 		t.Fatal("stdio transport with no command built without error")
 	}
@@ -960,7 +960,7 @@ func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
 	for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
 		t.Run(string(transport), func(t *testing.T) {
 			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: "https://blocked.example/mcp"}
-			_, _, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
+			_, _, _, _, err := buildTransport(context.Background(), Host{}, cfg, guard, t.TempDir())
 			if err == nil {
 				t.Fatalf("%s endpoint to a denied host built without error, want a url-safety block", transport)
 			}
@@ -974,13 +974,13 @@ func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
 // TestBuildTransport_UnknownAndMissing proves an unknown transport and a missing HTTP endpoint
 // are connect-time errors, never silently defaulted.
 func TestBuildTransport_UnknownAndMissing(t *testing.T) {
-	if _, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: "carrier-pigeon"}, security.URLGuard{}, t.TempDir()); err == nil {
+	if _, _, _, _, err := buildTransport(context.Background(), Host{}, ServerConfig{Name: "s", Transport: "carrier-pigeon"}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("unknown transport built without error")
 	}
-	if _, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: ""}, security.URLGuard{}, t.TempDir()); err == nil {
+	if _, _, _, _, err := buildTransport(context.Background(), Host{}, ServerConfig{Name: "s", Transport: ""}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("empty transport built without error")
 	}
-	if _, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE}, security.URLGuard{}, t.TempDir()); err == nil {
+	if _, _, _, _, err := buildTransport(context.Background(), Host{}, ServerConfig{Name: "s", Transport: TransportSSE}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("SSE transport with no endpoint built without error")
 	}
 }

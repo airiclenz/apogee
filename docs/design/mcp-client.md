@@ -46,13 +46,17 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   startup error, while a rebind or a redirect to a *different* private address stays refused
   ([ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md),
   Amendment 2026-07-26). Above the dial pin, **every request is pinned to the endpoint's origin**
-  (2026-09-29): `originPinTransport`, the guarded client's outermost RoundTripper, forwards only a
+  (2026-09-29): `security.OriginPinTransport`, the guarded client's outermost RoundTripper, forwards only a
   request whose scheme + host + port (host in `security.NormalizeURL`'s form, default ports
   canonicalised) equals the vetted endpoint's, and refuses any other with an error wrapping
   `security.ErrURLBlocked` that names the server. The SDK resolves an SSE `endpoint` event with no
   origin check and the dial pin judges IPs only — another port or virtual host on the endpoint's
   own address, or any target behind an egress proxy, would pass it — so an `endpoint` event naming
-  another origin now fails the connect and no request reaches that origin. The endpoint never
+  another origin now fails the connect and no request reaches that origin. The client itself comes
+  from `security.URLGuard.GuardedClient` — the one guarded-client recipe the native network tools
+  use too — under the `DialPinDestination` floor policy, with the origin pin outermost and
+  `boundedBodyTransport` beneath it, no client timeout (the connection is session-long), and this
+  package's refusal sentences unchanged (2026-10-01). The endpoint never
   reaches surfaced error text whole: a connect, list-tools
   or call-failed error that quotes it (the SDK's `Post "https://host/mcp?token=…": …`) is cut to the
   bare `scheme://host[:port]` first, so userinfo, path and query stay out of the model's context and
@@ -132,6 +136,7 @@ to the model and rendered, **never executed or interpreted** as a command by Apo
 
 ```
 Connect(ctx, []ServerConfig, URLGuard, workspaceRoot) → *Client  // dial every server, list its tools
+ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same over an explicit Host
   Client.Tools() []domain.Tool                                   // the surfaced tools, for registration
   Client.Close() error                                           // tear every session down — no orphan
 ```
@@ -142,6 +147,10 @@ Connect(ctx, []ServerConfig, URLGuard, workspaceRoot) → *Client  // dial every
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
   Close) — a host without MCP pays nothing. Server names must be non-empty and unique (the name
   prefixes each surfaced tool's registry key as `mcp__…` — actually `<name>__<tool>`, see §4).
+- **Host** is what a connect takes from the process rather than from config: `Host.Proxy` resolves
+  the egress proxy the HTTP transports honour, nil meaning `http.ProxyFromEnvironment`. `Connect`
+  passes the real one; a test injects its own through `ConnectWith` rather than swapping a package
+  variable (2026-10-01).
 - **Tool naming** qualifies each server tool as `<server-name>__<tool>` so two servers advertising
   the same tool name never collide in the single flat registry, and the human approving a call sees
   which server it reaches.

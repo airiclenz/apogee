@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -249,4 +250,142 @@ func TestGuardedClient_BuildsTheVettedDestinationsClient(t *testing.T) {
 			run(t)
 		})
 	}
+}
+
+// TestCanonicalOrigin_ComparesSchemeHostAndPort pins the origin comparator the request pin rests
+// on: spellings of one origin compare equal (a default port written or not, a host's case or
+// trailing root dot), and a different port, scheme or host does not.
+func TestCanonicalOrigin_ComparesSchemeHostAndPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		vetted    string
+		requested string
+		wantEqual bool
+	}{
+		{name: "https default port written", vetted: "https://h/mcp", requested: "https://h:443/other", wantEqual: true},
+		{name: "http default port written", vetted: "http://h:80/mcp", requested: "http://h/mcp?sessionid=1", wantEqual: true},
+		{name: "upper-case host", vetted: "https://mcp.example/mcp", requested: "https://MCP.Example/mcp", wantEqual: true},
+		{name: "trailing root dot", vetted: "https://mcp.example/mcp", requested: "https://mcp.example./mcp", wantEqual: true},
+		{name: "different port", vetted: "https://h/mcp", requested: "https://h:8443/mcp", wantEqual: false},
+		{name: "different scheme", vetted: "https://h/mcp", requested: "http://h/mcp", wantEqual: false},
+		{name: "different host", vetted: "https://h/mcp", requested: "https://other/mcp", wantEqual: false},
+		{name: "http port 443 is not https", vetted: "https://h/mcp", requested: "http://h:443/mcp", wantEqual: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			vetted, requested := mustParseURL(t, tt.vetted), mustParseURL(t, tt.requested)
+
+			vettedOrigin, vettedOK := CanonicalOrigin(vetted)
+			requestedOrigin, requestedOK := CanonicalOrigin(requested)
+
+			if !vettedOK || !requestedOK {
+				t.Fatalf("CanonicalOrigin ok = %v / %v; want both origins derived", vettedOK, requestedOK)
+			}
+			if got := vettedOrigin == requestedOrigin; got != tt.wantEqual {
+				t.Errorf("%q vs %q: equal = %v (%q vs %q); want %v",
+					tt.vetted, tt.requested, got, vettedOrigin, requestedOrigin, tt.wantEqual)
+			}
+		})
+	}
+
+	t.Run("a hostless URL names no origin", func(t *testing.T) {
+		t.Parallel()
+		if origin, ok := CanonicalOrigin(mustParseURL(t, "/mcp?sessionid=1")); ok {
+			t.Errorf("CanonicalOrigin(relative) = %q, true; want no origin", origin)
+		}
+	})
+}
+
+// countingRoundTripper counts the requests a caller's WrapTransport layer was handed before
+// forwarding them, so a test can see where that layer sits in the chain.
+type countingRoundTripper struct {
+	next http.RoundTripper
+	seen atomic.Int32
+}
+
+// RoundTrip counts req and forwards it to next.
+func (c *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.seen.Add(1)
+	return c.next.RoundTrip(req)
+}
+
+// TestGuardedClient_PinsRequestsToTheDestinationsOrigin drives the origin pin an
+// OriginRefusal turns on: a same-origin request passes through the caller's wrapped layer to
+// the dial, a request to another origin is refused with exactly the caller's error before that
+// layer sees it, and a destination with no origin to pin is ErrNoOrigin at build time.
+func TestGuardedClient_PinsRequestsToTheDestinationsOrigin(t *testing.T) {
+	t.Parallel()
+
+	refusal := fmt.Errorf("caller: %w: left the origin", ErrURLBlocked)
+	noProxy := func(*http.Request) (*url.URL, error) { return nil, nil }
+	build := func(t *testing.T, guard URLGuard, target string) (*http.Client, *countingRoundTripper, error) {
+		t.Helper()
+		wrapped := &countingRoundTripper{}
+		client, err := guard.GuardedClient(context.Background(), mustParseURL(t, target), GuardedClientOptions{
+			Proxy:         noProxy,
+			Policy:        DialPinDestination,
+			OriginRefusal: refusal,
+			WrapTransport: func(next http.RoundTripper) http.RoundTripper {
+				wrapped.next = next
+				return wrapped
+			},
+		})
+		return client, wrapped, err
+	}
+
+	t.Run("a same-origin request reaches the destination through the wrapped layer", func(t *testing.T) {
+		t.Parallel()
+		srv, hits := countingServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+		client, wrapped, err := build(t, URLGuard{}, srv.URL+"/mcp")
+		if err != nil {
+			t.Fatalf("GuardedClient: %v", err)
+		}
+
+		resp, err := getThrough(t, client, srv.URL+"/other?x=1")
+
+		if err != nil {
+			t.Fatalf("same-origin GET: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK || atomic.LoadInt32(hits) != 1 || wrapped.seen.Load() != 1 {
+			t.Errorf("status %d, server hits %d, wrapped layer saw %d; want 200, 1, 1",
+				resp.StatusCode, atomic.LoadInt32(hits), wrapped.seen.Load())
+		}
+	})
+
+	t.Run("another origin is refused with the caller's error above the wrapped layer", func(t *testing.T) {
+		t.Parallel()
+		srv, hits := countingServer(t, func(w http.ResponseWriter, _ *http.Request) {})
+		client, wrapped, err := build(t, URLGuard{}, srv.URL+"/mcp")
+		if err != nil {
+			t.Fatalf("GuardedClient: %v", err)
+		}
+		pin, ok := client.Transport.(*OriginPinTransport)
+		if !ok || pin.Next != wrapped {
+			t.Fatalf("client.Transport = %T; want the origin pin outermost over the wrapped layer", client.Transport)
+		}
+		other := strings.Replace(srv.URL, "http://", "https://", 1)
+
+		_, err = getThrough(t, client, other)
+
+		if !errors.Is(err, refusal) {
+			t.Errorf("err = %v; want the caller's refusal", err)
+		}
+		if atomic.LoadInt32(hits) != 0 || wrapped.seen.Load() != 0 {
+			t.Errorf("server hits %d, wrapped layer saw %d; want the request stopped at the pin",
+				atomic.LoadInt32(hits), wrapped.seen.Load())
+		}
+	})
+
+	t.Run("a destination with no origin is refused at build time", func(t *testing.T) {
+		t.Parallel()
+
+		client, _, err := build(t, URLGuard{}.DisableIPFloor(), "http://:8080/mcp")
+
+		if client != nil || !errors.Is(err, ErrNoOrigin) || !errors.Is(err, ErrURLBlocked) {
+			t.Errorf("client = %v, err = %v; want no client and ErrNoOrigin wrapping ErrURLBlocked", client, err)
+		}
+	})
 }

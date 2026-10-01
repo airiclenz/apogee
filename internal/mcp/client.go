@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 
@@ -76,6 +78,29 @@ type liveSession struct {
 // resolved on PATH to an absolute program, and one resolving inside the workspace is refused here
 // rather than launched (see buildStdioTransport).
 func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuard, workspaceRoot string) (*Client, error) {
+	return ConnectWith(ctx, Host{Proxy: http.ProxyFromEnvironment}, servers, guard, workspaceRoot)
+}
+
+// Host is what a connect takes from the process it runs in rather than from its configuration.
+// Connect supplies the real one; a test passes its own through ConnectWith instead of swapping a
+// package variable, so no connect ever depends on another test's state.
+type Host struct {
+	// Proxy resolves the egress proxy for a request to an HTTP-transported server's endpoint.
+	// Nil means http.ProxyFromEnvironment: the process's HTTP_PROXY / HTTPS_PROXY / NO_PROXY, the
+	// same environment the LLM client honours through Go's default transport. There is no
+	// per-server `proxy:` config key — the environment is the whole surface.
+	Proxy func(*http.Request) (*url.URL, error)
+}
+
+// ConnectWith is Connect over an explicit Host: everything Connect documents holds, with host
+// supplying the egress proxy the HTTP transports resolve.
+func ConnectWith(
+	ctx context.Context,
+	host Host,
+	servers []ServerConfig,
+	guard security.URLGuard,
+	workspaceRoot string,
+) (*Client, error) {
 	if len(servers) == 0 {
 		return &Client{}, nil
 	}
@@ -85,7 +110,7 @@ func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuar
 
 	c := &Client{}
 	for _, cfg := range servers {
-		if err := c.connectOne(ctx, cfg, guard, workspaceRoot); err != nil {
+		if err := c.connectOne(ctx, host, cfg, guard, workspaceRoot); err != nil {
 			// Roll back every session opened so far so a partial connect leaves no orphan, then
 			// surface the failure — Connect is all-or-nothing.
 			_ = c.Close()
@@ -151,8 +176,8 @@ func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerCo
 // into a job — so connectOne never contains it itself. A handshake that FAILED never yields a
 // session to record, so its already-contained process and the teardown's own handle are reaped
 // here: the rollback below can only reach what was recorded.
-func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) error {
-	transport, cmd, td, cancel, err := buildTransport(ctx, cfg, guard, workspaceRoot)
+func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) error {
+	transport, cmd, td, cancel, err := buildTransport(ctx, host, cfg, guard, workspaceRoot)
 	if err != nil {
 		return err
 	}
