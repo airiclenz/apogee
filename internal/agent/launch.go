@@ -120,11 +120,13 @@ func (a *Agent) buildLaunch(launch workflowLaunch) (builtLaunch, error) {
 }
 
 // admitBlocking is a blocking launch's Runner.Admit: it refuses the folder id while a background
-// run drives it — running, queued, or stopped but still draining — with workflowAlreadyRunningFormat
-// naming that run, so a second Runner never races the first over its status.json and children.
-// A background launch sets none: the manager refuses a second live run under one id itself.
+// run of this tree drives it — running, queued, or stopped but still draining — with
+// workflowAlreadyRunningFormat naming that run, so a second Runner never races the first over its
+// status.json and children. It asks the root's background set (workflowLive), so a delegate's or a
+// background item child's launch is refused as the root's own is. A background launch sets none:
+// the manager refuses a second live run under one id itself.
 func (a *Agent) admitBlocking(id string) error {
-	if a.background.isLive(id) {
+	if a.workflowLive != nil && a.workflowLive(id) {
 		return fmt.Errorf(workflowAlreadyRunningFormat, id)
 	}
 	return nil

@@ -165,17 +165,7 @@ func liveFolderSurfaces() []liveFolderSurface {
 			name: "a fan_out plan", item: "check alpha", args: planArgs,
 			start: func(t *testing.T, a *Agent) string {
 				t.Helper()
-				plan, refusal := parseFanOutPlan(json.RawMessage(planArgs))
-				if refusal != "" {
-					t.Fatalf("parseFanOutPlan: %s", refusal)
-				}
-				id, err := a.startBackground(workflowLaunch{
-					plan: plan, call: domain.ToolCall{ID: "bg", Tool: tools.FanOutToolName},
-				})
-				if err != nil {
-					t.Fatalf("startBackground: %v", err)
-				}
-				return id
+				return startPlanBackground(t, a, planArgs)
 			},
 			reissue: callAnswer,
 			lead:    fanOutRunFailedPrefix,
@@ -230,35 +220,147 @@ func TestBlockingLaunchRefusedOnALiveBackgroundFolder(t *testing.T) {
 			a := newBackgroundParent(t, cfg, log)
 			id := tc.start(t, a)
 			awaitClosed(t, started, "the background run's item child")
-			statusPath := filepath.Join(cfg.ScratchDir, "workflows", id, "status.json")
-			before, err := os.ReadFile(statusPath)
-			if err != nil {
-				t.Fatalf("read status.json: %v", err)
-			}
+			live := snapshotLiveFolder(t, cfg.ScratchDir, id, up, tc.item)
 
 			answer := tc.reissue(t, a, sink, log)
 
-			if want := tc.lead + fmt.Sprintf(workflowAlreadyRunningFormat, id); !strings.Contains(answer, want) {
-				t.Errorf("re-issue answered\n%s\nwant it to carry %q", answer, want)
-			}
-			if n := up.askedCount(tc.item); n != 1 {
-				t.Errorf("%s asked %d times, want only the background run's one child", tc.item, n)
-			}
-			if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 1 {
-				t.Errorf("workflow folders = %v, want the background run's one", folders)
-			}
-			after, err := os.ReadFile(statusPath)
-			if err != nil {
-				t.Fatalf("re-read status.json: %v", err)
-			}
-			if !bytes.Equal(before, after) {
-				t.Errorf("status.json changed under the refused re-issue:\n%s\nwas\n%s", after, before)
-			}
-			for _, event := range lockedEvents(sink) {
-				if phase, ok := event.(domain.WorkflowPhaseEvent); ok && phase.Workflow == id && !phase.Background {
-					t.Errorf("the refused re-issue reported %+v", phase)
-				}
-			}
+			live.assertRefused(t, answer, tc.lead, sink)
 		})
+	}
+
+	// A delegate's own background set is empty: its blocking fan_out must still see the root's.
+	t.Run("a delegate", func(t *testing.T) {
+		t.Parallel()
+		sink := newLockedSink()
+		cfg := backgroundWorkflowConfig(t, sink)
+		cfg.Delegation.MaxDepth = 2 // at depth 1 a child holds fan_out only under a bound above the default
+		_ = cfg.Tools.Register(tools.NewSubAgent())
+		planArgs := fanOutArgsJSON("alpha")
+		started := make(chan struct{})
+		up := (&workflowResponder{}).
+			route("please delegate", nil, subAgentCallScript("sa1", "redo the sweep")).
+			route("please delegate", nil, contentScript("done")).
+			route("redo the sweep", nil, toolCallScript("fo2", tools.FanOutToolName, planArgs)).
+			route("redo the sweep", nil, contentScript("refused")).
+			route("check alpha", signalThenWait(started, nil), cancelledScript()).
+			route("check alpha", nil, finishScript("f2", "alpha is fine"))
+		a := newBackgroundParent(t, cfg, up)
+		id := startPlanBackground(t, a, planArgs)
+		awaitClosed(t, started, "the background run's item child")
+		live := snapshotLiveFolder(t, cfg.ScratchDir, id, up, "check alpha")
+
+		runInput(t, a, domain.UserInput{Text: "please delegate"})
+
+		live.assertRefused(t, nestedCallResult(t, lockedEvents(sink), "fo2").Content, fanOutRunFailedPrefix, sink)
+	})
+
+	// A background run's item child runs under backgroundHost, whose own set is empty too. The
+	// re-issued plan queues behind that run on the one server, which keeps it live and untouched.
+	t.Run("a background item child", func(t *testing.T) {
+		t.Parallel()
+		sink := newLockedSink()
+		cfg := recipeConfig(t, sink, sweepRecipe("sweep", "beta"))
+		cfg.Delegation.MaxDepth = 2
+		planArgs := fanOutArgsJSON("alpha")
+		started, release, refused := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		up := (&workflowResponder{}).
+			route("sweep beta", signalThenWait(started, release), toolCallScript("fo2", tools.FanOutToolName, planArgs)).
+			route("sweep beta", signalThenWait(refused, nil), cancelledScript()).
+			route("check alpha", nil, cancelledScript()).
+			route("check alpha", nil, finishScript("f2", "alpha is fine"))
+		a := newBackgroundParent(t, cfg, up)
+		launchBackground(t, a, "sweep")
+		awaitClosed(t, started, "the sweep run's item child")
+		id := startPlanBackground(t, a, planArgs)
+		if !a.background.isLive(id) {
+			t.Fatalf("workflow %s is not live behind the sweep run", id)
+		}
+		live := snapshotLiveFolder(t, cfg.ScratchDir, id, up, "check alpha")
+
+		close(release)
+		awaitClosed(t, refused, "the item child's answered fan_out")
+
+		live.assertRefused(t, nestedCallResult(t, lockedEvents(sink), "fo2").Content, fanOutRunFailedPrefix, sink)
+	})
+}
+
+// startPlanBackground starts the fan_out plan args in the background on a and returns its id.
+func startPlanBackground(t *testing.T, a *Agent, args string) string {
+	t.Helper()
+	plan, refusal := parseFanOutPlan(json.RawMessage(args))
+	if refusal != "" {
+		t.Fatalf("parseFanOutPlan: %s", refusal)
+	}
+	id, err := a.startBackground(workflowLaunch{plan: plan, call: domain.ToolCall{ID: "bg", Tool: tools.FanOutToolName}})
+	if err != nil {
+		t.Fatalf("startBackground: %v", err)
+	}
+	return id
+}
+
+// nestedCallResult is the delegate's tool result that answered callID.
+func nestedCallResult(t *testing.T, events []domain.Event, callID string) domain.ToolResult {
+	t.Helper()
+	for _, e := range events {
+		if re, ok := e.(domain.ToolResultEvent); ok && re.Depth > 0 && re.Result.CallID == callID {
+			return re.Result
+		}
+	}
+	t.Fatalf("no delegate result answered %s", callID)
+	return domain.ToolResult{}
+}
+
+// liveFolder is a live background workflow's folder as it stood before a blocking re-issue: its
+// status.json bytes, how often its item was asked, and how many workflow folders existed.
+type liveFolder struct {
+	id         string
+	scratch    string
+	statusPath string
+	status     []byte
+	up         *workflowResponder
+	item       string
+	asked      int
+	folders    int
+}
+
+// snapshotLiveFolder records the live workflow id's folder ahead of a re-issue.
+func snapshotLiveFolder(t *testing.T, scratch, id string, up *workflowResponder, item string) liveFolder {
+	t.Helper()
+	statusPath := filepath.Join(scratch, "workflows", id, "status.json")
+	status, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read status.json: %v", err)
+	}
+	return liveFolder{
+		id: id, scratch: scratch, statusPath: statusPath, status: status,
+		up: up, item: item, asked: up.askedCount(item), folders: len(workflowFolders(t, scratch)),
+	}
+}
+
+// assertRefused checks a re-issue was refused naming the live run behind lead, and left its folder
+// as it stood: no item asked again, no new folder, status.json unchanged, and no foreground phase
+// reported for it.
+func (l liveFolder) assertRefused(t *testing.T, answer, lead string, sink *lockedSink) {
+	t.Helper()
+	if want := lead + fmt.Sprintf(workflowAlreadyRunningFormat, l.id); !strings.Contains(answer, want) {
+		t.Errorf("re-issue answered\n%s\nwant it to carry %q", answer, want)
+	}
+	if n := l.up.askedCount(l.item); n != l.asked {
+		t.Errorf("%s asked %d times, want the %d before the re-issue", l.item, n, l.asked)
+	}
+	if folders := workflowFolders(t, l.scratch); len(folders) != l.folders {
+		t.Errorf("workflow folders = %v, want the %d before the re-issue", folders, l.folders)
+	}
+	after, err := os.ReadFile(l.statusPath)
+	if err != nil {
+		t.Fatalf("re-read status.json: %v", err)
+	}
+	if !bytes.Equal(l.status, after) {
+		t.Errorf("status.json changed under the refused re-issue:\n%s\nwas\n%s", after, l.status)
+	}
+	for _, event := range lockedEvents(sink) {
+		if phase, ok := event.(domain.WorkflowPhaseEvent); ok && phase.Workflow == l.id && !phase.Background {
+			t.Errorf("the refused re-issue reported %+v", phase)
+		}
 	}
 }

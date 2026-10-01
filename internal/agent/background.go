@@ -655,6 +655,7 @@ func (a *Agent) backgroundHost() *Agent {
 		undoNote:           a.undoNote,
 		consoles:           a.consoles,
 		runIDs:             a.runIDs,
+		workflowLive:       a.workflowLive,
 		tasks:              a.tasks,
 		tree:               a.tree,
 		depth:              a.depth,

@@ -222,7 +222,9 @@ NOTES (2026-10-01): newWorkflowRunner/newRecipeRunner fold into `newLaunchRunner
 **Acceptance:** `go test ./internal/agent -run 'TestBlockingLaunchRefused|TestLaunch|TestBackground_RerunFailedRefuses|TestWorkflowCall_TheSameCall|TestRecipe_'`
 **Commit:** `fix(agent): refuse a blocking launch onto a live background workflow folder`
 
-## 14. agent: a delegate's blocking launch sees the root's background runs
+## 14. agent: a delegate's blocking launch sees the root's background runs — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): admitBlocking treats a nil workflowLive as admitting every folder, so an Agent built outside buildAgent/backgroundHost (test literals) keeps working; the "a background item child" subtest starts the sweep run first and queues the re-issued plan behind it on the one server (a queued run counts as live), so the plan's folder stays untouched while the item child re-issues it. The "a fan_out plan" surface now starts through the shared startPlanBackground helper, and item 13's assertions moved into liveFolder.assertRefused so all six subtests share them.
 
 **Depends on:** item 13.
 **Files:** `internal/agent/agent.go`, `internal/agent/construct.go`, `internal/agent/subagent.go`, `internal/agent/background.go`, `internal/agent/launch.go`, `internal/agent/launch_test.go`

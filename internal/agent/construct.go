@@ -208,6 +208,7 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
 	a.consoles = console.New()                             // the engine's live Consoles (ADR 0059)
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
+	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
 }
 
@@ -238,6 +239,7 @@ func (d *delegation) seed(a *Agent) {
 	a.delegation = d.latch
 	a.journal = d.journal
 	a.consoles = d.consoles
+	a.workflowLive = d.workflowLive
 	// The child's other structural bound on runaway context: it folds under budget pressure at
 	// quiescent TURN boundaries, not only at Exchange boundaries (shouldAutoCompact's S2 guard). A
 	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's

@@ -354,6 +354,14 @@ type Agent struct {
 	// this process, and a resumed session's root draws a fresh prefix.
 	runIDs *runIDMinter
 
+	// workflowLive reports whether a background workflow of this tree drives the folder id — the
+	// ROOT's background manager's liveness (backgroundManager.isLive). The root binds it to its own
+	// manager (seedTopLevel); every delegate is handed its parent's (delegation.seed) and a
+	// background host copies it (backgroundHost), so a blocking launch anywhere in the tree refuses
+	// a folder the root's background run still drives (admitBlocking). A delegate's own manager is
+	// empty, which is why it never reads that one. nil admits every folder.
+	workflowLive func(id string) bool
+
 	// tasks is the model's own checklist — the complete list of what this run is doing, written
 	// only through the task_list tool and re-rendered into the standing content on every request
 	// (ADR 0072). Unlike the journal and the registry above it IS session state (ADR 0022 §8):

@@ -1595,6 +1595,7 @@ type delegation struct {
 	journal        *undo.Journal      // the parent's undo journal, shared: delegated writes belong to the current Exchange's undo step (ADR 0051)
 	consoles       *console.Registry  // the engine's one Console registry, shared: the cap of four is per engine, not per delegation (ADR 0059 §6)
 	runIDs         *runIDMinter       // the tree's run-id minter, shared: the child's own delegations draw from the root's counter, so no two runs in the tree share an id
+	workflowLive   func(string) bool  // the root's background liveness, inherited: the child's own manager is empty, so its blocking launches ask the root's (admitBlocking)
 }
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
@@ -1859,10 +1860,11 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// snapshot instead would freeze depth≥1 spawns on whatever was current when their parent was
 		// built — and "identity once there" (a routed child's delegations go to the same server) is
 		// exactly what one shared latch gives for free.
-		latch:    a.delegation,
-		journal:  a.journal,
-		consoles: a.consoles,
-		runIDs:   a.runIDs,
+		latch:        a.delegation,
+		journal:      a.journal,
+		consoles:     a.consoles,
+		runIDs:       a.runIDs,
+		workflowLive: a.workflowLive,
 	}
 	if routedDialect != provider.EffortDialectNone {
 		d.effortDialect = routedDialect
