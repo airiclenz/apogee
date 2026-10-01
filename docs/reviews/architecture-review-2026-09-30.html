@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — apogee — 2026-09-30</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true, curve: "basis" } });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+      .mermaid { font-size: 12px; }
+      .mermaid svg { max-height: 340px; }
+      .band { border-left-width: 4px; }
+      .mod { border: 1px solid #94a3b8; border-radius: 6px; padding: 6px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; background: #fff; }
+      .mod.leak { border-color: #dc2626; color: #b91c1c; }
+      .mod.deep { border: 3px solid #0f172a; background: linear-gradient(135deg,#0f172a,#1e293b); color: #f8fafc; }
+      .mod.faded { opacity: .45; border-style: dashed; }
+      .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: #64748b; }
+      .cell { width: 1.1rem; height: 1.1rem; border-radius: 3px; display: inline-block; }
+      h2, h3 { font-family: ui-serif, Georgia, serif; }
+      article { scroll-margin-top: 1.5rem; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-3">
+        <h1 class="text-3xl font-serif">Architecture review — <span class="font-mono">apogee</span></h1>
+        <p class="text-sm text-slate-600">2026-09-30 · commit <span class="font-mono">704514db</span> (v0.24.2) · fifth review (08-30, 09-14, 09-16, 09-20 before it). Five read-only explorers: workflow + background, engine core, <span class="font-mono">internal/tui</span>, composition root + config, tools + security. Checked against <a class="underline" href="../adr/0083-the-standing-denials-of-the-architecture-reviews.md">ADR 0083</a> (standing denials) and the plans that ruled on the 09-20 review; landed and denied candidates are in the <a href="#ledger" class="underline">ledger</a>, not re-raised as cards. Headline counts were re-checked by hand against the cited lines.</p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 pt-2">
+          <span><span class="inline-block w-4 h-3 border border-slate-400 align-middle mr-1 bg-white"></span> module</span>
+          <span><span class="inline-block w-6 border-t-2 border-dashed border-slate-500 align-middle mr-1"></span> seam</span>
+          <span><span class="inline-block w-6 border-t-2 border-red-600 align-middle mr-1"></span> leak</span>
+          <span><span class="inline-block w-4 h-3 border-2 border-slate-900 bg-slate-900 align-middle mr-1"></span> deep module</span>
+          <span class="ml-auto"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span> <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span> <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span></span>
+        </div>
+        <nav class="text-sm pt-2 grid md:grid-cols-2 gap-x-8 gap-y-1">
+          <div class="lbl pt-2 md:col-span-2">Strong</div>
+          <a class="underline" href="#c1">1. One workflow launch, not nine hand-wired paths</a>
+          <a class="underline" href="#c2">2. The workflow tally is the engine's</a>
+          <a class="underline" href="#c3">3. The two child spawners share one run lifecycle</a>
+          <a class="underline" href="#c4">4. Finish execHost: git and vet run through it</a>
+          <a class="underline" href="#c5">5. Who holds the engine is one fact (TUI)</a>
+          <a class="underline" href="#c6">6. An entry's dial facts are one host-side value</a>
+          <a class="underline" href="#c7">7. One guarded HTTP client for a vetted destination</a>
+          <a class="underline" href="#c8">8. A budget note's latch is its own presence</a>
+          <div class="lbl pt-2 md:col-span-2">Worth exploring</div>
+          <a class="underline" href="#c9">9. A delegation's outcome is typed, not re-parsed</a>
+          <a class="underline" href="#c10">10. The reaction generation is armed whole by the engine</a>
+          <a class="underline" href="#c11">11. Delegation width is one module</a>
+          <a class="underline" href="#c12">12. The Floor guard set is keyed by guard id</a>
+          <a class="underline" href="#c13">13. The settings applier is total</a>
+          <a class="underline" href="#c14">14. The textarea mirror lives behind lineEditor</a>
+          <a class="underline" href="#c15">15. The keystore runner joins userexec</a>
+          <a class="underline" href="#c16">16. The audit ring goes; the event stream is the trail</a>
+          <a class="underline" href="#c17">17. A recipe launch is one value</a>
+          <div class="lbl pt-2 md:col-span-2">Speculative</div>
+          <a class="underline" href="#c18">18. Keep/resume stops being a latch on the Engine interface</a>
+          <a class="underline" href="#c19">19. The Budget is derived whole in internal/context</a>
+          <a class="underline" href="#c20">20. Small trims</a>
+          <div class="lbl pt-2 md:col-span-2">Ledger</div>
+          <a class="underline" href="#landed">Landed since 09-20</a>
+          <a class="underline" href="#adjudicated">Adjudicated earlier (ADR 0083)</a>
+          <a class="underline" href="#defects">In-passing defects — for /code-audit</a>
+          <a class="underline" href="#deep">Already deep — leave alone</a>
+          <a class="underline md:col-span-2" href="#top">Top recommendation</a>
+        </nav>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- ============ 1 ============ -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">1. One workflow launch, not nine hand-wired paths</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">newest code — ADR 0087–0090 landed after 09-20</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/agent/workflowcall.go:293-331 workflowCallResult · :419-445 newWorkflowRunner</li>
+            <li>internal/agent/recipe.go:114-131 · :180-200 newRecipeRunner · :219 bindRecipeInputs · :276-300 runRecipe · :305 completeInputs · :422-454</li>
+            <li>internal/agent/background.go:384-441 · :516-604 startBackgroundRecipe / startBackground · :606-644 openWorkflowFolder</li>
+            <li>internal/workflow/runner.go:317-331, :390-412 openStatus · store.go:481 Find</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — 9 entry points, 2 constructors, 3 input binders, 3 run sequences</div>
+              <pre class="mermaid">
+flowchart LR
+  subgraph E["entry points ×9"]
+    F1["fan_out plan<br/>block · bg"]
+    F2["fan_out recipe<br/>block · bg"]
+    T["typed /‹id›"]
+    S["StartRecipe<br/>fg · bg"]
+    R["resume · RerunFailed"]
+  end
+  F1 --> W["newWorkflowRunner<br/>refusal string"]
+  F2 --> RR["newRecipeRunner<br/>error"]
+  T --> RR
+  S --> RR
+  R --> RR
+  W --> SB["startBackground<br/>rebuilds Spawner · Asker · Width"]:::leak
+  RR --> SB
+  SB --> OF["openWorkflowFolder<br/>copy of Run's first half<br/>time.Now()"]:::leak
+  W --> RUN["observe → Run → end ×3"]
+  RR --> RUN
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — one launch value, one builder, Run opens its own folder</div>
+              <pre class="mermaid">
+flowchart LR
+  A["fan_out · /‹id› · StartRecipe<br/>resume · RerunFailed"] --> L["workflowLaunch<br/>source: plan | recipe+inputs | folder<br/>blocking | background · seat · resume cmd"]
+  L --> B["launch builder<br/>wires runner · spawner · observer · asker ONCE<br/>live-folder guard"]:::deep
+  B --> RUN["workflow.Runner.Run<br/>open folder · PlanHash · Runner.Now"]:::deep
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Nine launch paths each wire runner, spawner, observer and asker by hand (~17 post-construction writes); the background path copies the folder-open half of <code>Runner.Run</code> with its own clock, and no path asks whether the folder it resumes is live.</p>
+          <p><strong>Solution.</strong> One launch value and one builder in <code>internal/agent</code>; folder open stays inside <code>internal/workflow</code>, used by <code>Run</code> and the background start alike.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>leverage: a new launch source is one enum value</li>
+            <li>locality: live-folder guard stated once</li>
+            <li>plan hash computed in one place</li>
+            <li>tests cross one entry, not eight</li>
+          </ul>
+          <div class="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-900"><strong>Defect this closes (verified).</strong> <code>openStatus</code> (<code>runner.go:390-411</code>) resumes any folder whose plan hash matches, running or not; <code>workflowCallResult</code> and <code>runRecipe</code> never consult <code>background.isLive</code> (only <code>RerunFailed</code>, <code>background.go:338</code>, does). A blocking <code>fan_out</code> or <code>/&lt;id&gt;</code> re-issuing a live background plan runs a second Runner in the same folder: racing <code>status.json</code> writes, duplicate children for unfinished items. No test covers it.</div>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Fits ADR 0087 D4 and ADR 0089 D1/D2; contradicts none.</div>
+        </article>
+
+        <!-- ============ 2 ============ -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">2. The workflow tally is the engine's</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/workflow/format.go:116, :134 item line, :141 status text, :222</li>
+            <li>internal/agent/background.go:1249 finishTally · workflowcall.go:1087 workflowState, :1099 itemCounts, :1116</li>
+            <li>internal/tui/workflowblock.go:396, :491 totals · workflow.go:317, :336 finishLine · workflows.go:687, :703-713, :759</li>
+            <li>internal/run/run.go:825-845 eventTap.noteWorkflowPhase → cmd/apogee/wire_firing.go:883-900 recipeWorkflowFailure</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-3">Before — seven tallies over three item sets</div>
+              <div class="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1.5 text-xs items-center">
+                <div class="lbl">tally</div><div class="lbl">fan-out</div><div class="lbl">every stage</div><div class="lbl">status.json</div>
+                <div class="font-mono">workflow.Format</div><div><span class="cell bg-slate-700"></span></div><div></div><div></div>
+                <div class="font-mono">agent.finishTally <span class="text-red-700">(drops resumed)</span></div><div><span class="cell bg-slate-700"></span></div><div></div><div></div>
+                <div class="font-mono">agent.itemCounts</div><div></div><div></div><div><span class="cell bg-slate-700"></span></div>
+                <div class="font-mono">tui workflowView.totals</div><div></div><div><span class="cell bg-red-600"></span></div><div></div>
+                <div class="font-mono">tui finishLine</div><div></div><div><span class="cell bg-red-600"></span></div><div></div>
+                <div class="font-mono">tui /workflows list</div><div></div><div></div><div><span class="cell bg-slate-700"></span></div>
+                <div class="font-mono text-red-700">run eventTap → exit code</div><div></div><div><span class="cell bg-red-600"></span></div><div></div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">Red: counts verify / merge receipts as items. Also ×2 <code>workflowState</code>, ×3 item status text, ×2 item line (quoting already drifted: Format escapes <code>\n</code>, the TUI does not).</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-3">After — one tally, carried on the end phase</div>
+              <div class="flex flex-col items-center gap-3">
+                <div class="mod deep text-center w-full">internal/workflow · Tally(Result | RunStatus)<br/><span class="normal-case tracking-normal opacity-80">item line · status text · state</span></div>
+                <div class="text-slate-400">↓ WorkflowPhaseEvent end phase carries it ↓</div>
+                <div class="flex gap-2 flex-wrap justify-center">
+                  <div class="mod">model's finish note</div>
+                  <div class="mod">TUI totals line</div>
+                  <div class="mod">run.Once → exit / failed</div>
+                </div>
+                <p class="text-xs text-slate-500">readers read; nobody re-counts from events</p>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> "items N · ok · partial · blocked" is counted seven times over three different item sets, and the one that decides <code>apogee headless --recipe</code>'s exit 1 and the daemon's failed verdict counts a different set from the note the model reads.</p>
+          <p><strong>Solution.</strong> <code>internal/workflow</code> owns the tally, the state word, the status text and the item line; the end phase of <code>WorkflowPhaseEvent</code> carries the tally; the TUI and <code>run.Once</code> read it.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: one definition of "item"</li>
+            <li>note, TUI line and exit code agree</li>
+            <li>one table test replaces five</li>
+            <li>item quoting stops drifting</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Touches the content of ADR 0089 D3 (the finish note) and ADR 0090 D1 (the totals line), not the decisions. Pairs with #1 — same area, same plan.</div>
+        </article>
+
+        <!-- ============ 3 ============ -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">3. The two child spawners share one run lifecycle</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/agent/subagent.go:889-1207 runSubAgent (:932 · :1028 · :1089-1094 · :1096-1129 · :1145-1149)</li>
+            <li>internal/agent/workflowspawn.go:201-288 workflowSpawner.Spawn (:203 · :248 · :260-264 · :265-276 · :278-279)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — the same ten bands, spelled twice</div>
+              <div class="grid grid-cols-2 gap-3 text-[11px]">
+                <div class="space-y-1">
+                  <div class="lbl">runSubAgent</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">depth check</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">tools · runIDs.mint · started</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">newChildAgentOn</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">register · WithCancelCause</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">arm · Run · disarm</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">stopped := … (identical)</div>
+                  <div class="band border-red-600 bg-red-50 px-2 py-1 text-red-800">foldStoppedChild</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">unregister · mailbox.close · reap</div>
+                </div>
+                <div class="space-y-1">
+                  <div class="lbl">workflowSpawner.Spawn</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">depth check</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">tools · runIDs.mint · started</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">newChildAgentOn</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">register · WithCancelCause</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">arm · Run · disarm</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">stopped := … (identical)</div>
+                  <div class="band border-red-600 bg-white px-2 py-1 text-red-700 border-dashed">— (no fold)</div>
+                  <div class="band border-slate-400 bg-slate-50 px-2 py-1">unregister · mailbox.close · reap</div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — one child-run module, two thin shapers</div>
+              <div class="flex flex-col gap-3">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="mod text-center">delegation<br/><span class="normal-case tracking-normal">task · report shape</span></div>
+                  <div class="mod text-center">workflow item<br/><span class="normal-case tracking-normal">task · receipt</span></div>
+                </div>
+                <div class="border-t-2 border-dashed border-slate-500"></div>
+                <div class="mod deep text-center py-4">runChild<br/><span class="normal-case tracking-normal opacity-80">register → arm → Run → disarm → classify stop → reap</span></div>
+                <p class="text-xs text-slate-500">ADR 0063 D2 · 0086 D4 · 0088 D2 ordering lives here once</p>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> <code>runSubAgent</code> and <code>workflowSpawner.Spawn</code> hand-spell the same register/arm/Run/disarm/stop/reap skeleton; the stopped predicate is character-identical (verified, <code>subagent.go:1145</code> vs <code>workflowspawn.go:278</code>) and the two have already diverged — only one folds a stopped child.</p>
+          <p><strong>Solution.</strong> One internal child-run module owns the lifecycle and the stop verdict; each spawner keeps its own task composition and result shaping.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: stop and reap ordering stated once</li>
+            <li>stop / cancel / undelivered tested once</li>
+            <li>leverage: a third spawner inherits it</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Not ADR 0083 §3: that denial is about the child's <em>runtime state</em> as one value. This changes the run <em>protocol</em>; <code>runSubAgent</code> may keep writing its post-construction facts.</div>
+        </article>
+
+        <!-- ============ 4 ============ -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">4. Finish execHost: git and vet run through it</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">local-substitutable</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">untaken half of 09-20 #3</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/tools/exec_host.go:24-46 · git.go:66-67 runGit → gitexec.Capture · :86-88 · :99-103 RunGitQuery → gitexec.Run(…, nil …)</li>
+            <li>internal/tools/diagnostics.go:281-282 runGoVet(ctx, h, …) → runSubprocess · exec_common.go:268, :276</li>
+            <li>internal/gitexec/gitexec.go:40 var LookPath · :44 var host = platform.Current() · internal/snapshot/store.go:113</li>
+            <li>internal/mcp/transport.go:199, :205, :212, :352 · internal/subprocess/subprocess.go:157 · internal/platform/teardown.go:97</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — execHost fakes the lookup; the run escapes it</div>
+              <pre class="mermaid">
+flowchart LR
+  H["execHost<br/>look ✓ · run ✓"] --> T["terminal · python_exec<br/>run_tests · console_open"]
+  H --> G["git family ×6<br/>move / delete staging"]:::leak
+  H --> V["diagnostics"]:::leak
+  G -- "run" --> GX["gitexec.Capture<br/>own global host"]:::leak
+  V -- "run ignores h" --> RS["package runSubprocess"]:::leak
+  GX --> OS(("real OS"))
+  RS --> OS
+  M["mcp stdio · proxy<br/>3 globals"]:::leak --> OS
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — one host value, every holder runs through it</div>
+              <pre class="mermaid">
+flowchart LR
+  CR["composition root"] --> H["execHost<br/>lookup · run · env · teardown"]:::deep
+  H --> T["terminal · python · tests · console"]
+  H --> G["git family"]
+  H --> V["diagnostics"]
+  H --> GX["gitexec(host, …)"]
+  H --> M["mcp stdio · proxy"]
+  H --> SN["snapshot store · RunGitQuery"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> 9 of execHost's 13 holders never run through <code>h.run</code>: a fake <code>look</code> hands back a path that is then really executed; seven mutable package globals remain across gitexec, mcp, subprocess and platform; <code>git_test.go</code> leans on real git 14 times.</p>
+          <p><strong>Solution.</strong> gitexec takes the host as an argument; the git and vet paths run through the execHost they were built with; the engine's own git (<code>RunGitQuery</code>, the snapshot store) and mcp's stdio/proxy facilities get the host from the composition root.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: "the OS" is one value, zero globals</li>
+            <li>git tests script outcomes without git</li>
+            <li><code>t.Parallel()</code> becomes legal</li>
+            <li>"git absent" (ADR 0042) is fakeable</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">ADR 0008 untouched (the host is configuration). Plan 2026-09-20 - 01's ratified call — execHost unexported, no <code>HostTools</code> field — stands.</div>
+        </article>
+
+        <!-- ============ 5 ============ -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">5. Who holds the engine is one fact (TUI)</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/tui/commandrun.go:52 commandRunnable · :92 runDeferredCommands · :694 foldBgStarted</li>
+            <li>internal/tui/heartbeat.go:352 observeBinding · :658 foldBeatFailure · settingswatcher.go:93 · schedule.go:289 quiescent</li>
+            <li>internal/tui/sessions.go:700 canResumeWorkflows · workflow.go:516, :554 canWake · model.go:2417 · actuation.go:432 · workflows.go:351</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-3">Before — each gate ANDs its own subset of seven flags</div>
+              <div class="grid grid-cols-[1fr_repeat(7,auto)] gap-x-1.5 gap-y-1 text-[10px] items-center">
+                <div></div><div class="lbl [writing-mode:vertical-rl]">busy</div><div class="lbl [writing-mode:vertical-rl]">bgLaunching</div><div class="lbl [writing-mode:vertical-rl]">inFlight</div><div class="lbl [writing-mode:vertical-rl]">sessionLoading</div><div class="lbl [writing-mode:vertical-rl]">writeBusy</div><div class="lbl [writing-mode:vertical-rl]">quitting</div><div class="lbl [writing-mode:vertical-rl]">prebound</div>
+                <div class="font-mono">commandRunnable</div><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span></span><span></span>
+                <div class="font-mono">runDeferred…</div><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span class="cell bg-slate-700"></span><span></span>
+                <div class="font-mono">foldBgStarted</div><span class="cell bg-slate-700"></span><span></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span></span>
+                <div class="font-mono">observeBinding</div><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span></span>
+                <div class="font-mono">foldBeatFailure</div><span class="cell bg-slate-700"></span><span></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span></span>
+                <div class="font-mono text-red-700">quiescent</div><span class="cell bg-slate-700"></span><span class="cell bg-red-300"></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span></span>
+                <div class="font-mono">canResume / canWake ×2</div><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span class="cell bg-slate-700"></span><span></span><span></span>
+                <div class="font-mono">actuation.go:432</div><span></span><span class="cell bg-slate-700"></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">~14 gates; <code>bgLaunching</code> alone: 22 reads/writes in 8 files. Pink: <code>quiescent</code> ignores it — maybe right (a Firing is its own Agent), but nothing makes anyone decide. Rebind stash applied at 5 release points under 3 guards.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-3">After — one holder, named questions, one release</div>
+              <div class="flex flex-col gap-3">
+                <div class="mod deep text-center py-3">engine holder<br/><span class="normal-case tracking-normal opacity-80">none · loop · worker · launcher verb · /bg launch · session load · record write</span></div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                  <div class="mod">canRunCommand</div>
+                  <div class="mod">canRebind</div>
+                  <div class="mod">quiescent</div>
+                </div>
+                <div class="mod text-center">released → apply stashed rebind (once)</div>
+                <p class="text-xs text-slate-500">one table test: holders × questions</p>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> "Is the engine free for this?" is asked at ~14 sites, each combining a different subset of seven flags; nothing forces a new idle-only operation into every conjunction.</p>
+          <p><strong>Solution.</strong> One value records who holds the engine; a few named questions read it; one "released" transition applies the pending rebind.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: a new holder is one line</li>
+            <li>leverage: every gate reads one answer</li>
+            <li>holders × questions: one table test</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Strengthens ADR 0011 C1 and ADR 0024 (rebind at a quiescent boundary). The record-write queue the owner kept (09-20 #17) stays; only its "held" state feeds the predicate.</div>
+        </article>
+
+        <!-- ============ 6 ============ -->
+        <article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">6. An entry's dial facts are one host-side value</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">ADR 0083 §4 reopen evidence</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>cmd/apogee/upstream.go:70-78 upstreamBinding · :97 · :154 · :187 · :290-318</li>
+            <li>cmd/apogee/wire_server.go:83-99, :151-154 · wire_firing.go:280-296, :345-346, :441-444, :515-520</li>
+            <li>cmd/apogee/delegation.go:357-358, :506, :864-903 · naming.go:95 · title.go:112-115 · probemodel.go:147-172 · probecontext.go:199</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — the provider option recipe at 8 sites; forced dialect two ways</div>
+              <pre class="mermaid">
+flowchart LR
+  E["ServerEntry"] --> U["upstream"]:::leak
+  E --> WS["wire_server"]:::leak
+  E --> WF["wire_firing"]:::leak
+  E --> D["delegation"]:::leak
+  E --> N["naming · title"]:::leak
+  E --> P["probemodel · probecontext"]:::leak
+  U & WS --> O1["Monitor option<br/>forced dialect wins"]
+  WF & D --> O2["hand if/else<br/>forced dialect wins"]:::leak
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+              <p class="text-xs text-slate-500">each spells WithWire(WireFor) · WithEffortDialect · WithRequestExtra · WithAPIKey</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — dial facts are one value; ranking ladders untouched</div>
+              <pre class="mermaid">
+flowchart LR
+  E["ServerEntry"] --> DF["dial facts<br/>endpoint · key · wire · model<br/>request-extra · forced dialect<br/>→ Client() · Monitor()"]:::deep
+  DF --> S["8 arrival sites<br/>each keeps its own ranking"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> <code>request-extra:</code> (commit <code>5e41fe15</code>, 2026-09-24) had to edit 7 non-test <code>cmd/apogee</code> files (verified) — 5 of them ADR 0083 §4's assembly sites; the "forced dialect wins" rule has two recipes.</p>
+          <p><strong>Solution.</strong> Only the dial facts — which depend on no observed state — become one value built from a <code>ServerEntry</code> that builds the Client and the Monitor. The ranking ladders §4 defended stay where they are.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>next dial key: 1 host edit, not 7</li>
+            <li>locality: dialect rule stated once</li>
+            <li>Client and Monitor options tested once</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900"><strong>Contradicts ADR 0083 §4</strong> ("the bound entry stays six host-side assembly sites") — but worth reopening: §4's own <em>reopens on</em> is "an entry key added that needs an edit at every one of the six", and <code>request-extra:</code> is that key. §4's reason (arrival sites rank against different observed state) does not reach dial facts, so the reduction survives. Owner's call, as a dated amendment to §4.</div>
+        </article>
+
+        <!-- ============ 7 ============ -->
+        <article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">7. One guarded HTTP client for a vetted destination</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">the code names this seam itself</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/tools/network.go:338-392 newHTTPClient · :447-490 URL credential scrubber</li>
+            <li>internal/mcp/transport.go:360-395 vetEndpoint · :445-496 scrubber · :515-551 newGuardedHTTPClient ("that seam is an architecture-deepening candidate")</li>
+            <li>internal/security URLGuard (the natural home)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — one recipe, two builders</div>
+              <div class="grid grid-cols-2 gap-3 text-[11px]">
+                <div class="space-y-1">
+                  <div class="lbl">tools · per call</div>
+                  <div class="band border-red-600 px-2 py-1">normalise → pre-flight</div>
+                  <div class="band border-red-600 px-2 py-1">proxy, credential-safe refusal</div>
+                  <div class="band border-red-600 px-2 py-1">pinned / blanket dial control</div>
+                  <div class="band border-red-600 px-2 py-1">10s · 10 idle · 30s · 10s · 1s</div>
+                  <div class="band border-red-600 px-2 py-1">no redirects</div>
+                  <div class="band border-red-600 px-2 py-1">redact URL creds</div>
+                </div>
+                <div class="space-y-1">
+                  <div class="lbl">mcp · session-long</div>
+                  <div class="band border-red-600 px-2 py-1">normalise → vetEndpoint</div>
+                  <div class="band border-red-600 px-2 py-1">proxyForRequest (global)</div>
+                  <div class="band border-red-600 px-2 py-1">pinned / blanket dial control</div>
+                  <div class="band border-red-600 px-2 py-1">10s · 10 idle · 30s · 10s · 1s</div>
+                  <div class="band border-red-600 px-2 py-1">no redirects</div>
+                  <div class="band border-red-600 px-2 py-1">redact URL creds</div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — security owns "a client for this vetted destination"</div>
+              <div class="flex flex-col gap-3">
+                <div class="mod deep text-center py-4">security · guarded client<br/><span class="normal-case tracking-normal opacity-80">check the string you dial · proxy pinning · transport · no redirects · redaction</span></div>
+                <div class="text-center text-xs text-slate-500">parameters: lifetime (call | session) · floor policy · origin pinned?</div>
+                <div class="border-t-2 border-dashed border-slate-500"></div>
+                <div class="grid grid-cols-2 gap-3 text-center">
+                  <div class="mod">network tools</div>
+                  <div class="mod">mcp http transport</div>
+                </div>
+                <p class="text-xs text-slate-500 text-center">two adapters → a real seam</p>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The SSRF-relevant recipe — check the string you dial, pin the proxy, refuse redirects, scrub credentials — is spelled twice with byte-identical transport numbers; mcp tests swap a global (<code>proxyForRequest</code>, 3×) where tools inject a field.</p>
+          <p><strong>Solution.</strong> <code>internal/security</code>, next to <code>URLGuard</code>, builds the client; lifetime, floor policy and origin pinning are its only parameters.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: M-1 and proxy rules in one place</li>
+            <li>SSRF / proxy tests become one table</li>
+            <li>one mcp global goes</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">ADR 0012's 2026-07-26 amendment (MCP floor disabled) survives as the floor-policy parameter.</div>
+        </article>
+
+        <!-- ============ 8 ============ -->
+        <article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">8. A budget note's latch is its own presence</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">small</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/agent/stepnotice.go:59 ("the latch is the note's own presence"), :71-145</li>
+            <li>internal/agent/agent.go:384-387 · prune.go:58-63 · compact.go:318-320 · construct.go:185 · turn.go:237</li>
+            <li>internal/domain/hooks.go:910 Conversation.HasEngineNote (prune already asks it)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — interface ≈ implementation</div>
+              <div class="flex items-end gap-6 h-40">
+                <div class="flex flex-col items-center gap-1"><div class="w-16 bg-red-200 border border-red-500" style="height:120px"></div><div class="lbl">interface</div></div>
+                <div class="flex flex-col items-center gap-1"><div class="w-16 bg-slate-300 border border-slate-500" style="height:135px"></div><div class="lbl">impl</div></div>
+                <ul class="text-xs text-slate-600 space-y-0.5 pb-6">
+                  <li>4 fields: step/token × At/Live</li>
+                  <li>3 re-arm functions</li>
+                  <li>4 hand-placed re-arm sites</li>
+                  <li>every shrink verb must remember</li>
+                </ul>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — "does a note under this topic still stand?"</div>
+              <div class="flex items-end gap-6 h-40">
+                <div class="flex flex-col items-center gap-1"><div class="w-16 bg-slate-900" style="height:20px"></div><div class="lbl">interface</div></div>
+                <div class="flex flex-col items-center gap-1"><div class="w-16 bg-slate-300 border border-slate-500" style="height:90px"></div><div class="lbl">impl</div></div>
+                <ul class="text-xs text-slate-600 space-y-0.5 pb-6">
+                  <li>threshold reached ∧ ¬HasEngineNote(topic) → fire</li>
+                  <li>fill ladder (a rung, not a note) unchanged</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The step and token budget notices keep a parallel "live" latch that four sites must re-arm by hand after folds, prunes and rollbacks, though the code's own doc says the latch <em>is</em> the note's presence.</p>
+          <p><strong>Solution.</strong> Ask the conversation, as prune already does; the fields, the re-arm functions and <code>rearmNotices</code>' index arithmetic go.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>future shrink verbs correct for free</li>
+            <li>tests assert once-per-life only</li>
+            <li>delete 4 fields, 3 functions, 4 call sites</li>
+          </ul>
+        </article>
+
+        <!-- ============ 9 ============ -->
+        <article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">9. A delegation's outcome is typed, not re-parsed</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/tui/toolregistry.go:875-1060 (3 regexes, 3 literal markers) · :935 delegationStoppedHead · :953 · :972 floor.IsNonReport again</li>
+            <li>internal/agent/subagent.go:100-127, :152 stoppedResultHead, :285, :351, :709-710</li>
+            <li>internal/tui/toolregistry_test.go:228-301 hand-copied fixtures</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — engine writes prose, TUI regexes it back</div>
+              <pre class="mermaid">
+flowchart LR
+  A["runSubAgent<br/>knows: bound hit, stopped,<br/>no report, steered"] -- "prose" --> R["ToolResult.Content"]
+  R -. "3 regexes · 3 markers<br/>copied constants" .-> T["toolregistry<br/>stat · failure · detail"]:::leak
+  X["no test binds the two"]:::leak
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — the ToolSummary seam ReadSpan and ChangedFiles already use</div>
+              <pre class="mermaid">
+flowchart LR
+  A["runSubAgent"] -- "typed delegation summary" --> S["domain.ToolSummary"]:::deep
+  S --> T["toolregistry hooks read facts"]
+  A -- "prose (fallback only)" --> T
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The TUI re-derives what the agent already decided from its wording (<code>"[stopped by the user — engine summary follows]"</code> is duplicated verbatim, verified); change the wording and both suites pass while the card silently falls back to prose.</p>
+          <p><strong>Solution.</strong> <code>runSubAgent</code> attaches a typed summary; the hooks read it; prose parsing remains only for summary-less results.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: the agent owns its facts</li>
+            <li>~180 lines of parsing go</li>
+            <li>compile-time link replaces silent drift</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Contradicts design call 14 of archived plan <code>2026-08-10 - 04</code> ("no engine growth for presentation") — not an ADR, but an owner ruling. Worth reopening because the parse is a silent coupling the engine already carries typed seams for. Not ADR 0083 §1 / ADR 0052: the summary is never persisted; the record still stores the rendered view.</div>
+        </article>
+
+        <!-- ============ 10 ============ -->
+        <article id="c10" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">10. The reaction generation is armed whole by the engine</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/agent/agent.go:169, :1419, :1462-1516 (SetReactions ignores Observe) · agent/reactions.go:792</li>
+            <li>cmd/apogee/wire_engine.go:561-587 (the real two-half swap, reflect.DeepEqual) · internal/run/run.go:95-103, :402-408 Spec.Sync</li>
+            <li>lane splits: config/reactions.go:384 · wire_settings.go:591, :2040 · probecontext.go:213 · wire_firing.go:811 · wire_boot.go:209</li>
+            <li>validators: domain/reaction.go:445, :632 · reactions/hooks.go:97, :124 · apogee.go:846-857</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — engine arms one lane; hosts pair the other</div>
+              <pre class="mermaid">
+flowchart LR
+  C["reactions config"] --> SP["split lanes ×6 sites"]:::leak
+  SP --> SY["sync lane → Agent.SetReactions"]
+  SP --> OB["observe lane → reactions.New ×3<br/>host swaps Runner"]:::leak
+  V["5 validators<br/>embedder told to call 2"]:::leak
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — ADR 0076 A8 as written</div>
+              <pre class="mermaid">
+flowchart LR
+  C["reactions config"] --> G["SetReactions(gen)<br/>validate both lanes · swap both halves<br/>holds the observe Runner (A4 seat)"]:::deep
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> ADR 0076 A8 names one <code>SetReactions(gen)</code> as "the only caller of <code>Runner.Replace</code>"; in the code the engine arms the sync half and each host pairs the observe half, with lanes split at 6 sites and validation spread over 5 functions.</p>
+          <p><strong>Solution.</strong> An engine-owned generation module validates both lanes and swaps both halves atomically.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>one validation path, one atomic swap</li>
+            <li>Driver parity by structure, not convention</li>
+            <li>facade stops asking embedders to validate</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Aligns code to ADR 0076 A4/A8. Open question: a Firing needs a Runner per Schedule.</div>
+        </article>
+
+        <!-- ============ 11 ============ -->
+        <article id="c11" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">11. Delegation width is one module</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/agent/dispatch.go:80 fanOutWidthFor · :109-297 · :599 · agent.go:1651-1710 · loop.go:1777 delegationWidth</li>
+            <li>internal/agent/delegationseat.go:70 · delegationtarget.go:186 · orientation.go:217 · workflowcall.go:473-475 · background.go:774-776</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — seven functions, five files, three widths</div>
+              <pre class="mermaid">
+flowchart TB
+  W1["stated to the model<br/>sticky far width"] --> O["orientation line · ceiling ×"]
+  W2["LoopView.ParallelAgents<br/>follows live latch"]:::leak --> TT["tests only"]
+  W3["fanOutWidthFor<br/>seat-aware"] --> B["batch run"]
+  W4["workflowcall · background<br/>pick another pair"]:::leak
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — one module, three named answers</div>
+              <pre class="mermaid">
+flowchart TB
+  M["delegation width<br/>stated · per batch · ceiling<br/>stickiness decided here"]:::deep --> O["orientation"]
+  M --> B["batch"]
+  M --> WF["workflow · background"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Three different "widths" come from seven functions; <code>LoopView.ParallelAgents()</code> has no production reader, and the workflow and background paths each pick a fourth pairing.</p>
+          <p><strong>Solution.</strong> One width module answers "stated", "per batch" and "ceiling", with the (deliberate) stickiness named in one place.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>one table: seat × target × beat</li>
+            <li>a new reader cannot pick wrong</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">ADR 0039; ADR 0069 D6 and its 2026-09-24 note — the stickiness is kept, only named.</div>
+        </article>
+
+        <!-- ============ 12 ============ -->
+        <article id="c12" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">12. The Floor guard set is keyed by guard id</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/domain/config.go:471 (7 Disable… fields) · internal/agent/floorguards.go:14-15 · builtins.go:85-141</li>
+            <li>internal/config/reactions.go:55-63 floorGuardKeys · config.go:875-877 · options.go:232 · registry.go ~:530-585</li>
+            <li>cmd/apogee/wire_settings.go:690-730, :1234-1264 (7 identical applyFloorGuard rows)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — an 8th guard is 8 edits in 6 files</div>
+              <div class="flex flex-wrap gap-2 text-[11px]">
+                <div class="mod leak">agent const</div><div class="mod leak">floorGuardKeys</div><div class="mod leak">registry Path</div>
+                <div class="mod">Disable… field</div><div class="mod">floorFromOptions flip</div><div class="mod">settings row</div>
+                <div class="mod">options.go</div><div class="mod">builtins row</div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">red: the id string, spelled three times; cross-package tests hold them in step</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — the engine row carries the id; the rest loop</div>
+              <div class="flex flex-col gap-2">
+                <div class="mod deep text-center">Floor guard table (key + gate)</div>
+                <div class="grid grid-cols-3 gap-2 text-center text-[11px]"><div class="mod faded">config projection = loop</div><div class="mod faded">settings rows = loop</div><div class="mod faded">disabled = set of ids</div></div>
+                <div class="mod text-center">+ one registry row</div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Seven negative <code>Disable…</code> fields mirror seven positive keys one line at a time; the guard id lives in three places.</p>
+          <p><strong>Solution.</strong> Disabled guards become a set of ids; the config projection and settings rows loop over the engine's table.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>a guard declared once (+ registry row)</li>
+            <li>three drift tests go</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Cost: the public <code>apogee.FloorConfig</code> alias (ADR 0001 stability; ADR 0071's zero-value rule — the zero set must still mean "all on").</div>
+        </article>
+
+        <!-- ============ 13 ============ -->
+        <article id="c13" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">13. The settings applier is total</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process · hypothetical seam</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>cmd/apogee/wire_settings.go:841-856, :959-969, :1792-1818 (6 predicates), :1839 unreachable, :1856 rides</li>
+            <li>only production construction: wire_options.go:49 · members always set: wire_boot.go:115, :219, :241 · wire_live.go:105-312</li>
+            <li>cmd/apogee/wire_settings_test.go — 62 partial appliers</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — every row declares who it reaches</div>
+              <div class="font-mono text-[11px] space-y-1">
+                <div class="band border-slate-400 px-2 py-1">key · <span class="text-red-700">reaches(presenter?)</span> · apply</div>
+                <div class="band border-slate-400 px-2 py-1">key · <span class="text-red-700">reaches(engine?)</span> · apply</div>
+                <div class="band border-slate-400 px-2 py-1">… ×50 rows</div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">one adapter (the TUI) builds it, always whole; nil only in tests</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — key · apply; tests build one full fake</div>
+              <div class="font-mono text-[11px] space-y-1">
+                <div class="band border-slate-900 px-2 py-1">key · apply</div>
+                <div class="band border-slate-900 px-2 py-1">key · apply</div>
+                <div class="band border-slate-900 px-2 py-1">… ×50 rows</div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">fakeApplier(t) — the real composition, fake-backed</p>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> All 50 rows carry a <code>reaches</code> predicate so a nil member degrades — for "a bench or a daemon with no presenter" that never builds a <code>settingsApplier</code>. Deletion test: in production the complexity vanishes.</p>
+          <p><strong>Solution.</strong> Treat the applier as total; drop the column and its predicates; give tests one complete fake builder.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>interface shrinks: one fewer declaration per key</li>
+            <li>tests exercise the real composition</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">ADR 0031 and ADR 0037 D1 not contradicted; reintroduce the seam when a second Driver actually builds an applier.</div>
+        </article>
+
+        <!-- ============ 14 ============ -->
+        <article id="c14" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">14. The textarea mirror lives behind lineEditor</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/tui/inputaccent.go:226 wrapRowStarts, sanitizeInputLine, :345 inputContentRows</li>
+            <li>internal/tui/mouse.go:298-460 visualSubline · cellToRuneOffset(In) · caretOffset · offsetToLineCol · runeOffsetOf · byteOffsetOf · selectionText</li>
+            <li>consumers: lineeditor.go:289, :432-434, :492 · prompteditor.go:290-297 · oracle: chromelayout_test.go:77-172</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — the mirror of bubbles/textarea in three files</div>
+              <pre class="mermaid">
+flowchart LR
+  IA["inputaccent.go<br/>wrap · rows"]:::leak --> LE["lineEditor"]
+  MO["mouse.go<br/>7 string-geometry funcs"]:::leak --> LE
+  MO --> PE["promptEditor"]
+  IA --> PE
+  OR["oracle tests"] -.-> IA
+  OR -.-> MO
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — the editor answers its own geometry</div>
+              <pre class="mermaid">
+flowchart LR
+  LE["lineEditor<br/>rows · wrap starts · offset ↔ cell"]:::deep --> PE["promptEditor"]
+  M["mouse.go — gestures only"] --> LE
+  OR["oracle tests"] -.-> LE
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Re-deriving what the textarea did is spread over three files kept in step by oracle tests; it has drifted before (the 41% divergence, the 2026-08-14 CR fix).</p>
+          <p><strong>Solution.</strong> Move the mirror behind the editor's interface; <code>mouse.go</code> goes back to gestures.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>locality: textarea drift bugs in one module</li>
+            <li>oracle suite targets one interface</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Respects the owner's call on 09-20 #8 ("the prompt keeps its own geometry"): where the mirror lives changes, whose geometry it is does not.</div>
+        </article>
+
+        <!-- ============ 15 ============ -->
+        <article id="c15" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">15. The keystore runner joins userexec</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process · residue of 09-20 #13</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/keystore/run.go:1-25, :82-114, :119-130, :164-182</li>
+            <li>internal/userexec/userexec.go:43-45, :131-185, :224-262 · internal/subprocess/subprocess.go:429-465</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — three capped writers, two tail folders, one missing teardown</div>
+              <div class="grid grid-cols-3 gap-2 text-[11px] text-center">
+                <div class="mod">subprocess<br/>CappedBuffer</div>
+                <div class="mod">userexec<br/>cappedWriter · stderrTail · teardown ✓</div>
+                <div class="mod leak">keystore<br/>cappedBuffer · said · teardown ✗</div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — keystore keeps argv building and exit reading</div>
+              <div class="flex flex-col gap-2 text-[11px] text-center">
+                <div class="mod">keystore — argv · exit code</div>
+                <div class="text-slate-400">↓</div>
+                <div class="mod deep">userexec.Run — reap · process group · caps · stdin</div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The stated reason for a separate runner ("exit status is data") is already true of <code>userexec.Result</code>, and the copy has drifted: keystore never gained the tree teardown userexec did.</p>
+          <p><strong>Solution.</strong> keystore calls <code>userexec.Run</code>.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>inherits the tested teardown contract</li>
+            <li>~60 lines go</li>
+          </ul>
+        </article>
+
+        <!-- ============ 16 ============ -->
+        <article id="c16" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">16. The audit ring goes; the event stream is the trail</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/security/audit.go (165 lines: NewAuditLog · Records · Len · Dropped) · guard.go:28-66, :136-155</li>
+            <li>internal/agent/dispatch.go:2084-2117 · readers: dispatch_test.go:1363, guardrails_test.go:280 only</li>
+            <li>also: security/rules.go:274, :310 MergeDangerousRules — no caller from any config key</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — every call written twice</div>
+              <pre class="mermaid">
+flowchart LR
+  D["dispatch"] --> AL["AuditLog ring<br/>≤10k × 4 KiB per Agent<br/>fresh per sub-agent"]:::leak
+  D --> EV["domain.AuditEvent"]
+  AL --> TT["2 tests"]
+  EV --> OBS["observers · Drivers"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — Guards keeps the floor and the breaker</div>
+              <pre class="mermaid">
+flowchart LR
+  D["dispatch"] --> EV["domain.AuditEvent"]
+  EV --> OBS["observers · Drivers"]
+  EV --> REC["recording EventSink (tests)"]
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> <code>AuditLog.Records()</code> has zero production readers (verified); the deletion test passes cleanly — nothing reappears.</p>
+          <p><strong>Solution.</strong> Remove the ring; tests assert what observers see.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li><code>Guards</code> and <code>ForSubAgent</code> interfaces shrink</li>
+            <li>up to ~40 MB per Agent freed</li>
+            <li>tests assert the observable trail</li>
+          </ul>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">Needs an amendment to ADR 0013 (its "fresh AuditLog" isolation decision) — the isolation it bought is now carried by the event stream's depth/spawn ids.</div>
+        </article>
+
+        <!-- ============ 17 ============ -->
+        <article id="c17" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">17. A recipe launch is one value</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process · follows #1</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>domain.RecipeLaunch{SkillID,Text} · daemon.WorkflowAction{Recipe,Inputs} · run.Spec{Recipe,Prompt} · firingInputs{recipe,prompt} · UserInput{SkillIDs,RecipeInputs}</li>
+            <li>"/"+id+" "+text built 3×: internal/daemon/file.go:103-112 · internal/run/run.go:636-643 · internal/agent/recipe.go:125-128 · parsed back: recipe.go:158-176</li>
+            <li>schedule.Spec.Prompt overloaded as a label: cmd/apogee/daemonfire.go:376-383 · internal/daemon/diff.go:186-203</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — five shapes, a text round-trip</div>
+              <pre class="mermaid">
+flowchart LR
+  DF["daemon file"] --> WA["WorkflowAction"] --> SP["run.Spec<br/>Recipe · Prompt"] --> FI["firingInputs"]
+  FI -- "slash-id text line" --> AG["Agent"]
+  AG -- "recipeLaunch parses back" --> RL["RecipeLaunch"]:::leak
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — one value with its display line</div>
+              <pre class="mermaid">
+flowchart LR
+  DF["daemon file"] --> RL["RecipeLaunch<br/>id · inputs · Line()"]:::deep
+  TY["typed /‹id›"] --> RL
+  RL --> SP["run.Spec"] --> AG["Agent"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The (recipe id, inputs) pair is spelled five ways and rendered-then-reparsed on the foreground path.</p>
+          <p><strong>Solution.</strong> One launch value carried from the daemon file through <code>run.Spec</code> into the Agent; the typed <code>/&lt;id&gt;</code> line is one producer of it.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5">
+            <li>title, transcript line, resume command: one source</li>
+            <li>text round-trip goes</li>
+          </ul>
+        </article>
+
+        <!-- ============ 18 ============ -->
+        <article id="c18" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">18. Keep/resume stops being a latch on the Engine interface</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">one adapter today</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/agent/agent.go:1847, :1900 KeepWorkflows · internal/tui/commandrun.go:201 · sessions.go:591, :684-707</li>
+            <li>internal/tui/workflows.go:461, :465, :822, :864 (ReadFolderPlan · PlanToRecipe · ItemOutputPath · ReadItemTranscript)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — Engine 24 → 35 methods since 09-20 (10 workflow)</div>
+              <pre class="mermaid">
+sequenceDiagram
+  participant T as TUI
+  participant E as Engine
+  T->>E: KeepWorkflows() (latch)
+  T->>E: ClearContext()
+  Note over E: next boundary consumes latch
+  T->>T: read workflow folder directly
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — the verdict is an argument; the engine serves folders</div>
+              <pre class="mermaid">
+sequenceDiagram
+  participant T as TUI
+  participant E as Engine
+  T->>E: ClearContext(keep)
+  T->>E: WorkflowItem(id, key)
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> A temporal-coupling rule (latch before clear) is part of the TUI↔engine interface, and the TUI reads workflow folders past it.</p>
+          <p><strong>Solution.</strong> Pass the keep verdict as an argument; serve item detail and save-as-recipe from the engine.</p>
+          <ul class="list-disc pl-6 text-sm space-y-0.5"><li>worth it when a second Driver (web) arrives — ADR 0031</li></ul>
+        </article>
+
+        <!-- ============ 19 ============ -->
+        <article id="c19" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+          <h2 class="text-2xl">19. The Budget is derived whole in internal/context</h2>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>internal/context/budget.go:128 Allocate (pure, tested)</li>
+            <li>internal/agent/loop.go:1245, :1562, :1580, :1649 · compact.go:27-69, :117, :122 · workflowcall.go:451 · standingblocks.go:97 (re-rendered per a.budget(), 15 call sites)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">Before — Allocate plus five agent-side adjustments</div>
+              <div class="space-y-1 text-[11px]">
+                <div class="band border-slate-900 bg-slate-100 px-2 py-1">context.Allocate</div>
+                <div class="band border-red-600 px-2 py-1">workingLimit (+ re-derived for a target)</div>
+                <div class="band border-red-600 px-2 py-1">HistoryCap clamp</div>
+                <div class="band border-red-600 px-2 py-1">deriveGrowthBounds fallbacks</div>
+                <div class="band border-red-600 px-2 py-1">uncalibratedRoomMargin</div>
+                <div class="band border-red-600 px-2 py-1">output clamps</div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="lbl mb-2">After — one derivation, ADR 0018 §8 testable purely</div>
+              <div class="h-full flex items-center"><div class="mod deep w-full text-center py-6">context.Budget(inputs) → whole Budget</div></div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> ADR 0018 §8's ordering (structural floor ≤ what a fold can render) is testable only through the Agent.</p>
+          <p><strong>Solution.</strong> Move the whole derivation into <code>internal/context</code>.</p>
+          <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900"><strong>Contradicts the letter of ADR 0084 D5</strong> ("capped where History is produced", i.e. in <code>budget()</code>). Raise only if a budget-ordering bug lands that a pure test would have caught.</div>
+        </article>
+
+        <!-- ============ 20 ============ -->
+        <article id="c20" class="rounded-xl border border-slate-200 bg-white p-6 space-y-3 shadow-sm">
+          <h2 class="text-2xl">20. Small trims (no diagram warranted)</h2>
+          <div class="flex flex-wrap gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span></div>
+          <ul class="list-disc pl-6 text-sm space-y-1.5">
+            <li><strong>Pane table residue (09-20 #1).</strong> <code>framePane</code> enum order (<code>model.go:4495</code>), <code>keyClaimOrder</code> (<code>model.go:1627</code>) and <code>pointerPanes</code> (<code>mouse.go:504</code>) are three orders with three order tests; <code>reportRows</code> re-maps <code>reportKind→framePane</code>; the four report states are still four Model fields. Put key rank and pointer rank on the row.</li>
+            <li><strong>UIPrefs residue (09-20 #2).</strong> <code>settingsApplyLocal</code> (<code>settingsapply.go:250-330</code>) still has 10 arms each repeating <code>m.opts.UI.Set(path, value)</code>; <code>m.spin.style/color</code> and the transcript's <code>taskListOpen/toolsOpen/toolsFoldOver</code> mirror it.</li>
+            <li><strong>Options families (ADR 0054).</strong> <code>AutoTitle</code> + <code>OnAutoTitle</code> + <code>GenerateTitle</code>, <code>Skills</code> + <code>ReloadSkills</code>, <code>Schedules</code> + <code>ScheduleAutoBlocked</code> are bare-field families; 41 nil-host checks across 18 files; only <code>ConfigHost</code> has a no-op adapter.</li>
+            <li><strong>Clip helpers (09-20 #7 residue).</strong> <code>title.capRunes</code> (<code>title.go:398</code>), <code>title.Clip</code> (<code>:609</code>), <code>tui/textutil.go:58 clipRunes</code>, <code>headless.go:1472 clipSubAgentTask</code> beside <code>sanitize.ClampRunes</code> — ellipsis / word-boundary differ, so small.</li>
+            <li><strong>Test-seam globals.</strong> <code>restreamHoldoff</code> (<code>loop.go:411</code>), <code>provider.dialAddress</code> (<code>localdial.go:25</code>).</li>
+            <li><strong>Filename.</strong> <code>Conversation</code>, <code>Request</code>, <code>Response</code> live in <code>internal/domain/hooks.go</code>, a name ADR 0076 retired.</li>
+            <li><strong>Doc/arm drift.</strong> 49 <code>layout()</code>/<code>refreshViewport()</code> calls, 38 outside <code>model.go</code> (09-20 counted 35) against <code>doc.go:1139</code>'s "an arm mutates; the tail lays out" — tracked by bead <code>apogee-arm-layout-calls-residue</code>. <code>keyClaimOrder</code> says "autocomplete overlay", <code>paneSpec.name</code> "autocomplete dropdown".</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============ LEDGER ============ -->
+      <section id="ledger" class="space-y-8">
+        <h2 class="text-2xl">Ledger</h2>
+
+        <div id="landed" class="rounded-xl border border-slate-200 bg-white p-6 space-y-2">
+          <h3 class="text-xl">Landed since 09-20 — not re-raised</h3>
+          <ul class="list-disc pl-6 text-sm space-y-1">
+            <li><strong>#1 pane table</strong> — <code>panes.go</code> <code>paneSpecs</code> (residue in #20). <strong>#2 UIPrefs</strong> — <code>domain/uiprefs.go</code> (residue in #20). <strong>#8 text field</strong> — <code>fieldSel</code>. <strong>#9 run on the command row</strong> — <code>commandSpec.run</code>. <strong>#10 key descriptor</strong> — <code>config/keyfield.go</code> <code>scalarField[T]</code>.</li>
+            <li><strong>#3 execHost</strong> — half: terminal, python_exec, run_tests, console_open (the rest is #4). <strong>#4 permit fence</strong> — <code>security.Fence</code>, <code>undo.Mutation.Fence</code>. <strong>#5 stubllm discovery</strong> — <code>runOnce</code>/<code>discoverBeat</code>/<code>newConfiner</code> globals gone. <strong>#6 engine-side binding</strong> — <code>agent/serverbinding.go</code>. <strong>#7 strip-escapes</strong> — <code>sanitize.StripEscapes</code>, <code>ClampRunes</code>.</li>
+            <li><strong>#13 spawner lifecycle</strong> — mostly (console, userexec on <code>NewProcessTeardown</code>; keystore is #15). <strong>#14 read mounts</strong> — <code>domain.ReadMounts</code>. <strong>#16 session.Live</strong> — <code>session/live.go</code>. <strong>#17</strong> — partly; record-write queue, facade options, probe split declined.</li>
+            <li><strong>#15 lateEngine replay list</strong> — declined 2026-09-24 (ADR 0083 §2 note).</li>
+          </ul>
+        </div>
+
+        <div id="adjudicated" class="rounded-xl border border-slate-200 bg-white p-6 space-y-2">
+          <h3 class="text-xl">Adjudicated earlier — ADR 0083 residue, not re-raised</h3>
+          <ul class="list-disc pl-6 text-sm space-y-1.5">
+            <li><strong>§2 ten live settings.</strong> Now <em>ten × seven places</em> (was six): <code>backgroundHost</code> (<code>background.go:724-767</code>) hand-copies 37 Agent fields, all ten settings among them, with no drift guard — a new Agent field left out is silently zero in the host. <code>lateEngine</code>: 9 <code>pending*</code> fields (was 11) behind 54 methods (was 42). Not reopen evidence on §2's terms (no second pair on one clock), but the unguarded copy is worth a test.</li>
+            <li><strong>§3 delegate runtime state.</strong> <code>stepCap</code>/<code>capRequested</code> still written after construction (<code>subagent.go:1060</code>); <code>seatFallback</code> read at three result sites. #3 above is not this.</li>
+            <li><strong>§4 bound entry.</strong> <span class="text-amber-800">Reopen evidence exists</span> — see #6. <code>liveSettings</code>' five <code>entry*</code> latches (<code>wire_settings.go:108-150</code>) are pure mirrors of <code>s.entry</code>, assigned together at every write.</li>
+            <li><strong>§5 host boot.</strong> 11 function-valued <code>cmd/apogee</code> globals (was 15) plus 4 value seams, policed by <code>seams_guard_test.go</code>. <span class="text-amber-800">Possible reopen evidence:</span> headless prints <code>plaintextKeyNotice</code> and <code>subAgentsFlagNotice</code> (<code>headless.go:786-798</code>), the daemon (<code>daemon.go:184-250</code>, <code>daemonfire.go:139-200</code>) prints neither, and nothing records that as deliberate — a "second boot drift of the snapshot-sweep kind". Proposed fix is the sweep-style one: one function returning the notices for a resolved <code>Options</code>, called by all three Drivers — no host-boot module.</li>
+            <li><strong>§1 verdicts on the wire, §6 wire traits.</strong> Nothing new found.</li>
+            <li><strong>09-20 #17 context values.</strong> 21 <code>context.WithValue</code>/<code>ctx.Value</code> sites in <code>internal/domain</code>; documented in the confinement contract §11 table, as ruled.</li>
+          </ul>
+        </div>
+
+        <div id="defects" class="rounded-xl border border-slate-200 bg-white p-6 space-y-2">
+          <h3 class="text-xl">In-passing defects — for <code>/code-audit</code>, not this review</h3>
+          <ul class="list-disc pl-6 text-sm space-y-1.5">
+            <li><strong>Two Runners, one workflow folder</strong> (verified). See #1's red callout. <code>internal/workflow/runner.go:390-411</code>, <code>internal/agent/workflowcall.go:293-331</code>, <code>recipe.go:276-300</code>.</li>
+            <li><strong>Headless / daemon recipe verdict counts the wrong items</strong> (plausible). <code>run.eventTap</code> counts every stage's <code>WorkflowItemFinished</code> (<code>run.go:838-842</code>), so ok verify / merge children can mask "every item blocked" in <code>recipeWorkflowFailure</code> (<code>wire_firing.go:895</code>) while the model's note says otherwise.</li>
+            <li><strong>Raw clock in background folders.</strong> <code>background.go:639</code>, <code>:807</code> stamp <code>status.json</code> with <code>time.Now()</code>, bypassing <code>Runner.Now</code>; <code>isNewer</code> orders folders by it.</li>
+            <li><strong><code>runGoVet</code> ignores its host</strong> (verified). <code>internal/tools/diagnostics.go:282</code> calls package <code>runSubprocess</code>, not <code>h.run</code>.</li>
+            <li><strong>keystore: no tree teardown.</strong> <code>internal/keystore/run.go:87-96</code> — timeout kills only the leader; a tool opening <code>/dev/tty</code> sits in the TUI's foreground group (userexec.go:26-31's own reasoning). POSIX, latent.</li>
+            <li><strong>Daemon omits config-hygiene notices.</strong> See §5 above.</li>
+            <li><strong><code>cloneOptions</code> aliasing.</strong> <code>cmd/apogee/wire_settings.go:201-211</code> says "eight collections"; <code>config.Options</code> has 11 slices/maps plus <code>SystemPrompt.Layers</code>, which is not deep-copied — latent alias for a Firing composed on the Scheduler goroutine.</li>
+            <li><strong>Routed Monitor drops the forced dialect</strong> (per explorer; verify). <code>cmd/apogee/delegation.go:357</code> builds a Monitor without the forced-dialect option the other sites pass.</li>
+            <li><strong>Two "file alone" projections.</strong> Live settings apply reads via <code>LoadFileConfig</code> (<code>wire_settings.go:1928</code>); the external-edit reload via <code>ApplyConfig</code> with no flags/env (<code>settingsedit.go:365</code>).</li>
+            <li><strong>Cosmetic / doc.</strong> <code>security/audit.go:98</code> can split a UTF-8 rune. <code>run_tests.go:289-291</code> claims terminal and python_exec use <code>subprocessEnv</code> (false since 2026-08-13). <code>quiescent()</code> ignoring <code>bgLaunching</code> — decide, then document.</li>
+          </ul>
+        </div>
+
+        <div id="deep" class="rounded-xl border border-slate-200 bg-white p-6 space-y-2">
+          <h3 class="text-xl">Already deep — leave alone</h3>
+          <p class="text-sm leading-relaxed"><code>workflow.Runner.Run</code> (~1,960 lines behind one method and four seams; Spawner has two adapters) · workflow <code>Store</code> + keyscheme · <code>cond.go</code>, <code>Validate</code>/<code>ValidateModelPlan</code> · <code>workflowSpawner.Spawn</code> as the recursion point · <code>schedule.Scheduler</code> (5 methods, one Clock) · daemon Load/Diff/Apply · the background note queue · <code>workflowView.fold</code> · <code>turnLifecycle</code> · <code>foldTable</code> · the Floor guard table and <code>internal/floor</code> · <code>fireCascade</code> · <code>serverBinding.applyTo</code> · <code>resolution.go</code>'s ladder · provider <code>Client</code> + <code>wireCodec</code> + <code>attemptRecorder</code> · heartbeat <code>Monitor</code> · <code>reactions.Runner</code> · <code>turnRun</code> retry counters (ADR 0082) · the config registry + <code>keyfield.go</code> (71 rows) · <code>configedit</code> transaction · <code>unknownkeys.go</code> · <code>settingsRows</code>/<code>settingSections</code> · <code>raise → firingConfig → run.Once</code> · <code>profiles.Resolve</code> · <code>mdns.Lookup</code> · <code>serverstats</code> · <code>session.Live</code> · <code>run.Once</code> · <code>listsurface.go</code> · <code>paneSpecs</code> · <code>blocktarget.go</code> · entrykind rules table · <code>toolRegistry</code> ↔ <code>KnownToolNames</code> · <code>runView</code>/<code>stageLevel</code> · Update's one-line arms · <code>internal/tuitest</code> · <code>security.Fence</code> · writeScope/writeTarget · readScope · <code>gitReadCall</code>/<code>gitRef</code> · gitexec hardening memo · <code>subprocess.RunSubprocess</code> · <code>security.ResolveProgram</code> · <code>decodeToolArgs</code> · the roster ladder · <code>undo.Journal</code> + Snapshotter · doctext · sanitize · <code>platform.Host</code> / Confiner. The userexec vs <code>RunHookSubprocess</code> posture split is deliberate (ADR 0076 D8) — do not merge.</p>
+        </div>
+      </section>
+
+      <section id="top" class="rounded-xl p-8 deep space-y-3 shadow-md">
+        <div class="lbl !text-slate-300">Top recommendation</div>
+        <h2 class="text-2xl"><a href="#c1" class="underline">#1 One workflow launch</a>, with <a href="#c2" class="underline">#2 the workflow tally</a> in the same plan.</h2>
+        <p class="text-slate-200">The workflow engine is the newest and fastest-growing module (four ADRs in ten days, Engine 24 → 35 methods) and already has nine hand-wired launch paths and seven tallies — deepening it now is cheap, before more Drivers and launch sources lean on today's shape. Both candidates carry live defects the deepening closes structurally: two Runners in one folder, and a headless/daemon verdict counting different items than the model sees. After that, <a href="#c3" class="underline">#3 the shared child-run lifecycle</a> is the natural next step in the same area.</p>
+      </section>
+
+      <footer class="text-xs text-slate-500">Vocabulary: domain terms from <code>CONTEXT.md</code>; architecture terms (module, interface, depth, seam, adapter, leverage, locality) from the review skill's glossary. Line numbers as of commit <code>704514db</code>.</footer>
+    </main>
+  </body>
+</html>

@@ -2571,7 +2571,7 @@ const salvageNotePrefix = "tool call salvaged from reply text: "
 //
 // Tool-call salvage is the one exception, in every view: it dispatches a call the model wrote as
 // text rather than on the wire, so the user is told a tool ran that the reply only described
-// (docs/reviews/code-audit-2026-09-26.md). Its Detail is the salvaged tools' names.
+// (docs/reviews/archived/code-audit-2026-09-26.md). Its Detail is the salvaged tools' names.
 //
 // The wording names the reaction's ID — for a builtin, the same config key that turns the behaviour
 // off — and the Moment it fired at, so a human reading the debug view never has to map an internal

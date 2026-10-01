@@ -209,13 +209,10 @@ switch stays as it was.
 These must exist before the Campaigns can be pre-registered. None of it is design work this
 document leaves open.
 
-**In apogee:**
-
-- **An embedder cannot yet offer the background switch.** The facade's own roster passes
-  `offersBackground false` (`internal/agent/construct.go`, `defaultRoster`). An embedder outside
-  this module cannot build a `fan_out` that publishes `background`, because it cannot import
-  `internal/tools`. Experiment 3 needs a facade-level opt-in for a Driver that has a conversation
-  to go on. Headless and daemon keep it off (ADR 0089 D1).
+**In apogee:** nothing outstanding. An embedder outside this module opts in to the background
+switch with `Config.OffersBackground` (`internal/agent/construct.go`, `defaultRoster`), so
+Experiment 3's Driver can publish `background` on `fan_out`. Headless and daemon keep it off
+(ADR 0089 D1).
 
 **In apogee-sim:**
 

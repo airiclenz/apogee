@@ -1,10 +1,11 @@
 # Changelog
 
-All notable changes to Apogee are recorded here. The public Go API follows
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) from `v1.0.0`
-onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
-hook points stay **additively extensible**, so a new Event variant or hook
-point is a **minor** bump, not a breaking change.
+All notable changes to Apogee are recorded here. Versioning is deliberately 0.x
+while the project is pre-production (ADR 0001, as amended 2026-09-30; `VERSION`).
+The public Go API is meant to follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) once a `v1.0.0` is
+cut: Events and Moments stay **additively extensible**, so a new Event variant
+or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 

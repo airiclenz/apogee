@@ -15,7 +15,7 @@ a host-boot module and a Client-owned effort dialect; the owner ruled on each in
 `… - 01 - host-config-and-tools-deepening-plan.md`), where a denied row was "recorded here only" —
 a verdict table and an *Out of scope* line in a plan that was archived when its items landed. The
 2026-09-16 review found the delegate's flat fields again and listed the bound entry's residue
-under *Adjudicated earlier*; the 2026-09-20 review (`docs/reviews/architecture-review-2026-09-20.html`)
+under *Adjudicated earlier*; the 2026-09-20 review (`docs/reviews/archived/architecture-review-2026-09-20.html`)
 listed all five under the same heading, added a sixth candidate that contradicts two ADRs, and
 said the quiet part: "None has an ADR — if a ruling is meant to be permanent, an ADR is the
 cheapest way to stop the next review re-finding it."

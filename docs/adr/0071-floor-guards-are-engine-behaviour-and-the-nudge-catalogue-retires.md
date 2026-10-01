@@ -249,7 +249,7 @@ that only looked empty or narrating. A firing surfaces as an ordinary `FloorGuar
 `tool-call-salvage` with `Detail` naming the salvaged tools. Unlike every other firing it is **not**
 debug-view only (2026-09-26): the TUI announces it in the default view as `tool call salvaged from
 reply text: <tool names>`, because a call the reply only described was dispatched and the user is
-owed that fact (`docs/reviews/code-audit-2026-09-26.md`). It forces no approval — the call meets
+owed that fact (`docs/reviews/archived/code-audit-2026-09-26.md`). It forces no approval — the call meets
 the mode's gate like any other.
 
 **It is a new guard, not a promoted catalogue row.** Decision 3's per-row verdicts stand unchanged
@@ -267,7 +267,7 @@ out of that result with the same three containers, or its text, with all whitesp
 substring of the result's — stays in the reply as text and is not dispatched; the reply's other
 blocks are salvaged as before. A README, a fetched page or a child's report can carry a
 call-shaped object, and a model echoing it back has quoted it, not asked to run it
-(`docs/reviews/code-audit-2026-09-26.md`). The refusal reads only history the guard is handed, so
+(`docs/reviews/archived/code-audit-2026-09-26.md`). The refusal reads only history the guard is handed, so
 it stays pure, and it takes nothing from Decision 1's test: it narrows what salvage reads back
 and says nothing to the model.
 
