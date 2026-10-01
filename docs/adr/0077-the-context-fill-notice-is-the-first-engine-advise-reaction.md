@@ -111,7 +111,10 @@ at depth ≥ 1 — on everywhere, Bypass included — as an engine note on the c
 the advice fence). The `step-budget-notice` key, its `/settings` row, the `Options`, `Config` and
 `Generation` fields and the reserved Reaction id are removed; a home config still carrying the key
 is exempted from the unknown-key walk, read-only — nothing is stripped or rewritten. The notice
-books no firing, and a compaction fold re-arms it as it re-arms the fill notice. Evidence: the
+books no firing, and a compaction fold re-arms it as it re-arms the fill notice (amended
+2026-10-01: there is no re-arm call — the notice's latch is its note's own presence
+(`Conversation.HasEngineNote`), so a fold that swallows the note leaves the next result to be told
+again). Evidence: the
 2026-09-18 capped-delegate handoff §3 F3 — a delegate read the notice's advice fence on a
 `read_file` result as part of the file it read, so the fence header must say *engine*, not
 *reaction* — and the 2026-09-14 session-mining review's headline 3: announcing the cap is part of
@@ -131,7 +134,11 @@ figure the bound is enforced against) reach **ceil(0.75 × delegate-max-tokens)*
 default — fenced `[engine — token budget]` … `[end engine — token budget]`:
 `tokens: 15.2M of 20.0M spent — 4.8M left before the wrap-up Turn; write your output now`. It
 rides the same latch and re-arm seams as the step notice (once while its copy survives; a fold, a
-prune stub or the rollback of the Turn it rode re-arms it), lands beside it in `appendToolResult`
+prune stub or the rollback of the Turn it rode re-arms it) (amended 2026-10-01: neither notice
+keeps a latch or re-arm seam of its own — the latch is the note's own presence in the
+conversation, `Conversation.HasEngineNote` on its topic, so a fold, a prune stub or a rollback that
+takes the note away leaves the next result to be told again, and nothing is reset; plan
+`2026-09-30 - 01` item 12), lands beside it in `appendToolResult`
 so the fence order on a closing result is fixed (tool output, advice, step note, token note, the
 wrap-up directive last), is silent at depth 0 and for an unbounded budget, books no firing and
 stays on under Bypass. It is **not a rung of this decision's ladder** — the ladder, its three

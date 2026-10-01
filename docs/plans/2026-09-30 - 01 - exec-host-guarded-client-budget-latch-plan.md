@@ -250,7 +250,10 @@ NOTES (2026-10-01): the rollback tests also assert the threshold Turn's first re
 **Acceptance:** `go test ./internal/agent -run 'TestStepNotice|TestTokenNotice|TestContextFillNotice|TestAutoPrune|TestTurnLifecycle'`; `go test ./internal/domain -run 'EngineNote'`; `! grep -nE 'NoticeLive|NoticeAt|rearmStepNotice|rearmTokenNotice|rearmNotices' internal/agent/*.go`
 **Commit:** `refactor(agent): a budget note's latch is the note's own presence`
 
-## 13. docs: no comment names a parallel budget latch
+## 13. docs: no comment names a parallel budget latch — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): stepnotice.go's header, construct.go's turnRolledBack comment, fillnotice.go and dispatch.go already carried no parallel-latch prose after item 12, so they are left untouched; dispatch.go's "latch" hits are the Delegation-target latch, unrelated.
+NOTES (2026-10-01): ADR 0077 also gets a dated amendment on the 2026-09-19 step-notice addendum's "a compaction fold re-arms it" sentence, which described the same retired re-arm seam.
 
 **Depends on:** item 12.
 **Files:** `docs/adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md`, `internal/agent/fillnotice.go`, `internal/agent/dispatch.go`, `internal/domain/hooks.go`, `CONTEXT.md`, `internal/agent/stepnotice.go`, `internal/agent/construct.go`

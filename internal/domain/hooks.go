@@ -901,12 +901,13 @@ func (c *Conversation) SetMessageContent(i int, content string) {
 	c.revision++
 }
 
-// HasEngineNote reports whether some message still carries an engine note on topic — the latch a
-// caller that lands a note once per conversation (the step- and token-budget notices, internal/agent) reads
-// after a rewrite it did not make. A row counts only while its fence still stands at its offset
-// (Message.fenceStands): SetMessageContent already clears a ledger whose fence a rewrite lost
-// (dropStaleAdvice), and the same check here keeps a message committed with a stale row from
-// reading as noted.
+// HasEngineNote reports whether some message still carries an engine note on topic. For a caller
+// that lands a note only while none stands (the step- and token-budget notices, internal/agent)
+// it IS the latch: there is no separate flag to clear, so a fold, a prune stub or a rollback that
+// takes the note away leaves the next result to be noted again. A row counts only while its fence
+// still stands at its offset (Message.fenceStands): SetMessageContent already clears a ledger whose
+// fence a rewrite lost (dropStaleAdvice), and the same check here keeps a message committed with a
+// stale row from reading as noted.
 func (c *Conversation) HasEngineNote(topic string) bool {
 	for i := range c.messages {
 		m := &c.messages[i]

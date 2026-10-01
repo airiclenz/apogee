@@ -995,7 +995,8 @@ note, fenced `[engine — step budget]` … `[end engine — step budget]` (neve
 delegate has been seen reading an advice fence on a `read_file` result as part of the file),
 `steps: N of M used — K left before the wrap-up Turn; write your output now`, so the child writes
 while it still holds its tools. It fires ONCE per delegation while its copy survives in the
-history — a fold that swallowed it re-arms it, as a fold re-arms the fill notice — silent at depth
+history — its latch is the note's own presence, so a fold, a prune stub or a rollback that took
+the note away leaves the next result to be told again — silent at depth
 0 and for an unbounded delegation, and it is part of the bound's contract, not a Reaction: no key,
 no Reaction id, no firing booked, on under Bypass (the `step-budget-notice` key of the 2026-09-15
 addendum is retired; a file still carrying it is ignored without an unknown-key notice). The token
@@ -1003,7 +1004,8 @@ bound announces itself the same way — the **token-budget notice** (2026-09-19,
 `apogee-zuu`): the tool result closing the Turn at which the child's cumulative prompt tokens reach
 **ceil(0.75 × delegate-max-tokens)** carries one engine note, fenced `[engine — token budget]` …
 `[end engine — token budget]`, `tokens: 15.2M of 20.0M spent — 4.8M left before the wrap-up Turn;
-write your output now`, on the same latch and re-arm seams and beside the step note on the result.
+write your output now`, latched the same way (by its own note's presence) and beside the step
+note on the result.
 Neither notice is a rung of the **context-fill notice** ladder: the ladder measures one request
 against the window, these measure the delegation's whole spend against its cap — which is why a
 child under a wide `working-window:` heard nothing at 10.7M of 20M before the twin existed. It is a
