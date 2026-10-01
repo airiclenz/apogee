@@ -165,7 +165,10 @@ NOTES (2026-10-01): the Firing namer's session binding is bindingOfEntry(in.entr
 **Acceptance:** `go test ./cmd/apogee -run 'TestNamingCall|TestTitleGenerator|TestFiringNamer|TestDelegationWiring|TestProbeModel|TestProbeContext|TestE2ERequestExtra|TestDelegationNamer|TestFiringConfigCarriesTheDelegationNamer|TestFiringConfigNamesARoutedChild|TestFiringConfigCarriesTheEntrysRequestExtra|TestRunRootWiresTheTitleSeam'`; `! grep -nE 'provider\.With(Wire|RequestExtra|EffortDialect)|heartbeat\.NewMonitor|provider\.NewClient\(' cmd/apogee/*.go | grep -v _test.go | grep -v dial.go`; `! grep -nE '\.RequestExtra\b' cmd/apogee/naming.go cmd/apogee/probemodel.go cmd/apogee/title.go`; `! grep -nE 'RequestExtra: *(target\.|string\(in\.entry)' cmd/apogee/delegation.go cmd/apogee/wire_firing.go`
 **Commit:** `refactor(cmd): every upstream Client is built from the dial facts`
 
-## 10. cmd: the engine's dial fields come from the dial facts
+## 10. cmd: the engine's dial fields come from the dial facts — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): consequential edit — cmd/apogee/doc.go: made necessary by dial.go now also projecting the engine's and the probe's dial fields (its file-map line named only the Client and the Monitor).
+NOTES (2026-10-01): the holder's Bind/Swap keep their positional signatures (item 11 owns the holder); bind and move pass the binding's own fields (`dial.Endpoint, dial.APIKey, …, dial.Monitor()`). TestProbeCommandDialsTheEntrysKeyAndWire is a witness — the probe already dialled the entry's key and wire before this item, so it is green before and after.
 
 **Depends on:** item 9.
 **Files:** `cmd/apogee/dial.go`, `cmd/apogee/dial_test.go`, `cmd/apogee/wire_server.go`, `cmd/apogee/wire_firing.go`, `cmd/apogee/upstream.go`, `cmd/apogee/delegation.go`, `cmd/apogee/probe.go`, `cmd/apogee/probe_test.go`

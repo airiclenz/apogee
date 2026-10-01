@@ -869,42 +869,37 @@ func resolveDelegationTarget(
 	// zero says this target names none — a routed child then keeps the session's own shape
 	// (subagent.go), which is what dialectAdvice tells the human about.
 	dialect := observed.EffortSupport.Dialect
-	return &apogee.DelegationTarget{
-		Endpoint: entry.Endpoint,
-		// The key the beat above just authenticated with, resolved from the entry's key source by
-		// the caller: the child talks to the same server, with the same credential, and cannot be
-		// handed a source it would have to run again for itself.
-		APIKey: apiKey,
-		// The protocol that server speaks — the entry's `wire:` key as written (ADR 0078), the
-		// same value the beat above was dialled under; a routed child dials with it and never with
-		// the session server's.
-		Wire: entry.Wire,
-		// The entry's name, so the routed child's Config names the server it actually dials, and
-		// its `request-extra:` passthrough (ADR 0085), carried as written — "" included, so a child
-		// routed to an entry that names none never sends the session server's keys.
-		ServerName:    entry.Name,
-		RequestExtra:  string(entry.RequestExtra),
-		Model:         model,
-		ContextWindow: window,
-		// The entry's `working-window:` bound, carried as written and NOT resolved over the top-level
-		// key: that key describes the session's own server, and this one is another box whose room a
-		// number sized for the orchestrator's window has no business fencing. There is no observed
-		// half either — a server reports no working room — so an absent key stays 0 and a delegation
-		// there works in the whole window resolved above (subagent.go).
-		WorkingWindow: int(entry.WorkingWindow),
-		// The entry's `max-output-tokens:` pin, carried as written (ADR 0046). There is no observed
-		// half to fall back to — a server advertises no reply ceiling — so an absent key stays 0 and
-		// the child derives its cap from the window resolved above.
-		MaxOutputTokens: int(entry.MaxOutputTokens),
-		// The entry's `response-reserve:` override, carried as written. There is no observed half
-		// here either — a server reports no split — and no top-level rank to resolve against, on
-		// purpose: an entry that states no share leaves the child on the share the PARENT resolved,
-		// which already IS the top-level key when nobody overrode it (subagent.go).
-		ResponseReserveFraction: entry.ResponseReserve,
-		ParallelAgents: config.ResolveParallelAgents(int(entry.ParallelAgents), observed.TotalSlots,
-			config.DefaultParallelAgents(entry)),
-		Profile:       profile,
-		EffortDialect: dialect,
-		Bypass:        entry.Bypass,
-	}
+	// The entry's dial facts: its endpoint; the key the beat above just authenticated with,
+	// resolved from the entry's key source by the caller — the child talks to the same server, with
+	// the same credential, and cannot be handed a source it would have to run again for itself; the
+	// protocol that server speaks — the entry's `wire:` key as written (ADR 0078), the same value
+	// the beat above was dialled under, so a routed child dials with it and never with the session
+	// server's; and its `request-extra:` passthrough (ADR 0085), carried as written — "" included,
+	// so a child routed to an entry that names none never sends the session server's keys.
+	target := bindingOfEntry(entry, apiKey).delegationTarget()
+	// The entry's name, so the routed child's Config names the server it actually dials.
+	target.ServerName = entry.Name
+	target.Model = model
+	target.ContextWindow = window
+	// The entry's `working-window:` bound, carried as written and NOT resolved over the top-level
+	// key: that key describes the session's own server, and this one is another box whose room a
+	// number sized for the orchestrator's window has no business fencing. There is no observed half
+	// either — a server reports no working room — so an absent key stays 0 and a delegation there
+	// works in the whole window resolved above (subagent.go).
+	target.WorkingWindow = int(entry.WorkingWindow)
+	// The entry's `max-output-tokens:` pin, carried as written (ADR 0046). There is no observed half
+	// to fall back to — a server advertises no reply ceiling — so an absent key stays 0 and the
+	// child derives its cap from the window resolved above.
+	target.MaxOutputTokens = int(entry.MaxOutputTokens)
+	// The entry's `response-reserve:` override, carried as written. There is no observed half here
+	// either — a server reports no split — and no top-level rank to resolve against, on purpose: an
+	// entry that states no share leaves the child on the share the PARENT resolved, which already IS
+	// the top-level key when nobody overrode it (subagent.go).
+	target.ResponseReserveFraction = entry.ResponseReserve
+	target.ParallelAgents = config.ResolveParallelAgents(int(entry.ParallelAgents), observed.TotalSlots,
+		config.DefaultParallelAgents(entry))
+	target.Profile = profile
+	target.EffortDialect = dialect
+	target.Bypass = entry.Bypass
+	return &target
 }

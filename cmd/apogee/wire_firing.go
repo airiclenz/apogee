@@ -277,22 +277,20 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// allow/deny lists, scrub the same variables out of a subprocess it chose the contents of, mount
 	// the same context files and read responses in the same shape a session on this host would.
 	cfg := projectConfig(in.opts, in.roots, in.confiner, in.mode, skillProvider)
-	cfg.Endpoint = in.entry.Endpoint
+	// The bound entry's dial facts: its endpoint, the key resolved for it, the protocol it speaks
+	// — its `wire:` key as written (ADR 0078), the same value firingConfig's beat is dialled under,
+	// so an unattended run opens the connection a session on this entry opens (ADR 0031's Driver
+	// parity) — and its `request-extra:` passthrough (ADR 0085), for the wire's reason: every body
+	// an unattended run sends to this entry carries the keys a session on it sends. The model is
+	// the spec's, never the entry's pin: the resolution above already ranked the two.
+	bindingOfEntry(in.entry, apiKey).fillDial(&cfg)
 	cfg.Model = spec.Model
-	cfg.APIKey = apiKey
 	// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
 	// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
 	// unattended run needs them for the same reason a session does: the bullet that names the
 	// far seat is unreadable beside a near one the model can only call "this server".
 	cfg.ServerName = in.entry.Name
 	cfg.ServerDescription = in.entry.Description
-	// And the protocol the bound entry speaks — its `wire:` key as written (ADR 0078), the same
-	// value firingConfig's beat is dialled under, so an unattended run opens the connection a
-	// session on this entry opens (ADR 0031's Driver parity).
-	cfg.Wire = in.entry.Wire
-	// And its `request-extra:` passthrough (ADR 0085), for the wire's reason: every body an
-	// unattended run sends to this entry carries the keys a session on it sends.
-	cfg.RequestExtra = string(in.entry.RequestExtra)
 	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 	// rather than off opts, so the run reads responses in the same shape a session on the same
 	// model would, and a built-in match has already narrated itself through the notices.

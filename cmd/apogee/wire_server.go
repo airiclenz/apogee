@@ -80,17 +80,17 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 		return err
 	}
 
+	// The entry's dial facts, dialled with the key just resolved: one binding fills the Config's
+	// dial fields here and the holder's below, so the engine and the Monitor dial one server.
+	dial := bindingOfEntry(entry, apiKey)
 	cfg := b.cfg
-	cfg.Endpoint = entry.Endpoint
+	// The endpoint, the key, the wire this server speaks (ADR 0078) and its `request-extra:`
+	// passthrough (ADR 0085) ride the same Config, for the pins' reason below: the Agent is
+	// constructed from it here, and a session that starts on an anthropic entry must open the
+	// Messages connection — merging the entry's keys over every body — from its very first Turn.
+	// The zero wire folds to openai at the dial; "" merges nothing.
+	dial.fillDial(&cfg)
 	cfg.Model = entry.Model
-	cfg.APIKey = apiKey
-	// The wire this server speaks (ADR 0078) rides the same Config, for the pins' reason below: the
-	// Agent is constructed from it here, and a session that starts on an anthropic entry must open
-	// the Messages connection from its very first Turn. The zero value folds to openai at the dial.
-	cfg.Wire = entry.Wire
-	// And its `request-extra:` passthrough (ADR 0085): the engine's Client merges it over every body
-	// it sends to this server, from the first Turn on. "" merges nothing.
-	cfg.RequestExtra = string(entry.RequestExtra)
 	// The same server in the HUMAN's words, for the orientation block to name the session seat by
 	// when the model is offered a seat to choose (ADR 0069). They ride the Config rather than a
 	// later push for the pins' reason: a session that starts on a described entry must be able to
@@ -148,8 +148,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// the picker, the footer and the wire all read. And with the entry's wire (ADR 0078), because
 	// discovery differs per wire: an anthropic entry is asked under its own headers and never for
 	// a /props it does not serve.
-	b.holder.Bind(entry.Endpoint, apiKey, entry.Model, entry.Wire, string(entry.RequestExtra),
-		bindingOfEntry(entry, apiKey).Monitor())
+	b.holder.Bind(dial.Endpoint, dial.APIKey, dial.Model, dial.Wire, dial.RequestExtra, dial.Monitor())
 	return nil
 }
 

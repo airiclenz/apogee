@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
@@ -155,5 +156,84 @@ func TestDial_BindingsOfEachSource(t *testing.T) {
 				t.Errorf("binding = %+v; want %+v", tc.got, tc.want)
 			}
 		})
+	}
+}
+
+// projectedBinding is the binding every projection test fills from: each dial field set to a
+// value no caller-owned field could be confused with, and a forced dialect no projection may carry.
+func projectedBinding() upstreamBinding {
+	return upstreamBinding{
+		Endpoint: "http://box:8080", Model: "entry-pin", APIKey: dialKey, Wire: "anthropic",
+		RequestExtra: `{"witness":"dial"}`, EffortDialect: "kwargs",
+	}
+}
+
+// fillDial sets the Config's four dial fields and touches nothing the caller owns: the model the
+// caller resolved, the server's name, and the RANKED effort dialect all survive it.
+func TestDial_FillDialSetsTheDialFieldsOnly(t *testing.T) {
+	t.Parallel()
+
+	cfg := apogee.Config{Model: "caller-model", ServerName: "seat", EffortDialect: domain.EffortDialectReasoning}
+	projectedBinding().fillDial(&cfg)
+
+	if cfg.Endpoint != "http://box:8080" || cfg.APIKey != dialKey || cfg.Wire != "anthropic" ||
+		cfg.RequestExtra != `{"witness":"dial"}` {
+		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q; want the binding's",
+			cfg.Endpoint, cfg.APIKey, cfg.Wire, cfg.RequestExtra)
+	}
+	if cfg.Model != "caller-model" || cfg.ServerName != "seat" {
+		t.Errorf("fillDial changed caller fields: model %q server name %q; want caller-model, seat", cfg.Model, cfg.ServerName)
+	}
+	if cfg.EffortDialect != domain.EffortDialectReasoning {
+		t.Errorf("EffortDialect = %q; fillDial must leave the ranked dialect alone", cfg.EffortDialect)
+	}
+}
+
+// upstreamSpec carries the four dial fields and nothing a move sets on its own.
+func TestDial_UpstreamSpecCarriesTheDialFields(t *testing.T) {
+	t.Parallel()
+
+	spec := projectedBinding().upstreamSpec()
+
+	want := apogee.UpstreamSpec{
+		Endpoint: "http://box:8080", APIKey: dialKey, Wire: "anthropic", RequestExtra: `{"witness":"dial"}`,
+	}
+	if spec != want {
+		t.Errorf("upstreamSpec = %+v; want %+v", spec, want)
+	}
+}
+
+// delegationTarget carries the four dial fields; the model, the server's name and the ranked
+// effort dialect stay the caller's to set.
+func TestDial_DelegationTargetCarriesTheDialFields(t *testing.T) {
+	t.Parallel()
+
+	target := projectedBinding().delegationTarget()
+
+	if target.Endpoint != "http://box:8080" || target.APIKey != dialKey || target.Wire != "anthropic" ||
+		target.RequestExtra != `{"witness":"dial"}` {
+		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q; want the binding's",
+			target.Endpoint, target.APIKey, target.Wire, target.RequestExtra)
+	}
+	if target.Model != "" || target.ServerName != "" || target.EffortDialect != "" {
+		t.Errorf("model %q server name %q effort dialect %q; want all three left to the caller",
+			target.Model, target.ServerName, target.EffortDialect)
+	}
+}
+
+// probeDial sets the probe's three dial fields, the wire folded the way the Monitor folds it, and
+// leaves the host facts the caller filled in.
+func TestDial_ProbeDialCarriesTheDialFields(t *testing.T) {
+	t.Parallel()
+
+	in := probe.Inputs{Workspace: "/ws", ConfineToWorkspace: true}
+	projectedBinding().probeDial(&in)
+
+	if in.Endpoint != "http://box:8080" || in.APIKey != dialKey || in.Wire != provider.WireAnthropic {
+		t.Errorf("probe dial = endpoint %q key %q wire %q; want the binding's, on the anthropic wire",
+			in.Endpoint, in.APIKey, in.Wire)
+	}
+	if in.Workspace != "/ws" || !in.ConfineToWorkspace {
+		t.Errorf("probeDial changed host facts: workspace %q confine %v", in.Workspace, in.ConfineToWorkspace)
 	}
 }

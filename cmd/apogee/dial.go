@@ -6,7 +6,11 @@ package main
 // An entry reaches the wire through two host-built values: the Client a request is sent on and
 // the heartbeat Monitor that observes the server. Both are built HERE, from one upstreamBinding,
 // so the options each needs are spelled once — a new Client-side entry key is the binding's
-// field and a line in this file, not an edit at every site that dials.
+// field and a line in this file, not an edit at every site that dials. The engine's own dial
+// fields — on the Config it is built from, the UpstreamSpec a move switches it with, the
+// DelegationTarget a routed child dials — and the probe's are projected from the same binding
+// here too (fillDial, upstreamSpec, delegationTarget, probeDial): each sets dial fields only and
+// never the model, which stays the caller's.
 //
 // The split between the two is the facts' own. The Client carries the key, the wire and the
 // `request-extra:` passthrough, because every body it sends must; the forced dialect does not
@@ -19,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -80,4 +85,49 @@ func (b upstreamBinding) Monitor() *heartbeat.Monitor {
 	return heartbeat.NewMonitor(b.Endpoint, b.Model, b.APIKey,
 		provider.WithEffortDialect(provider.EffortDialectFor(b.EffortDialect)),
 		provider.WithWire(provider.WireFor(b.Wire)))
+}
+
+// fillDial sets cfg's dial fields from the binding — the endpoint, the key, the wire and the
+// request-extra passthrough — and nothing else. Model stays the caller's (a bind pins the entry's
+// own, a Firing the one its spec resolved), and so does EffortDialect: the Config carries the
+// RANKED dialect, which the caller resolves against an observation, never the forced spelling.
+func (b upstreamBinding) fillDial(cfg *apogee.Config) {
+	cfg.Endpoint = b.Endpoint
+	cfg.APIKey = b.APIKey
+	cfg.Wire = b.Wire
+	cfg.RequestExtra = b.RequestExtra
+}
+
+// upstreamSpec is the switch a `/server` move hands the engine, carrying the binding's dial fields
+// only. The caller sets the arrived-at server's name, description and its window, working-window,
+// reply-cap and reserve; a move carries no model at all — the first beat on the new server binds
+// one.
+func (b upstreamBinding) upstreamSpec() apogee.UpstreamSpec {
+	return apogee.UpstreamSpec{
+		Endpoint:     b.Endpoint,
+		APIKey:       b.APIKey,
+		Wire:         b.Wire,
+		RequestExtra: b.RequestExtra,
+	}
+}
+
+// delegationTarget is a Delegation target carrying the binding's dial fields only — the dial a
+// routed child is built on. The caller sets the server's name, the model it resolved, the window
+// and the rest; EffortDialect is the beat's ranked one (resolveDelegationTarget), never the forced
+// spelling the binding holds for its Monitor.
+func (b upstreamBinding) delegationTarget() apogee.DelegationTarget {
+	return apogee.DelegationTarget{
+		Endpoint:     b.Endpoint,
+		APIKey:       b.APIKey,
+		Wire:         b.Wire,
+		RequestExtra: b.RequestExtra,
+	}
+}
+
+// probeDial sets the dial fields `apogee probe` discovers with: the endpoint, the key and the wire,
+// folded the way the Monitor folds it. A probe sends no body, so request-extra has no field here.
+func (b upstreamBinding) probeDial(in *probe.Inputs) {
+	in.Endpoint = b.Endpoint
+	in.APIKey = b.APIKey
+	in.Wire = provider.WireFor(b.Wire)
 }

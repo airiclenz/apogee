@@ -297,33 +297,31 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	if err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{
-		Endpoint: entry.Endpoint,
-		APIKey:   apiKey,
-		// The protocol the arrived-at server speaks (ADR 0078), so the engine's replacement client
-		// dials it the way this entry's Monitor below does — a wire is a fact about the server, and
-		// it moves with the endpoint for the key's reason.
-		Wire: entry.Wire,
-		// The arrived-at server in the HUMAN's words, so the orientation block names the session seat
-		// by the entry the session is on NOW when the model is offered a seat to choose (ADR 0069).
-		// They ride the switch for the pins' reason: the entry is in hand here, and a session that
-		// moved to another box must not go on describing the one it left.
-		ServerName:        entry.Name,
-		ServerDescription: entry.Description,
-		// The arrived-at entry's `request-extra:` passthrough (ADR 0085), "" included: the
-		// replacement client merges THIS server's keys and never the retired one's.
-		RequestExtra:            string(entry.RequestExtra),
-		MaxContextTokens:        window,
-		WorkingWindow:           working,
-		MaxOutputTokens:         int(entry.MaxOutputTokens),
-		ResponseReserveFraction: reserve,
-	}); err != nil {
+	// The arrived-at entry's dial facts, one binding for the engine's switch and the holder's swap
+	// below. The switch takes its endpoint, its key, the protocol it speaks (ADR 0078) — so the
+	// engine's replacement client dials it the way this entry's Monitor does; a wire is a fact about
+	// the server, and it moves with the endpoint for the key's reason — and its `request-extra:`
+	// passthrough (ADR 0085), "" included: the replacement client merges THIS server's keys and
+	// never the retired one's.
+	dial := bindingOfEntry(entry, apiKey)
+	spec := dial.upstreamSpec()
+	// The arrived-at server in the HUMAN's words, so the orientation block names the session seat by
+	// the entry the session is on NOW when the model is offered a seat to choose (ADR 0069). They
+	// ride the switch for the pins' reason: the entry is in hand here, and a session that moved to
+	// another box must not go on describing the one it left.
+	spec.ServerName = entry.Name
+	spec.ServerDescription = entry.Description
+	spec.MaxContextTokens = window
+	spec.WorkingWindow = working
+	spec.MaxOutputTokens = int(entry.MaxOutputTokens)
+	spec.ResponseReserveFraction = reserve
+	if err := m.agent.SwitchUpstream(spec); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
 	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
 	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
 	// decision 3, ADR 0078).
-	m.holder.Swap(entry.Endpoint, apiKey, entry.Wire, string(entry.RequestExtra), bindingOfEntry(entry, apiKey).Monitor())
+	m.holder.Swap(dial.Endpoint, dial.APIKey, dial.Wire, dial.RequestExtra, dial.Monitor())
 	m.host.SetModel("")
 	m.live.followEntry(entry)
 	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new

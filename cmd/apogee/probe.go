@@ -10,7 +10,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
@@ -113,7 +112,7 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 			// stays read-only (ADR 0020 §2 / 0021 §1).
 			residue := platform.ConfinementResidue()
 
-			host := probe.GatherHost(cmd.Context(), probe.Inputs{
+			in := probe.Inputs{
 				GOOS:   runtime.GOOS,
 				GOARCH: runtime.GOARCH,
 				// The host's real backend for this OS, selected exactly as runRoot selects the
@@ -123,24 +122,25 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				// run's restore; doing that here would both break ADR 0021 §1's read-only
 				// pledge and revert-and-delete the journal the residue line above exists to
 				// report (ADR 0020 §2).
-				Confiner:   platform.NewReportConfiner(),
-				HostID:     platform.HostID(),
-				Workspace:  roots.workspace,
-				ConfigHome: roots.config,
-				Endpoint:   opts.Endpoint,
-				// The api key resolved above (the startup `servers:` entry's own key
-				// source, which APOGEE_API_KEY overlays; no flag): the
-				// probe must authenticate exactly as a session would, or a keyed server
-				// would be reported unreachable here and perfectly fine in a session. The
-				// report states its PRESENCE only; the value never reaches Host.
-				APIKey: apiKey,
-				// And the entry's wire (ADR 0078), so the probe dials the server the way a
-				// session's Monitor would: under that wire's headers, asking only the probes
-				// that wire has.
-				Wire:               provider.WireFor(opts.StartupEntry.Wire),
+				Confiner:           platform.NewReportConfiner(),
+				HostID:             platform.HostID(),
+				Workspace:          roots.workspace,
+				ConfigHome:         roots.config,
 				ConfineToWorkspace: opts.ConfineToWorkspace,
 				Residue:            residue,
-			})
+			}
+			// The startup entry's dial facts, dialled with the api key resolved above (the
+			// entry's own key source, which APOGEE_API_KEY overlays; no flag): the probe must
+			// authenticate exactly as a session would, or a keyed server would be reported
+			// unreachable here and perfectly fine in a session — the report states the key's
+			// PRESENCE only; the value never reaches Host. And under the entry's wire (ADR
+			// 0078), so the probe dials the server the way a session's Monitor would: under that
+			// wire's headers, asking only the probes that wire has. The endpoint is the
+			// resolved one rather than the entry's, because a flag may override it.
+			dial := bindingOfEntry(opts.StartupEntry, apiKey)
+			dial.Endpoint = opts.Endpoint
+			dial.probeDial(&in)
+			host := probe.GatherHost(cmd.Context(), in)
 			// The report is this command's PRODUCT, so it goes to real stdout: Cobra's whole
 			// Print/Printf/Println family resolves to OutOrStderr, which would put the entire
 			// report on STDERR in every real invocation and leave `apogee probe >host.txt`

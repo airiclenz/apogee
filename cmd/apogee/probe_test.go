@@ -214,6 +214,33 @@ func TestProbeCommandReadsTheConfigFile(t *testing.T) {
 	}
 }
 
+// The probe dials the startup entry's own dial facts: a keyed `wire: anthropic` entry is asked
+// under the Messages API's headers with the entry's key — never a bearer, never /props — and the
+// report states the key's presence and the anthropic wire it travelled on.
+func TestProbeCommandDialsTheEntrysKeyAndWire(t *testing.T) {
+	t.Parallel()
+	const apiKey = "probe-s3cret"
+	up := newAnthropicUpstream(t, "claude-probe")
+	configHome := t.TempDir()
+	config := "servers:\n  - name: probe-target\n    endpoint: " + up.URL + "\n    wire: anthropic\n" +
+		"    api-key: " + apiKey + "\n    plaintext-key-ok: true\nserver: probe-target\n"
+	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	report := runProbe(t, newProbeCommand(), configHome, t.TempDir())
+
+	up.assertAnthropicRequests(t, apiKey)
+	for _, want := range []string{"configured (sent as x-api-key)", "not probed (the anthropic wire has no /props"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("probe report does not state %q:\n%s", want, report)
+		}
+	}
+	if strings.Contains(report, apiKey) {
+		t.Errorf("probe report leaks the api key itself:\n%s", report)
+	}
+}
+
 // The shipped registration seam carries probe: `apogee probe` is reachable through the real
 // root, which is what makes the report available off-session at all.
 func TestSubcommandsRegistersProbe(t *testing.T) {
