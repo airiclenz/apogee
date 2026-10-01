@@ -665,7 +665,7 @@ func (s *runState) runScript(ctx context.Context, index, round int, stage Stage)
 	if runErr != nil {
 		receipt := Receipt{
 			Status:  StatusBlocked,
-			Summary: clampWords("the script could not run: "+firstLine(runErr.Error()), SummaryMaxWords),
+			Summary: clampWords("the script could not run: "+FirstLine(runErr.Error()), SummaryMaxWords),
 		}
 		return s.settleStage(index, stage, PhaseFailed, "", &receipt)
 	}
@@ -756,7 +756,7 @@ func (s *runState) runAsk(ctx context.Context, index, round int, stage Stage) (S
 		case ctx.Err() != nil:
 			return s.settleStage(index, stage, PhaseStopped, "", nil)
 		case err != nil:
-			note = "(default taken: the question could not be asked: " + firstLine(err.Error()) + ")"
+			note = "(default taken: the question could not be asked: " + FirstLine(err.Error()) + ")"
 		case given == "":
 			note, answered = "(default taken: no answer)", true
 		case len(stage.Options) > 0 && !slices.Contains(stage.Options, given):

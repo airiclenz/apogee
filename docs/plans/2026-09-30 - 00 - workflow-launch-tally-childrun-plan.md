@@ -36,7 +36,11 @@ NOTES (2026-10-01): a created folder's Create stamp and Run's Updated stamp now 
 **Acceptance:** `go test ./internal/workflow -run 'TestRunner|TestStore|TestDocMap'`; `go vet ./internal/workflow`
 **Commit:** `refactor(workflow): Runner.Open owns folder open for Run and background start`
 
-## 2. workflow: one tally, workflow state and item-text pieces
+## 2. workflow: one tally, workflow state and item-text pieces — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): `agent.finishTally`, `workflowState` and `itemCounts` stay in internal/agent untouched — this item adds their engine-side replacements (TallyOf, StateOf, TallyOfStatus); items 4, 8 and 9 rewire the callers and delete the agent copies.
+NOTES (2026-10-01): TallyOfStatus leaves a skipped fan-out out (as TallyOf does) and counts a done item with no receipt as unfinished (runner tallyOf's rule, now the shared Tally.countOutcome); agent.itemCounts counted both into its total, and a receipt-less done item as done.
+NOTES (2026-10-01): TallyOf sums the Resumed count too (finishTally did not); Line() never renders it, so the finish note text is unchanged. totalsLine and Line share one renderer (Tally.render), and runner.go's tallyOf now classifies through Tally.countOutcome — no behaviour change, TestFormat* unchanged.
 
 **Files:** `internal/workflow/tally.go`, `internal/workflow/tally_test.go`, `internal/workflow/format.go`, `internal/workflow/runner.go`, `internal/workflow/stages.go`, `internal/workflow/doc.go`
 **Read first:** internal/workflow/format.go — receiptText, fieldValue; internal/agent/background.go — finishTally, liveStates; internal/agent/workflowcall.go — workflowState, itemCounts

@@ -53,6 +53,10 @@
 // format.go is Format: the result lines the parent reads — one `#<n> <item> — <status> — <summary>`
 // line per item, a totals line, the stages' notes, `report:` — listing only the non-ok items past
 // 40 and pointing to the full items.md the Store writes as the run ends.
+// tally.go is TallyOf, TallyOfStatus and Tally.Line: the one item tally every surface reports a
+// workflow by (fan-out items only), StateOf (how a listed workflow stands), and the item-text
+// pieces every surface builds its item line from — ItemStatusWord, with FirstLine (runner.go) and
+// FieldValue (format.go).
 // torecipe.go is PlanToRecipe and ReadFolderPlan: a fan_out's plan rendered (yaml.v3) as a recipe
 // skill's SKILL.md — its briefs inline, its path source the `scope` input defaulting to that path —
 // for the /workflows view to save under a name the human picks.

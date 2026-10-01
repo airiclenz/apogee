@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -139,14 +140,11 @@ func itemLine(number int, item ItemResult) string {
 // receipt's for a finished item and the item's phase (stopped, pending) for an unfinished one; the
 // fields follow in key order, then the verify verdict when the item has one.
 func receiptText(item ItemResult) string {
-	status := string(item.Phase)
-	if item.Phase == PhaseDone && item.Receipt != nil {
-		status = string(item.Receipt.Status)
-	}
+	status := ItemStatusWord(item.Phase, item.Receipt)
 	summary := noReceiptText
 	var pairs []string
 	if item.Receipt != nil {
-		summary = firstLine(item.Receipt.Summary)
+		summary = FirstLine(item.Receipt.Summary)
 		if summary == "" {
 			summary = noSummaryText
 		}
@@ -171,7 +169,7 @@ func fieldPairs(fields map[string]any) []string {
 	slices.Sort(keys)
 	pairs := make([]string, len(keys))
 	for index, key := range keys {
-		pairs[index] = key + "=" + fieldValue(fields[key])
+		pairs[index] = key + "=" + FieldValue(fields[key])
 	}
 	return pairs
 }
@@ -186,15 +184,16 @@ func (r Receipt) Domain() domain.WorkflowReceipt {
 			fields[key] = text
 			continue
 		}
-		fields[key] = fieldValue(value)
+		fields[key] = FieldValue(value)
 	}
 	return domain.WorkflowReceipt{Status: string(r.Status), Summary: r.Summary, Fields: fields}
 }
 
-// fieldValue renders one field value on one line: a list joined by commas, a number as written (a
-// receipt read back from receipt.json holds its ints as float64), and a text quoted when it is
-// empty or holds a space or an `=` that would blur the pair.
-func fieldValue(value any) string {
+// FieldValue renders one receipt field value on one line, the way every surface shows a `k=v`
+// pair: a list joined by commas, a number as written (a receipt read back from receipt.json holds
+// its ints as float64), and a text quoted when it is empty or holds an `=` or any whitespace
+// (unicode.IsSpace) that would blur the pair or break the line.
+func FieldValue(value any) string {
 	switch typed := value.(type) {
 	case []string:
 		return strings.Join(typed, ",")
@@ -207,7 +206,7 @@ func fieldValue(value any) string {
 	case float64:
 		return strconv.FormatFloat(typed, 'f', -1, 64)
 	case string:
-		if typed == "" || strings.ContainsAny(typed, " \t\n=") {
+		if typed == "" || strings.ContainsFunc(typed, isBlurringRune) {
 			return strconv.Quote(typed)
 		}
 		return typed
@@ -216,31 +215,17 @@ func fieldValue(value any) string {
 	}
 }
 
+// isBlurringRune reports whether r, inside a text field value, would blur its `k=v` pair: an `=`,
+// or any whitespace, so a `\r` or a no-break space never reads as the pair's end.
+func isBlurringRune(r rune) bool {
+	return r == '=' || unicode.IsSpace(r)
+}
+
 // totalsLine renders a fan-out's tally: `items N · ok A · partial B · blocked C`, then the
 // unfinished and resumed counts when there are any, then the verdicts when a verify checked any
 // item.
 func totalsLine(tally Tally) string {
-	total := tally.OK + tally.Partial + tally.Blocked + tally.Unfinished
-	parts := []string{
-		"items " + strconv.Itoa(total),
-		"ok " + strconv.Itoa(tally.OK),
-		"partial " + strconv.Itoa(tally.Partial),
-		"blocked " + strconv.Itoa(tally.Blocked),
-	}
-	if tally.Unfinished > 0 {
-		parts = append(parts, "unfinished "+strconv.Itoa(tally.Unfinished))
-	}
-	if tally.Resumed > 0 {
-		parts = append(parts, "resumed "+strconv.Itoa(tally.Resumed))
-	}
-	if tally.Confirmed+tally.Refuted+tally.Unclear > 0 {
-		parts = append(parts,
-			"confirmed "+strconv.Itoa(tally.Confirmed),
-			"refuted "+strconv.Itoa(tally.Refuted),
-			"unclear "+strconv.Itoa(tally.Unclear),
-		)
-	}
-	return strings.Join(parts, totalSeparator)
+	return tally.render(true)
 }
 
 // noteLine renders what a stage came to when its items are not listed, or "" when there is

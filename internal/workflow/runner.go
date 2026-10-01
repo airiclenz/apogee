@@ -888,7 +888,7 @@ func exhaustedReceipt(last Outcome, attempts int) Receipt {
 	var cause string
 	switch {
 	case last.Ending == EndFaulted:
-		cause = "the child faulted: " + firstLine(last.Report)
+		cause = "the child faulted: " + FirstLine(last.Report)
 	case last.Ending == EndCapped:
 		cause = "the child reached its step cap without a receipt"
 	default:
@@ -1091,18 +1091,7 @@ func tallyOf(results []ItemResult) Tally {
 		case VerdictUnclear:
 			tally.Unclear++
 		}
-		if result.Receipt == nil || result.Phase != PhaseDone {
-			tally.Unfinished++
-			continue
-		}
-		switch result.Receipt.Status {
-		case StatusOK:
-			tally.OK++
-		case StatusPartial:
-			tally.Partial++
-		default:
-			tally.Blocked++
-		}
+		tally.countOutcome(result.Phase, result.Receipt)
 	}
 	return tally
 }
@@ -1116,8 +1105,9 @@ func joinProblems(problems []Problem) string {
 	return strings.Join(lines, "; ")
 }
 
-// firstLine is s up to its first line break, trimmed.
-func firstLine(s string) string {
+// FirstLine is s up to its first line break, trimmed: the summary line every surface shows of a
+// receipt, a report or an error, whatever whitespace leads or pads it.
+func FirstLine(s string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(line)
 }
