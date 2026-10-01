@@ -49,7 +49,6 @@ func (m Model) runEffortCommand() (tea.Model, tea.Cmd) {
 		return m.pickerNote(noEffortDialNote)
 	}
 	m.picker = picker{open: true, kind: pickerEffort}
-	m.layout()
 	return m, nil
 }
 

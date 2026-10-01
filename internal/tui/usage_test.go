@@ -873,3 +873,14 @@ func TestWorkflowItemsSubAgentCountsOnceUnderItsOwnHead(t *testing.T) {
 		workflowRow("check {item}", item),
 	)
 }
+
+// /usage opens the report and returns: the pane is laid out by Update's tail (doc.go, "an arm
+// mutates").
+func TestUsagePaneIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	m, _ := typeCommand(t, newTestModel(t), "/usage")
+	if !m.usagePane.open {
+		t.Fatal("precondition: /usage did not open the report")
+	}
+	assertSettled(t, m)
+}

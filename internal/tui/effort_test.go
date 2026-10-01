@@ -138,3 +138,14 @@ func TestFooterShowsTheEffortSegmentOnlyWhenDialled(t *testing.T) {
 		})
 	}
 }
+
+// /effort on a dialled model opens the popup and returns: the pane is laid out by Update's tail
+// (doc.go, "an arm mutates").
+func TestEffortPickerIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	m := openEffortPicker(t, &fakeEngine{}, dialledEffort())
+	if !m.picker.open || m.picker.kind != pickerEffort {
+		t.Fatalf("precondition: picker = {open:%v kind:%v}, want the effort popup", m.picker.open, m.picker.kind)
+	}
+	assertSettled(t, m)
+}

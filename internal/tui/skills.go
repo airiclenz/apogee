@@ -93,7 +93,6 @@ func (m *Model) noteSkillCatalog() {
 		list, skipped = m.opts.Skills.Report()
 	}
 	m.transcript.addNote(skillCatalogNote(list, skipped, m.opts.ConfigHome, m.opts.Workspace))
-	m.layout()
 }
 
 // skillCatalogNote renders the /skills report from one scan's halves: the skills that loaded, the

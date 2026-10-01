@@ -299,3 +299,15 @@ func TestSkillsListingLabelsAShippedSkill(t *testing.T) {
 		t.Errorf("the listing is missing %q:\n%s", want, note)
 	}
 }
+
+// The /skills listing writes one note and returns: the note moves the frame key, and Update's tail
+// lays the frame out (doc.go, "an arm mutates").
+func TestSkillsListingIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	m, cmd := typeCommand(t, newTestModelEng(t, &fakeEngine{}, skillOpts()), "/skills")
+	m = runCmd(t, m, cmd)
+	if last := lastEntry(t, m); last.kind != entryNote || !strings.Contains(last.text, "skills available") {
+		t.Fatalf("precondition: the listing wrote %v %q, want the catalog", last.kind, last.text)
+	}
+	assertSettled(t, m)
+}

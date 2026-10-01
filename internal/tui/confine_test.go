@@ -370,3 +370,16 @@ func TestConfineOnNoteLeavesThePersistedEntryAlone(t *testing.T) {
 		t.Errorf("note does not say a saved acknowledgement is untouched:\n%s", got)
 	}
 }
+
+// /confine writes one note and returns: the note moves the frame key, and Update's tail lays the
+// frame out (doc.go, "an arm mutates").
+func TestConfineNoteIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{"/confine", "/confine off"} {
+		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+			m, _ := runConfineLine(t, &fakeEngine{}, confineOpts(degradedHost, domain.ModeAuto), line)
+			assertSettled(t, m)
+		})
+	}
+}

@@ -110,7 +110,11 @@ read geometry the dropped call laid settles its returned copy with `.layout()` f
 - `grep -n '\.layout()\|\.refreshViewport()' internal/tui/{interject,commandrun,recall,prompteditor,suggestband}.go | grep -v '// geometry:'` prints nothing.
 **Commit:** `refactor(tui): input-box arms leave layout to Update's tail`
 
-## 3. Command arms leave layout to the tail
+## 3. Command arms leave layout to the tail — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): all 13 calls dropped, none kept (no arm writes follow/detached or scroll state, and none reads geometry after its call): schedule.go runSchedule, createSchedule, runScheduleStop, stopSchedule, acceptCycle; fork.go runFork, acceptFork; workflow.go closeWorkflowPrompt; undo.go noteRevert; skills.go noteSkillCatalog; confine.go runConfine; effort.go runEffortCommand; usage.go runUsageCommand. noteRevert's doc comment no longer claims it re-lays the frame; it names Update's tail ([Model.settle]).
+NOTES (2026-10-01): one test per source file in its own _test.go: TestScheduleArmsAreSettledByTheTail, TestBackgroundPromptCloseIsSettledByTheTail (workflow_test.go), TestForkArmsAreSettledByTheTail, TestUndoNotesAreSettledByTheTail, TestSkillsListingIsSettledByTheTail (skillscmd_test.go), TestConfineNoteIsSettledByTheTail, TestEffortPickerIsSettledByTheTail, TestUsagePaneIsSettledByTheTail. workflows_test.go is unchanged.
+NOTES (2026-10-01): the guard's direct-caller grep found one test: engineholds_test.go TestReleaseEngine_CloseWorkflowPrompt calls dismissWorkflowPrompt, which reaches closeWorkflowPrompt. It reads only the rebind, no geometry, so it is unchanged; it was added to the Acceptance -run alternation and passes. dismissReport, the guard's example, has no layout call in these files (it is not in usage.go), so it is outside this item.
 
 **What:**
 **Goal:** the item-2 rule holds for `internal/tui/schedule.go`, `workflow.go`, `fork.go`,

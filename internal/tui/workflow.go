@@ -495,7 +495,6 @@ func (m *Model) closeWorkflowPrompt() {
 	m.pendingDecision.reset()
 	m.restoreAskDraft()
 	m.state = stateIdle
-	m.layout()
 	m.releaseEngine()
 	m.promptPending = true
 }

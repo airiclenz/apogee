@@ -443,3 +443,22 @@ func TestRedoConfirmDoesNotSpendTheUndoStamp(t *testing.T) {
 		t.Errorf("the stale confirmation did not earn a re-preview:\n%s", view)
 	}
 }
+
+// The preview and the confirm each write one note and return: the note moves the frame key, and
+// Update's tail lays the frame out (doc.go, "an arm mutates").
+func TestUndoNotesAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	eng := &fakeEngine{undoStep: scriptedStep(7), undoStepOK: true, undoReport: undo.Report{Ordinal: 3}}
+	m, _ := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/undo")
+	if m.undoGeneration != 7 {
+		t.Fatalf("precondition: stashed generation = %d after the preview, want 7", m.undoGeneration)
+	}
+	assertSettled(t, m)
+
+	m, _ = runUndoLine(t, m, "/undo confirm")
+	if len(eng.undoReverts) != 1 {
+		t.Fatalf("precondition: UndoRevert calls = %v, want one", eng.undoReverts)
+	}
+	assertSettled(t, m)
+}

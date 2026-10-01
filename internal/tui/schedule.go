@@ -118,7 +118,6 @@ func (m Model) runSchedule(line string) (tea.Model, tea.Cmd) {
 	}
 	// The prompt-only form: the whole line is the instruction, and the two popups collect the rest.
 	m.picker = picker{open: true, kind: pickerCycle, draft: scheduleDraft{prompt: line}}
-	m.layout()
 	return m, nil
 }
 
@@ -148,7 +147,6 @@ func (m Model) createSchedule(spec schedule.Spec) (tea.Model, tea.Cmd) {
 	if _, err := m.opts.Schedules.Add(spec); err != nil {
 		return m.pickerNote(scheduleAddNote(err))
 	}
-	m.layout()
 	return m, nil
 }
 
@@ -168,7 +166,6 @@ func (m Model) runScheduleStop() (tea.Model, tea.Cmd) {
 		return m.stopSchedule(live[0])
 	}
 	m.picker = picker{open: true, kind: pickerScheduleStop}
-	m.layout()
 	return m, nil
 }
 
@@ -181,7 +178,6 @@ func (m Model) stopSchedule(st schedule.Status) (tea.Model, tea.Cmd) {
 	if err := m.opts.Schedules.Stop(st.ID); err != nil {
 		return m.pickerNote("could not stop " + st.Name + ": " + err.Error())
 	}
-	m.layout()
 	return m, nil
 }
 
@@ -214,7 +210,6 @@ func (m Model) acceptScheduleStop(offered int) (tea.Model, tea.Cmd) {
 func (m Model) acceptCycle(cycle time.Duration) (tea.Model, tea.Cmd) {
 	m.picker.kind, m.picker.selected, m.picker.filter = pickerScheduleMode, 0, lineEditor{}
 	m.picker.draft.cycle = cycle
-	m.layout()
 	return m, nil
 }
 

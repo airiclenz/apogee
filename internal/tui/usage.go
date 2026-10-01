@@ -116,7 +116,6 @@ func usageHeaderCells(cached bool) popupRow {
 // "nothing has been counted yet" IS that answer.
 func (m Model) runUsageCommand() (tea.Model, tea.Cmd) {
 	m.usagePane = usagePane{open: true}
-	m.layout()
 	return m, nil
 }
 

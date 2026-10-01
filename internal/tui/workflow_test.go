@@ -577,3 +577,37 @@ func TestBackgroundWorkflow_SpendAcrossAClearCountsOnlyWhatFollows(t *testing.T)
 		})
 	}
 }
+
+// Closing a background prompt's pane hands the box back and returns to idle: the answer, esc, and the
+// workflow ending under the open pane are each laid out by Update's tail (doc.go, "an arm mutates").
+func TestBackgroundPromptCloseIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		close func(t *testing.T, m Model, eng *fakeEngine) Model
+	}{
+		{"answered", func(t *testing.T, m Model, _ *fakeEngine) Model { return step(t, armed(m), keyEnter()) }},
+		{"dismissed", func(t *testing.T, m Model, _ *fakeEngine) Model { return step(t, m, keyEsc()) }},
+		{"its workflow ended", func(t *testing.T, m Model, eng *fakeEngine) Model {
+			eng.workflowPrompts = nil // the stop withdrew it
+			return foldEvents(t, m, bgPhase(domain.WorkflowStopped))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgQuestion(7)}}
+			m := newTestModelEng(t, eng, testOpts)
+			m.input.SetValue("half a message")
+			m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+			if m.state != stateAwaitingAsk {
+				t.Fatalf("precondition: state = %v, want the question open at idle", m.state)
+			}
+
+			m = tc.close(t, m, eng)
+			if m.state != stateIdle || m.pendingAsk != nil {
+				t.Fatalf("precondition: state %v, pane %v; want idle with the pane closed", m.state, m.pendingAsk != nil)
+			}
+			assertSettled(t, m)
+		})
+	}
+}

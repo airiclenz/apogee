@@ -52,7 +52,6 @@ func (m Model) runConfine(args confineArgs) (tea.Model, tea.Cmd) {
 		m.transcript.addNote(note)
 	}
 
-	m.layout()
 	return m, nil
 }
 

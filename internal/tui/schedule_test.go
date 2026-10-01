@@ -1387,3 +1387,63 @@ func TestBridgeNotifyScheduleReachesTheTranscript(t *testing.T) {
 // Compile-time proof that the live scheduler satisfies the seam the TUI drives — the SessionHost
 // posture, so a library change that broke the surface fails here rather than in cmd/apogee.
 var _ Scheduler = (*schedule.Scheduler)(nil)
+
+// Every /schedule arm opens, moves or closes the picker and returns: the prompt-only form, the cycle
+// accept, the mode accept that creates, the argument form, the stop picker and its accept are each
+// laid out by Update's tail (doc.go, "an arm mutates").
+func TestScheduleArmsAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the prompt-only walk", func(t *testing.T) {
+		t.Parallel()
+		sch := &fakeScheduler{}
+		m := scheduleModel(t, sch, "")
+
+		m, _ = typeCommand(t, m, "/schedule summarise today's commits")
+		if !m.picker.open || m.picker.kind != pickerCycle {
+			t.Fatalf("precondition: picker = {open:%v kind:%v}, want the cycle picker", m.picker.open, m.picker.kind)
+		}
+		assertSettled(t, m)
+
+		m = step(t, m, keyEnter())
+		if !m.picker.open || m.picker.kind != pickerScheduleMode {
+			t.Fatalf("precondition: picker = {open:%v kind:%v}, want the mode picker", m.picker.open, m.picker.kind)
+		}
+		assertSettled(t, m)
+
+		m = step(t, m, keyEnter())
+		if m.picker.open || len(sch.added) != 1 {
+			t.Fatalf("precondition: picker open %v, Add calls %d; want closed with one created", m.picker.open, len(sch.added))
+		}
+		assertSettled(t, m)
+	})
+
+	t.Run("the argument form", func(t *testing.T) {
+		t.Parallel()
+		sch := &fakeScheduler{}
+		m, _ := typeCommand(t, scheduleModel(t, sch, ""), "/schedule 15m tidy the logs")
+		if len(sch.added) != 1 {
+			t.Fatalf("precondition: Add calls = %d, want 1", len(sch.added))
+		}
+		assertSettled(t, m)
+	})
+
+	t.Run("the stop picker and its accept", func(t *testing.T) {
+		t.Parallel()
+		sch := &fakeScheduler{live: []schedule.Status{
+			liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan),
+			liveStatus("sch-2", "log watch", 15*time.Minute, domain.ModeAuto),
+		}}
+		m, _ := typeCommand(t, scheduleModel(t, sch, ""), "/schedule-stop")
+		if !m.picker.open || m.picker.kind != pickerScheduleStop {
+			t.Fatalf("precondition: picker = {open:%v kind:%v}, want the stop picker", m.picker.open, m.picker.kind)
+		}
+		assertSettled(t, m)
+
+		m = step(t, m, keyEnter())
+		if m.picker.open || len(sch.stopped) != 1 {
+			t.Fatalf("precondition: picker open %v, stopped %v; want closed with one stopped", m.picker.open, sch.stopped)
+		}
+		assertSettled(t, m)
+	})
+}

@@ -287,3 +287,19 @@ func TestForkNotesAHostRefusal(t *testing.T) {
 }
 
 var errForkRefused = errors.New("the store refused the child")
+
+// Opening the fork picker and accepting a row open and close a pane and return: both are laid out
+// by Update's tail (doc.go, "an arm mutates").
+func TestForkArmsAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeSessionHost{}
+	m := openForkPicker(t, newForkModel(t, &fakeEngine{}, host))
+	assertSettled(t, m)
+
+	m = step(t, m, keyEnter())
+	if m.picker.open {
+		t.Fatal("precondition: the picker stayed open after ⏎")
+	}
+	assertSettled(t, m)
+}

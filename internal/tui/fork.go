@@ -73,7 +73,6 @@ func (m Model) runFork() (tea.Model, tea.Cmd) {
 		return m.pickerNote(forkFoldedNote)
 	}
 	m.picker = picker{open: true, kind: pickerFork}
-	m.layout()
 	return m, nil
 }
 
@@ -100,7 +99,6 @@ func forkRows(points []forkPoint) []popupRow {
 func (m Model) acceptFork(offered int) (tea.Model, tea.Cmd) {
 	points := m.transcript.forkPoints()
 	m.picker = picker{}
-	m.layout()
 	if offered < 0 || offered >= len(points) {
 		return m, nil
 	}

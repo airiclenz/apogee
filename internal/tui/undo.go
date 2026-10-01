@@ -164,14 +164,14 @@ func (m Model) confirmRedo() (tea.Model, tea.Cmd) {
 }
 
 // noteRevert records one revert note in the transcript, under lead when the note is a re-preview a
-// stale confirmation earned, and re-lays the frame. It is the single exit both verbs take, so a
-// path that answers without saying anything is a path that does not compile.
+// stale confirmation earned; the note moves the frame key, so Update's tail re-lays the frame
+// ([Model.settle]). It is the single exit both verbs take, so a path that answers without saying
+// anything is a path that does not compile.
 func (m Model) noteRevert(lead, note string) (tea.Model, tea.Cmd) {
 	if lead != "" {
 		note = lead + "\n" + note
 	}
 	m.transcript.addNote(note)
-	m.layout()
 	return m, nil
 }
 
