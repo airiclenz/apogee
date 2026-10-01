@@ -47,9 +47,10 @@ func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
 // loop (m.bgLaunching — an idle state whose engine is still not the loop's to mutate), only the
 // reporting lines are: parsedInput.safeWhileRunning owns which those are, and it is deliberately
 // asked about the parsed LINE rather than the bare verb, because "/confine" and "/confine off" are
-// the same verb and only one of them is a report.
+// the same verb and only one of them is a report. The rule itself is the hold set's
+// ([engineHolds.commandRunnable]).
 func (m Model) commandRunnable(parsed parsedInput) bool {
-	return (!m.busy() && !m.bgLaunching) || parsed.safeWhileRunning()
+	return m.engineHolds().commandRunnable(parsed)
 }
 
 // queueCommand stages an idle-only command invoked while a worker works: the parsed line joins
@@ -89,7 +90,7 @@ func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 // too: the commands behind it wait for the answer, whose fold drains again (answerBoundary).
 func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	for len(m.deferredCommands) > 0 && !m.busy() && !m.bgLaunching && !m.quitting && !m.boundaryConfirmOpen() {
+	for len(m.deferredCommands) > 0 && m.engineHolds().canRunDeferred() {
 		parsed := m.deferredCommands[0]
 		m.deferredCommands = m.deferredCommands[1:]
 		if len(m.deferredCommands) == 0 {

@@ -287,7 +287,7 @@ func reportActivity(next tea.Model) tea.Model {
 // stateErrored with nothing queued IS quiescent: the worker has unwound and the engine is idle, and
 // a human reading a failure is not a reason to hold a standing instruction back.
 func (m Model) quiescent() bool {
-	return !m.busy() && !m.actuation.inFlight && len(m.pendingInterjections) == 0 && len(m.deferredCommands) == 0
+	return m.engineHolds().quiescent()
 }
 
 // ----------------------------------------------------------------------------

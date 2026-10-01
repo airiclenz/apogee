@@ -533,13 +533,7 @@ func wakeAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 // snapshots the engine at idle), a held message (the human's next ⏎ sends it, and the note rides
 // with it), or a modal pane the human is answering.
 func (m Model) canWake() bool {
-	switch {
-	case m.state != stateIdle, m.prebound(), m.quitting, m.sessionLoading, m.bgLaunching:
-		return false
-	case m.writeBusy, len(m.pendingWrites) > 0, len(m.pendingInterjections) > 0:
-		return false
-	}
-	return !m.modalPaneOpen()
+	return m.engineHolds().canWake()
 }
 
 // modalPaneOpen reports whether a pane that owns the keyboard is up (paneSpecs' modal column).

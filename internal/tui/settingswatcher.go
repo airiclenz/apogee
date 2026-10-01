@@ -90,7 +90,7 @@ const settingsDetachedEditNote = "opened in your editor"
 // file shape the parse will not risk is exactly the moment not to hand a human an editor and a
 // promise to re-read it.
 func (m Model) settingsExternalEdit(row SettingRow) (tea.Model, tea.Cmd) {
-	if m.busy() || m.actuation.inFlight {
+	if !m.engineHolds().canEditConfigExternally() {
 		return m.settingsFailed(row, settingsEditBusyNote)
 	}
 	launch, err := m.configHostOrNoop().ExternalEditSpec(row.Path)

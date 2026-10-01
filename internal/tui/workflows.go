@@ -348,7 +348,7 @@ func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.transcript.addNote(m.actuationBlockNote())
 			return m, nil
 		}
-		if m.busy() || m.bgLaunching {
+		if !m.engineHolds().canLaunchBg() {
 			m.transcript.addNote(workflowRerunNotIdle)
 			return m, nil
 		}

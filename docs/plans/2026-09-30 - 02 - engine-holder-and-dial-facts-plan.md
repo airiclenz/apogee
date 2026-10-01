@@ -49,7 +49,10 @@ NOTES (2026-10-01): TestEngineHolds_Questions also cross-checks each row against
 **Acceptance:** `go test ./internal/tui -run 'TestEngineHold|TestDocMap'`
 **Commit:** `refactor(tui): name the engine holds and the questions that read them`
 
-## 3. tui: every gate asks its named question
+## 3. tui: every gate asks its named question — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): the Model's commandRunnable, quiescent, canResumeWorkflows and canWake keep their names and doc comments and now delegate to the hold-set question, so TestEngineHolds_Questions' cross-check against them now pins the delegation rather than an independent flag expression (test left unchanged).
+NOTES (2026-10-01): the stashed-rebind apply sites that still read bgLaunching/actuation.inFlight (foldActuationDone, foldBgStarted, finishWorker, closeWorkflowPrompt) were left as they are — they are item 5's one released transition, not gates this item names.
 
 **Depends on:** item 2.
 **Files:** `internal/tui/commandrun.go`, `internal/tui/heartbeat.go`, `internal/tui/settingswatcher.go`, `internal/tui/schedule.go`, `internal/tui/sessions.go`, `internal/tui/workflow.go`, `internal/tui/workflows.go`

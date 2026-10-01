@@ -696,13 +696,7 @@ func resumeAfterFold(next tea.Model) tea.Model {
 // queue drained — a switch's Activate, which moves the scratch directory the workflows' folders are
 // found under, rides that queue, so a resume waits for it to land.
 func (m Model) canResumeWorkflows() bool {
-	switch {
-	case m.state != stateIdle, m.prebound(), m.quitting, m.sessionLoading, m.bgLaunching:
-		return false
-	case m.writeBusy, len(m.pendingWrites) > 0:
-		return false
-	}
-	return true
+	return m.engineHolds().canResumeWorkflows()
 }
 
 // ----------------------------------------------------------------------------

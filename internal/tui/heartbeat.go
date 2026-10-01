@@ -349,7 +349,7 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 		effort:    beat.EffortSupport,
 		quietSeed: firstContact,
 	}
-	if m.busy() || m.actuation.inFlight || m.bgLaunching {
+	if !m.engineHolds().canRebind() {
 		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
 		// construction. Stash the intent for the boundary rather than refuse it — finishWorker for a
 		// worker's Exchange, foldActuationDone for a launcher verb, foldBgStarted for a /bg launch
@@ -655,7 +655,7 @@ func serverSwitchNote(from string, to Options, saved bool) string {
 // The crossing is noted exactly once — and published once, through [Options.ReportUpstream] —
 // every further failed beat is silent until a success crosses back (foldBeat).
 func (m Model) foldBeatFailure(failure string) (Model, bool) {
-	if m.busy() || m.actuation.inFlight {
+	if !m.engineHolds().beatMayCount() {
 		return m, false
 	}
 	m.hb.failures++
