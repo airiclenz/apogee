@@ -1156,13 +1156,13 @@
 // layout() (or refreshViewport) itself only when it READS geometry afterwards in the same arm — the
 // offset, the widget's bottom, a placed pane's rows — and then says so beside the call, because
 // what it reads has to be the frame it just made rather than the one the tail has yet to settle.
+// Outside model.go "says so" is literal: a layout() or refreshViewport() call, on any receiver,
+// carries a same-line "// geometry:" comment naming what the arm reads after it, and
+// TestArmsLeaveLayoutToTail (settled_test.go) fails on one that does not.
 // The positioning repaints keep their calls under that reading: [Model.refreshViewportAnchored]
 // (an anchored block), the run view's openRun and upRun (a view landed or restored, runview.go),
 // and the claim walk's [Model.freshenTranscriptClamp] (a pane key answered with its height fresh
-// for whatever the claimant reads next). Everything else should be a mutation and a return, and
-// is not yet everywhere: arms outside model.go still carry belt layout()/refreshViewport() calls
-// the tail already covers — residue of the strip plan "2026-09-16 - 00" items 18–21 began,
-// tracked by apogee-arm-layout-calls-residue. A new arm adds none.
+// for whatever the claimant reads next). Everything else is a mutation and a return.
 // TestMouseMotionNeverRepaints pins the one exemption the tail itself makes.
 //
 // Invariant — untrusted text is escape-stripped at the SEAM it enters the view through, never

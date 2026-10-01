@@ -214,7 +214,9 @@ calling the settled helper; every direct-caller test the guard's grep finds stay
   — its alternation extended with the direct-caller tests the guard's grep finds.
 **Commit:** `refactor(tui): annotate or drop the frame-driver layout calls`
 
-## 6. Guard the invariant structurally and retire the residue note
+## 6. Guard the invariant structurally and retire the residue note — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): the scan matches argument-less `<any receiver>.layout()` / `.refreshViewport()` calls only (a method value such as `_ = m.layout` and `refreshViewportAnchored()` are not calls it flags); the license is a same-line comment that opens with `// geometry:`. The non-vacuity guard fails only on an empty file scan, not on a named annotated site, so a later item dropping every kept call cannot break it spuriously.
 
 **What:**
 **Goal:** a test fails when any non-test `.go` file in `internal/tui` other than `model.go` calls
