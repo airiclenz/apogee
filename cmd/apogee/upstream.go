@@ -67,6 +67,10 @@ type upstreamHolder struct {
 // through provider.WireFor. It moves with the endpoint and key for their reason: a wire is a fact
 // about the server, and a naming call built on the new endpoint under the old wire would speak the
 // wrong protocol to the right box.
+//
+// The binding is an entry's DIAL FACTS (ADR 0083 §4 as amended 2026-09-30): the facts a connection
+// to the server is dialled from, none of them observed. It builds the Client and the heartbeat
+// Monitor itself (dial.go), so a new dial key is this struct's field plus that file.
 type upstreamBinding struct {
 	Endpoint string
 	Model    string
@@ -76,6 +80,12 @@ type upstreamBinding struct {
 	// for an entry that names none; an out-of-band call built from the binding carries it the way
 	// the engine's own Client does. A string, so the binding stays comparable.
 	RequestExtra string
+	// EffortDialect is the entry's forced `effort-dialect:` in the config's spelling (ADR 0060
+	// decision 3), "" for an entry that forces none and for a source that carries no forced
+	// spelling at all (bindingOfTarget, bindingOfConfig). Only the Monitor reads it: a forced
+	// dialect is a verdict over what discovery detected, and the ranked dialect a request is
+	// encoded in is the caller's, resolved against an observation.
+	EffortDialect string
 }
 
 // newUpstreamHolder builds the holder EMPTY: no Monitor, no binding, nothing to observe. The

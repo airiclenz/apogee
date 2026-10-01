@@ -116,7 +116,10 @@ NOTES (2026-10-01): schedule.go's quiescent doc also stops saying the Model "pai
 **Acceptance:** `grep -n 'engineHolds' docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md` prints a line in the C1 note; `grep -n 'releaseEngine' docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md` prints a line in decision 4; `! grep -rnE '\b(bgLaunching|sessionLoading)\b' internal/tui docs/adr CONTEXT.md`; `go test ./internal/tui -run 'TestDocMap'`
 **Commit:** `docs: the TUI's engine holds and release transition`
 
-## 7. cmd: the dial facts build the Client and the Monitor
+## 7. cmd: the dial facts build the Client and the Monitor — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): added a third test, TestDial_BindingsOfEachSource (a table over bindingOfEntry/bindingOfTarget/bindingOfConfig, pinning that only an entry's binding carries EffortDialect) — beyond the two the item names; the three constructors have no production caller until the later migration items, and golangci-lint's `unused` refuses them without a test caller.
+NOTES (2026-10-01): bindingOfConfig leaves EffortDialect "" like bindingOfTarget, since Config.EffortDialect is the ranked dialect, not the forced spelling; upstreamHolder.Binding() also still yields EffortDialect "" (the holder stores no forced dialect yet — the holder's own item covers it). No call site was migrated to Client()/Monitor() in this item.
 
 **Depends on:** item 1.
 **Files:** `cmd/apogee/upstream.go`, `cmd/apogee/dial.go`, `cmd/apogee/dial_test.go`, `cmd/apogee/doc.go`
