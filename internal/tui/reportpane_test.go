@@ -700,3 +700,30 @@ func TestRenderReportLaysItsRowsOutOnce(t *testing.T) {
 		})
 	}
 }
+
+// Both ways of dismissing a report — esc and a click outside its box — give its rows back to the
+// transcript and return: the re-lay is Update's tail's (doc.go, "an arm mutates"), not dismissReport's.
+func TestReportDismissalIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range reportCases(t) {
+		t.Run(tc.name, func(t *testing.T) {
+			openHeight := tc.model.viewport.Height()
+			dismissals := []struct {
+				name string
+				msg  tea.Msg
+			}{
+				{name: "esc", msg: keyEsc()},
+				{name: "click outside", msg: leftClick(10, 0)},
+			}
+			for _, d := range dismissals {
+				closed := step(t, tc.model, d.msg)
+				if closed.reportState(tc.kind).open || closed.viewport.Height() <= openHeight {
+					t.Fatalf("precondition: %s left the report open=%v over a transcript of %d rows (%d with it open)",
+						d.name, closed.reportState(tc.kind).open, closed.viewport.Height(), openHeight)
+				}
+				assertSettled(t, closed)
+			}
+		})
+	}
+}

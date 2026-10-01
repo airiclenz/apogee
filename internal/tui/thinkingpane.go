@@ -299,6 +299,5 @@ func (m Model) thinkingContent() reportContent {
 func (m Model) runThinkingCommand() (tea.Model, tea.Cmd) {
 	rows, _ := m.thinkingRows(m.thinkingWrapColumn())
 	m.thinkingPane = reportPane{open: true, top: len(rows), follow: true}
-	m.layout()
 	return m, nil
 }

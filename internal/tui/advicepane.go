@@ -211,6 +211,5 @@ func (m Model) adviceContent() reportContent {
 func (m Model) runAdviceCommand() (tea.Model, tea.Cmd) {
 	rows, _ := m.adviceRows(m.thinkingWrapColumn())
 	m.advicePane = reportPane{open: true, top: len(rows), follow: true}
-	m.layout()
 	return m, nil
 }

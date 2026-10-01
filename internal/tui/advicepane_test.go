@@ -328,3 +328,21 @@ func TestFramePaneSetHoldsEveryPane(t *testing.T) {
 		}
 	}
 }
+
+// Opening the pane through /advice takes rows off the transcript and returns: the re-lay is Update's
+// tail's (doc.go, "an arm mutates"), not the verb's.
+func TestAdvicePaneIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m := advicePaneModel(t, 6)
+	m = m.dismissReport(adviceReport)
+	m.layout()
+	closedHeight := m.viewport.Height()
+
+	m, _ = typeCommand(t, m, "/advice")
+	if !m.advicePane.open || m.viewport.Height() >= closedHeight {
+		t.Fatalf("precondition: /advice left the pane open=%v over a transcript of %d rows (%d with it closed)",
+			m.advicePane.open, m.viewport.Height(), closedHeight)
+	}
+	assertSettled(t, m)
+}

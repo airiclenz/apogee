@@ -143,7 +143,11 @@ guard's grep finds stays green.
   — its alternation extended with the direct-caller tests the guard's grep finds.
 **Commit:** `refactor(tui): command arms leave layout to Update's tail`
 
-## 4. Pane arms leave layout to the tail
+## 4. Pane arms leave layout to the tail — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): all 7 calls dropped, none kept (no arm writes the transcript's follow/detached flag or scroll offset, and none reads geometry after its call): thinkingpane.go runThinkingCommand, advicepane.go runAdviceCommand, reportpane.go dismissReport, inspector.go runInspectCommand, keymigration.go acceptKeyMigration, actuation.go startProfileLoad and startServerActuation. A pane's own top/follow is read at paint (reportSpec), not by layout(); the click chain after a dismissReport reads geometry off the pre-click frame, never the live model; the footer's "loading <name>…" slot is painted by View every frame, so startProfileLoad's trailing comment went with its call.
+NOTES (2026-10-01): one test per source file in its own _test.go (the plan's Files line names none of them; its Tests line asks for one per file): TestThinkingPaneIsSettledByTheTail, TestAdvicePaneIsSettledByTheTail, TestInspectorPaneIsSettledByTheTail, TestReportDismissalIsSettledByTheTail (esc and click-outside, every report kind), TestKeyMigrationAnswersAreSettledByTheTail, TestActuationStartsAreSettledByTheTail. The pane tests also assert the transcript height moved, so the tail's re-lay is what is being checked.
+NOTES (2026-10-01): direct-caller grep: TestClickOnAVacatedRowSelectsNoTranscriptLine (mouse_test.go) and TestUsageKeysLeaveTheRestOfTheFrameAlone (usage_test.go) now settle their dismissed copy with layout() first, as the plan says; TestClickInTheBandTheInspectorGrowsIntoFallsThrough (mouse_test.go, dismissReport then reportPaneRect) reads the frame's spans, not the viewport, so it is unchanged. All three were added to the Acceptance -run alternation. The other direct callers (advicepane/reportpane/thinkingpane/inspector/actuation tests) are inside the Acceptance glob already. All pass.
 
 **What:**
 **Goal:** the item-2 rule holds for `internal/tui/advicepane.go`, `thinkingpane.go`,

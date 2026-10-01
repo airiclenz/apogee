@@ -5018,7 +5018,9 @@ func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
 	if _, _, ok := m.pointTranscriptRow(10, y); ok {
 		t.Fatalf("precondition: the pre-click frame already names a transcript row at y=%d", y)
 	}
-	if _, _, ok := m.dismissReport(usageReport).dismissReport(inspectReport).pointTranscriptRow(10, y); !ok {
+	d := m.dismissReport(usageReport).dismissReport(inspectReport)
+	d.layout() // dismissReport leaves the re-lay to Update's tail; settle the copy before mapping a row
+	if _, _, ok := d.pointTranscriptRow(10, y); !ok {
 		t.Fatalf("precondition: y=%d is no transcript row once both panes are dismissed either", y)
 	}
 

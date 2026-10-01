@@ -396,7 +396,9 @@ func TestUsageKeysLeaveTheRestOfTheFrameAlone(t *testing.T) {
 
 	m := usageScrollModel(t)
 
-	if control := step(t, m.dismissReport(usageReport), keyPgUp()); !control.detached {
+	c := m.dismissReport(usageReport)
+	c.layout() // dismissReport leaves the re-lay to Update's tail; settle the copy before paging
+	if control := step(t, c, keyPgUp()); !control.detached {
 		t.Fatalf("precondition: with the report closed pgup did not scroll the transcript (offset %d)",
 			control.viewport.YOffset())
 	}

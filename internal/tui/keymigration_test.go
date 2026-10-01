@@ -498,3 +498,24 @@ func TestSubAgentsMigrationGivesWayToTheKeyMigration(t *testing.T) {
 			m.opts.SubAgentsMigration)
 	}
 }
+
+// Answering the offer notes the outcome and either asks about the next entry or closes the pane, and
+// returns: the re-lay is Update's tail's (doc.go, "an arm mutates"), not acceptKeyMigration's.
+func TestKeyMigrationAnswersAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
+	m := offerModel(t, w, "workstation", "laptop")
+
+	m = step(t, m, keyEnter())
+	if !m.picker.open || len(m.picker.migration) != 1 {
+		t.Fatalf("precondition: the first answer left the pane open=%v with queue %v", m.picker.open, m.picker.migration)
+	}
+	assertSettled(t, m)
+
+	m = step(t, m, keyEnter())
+	if m.picker.open {
+		t.Fatal("precondition: the last answer left the pane open")
+	}
+	assertSettled(t, m)
+}

@@ -757,3 +757,21 @@ func TestSessionBoundaryEmptiesThinkingAndAdvice(t *testing.T) {
 		}
 	})
 }
+
+// Opening the pane through /thinking takes rows off the transcript and returns: the re-lay is Update's
+// tail's (doc.go, "an arm mutates"), not the verb's.
+func TestThinkingPaneIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m := thinkingPaneModel(t, 6)
+	m = m.dismissReport(thinkingReport)
+	m.layout()
+	closedHeight := m.viewport.Height()
+
+	m, _ = typeCommand(t, m, "/thinking")
+	if !m.thinkingPane.open || m.viewport.Height() >= closedHeight {
+		t.Fatalf("precondition: /thinking left the pane open=%v over a transcript of %d rows (%d with it closed)",
+			m.thinkingPane.open, m.viewport.Height(), closedHeight)
+	}
+	assertSettled(t, m)
+}

@@ -158,7 +158,6 @@ func (m Model) acceptKeyMigration(choice int) (tea.Model, tea.Cmd) {
 	if len(rest) > 0 {
 		m.picker = picker{open: true, kind: pickerKeyMigration, migration: rest}
 	}
-	m.layout()
 	return m, nil
 }
 

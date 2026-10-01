@@ -321,7 +321,6 @@ func (m Model) reportHeight(r reportKind) int {
 // — so the two can never come apart, and neither can leave the scroll behind for the next open.
 func (m Model) dismissReport(r reportKind) Model {
 	*m.reportState(r) = reportPane{}
-	m.layout()
 	return m
 }
 

@@ -180,7 +180,6 @@ const inspectorNoReplyRow = "· no response recorded — a non-streaming reply i
 func (m Model) runInspectCommand() (tea.Model, tea.Cmd) {
 	rows, _ := m.inspectorRows()
 	m.inspector = inspectorPane{open: true, top: len(rows), follow: true}
-	m.layout()
 	return m, nil
 }
 

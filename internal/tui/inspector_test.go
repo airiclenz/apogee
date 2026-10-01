@@ -1457,3 +1457,23 @@ func TestAttemptRingKeepsTheLatestRecords(t *testing.T) {
 		}
 	}
 }
+
+// Opening the pane through /inspect takes rows off the transcript and returns: the re-lay is Update's
+// tail's (doc.go, "an arm mutates"), not the verb's.
+func TestInspectorPaneIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m := inspectorModel(t,
+		wireEvent(domain.WireDirectionRequest, `{"n":1}`, 1, 0),
+		wireEvent(domain.WireDirectionResponse, `{"ok":true}`, 1, 0))
+	m.inspector = inspectorPane{}
+	m.layout()
+	closedHeight := m.viewport.Height()
+
+	m, _ = typeCommand(t, m, "/inspect")
+	if !m.inspector.open || m.viewport.Height() >= closedHeight {
+		t.Fatalf("precondition: /inspect left the pane open=%v over a transcript of %d rows (%d with it closed)",
+			m.inspector.open, m.viewport.Height(), closedHeight)
+	}
+	assertSettled(t, m)
+}

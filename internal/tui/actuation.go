@@ -242,7 +242,6 @@ func (m Model) startProfileLoad(name string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(noLauncherNote) // unreachable through the command; the seam is checked first
 	}
 	m = m.holdActuation(verbLoad, name)
-	m.layout() // the footer's model slot now says "loading <name>…"
 	return m, m.actuationCmds(func(progress func(string)) actuationEvent {
 		result, err := host.Load(name, progress)
 		return actuationEvent{load: result, err: err}
@@ -283,7 +282,6 @@ func (m Model) startServerActuation(verb string) (tea.Model, tea.Cmd) {
 	}
 	endpoint := m.opts.Endpoint
 	m = m.holdActuation(verb, "")
-	m.layout()
 	return m, m.actuationCmds(func(func(string)) actuationEvent {
 		result, err := act(endpoint)
 		return actuationEvent{result: result, err: err}

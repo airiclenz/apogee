@@ -1547,3 +1547,22 @@ func TestStartupRestoreIsSilentWhenUnwired(t *testing.T) {
 		t.Errorf("loads = %v; want nothing actuated with no restore seam wired", got)
 	}
 }
+
+// Taking the latch for a profile load or a server verb only changes what the footer says and returns:
+// the footer is painted every frame, and any re-lay is Update's tail's (doc.go, "an arm mutates").
+func TestActuationStartsAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	for _, line := range []string{"/model alpha", "/stop-server"} {
+		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+
+			m, _ := wireLauncher(t, newLauncher())
+			m, _ = typeCommand(t, m, line)
+			if !m.actuation.inFlight {
+				t.Fatalf("precondition: %s did not take the latch", line)
+			}
+			assertSettled(t, m)
+		})
+	}
+}
