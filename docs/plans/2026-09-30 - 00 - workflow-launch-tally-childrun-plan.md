@@ -83,7 +83,9 @@ NOTES (2026-10-01): `internal/agent/wake_test.go` needed no change — `TestFini
 **Acceptance:** `go test ./internal/agent -run 'TestWorkflowState_|TestFinishNote|TestWorkflowControl_|TestBackground_|TestWorkflowCall_ThreeItems'`; `! grep -nE 'func (finishTally|itemCounts)|finishTallySeparator' internal/agent/*.go`
 **Commit:** `refactor(agent): delegate the workflow tally and state to the engine`
 
-## 5. domain, agent: the end phase carries the tally
+## 5. domain, agent: the end phase carries the tally — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): `TestWorkflowCall_EndPhaseCarriesTheNotesTally` drives `workflowObserver.end` with a constructed `workflow.Result` (fan-out with a resumed item, verify and merge stages) rather than running a full verify+merge recipe through fan_out; it checks the event tally equals `workflow.TallyOf(result)` on finished and stopped, and nil on failed and on the started phase.
 
 **Depends on:** item 4.
 **Files:** `internal/domain/events.go`, `internal/agent/workflowcall.go`, `internal/agent/workflowcall_test.go`, `internal/eventjson/encode.go`, `apogee.go`, `example_test.go`

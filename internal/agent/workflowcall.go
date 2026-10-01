@@ -787,8 +787,9 @@ func (o *workflowObserver) waitingOn(id, stage, detail string) {
 }
 
 // end reports how the run Run returned ended: failed when it returned an error after the Workflow
-// started, else stopped or finished by the result's phase. A run that failed before its Workflow
-// had an id started nothing and reports nothing.
+// started, else stopped or finished by the result's phase, carrying the result's item tally — the
+// one the model's note reports. A run that failed before its Workflow had an id started nothing
+// and reports nothing.
 func (o *workflowObserver) end(result workflow.Result, err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -800,10 +801,16 @@ func (o *workflowObserver) end(result workflow.Result, err error) {
 	case err != nil:
 		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFailed, Detail: err.Error()})
 	case result.Stopped():
-		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStopped})
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStopped, Tally: eventTally(result)})
 	default:
-		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFinished})
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFinished, Tally: eventTally(result)})
 	}
+}
+
+// eventTally is result's item tally (workflow.TallyOf) in the shape an end phase carries it.
+func eventTally(result workflow.Result) *domain.WorkflowTally {
+	tally := workflow.TallyOf(result)
+	return &domain.WorkflowTally{OK: tally.OK, Partial: tally.Partial, Blocked: tally.Blocked, Unfinished: tally.Unfinished}
 }
 
 // startLocked emits started, with the stage names and the resume command, the first time a

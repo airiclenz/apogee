@@ -95,6 +95,7 @@ var (
 	_ apogee.WorkflowPhaseEvent
 	_ apogee.WorkflowPhase
 	_ apogee.WorkflowReceipt
+	_ apogee.WorkflowTally
 	_ apogee.Tool
 	_ apogee.ExternalEffectTool
 	_ apogee.ReadOnlyTool

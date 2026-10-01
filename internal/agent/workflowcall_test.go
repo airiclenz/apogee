@@ -1245,6 +1245,67 @@ func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
 	}
 }
 
+// TestWorkflowCall_EndPhaseCarriesTheNotesTally pins the tally a finished or stopped Workflow's end
+// phase carries: the fan-out items the model's note counts (workflow.TallyOf), its resumed item
+// among them, and not the verify and merge outcomes — while a failed end phase and every phase
+// before the end carry none.
+func TestWorkflowCall_EndPhaseCarriesTheNotesTally(t *testing.T) {
+	t.Parallel()
+
+	result := workflow.Result{ID: "wf-1", Phase: workflow.PhaseDone, Stages: []workflow.StageResult{
+		{Name: "check", Kind: workflow.StageFanout, Phase: workflow.PhaseDone, Tally: workflow.Tally{OK: 2, Partial: 1, Blocked: 1, Resumed: 1, Confirmed: 1}},
+		{Name: "verify", Kind: workflow.StageVerify, Phase: workflow.PhaseDone, Tally: workflow.Tally{OK: 3}},
+		{Name: "merge", Kind: workflow.StageMerge, Phase: workflow.PhaseDone, Tally: workflow.Tally{OK: 1}},
+	}}
+	stopped := result
+	stopped.Phase = workflow.PhaseStopped
+	stopped.Stages = []workflow.StageResult{{Name: "check", Kind: workflow.StageFanout, Phase: workflow.PhaseStopped, Tally: workflow.Tally{OK: 1, Unfinished: 2}}}
+	cases := []struct {
+		name      string
+		result    workflow.Result
+		err       error
+		wantPhase domain.WorkflowPhase
+		want      *domain.WorkflowTally
+	}{
+		{"finished", result, nil, domain.WorkflowFinished, &domain.WorkflowTally{OK: 2, Partial: 1, Blocked: 1}},
+		{"stopped", stopped, nil, domain.WorkflowStopped, &domain.WorkflowTally{OK: 1, Unfinished: 2}},
+		{"failed", result, errors.New("disk full"), domain.WorkflowFailed, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			a, err := newAgent(workflowConfig(t, sink), &workflowResponder{})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.observeWorkflow(&workflow.Runner{}, 1, workflow.Plan{Name: "audit"}).end(tc.result, tc.err)
+
+			phases := workflowPhaseEvents(sink.events)
+			want := []domain.WorkflowPhase{domain.WorkflowStarted, tc.wantPhase}
+			if !slices.Equal(phaseNames(phases), want) {
+				t.Fatalf("workflow phases = %v, want %v", phaseNames(phases), want)
+			}
+			if phases[0].Tally != nil {
+				t.Errorf("started phase carries tally %+v, want nil", *phases[0].Tally)
+			}
+			got := phases[1].Tally
+			switch {
+			case tc.want == nil && got != nil:
+				t.Errorf("%s phase carries tally %+v, want nil", tc.wantPhase, *got)
+			case tc.want != nil && (got == nil || *got != *tc.want):
+				t.Errorf("%s phase tally = %v, want %+v", tc.wantPhase, got, *tc.want)
+			case tc.want != nil:
+				note := workflow.TallyOf(tc.result)
+				if got.Total() != note.Total() || got.OK != note.OK || got.Partial != note.Partial || got.Blocked != note.Blocked || got.Unfinished != note.Unfinished {
+					t.Errorf("%s phase tally %+v differs from the note's %+v", tc.wantPhase, *got, note)
+				}
+			}
+		})
+	}
+}
+
 // recipeFanOutUpstream answers a parent whose first reply calls fan_out with args and whose second
 // closes the Exchange, and the review recipe's two children bound to scope src.
 func recipeFanOutUpstream(args string) *workflowResponder {

@@ -754,6 +754,24 @@ type WorkflowReceipt struct {
 	Fields  map[string]string
 }
 
+// WorkflowTally counts the items a Workflow ran, as the finished or stopped WorkflowPhaseEvent
+// carries them: its fan-out stages' items by the receipt each ended on — ok, partial or blocked —
+// and Unfinished for those a cancel left without one; a skipped fan-out, and verify, merge, script
+// and ask outcomes, are not items. It is the domain's copy of the workflow package's own tally,
+// the one the model's note on the finished Workflow reports, without the resumed count or the
+// verify verdicts that tally also keeps.
+type WorkflowTally struct {
+	OK         int
+	Partial    int
+	Blocked    int
+	Unfinished int
+}
+
+// Total is how many items the tally counts: ok, partial, blocked and unfinished.
+func (t WorkflowTally) Total() int {
+	return t.OK + t.Partial + t.Blocked + t.Unfinished
+}
+
 // WorkflowPhaseEvent reports one Workflow (ADR 0087) crossing a lifecycle boundary: starting, a
 // stage starting and finishing, an item's run starting, an item finishing on its receipt, an
 // `ask` stage waiting for the user, and the Workflow ending — finished, stopped or failed. Every
@@ -802,6 +820,10 @@ type WorkflowReceipt struct {
 // again with the same inputs to resume" for one StartRecipe made — and "" on every other
 // phase and on a fan_out's or a background workflow's started phase.
 //
+// Tally is, on WorkflowFinished and WorkflowStopped, the Workflow's item tally — the same counts
+// the model's note on it reports — and nil on WorkflowFailed and every other phase. The NDJSON
+// encoding does not carry it.
+//
 // It is OBSERVATION ONLY: nothing in the loop reads it, and the result the Workflow's caller reads
 // is its result lines, not these events. A Driver that ignores it loses the Workflow's liveness
 // and nothing else.
@@ -827,6 +849,7 @@ type WorkflowPhaseEvent struct {
 	Run        string
 	Attempt    int
 	Resume     string
+	Tally      *WorkflowTally
 }
 
 // BackgroundWorkflowCallPrefix leads the synthetic call id a background workflow's item children

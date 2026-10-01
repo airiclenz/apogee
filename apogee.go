@@ -349,6 +349,10 @@ type WorkflowPhase = domain.WorkflowPhase
 // WorkflowReceipt is the receipt a WorkflowPhaseEvent's finished item ended on.
 type WorkflowReceipt = domain.WorkflowReceipt
 
+// WorkflowTally is the item tally a WorkflowPhaseEvent carries at WorkflowFinished and
+// WorkflowStopped.
+type WorkflowTally = domain.WorkflowTally
+
 // The phases a Workflow is reported at: started, then its stages and items, then exactly one of
 // finished, stopped or failed.
 const (
