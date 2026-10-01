@@ -35,6 +35,12 @@
 // GIT_INDEX_FILE — which redirects the run to an object database of apogee's own without
 // weakening anything the hardening put there.
 //
+// Every entry point is a method of a [Host] value — the PATH lookup, the two subprocess
+// launchers and the per-OS environment rules one run goes through — and the package-level funcs
+// are thin wrappers over one. A nil field is the real OS's facility, so the zero Host ([OS]) runs
+// the system git; a fake Host scripts git's outcomes with no git installed, and its answers still
+// pass the exec fence, the hardening and the command-config refusal.
+//
 // The package is a LEAF over internal/subprocess: it imports internal/domain, internal/platform,
 // internal/security and internal/subprocess, and nothing else in the tree — never internal/tools,
 // never internal/agent (ADR 0010). Everything tool-shaped — the tool structs, the ref guards, the
@@ -43,6 +49,7 @@
 //
 // # The files, one line each
 //
-// gitexec.go is the whole runner — the resolution seam, the allowlist and hardening values, the
-// spec builder, the four entry points, and the repo-local command-config probe and refusal.
+// gitexec.go is the whole runner — the Host value and the resolution seam, the allowlist and
+// hardening values, the spec builder, the entry points, and the repo-local command-config probe
+// and refusal.
 package gitexec

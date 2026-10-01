@@ -18,7 +18,7 @@
 **Not covered by plans 00–02:** review 2026-09-30 candidates #9, #11, #12, #13, #14, #16, #18, #20 (except its bead) and #17 (plan 00 item 10 only reuses `domain.RecipeLaunch`).
 **Regression check:** three rounds (2026-09-30 ×2, 2026-10-01) at 704514db; reports in docs/skill-runs/implement-plan/2026-09-30_-_01_-_exec-host-guarded-client-budget-latch-plan/.
 
-## 1. gitexec: a Host value resolves, runs and scopes env
+## 1. gitexec: a Host value resolves, runs and scopes env — ✅ DONE (2026-10-01)
 
 **Files:** `internal/gitexec/gitexec.go`, `internal/gitexec/gitexec_test.go`, `internal/gitexec/doc.go`
 **Read first:** `internal/gitexec/gitexec.go` — Resolve, Run, queryDiagnosed, probeGit, probeCommandConfig; `internal/security/execsafety.go` — ResolveProgram (nil look → exec.LookPath);

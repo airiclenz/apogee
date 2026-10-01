@@ -43,6 +43,75 @@ var LookPath LookFunc = exec.LookPath
 // essentials are appended by ScopeEnv rather than restated in safeEnvKeys.
 var host platform.Host = platform.Current()
 
+// Host is the set of operating-system facilities one git run goes through: the PATH lookup that
+// finds git, the two subprocess launchers that run it, and the per-OS rules its environment is
+// scoped by. Every method of the package's funnel — Resolve, Program, Capture, CaptureUnchecked,
+// Run, RunTo, RunDiagnosed, Query, SafeEnv — hangs off it, so a caller holding a Host reaches the
+// whole hardened runner through one value, and a test holding a fake one scripts git's outcomes
+// (absent, fenced, refused, failed) with no real git on the machine.
+//
+// Every nil field falls back to the real OS, so the zero Host — what [OS] returns — IS the real
+// OS. A field only ever REPLACES a facility; none of them bypasses a guarantee: a fake Look's
+// answer still passes through the exec fence, and a fake Spawn still receives the hardened argv
+// and the scoped environment the real one would.
+//
+// The config-probe memo (commandConfigProbes) is keyed without the Host: the answer is a fact
+// about the repository's files, which the fingerprints re-check on every call, not about the
+// launcher that asked. A test scripting different config answers through different fake Hosts
+// therefore uses a fresh root per answer.
+type Host struct {
+	// Look is the PATH lookup for git. nil is passed on as nil to security.ResolveProgram, which
+	// takes exec.LookPath — never a path around the fence.
+	Look func(string) (string, error)
+	// Spawn runs one captured git subprocess. nil is subprocess.RunSubprocess.
+	Spawn func(context.Context, subprocess.SubprocessSpec) (subprocess.SubprocessResult, error)
+	// SpawnTo runs one git subprocess with its standard output streamed to the writer. nil is
+	// subprocess.RunSubprocessTo.
+	SpawnTo func(context.Context, subprocess.SubprocessSpec, io.Writer) (subprocess.SubprocessResult, error)
+	// Env is the per-OS rule set the environment is scoped by. nil is platform.Current().
+	Env platform.Host
+}
+
+// OS returns the Host that runs the real system git: the zero value, every facility the
+// operating system's own.
+func OS() Host {
+	return Host{}
+}
+
+// packageHost is the Host the package-level funcs wrap: the caller's lookup, else the LookPath
+// seam, over the package's per-OS rules — so a test swapping either var still reaches every
+// package-level entry point.
+func packageHost(look LookFunc) Host {
+	if look == nil {
+		look = LookPath
+	}
+	return Host{Look: look, Env: host}
+}
+
+// spawn runs spec through the Host's captured launcher.
+func (h Host) spawn(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+	if h.Spawn == nil {
+		return subprocess.RunSubprocess(ctx, spec)
+	}
+	return h.Spawn(ctx, spec)
+}
+
+// spawnTo runs spec through the Host's streaming launcher.
+func (h Host) spawnTo(ctx context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+	if h.SpawnTo == nil {
+		return subprocess.RunSubprocessTo(ctx, spec, stdout)
+	}
+	return h.SpawnTo(ctx, spec, stdout)
+}
+
+// env returns the Host's per-OS rules.
+func (h Host) env() platform.Host {
+	if h.Env == nil {
+		return platform.Current()
+	}
+	return h.Env
+}
+
 // safeEnvKeys is the allowlist of environment variables a git subprocess inherits
 // (ported from the TS oracle's SAFE_ENV_KEYS). Everything else is dropped, so a
 // surprising inherited variable cannot redirect git (config, auth, pager) — the
@@ -74,7 +143,12 @@ var safeEnvKeys = []string{
 // credential helpers, pagers, diff drivers — so an unscoped PATH would hand every one of those
 // resolutions to the workspace. An empty root scopes nothing (the shape a test wants).
 func SafeEnv(root string) []string {
-	return host.ScopeEnv(root, safeEnvKeys, os.LookupEnv)
+	return packageHost(nil).SafeEnv(root)
+}
+
+// SafeEnv is the package-level SafeEnv scoped by the Host's per-OS rules.
+func (h Host) SafeEnv(root string) []string {
+	return h.env().ScopeEnv(root, safeEnvKeys, os.LookupEnv)
 }
 
 // hardeningOptions are the global options every git invocation carries, ahead of its
@@ -135,7 +209,12 @@ var DiffHardeningArgs = []string{"--no-textconv", "--no-ext-diff"}
 // look is the lookup seam; nil takes LookPath. A caller holding its own swappable lookup var
 // passes it through, so a fake git installed for a test reaches this resolution.
 func Program(ctx context.Context, root string, look LookFunc) (gitPath, refusal string, ok bool) {
-	path, err := Resolve(ctx, root, look)
+	return packageHost(look).Program(ctx, root)
+}
+
+// Program is the package-level Program resolving through the Host's lookup.
+func (h Host) Program(ctx context.Context, root string) (gitPath, refusal string, ok bool) {
+	path, err := h.Resolve(ctx, root)
 	if err != nil {
 		return "", err.Error(), false
 	}
@@ -147,10 +226,14 @@ func Program(ctx context.Context, root string, look LookFunc) (gitPath, refusal 
 // (security.ErrExecFromWritablePath) intact through errors.Is, which a message string cannot.
 // Both forms resolve and fence identically — Program is this function plus the render.
 func Resolve(ctx context.Context, root string, look LookFunc) (string, error) {
-	if look == nil {
-		look = LookPath
-	}
-	path, err := security.ResolveProgram(look, "git", root, confinementBox(ctx))
+	return packageHost(look).Resolve(ctx, root)
+}
+
+// Resolve is the package-level Resolve through the Host's lookup. A nil Look reaches
+// security.ResolveProgram as nil, so the zero Host resolves with exec.LookPath behind the same
+// fence.
+func (h Host) Resolve(ctx context.Context, root string) (string, error) {
+	path, err := security.ResolveProgram(h.Look, "git", root, confinementBox(ctx))
 	if err != nil {
 		// The fence's refusal passes through with its sentinel and its own sentence — it
 		// NAMES the resolved path, so an operator reads which PATH entry to fix. Every other
@@ -197,14 +280,19 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // config rather than on every git call. A root no repository reaches is never memoised: it is
 // probed afresh on every call, so a `git init` made mid-session is seen by the next one.
 func Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	drivers, err := probeCommandConfig(ctx, gitPath, root, nil)
+	return packageHost(nil).Capture(ctx, gitPath, root, timeout, args...)
+}
+
+// Capture is the package-level Capture, probing and running through the Host's launcher.
+func (h Host) Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
+	drivers, err := h.probeCommandConfig(ctx, gitPath, root, nil)
 	if err != nil {
 		return subprocess.SubprocessResult{}, err
 	}
 	if len(drivers) > 0 {
 		return subprocess.SubprocessResult{CombinedOutput: CommandConfigRefusal(drivers), ExitCode: 1}, nil
 	}
-	return CaptureUnchecked(ctx, gitPath, root, nil, timeout, args...)
+	return h.CaptureUnchecked(ctx, gitPath, root, nil, timeout, args...)
 }
 
 // CaptureUnchecked is Capture without the command-config probe. Only one caller may use it: a
@@ -213,7 +301,12 @@ func Capture(ctx context.Context, gitPath, root string, timeout time.Duration, a
 // program — go through probeGit instead, which keeps git's diagnostics out of the listing it
 // parses. Everything a MODEL causes goes through Capture.
 func CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	return subprocess.RunSubprocess(ctx, runSpec(gitPath, root, env, timeout, false, args...))
+	return packageHost(nil).CaptureUnchecked(ctx, gitPath, root, env, timeout, args...)
+}
+
+// CaptureUnchecked is the package-level CaptureUnchecked through the Host's launcher.
+func (h Host) CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
+	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, args...))
 }
 
 // runSpec builds the subprocess spec for one git invocation in root: hardeningOptions ahead of
@@ -226,13 +319,13 @@ func CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, t
 // The caller's env comes LAST because it is an addition, never a removal: a GIT_DIR or
 // GIT_INDEX_FILE that redirects the run to a store of apogee's own overrides nothing the
 // hardening put there, and no entry it carries can drop GIT_CONFIG_NOSYSTEM.
-func runSpec(gitPath, root string, env []string, timeout time.Duration, splitStdout bool, args ...string) subprocess.SubprocessSpec {
+func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration, splitStdout bool, args ...string) subprocess.SubprocessSpec {
 	argv := make([]string, 0, 1+len(hardeningOptions)+len(args))
 	argv = append(argv, gitPath)
 	argv = append(argv, hardeningOptions...)
 	argv = append(argv, args...)
 
-	full := SafeEnv(root)
+	full := h.SafeEnv(root)
 	full = append(full[:len(full):len(full)], hardeningEnv...)
 	full = append(full, env...)
 
@@ -267,11 +360,16 @@ func runSpec(gitPath, root string, env []string, timeout time.Duration, splitStd
 // included, so the git tools take Capture's captured outcome; this returns stdout as DATA, with
 // the diagnostics left out of the payload.
 func Run(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
-	gitPath, err := Resolve(ctx, dir, LookPath)
+	return packageHost(nil).Run(ctx, dir, env, timeout, args...)
+}
+
+// Run is the package-level Run, resolving and running through the Host.
+func (h Host) Run(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
+	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	return Query(ctx, gitPath, dir, env, timeout, args...)
+	return h.Query(ctx, gitPath, dir, env, timeout, args...)
 }
 
 // RunTo is Run with the child's standard output streamed UNCAPPED into stdout instead of
@@ -281,11 +379,16 @@ func Run(ctx context.Context, dir string, env []string, timeout time.Duration, a
 // is Run's: the same resolution, the same hardening, the same probe under the same env, the same
 // teardown, and stderr still capped. A nil stdout discards the payload.
 func RunTo(ctx context.Context, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) error {
-	gitPath, err := Resolve(ctx, dir, LookPath)
+	return packageHost(nil).RunTo(ctx, dir, env, timeout, stdout, args...)
+}
+
+// RunTo is the package-level RunTo, resolving and streaming through the Host.
+func (h Host) RunTo(ctx context.Context, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) error {
+	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
 		return err
 	}
-	_, err = query(ctx, gitPath, dir, env, timeout, stdout, args...)
+	_, err = h.query(ctx, gitPath, dir, env, timeout, stdout, args...)
 	return err
 }
 
@@ -299,11 +402,16 @@ func RunTo(ctx context.Context, dir string, env []string, timeout time.Duration,
 // string was cut there and carries the cap's truncation marker, so a caller that reads it as a
 // complete list checks its length first.
 func RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
-	gitPath, err := Resolve(ctx, dir, LookPath)
+	return packageHost(nil).RunDiagnosed(ctx, dir, env, timeout, args...)
+}
+
+// RunDiagnosed is the package-level RunDiagnosed, resolving and running through the Host.
+func (h Host) RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
+	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
 		return "", "", err
 	}
-	return queryDiagnosed(ctx, gitPath, dir, env, timeout, nil, args...)
+	return h.queryDiagnosed(ctx, gitPath, dir, env, timeout, nil, args...)
 }
 
 // Query is Run for a caller that has already resolved (and fenced) its own git — the tools
@@ -311,23 +419,28 @@ func RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Du
 // LookPath. It is Run minus the resolution: the probe, the hardening and the stdout-as-data
 // contract are identical.
 func Query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
-	return query(ctx, gitPath, dir, env, timeout, nil, args...)
+	return packageHost(nil).Query(ctx, gitPath, dir, env, timeout, args...)
+}
+
+// Query is the package-level Query, probing and running through the Host's launcher.
+func (h Host) Query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
+	return h.query(ctx, gitPath, dir, env, timeout, nil, args...)
 }
 
 // query is the body Run, RunTo and Query share. A non-nil stdout takes the child's standard
 // output uncapped and leaves the returned string empty.
-func query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, error) {
-	out, _, err := queryDiagnosed(ctx, gitPath, dir, env, timeout, stdout, args...)
+func (h Host) query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, error) {
+	out, _, err := h.queryDiagnosed(ctx, gitPath, dir, env, timeout, stdout, args...)
 	return out, err
 }
 
 // queryDiagnosed is query that also returns the child's standard error, which the split or
 // streamed stdout leaves alone in the result's CombinedOutput.
-func queryDiagnosed(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, string, error) {
+func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, string, error) {
 	if len(args) == 0 {
 		return "", "", errors.New("apogee: gitexec: no git subcommand")
 	}
-	drivers, err := probeCommandConfig(ctx, gitPath, dir, env)
+	drivers, err := h.probeCommandConfig(ctx, gitPath, dir, env)
 	if err != nil {
 		return "", "", err
 	}
@@ -335,12 +448,12 @@ func queryDiagnosed(ctx context.Context, gitPath, dir string, env []string, time
 		return "", "", errors.New(CommandConfigRefusal(drivers))
 	}
 
-	spec := runSpec(gitPath, dir, env, timeout, stdout == nil, args...)
+	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, args...)
 	var res subprocess.SubprocessResult
 	if stdout != nil {
-		res, err = subprocess.RunSubprocessTo(ctx, spec, stdout)
+		res, err = h.spawnTo(ctx, spec, stdout)
 	} else {
-		res, err = subprocess.RunSubprocess(ctx, spec)
+		res, err = h.spawn(ctx, spec)
 	}
 	if err != nil {
 		return "", "", err
@@ -504,14 +617,17 @@ func sameChangeTime(then, now os.FileInfo) bool {
 // confinement-unavailable demotion — which says nothing about the repository, so caching it
 // would let one cancelled Turn refuse every later git call on that root. Nor is a probe that
 // reached no repository: its empty answer serves the call that ran it only (commandConfigProbes).
-func probeCommandConfig(ctx context.Context, gitPath, root string, env []string) ([]string, error) {
+//
+// The memo key leaves the Host out on purpose (see Host): the answer describes the repository's
+// files, and the fingerprints are what keep it honest.
+func (h Host) probeCommandConfig(ctx context.Context, gitPath, root string, env []string) ([]string, error) {
 	key := gitPath + "\x00" + root + "\x00" + strings.Join(env, "\x00")
 	if cached, ok := commandConfigProbes.Load(key); ok {
 		if probe := cached.(commandConfigProbe); probe.holds() {
 			return probe.names, nil
 		}
 	}
-	probe, err := repoLocalCommandConfig(ctx, gitPath, root, env)
+	probe, err := h.repoLocalCommandConfig(ctx, gitPath, root, env)
 	if err != nil {
 		return nil, err
 	}
@@ -522,9 +638,10 @@ func probeCommandConfig(ctx context.Context, gitPath, root string, env []string)
 }
 
 // probeGit runs one of the probe's own git invocations with stdout split from the diagnostics,
-// so a warning git prints can never pose as a record of the listing.
-func probeGit(ctx context.Context, gitPath, root string, env []string, args ...string) (subprocess.SubprocessResult, error) {
-	return subprocess.RunSubprocess(ctx, runSpec(gitPath, root, env, probeTimeout, true, args...))
+// so a warning git prints can never pose as a record of the listing. It spawns through the Host,
+// so a fake launcher scripts the probe's answers as it scripts the command's.
+func (h Host) probeGit(ctx context.Context, gitPath, root string, env []string, args ...string) (subprocess.SubprocessResult, error) {
+	return h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, args...))
 }
 
 // repoLocalCommandConfig lists the repo-local config names whose VALUE is a program git would
@@ -546,8 +663,8 @@ func probeGit(ctx context.Context, gitPath, root string, env []string, args ...s
 // apply (--worktree on a git that refuses the option). The error return
 // is the subprocess contract's — ctx cancellation or a confinement-unavailable demotion — and it
 // stops the caller, so a probe that could not run never lets the real command run un-probed.
-func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []string) (commandConfigProbe, error) {
-	files, top, reached, err := configFiles(ctx, gitPath, root, env)
+func (h Host) repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []string) (commandConfigProbe, error) {
+	files, top, reached, err := h.configFiles(ctx, gitPath, root, env)
 	if err != nil {
 		return commandConfigProbe{}, err
 	}
@@ -561,7 +678,7 @@ func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []str
 
 	var names, includes orderedSet
 	for _, scope := range FilterConfigScopes {
-		res, err := probeGit(ctx, gitPath, root, env,
+		res, err := h.probeGit(ctx, gitPath, root, env,
 			"config", scope, "--includes", "--show-origin", "--list", "-z")
 		if err != nil {
 			return commandConfigProbe{}, err
@@ -600,8 +717,8 @@ func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []str
 // repository, or GIT_DIR names a store not yet created. That is the one answer with nothing to
 // fingerprint, so the caller neither lists config for it nor memoises it. A zero exit that printed
 // nothing (a fake git in a test) still counts as reached.
-func configFiles(ctx context.Context, gitPath, root string, env []string) (files []string, top string, reached bool, err error) {
-	res, err := probeGit(ctx, gitPath, root, env, "rev-parse",
+func (h Host) configFiles(ctx context.Context, gitPath, root string, env []string) (files []string, top string, reached bool, err error) {
+	res, err := h.probeGit(ctx, gitPath, root, env, "rev-parse",
 		"--git-path", "config", "--git-path", "config.worktree", "--git-path", "HEAD", "--show-toplevel")
 	if err != nil {
 		return nil, "", false, err

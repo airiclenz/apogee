@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -484,5 +486,200 @@ func TestCommandConfigRefusal_JudgesTheRepositoryTheRunActuallyReaches(t *testin
 	}
 	if strings.TrimSpace(out) != store {
 		t.Errorf("git-dir = %q, want the redirected store %q", strings.TrimSpace(out), store)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Host — the funnel over a value, scriptable without a git
+// ----------------------------------------------------------------------------
+
+// gitAnswer scripts one fake git run: given the argv the launcher was handed, flattened to one
+// space-joined string, it returns the outcome the run reports.
+type gitAnswer func(argv string) subprocess.SubprocessResult
+
+// cleanRepository answers the command-config probe as a repository with nothing to refuse — the
+// rev-parse reaches it and names no file, and every scope listing passes with a non-zero exit —
+// and every other invocation with command's answer.
+func cleanRepository(command gitAnswer) gitAnswer {
+	return func(argv string) subprocess.SubprocessResult {
+		switch {
+		case strings.Contains(argv, " rev-parse --git-path "):
+			return subprocess.SubprocessResult{}
+		case strings.Contains(argv, " --show-origin --list -z"):
+			return subprocess.SubprocessResult{ExitCode: 1}
+		}
+		return command(argv)
+	}
+}
+
+// fakeHost returns a Host whose Look answers gitPath and whose launchers answer from answer,
+// with the specs every launch was handed. No real git runs: the spawned argv is never executed.
+func fakeHost(gitPath string, answer gitAnswer) (gitexec.Host, *[]subprocess.SubprocessSpec) {
+	spawned := &[]subprocess.SubprocessSpec{}
+	host := gitexec.Host{
+		Look: func(string) (string, error) { return gitPath, nil },
+		Spawn: func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+			*spawned = append(*spawned, spec)
+			return answer(strings.Join(spec.Argv, " ")), nil
+		},
+		SpawnTo: func(_ context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+			*spawned = append(*spawned, spec)
+			res := answer(strings.Join(spec.Argv, " "))
+			_, err := io.WriteString(stdout, res.Stdout)
+			res.Stdout = ""
+			return res, err
+		},
+	}
+	return host, spawned
+}
+
+// outsideGit returns an absolute git path outside every root a test runs in, so the exec fence
+// lets it through. Nothing is written there: a fake launcher never executes it.
+func outsideGit(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "git")
+}
+
+// TestHost_RunReportsAnAbsentGitWithoutSpawning pins the graceful degradation through a fake
+// Look: a lookup that finds no git yields UnavailableMessage, and nothing is launched.
+func TestHost_RunReportsAnAbsentGitWithoutSpawning(t *testing.T) {
+	t.Parallel()
+	host, spawned := fakeHost("", cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{}
+	}))
+	host.Look = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "status")
+
+	if err == nil || err.Error() != gitexec.UnavailableMessage || len(*spawned) != 0 {
+		t.Errorf("Run err = %v after %d launches, want %q and none", err, len(*spawned), gitexec.UnavailableMessage)
+	}
+}
+
+// TestHost_RunRefusesAPlantedGit pins that a fake Look replaces the lookup, never the fence: the
+// git it answers from inside the workspace is refused with the fence's sentinel and never run.
+func TestHost_RunRefusesAPlantedGit(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	planted := filepath.Join(root, "bin", "git")
+	if err := os.MkdirAll(filepath.Dir(planted), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(planted, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write planted git: %v", err)
+	}
+	host, spawned := fakeHost(planted, cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{}
+	}))
+
+	_, err := host.Run(context.Background(), root, nil, testTimeout, "status")
+
+	if !errors.Is(err, security.ErrExecFromWritablePath) || len(*spawned) != 0 {
+		t.Errorf("Run err = %v after %d launches, want the exec-fence refusal and none", err, len(*spawned))
+	}
+}
+
+// TestHost_RunReportsANonZeroExit pins that a scripted exit status reaches Run's flattened error
+// exactly as a real git's would.
+func TestHost_RunReportsANonZeroExit(t *testing.T) {
+	t.Parallel()
+	host, _ := fakeHost(outsideGit(t), cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: not a git repository"}
+	}))
+
+	_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "rev-parse", "--is-inside-work-tree")
+
+	if err == nil || !strings.Contains(err.Error(), "exit 128") {
+		t.Errorf("Run err = %v, want the exit status named", err)
+	}
+}
+
+// TestHost_CaptureRefusesARepositoryWhoseConfigNamesAProgram pins that the probe spawns through
+// the Host too: a scripted --local listing carrying a filter driver refuses the call, and the
+// command itself is never launched.
+func TestHost_CaptureRefusesARepositoryWhoseConfigNamesAProgram(t *testing.T) {
+	t.Parallel()
+	gitPath := outsideGit(t)
+	host, spawned := fakeHost(gitPath, func(argv string) subprocess.SubprocessResult {
+		if strings.Contains(argv, " config --local ") {
+			return subprocess.SubprocessResult{Stdout: "file:.git/config\x00filter.x.clean\ntrue\x00"}
+		}
+		return subprocess.SubprocessResult{}
+	})
+
+	res, err := host.Capture(context.Background(), gitPath, t.TempDir(), testTimeout, "status")
+	if err != nil {
+		t.Fatalf("Capture err = %v", err)
+	}
+
+	for _, spec := range *spawned {
+		if strings.HasSuffix(strings.Join(spec.Argv, " "), " status") {
+			t.Errorf("the refused command was launched: %q", spec.Argv)
+		}
+	}
+	if want := gitexec.CommandConfigRefusal([]string{"filter.x.clean"}); res.CombinedOutput != want {
+		t.Errorf("Capture output = %q, want the refusal %q", res.CombinedOutput, want)
+	}
+}
+
+// TestHost_SpawnReceivesTheHardenedSpec pins that a fake launcher replaces the process, not the
+// hardening: the spec it is handed carries the global options ahead of the subcommand and
+// GIT_CONFIG_NOSYSTEM after the scoped allowlist.
+func TestHost_SpawnReceivesTheHardenedSpec(t *testing.T) {
+	t.Parallel()
+	host, spawned := fakeHost(outsideGit(t), cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{Stdout: "PAYLOAD"}
+	}))
+
+	if _, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "status"); err != nil {
+		t.Fatalf("Run err = %v", err)
+	}
+
+	last := (*spawned)[len(*spawned)-1]
+	if got := strings.Join(last.Argv[1:], " "); got != "-c core.hooksPath= -c core.fsmonitor=false status" {
+		t.Errorf("argv = %q, want the hardening options ahead of the subcommand", got)
+	}
+	if !slices.Contains(last.Env, "GIT_CONFIG_NOSYSTEM=1") {
+		t.Errorf("env = %q, want GIT_CONFIG_NOSYSTEM=1", last.Env)
+	}
+}
+
+// TestHost_RunToStreamsThroughSpawnTo pins that the streaming entry takes the Host's streaming
+// launcher, with the payload written to the caller's writer rather than returned.
+func TestHost_RunToStreamsThroughSpawnTo(t *testing.T) {
+	t.Parallel()
+	host, _ := fakeHost(outsideGit(t), cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{Stdout: "PAYLOAD"}
+	}))
+	host.Spawn = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		if strings.Contains(strings.Join(spec.Argv, " "), "cat-file") {
+			t.Errorf("RunTo launched its command through Spawn: %q", spec.Argv)
+		}
+		return cleanRepository(func(string) subprocess.SubprocessResult {
+			return subprocess.SubprocessResult{}
+		})(strings.Join(spec.Argv, " ")), nil
+	}
+
+	var payload bytes.Buffer
+	if err := host.RunTo(context.Background(), t.TempDir(), nil, testTimeout, &payload, "cat-file", "blob", "deadbeef"); err != nil {
+		t.Fatalf("RunTo err = %v", err)
+	}
+
+	if payload.String() != "PAYLOAD" {
+		t.Errorf("payload = %q, want the SpawnTo launcher's stream", payload.String())
+	}
+}
+
+// TestHost_ZeroValueIsTheOS pins that every nil field falls back to the real OS: the zero Host,
+// and OS(), scope the environment exactly as the package-level SafeEnv does.
+func TestHost_ZeroValueIsTheOS(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	want := gitexec.SafeEnv(root)
+
+	for name, host := range map[string]gitexec.Host{"Host{}": {}, "OS()": gitexec.OS()} {
+		if got := host.SafeEnv(root); !slices.Equal(got, want) {
+			t.Errorf("%s.SafeEnv(root) = %q, want %q", name, got, want)
+		}
 	}
 }
