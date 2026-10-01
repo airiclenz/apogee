@@ -44,7 +44,7 @@ func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
 //
 // At a quiescent boundary every verb is runnable. While a worker owns the engine (m.busy() — the
 // same predicate that decides whether Esc stops something), or a /bg launch is reading it off the
-// loop (m.bgLaunching — an idle state whose engine is still not the loop's to mutate), only the
+// loop (holdBgLaunch — an idle state whose engine is still not the loop's to mutate), only the
 // reporting lines are: parsedInput.safeWhileRunning owns which those are, and it is deliberately
 // asked about the parsed LINE rather than the bare verb, because "/confine" and "/confine off" are
 // the same verb and only one of them is a report. The rule itself is the hold set's
@@ -81,7 +81,7 @@ func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 // /clear clears before a queued message lands (ADR 0025 D7 and D10, amended 2026-09-14).
 //
 // The drain stops at the first verb that leaves the Model busy — /compact starts its worker,
-// /continue opens an Exchange, /bg launches off the loop (bgLaunching) — because the next verb would
+// /continue opens an Exchange, /bg launches off the loop (holdBgLaunch) — because the next verb would
 // be driven against an engine something else holds: never two workers on one Agent. What is left queued waits for that worker's own
 // terminal fold, which drains again, so a /clear queued behind a /compact still runs, in order,
 // once the compaction lands. A deferred quit runs nothing: the queued commands are
@@ -656,7 +656,7 @@ type bgStartedMsg struct {
 // disk; the context it is handed is the program's, never an Exchange's, since the running workflow
 // lives under a context the engine's manager owns, which the conversation's esc never reaches
 // (ADR 0089 D5). /bg is idle-only, so no worker drives the engine when the launch starts, and the
-// launch is latched until its answer folds (bgLaunching, cleared by foldBgStarted) the way a
+// launch is latched until its answer folds (holdBgLaunch, released by foldBgStarted) the way a
 // /sessions load is: while the Cmd reads the Agent, a heartbeat's rebind is stashed, a wake is held
 // and every idle-only command — a second /bg among them — is queued, so no idle-only mutator runs
 // beside the launch-time snapshot.
@@ -673,7 +673,7 @@ func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 	}
 	eng, ctx := m.eng, m.parent
 	launch := domain.RecipeLaunch{SkillID: id, Text: strings.TrimSpace(text), Background: true}
-	m.bgLaunching = true
+	m.holds.hold(holdBgLaunch)
 	return m, func() tea.Msg {
 		workflow, err := eng.StartRecipe(ctx, launch)
 		return bgStartedMsg{id: workflow, err: err}
@@ -686,7 +686,7 @@ func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 // launch, in order; either waits on for a worker a message opened meanwhile (finishWorker). A held
 // wake is tried by the Update tail (wakeAfterFold).
 func (m Model) foldBgStarted(msg bgStartedMsg) (tea.Model, tea.Cmd) {
-	m.bgLaunching = false
+	m.holds.release(holdBgLaunch)
 	if msg.err != nil {
 		m.transcript.addNote(msg.err.Error())
 	} else {

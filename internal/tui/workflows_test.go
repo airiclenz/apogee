@@ -464,7 +464,7 @@ func TestWorkflowsViewCtrlRRerunsTheFailedItems(t *testing.T) {
 	id := m.workflowsPane.shown
 
 	pressed, cmd := stepCmd(t, m, keyCtrl('r'))
-	if !pressed.bgLaunching {
+	if !pressed.holds.has(holdBgLaunch) {
 		t.Error("^r did not latch the launch while the re-run reads the engine")
 	}
 	for _, msg := range cmdMsgs(cmd) {
@@ -473,7 +473,7 @@ func TestWorkflowsViewCtrlRRerunsTheFailedItems(t *testing.T) {
 	if stops, reruns := eng.workflowActions(); !slices.Equal(reruns, []string{id}) || len(stops) != 0 {
 		t.Errorf("reruns = %v, stops = %v; want one re-run of %s and no stop", reruns, stops, id)
 	}
-	if pressed.bgLaunching {
+	if pressed.holds.has(holdBgLaunch) {
 		t.Error("the re-run's answer did not release the launch latch")
 	}
 	if note, want := lastNote(pressed), "started "+id+" in the background"; note != want {
@@ -503,7 +503,7 @@ func TestWorkflowsViewCtrlRRerunRefusedWhileAnActuationIsInFlight(t *testing.T) 
 	if cmd != nil {
 		t.Error("^r during an actuation returned a launch Cmd")
 	}
-	if pressed.bgLaunching {
+	if pressed.holds.has(holdBgLaunch) {
 		t.Error("^r during an actuation latched the /bg launch")
 	}
 	if _, reruns := eng.workflowActions(); len(reruns) != 0 {
@@ -531,8 +531,8 @@ func TestWorkflowsViewVerbsAreDetailChordsOnly(t *testing.T) {
 		if stops, reruns := eng.workflowActions(); len(stops) != 0 || len(reruns) != 0 {
 			t.Errorf("level %d: stops = %v, reruns = %v; want no engine call", level, stops, reruns)
 		}
-		if !m.workflowsPane.open || m.workflowsPane.level != level || m.bgLaunching {
-			t.Errorf("level %d: pane open %v at level %d, latch %v; want it untouched", level, m.workflowsPane.open, m.workflowsPane.level, m.bgLaunching)
+		if !m.workflowsPane.open || m.workflowsPane.level != level || m.holds.has(holdBgLaunch) {
+			t.Errorf("level %d: pane open %v at level %d, latch %v; want it untouched", level, m.workflowsPane.open, m.workflowsPane.level, m.holds.has(holdBgLaunch))
 		}
 	}
 }

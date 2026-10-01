@@ -65,7 +65,10 @@ NOTES (2026-10-01): the stashed-rebind apply sites that still read bgLaunching/a
 **Acceptance:** `go test ./internal/tui -run 'TestBgLaunch(Queues|Holds|Keeps)|TestRebindDeferredWhileBusy|TestActuation|TestBackgroundWorkflow_|TestReportActivity|TestWorkflowsViewCtrlR|TestQueued|TestSettingsPaneRefusesTheExternalEditMidRun|TestEngineHold|TestSessionSwitch|TestABgOnly|TestAFailedWorkflowResume|TestPreboundClear|TestBusyFailure|TestSessionBrowserResume'`; `go test ./internal/tui -run '^TestBgLaunchStashesARebindUntilItLands$'`
 **Commit:** `refactor(tui): engine gates ask named questions`
 
-## 4. tui: the holds are stored as one set
+## 4. tui: the holds are stored as one set — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): consequential edit — internal/tui/engineholds_test.go: made necessary by removing Model.bgLaunching/sessionLoading (its two table setups now call m.holds.hold(holdBgLaunch) / m.holds.hold(holdSessionLoad)).
+NOTES (2026-10-01): the stored set is Model.holds of the existing engineHold bitset type, with has/hold/release methods in engineholds.go; engineHoldSources reads the two stored bits from it, the other holds stay derived from their own fields.
 
 **Depends on:** item 3.
 **Files:** `internal/tui/model.go`, `internal/tui/commandrun.go`, `internal/tui/workflows.go`, `internal/tui/sessions.go`, `internal/tui/engineholds.go`, `internal/tui/actuation.go`, `internal/tui/workflow.go`, `internal/tui/command.go`, `internal/tui/command_test.go`, `internal/tui/workflows_test.go`, `internal/tui/workflow_test.go`

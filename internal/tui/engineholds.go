@@ -44,6 +44,21 @@ const (
 	holdsBlockingResume = holdPrebound | holdQuitting | holdSessionLoad | holdBgLaunch | holdRecordWrite
 )
 
+// has reports whether every hold in want is in the set.
+func (s engineHold) has(want engineHold) bool {
+	return s&want == want
+}
+
+// hold adds h to the set — the producer taking the engine away from the Update loop.
+func (s *engineHold) hold(h engineHold) {
+	*s |= h
+}
+
+// release removes h from the set — the fold that hands the engine back.
+func (s *engineHold) release(h engineHold) {
+	*s &^= h
+}
+
 // engineHoldSources maps each hold to the Model field (or predicate) it is read from — the one
 // place a hold's meaning meets the Model's storage.
 var engineHoldSources = [...]struct {
@@ -52,8 +67,8 @@ var engineHoldSources = [...]struct {
 }{
 	{holdWorker, Model.busy},
 	{holdActuation, func(m Model) bool { return m.actuation.inFlight }},
-	{holdBgLaunch, func(m Model) bool { return m.bgLaunching }},
-	{holdSessionLoad, func(m Model) bool { return m.sessionLoading }},
+	{holdBgLaunch, func(m Model) bool { return m.holds.has(holdBgLaunch) }},
+	{holdSessionLoad, func(m Model) bool { return m.holds.has(holdSessionLoad) }},
 	{holdRecordWrite, func(m Model) bool { return m.writeBusy || len(m.pendingWrites) > 0 }},
 	{holdQuitting, func(m Model) bool { return m.quitting }},
 	{holdPrebound, Model.prebound},

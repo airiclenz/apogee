@@ -365,7 +365,7 @@ func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 // switchSession starts the load of the stored session id that resumeLoaded then restores, keep
 // riding along to the restore (sessionLoadedMsg).
 func (m Model) switchSession(id string, keep bool) (Model, tea.Cmd) {
-	m.sessionLoading = true // …and a background workflow's wake waits for it (workflow.go)
+	m.holds.hold(holdSessionLoad) // …and a background workflow's wake waits for it (workflow.go)
 	return m, m.loadSession(id, keep)
 }
 

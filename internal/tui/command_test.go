@@ -1137,8 +1137,8 @@ func TestBgLaunchStashesARebindUntilItLands(t *testing.T) {
 	if len(rb.calls) != 2 || rb.calls[1].model != "new-model" {
 		t.Fatalf("rebind calls = %+v, want the stashed change bound once the launch landed", rb.calls)
 	}
-	if m.bgLaunching || m.hb.pendingRebind != nil {
-		t.Errorf("latched %v, pending %+v after the launch landed; want both clear", m.bgLaunching, m.hb.pendingRebind)
+	if m.holds.has(holdBgLaunch) || m.hb.pendingRebind != nil {
+		t.Errorf("latched %v, pending %+v after the launch landed; want both clear", m.holds.has(holdBgLaunch), m.hb.pendingRebind)
 	}
 	if !slices.Contains(noteTexts(m), "started "+testWorkflowID+" in the background") {
 		t.Errorf("notes = %q, want the started note", noteTexts(m))
@@ -1176,18 +1176,18 @@ func TestBgLaunchQueuesIdleOnlyCommandsUntilItLands(t *testing.T) {
 	}
 
 	// The queued /bg ran and latched again, so the /clear behind it still waits for that launch.
-	if !m.bgLaunching || eng.clearCalls != 0 || len(m.deferredCommands) != 1 {
+	if !m.holds.has(holdBgLaunch) || eng.clearCalls != 0 || len(m.deferredCommands) != 1 {
 		t.Fatalf("latched %v, clear calls %d, queued %d; want the second /bg launching and /clear still queued",
-			m.bgLaunching, eng.clearCalls, len(m.deferredCommands))
+			m.holds.has(holdBgLaunch), eng.clearCalls, len(m.deferredCommands))
 	}
 	for _, msg := range cmdMsgs(drained) {
 		if started, ok := msg.(bgStartedMsg); ok {
 			m = step(t, m, started)
 		}
 	}
-	if m.bgLaunching || eng.clearCalls != 1 || len(m.deferredCommands) != 0 {
+	if m.holds.has(holdBgLaunch) || eng.clearCalls != 1 || len(m.deferredCommands) != 0 {
 		t.Errorf("latched %v, clear calls %d, queued %d; want the /clear run once the second launch landed",
-			m.bgLaunching, eng.clearCalls, len(m.deferredCommands))
+			m.holds.has(holdBgLaunch), eng.clearCalls, len(m.deferredCommands))
 	}
 	if got := eng.launches(); len(got) != 2 || got[1].Text != "b" {
 		t.Errorf("StartRecipe calls = %+v, want the queued /bg launched second", got)
@@ -1263,7 +1263,7 @@ func TestBgLaunchKeepsARebindStashedPastAnActuationEnd(t *testing.T) {
 	m, rb := wireLauncher(t, newLauncher())
 	m, cmd := startLoad(t, m, "alpha")
 	m = foldBeatMsg(t, m, upBeat("other-model", 16384))
-	m.bgLaunching = true // a /bg launch reading the engine off the loop
+	m.holds.hold(holdBgLaunch) // a /bg launch reading the engine off the loop
 
 	m, _ = driveActuation(t, m, cmd)
 

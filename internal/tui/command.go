@@ -119,7 +119,7 @@ type parsedInput struct {
 //   - touchesServer — the verb switches the session's server or actuates it, so the actuation latch
 //     refuses it while a launcher verb is in flight: the server is mid-restart, and there is nothing
 //     stable to switch (actuationBlocked, ADR 0029 D5). /bg carries it too: its launch reads the
-//     Agent off the loop (bgLaunching), which a completing load's move would re-point beside it. The
+//     Agent off the loop (holdBgLaunch), which a completing load's move would re-point beside it. The
 //     latch refuses the opensExchange pair for the neighbouring reason — there is nothing to send
 //     to — so it reads the two flags together rather than keeping a verb list of its own, and a
 //     future verb that opens an Exchange is latched by declaring that one flag.

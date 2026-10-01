@@ -411,25 +411,26 @@ type Model struct {
 	// queued. The Update tail reads the engine's queue at the first idle fold (offerWaitingPrompt)
 	// and clears it on that one try.
 	//
-	// sessionLoading marks a /sessions load in flight — the record is being read off the loop, and
-	// the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held until it
-	// lands.
-	//
-	// bgLaunching marks a /bg launch in flight (runBg sets it, foldBgStarted clears it): the launch
-	// reads the Agent off the loop where the idle-only mutators must not run (StartRecipe's
-	// launch-time snapshot), so until it lands a heartbeat's rebind is stashed (observeBinding), a
-	// wake is held (canWake), and an idle-only command is queued rather than run (commandRunnable).
+	// holds records the engine holds no other field already carries (engineholds.go; the rest are
+	// derived by engineHolds), each set and cleared through hold/release:
+	//   - holdSessionLoad marks a /sessions load in flight — the record is being read off the loop,
+	//     and the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held
+	//     until it lands.
+	//   - holdBgLaunch marks a /bg launch in flight (runBg sets it, foldBgStarted releases it): the
+	//     launch reads the Agent off the loop where the idle-only mutators must not run
+	//     (StartRecipe's launch-time snapshot), so until it lands a heartbeat's rebind is stashed
+	//     (observeBinding), a wake is held (canWake), and an idle-only command is queued rather
+	//     than run (commandRunnable).
 	//
 	// resumePending says a restored session's background workflows are still to be started from
 	// their folders (Engine.ResumeWorkflows): set by a --resume start and by every /sessions switch
 	// or /fork that restored a record, and honoured by the Update tail at the first fold that finds
 	// the engine bound, idle and on the restored session's scratch directory (resumeAfterFold).
-	workflows      backgroundWorkflows
-	wakePending    bool
-	promptPending  bool
-	sessionLoading bool
-	bgLaunching    bool
-	resumePending  bool
+	workflows     backgroundWorkflows
+	wakePending   bool
+	promptPending bool
+	holds         engineHold
+	resumePending bool
 
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
@@ -1415,7 +1416,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// Sessions.Load(id) returned: restore the record into the live engine and repaint its
 		// scrollback, or note the failure with the view left untouched (sessions.go). The load is
 		// no longer in flight either way, so a held wake may go at the tail.
-		m.sessionLoading = false
+		m.holds.release(holdSessionLoad)
 		return m, m.resumeLoaded(msg)
 
 	case bgStartedMsg:
@@ -2083,7 +2084,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 			m, record = m.recordSend(sent)
 		}
 		if !m.commandRunnable(parsed) {
-			// Idle, but a /bg launch holds the engine off the loop (bgLaunching): an idle-only verb
+			// Idle, but a /bg launch holds the engine off the loop (holdBgLaunch): an idle-only verb
 			// waits for it to land (foldBgStarted drains it), as it waits for a worker.
 			next, cmd := m.queueCommand(parsed)
 			return next, tea.Batch(cmd, record)
@@ -2411,10 +2412,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// The engine is the Update loop's again, which is the boundary a binding change captured
 	// mid-Exchange has been waiting for (ADR 0024). It runs BEFORE the idle save so the session
 	// record is stamped with the model that is now bound, notes and all. A /bg launch still reading
-	// the Agent off the loop (bgLaunching — a message can open an Exchange beside it) makes this not
+	// the Agent off the loop (holdBgLaunch — a message can open an Exchange beside it) makes this not
 	// that boundary yet: the rebind stays stashed for foldBgStarted, which binds it once the launch
 	// has landed.
-	if !m.bgLaunching {
+	if !m.holds.has(holdBgLaunch) {
 		m.applyPendingRebind()
 	}
 	if next == stateIdle {

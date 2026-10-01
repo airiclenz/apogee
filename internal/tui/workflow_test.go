@@ -141,7 +141,7 @@ func TestBackgroundWorkflow_WakeIsHeldWhileASessionLoads(t *testing.T) {
 	t.Parallel()
 	eng := wakingEngine()
 	m := newTestModelEng(t, eng, testOpts)
-	m.sessionLoading = true
+	m.holds.hold(holdSessionLoad)
 
 	m = finishBackground(t, m)
 	if eng.wakes() != 0 {

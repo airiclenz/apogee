@@ -496,7 +496,7 @@ func (m *Model) closeWorkflowPrompt() {
 	m.restoreAskDraft()
 	m.state = stateIdle
 	m.layout()
-	if !m.bgLaunching && !m.actuation.inFlight {
+	if !m.holds.has(holdBgLaunch) && !m.actuation.inFlight {
 		m.applyPendingRebind()
 	}
 	m.promptPending = true

@@ -334,7 +334,7 @@ func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // Update loop (a queued one's stop writes its status.json); the engine refuses one it neither runs
 // nor queues, and that refusal is noted. ^r re-runs its failed items: the launch reads the engine
 // for its snapshot, so it goes only at idle, off the loop and under the /bg launch latch
-// (bgLaunching), and folds as a /bg launch does (foldBgStarted); while an actuation is in flight it
+// (holdBgLaunch), and folds as a /bg launch does (foldBgStarted); while an actuation is in flight it
 // is refused through the predicate that refuses /bg (actuationBlocked), with the latch's own note. ^s opens the name row that saves it
 // as a recipe (openWorkflowSave). ^a opens the prompt it waits on (answerShownWorkflow). Any other
 // key is swallowed.
@@ -352,7 +352,7 @@ func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.transcript.addNote(workflowRerunNotIdle)
 			return m, nil
 		}
-		m.bgLaunching = true
+		m.holds.hold(holdBgLaunch)
 		return m, func() tea.Msg { return bgStartedMsg{id: id, err: eng.RerunFailed(id)} }
 	case workflowSaveKey:
 		return m.openWorkflowSave(), nil

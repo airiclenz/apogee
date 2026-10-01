@@ -69,7 +69,7 @@ func TestEngineHolds_Questions(t *testing.T) {
 		},
 		{
 			name:  "bg launch is quiescent",
-			setup: func(m *Model) { m.bgLaunching = true },
+			setup: func(m *Model) { m.holds.hold(holdBgLaunch) },
 			want: atRestExcept(func(a *engineAnswers) {
 				a.runsIdleOnly, a.runsDeferred, a.rebinds, a.launchesBg = false, false, false, false
 				a.resumesWorkflow, a.wakes = false, false
@@ -77,7 +77,7 @@ func TestEngineHolds_Questions(t *testing.T) {
 		},
 		{
 			name:  "session loading",
-			setup: func(m *Model) { m.sessionLoading = true },
+			setup: func(m *Model) { m.holds.hold(holdSessionLoad) },
 			want:  atRestExcept(func(a *engineAnswers) { a.resumesWorkflow, a.wakes = false, false }),
 		},
 		{
