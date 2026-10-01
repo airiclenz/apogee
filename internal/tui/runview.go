@@ -294,7 +294,7 @@ func (m Model) pushView(level runView) Model {
 	// tail — so a Model handed back from openRun is already standing on the run, rather than on a
 	// frame Update's tail has yet to settle (the moved root would miss the frame key and repaint
 	// there anyway; a positioning repaint is stated where the move is written, not left to it).
-	m.refreshViewport()
+	m.refreshViewport() // geometry: detached = false above is read only by refreshViewport (its GotoBottom onto the run's tail); settleFrame's frameKey and stale-height checks never see the flag
 	return m
 }
 
@@ -330,7 +330,7 @@ func (m Model) upRun() Model {
 	//
 	// The repaint stays here for the reason openRun's does: it positions, and the restore right
 	// below reads the geometry it produced (SetYOffset against the repainted level, AtBottom).
-	m.refreshViewport()
+	m.refreshViewport() // geometry: the restore below reads the repainted level (SetYOffset, floorShortScreenOffset, AtBottom), and the restored detached flag is one settleFrame never sees
 	if left.detached {
 		m.viewport.SetYOffset(left.yOffset)
 		m.floorShortScreenOffset()

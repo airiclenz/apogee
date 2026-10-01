@@ -1291,3 +1291,30 @@ func TestRebindNoticesSurfaceAsNotes(t *testing.T) {
 		t.Errorf("transcript notes =\n%q\nwant\n%q", got, want)
 	}
 }
+
+// TestBeatIsSettledByTheTail drives the two kinds of beat that move the view through Update: one
+// that shrinks the offering under an open picker (a pane redrawn at a new height) and one that
+// crosses offline (a note). Neither fold lays out; the tail's stale-height check and the frame key
+// carry them (doc.go, "an arm mutates; Update's tail lays out and repaints").
+func TestBeatIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+	openHeight := m.viewport.Height()
+
+	shrunk := foldBeatMsg(t, m, twoModelBeat())
+	if !shrunk.picker.open || shrunk.viewport.Height() == openHeight {
+		t.Fatalf("precondition: picker open=%v over a transcript of %d rows (%d before the beat)",
+			shrunk.picker.open, shrunk.viewport.Height(), openHeight)
+	}
+	assertSettled(t, shrunk)
+
+	offline := foldBeatMsg(t, m, downBeat("connection refused"))
+	offline = foldBeatMsg(t, offline, downBeat("connection refused"))
+	if !offline.hb.offline {
+		t.Fatal("precondition: two idle failures after first contact did not cross offline")
+	}
+	assertSettled(t, offline)
+}

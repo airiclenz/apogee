@@ -391,3 +391,29 @@ func TestBoundStartOpensNothing(t *testing.T) {
 		t.Errorf("a bound session paints the pre-bound fact:\n%s", got)
 	}
 }
+
+// TestPreboundArmsAreSettledByTheTail drives both pre-bound arms through Update: a refused send
+// (a note and the picker back up) and an accepted bind (the picker closed, the box restated, a
+// note). Neither lays out; the tail's frame key and stale-height check carry them (doc.go, "an arm
+// mutates; Update's tail lays out and repaints").
+func TestPreboundArmsAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
+	m = step(t, m, keyEsc())
+	closedHeight := m.viewport.Height()
+
+	m.input.SetValue("what is the capital of France?")
+	refused := step(t, m, keyEnter())
+	if !refused.picker.open || refused.viewport.Height() == closedHeight {
+		t.Fatalf("precondition: picker open=%v over a transcript of %d rows (%d with it closed)",
+			refused.picker.open, refused.viewport.Height(), closedHeight)
+	}
+	assertSettled(t, refused)
+
+	bound := step(t, refused, keyEnter())
+	if bound.prebound() || bound.picker.open {
+		t.Fatalf("precondition: prebound=%v picker open=%v after the accept", bound.prebound(), bound.picker.open)
+	}
+	assertSettled(t, bound)
+}

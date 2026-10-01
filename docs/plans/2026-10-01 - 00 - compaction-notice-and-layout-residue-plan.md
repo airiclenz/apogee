@@ -180,7 +180,12 @@ reportpane_test.go, thinkingpane_test.go) stays green.
   `TestClickOnAVacatedRowSelectsNoTranscriptLine|TestUsageKeysLeaveTheRestOfTheFrameAlone`).
 **Commit:** `refactor(tui): pane arms leave layout to Update's tail`
 
-## 5. Frame-driver sites: keep or drop, each annotated
+## 5. Frame-driver sites: keep or drop, each annotated — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): 5 belt calls dropped (foldSpinnerTick's refreshViewport, foldModeReport's layout, foldBeatMsg's layout, preboundRefusal's layout, bindToServer's layout); the 2 run-view repaints (pushView, which openRun funnels through, and upRun) are kept, each annotated with a same-line `// geometry:` comment: pushView writes detached = false, which settleFrame never sees; upRun's restore reads the repainted geometry. foldModeReport's now-unused `before` local and its `m.ready` guard went with its call (settle has its own `!ready` guard). bindToServer now returns foldServerBind's result directly.
+NOTES (2026-10-01): comments rewritten where they named a dropped call's function as a repaint site: foldSpinnerTick's doc and body comment, foldModeReport's doc, foldBeatMsg's body comment, foldBeat's doc ("so the caller repaints only when..."), transcript.go hasLiveStar's doc, paintcache.go frameKey.blink, model.go settle's doc ("foldModeReport's guard").
+NOTES (2026-10-01): each per-file test sits in its source's own _test.go: TestSpinnerFlipIsSettledByTheTail, TestMeasureMoveIsSettledByTheTail, TestBeatIsSettledByTheTail, TestPreboundArmsAreSettledByTheTail. No test calls a function that lost a call directly (grep for `.foldSpinnerTick(`, `.foldModeReport(`, `.foldBeatMsg(`, `.preboundRefusal(`, `.bindToServer(` in internal/tui/*_test.go finds none; the test helper foldBeatMsg goes through Update), so the Acceptance -run alternation needs no extension.
+NOTES (2026-10-01): foldBeat's bool report (and the offeringMoved count feeding it) now has no consumer: foldBeatMsg discards it with `_`. Removing it would change foldBeat's and foldBeatFailure's signatures, which is outside this item's scope.
 
 **What:**
 **Goal:** the item-2 rule holds for `internal/tui/spinner.go`, `runview.go`, `heartbeat.go`,

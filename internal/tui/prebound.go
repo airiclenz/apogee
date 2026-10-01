@@ -139,7 +139,6 @@ func (m Model) preboundRefusal() (tea.Model, tea.Cmd) {
 		m.picker = picker{open: true, kind: pickerServer,
 			listSurface: listSurface{listCursor: listCursor{selected: m.currentServerRow()}}}
 	}
-	m.layout()
 	return m, nil
 }
 
@@ -164,9 +163,7 @@ func (m Model) bindToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	// The state is over the moment the engine exists, and it is cleared BEFORE the fold: the beat the
 	// fold arms is issued only for a bound session (beatCmd).
 	m.opts.Prebound = PreboundStart{}
-	bound, beat := m.foldServerBind(result, record)
-	bound.layout()
-	return bound, beat
+	return m.foldServerBind(result, record)
 }
 
 // foldServerBind folds a COMMITTED first bind into the display — [Model.foldServerSwitch]'s sibling,

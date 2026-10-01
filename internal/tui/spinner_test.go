@@ -937,3 +937,25 @@ func TestSpinnerFlipRepaintsForRunningWorkflow(t *testing.T) {
 		t.Error("the flipping tick with a running workflow block did not repaint — its star would never blink")
 	}
 }
+
+// TestSpinnerFlipIsSettledByTheTail drives the flipping tick under a live header through Update:
+// the fold only advances the phase, and the frame key's blink field is what makes the tail repaint
+// the star (doc.go, "an arm mutates; Update's tail lays out and repaints").
+func TestSpinnerFlipIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	m.input.SetValue("run the tests")
+	m = step(t, m, keyEnter())
+	openCall(&m, "c1", "go test ./...")
+	m.refreshViewport()
+	m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that crosses the phase
+	before := m.painted
+
+	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
+
+	if m.painted.blink == before.blink {
+		t.Fatalf("precondition: the painted blink stayed %v across the flipping tick", before.blink)
+	}
+	assertSettled(t, m)
+}

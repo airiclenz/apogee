@@ -388,8 +388,8 @@ func (s spinnerAnim) tick(gen int) tea.Cmd {
 // Update loop drops any tick that does not carry the live generation.
 type spinnerTickMsg struct{ gen int }
 
-// foldSpinnerTick folds one frame of the spinner chain: advance the animation, repaint the live
-// star on the ticks that flip its blink phase, and re-arm.
+// foldSpinnerTick folds one frame of the spinner chain: advance the animation and re-arm. The
+// live star's repaint on the ticks that flip its blink phase is Update's tail's, not this fold's.
 //
 // The chain is kept alive only while running, and only for the current generation: dropping the tick
 // when idle lets the chain die naturally, and dropping a tick from a previous arm means a re-arm (an
@@ -398,20 +398,16 @@ func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 	if m.state != stateRunning || msg.gen != m.worker.gen {
 		return m, nil
 	}
-	wasBlink := m.spin.blink()
+	// The frame the status line spins on is also the LIVE STAR's clock: a block still holding an
+	// open call, or a workflow block whose Workflow has not ended, paints its header glyph from this
+	// frame's blink phase (layout.md, "The live star"; blockState.star). The repaint that flip needs
+	// is carried by the frame key's blink field, which reads the phase only while some header is live
+	// (transcript.hasLiveStar), so Update's tail ([Model.settle]) lays out on exactly the tick that
+	// FLIPS the phase under a live header — every other tick paints byte-identically, and
+	// re-rendering the whole scrollback ten to twenty times a second for an identical result would be
+	// work for its own sake, and would put the keep-if-unchanged rule (refreshViewport) between the
+	// human and every drag-selection they hold through a turn. A selection spanning a header that
+	// DOES flip is dropped, which is that same rule doing its ordinary job on a line that changed.
 	m.spin.frame++
-	if m.spin.blink() != wasBlink && m.transcript.hasLiveStar() {
-		// The frame the status line spins on is also the LIVE STAR's clock: a block still holding
-		// an open call, or a workflow block whose Workflow has not ended, paints its header glyph
-		// from this frame's blink phase (layout.md, "The live star"; blockState.star), so the flip
-		// needs a repaint the tick did not use to do. It is asked for only on the tick that
-		// actually FLIPS the phase, and only while some header is live (transcript.hasLiveStar) —
-		// every other tick paints byte-identically, and re-rendering the whole scrollback
-		// ten to twenty times a second for an identical result would be work for its own sake, and
-		// would put the keep-if-unchanged rule (refreshViewport) between the human and every
-		// drag-selection they hold through a turn. A selection spanning a header that DOES flip is
-		// dropped, which is that same rule doing its ordinary job on a line that changed.
-		m.refreshViewport()
-	}
 	return m, m.spin.tick(m.worker.gen)
 }

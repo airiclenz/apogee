@@ -427,7 +427,7 @@ type frameKey struct {
 	// blink is the live star's phase, and only while some header is still live
 	// (transcript.hasLiveStar): a settled transcript paints identically at either phase, so folding
 	// the bare phase in would repaint the scrollback on every flip of an idle session's clock
-	// (foldSpinnerTick's decision, spinner.go).
+	// (spinner.go, foldSpinnerTick — the tick only advances the phase; this field is its repaint).
 	blink bool
 	// backHint is the wording a rooted paint's breadcrumb advertises for esc ([Model.backHint]).
 	backHint string

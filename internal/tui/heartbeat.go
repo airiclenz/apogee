@@ -229,26 +229,17 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 	if !m.heartbeatLive(msg.gen) {
 		return m, nil
 	}
-	next, noted := m.foldBeat(msg.beat)
-	if noted {
-		// Only a beat that MOVED something — the offline state, a binding, or the rows of an open
-		// picker — lays out: a beat that changed nothing has nothing to draw, so re-rendering the
-		// whole transcript on every beat would be work for its own sake. (It no longer costs a
-		// live drag-selection: a repaint that appends a note leaves the spanned lines alone, and
-		// refreshViewport's keep-if-unchanged rule keeps the selection through it. Economy, not
-		// correctness.)
-		//
-		// layout() rather than a bare refreshViewport, because an offering that moved under an open
-		// picker moved the pane's drawn height with it, and the viewport WIDGET's height IS the
-		// transcript's drawn row count (layout(), model.go) — left stale, the scroll clamp strands
-		// the tail under the pane.
-		next.layout()
-	}
+	// A beat that MOVED something — the offline state, a binding, the rows of an open picker — is
+	// laid out by Update's tail ([Model.settle]): its notes move the transcript generation, and a
+	// picker redrawn at a new height leaves the viewport widget's height stale, which the tail's
+	// height check catches. A beat that changed nothing misses neither, so it repaints nothing.
+	next, _ := m.foldBeat(msg.beat)
 	return next, next.beatTick()
 }
 
 // foldBeat folds one landed observation into the heartbeat state and reports whether it changed
-// what the view shows (so the caller repaints only when there is something new to see). Three things
+// what the view shows (the repaint does not ride on the report: Update's tail lays out from what the
+// fold moved, [Model.settle]). Three things
 // can move: the offline state, the bindings themselves (through [Model.observeBinding]), and the row
 // count of a picker that is OPEN over the offering this beat replaces — which changes how tall that
 // pane is drawn, and so how many rows the transcript below it keeps ([Model.transcriptRows]).

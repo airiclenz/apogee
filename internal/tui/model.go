@@ -2702,11 +2702,12 @@ func (m *Model) freshenTranscriptClamp() {
 // It is a no-op while no WindowSizeMsg has sized the frame (m.ready): bubbletea v2 sends the first
 // size as `go p.Send(resizeMsg)`, racing Init's Cmd and the terminal's mode reports, and a Msg that
 // lands first must not find the widget's zero height ≠ its one-row floor and lay out at width 0 —
-// the WindowSizeMsg arm lays out and stores the key on the first sized frame (foldModeReport's
-// guard, width.go). The one Msg exempt from it is tea.MouseMotionMsg, which settleFrame filters
-// before calling: motion moves a selection's head and nothing else, View overlays the shade, and a
-// key miss that motion happens to be the first Update after waits for the next Msg rather than
-// repainting the scrollback at the mouse's sampling rate (TestMouseMotionNeverRepaints).
+// the WindowSizeMsg arm lays out and stores the key on the first sized frame, so a measure a mode
+// report moved before it is carried by that first layout (foldModeReport, width.go). The one Msg
+// exempt from it is tea.MouseMotionMsg, which settleFrame filters before calling: motion moves a
+// selection's head and nothing else, View overlays the shade, and a key miss that motion happens to
+// be the first Update after waits for the next Msg rather than repainting the scrollback at the
+// mouse's sampling rate (TestMouseMotionNeverRepaints).
 func (m *Model) settle() {
 	if !m.ready {
 		return

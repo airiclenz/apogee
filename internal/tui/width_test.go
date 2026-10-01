@@ -298,3 +298,20 @@ func TestUpdateFollowsThePainterToGraphemeWidth(t *testing.T) {
 			"about width", got)
 	}
 }
+
+// TestMeasureMoveIsSettledByTheTail drives the mode report that moves the measure through Update:
+// the fold only records it, and the measure being part of the frame key is what makes the tail
+// re-wrap the transcript against it (doc.go, "an arm mutates; Update's tail lays out and repaints").
+func TestMeasureMoveIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	before := m.painted
+
+	m = step(t, m, tea.ModeReportMsg{Mode: ansi.ModeUnicodeCore, Value: ansi.ModeSet})
+
+	if m.painted.measure == before.measure {
+		t.Fatalf("precondition: the painted measure stayed %v across the mode-2027 report", before.measure.Method())
+	}
+	assertSettled(t, m)
+}
