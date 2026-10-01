@@ -159,8 +159,7 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	// The Agent rides along as the lifecycle's exchangeObserver for the same reason: the lifecycle
 	// owns the moment an Exchange ends, the moment a cancelled Turn is rolled back and the moment
 	// an Exchange is aborted, the Agent owns what each costs — the undo journal's closing capture
-	// (ADR 0074); the two notices that rode the tool results the rollback drops, the context-fill
-	// ladder (ADR 0077 D4) and the step-budget notice's latch (stepnotice.go); and the retained
+	// (ADR 0074); the context-fill ladder a rollback re-arms (ADR 0077 D4); and the retained
 	// delegations an abort restores (ADR 0086 D3).
 	a.turns = &turnLifecycle{
 		conv:     &a.conv,
@@ -180,11 +179,13 @@ func (a *Agent) exchangeClosed() {
 
 // turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
 // ROLLBACK (turnLifecycle.end's endCancelled row — a cancel while the reply streamed or during a
-// history fold): the two notices that rode the dropped tool results are re-armed (rearmNotices,
-// stepnotice.go). The retained delegations are left as they stand: a Turn rolled back dispatched no
-// delegation, since a cancel that reaches a dispatch settles the Turn instead (ADR 0088).
+// history fold): the context-fill ladder ends its climb (rearmFillNotice, fillnotice.go). The step-
+// and token-budget notices need no re-arm: their latch is the note's own presence (stepnotice.go),
+// so a note the rollback dropped is simply gone and the re-attempt's result is told again. The
+// retained delegations are left as they stand: a Turn rolled back dispatched no delegation, since
+// a cancel that reaches a dispatch settles the Turn instead (ADR 0088).
 func (a *Agent) turnRolledBack() {
-	a.rearmNotices()
+	a.rearmFillNotice()
 }
 
 // exchangeAborted is the Agent's half of the exchangeObserver contract for an Exchange's ABORT

@@ -91,8 +91,8 @@ type turnLifecycle struct {
 	// It is an interface rather than an Agent for the same reason conv is a pointer: this type owns
 	// the moments and knows nothing of what an Agent wants to do about them — the undo journal's
 	// closing capture hangs off the first (Agent.closeUndoGroup, agent.go), the context-fill
-	// ladder's re-arm, the step-budget note's latch (Agent.rearmNotices, stepnotice.go) and the
-	// retained delegations' Turn-start restore off the second, the retained delegations'
+	// ladder's re-arm (Agent.rearmFillNotice, fillnotice.go) and the retained delegations'
+	// Turn-start restore off the second, the retained delegations'
 	// Exchange-start restore off the third (retainedDelegates, children.go) — and no fire site
 	// carries a context or an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
 	// no Agent behind it, and an engine that records nothing simply hangs nothing here.
@@ -234,7 +234,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		l.conv.TruncateDeferred(t.deferredFloor)
 		l.restoreDeferred(t.deferred)
 		// The dropped tool results may include the one a context-fill notice rode on: let the
-		// Agent end the ladder's climb (observer.turnRolledBack → rearmNotices), as abort does.
+		// Agent end the ladder's climb (observer.turnRolledBack → rearmFillNotice), as abort does.
 		if l.observer != nil {
 			l.observer.turnRolledBack()
 		}

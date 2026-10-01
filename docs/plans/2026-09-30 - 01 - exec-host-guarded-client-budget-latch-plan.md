@@ -234,7 +234,10 @@ The ADR 0012 note records review #7's narrowing as deliberate, not deferred: the
 **Acceptance:** the sweep grep and the removed-function grep return no site outside `docs/plans`, `docs/reviews` and archived files; `! grep -n 'environment terminal and python_exec run in' internal/tools/run_tests.go`; `go test ./internal/tools -run DocMap`
 **Commit:** `docs: record the exec host and guarded client consolidation`
 
-## 12. agent: a budget note's latch is its own presence
+## 12. agent: a budget note's latch is its own presence — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): agent.go's remaining Agent field block (conv … task) realigned by gofmt after the four latch fields were removed.
+NOTES (2026-10-01): the rollback tests also assert the threshold Turn's first result is noted (assertStepNoted/assertTokenNoted) where they used to peek the fields, and call a.turnRolledBack() after the DropRange so the real observer seam runs; the prune tests drop the *NoticeLive checks, keeping the ledger and next-result behaviour assertions. Stale "latch/re-arm" prose in domain/hooks.go, fillnotice.go and dispatch.go is left to item 13, which lists those files.
 
 **Files:** `internal/agent/stepnotice.go`, `internal/agent/agent.go`, `internal/agent/prune.go`, `internal/agent/compact.go`, `internal/agent/construct.go`, `internal/agent/stepnotice_test.go`, `internal/agent/turn.go`
 **Read first:** `internal/agent/stepnotice.go` — stepBudgetNotice, tokenBudgetNotice, rearmNotices; `internal/domain/hooks.go` — Conversation.HasEngineNote; `internal/agent/construct.go` — buildAgent observer comment;

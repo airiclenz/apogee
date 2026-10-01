@@ -192,40 +192,34 @@ func TestStepNoticeRidesOneResultOfAManyCallTurn(t *testing.T) {
 }
 
 // A cancelled Turn's rollback re-arms the notice ONLY when the dropped result is the one the note
-// rode: the re-attempt of the threshold Turn is told again (and the re-arm is idempotent), while a
-// cancelled Turn PAST the threshold keeps the noted result, so its re-attempt carries no second
-// copy.
+// rode — the latch is the note's own presence, so dropping the noted message is the re-arm: the
+// re-attempt of the threshold Turn is told again, while a cancelled Turn PAST the threshold keeps
+// the noted result, so its re-attempt carries no second copy.
 func TestStepNoticeReArmsAfterARollback(t *testing.T) {
 	t.Run("the threshold Turn itself", func(t *testing.T) {
 		sink := &recordingSink{}
 		a := stepNoticeChild(t, stepNoticeConfig(sink), 4)
 		a.turns.exchangeTurns = 2
-		adviseOneCall(t, a, "one")
-		if a.stepNoticeAt != 1 || !a.stepNoticeLive {
-			t.Fatalf("the notice fired and latched (%d, %v), want Turn 1 live", a.stepNoticeAt, a.stepNoticeLive)
-		}
+		rollback := a.conv.Len()
+		assertStepNoted(t, adviseOneCall(t, a, "one"), "one", stepNoticeLineThreeOfFour)
 
-		a.rearmNotices() // the rollback: the index still names the cancelled Turn
-		a.rearmNotices()
+		a.conv.DropRange(rollback, a.conv.Len()) // the rollback drops the noted result
+		a.turnRolledBack()
 
-		if a.stepNoticeAt != 0 || a.stepNoticeLive {
-			t.Fatalf("latch = (%d, %v) after the re-arm, want cleared", a.stepNoticeAt, a.stepNoticeLive)
-		}
 		assertStepNoted(t, adviseOneCall(t, a, "one again"), "one again", stepNoticeLineThreeOfFour)
 	})
 	t.Run("a later Turn past the threshold", func(t *testing.T) {
 		sink := &recordingSink{}
 		a := stepNoticeChild(t, stepNoticeConfig(sink), 4)
 		a.turns.exchangeTurns = 2
-		adviseOneCall(t, a, "three")
+		assertStepNoted(t, adviseOneCall(t, a, "three"), "three", stepNoticeLineThreeOfFour)
 		a.turns.index, a.turns.exchangeTurns = 1, 3 // Turn 4 under way; the noted result stays
+		rollback := a.conv.Len()
 		assertBare(t, 1, adviseOneCall(t, a, "four"), "four")
 
-		a.rearmNotices() // Turn 4 cancelled: its own messages drop, the noted third stays
+		a.conv.DropRange(rollback, a.conv.Len()) // Turn 4 cancelled: its own messages drop, the noted third stays
+		a.turnRolledBack()
 
-		if a.stepNoticeAt != 1 || !a.stepNoticeLive {
-			t.Fatalf("latch = (%d, %v) after a later Turn's rollback, want Turn 1 still live", a.stepNoticeAt, a.stepNoticeLive)
-		}
 		assertBare(t, 2, adviseOneCall(t, a, "four again"), "four again")
 	})
 }
@@ -352,9 +346,6 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		noted := adviseOneCall(t, a, "one") // the noted result: index 1, the oldest tool result
 		assertStepNoted(t, noted, "one", stepNoticeLineThreeOfFour)
 		seedToolTurns(a, apogeectx.PruneKeepTurns, 4000) // ~24k chars, past the ~10k-char trigger; the noted Turn is the one outside the window
-		if !a.stepNoticeLive {
-			t.Fatal("the notice did not latch on the noted result")
-		}
 
 		a.autoPrune(1)
 
@@ -367,9 +358,6 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		}
 		if spans := a.conv.At(1).Advice; len(spans) != 0 {
 			t.Fatalf("ledger = %+v after the stub replaced the fence, want it empty", spans)
-		}
-		if a.stepNoticeLive {
-			t.Fatal("stepNoticeLive still true after the prune stubbed the noted result, want the latch cleared")
 		}
 		assertStepNoted(t, adviseOneCall(t, a, "two"), "two", stepNoticeLineThreeOfFour)
 		assertNoStepFiring(t, sink)
@@ -389,9 +377,6 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		}
 		if last := results[len(results)-1]; !strings.HasSuffix(last, stepNoticeRendered(stepNoticeLineThreeOfFour)) {
 			t.Fatalf("the noted result = %q after the prune, want it kept whole", last)
-		}
-		if !a.stepNoticeLive {
-			t.Fatal("stepNoticeLive cleared by a prune that kept the noted result, want the latch standing")
 		}
 		assertBare(t, 1, adviseOneCall(t, a, "two"), "two")
 		assertNoStepFiring(t, sink)
@@ -509,16 +494,12 @@ func TestTokenNoticeRidesOneResultOfAManyCallTurn(t *testing.T) {
 func TestTokenNoticeReArmsAfterARollback(t *testing.T) {
 	sink := &recordingSink{}
 	a := tokenNoticeChild(t, stepNoticeConfig(sink), tokenCapTwentyMillion, 15_200_000)
-	adviseOneCall(t, a, "one")
-	if a.tokenNoticeAt != 1 || !a.tokenNoticeLive {
-		t.Fatalf("the notice fired and latched (%d, %v), want Turn 1 live", a.tokenNoticeAt, a.tokenNoticeLive)
-	}
+	rollback := a.conv.Len()
+	assertTokenNoted(t, adviseOneCall(t, a, "one"), "one", tokenNoticeLineFifteenPointTwo)
 
-	a.rearmNotices() // the rollback: the index still names the cancelled Turn
+	a.conv.DropRange(rollback, a.conv.Len()) // the rollback drops the noted result
+	a.turnRolledBack()
 
-	if a.tokenNoticeAt != 0 || a.tokenNoticeLive {
-		t.Fatalf("latch = (%d, %v) after the re-arm, want cleared", a.tokenNoticeAt, a.tokenNoticeLive)
-	}
 	assertTokenNoted(t, adviseOneCall(t, a, "one again"), "one again", tokenNoticeLineFifteenPointTwo)
 }
 
@@ -639,9 +620,6 @@ func TestTokenNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		if spans := a.conv.At(1).Advice; len(spans) != 0 {
 			t.Fatalf("ledger = %+v after the stub replaced the fence, want it empty", spans)
 		}
-		if a.tokenNoticeLive {
-			t.Fatal("tokenNoticeLive still true after the prune stubbed the noted result, want the latch cleared")
-		}
 		assertTokenNoted(t, adviseOneCall(t, a, "two"), "two", tokenNoticeLineFifteenPointTwo)
 		assertNoTokenFiring(t, sink)
 	})
@@ -659,9 +637,6 @@ func TestTokenNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		}
 		if last := results[len(results)-1]; !strings.HasSuffix(last, tokenNoticeRendered(tokenNoticeLineFifteenPointTwo)) {
 			t.Fatalf("the noted result = %q after the prune, want it kept whole", last)
-		}
-		if !a.tokenNoticeLive {
-			t.Fatal("tokenNoticeLive cleared by a prune that kept the noted result, want the latch standing")
 		}
 		assertBare(t, 1, adviseOneCall(t, a, "two"), "two")
 		assertNoTokenFiring(t, sink)

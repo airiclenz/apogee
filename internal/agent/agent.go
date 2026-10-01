@@ -393,20 +393,16 @@ type Agent struct {
 	// the zero Host is the real OS.
 	gitHost gitexec.Host
 
-	conv            domain.Conversation // serializable conversation state (ADR 0001)
-	turns           *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
-	compacting      bool                // the fold re-entrancy guard, held by foldFor for every trigger (compact.go)
-	stepNoticeAt    int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the note rode, 0 = none — what a cancelled Turn's rollback compares against to know whether it dropped the note (rearmNotices)
-	stepNoticeLive  bool                // and whether that note is still in the conversation: the latch the notice fires against, cleared by a fold or a prune stub that swallowed it (rearmStepNotice) so the next result is told again
-	tokenNoticeAt   int                 // token-budget notice (stepnotice.go, tokenBudgetNotice): stepNoticeAt's twin for the note that fires at three quarters of tokenCap
-	tokenNoticeLive bool                // and stepNoticeLive's twin, cleared by the same fold, prune and rollback routes (rearmTokenNotice)
-	depth           int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
-	callID          string              // the id of the sub_agent call that spawned this Agent, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0. The model's or server's id, so it can collide — runID is the run identity
-	runID           string              // this Agent's RUN IDENTITY: the engine-minted id of the delegation it runs (runIDMinter), stamped on every Event it emits (domain.EventBase.RunID); empty at depth 0. Unlike callID it is unique across the whole tree, which is what tells two runs whose spawning calls share an id apart
-	consoleOwner    string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
-	task            string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
-	seatFallback    bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so — for a workflow item's child, workflowPhaseResult and the workflow's answer (workflowAnswer), or its finish note when it runs in the background (finishNote). False for every other spawn, the absent ask included
-	capRequested    int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
+	conv         domain.Conversation // serializable conversation state (ADR 0001)
+	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
+	compacting   bool                // the fold re-entrancy guard, held by foldFor for every trigger (compact.go)
+	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	callID       string              // the id of the sub_agent call that spawned this Agent, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0. The model's or server's id, so it can collide — runID is the run identity
+	runID        string              // this Agent's RUN IDENTITY: the engine-minted id of the delegation it runs (runIDMinter), stamped on every Event it emits (domain.EventBase.RunID); empty at depth 0. Unlike callID it is unique across the whole tree, which is what tells two runs whose spawning calls share an id apart
+	consoleOwner string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
+	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
+	seatFallback bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so — for a workflow item's child, workflowPhaseResult and the workflow's answer (workflowAnswer), or its finish note when it runs in the background (finishNote). False for every other spawn, the absent ask included
+	capRequested int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
 
 	// nameMu guards name, which is the ONE identity field a running Agent may see replaced under
 	// it: a delegation the model left unnamed is named out of band, by a completion that lands while

@@ -18,9 +18,9 @@ import (
 // fence header is the one thing that tells a structural instruction from a Reaction's advice.
 //
 // The token-budget notice (tokenBudgetNotice, below) is its twin for the step cap's token sibling
-// (Agent.tokenCap, `delegate-max-tokens`): the same fence, the same latch and re-arm seams, the
-// same append site, fired once when the child's cumulative prompt tokens reach three quarters of
-// the budget. It exists because the two bounds are independent: a child under a wide working
+// (Agent.tokenCap, `delegate-max-tokens`): the same fence, the same latch (the note's own
+// presence), the same append site, fired once when the child's cumulative prompt tokens reach
+// three quarters of the budget. It exists because the two bounds are independent: a child under a wide working
 // window keeps the context-fill ladder (fillnotice.go) silent for its whole run while its
 // cumulative spend climbs past half the budget unannounced — the 2026-09-18 session reached 10.7M
 // of 20M without a word. Neither notice is a rung of that ladder: the ladder measures ONE
@@ -56,39 +56,28 @@ var tokenNoticeLine = mustPrompt("token-notice.txt")
 // is the one the notice rides, and false otherwise. It counts the Turn this result closes —
 // turns.exchangeTurns is advanced by Run AFTER step() returns, so at commit of Turn N it reads N-1
 // and the Turn under way is one more — and fires when that count has reached the threshold
-// (stepNoticeThreshold) while no copy of the note is live in the conversation (stepNoticeLive), so
-// it lands ONCE: a Turn with several tool calls commits once per call, and the first result past
-// the threshold latches the note against every later result while it survives. The latch is the
-// note's own presence, not the Turn: a fold that swallowed the note clears it (rearmStepNotice,
-// foldFor) and the next result is told again, because the model no longer holds the line; a prune
-// whose stub replaced the noted result clears it the same way (autoPrune, which asks the
-// conversation whether the note still stands — Conversation.HasEngineNote, which counts a ledger
-// row only while its fence still opens at its offset); a cancelled Turn's rollback clears it only when the dropped result
-// is the one the note rode (rearmNotices), so a surviving note is never doubled.
+// (stepNoticeThreshold) while no copy of the note stands in the conversation, so it lands ONCE: a
+// Turn with several tool calls commits once per call, and the first result past the threshold
+// carries the note that keeps every later result silent while it survives. The latch IS the note's
+// own presence (Conversation.HasEngineNote, which counts a ledger row only while its fence still
+// opens at its offset), so there is no state to clear: a fold that swallowed the note (foldFor), a
+// prune whose stub replaced the noted result (autoPrune) and a cancelled Turn's rollback that
+// dropped it (turnLifecycle.end) each leave the conversation without it, and the next result is
+// told again because the model no longer holds the line; a rollback that kept the noted result
+// keeps the note, so a surviving note is never doubled. The threshold is checked first, so the
+// scan runs only past it.
 //
 // Silent at depth 0 — a top-level Agent has no cap, and the main loop is the human's to stop — and
 // silent for an unbounded delegation (stepCap 0), where there is no cap to be three quarters of.
 func (a *Agent) stepBudgetNotice() (string, bool) {
-	if a.depth == 0 || a.stepCap <= 0 || a.stepNoticeLive {
+	if a.depth == 0 || a.stepCap <= 0 {
 		return "", false
 	}
 	used := a.turns.exchangeTurns + 1
-	if used < stepNoticeThreshold(a.stepCap) {
+	if used < stepNoticeThreshold(a.stepCap) || a.conv.HasEngineNote(stepNoticeTopic) {
 		return "", false
 	}
-	a.stepNoticeAt = a.turns.index + 1
-	a.stepNoticeLive = true
 	return fmt.Sprintf(stepNoticeLine, used, a.stepCap, a.stepCap-used), true
-}
-
-// rearmStepNotice forgets the note: the conversation no longer carries it, so the next tool
-// result past the threshold is told again. Called after a fold that ran (foldFor), which replaced
-// the history the note sat in, after a prune whose stub replaced the noted result (autoPrune), and
-// through rearmNotices on the rollback that dropped its result; idempotent, so a Step-driven host
-// that cancels the re-attempt too is harmless.
-func (a *Agent) rearmStepNotice() {
-	a.stepNoticeAt = 0
-	a.stepNoticeLive = false
 }
 
 // tokenBudgetNotice is stepBudgetNotice's twin for the token cap, consulted by appendToolResult
@@ -97,49 +86,24 @@ func (a *Agent) rearmStepNotice() {
 // (Agent.usage, the tally the token bound itself is enforced against in delegateBoundHit) — the
 // Turn under way has already booked its usage, because the server's report lands on the stream
 // before the tool runs (loop.go, DeltaDone) — and fires when that spend has reached the
-// threshold (tokenNoticeThreshold) while no copy of the note is live (tokenNoticeLive). The
-// latch, the once-per-Turn behaviour on a many-call Turn and the three re-arm routes are the
-// step notice's exactly (rearmTokenNotice, rearmNotices, foldFor, autoPrune). The tokens-left
-// figure floors at 0: the result closing the Turn that crossed the cap itself commits before the
-// boundary trips the bound, and "0 left" is the truth the wrap-up Turn is about to state.
+// threshold (tokenNoticeThreshold) while no copy of the note stands in the conversation
+// (Conversation.HasEngineNote on tokenNoticeTopic). The latch, the once-per-Turn behaviour on a
+// many-call Turn and the fold, prune and rollback routes that take the note away are the step
+// notice's exactly. The tokens-left figure floors at 0: the result closing the Turn that crossed
+// the cap itself commits before the boundary trips the bound, and "0 left" is the truth the
+// wrap-up Turn is about to state.
 //
 // Silent at depth 0 and for an unbounded delegation (tokenCap 0), for the step notice's reasons.
 func (a *Agent) tokenBudgetNotice() (string, bool) {
-	if a.depth == 0 || a.tokenCap <= 0 || a.tokenNoticeLive {
+	if a.depth == 0 || a.tokenCap <= 0 {
 		return "", false
 	}
 	spent := a.usage.prompt
-	if spent < tokenNoticeThreshold(a.tokenCap) {
+	if spent < tokenNoticeThreshold(a.tokenCap) || a.conv.HasEngineNote(tokenNoticeTopic) {
 		return "", false
 	}
-	a.tokenNoticeAt = a.turns.index + 1
-	a.tokenNoticeLive = true
 	left := max(a.tokenCap-spent, 0)
 	return fmt.Sprintf(tokenNoticeLine, formatTokens(spent), formatTokens(a.tokenCap), formatTokens(left)), true
-}
-
-// rearmTokenNotice is rearmStepNotice for the token-budget notice: called from the same three
-// sites, idempotent for the same reason.
-func (a *Agent) rearmTokenNotice() {
-	a.tokenNoticeAt = 0
-	a.tokenNoticeLive = false
-}
-
-// rearmNotices is the one rollback seam the engine notices hang off (construct.go): the
-// context-fill ladder ends its climb, and the step- and token-budget notices each forget their
-// note when the rolled-back Turn is the one that note rode — the index is not advanced on cancel
-// (turn.go, endCancelled), so the Turn under way is still stepNoticeAt's / tokenNoticeAt's. A
-// cancelled Turn PAST a threshold drops its own messages only (DropRange from the Turn's boundary)
-// and keeps the noted result, so there the latch stands and the re-attempt's result carries no
-// second copy.
-func (a *Agent) rearmNotices() {
-	a.rearmFillNotice()
-	if a.stepNoticeAt == a.turns.index+1 {
-		a.rearmStepNotice()
-	}
-	if a.tokenNoticeAt == a.turns.index+1 {
-		a.rearmTokenNotice()
-	}
 }
 
 // stepNoticeThreshold is the Turn count the notice fires at for cap: ceil(stepNoticeShare × cap),
