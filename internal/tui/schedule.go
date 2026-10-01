@@ -277,12 +277,17 @@ func reportActivity(next tea.Model) tea.Model {
 // The four terms are the four ways a Firing could collide with the human's own work. The first is
 // the Exchange, and it is deliberately the WHOLE Exchange rather than a Turn boundary (ADR 0025).
 // The second is the actuation latch: a profile load restarts the very server a Firing would dial,
-// and the Model already pairs it with busy() wherever it asks "is the engine mine right now"
-// (observeBinding). The third is the interjection queue: rows held over from a stop or a fault are a
+// and the hold set already groups it with the worker wherever it asks "is the engine mine right
+// now" (holdsOwningEngine). The third is the interjection queue: rows held over from a stop or a fault are a
 // message the next ⏎ sends, so the session is between two halves of one thought rather than done.
 // The fourth is the command queue: a /command typed while a worker worked runs at the next idle
 // (runDeferredCommands), and one held over into stateErrored runs at the ⏎ that dismisses the
 // failure — so a queued /clear is about to reset the very session a Firing would drive.
+//
+// It is the hold set's quiescent question ([engineHolds.quiescent]), and it deliberately ignores
+// two holds the other gates read: a /bg launch in flight and a /sessions load. A Firing builds its
+// own Agent and its own session record (ADR 0033 decision 5), so neither reading this session's
+// Agent off the loop nor restoring it is something a Firing could collide with.
 //
 // stateErrored with nothing queued IS quiescent: the worker has unwound and the engine is idle, and
 // a human reading a failure is not a reason to hold a standing instruction back.

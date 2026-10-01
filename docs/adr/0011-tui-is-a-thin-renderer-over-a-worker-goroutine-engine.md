@@ -46,6 +46,22 @@ model refuses input while running), so the Agent is only ever driven from the cu
 worker — the single-goroutine contract holds by construction. Driving via `Step` (not `Run`)
 keeps a clean per-Turn boundary for the status line and snapshots.
 
+**Note (2026-09-30) — the worker is one hold among several, and they are one set.** The
+invariant stands: one worker at a time drives the Agent. But the worker is no longer the only
+thing that holds the engine away from the `Update` loop — a launcher verb restarting the server
+it dials (the actuation latch, ADR 0029), a `/bg` launch reading the Agent off the loop, a
+`/sessions` load, a record write, a deferred quit and a not-yet-bound session do too, and they
+overlap rather than exclude one another. `internal/tui/engineholds.go` records them as one set of
+`engineHold` bits — the `/bg` launch and session-load holds stored in `Model.holds`, the rest
+derived from the fields that already carry them — and `Model.engineHolds` snapshots that set
+with the non-hold facts the gates read. Every engine-availability gate asks a named question of
+the snapshot (`commandRunnable`, `canRunDeferred`, `canRebind`, `beatMayCount`,
+`canEditConfigExternally`, `canLaunchBg`, `quiescent`, `canResumeWorkflows`, `canWake`) rather
+than ANDing flags, and every fold that hands the engine back runs the one release transition
+`Model.releaseEngine` (ADR 0024 decision 4). `quiescent` deliberately ignores the `/bg` launch and
+session-load holds: a Firing builds its own Agent (ADR 0033 decision 5). (Review 2026-09-30 #5;
+plan `2026-09-30 - 02`.)
+
 **C2 — Event→Msg bridge (`teaSink`).** `Config.Events` is a tiny adapter holding a handle to
 the running program; `Emit(e)` wraps the Event in an `eventMsg` and calls `p.Send` —
 async-to-`Update`, which satisfies "Emit must not block the loop for long" (a deadlock is

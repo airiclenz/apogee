@@ -503,8 +503,8 @@ type ServerHost interface {
 	// the resolution (the per-model system prompt, ADR 0023; the window pin and the compaction
 	// budget) and the engine mutators; the TUI owns only
 	// WHEN, which is the whole of its half: at idle the moment the beat lands, or deferred to the
-	// exchange-terminal fold when a worker owns the engine — the quiescent boundary Agent.Rebind
-	// demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed
+	// release transition (Model.releaseEngine) the last worker, actuation or /bg launch hold runs as
+	// it hands the engine back — the quiescent boundary Agent.Rebind demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed
 	// (a `context-window:` pin outranks the server's window), plus any notices to surface.
 	//
 	// effortDialect is the wire shape the SERVER reads a thinking-effort intent in, as the beat

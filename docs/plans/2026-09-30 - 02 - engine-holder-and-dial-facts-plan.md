@@ -99,7 +99,11 @@ NOTES (2026-10-01): command_test.go change is comment-only (TestBgLaunchKeepsARe
 **Acceptance:** `go test ./internal/tui -run 'TestBgLaunchKeeps|TestRebind|TestActuationDefers|TestEngineHold|TestReleaseEngine'`; `go test ./internal/tui -run '^TestBgLaunchStashesARebindUntilItLands$'`; `grep -n 'applyPendingRebind(' internal/tui/*.go | grep -vE '^[^:]*:[0-9]+:\s*//'` shows only the call in `releaseEngine` and its definition
 **Commit:** `refactor(tui): one release transition applies the stashed rebind`
 
-## 6. docs: engine holds in the TUI docs and ADRs 0011/0024
+## 6. docs: engine holds in the TUI docs and ADRs 0011/0024 — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): internal/tui/command.go left unchanged — its touchesServer comment already names holdBgLaunch (reworded by item 4); doc.go's rebind paragraph and engineholds.go file-map entry were already updated by item 5, so doc.go only gains the quiescent-ignores-/bg-launch clause on the schedule.go entry.
+NOTES (2026-10-01): commandrun.go (foldBgStarted doc) and tui.go (ServerHost.Rebind doc) are outside the item's Files list but each narrated where a stashed rebind applies without naming releaseEngine; folded in per the Regression guard's "every comment narrating where a stashed rebind applies names releaseEngine" (comment-only).
+NOTES (2026-10-01): schedule.go's quiescent doc also stops saying the Model "pairs [the actuation latch] with busy()" and names the holdsOwningEngine group instead.
 
 **Depends on:** item 5.
 **Files:** `internal/tui/doc.go`, `internal/tui/command.go`, `docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md`, `docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md`, `internal/tui/schedule.go`, `internal/tui/heartbeat.go`

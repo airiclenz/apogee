@@ -71,12 +71,13 @@ type heartbeatState struct {
 	// is also what a beat that could not read the server leaves in place.
 	effort provider.EffortSupport
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
-	// lands while a worker owns the engine (applied in finishWorker), while a launcher verb owns
-	// the server it talks to (applied in foldActuationDone), or while a /bg launch is reading the
-	// Agent off the loop (applied in foldBgStarted). Latest-wins: a second change inside the
-	// same window replaces the first, so only the newest reality is ever bound. nil ⇒ nothing is
-	// deferred. A pointer into a value-copied Model is safe because it is only ever replaced, never
-	// written through (the pendingSave posture, ADR 0011).
+	// lands while a worker owns the engine, while a launcher verb owns the server it talks to, or
+	// while a /bg launch is reading the Agent off the loop. It is applied by [Model.releaseEngine],
+	// the one release transition finishWorker, foldActuationDone, foldBgStarted and
+	// closeWorkflowPrompt each run, once none of those holds still stands. Latest-wins: a second
+	// change inside the same window replaces the first, so only the newest reality is ever bound.
+	// nil ⇒ nothing is deferred. A pointer into a value-copied Model is safe because it is only
+	// ever replaced, never written through (the pendingSave posture, ADR 0011).
 	pendingRebind *rebindIntent
 	// lastRebindFailed is the model id whose rebind last failed, so a refusal is noted once per
 	// distinct target instead of once every Interval. "" once a rebind succeeds.
@@ -351,11 +352,12 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 	}
 	if !m.engineHolds().canRebind() {
 		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
-		// construction. Stash the intent for the boundary rather than refuse it — finishWorker for a
-		// worker's Exchange, foldActuationDone for a launcher verb, foldBgStarted for a /bg launch
-		// whose snapshot of the Agent is being taken off the loop — so the switch the human made
-		// upstream lands the moment the engine is quiescent again (latest-wins, so a second change
-		// inside the same window simply supersedes this one).
+		// construction. Stash the intent for the boundary rather than refuse it — [Model.releaseEngine],
+		// which finishWorker runs for a worker's Exchange, foldActuationDone for a launcher verb and
+		// foldBgStarted for a /bg launch whose snapshot of the Agent is being taken off the loop, applies
+		// it at the last of those releases — so the switch the human made upstream lands the moment the
+		// engine is quiescent again (latest-wins, so a second change inside the same window simply
+		// supersedes this one).
 		//
 		// The actuation half is the same claim [Model.foldBeatFailure] makes about a FAILED beat, made
 		// about one that lands: a profile load's own completion may re-point the whole session

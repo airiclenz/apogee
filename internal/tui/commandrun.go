@@ -682,9 +682,10 @@ func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 
 // foldBgStarted notes what a /bg launch came to: the id it started under, or the engine's refusal
 // exactly as the engine worded it. It releases the launch latch first, and — the engine being the
-// loop's again — binds a rebind a beat stashed meanwhile and runs the commands queued behind the
-// launch, in order; either waits on for a worker a message opened meanwhile (finishWorker). A held
-// wake is tried by the Update tail (wakeAfterFold).
+// loop's again — binds a rebind a beat stashed meanwhile (releaseEngine, unless a worker or an
+// actuation still holds the engine) and runs the commands queued behind the launch, in order;
+// either waits on for a worker a message opened meanwhile (finishWorker). A held wake is tried by
+// the Update tail (wakeAfterFold).
 func (m Model) foldBgStarted(msg bgStartedMsg) (tea.Model, tea.Cmd) {
 	m.holds.release(holdBgLaunch)
 	if msg.err != nil {

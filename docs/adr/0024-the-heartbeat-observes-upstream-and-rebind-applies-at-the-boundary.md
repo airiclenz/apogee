@@ -90,7 +90,13 @@ swaps *all* the per-model bindings together — wire model id, system-prompt tem
 `MaxContextTokens`, and a freshly built Mechanism registry — and joins ADR 0011's idle-only
 engine-call class beside `ClearContext` / `RestoreSession` / `AbortExchange`: it refuses
 mid-Exchange with `ErrInputPending`, and the host stashes a change observed mid-Exchange as a
-latest-wins `pendingRebind` applied in the exchange-terminal fold.
+latest-wins `pendingRebind` applied in the exchange-terminal fold. (Amended 2026-09-30: the
+exchange-terminal fold is one of four release points — the worker's end, a launcher verb's
+completion, a `/bg` launch landing and a background prompt's pane closing — and each runs the
+one release transition `Model.releaseEngine` (`internal/tui/engineholds.go`), which applies the
+stash only when no worker, actuation or `/bg` launch hold still stands. Those holds overlap, so
+with two at once — a wake can run during an actuation — the stash lands at the second release,
+not the first. The boundary is still the synchronization; it is now the last hold's boundary.)
 
 That discipline is *deliberately chosen over a lock*. Every un-mutexed `cfg` reader in the loop —
 `buildRequest`, `budget()`, `Compact`, the per-call `loopView`→`Budget` rebuild the Mechanisms see
