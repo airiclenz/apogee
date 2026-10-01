@@ -5,6 +5,7 @@ import (
 	"os/exec"
 
 	"github.com/airiclenz/apogee/internal/console"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
@@ -43,6 +44,17 @@ func defaultExecHost() execHost {
 		run:         subprocess.RunSubprocess,
 		shell:       platform.Current(),
 		openConsole: (*console.Registry).Open,
+	}
+}
+
+// git returns the host's facilities as the gitexec.Host a git run goes through: the PATH lookup,
+// the captured launcher and the platform rules the environment is scoped by. SpawnTo stays nil —
+// execHost has no streaming launcher, so a streamed git run takes the real one.
+func (h execHost) git() gitexec.Host {
+	return gitexec.Host{
+		Look:  h.look,
+		Spawn: h.run,
+		Env:   h.shell,
 	}
 }
 

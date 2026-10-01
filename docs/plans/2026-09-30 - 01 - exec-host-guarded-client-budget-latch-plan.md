@@ -33,7 +33,10 @@ Kept: `SafeEnv(root)`'s signature, `LookFunc` (the `TestNoPackageLevelExecSeam` 
 **Acceptance:** `go test ./internal/gitexec -run 'TestCapture|TestRun|TestCommandConfigRefusal|TestHost'`
 **Commit:** `refactor(gitexec): resolve, run and scope env through a Host value`
 
-## 2. gitexec: the package vars go; engine git takes a passed Host
+## 2. gitexec: the package vars go; engine git takes a passed Host — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): Program/Resolve keep their `look LookFunc` parameter (the git tools still pass their execHost look until item 3); they wrap a small `lookingHost(look)` — OS() with Look set — so a nil look reaches security.ResolveProgram as nil (exec.LookPath behind the fence, as before).
+NOTES (2026-10-01): withFakeGit became `fakeGitHost(path) gitexec.Host` and swapEngineGitLook became `engineGitHost(path) gitexec.Host` (OS() with a fake Look; the real fence and real spawn of the fake-git script stay); the converted tests call the Host's methods. TestRunGitQuery_RefusesAPlantedGit and _NonZeroExitIsAnError now take t.Parallel() since no process-wide var is swapped any more.
 
 **Depends on:** item 1.
 **Files:** `internal/gitexec/gitexec.go`, `internal/gitexec/gitexec_test.go`, `internal/tools/exec_host.go`, `internal/tools/exec_host_test.go`, `internal/tools/git.go`, `internal/tools/git_test.go`, `internal/agent/treesnapshot.go`, `internal/snapshot/store.go`

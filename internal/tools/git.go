@@ -82,11 +82,11 @@ func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Dur
 // workspace-scoped environment (no APOGEE_API_KEY, no inherited config redirection), the
 // repo-local command-config refusal, and the §2.4 process-tree teardown.
 //
-// It is gitexec.Run under this package's name: the engine's git resolves through
-// gitexec.LookPath, while the git TOOLS resolve through the execHost they were built with — a
-// test that plants a git for the tools hands it to their host; one that plants it for the
-// engine swaps gitexec.LookPath. The empty-args check stays here so the sentence is this
-// funnel's own.
+// It is h.Run under this package's name: the engine's git resolves and runs through the
+// gitexec.Host its caller passes — gitexec.OS() in production — while the git TOOLS resolve
+// through the execHost they were built with. A test that plants a git for the tools hands it to
+// their host; one that plants it for the engine passes a fake gitexec.Host here. The empty-args
+// check stays here so the sentence is this funnel's own.
 //
 // Every failure is ONE error and they are deliberately not distinguished: git absent, a fenced
 // binary, a refused repository, a non-zero exit, a timeout, a wedged drain and a cancelled ctx
@@ -96,11 +96,11 @@ func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Dur
 // It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
 // included, so the git tools keep runGit's captured outcome; this returns stdout as DATA, with
 // the diagnostics left out of the payload.
-func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args ...string) (string, error) {
+func RunGitQuery(ctx context.Context, h gitexec.Host, root string, timeout time.Duration, args ...string) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New("apogee: RunGitQuery: no git subcommand")
 	}
-	return gitexec.Run(ctx, root, nil, timeout, args...)
+	return h.Run(ctx, root, nil, timeout, args...)
 }
 
 // gitResultText renders a captured git outcome as text the model reads: the

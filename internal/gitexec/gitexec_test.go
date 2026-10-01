@@ -42,15 +42,15 @@ func writeFakeGit(t *testing.T, dir, script string) string {
 	return path
 }
 
-// withFakeGit swaps the package's lookup seam for the duration of a test, so the resolution paths
+// fakeGitHost returns the real OS Host with its lookup answering path, so the resolution paths
 // are exercisable without depending on the host's git. It fakes the LOOK alone — the fence
 // security.ResolveProgram applies to what the look answers is the real one, which is what makes
-// the planted-git refusal a genuine assertion.
-func withFakeGit(t *testing.T, path string) {
-	t.Helper()
-	orig := gitexec.LookPath
-	gitexec.LookPath = func(string) (string, error) { return path, nil }
-	t.Cleanup(func() { gitexec.LookPath = orig })
+// the planted-git refusal a genuine assertion — and the Host is a value the test owns, so no
+// other test's resolution sees it.
+func fakeGitHost(path string) gitexec.Host {
+	host := gitexec.OS()
+	host.Look = func(string) (string, error) { return path, nil }
+	return host
 }
 
 // realGit returns the host's git, skipping the test when there is none — the live behaviour is
@@ -304,9 +304,9 @@ func TestRun_RefusesAPlantedGit(t *testing.T) {
 	if err := os.WriteFile(planted, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write planted git: %v", err)
 	}
-	withFakeGit(t, planted)
+	host := fakeGitHost(planted)
 
-	_, err := gitexec.Run(context.Background(), root, nil, testTimeout, "status", "--porcelain")
+	_, err := host.Run(context.Background(), root, nil, testTimeout, "status", "--porcelain")
 
 	if !errors.Is(err, security.ErrExecFromWritablePath) {
 		t.Fatalf("err = %v, want the exec-fence refusal", err)
@@ -331,11 +331,11 @@ func TestRun_ReturnsStdoutAloneAndAppendsTheCallersEnv(t *testing.T) {
 		"echo \"gitdir: ${GIT_DIR-unset}\"; echo \"apikey: ${APOGEE_API_KEY-unset}\"; } >> \""+record+"\"\n"+
 		"echo diagnostic >&2\n"+
 		"echo PAYLOAD\n")
-	withFakeGit(t, fakeGit)
+	host := fakeGitHost(fakeGit)
 	t.Setenv("APOGEE_API_KEY", "shhh-secret")
 
 	store := t.TempDir()
-	out, err := gitexec.Run(context.Background(), t.TempDir(), []string{"GIT_DIR=" + store}, testTimeout, "status", "--porcelain")
+	out, err := host.Run(context.Background(), t.TempDir(), []string{"GIT_DIR=" + store}, testTimeout, "status", "--porcelain")
 	if err != nil {
 		t.Fatalf("Run err = %v", err)
 	}
@@ -379,9 +379,9 @@ func TestRun_NonZeroExitIsAnError(t *testing.T) {
 	posixScriptHost(t)
 
 	fakeGit := writeFakeGit(t, t.TempDir(), "#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n")
-	withFakeGit(t, fakeGit)
+	host := fakeGitHost(fakeGit)
 
-	_, err := gitexec.Run(context.Background(), t.TempDir(), nil, testTimeout, "rev-parse", "--is-inside-work-tree")
+	_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "rev-parse", "--is-inside-work-tree")
 
 	if err == nil {
 		t.Fatal("Run err = nil, want a non-zero exit reported as an error")
@@ -401,9 +401,9 @@ func TestRunDiagnosed_ReturnsTheWarningsOfAZeroExit(t *testing.T) {
 		"case \"$*\" in *config*|*rev-parse*) exit 1 ;; esac\n"+
 		"echo \"warning: could not open directory 'dir/': Permission denied\" >&2\n"+
 		"echo PAYLOAD\n")
-	withFakeGit(t, fakeGit)
+	host := fakeGitHost(fakeGit)
 
-	stdout, stderr, err := gitexec.RunDiagnosed(context.Background(), t.TempDir(), nil, testTimeout, "add", "-A")
+	stdout, stderr, err := host.RunDiagnosed(context.Background(), t.TempDir(), nil, testTimeout, "add", "-A")
 	if err != nil {
 		t.Fatalf("RunDiagnosed err = %v", err)
 	}
@@ -427,10 +427,10 @@ func TestRunTo_StreamsPayloadUntruncated(t *testing.T) {
 		"case \"$*\" in *config*|*rev-parse*) exit 1 ;; esac\n"+
 		"line=0123456789012345678901234567890123456789012345678901234567890123\n"+
 		"n=0\nwhile [ $n -lt 8192 ]; do printf '%s' \"$line\"; n=$((n+1)); done\n")
-	withFakeGit(t, fakeGit)
+	host := fakeGitHost(fakeGit)
 
 	var payload bytes.Buffer
-	if err := gitexec.RunTo(context.Background(), t.TempDir(), nil, testTimeout, &payload, "cat-file", "blob", "deadbeef"); err != nil {
+	if err := host.RunTo(context.Background(), t.TempDir(), nil, testTimeout, &payload, "cat-file", "blob", "deadbeef"); err != nil {
 		t.Fatalf("RunTo err = %v", err)
 	}
 

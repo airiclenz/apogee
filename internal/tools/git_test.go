@@ -19,17 +19,14 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-// swapEngineGitLook swaps gitexec.LookPath — the lookup the ENGINE's own git (RunGitQuery →
-// gitexec.Run) resolves through — for the duration of a test, restored on cleanup. The git TOOLS
-// never read it: they resolve through the execHost they were built with, so a test plants a git
-// for a tool by handing it fakeLookHost. It fakes the LOOK alone — the fence
-// security.ResolveProgram applies to what the look answers is the real one, which is what makes
-// the planted-git refusal a genuine assertion. A test calling it cannot be parallel.
-func swapEngineGitLook(t *testing.T, path string) {
-	t.Helper()
-	orig := gitexec.LookPath
-	gitexec.LookPath = fakeLook(true, path)
-	t.Cleanup(func() { gitexec.LookPath = orig })
+// engineGitHost returns the real OS gitexec.Host with its lookup answering path — the host a test
+// hands the ENGINE's own git (RunGitQuery), as fakeLookHost is the one it hands a git TOOL. It
+// fakes the LOOK alone — the fence security.ResolveProgram applies to what the look answers is
+// the real one, which is what makes the planted-git refusal a genuine assertion.
+func engineGitHost(path string) gitexec.Host {
+	host := gitexec.OS()
+	host.Look = fakeLook(true, path)
+	return host
 }
 
 // gitRepo creates an initialized git repository in a fresh temp dir with a committed
@@ -2051,10 +2048,10 @@ func TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening(t *testing.T) {
 	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	swapEngineGitLook(t, fakeGit)
+	host := engineGitHost(fakeGit)
 	t.Setenv("APOGEE_API_KEY", "shhh-secret")
 
-	out, err := RunGitQuery(context.Background(), t.TempDir(), gitTimeout, "status", "--porcelain")
+	out, err := RunGitQuery(context.Background(), host, t.TempDir(), gitTimeout, "status", "--porcelain")
 	if err != nil {
 		t.Fatalf("RunGitQuery err = %v", err)
 	}
@@ -2082,11 +2079,12 @@ func TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening(t *testing.T) {
 // resolves INSIDE the workspace is bytes the model may have written, and the funnel refuses to
 // run it — with the fence's sentinel intact, so a caller can tell a refusal from an absence.
 func TestRunGitQuery_RefusesAPlantedGit(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	planted := plantExecutable(t, root, "node_modules/.bin/git")
-	swapEngineGitLook(t, planted)
+	host := engineGitHost(planted)
 
-	_, err := RunGitQuery(context.Background(), root, gitTimeout, "status", "--porcelain")
+	_, err := RunGitQuery(context.Background(), host, root, gitTimeout, "status", "--porcelain")
 
 	if !errors.Is(err, security.ErrExecFromWritablePath) {
 		t.Fatalf("err = %v, want the exec-fence refusal", err)
@@ -2100,6 +2098,7 @@ func TestRunGitQuery_RefusesAPlantedGit(t *testing.T) {
 // caller, which treats every failure as "skip this check", so a clean non-zero exit is an error
 // here rather than the captured outcome a TOOL would show the model.
 func TestRunGitQuery_NonZeroExitIsAnError(t *testing.T) {
+	t.Parallel()
 	posixScriptHost(t)
 
 	fakeDir := t.TempDir()
@@ -2107,9 +2106,9 @@ func TestRunGitQuery_NonZeroExitIsAnError(t *testing.T) {
 	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n"), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	swapEngineGitLook(t, fakeGit)
+	host := engineGitHost(fakeGit)
 
-	_, err := RunGitQuery(context.Background(), t.TempDir(), gitTimeout, "rev-parse", "--is-inside-work-tree")
+	_, err := RunGitQuery(context.Background(), host, t.TempDir(), gitTimeout, "rev-parse", "--is-inside-work-tree")
 
 	if err == nil {
 		t.Fatal("RunGitQuery err = nil, want a non-zero exit reported as an error")

@@ -110,7 +110,7 @@ type Store struct {
 // Driver asks before wiring snapshots at all; Open still resolves and fences git itself, so a
 // true answer here is an invitation rather than a guarantee.
 func Available() bool {
-	_, err := gitexec.Resolve(context.Background(), "", gitexec.LookPath)
+	_, err := gitexec.OS().Resolve(context.Background(), "")
 	return err == nil
 }
 

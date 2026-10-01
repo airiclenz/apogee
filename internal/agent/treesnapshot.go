@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -113,7 +114,7 @@ func (t *treeSnapshotter) mutationWarning(ctx context.Context, before string) st
 func (t *treeSnapshotter) git(ctx context.Context, args ...string) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, treeSnapshotTimeout)
 	defer cancel()
-	return tools.RunGitQuery(runCtx, t.root, treeSnapshotTimeout, args...)
+	return tools.RunGitQuery(runCtx, gitexec.OS(), t.root, treeSnapshotTimeout, args...)
 }
 
 // porcelainDiffPaths extracts the changed paths from two porcelain snapshots: every

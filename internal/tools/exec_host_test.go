@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -110,6 +111,36 @@ func TestBuiltinToolsShareOneExecHost(t *testing.T) {
 		if shell != platform.Host(marker) {
 			t.Errorf("%s launches through a shell other than the one host builtinTools was handed", name)
 		}
+	}
+}
+
+// TestExecHost_GitMapsItsFacilities pins the gitexec.Host execHost.git hands a git run: the
+// host's own lookup, launcher and platform rules — so a fake execHost scripts the git family as
+// it scripts every other tool — and no streaming launcher, which execHost does not have.
+func TestExecHost_GitMapsItsFacilities(t *testing.T) {
+	t.Parallel()
+	const lookedUp = "/fake/bin/git"
+	marker := &markerHost{Host: platform.Current()}
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, lookedUp)
+	h.shell = marker
+	spec := subprocess.SubprocessSpec{Argv: []string{lookedUp, "status"}}
+
+	git := h.git()
+	path, lookErr := git.Look("git")
+	_, spawnErr := git.Spawn(context.Background(), spec)
+
+	if path != lookedUp || lookErr != nil {
+		t.Errorf("Look(git) = %q, %v; want the host's look answer %q", path, lookErr, lookedUp)
+	}
+	if spawnErr != nil || !slices.Equal(captured.Argv, spec.Argv) {
+		t.Errorf("Spawn launched %v (err %v), want the spec handed to the host's run", captured.Argv, spawnErr)
+	}
+	if git.Env != platform.Host(marker) {
+		t.Error("Env is not the host's shell")
+	}
+	if git.SpawnTo != nil {
+		t.Error("SpawnTo is set; execHost has no streaming launcher to map")
 	}
 }
 
