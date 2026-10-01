@@ -6,7 +6,7 @@ package agent
 // workflow.Plan — one fanout, then at most one verify and one merge — checked by
 // workflow.ValidateModelPlan, whose problems come back as one tool error naming each argument to
 // fix. A call naming a `recipe` instead runs that Recipe (ADR 0087 D2) through the core the recipe
-// launch shares (runRecipe, recipe.go) with its keyed `inputs`: an unknown recipe is answered with
+// launch shares (runBlocking, launch.go) with its keyed `inputs`: an unknown recipe is answered with
 // the recipes there are, and a recipe beside any argument that describes a fan-out is refused
 // before anything runs. A valid plan runs through a workflow.Runner over the session's `<scratch>/workflows/` store,
 // its item children spawned through the recursion point (workflowspawn.go), its progress reported
@@ -40,7 +40,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -295,8 +294,8 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		if refusal != "" {
 			return errorToolResult(call.ID, refusal)
 		}
-		asked := recipeCall{id: recipe, inputs: inputs, seat: seat, launch: workflowLaunch{kind: launchFanOut, recipe: domain.RecipeLaunch{SkillID: recipe}}}
-		return a.recipeCallResult(ctx, turn, call, asked, background)
+		launch := workflowLaunch{recipe: domain.RecipeLaunch{SkillID: recipe}, inputs: inputs, seat: seat, turn: turn, call: call}
+		return a.recipeCallResult(ctx, launch, background)
 	}
 	plan, refusal := parseFanOutPlan(call.Arguments)
 	if refusal != "" {
@@ -305,68 +304,51 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if problems := workflow.ValidateModelPlan(plan); len(problems) > 0 {
 		return errorToolResult(call.ID, fanOutProblemsText(problems))
 	}
+	launch := workflowLaunch{plan: plan, seat: seat, turn: turn, call: call}
 	if background {
-		id, err := a.startBackground(workflowLaunch{plan: plan, seat: seat, turn: turn})
+		id, err := a.startBackground(launch)
 		if refusal := launchRefusal(""); errors.As(err, &refusal) {
 			return errorToolResult(call.ID, string(refusal))
 		}
 		return a.backgroundCallResult(call.ID, id, err)
 	}
-	runner, refusal := a.newWorkflowRunner(turn, call, seat)
-	if refusal != "" {
-		return errorToolResult(call.ID, refusal)
+	outcome, fellBack, err := a.runBlocking(ctx, launch)
+	if refusal := launchRefusal(""); errors.As(err, &refusal) {
+		return errorToolResult(call.ID, string(refusal))
 	}
-	observer := a.observeWorkflow(runner, turn, plan)
-	observer.call = call.ID
-	outcome, err := runner.Run(ctx, plan)
-	observer.end(outcome, err)
 	if err != nil {
 		return errorToolResult(call.ID, fanOutRunFailedPrefix+err.Error())
 	}
-	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome, seatFellBack(runner), workflowLaunch{kind: launchFanOut})}
+	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(outcome, fellBack, launch)}
 }
 
-// recipeCall is what a fan_out call's recipe form — or a recipe launch — asks for: the recipe's id,
-// its keyed inputs, the Delegation seat its item children run on, and how it was launched.
-type recipeCall struct {
-	id     string
-	inputs map[string]string
-	seat   delegationSeat
-	launch workflowLaunch
-}
-
-// recipeCallResult runs the recipe one fan_out call names over its keyed inputs, on the seat the
-// call named, and renders its answer: the result lines, the recipes there are for an unknown id, or
-// why the recipe could not run (an unknown or missing input among them). With background set it
-// starts the recipe in the background instead and answers at once.
-func (a *Agent) recipeCallResult(
-	ctx context.Context,
-	turn int,
-	call domain.ToolCall,
-	asked recipeCall,
-	background bool,
-) domain.ToolResult {
+// recipeCallResult runs the recipe one fan_out call's launch names over its keyed inputs, on the
+// seat the call named, and renders its answer: the result lines, the recipes there are for an
+// unknown id, or why the recipe could not run (an unknown or missing input among them). With
+// background set it starts the recipe in the background instead and answers at once.
+func (a *Agent) recipeCallResult(ctx context.Context, launch workflowLaunch, background bool) domain.ToolResult {
+	id, callID := launch.recipe.SkillID, launch.call.ID
 	source := a.recipeSource()
 	if source == nil {
-		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, asked.id, "none"))
+		return errorToolResult(callID, fmt.Sprintf(fanOutUnknownRecipe, id, "none"))
 	}
-	recipe, ok := source.Recipe(asked.id)
+	recipe, ok := source.Recipe(id)
 	if !ok {
 		known := "none"
 		if ids := source.RecipeIDs(); len(ids) > 0 {
 			known = strings.Join(ids, ", ")
 		}
-		return errorToolResult(call.ID, fmt.Sprintf(fanOutUnknownRecipe, asked.id, known))
+		return errorToolResult(callID, fmt.Sprintf(fanOutUnknownRecipe, id, known))
 	}
 	if background {
-		workflowID, err := a.startKeyedBackgroundRecipe(recipe, asked.inputs, asked.seat)
-		return a.backgroundCallResult(call.ID, workflowID, err)
+		workflowID, err := a.startKeyedBackgroundRecipe(recipe, launch.inputs, launch.seat)
+		return a.backgroundCallResult(callID, workflowID, err)
 	}
-	result, fellBack, err := a.runRecipe(ctx, turn, call, asked)
+	result, fellBack, err := a.runBlocking(ctx, launch)
 	if err != nil {
-		return errorToolResult(call.ID, fmt.Sprintf(fanOutRecipeFailed, asked.id, err))
+		return errorToolResult(callID, fmt.Sprintf(fanOutRecipeFailed, id, err))
 	}
-	return domain.ToolResult{CallID: call.ID, Content: workflowAnswer(result, fellBack, asked.launch)}
+	return domain.ToolResult{CallID: callID, Content: workflowAnswer(result, fellBack, launch)}
 }
 
 // parseFanOutRecipe reads a fan_out call that names a recipe: the recipe id and its inputs, or the
@@ -402,39 +384,6 @@ func parseFanOutRecipe(raw json.RawMessage) (id string, inputs map[string]string
 		}
 	}
 	return id, inputs, "", true
-}
-
-// newWorkflowRunner builds the Runner one fan_out call runs under, its item children built on seat,
-// or the refusal that keeps it from running: the session's workflow store under its scratch
-// directory, the workspace the items are read from, the split budget a `split:` source cuts to, the
-// dispatch width, and the Agent's clock (a.now) its folders are stamped by. Width and split budget
-// follow the seat (workflowWidthOn, workflowContextLimitOn) — the cap and window of the server the
-// children run on, width 1 on a delegate — and the Runner never runs more children than a stage has
-// items, so the width in effect is min(width, N).
-func (a *Agent) newWorkflowRunner(turn int, call domain.ToolCall, seat delegationSeat) (*workflow.Runner, string) {
-	scratch := a.ScratchDir()
-	if scratch == "" {
-		return nil, fanOutNoScratch
-	}
-	if a.cfg.WorkspaceDir == "" {
-		return nil, fanOutNoWorkspace
-	}
-	store, err := workflow.NewStore(scratch)
-	if err != nil {
-		return nil, fanOutRunFailedPrefix + err.Error()
-	}
-	spawner := a.newWorkflowSpawner(turn, call, nil)
-	spawner.seat = seat
-	return &workflow.Runner{
-		Spawner:       spawner,
-		Store:         store,
-		Workspace:     os.DirFS(a.cfg.WorkspaceDir),
-		Split:         workflow.NewSplitBudget(a.workflowContextLimitOn(seat)),
-		Width:         a.workflowWidthOn(seat),
-		Retries:       a.cfg.Workflow.ResolvedRetries(),
-		Continuations: a.cfg.Workflow.ResolvedContinuations(),
-		Now:           a.now,
-	}, ""
 }
 
 // workflowContextLimit is the working context ceiling an item child will run in, which a `split:`
@@ -636,7 +585,7 @@ type workflowObserver struct {
 	// starts.
 	call string
 	// resume is the resume command the started phase carries (domain.WorkflowPhaseEvent.Resume):
-	// runRecipe sets it from a recipe launch's resumeCommand before the run starts; "" otherwise.
+	// wireLaunch sets it from a blocking launch's resumeCommand before the run starts; "" otherwise.
 	resume string
 
 	mu sync.Mutex

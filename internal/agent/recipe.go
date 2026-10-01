@@ -13,8 +13,8 @@ package agent
 // recipe to the background workflow manager (background.go) and submits nothing.
 //
 // The catalog reaches the loop through workflow.RecipeSource, read off Config.Skills, so the loop
-// never imports internal/skills (ADR 0010). runRecipe is the core both launches share and
-// fan_out's recipe form calls: it opens no Exchange of its own. It binds the inputs into the
+// never imports internal/skills (ADR 0010). runBlocking (launch.go) is the core both launches share
+// and fan_out's recipe form calls: it opens no Exchange of its own. It binds the inputs into the
 // stages ({<input>} in a brief, a question, an item source, an output path, a context file or —
 // shell-quoted — a script's command), so a run with other inputs is another workflow folder, and
 // it runs the stages with a ScriptRunner that puts a script stage's command through this Agent's
@@ -187,15 +187,16 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 		}
 		inputs = bound
 	}
-	call := domain.ToolCall{ID: fmt.Sprintf("recipe-%s-%d", recipe.ID, turn), Tool: recipeCallTool}
-	asked := recipeCall{id: recipe.ID, inputs: inputs, launch: recipeLaunchKind(in, recipe.ID)}
-	result, fellBack, err := a.runRecipe(ctx, turn, call, asked)
+	launch := recipeLaunchKind(in, recipe.ID)
+	launch.inputs, launch.turn = inputs, turn
+	launch.call = domain.ToolCall{ID: fmt.Sprintf("recipe-%s-%d", recipe.ID, turn), Tool: recipeCallTool}
+	result, fellBack, err := a.runBlocking(ctx, launch)
 	if err != nil {
 		return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 	}
 	// The workflow ran, so the opening carries its result: a cancel now keeps the opening (settle).
 	a.turns.carryRecipeResult()
-	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack, asked.launch))
+	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack, launch))
 }
 
 // recipeLaunchKind is how the user launched recipe id through in: from StartRecipe when it bound
@@ -263,41 +264,6 @@ func (a *Agent) askUser(ctx context.Context, question string, choices []string) 
 		return "", err
 	}
 	return strings.TrimSpace(answer.Text), nil
-}
-
-// runRecipe runs the recipe asked names as a Workflow over its inputs — keyed by name, the ones
-// left out taking their defaults — with its item children on the seat asked names, and returns its
-// result. It opens no Exchange: the recipe launch (seatConfigured) and fan_out's recipe form both
-// call it from inside one. call and turn stamp the children's phase events as a fan_out call's do.
-// fellBack reports whether any item child asked for the Sub-agent server and ran on the session one
-// (seatFellBack), the fact the answer's SeatFallbackNote line rides (workflowAnswer).
-// The error is a recipe that could not run: an unknown id, an unknown or missing input, no scratch
-// dir or workspace, or a run the Runner could not proceed with.
-func (a *Agent) runRecipe(
-	ctx context.Context,
-	turn int,
-	call domain.ToolCall,
-	asked recipeCall,
-) (result workflow.Result, fellBack bool, err error) {
-	recipe, err := a.recipeByID(asked.id)
-	if err != nil {
-		return workflow.Result{}, false, err
-	}
-	inputs, err := completeInputs(recipe.Inputs, asked.inputs)
-	if err != nil {
-		return workflow.Result{}, false, err
-	}
-	plan := bindPlanInputs(recipe, inputs)
-	runner, err := a.newRecipeRunner(turn, call, recipe, asked.seat)
-	if err != nil {
-		return workflow.Result{}, false, err
-	}
-	observer := a.observeWorkflow(runner, turn, plan)
-	observer.call = call.ID
-	observer.resume = resumeCommand(asked.launch)
-	result, err = runner.Run(ctx, plan)
-	observer.end(result, err)
-	return result, seatFellBack(runner), err
 }
 
 // completeInputs checks keyed inputs against the declarations: an undeclared key is an error, an
@@ -411,46 +377,6 @@ func shellQuote(value string) string {
 		return value
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
-}
-
-// newRecipeRunner builds the Runner a recipe runs under, its item children built on seat: fan_out's
-// store, workspace, split budget, width, second chances and clock (newWorkflowRunner — the budget and
-// width sized for the seat), children whose prompt files are read from the skill's folder — the
-// folder the Runner also reads them from to key the items (Runner.Prompts) — this Agent's script
-// runner, and — when a human can be asked — its Asker. It names the recipe, so the folder's
-// status.json records where a re-run reads those files from (Agent.RerunFailed).
-func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.Recipe, seat delegationSeat) (*workflow.Runner, error) {
-	scratch := a.ScratchDir()
-	if scratch == "" {
-		return nil, errors.New("this session has no scratch directory to keep the workflow in")
-	}
-	if a.cfg.WorkspaceDir == "" {
-		return nil, errors.New("this session has no workspace to read the items from")
-	}
-	store, err := workflow.NewStore(scratch)
-	if err != nil {
-		return nil, err
-	}
-	split := workflow.NewSplitBudget(a.workflowContextLimitOn(seat))
-	spawner := a.newWorkflowSpawner(turn, call, recipe.Files)
-	spawner.seat = seat
-	runner := &workflow.Runner{
-		Spawner:       spawner,
-		Store:         store,
-		Workspace:     os.DirFS(a.cfg.WorkspaceDir),
-		Prompts:       recipe.Files,
-		Split:         split,
-		Width:         a.workflowWidthOn(seat),
-		Retries:       a.cfg.Workflow.ResolvedRetries(),
-		Continuations: a.cfg.Workflow.ResolvedContinuations(),
-		Scripts:       &recipeScripts{agent: a, turn: turn, recipe: recipe, split: split},
-		Recipe:        recipe.ID,
-		Now:           a.now,
-	}
-	if a.cfg.Asker != nil {
-		runner.Asker = recipeAsker{agent: a}
-	}
-	return runner, nil
 }
 
 // recipeAsker puts an `ask` stage's question to the human through the Agent's Asker.

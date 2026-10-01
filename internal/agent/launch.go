@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -126,9 +128,9 @@ func (a *Agent) launchRunner(launch workflowLaunch) (builtLaunch, error) {
 		built.plan = plan
 	}
 	if launch.recipe.SkillID == "" {
-		runner, refusal := a.newWorkflowRunner(launch.turn, launch.call, launch.seat)
-		if refusal != "" {
-			return builtLaunch{}, launchRefusal(refusal)
+		runner, err := a.newLaunchRunner(launch, nil)
+		if err != nil {
+			return builtLaunch{}, err
 		}
 		built.runner = runner
 	} else {
@@ -143,7 +145,7 @@ func (a *Agent) launchRunner(launch workflowLaunch) (builtLaunch, error) {
 			}
 			built.plan = bindPlanInputs(recipe, inputs)
 		}
-		runner, err := a.newRecipeRunner(launch.turn, launch.call, recipe, launch.seat)
+		runner, err := a.newLaunchRunner(launch, &recipe)
 		if err != nil {
 			return builtLaunch{}, err
 		}
@@ -153,6 +155,90 @@ func (a *Agent) launchRunner(launch workflowLaunch) (builtLaunch, error) {
 		built.runner.Store = launch.folder.store // a kept workflow's Home moves it off the session's
 	}
 	return built, nil
+}
+
+// newLaunchRunner builds the unwired Runner launch runs under, its width and split budget sized for
+// launch's seat: the session's workflow store under its scratch directory, the workspace the items
+// are read from, the split budget a `split:` source cuts to, the dispatch width, the second chances
+// and the Agent's clock (a.now) its folders are stamped by. Width and split budget follow the seat
+// (workflowWidthOn, workflowContextLimitOn) — the cap and window of the server the children run on,
+// width 1 on a delegate — and the Runner never runs more children than a stage has items, so the
+// width in effect is min(width, N). A recipe's Runner also reads its prompt files from the skill's
+// folder to key the items (Runner.Prompts), runs its script stages (recipeScripts), asks through
+// the Agent's Asker when a human can be asked, and names the recipe, so the folder's status.json
+// records where a re-run reads those files from (Agent.RerunFailed). The Spawner is left to
+// wireLaunch.
+//
+// The error is a session that cannot keep a Workflow — no scratch directory, no workspace, a store
+// that cannot be made — worded per surface: a launchRefusal in the fan_out answer's words for a
+// plan, the bare reason for a recipe, which its launch wraps in its own refusal line.
+func (a *Agent) newLaunchRunner(launch workflowLaunch, recipe *workflow.Recipe) (*workflow.Runner, error) {
+	scratch := a.ScratchDir()
+	if scratch == "" {
+		return nil, unreadyLaunch(recipe, fanOutNoScratch, launchNoScratch)
+	}
+	if a.cfg.WorkspaceDir == "" {
+		return nil, unreadyLaunch(recipe, fanOutNoWorkspace, launchNoWorkspace)
+	}
+	store, err := workflow.NewStore(scratch)
+	if err != nil {
+		if recipe == nil {
+			return nil, launchRefusal(fanOutRunFailedPrefix + err.Error())
+		}
+		return nil, err
+	}
+	split := workflow.NewSplitBudget(a.workflowContextLimitOn(launch.seat))
+	runner := &workflow.Runner{
+		Store:         store,
+		Workspace:     os.DirFS(a.cfg.WorkspaceDir),
+		Split:         split,
+		Width:         a.workflowWidthOn(launch.seat),
+		Retries:       a.cfg.Workflow.ResolvedRetries(),
+		Continuations: a.cfg.Workflow.ResolvedContinuations(),
+		Now:           a.now,
+	}
+	if recipe == nil {
+		return runner, nil
+	}
+	runner.Prompts = recipe.Files
+	runner.Scripts = &recipeScripts{agent: a, turn: launch.turn, recipe: *recipe, split: split}
+	runner.Recipe = recipe.ID
+	if a.cfg.Asker != nil {
+		runner.Asker = recipeAsker{agent: a}
+	}
+	return runner, nil
+}
+
+// The reasons a session cannot keep a recipe's Workflow; a fan_out's plan is refused in the fan_out
+// answer's words instead (fanOutNoScratch, fanOutNoWorkspace).
+const (
+	launchNoScratch   = "this session has no scratch directory to keep the workflow in"
+	launchNoWorkspace = "this session has no workspace to read the items from"
+)
+
+// unreadyLaunch is the error a session that cannot keep a Workflow answers a launch with: the
+// fan_out refusal for a plan (recipe nil), the bare reason for a recipe.
+func unreadyLaunch(recipe *workflow.Recipe, fanOut, reason string) error {
+	if recipe == nil {
+		return launchRefusal(fanOut)
+	}
+	return errors.New(reason)
+}
+
+// runBlocking builds launch to run on this Turn (buildLaunch) and runs it to its end on ctx: its
+// result, whether any item child asked for the Sub-agent server and ran on the session one
+// (seatFellBack, the fact the answer's SeatFallbackNote line rides), and the error of a launch that
+// could not be built — a launchRefusal for a fan_out's plan — or a run the Runner could not proceed
+// with. It opens no Exchange: a fan_out call and a recipe launch both run it from inside one.
+func (a *Agent) runBlocking(ctx context.Context, launch workflowLaunch) (result workflow.Result, fellBack bool, err error) {
+	launch.mode = launchModeBlocking
+	built, err := a.buildLaunch(launch)
+	if err != nil {
+		return workflow.Result{}, false, err
+	}
+	result, err = built.runner.Run(ctx, built.plan)
+	built.observer.end(result, err)
+	return result, seatFellBack(built.runner), err
 }
 
 // wireLaunch wires built's Runner for launch's mode and returns its observer: its children spawned

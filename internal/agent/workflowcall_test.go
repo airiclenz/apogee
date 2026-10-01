@@ -843,8 +843,8 @@ func TestWorkflowCall_RunOnIsTheSeatOfEveryItemChild(t *testing.T) {
 	}
 }
 
-// TestWorkflowCall_TheRunnerIsSizedForItsSeat pins the width and the split budget a fan_out's
-// Runner takes for each seat: a session-seated workflow takes the session's cap and window whatever
+// TestWorkflowCall_TheRunnerIsSizedForItsSeat pins the width and the split budget the launch
+// builder gives a fan_out's Runner for each seat: a session-seated workflow takes the session's cap and window whatever
 // is latched, every other seat the latched target's — and with nothing latched, the session's.
 func TestWorkflowCall_TheRunnerIsSizedForItsSeat(t *testing.T) {
 	t.Parallel()
@@ -873,12 +873,12 @@ func TestWorkflowCall_TheRunnerIsSizedForItsSeat(t *testing.T) {
 			}
 			a.SetDelegationTarget(tc.target)
 
-			runner, refusal := a.newWorkflowRunner(0, domain.ToolCall{}, tc.seat)
+			built, err := a.buildLaunch(workflowLaunch{seat: tc.seat})
 
-			if refusal != "" {
-				t.Fatalf("newWorkflowRunner refused: %s", refusal)
+			if err != nil {
+				t.Fatalf("buildLaunch: %v", err)
 			}
-			if runner.Width != tc.wantWidth || runner.Split != workflow.NewSplitBudget(tc.wantLimit) {
+			if runner := built.runner; runner.Width != tc.wantWidth || runner.Split != workflow.NewSplitBudget(tc.wantLimit) {
 				t.Errorf("runner width %d, split %d; want %d and the split of a %d window",
 					runner.Width, runner.Split, tc.wantWidth, tc.wantLimit)
 			}

@@ -181,7 +181,10 @@ NOTES (2026-10-01): a runner-construction refusal (no scratch / no workspace) is
 **Acceptance:** `go test ./internal/agent -run 'TestLaunch|TestBackground_|TestRecipe_|TestDocMap'`
 **Commit:** `refactor(agent): one launch builder for background and resume workflows`
 
-## 11. agent: blocking workflow paths use the launch builder
+## 11. agent: blocking workflow paths use the launch builder — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): runRecipe is replaced by `runBlocking` in launch.go (buildLaunch in blocking mode, Run, observer.end, seatFellBack), the one blocking core the fan_out plan, fan_out's recipe form and the typed/StartRecipe launch share; the `recipeCall` struct is gone — callers pass a `workflowLaunch` (recipe source, inputs, seat, turn, call, kind/line).
+NOTES (2026-10-01): newWorkflowRunner/newRecipeRunner fold into `newLaunchRunner` (launch.go), which builds no Spawner (wireLaunch does); its per-surface refusal texts are kept — a plan gets launchRefusal(fanOutNoScratch/fanOutNoWorkspace/fanOutRunFailedPrefix+err), a recipe the bare reason (new consts launchNoScratch/launchNoWorkspace, same text as before). doc.go needed no change: its launch.go sentence already names both modes.
 
 **Depends on:** item 10.
 **Files:** `internal/agent/launch.go`, `internal/agent/workflowcall.go`, `internal/agent/recipe.go`, `internal/agent/workflowcall_test.go`, `internal/agent/doc.go`
