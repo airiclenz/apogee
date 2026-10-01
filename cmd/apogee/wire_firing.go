@@ -876,7 +876,9 @@ func raise(
 
 // recipeWorkflowFailure reports why a recipe run's workflow counts as a failed run, nil when it
 // does not — no recipe was named, or its workflow finished with at least one item not blocked (or
-// with no items at all: a recipe of steps alone has nothing to block). It is the ONE judgement
+// with no items at all: a recipe of steps alone has nothing to block). The items are the fan-out
+// items the end phase's tally counts (run.WorkflowOutcome), so an ok verify or merge receipt never
+// masks a workflow whose every item blocked. It is the ONE judgement
 // every Driver that runs a recipe applies — `apogee headless --recipe` exits 1 on it and the
 // daemon records a scheduled `run: workflow:` Firing as failed on it — so the error is returned
 // unprefixed and each Driver wraps it in its own clause.

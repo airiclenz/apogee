@@ -18,7 +18,6 @@ import (
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
-	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // ErrMode is returned when a Spec names an autonomy mode a Firing may not run in. A Firing
@@ -219,8 +218,10 @@ type Result struct {
 }
 
 // WorkflowOutcome is how a Firing's recipe Workflow ended: its id, the phase it ended on, and how
-// many of its items finished on a receipt and how many of those were blocked. Only item stages
-// (fanout, verify, …) count items; a script, ask or pick stage is a step, never an item.
+// many of its items finished on a receipt and how many of those were blocked. The counts are the
+// end phase's tally (domain.WorkflowTally), the one the model's note on the Workflow reports: only
+// fan-out items count, each by the receipt its latest round ended on; verify and merge receipts,
+// and a script, ask or pick stage, are never items.
 type WorkflowOutcome struct {
 	// ID is the Workflow's id, empty when none started — no Spec.Recipe, or a launch that could not
 	// run (its refusal is the line the model read instead of the result lines).
@@ -228,7 +229,8 @@ type WorkflowOutcome struct {
 	// End is the phase the Workflow ended on — domain.WorkflowFinished, WorkflowStopped or
 	// WorkflowFailed — and empty while it had not ended.
 	End domain.WorkflowPhase
-	// Items is how many items finished on a receipt, a resumed one included.
+	// Items is how many items finished on a receipt, a resumed one included: the tally's ok,
+	// partial and blocked, never its unfinished. Zero until a finished or stopped end phase.
 	Items int
 	// Blocked is how many of those items ended on a blocked receipt.
 	Blocked int
@@ -821,7 +823,10 @@ func (t *eventTap) Emit(e domain.Event) {
 // recipe runs on the Firing's first Step, before the model is asked anything, so the first
 // top-level Workflow to start is the recipe's; a fan_out the model calls later starts another,
 // which this ignores. A background Workflow never runs in a Firing (ADR 0089 D1), and an event from
-// one is skipped all the same.
+// one is skipped all the same. The item counts come from the end phase's Tally alone — the one
+// the model's note on the Workflow reports — never from the item_finished events, which a verify
+// or merge receipt and every earlier round also emit; an end phase without a Tally (a failed one)
+// leaves them as they were.
 func (t *eventTap) noteWorkflowPhase(ev domain.WorkflowPhaseEvent) {
 	if !t.isRecipe || ev.Depth != 0 || ev.Background {
 		return
@@ -835,13 +840,12 @@ func (t *eventTap) noteWorkflowPhase(ev domain.WorkflowPhaseEvent) {
 		return
 	}
 	switch ev.Phase {
-	case domain.WorkflowItemFinished:
-		t.workflow.Items++
-		if ev.Receipt.Status == string(workflow.StatusBlocked) {
-			t.workflow.Blocked++
-		}
 	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
 		t.workflow.End = ev.Phase
+		if ev.Tally != nil {
+			t.workflow.Items = ev.Tally.OK + ev.Tally.Partial + ev.Tally.Blocked
+			t.workflow.Blocked = ev.Tally.Blocked
+		}
 	}
 }
 

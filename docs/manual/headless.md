@@ -36,7 +36,9 @@ input the text leaves unbound refuses the run before anything is sent — `missi
 <name>`, exit `2` — and every `ask` stage takes its declared default, which its result line
 records as `(default taken: no one to ask)`. Under `--format json` the workflow's progress
 arrives as `workflow_phase` lines. A workflow that could not run, was stopped, failed, or
-ended with every item blocked exits `1` whatever the model then said.
+ended with every item blocked exits `1` whatever the model then said. The items are the ones the
+workflow's finish note counts — its fan-out items, each on the receipt its latest round ended on;
+a verify or merge receipt is not an item.
 `--endpoint`, `--model`, `--server`, `--bypass`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from

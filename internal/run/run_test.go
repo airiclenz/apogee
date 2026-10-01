@@ -1392,6 +1392,66 @@ func TestEventTapBracketsEachFanOutItemByItsPhases(t *testing.T) {
 	}
 }
 
+// TestEventTapRecipeVerdictReadsTheEndPhaseTally pins where the recipe Workflow's item counts come
+// from: the end phase's Tally, the one the model's note reports — never the item_finished events,
+// which an ok verify receipt and every earlier round also emit. Items is the tally's ok, partial
+// and blocked, without its unfinished; an end phase without a Tally keeps the End-based verdict.
+func TestEventTapRecipeVerdictReadsTheEndPhaseTally(t *testing.T) {
+	t.Parallel()
+
+	phase := func(which domain.WorkflowPhase, status string, tally *domain.WorkflowTally) domain.WorkflowPhaseEvent {
+		return domain.WorkflowPhaseEvent{
+			Workflow: "wf-1", Phase: which, Receipt: domain.WorkflowReceipt{Status: status}, Tally: tally,
+		}
+	}
+	itemEvents := []domain.WorkflowPhaseEvent{
+		phase(domain.WorkflowItemFinished, "ok", nil), // round 1, later redone
+		phase(domain.WorkflowItemFinished, "blocked", nil),
+		phase(domain.WorkflowItemFinished, "blocked", nil),
+		phase(domain.WorkflowItemFinished, "ok", nil), // a verify receipt
+		phase(domain.WorkflowItemFinished, "ok", nil),
+	}
+
+	tests := []struct {
+		name string
+		end  domain.WorkflowPhaseEvent
+		want WorkflowOutcome
+	}{
+		{
+			"finished with every item blocked",
+			phase(domain.WorkflowFinished, "", &domain.WorkflowTally{Blocked: 2}),
+			WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished, Items: 2, Blocked: 2},
+		},
+		{
+			"stopped leaves its unfinished items out",
+			phase(domain.WorkflowStopped, "", &domain.WorkflowTally{OK: 1, Partial: 1, Blocked: 1, Unfinished: 3}),
+			WorkflowOutcome{ID: "wf-1", End: domain.WorkflowStopped, Items: 3, Blocked: 1},
+		},
+		{
+			"failed without a tally",
+			phase(domain.WorkflowFailed, "", nil),
+			WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFailed},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tap := &eventTap{isRecipe: true}
+			tap.Emit(phase(domain.WorkflowStarted, "", nil))
+			for _, ev := range itemEvents {
+				tap.Emit(ev)
+			}
+			if got := tap.workflowOutcome(); got != (WorkflowOutcome{ID: "wf-1"}) {
+				t.Errorf("before the end phase workflowOutcome() = %+v; want no items counted", got)
+			}
+			tap.Emit(tt.end)
+			if got := tap.workflowOutcome(); got != tt.want {
+				t.Errorf("workflowOutcome() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // namedSubAgentCall is the delegating tool-call event for a delegation that carries the OPTIONAL
 // short name beside its task.
 func namedSubAgentCall(depth int, id, task, name string) domain.ToolCallEvent {

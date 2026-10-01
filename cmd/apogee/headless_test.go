@@ -4293,6 +4293,72 @@ func TestHeadlessRecipeWithEveryItemBlockedExits1(t *testing.T) {
 	}
 }
 
+// sweepVerifyRecipeSkill is the sweep recipe over two items, alpha and beta, followed by a verify
+// stage with no `when:`, so a verify child checks every finished item, blocked or not.
+func sweepVerifyRecipeSkill() string {
+	return "---\nid: sweep\nsummary: sweep a list\ninputs:\n  - name: scope\n    required: true\n" +
+		"recipe:\n" +
+		"  - name: items\n    kind: fanout\n    over:\n      list: [alpha, beta]\n    task: \"check {item} in {scope}\"\n" +
+		"  - name: check\n    kind: verify\n" +
+		"---\nRun the sweep.\n"
+}
+
+// sweepVerifyUpstream scripts a sweepVerifyRecipeSkill run: each item child answers on the status
+// given for it, each verify child confirms its item on an ok receipt, and the Firing answers
+// "swept".
+func sweepVerifyUpstream(t *testing.T, alphaStatus, betaStatus string) *stubllm.Server {
+	t.Helper()
+	item := func(name, status string) stubllm.Turn {
+		return stubllm.Turn{When: &stubllm.Match{LastMessage: "check " + name + " in src"}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_" + name, Name: tools.FinishToolName,
+			Arguments: `{"status":"` + status + `","summary":"` + name + ` checked"}`,
+		}}}
+	}
+	verify := func(name string) stubllm.Turn {
+		return stubllm.Turn{When: &stubllm.Match{LastMessage: "The item is: " + name}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_verify_" + name, Name: tools.FinishToolName,
+			Arguments: `{"status":"ok","summary":"` + name + ` confirmed","verdict":"confirmed"}`,
+		}}}
+	}
+	return stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+	}, Turns: []stubllm.Turn{
+		item("alpha", alphaStatus), item("beta", betaStatus), verify("alpha"), verify("beta"),
+		{Text: "swept"},
+	}})
+}
+
+// The exit verdict counts the items the model's note counts: the fan-out's, never the verify
+// receipts. Two blocked items whose verify children both answered ok are still a workflow whose
+// every item blocked, exit 1; one blocked item of two is a run that landed, exit 0.
+func TestHeadlessRecipeVerdictIgnoresVerifyReceipts(t *testing.T) {
+	t.Run("every fan-out item blocked fails", func(t *testing.T) {
+		upstream := sweepVerifyUpstream(t, "blocked", "blocked")
+		_, errOut, err := recipeHeadless(t, upstream, sweepVerifyRecipeSkill(), "--recipe", "sweep", "src")
+		if err == nil {
+			t.Fatalf("an all-blocked workflow with ok verify receipts exited 0 (stderr: %q)", errOut)
+		}
+		upstream.AssertConsumed(t)
+		if code := exitCodeFor(err); code != exitRunFailed {
+			t.Errorf("exit code = %d; want %d", code, exitRunFailed)
+		}
+		if !regexp.MustCompile(`every item of recipe /sweep's workflow \S+ blocked \(2 of 2\)`).MatchString(err.Error()) {
+			t.Errorf("err = %q; want every item named blocked, 2 of 2", err.Error())
+		}
+	})
+	t.Run("one fan-out item of two blocked exits 0", func(t *testing.T) {
+		upstream := sweepVerifyUpstream(t, "ok", "blocked")
+		out, errOut, err := recipeHeadless(t, upstream, sweepVerifyRecipeSkill(), "--recipe", "sweep", "src")
+		if err != nil {
+			t.Fatalf("headless --recipe: %v (stderr: %q)", err, errOut)
+		}
+		upstream.AssertConsumed(t)
+		if strings.TrimSpace(out) != "swept" {
+			t.Errorf("stdout = %q; want the model's answer alone", out)
+		}
+	})
+}
+
 // A required input the text leaves unbound refuses the run before anything is sent: no one is
 // there to ask for it, so it is item 20's `missing input` refusal, exit 2.
 func TestHeadlessRecipeMissingRequiredInputNeverStarts(t *testing.T) {

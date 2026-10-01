@@ -99,7 +99,10 @@ apogee.go — WorkflowReceipt alias; internal/agent/workflowcall_test.go — Tes
 **Acceptance:** `go test ./internal/domain ./internal/eventjson . -run 'Workflow|Example'`; `go test ./internal/agent -run 'TestWorkflowCall_|TestBackground_'`
 **Commit:** `feat(agent): the workflow end phase carries the engine's tally`
 
-## 6. run, cmd: the exit verdict reads the end-phase tally
+## 6. run, cmd: the exit verdict reads the end-phase tally — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): consequential edit — docs/manual/headless.md: made necessary by the exit verdict now counting only the finish note's fan-out items (verify/merge receipts are not items)
+NOTES (2026-10-01): cmd/apogee/daemonfire_test.go left unchanged — its WorkflowOutcome fixtures stay valid (struct unchanged) and TestDaemonFireFailsARecipeWorkflowThatDidNotLand passes as is; the new headless case is TestHeadlessRecipeVerdictIgnoresVerifyReceipts (verify children matched on the verify brief's "The item is: <name>")
 
 **Depends on:** item 5.
 **Files:** `internal/run/run.go`, `internal/run/run_test.go`, `cmd/apogee/wire_firing.go`, `cmd/apogee/headless_test.go`, `cmd/apogee/daemonfire_test.go`
