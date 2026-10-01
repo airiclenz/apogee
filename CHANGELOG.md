@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- A model or context-window change the heartbeat observes while the engine is busy now lands only once every engine hold (worker, launcher actuation, /bg launch) has released: when an Exchange and a launcher verb overlap, the rebind waits for whichever of the two finishes last instead of landing at the first.
+
 - A workflow receipt's text field holding a carriage return, vertical tab or no-break space is now quoted in the result lines, like one holding a space, so it can no longer blur its `k=v` pair.
 
 - For embedders: a finished or stopped `WorkflowPhaseEvent` now carries `Tally *apogee.WorkflowTally` — the ok, partial, blocked and unfinished item counts the model's note reports (verify and merge outcomes are not items); it is nil on a failed end phase and every other phase, and the `workflow_phase` NDJSON line is unchanged.
