@@ -202,9 +202,9 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 // the inputs (in.RecipeInputs), else by the "/<id>" line they typed, kept trimmed.
 func recipeLaunchKind(in domain.UserInput, id string) workflowLaunch {
 	if in.RecipeInputs != nil {
-		return workflowLaunch{kind: launchStartRecipe, recipe: id}
+		return workflowLaunch{kind: launchStartRecipe, recipe: domain.RecipeLaunch{SkillID: id}}
 	}
-	return workflowLaunch{kind: launchTypedRecipe, recipe: id, line: strings.TrimSpace(in.Text)}
+	return workflowLaunch{kind: launchTypedRecipe, recipe: domain.RecipeLaunch{SkillID: id}, line: strings.TrimSpace(in.Text)}
 }
 
 // recipeRefusal reports a launch that could not run and returns the line the model reads it by.

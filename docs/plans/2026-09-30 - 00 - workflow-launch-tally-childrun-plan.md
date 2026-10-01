@@ -163,7 +163,12 @@ NOTES (2026-10-01): `workflowItemLines` already read its status through `workflo
 **Acceptance:** `go test ./internal/agent -run 'TestItemStatusText_|TestWorkflowControl_'`; `go test ./internal/tui -run 'TestWorkflowItemStatus_|TestWorkflows'`
 **Commit:** `fix(agent): workflow status detail quotes a field value that blurs its pair`
 
-## 10. agent: one launch builder for the background and resume paths
+## 10. agent: one launch builder for the background and resume paths — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): the recipe source's keyed inputs ride a `workflowLaunch.inputs` map beside `recipe domain.RecipeLaunch` (SkillID = recipe id) rather than in RecipeLaunch.Text — fan_out's `inputs` are keyed and cannot round-trip through a text line; the builder completes them (completeInputs) unless the plan is read back from a folder.
+NOTES (2026-10-01): the mode constants are `launchModeBlocking`/`launchModeBackground` — `launchBackground` is already a test helper in background_test.go.
+NOTES (2026-10-01): buildLaunch already wires blocking mode (spawner off this Agent under `launch.call`, observer.resume = resumeCommand); only TestLaunch exercises it until item 11 moves the blocking callers onto it, and newWorkflowRunner/newRecipeRunner stay as the builder's per-source Runner construction until item 11 folds them in.
+NOTES (2026-10-01): a runner-construction refusal (no scratch / no workspace) is a `launchRefusal` error so the fan_out background branch still answers it as the bare fan_out refusal text, not wrapped in fanOutBackgroundFailed.
 
 **Depends on:** items 3, 4, 5.
 **Files:** `internal/agent/launch.go`, `internal/agent/launch_test.go`, `internal/agent/background.go`, `internal/agent/recipe.go`, `internal/agent/workflowcall.go`, `internal/agent/doc.go`

@@ -89,7 +89,10 @@
 // under a cancel, with how many finished and the listing written so far (ADR 0088 D3) — or, where
 // the Driver offers the switch, handed to the background manager and answered at once with its id
 // and status path; it also answers the `workflow` control call — status, stop, and a message to a
-// running background item (ADR 0089 D4). recipe.go is
+// running background item (ADR 0089 D4). launch.go is the one launch builder a Workflow is wired
+// by: a workflowLaunch value — its source a plan, a recipe and its inputs, or a folder to resume,
+// its mode blocking or background — built into the Runner, spawner, observer and asker it runs
+// under. recipe.go is
 // the recipe launch: a leading "/<recipe>" or StartRecipe binds a Recipe's inputs and runs it as a
 // Workflow on the opening Step, its script stages through the terminal's own Resolution, and the
 // opening message carries the user's line plus the result lines (ADR 0087 D6). background.go is

@@ -92,7 +92,6 @@ import (
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -199,23 +198,6 @@ type backgroundRun struct {
 	running bool
 	cancel  context.CancelFunc
 	done    chan struct{}
-}
-
-// backgroundLaunch is what startBackground needs of a workflow: its plan (inputs already bound),
-// the recipe it comes from ("" for a fan_out's plan), the Runner built for it, where its stages'
-// prompt files are read from (nil: the workspace), the tool its children are bracketed under, the
-// Turn that launched it, the Delegation seat its children run on (the fan_out call's `run_on`;
-// seatConfigured, the zero, for every other launch), and — for a re-run — the folder it must run in
-// again ("" finds or creates one, workflow.Runner.Open).
-type backgroundLaunch struct {
-	plan    workflow.Plan
-	recipe  string
-	runner  *workflow.Runner
-	prompts fs.FS
-	tool    string
-	turn    int
-	seat    delegationSeat
-	folder  string
 }
 
 // Workflows lists the session's Workflows — every folder in its `<scratch>/workflows/` store, read
@@ -351,7 +333,8 @@ func (a *Agent) RerunFailed(id string) error {
 	if !hasBlockedItem(status) {
 		return fmt.Errorf(rerunNothingFormat, id)
 	}
-	return a.resumeBackground(workflowEntryJSON{ID: id, Recipe: status.Recipe}, id)
+	_, err = a.startBackground(a.folderLaunch(store, id, status.Recipe, true))
+	return err
 }
 
 // hasBlockedItem reports whether any item of status ended on a blocked receipt — the items a re-run
@@ -394,7 +377,7 @@ func (a *Agent) ResumeWorkflows() error {
 		if m.isLive(entry.ID) {
 			continue
 		}
-		if err := a.resumeBackground(entry, ""); err != nil {
+		if err := a.resumeBackground(entry); err != nil {
 			errs = append(errs, fmt.Errorf("apogee: resume workflow %s: %w", entry.ID, err))
 		}
 	}
@@ -402,39 +385,25 @@ func (a *Agent) ResumeWorkflows() error {
 }
 
 // resumeBackground launches the workflow entry names from its folder — under the scratch directory
-// its Home names (entryScratch). folder is the folder the launch must run in (a re-run,
-// RerunFailed), or "" to find or create it by plan hash (a resume).
-func (a *Agent) resumeBackground(entry workflowEntryJSON, folder string) error {
+// its Home names (entryScratch) — finding or creating its folder by plan hash, so a source that
+// moved under it runs in a new folder.
+func (a *Agent) resumeBackground(entry workflowEntryJSON) error {
 	store, err := workflow.NewStore(a.entryScratch(entry))
 	if err != nil {
 		return err
 	}
-	plan, err := store.ReadPlan(entry.ID)
-	if err != nil {
-		return err
-	}
-	turn := a.turns.snapshot().index
-	launch := backgroundLaunch{plan: plan, tool: tools.FanOutToolName, turn: turn, folder: folder}
-	if entry.Recipe == "" {
-		runner, refusal := a.newWorkflowRunner(turn, domain.ToolCall{}, seatConfigured)
-		if refusal != "" {
-			return errors.New(refusal)
-		}
-		launch.runner = runner
-	} else {
-		recipe, err := a.recipeByID(entry.Recipe)
-		if err != nil {
-			return err
-		}
-		runner, err := a.newRecipeRunner(turn, domain.ToolCall{}, recipe, seatConfigured)
-		if err != nil {
-			return err
-		}
-		launch.recipe, launch.runner, launch.prompts, launch.tool = recipe.ID, runner, recipe.Files, recipeCallTool
-	}
-	launch.runner.Store = store // the folder's own store, which a kept workflow's Home moves off the session's
-	_, err = a.startBackground(launch)
+	_, err = a.startBackground(a.folderLaunch(store, entry.ID, entry.Recipe, false))
 	return err
+}
+
+// folderLaunch is the launch of the workflow in folder id of store, from the recipe named ("" for a
+// fan_out's plan), at the current Turn; pinned keeps it to that very folder (RerunFailed).
+func (a *Agent) folderLaunch(store *workflow.Store, id, recipe string, pinned bool) workflowLaunch {
+	return workflowLaunch{
+		recipe: domain.RecipeLaunch{SkillID: recipe},
+		folder: &launchFolder{id: id, store: store, pinned: pinned},
+		turn:   a.turns.snapshot().index,
+	}
 }
 
 // entryScratch is the scratch directory entry's folder lives under: the session's own, or — for a
@@ -528,61 +497,29 @@ func (a *Agent) startBackgroundRecipe(recipe workflow.Recipe, text string) (stri
 // children on seat, and returns the workflow's id. An undeclared key or a required input left unset
 // is refused, never asked.
 func (a *Agent) startKeyedBackgroundRecipe(recipe workflow.Recipe, given map[string]string, seat delegationSeat) (string, error) {
-	inputs, err := completeInputs(recipe.Inputs, given)
-	if err != nil {
-		return "", err
-	}
-	turn := a.turns.snapshot().index
-	runner, err := a.newRecipeRunner(turn, domain.ToolCall{}, recipe, seat)
-	if err != nil {
-		return "", err
-	}
-	return a.startBackground(backgroundLaunch{
-		plan: bindPlanInputs(recipe, inputs), recipe: recipe.ID, runner: runner,
-		prompts: recipe.Files, tool: recipeCallTool, turn: turn, seat: seat,
+	return a.startBackground(workflowLaunch{
+		recipe: domain.RecipeLaunch{SkillID: recipe.ID}, inputs: given, seat: seat, turn: a.turns.snapshot().index,
 	})
 }
 
-// startBackground opens launch's workflow folder and hands the workflow to the manager: it starts at
-// once when no background workflow runs on its server, and waits in line otherwise. It returns the
-// workflow's id. The Runner is rebuilt around the folder's id and the launch-time host
-// (backgroundHost) — its children spawned off the host and bracketed under the `workflow-<id>` call
-// yet addressable through this Agent, its scripts run through the host's Resolution, its ask stages
-// put through the manager's queue — and gets its width when it starts. A workflow already live under
-// the same id (the same plan launched twice) is refused. It runs where the idle-only mutators cannot
-// (an idle boundary, or a Step), which is what lets the host be read off this Agent unguarded.
-func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
-	if a.isDelegate() {
-		return "", errDelegateBackground
-	}
-	// Opened at launch rather than at start, so a queued workflow already has the id and status path
-	// it is listed and stopped by; the Run that follows resumes this very folder.
-	status, err := launch.runner.Open(launch.plan, launch.folder)
-	if errors.Is(err, workflow.ErrFolderMoved) {
-		return "", fmt.Errorf(rerunMovedFormat, launch.folder)
-	}
+// startBackground builds launch in the background (buildLaunch) and hands the workflow to the
+// manager: it starts at once when no background workflow runs on its server, and waits in line
+// otherwise. It returns the workflow's id. The folder is opened at launch and the Runner wired
+// around its id and the launch-time host (backgroundHost) — its children spawned off the host and
+// bracketed under the `workflow-<id>` call yet addressable through this Agent, its scripts run
+// through the host's Resolution, its ask stages put through the manager's queue — and gets its
+// width when it starts. A workflow already live under the same id (the same plan launched twice) is
+// refused. It runs where the idle-only mutators cannot (an idle boundary, or a Step), which is what
+// lets the host be read off this Agent unguarded.
+func (a *Agent) startBackground(launch workflowLaunch) (string, error) {
+	launch.mode = launchModeBackground
+	built, err := a.buildLaunch(launch)
 	if err != nil {
 		return "", err
 	}
-	host := a.backgroundHost()
-	call := domain.ToolCall{ID: backgroundCallPrefix + status.ID, Tool: launch.tool}
-	spawner := host.newWorkflowSpawner(launch.turn, call, launch.prompts)
-	spawner.children = &a.children
-	spawner.seat = launch.seat
-	launch.runner.Spawner = spawner
-	if scripts, ok := launch.runner.Scripts.(*recipeScripts); ok {
-		scripts.agent = host
-	}
-	observer := host.observeWorkflow(launch.runner, launch.turn, launch.plan)
-	observer.background, observer.call = true, call.ID
-	// Set after observeWorkflow, which would wrap it to report the question before it is queued: a
-	// background question is reported once it waits in the queue (backgroundScope.announce).
-	if launch.runner.Asker != nil {
-		launch.runner.Asker = backgroundAsker{scope: backgroundScope{manager: &a.background, workflow: status.ID, observer: observer}}
-	}
 	run := &backgroundRun{
-		id: status.ID, recipe: launch.recipe, server: host.backgroundServer(launch.seat), seat: launch.seat,
-		plan: launch.plan, runner: launch.runner, host: host, turn: launch.turn, observer: observer,
+		id: built.id, recipe: built.recipe, server: built.host.backgroundServer(launch.seat), seat: launch.seat,
+		plan: built.plan, runner: built.runner, host: built.host, turn: launch.turn, observer: built.observer,
 		done: make(chan struct{}),
 	}
 

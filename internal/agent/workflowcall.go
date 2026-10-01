@@ -38,6 +38,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -124,22 +125,13 @@ const (
 	launchStartRecipe
 )
 
-// workflowLaunch is how a blocking Workflow was launched: its kind, the recipe a recipe launch
-// ran, and — for a typed launch — the user's line, trimmed. It is the single input the resume line
-// of a stopped workflow's answer is derived from (resumeHint).
-type workflowLaunch struct {
-	kind   launchKind
-	recipe string
-	line   string
-}
-
 // resumeHint is the line that tells the model how to resume a stopped workflow launched as launch.
 func resumeHint(launch workflowLaunch) string {
 	switch launch.kind {
 	case launchTypedRecipe:
 		return fmt.Sprintf(resumeTypedLineFormat, launch.line)
 	case launchStartRecipe:
-		return fmt.Sprintf(resumeStartRecipeFormat, launch.recipe)
+		return fmt.Sprintf(resumeStartRecipeFormat, launch.recipe.SkillID)
 	default:
 		return resumeFanOutLine
 	}
@@ -153,7 +145,7 @@ func resumeCommand(launch workflowLaunch) string {
 	case launchTypedRecipe:
 		return fmt.Sprintf(resumeCommandTypedFormat, launch.line)
 	case launchStartRecipe:
-		return fmt.Sprintf(resumeCommandStartFormat, launch.recipe)
+		return fmt.Sprintf(resumeCommandStartFormat, launch.recipe.SkillID)
 	default:
 		return ""
 	}
@@ -303,7 +295,7 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		if refusal != "" {
 			return errorToolResult(call.ID, refusal)
 		}
-		asked := recipeCall{id: recipe, inputs: inputs, seat: seat, launch: workflowLaunch{kind: launchFanOut, recipe: recipe}}
+		asked := recipeCall{id: recipe, inputs: inputs, seat: seat, launch: workflowLaunch{kind: launchFanOut, recipe: domain.RecipeLaunch{SkillID: recipe}}}
 		return a.recipeCallResult(ctx, turn, call, asked, background)
 	}
 	plan, refusal := parseFanOutPlan(call.Arguments)
@@ -313,13 +305,16 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if problems := workflow.ValidateModelPlan(plan); len(problems) > 0 {
 		return errorToolResult(call.ID, fanOutProblemsText(problems))
 	}
+	if background {
+		id, err := a.startBackground(workflowLaunch{plan: plan, seat: seat, turn: turn})
+		if refusal := launchRefusal(""); errors.As(err, &refusal) {
+			return errorToolResult(call.ID, string(refusal))
+		}
+		return a.backgroundCallResult(call.ID, id, err)
+	}
 	runner, refusal := a.newWorkflowRunner(turn, call, seat)
 	if refusal != "" {
 		return errorToolResult(call.ID, refusal)
-	}
-	if background {
-		id, err := a.startBackground(backgroundLaunch{plan: plan, runner: runner, tool: tools.FanOutToolName, turn: turn, seat: seat})
-		return a.backgroundCallResult(call.ID, id, err)
 	}
 	observer := a.observeWorkflow(runner, turn, plan)
 	observer.call = call.ID
