@@ -207,7 +207,7 @@ type backgroundRun struct {
 // prompt files are read from (nil: the workspace), the tool its children are bracketed under, the
 // Turn that launched it, the Delegation seat its children run on (the fan_out call's `run_on`;
 // seatConfigured, the zero, for every other launch), and — for a re-run — the folder it must run in
-// again ("" finds or creates one, openWorkflowFolder).
+// again ("" finds or creates one, workflow.Runner.Open).
 type backgroundLaunch struct {
 	plan    workflow.Plan
 	recipe  string
@@ -556,7 +556,12 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 	if a.isDelegate() {
 		return "", errDelegateBackground
 	}
-	status, err := openWorkflowFolder(launch.runner, launch.plan, launch.folder)
+	// Opened at launch rather than at start, so a queued workflow already has the id and status path
+	// it is listed and stopped by; the Run that follows resumes this very folder.
+	status, err := launch.runner.Open(launch.plan, launch.folder)
+	if errors.Is(err, workflow.ErrFolderMoved) {
+		return "", fmt.Errorf(rerunMovedFormat, launch.folder)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -594,49 +599,6 @@ func (a *Agent) startBackground(launch backgroundLaunch) (string, error) {
 		a.startRunLocked(run)
 	}
 	return run.id, nil
-}
-
-// openWorkflowFolder finds or creates the folder launch's Runner will run plan in, the way the
-// Runner's own Run does (workflow.Runner.Run: every fanout with a source of its own expanded, the
-// PlanHash over them, the newest folder with that hash, else a new one), so the Run that follows
-// resumes this very folder. It is opened at launch rather than at start so a queued workflow already
-// has the id and status path it is listed and stopped by. A non-empty folder is the one a re-run
-// must find: a plan whose hash leads anywhere else — no folder, or a newer one — is refused, and
-// nothing is created.
-func openWorkflowFolder(runner *workflow.Runner, plan workflow.Plan, folder string) (workflow.RunStatus, error) {
-	if problems := workflow.Validate(plan); len(problems) > 0 {
-		texts := make([]string, 0, len(problems))
-		for _, problem := range problems {
-			texts = append(texts, problem.String())
-		}
-		return workflow.RunStatus{}, fmt.Errorf("workflow: invalid plan: %s", strings.Join(texts, "; "))
-	}
-	var items []workflow.Item
-	for _, stage := range plan.Stages {
-		if stage.Kind != workflow.StageFanout || stage.Over == nil || stage.Over.Stage != "" {
-			continue
-		}
-		expanded, err := workflow.Expand(*stage.Over, runner.Workspace, runner.Split)
-		if err != nil {
-			return workflow.RunStatus{}, fmt.Errorf("workflow: stage %q: %w", stage.Name, err)
-		}
-		items = append(items, expanded...)
-	}
-	planHash, err := workflow.PlanHash(plan, nil, items)
-	if err != nil {
-		return workflow.RunStatus{}, err
-	}
-	status, found, err := runner.Store.Find(planHash)
-	if err != nil {
-		return status, err
-	}
-	if folder != "" && (!found || status.ID != folder) {
-		return workflow.RunStatus{}, fmt.Errorf(rerunMovedFormat, folder)
-	}
-	if found {
-		return status, nil
-	}
-	return runner.Store.Create(plan, planHash, time.Now())
 }
 
 // startRunLocked starts run on a goroutine of its own, at the background width its host states,
@@ -794,7 +756,8 @@ func (a *Agent) backgroundServer(seat delegationSeat) string {
 
 // markStopped writes a queued run's folder as stopped: it never started, so no Runner will. A folder
 // already done — a queued RerunFailed's — is left done: the re-run never started, so the finished
-// run it would have repeated stands, and a later RerunFailed still accepts it.
+// run it would have repeated stands, and a later RerunFailed still accepts it. The stamp reads the
+// run's Runner clock (Runner.Now), else time.Now.
 func markStopped(run *backgroundRun) error {
 	status, err := run.runner.Store.ReadStatus(run.id)
 	if err != nil {
@@ -805,6 +768,9 @@ func markStopped(run *backgroundRun) error {
 	}
 	status.Phase = workflow.PhaseStopped
 	status.Updated = time.Now()
+	if run.runner.Now != nil {
+		status.Updated = run.runner.Now()
+	}
 	return run.runner.Store.WriteStatus(status)
 }
 

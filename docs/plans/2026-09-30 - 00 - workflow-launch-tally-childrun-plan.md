@@ -52,7 +52,9 @@ NOTES (2026-10-01): TallyOf sums the Resumed count too (finishTally did not); Li
 **Acceptance:** `go test ./internal/workflow -run 'TestFormat|TestTally_|TestStateOf|TestItemText_|TestReceiptDomain|TestRunner|TestDocMap'`
 **Commit:** `refactor(workflow): own the item tally, workflow state and item-text pieces`
 
-## 3. agent: background start opens its folder through Runner.Open
+## 3. agent: background start opens its folder through Runner.Open — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): startBackground (shared by the fan_out and recipe background paths) is the single call site of Runner.Open; startBackgroundRecipe needed no change of its own. The "opened at launch, not at start" rationale moved from the deleted openWorkflowFolder comment to a comment at the Open call.
 
 **Depends on:** item 1.
 **Files:** `internal/agent/background.go`, `internal/agent/background_test.go`, `internal/agent/workflowcall.go`, `internal/agent/recipe.go`

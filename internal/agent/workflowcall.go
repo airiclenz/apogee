@@ -411,11 +411,11 @@ func parseFanOutRecipe(raw json.RawMessage) (id string, inputs map[string]string
 
 // newWorkflowRunner builds the Runner one fan_out call runs under, its item children built on seat,
 // or the refusal that keeps it from running: the session's workflow store under its scratch
-// directory, the workspace the items are read from, the split budget a `split:` source cuts to, and
-// the dispatch width. Width and split budget follow the seat (workflowWidthOn,
-// workflowContextLimitOn) — the cap and window of the server the children run on, width 1 on a
-// delegate — and the Runner never runs more children than a stage has items, so the width in
-// effect is min(width, N).
+// directory, the workspace the items are read from, the split budget a `split:` source cuts to, the
+// dispatch width, and the Agent's clock (a.now) its folders are stamped by. Width and split budget
+// follow the seat (workflowWidthOn, workflowContextLimitOn) — the cap and window of the server the
+// children run on, width 1 on a delegate — and the Runner never runs more children than a stage has
+// items, so the width in effect is min(width, N).
 func (a *Agent) newWorkflowRunner(turn int, call domain.ToolCall, seat delegationSeat) (*workflow.Runner, string) {
 	scratch := a.ScratchDir()
 	if scratch == "" {
@@ -438,6 +438,7 @@ func (a *Agent) newWorkflowRunner(turn int, call domain.ToolCall, seat delegatio
 		Width:         a.workflowWidthOn(seat),
 		Retries:       a.cfg.Workflow.ResolvedRetries(),
 		Continuations: a.cfg.Workflow.ResolvedContinuations(),
+		Now:           a.now,
 	}, ""
 }
 

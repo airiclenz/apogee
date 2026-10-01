@@ -414,7 +414,7 @@ func shellQuote(value string) string {
 }
 
 // newRecipeRunner builds the Runner a recipe runs under, its item children built on seat: fan_out's
-// store, workspace, split budget, width and second chances (newWorkflowRunner — the budget and
+// store, workspace, split budget, width, second chances and clock (newWorkflowRunner — the budget and
 // width sized for the seat), children whose prompt files are read from the skill's folder — the
 // folder the Runner also reads them from to key the items (Runner.Prompts) — this Agent's script
 // runner, and — when a human can be asked — its Asker. It names the recipe, so the folder's
@@ -445,6 +445,7 @@ func (a *Agent) newRecipeRunner(turn int, call domain.ToolCall, recipe workflow.
 		Continuations: a.cfg.Workflow.ResolvedContinuations(),
 		Scripts:       &recipeScripts{agent: a, turn: turn, recipe: recipe, split: split},
 		Recipe:        recipe.ID,
+		Now:           a.now,
 	}
 	if a.cfg.Asker != nil {
 		runner.Asker = recipeAsker{agent: a}

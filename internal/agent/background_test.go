@@ -326,6 +326,42 @@ func TestBackground_ASecondWorkflowOnTheSameServerWaitsInLine(t *testing.T) {
 	}
 }
 
+func TestBackground_FolderStampsFollowTheAgentClock(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("first", "one"), sweepRecipe("second", "two"))
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep one", signalThenWait(started, release), finishScript("f1", "one is fine")).
+		route("sweep two", nil, finishScript("f2", "two is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	pinned := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	a.now = func() time.Time { return pinned }
+
+	first := launchBackground(t, a, "first")
+	awaitClosed(t, started, "the first workflow's child")
+	second := launchBackground(t, a, "second")
+	if info := workflowInfo(t, a, second); !info.Queued {
+		t.Fatalf("second = %+v, want it queued behind the first", info)
+	}
+	if err := a.StopWorkflow(second); err != nil {
+		t.Fatalf("StopWorkflow(%s): %v", second, err)
+	}
+	close(release)
+	a.background.waitAll()
+
+	for _, id := range []string{first, second} {
+		status := workflowInfo(t, a, id).Status
+		if !status.Created.Equal(pinned) || !status.Updated.Equal(pinned) {
+			t.Errorf("%s stamped created %v, updated %v; want both %v from the Agent's clock",
+				id, status.Created, status.Updated, pinned)
+		}
+	}
+	if phase := workflowInfo(t, a, second).Status.Phase; phase != workflow.PhaseStopped {
+		t.Errorf("the stopped queued workflow is %s, want stopped", phase)
+	}
+}
+
 func TestBackground_StopKeepsTheFinishedItems(t *testing.T) {
 	t.Parallel()
 
