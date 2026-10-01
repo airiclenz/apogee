@@ -148,7 +148,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// the picker, the footer and the wire all read. And with the entry's wire (ADR 0078), because
 	// discovery differs per wire: an anthropic entry is asked under its own headers and never for
 	// a /props it does not serve.
-	b.holder.Bind(dial.Endpoint, dial.APIKey, dial.Model, dial.Wire, dial.RequestExtra, dial.Monitor())
+	b.holder.Bind(dial, dial.Monitor())
 	return nil
 }
 

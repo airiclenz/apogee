@@ -49,7 +49,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	second := upstreamServer(t, "model-b", 8192)
 
 	holder := newUpstreamHolder()
-	holder.Bind(first.URL, "key-a", "model-a", "", "", heartbeat.NewMonitor(first.URL, "", ""))
+	holder.Bind(upstreamBinding{Endpoint: first.URL, APIKey: "key-a", Model: "model-a"}, heartbeat.NewMonitor(first.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Fatalf("first beat = %+v; want a reachable model-a from the seeded Monitor", beat)
@@ -64,7 +64,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 		t.Errorf("Binding before the swap = %+v; want the seeded %+v", got, want)
 	}
 
-	holder.Swap(second.URL, "key-b", "", "", heartbeat.NewMonitor(second.URL, "", ""))
+	holder.Swap(upstreamBinding{Endpoint: second.URL, APIKey: "key-b"}, heartbeat.NewMonitor(second.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-b" {
 		t.Errorf("beat after Swap = %+v; want a reachable model-b — the holder still observes the old server", beat)
@@ -1038,7 +1038,7 @@ func TestMoveCarriesTheEntrysWireToTheEngineAndTheBinding(t *testing.T) {
 	t.Parallel()
 
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "anthropic", "",
+	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111", APIKey: "old-key", Model: "old-model", Wire: "anthropic"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	if got := holder.Binding().Wire; got != "anthropic" {
 		t.Fatalf("Binding().Wire after the bind = %q; want the bound entry's %q", got, "anthropic")
@@ -1089,7 +1089,7 @@ func TestMoveReFollowsTheParallelAgentsCap(t *testing.T) {
 	spy := &parallelAgentsSpy{}
 	caps := newParallelAgentsCap(spy)
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "", "",
+	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111", APIKey: "old-key", Model: "old-model"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	mover := sessionMover{
 		agent: &fakeSwitcher{}, holder: holder, host: &fakeStamper{},

@@ -243,7 +243,7 @@ func TestServerStatsFillBothPickersChoices(t *testing.T) {
 	sink.Emit(statsAttempt("unbound", "http://unbound:8080/v1", "mistral"))
 
 	holder := newUpstreamHolder()
-	holder.Bind(servers[0].Endpoint, "", "qwen", "", "", nil)
+	holder.Bind(upstreamBinding{Endpoint: servers[0].Endpoint, Model: "qwen"}, nil)
 	w := &rootWiring{live: newLiveSettings(config.Options{Servers: servers}), stats: rec, holder: holder}
 
 	for name, choices := range map[string][]tui.ServerChoice{

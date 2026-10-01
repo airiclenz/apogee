@@ -181,7 +181,9 @@ NOTES (2026-10-01): the holder's Bind/Swap keep their positional signatures (ite
 **Acceptance:** `go test ./cmd/apogee -run 'TestDial|TestE2ERequestExtra|TestBind|TestMove|TestLoadProfile|TestUnloadAndStop|TestLaunchProfilesSeam|TestFiringConfig|TestProbeContext|TestProbeCommand|TestResolveDelegationTarget'`; `! grep -nE '[eE]ntry\.RequestExtra\b|\bRequestExtra *(:|=)' cmd/apogee/*.go | grep -v _test.go | grep -v '^cmd/apogee/dial.go:' | grep -v 'h\.requestExtra'`; `! grep -nE 'cfg\.(Endpoint|APIKey|Wire) *=' cmd/apogee/*.go | grep -v _test.go | grep -v '^cmd/apogee/dial.go:' | grep -v '^cmd/apogee/wire_boot.go:'`; `! grep -nE '^\s*(Endpoint|APIKey|Wire): ' cmd/apogee/probe.go`
 **Commit:** `refactor(cmd): the engine's and the probe's dial fields are filled from the dial facts`
 
-## 11. cmd: the upstream holder binds one dial value
+## 11. cmd: the upstream holder binds one dial value — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): the holder now stores the whole upstreamBinding, so Binding() also returns the bound entry's forced EffortDialect (previously not held); no Binding() consumer reads that field (only upstreamBinding.Monitor does), so behaviour is unchanged.
 
 **Depends on:** item 10.
 **Files:** `cmd/apogee/upstream.go`, `cmd/apogee/wire_server.go`, `cmd/apogee/upstream_test.go`, `cmd/apogee/keysource_test.go`, `cmd/apogee/request_extra_test.go`, `cmd/apogee/serverstats_test.go`, `cmd/apogee/wire_server_test.go`

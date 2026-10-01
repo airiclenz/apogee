@@ -205,7 +205,7 @@ func TestTitleGeneratorRequestExtraFollowsTheHoldersBinding(t *testing.T) {
 	second := stubllm.New(t, stubllm.Script{Model: "model-b", Turns: []stubllm.Turn{{Repeat: true, Text: "rename the rows"}}})
 
 	holder := newUpstreamHolder()
-	holder.Bind(first.URL, "", "model-a", "", sessionExtra, nil)
+	holder.Bind(upstreamBinding{Endpoint: first.URL, Model: "model-a", RequestExtra: sessionExtra}, nil)
 	wiring := newTitleWiring(holder.Binding, noDialect, "/home/dev/apogee")
 
 	if _, err := wiring.generate(context.Background(), []string{"the parser test fails"}); err != nil {
@@ -213,7 +213,7 @@ func TestTitleGeneratorRequestExtraFollowsTheHoldersBinding(t *testing.T) {
 	}
 	assertEveryWitness(t, first, "first", sessionWitness)
 
-	holder.Swap(second.URL, "", "", "", nil)
+	holder.Swap(upstreamBinding{Endpoint: second.URL}, nil)
 	if _, err := wiring.generate(context.Background(), []string{"the rows are unreadable"}); err != nil {
 		t.Fatalf("generate after the swap: %v", err)
 	}

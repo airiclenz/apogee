@@ -42,14 +42,11 @@ import (
 // in the one place a switch already moves is what stops a second, quietly divergent notion of "the
 // current Upstream" from growing beside this one.
 type upstreamHolder struct {
-	mu       sync.Mutex
-	endpoint string
-	apiKey   string
-	model    string
-	wire     string
-	// requestExtra is the entry's `request-extra:` canonical JSON (ADR 0085), "" for none.
-	requestExtra string
-	monitor      *heartbeat.Monitor
+	mu sync.Mutex
+	// binding is the bound entry's dial facts, held as the one value they are (ADR 0083 §4 as
+	// amended 2026-09-30), so a new dial key reaches the holder through upstreamBinding alone.
+	binding upstreamBinding
+	monitor *heartbeat.Monitor
 }
 
 // upstreamBinding is everything a fresh call to this session's Upstream must be built from: where it
@@ -99,19 +96,16 @@ func newUpstreamHolder() *upstreamHolder {
 }
 
 // Bind installs the Monitor for the server the session is now on, together with the binding it
-// observes: the endpoint, the resolved key, and that server's discovery hint (empty when the entry
-// pins no model, where the first beat binds one), the wire that server speaks (the entry's `wire:`
-// key, ADR 0078) and its `request-extra:` passthrough (ADR 0085). It is how a Monitor first
-// ARRIVES — Swap below is the same write for a session that already had one — so it is the single
-// writer of the six fields, and they move together under one lock.
-func (h *upstreamHolder) Bind(endpoint, apiKey, model, wire, requestExtra string, monitor *heartbeat.Monitor) {
+// observes: the bound entry's dial facts — the endpoint, the resolved key, that server's discovery
+// hint (empty when the entry pins no model, where the first beat binds one), the wire it speaks (the
+// entry's `wire:` key, ADR 0078), its `request-extra:` passthrough (ADR 0085) and its forced effort
+// dialect. It is how a Monitor first ARRIVES — Swap below is the same write for a session that
+// already had one — so it is the single writer of the binding and the Monitor, and the two move
+// together under one lock.
+func (h *upstreamHolder) Bind(binding upstreamBinding, monitor *heartbeat.Monitor) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.endpoint = endpoint
-	h.apiKey = apiKey
-	h.model = model
-	h.wire = wire
-	h.requestExtra = requestExtra
+	h.binding = binding
 	h.monitor = monitor
 }
 
@@ -144,7 +138,7 @@ func (h *upstreamHolder) Beat(ctx context.Context) heartbeat.Beat {
 // refuses first — so this is a backstop, not a path.)
 func (h *upstreamHolder) SetModel(model string) {
 	h.mu.Lock()
-	h.model = model
+	h.binding.Model = model
 	monitor := h.monitor
 	h.mu.Unlock()
 	if monitor != nil {
@@ -152,17 +146,19 @@ func (h *upstreamHolder) SetModel(model string) {
 	}
 }
 
-// Swap makes monitor — observing endpoint with apiKey — the one subsequent beats observe. It is
+// Swap makes monitor — observing binding's server — the one subsequent beats observe. It is
 // called once a switch has already COMMITTED in the engine (Agent.SwitchUpstream), so there is no
 // failure to unwind: from the next beat on, the display observes the server the wire is actually
-// pointed at. The fields move together under one lock, so no reader can see a Monitor paired with
-// the endpoint it is not observing, or an endpoint paired with another server's key.
+// pointed at. The binding and the Monitor move together under one lock, so no reader can see a
+// Monitor paired with the endpoint it is not observing, or an endpoint paired with another server's
+// key.
 //
-// The bound model is CLEARED, for the same reason the session record's stamped model is: a switch
-// unbinds the model, and until the new server's first beat rebinds one, claiming the old server's
-// model would be a claim about a server this session no longer talks to.
-func (h *upstreamHolder) Swap(endpoint, apiKey, wire, requestExtra string, monitor *heartbeat.Monitor) {
-	h.Bind(endpoint, apiKey, "", wire, requestExtra, monitor)
+// The bound model is CLEARED whatever binding.Model says, for the same reason the session record's
+// stamped model is: a switch unbinds the model, and until the new server's first beat rebinds one,
+// claiming the old server's model would be a claim about a server this session no longer talks to.
+func (h *upstreamHolder) Swap(binding upstreamBinding, monitor *heartbeat.Monitor) {
+	binding.Model = ""
+	h.Bind(binding, monitor)
 }
 
 // Endpoint reports the Upstream the session is on right now — the launch endpoint until a move
@@ -171,7 +167,7 @@ func (h *upstreamHolder) Swap(endpoint, apiKey, wire, requestExtra string, monit
 func (h *upstreamHolder) Endpoint() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.endpoint
+	return h.binding.Endpoint
 }
 
 // Binding snapshots the current Upstream binding for a caller that must ACT on it rather than
@@ -193,9 +189,7 @@ func (h *upstreamHolder) Endpoint() string {
 func (h *upstreamHolder) Binding() upstreamBinding {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return upstreamBinding{
-		Endpoint: h.endpoint, Model: h.model, APIKey: h.apiKey, Wire: h.wire, RequestExtra: h.requestExtra,
-	}
+	return h.binding
 }
 
 // current reads the live Monitor under the mutex and hands it back, so callers hold the lock for a
@@ -321,7 +315,7 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
 	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
 	// decision 3, ADR 0078).
-	m.holder.Swap(dial.Endpoint, dial.APIKey, dial.Wire, dial.RequestExtra, dial.Monitor())
+	m.holder.Swap(dial, dial.Monitor())
 	m.host.SetModel("")
 	m.live.followEntry(entry)
 	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new
