@@ -1793,3 +1793,35 @@ func TestWorkflowState_MapsTheEngineState(t *testing.T) {
 		})
 	}
 }
+
+// An item's status detail takes its status word from the engine and renders each receipt field
+// value as Format does: a value that is empty or holds an `=` or whitespace is quoted so it never
+// blurs its `k=v` pair, a list is joined by commas, and a list element's line break folds to a space.
+func TestItemStatusText_QuotesAFieldValueThatBlursItsPair(t *testing.T) {
+	t.Parallel()
+	done := func(fields map[string]any) workflow.ItemStatus {
+		return workflow.ItemStatus{Phase: workflow.PhaseDone, Receipt: &workflow.Receipt{Status: workflow.StatusOK, Summary: "did it\nwell", Fields: fields}}
+	}
+	for _, tc := range []struct {
+		name string
+		item workflow.ItemStatus
+		want string
+	}{
+		{"no receipt", workflow.ItemStatus{Phase: workflow.PhaseRunning}, "running"},
+		{"no fields", done(nil), "ok — did it well"},
+		{"plain fields", done(map[string]any{"n": float64(2), "files": "3"}), "ok — did it well files=3 n=2"},
+		{"a spaced value", done(map[string]any{"k": "a b"}), `ok — did it well k="a b"`},
+		{"an empty value", done(map[string]any{"k": ""}), `ok — did it well k=""`},
+		{"a newline value", done(map[string]any{"k": "a\nb"}), `ok — did it well k="a\nb"`},
+		{"a carriage-return value", done(map[string]any{"k": "a\rb"}), `ok — did it well k="a\rb"`},
+		{"a list", done(map[string]any{"k": []any{"x", "y"}}), "ok — did it well k=x,y"},
+		{"a list element's newline", done(map[string]any{"k": []any{"x\ny", "z"}}), "ok — did it well k=x y,z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := itemStatusText(tc.item); got != tc.want {
+				t.Errorf("itemStatusText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

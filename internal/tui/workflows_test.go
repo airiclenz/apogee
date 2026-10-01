@@ -944,3 +944,29 @@ func TestWorkflowsStateMapsTheEngineState(t *testing.T) {
 		})
 	}
 }
+
+// An item's status in the /workflows view takes its status word from the engine: its phase until
+// its receipt is in, then the receipt's status and its summary.
+func TestWorkflowItemStatus_ReadsTheEngineStatusWord(t *testing.T) {
+	t.Parallel()
+	done := func(summary string) workflow.ItemStatus {
+		return workflow.ItemStatus{Phase: workflow.PhaseDone, Receipt: &workflow.Receipt{Status: workflow.StatusPartial, Summary: summary}}
+	}
+	for _, tc := range []struct {
+		name string
+		item workflow.ItemStatus
+		want string
+	}{
+		{"pending", workflow.ItemStatus{Phase: workflow.PhasePending}, "pending"},
+		{"running", workflow.ItemStatus{Phase: workflow.PhaseRunning}, "running"},
+		{"done with a summary", done("half of it"), "partial — half of it"},
+		{"done without a summary", done(""), "partial"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := workflowItemStatus(tc.item); got != tc.want {
+				t.Errorf("workflowItemStatus = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

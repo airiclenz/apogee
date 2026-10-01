@@ -148,7 +148,9 @@ NOTES (2026-10-01): TestWorkflowsStateMapsTheEngineState passes on the pre-chang
 **Acceptance:** `go test ./internal/tui -run 'TestWorkflows|TestWorkflowItemLine|TestWorkflowBlock'`; `! grep -n 'firstLine(e.Receipt' internal/tui/workflowblock.go`
 **Commit:** `fix(tui): workflow item line quotes newlines and reads a summary's first real line`
 
-## 9. agent, tui: item status text reads the engine's pieces
+## 9. agent, tui: item status text reads the engine's pieces — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): `workflowItemLines` already read its status through `workflowItemStatus` — no change needed there; its unquoted `key: value` field lines are kept as the item's Approach says.
 
 **Depends on:** items 2, 4, 8.
 **Files:** `internal/agent/workflowcall.go`, `internal/agent/workflowcall_test.go`, `internal/tui/workflows.go`, `internal/tui/workflows_test.go`

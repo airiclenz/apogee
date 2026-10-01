@@ -1112,20 +1112,22 @@ func itemProgress(status workflow.RunStatus) (done, total int) {
 }
 
 // itemStatusText is one item's outcome so far: `<status> — <summary>[ k=v…]` once its receipt is in,
-// its phase until then.
+// its phase until then — the status word the engine's (workflow.ItemStatusWord), each field value
+// rendered as Format renders it (workflow.FieldValue: a value that would blur its pair is quoted),
+// then folded onto one line.
 func itemStatusText(item workflow.ItemStatus) string {
+	status := workflow.ItemStatusWord(item.Phase, item.Receipt)
 	if item.Receipt == nil {
-		return string(item.Phase)
+		return status
 	}
-	receipt := item.Receipt.Domain()
-	text := receipt.Status + finishSeparator + oneLine(receipt.Summary)
-	keys := make([]string, 0, len(receipt.Fields))
-	for key := range receipt.Fields {
+	text := status + finishSeparator + oneLine(item.Receipt.Summary)
+	keys := make([]string, 0, len(item.Receipt.Fields))
+	for key := range item.Receipt.Fields {
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
-		text += " " + key + "=" + oneLine(receipt.Fields[key])
+		text += " " + key + "=" + oneLine(workflow.FieldValue(item.Receipt.Fields[key]))
 	}
 	return text
 }

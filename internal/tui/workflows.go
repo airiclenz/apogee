@@ -747,12 +747,13 @@ func workflowDetailRows(info workflow.Info) ([]popupRow, []workflowRowTarget) {
 }
 
 // workflowItemStatus is one item's outcome so far: `<status> — <summary>` once its receipt is in,
-// its phase until then.
+// its phase until then — the status word the engine's (workflow.ItemStatusWord), escape-stripped:
+// status.json is read from disk.
 func workflowItemStatus(item workflow.ItemStatus) string {
+	status := sanitize.StripEscapesToLine(workflow.ItemStatusWord(item.Phase, item.Receipt))
 	if item.Receipt == nil {
-		return sanitize.StripEscapesToLine(string(item.Phase))
+		return status
 	}
-	status := sanitize.StripEscapesToLine(string(item.Receipt.Status))
 	if item.Receipt.Summary == "" {
 		return status
 	}
