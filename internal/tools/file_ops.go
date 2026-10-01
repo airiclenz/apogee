@@ -362,8 +362,9 @@ const copiedFilePerm = 0o644
 type MoveFile struct {
 	toolSpec
 	root string
-	// host is the execHost whose look resolves the git the rename is staged through
-	// (stageGitPaths) — the one host builtinTools builds, so a test hands the tool a fake look.
+	// host is the execHost whose look resolves, and whose run launches, the git the rename
+	// is staged through (stageGitPaths) — the one host builtinTools builds, so a test hands the
+	// tool a fake look or run.
 	host execHost
 }
 
@@ -372,7 +373,7 @@ type MoveFile struct {
 // through newMoveFile.
 func NewMoveFile(root string) *MoveFile { return newMoveFile(root, defaultExecHost()) }
 
-// newMoveFile is NewMoveFile with the host whose look resolves git supplied.
+// newMoveFile is NewMoveFile with the host git is resolved and launched through supplied.
 func newMoveFile(root string, host execHost) *MoveFile {
 	return &MoveFile{toolSpec: moveFileSpec, root: root, host: host}
 }
@@ -425,7 +426,7 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// args.Source is paths[0] by the helper's contract — the pre-move path whose trackedness
 	// decides whether anything is staged. The destination rides along in the same pathspec pair,
 	// which is also what stages an OVERWRITTEN tracked destination's replacement.
-	staged := stageGitPaths(ctx, t.root, t.host.look, " (rename staged in git)", args.Source, args.Destination)
+	staged := stageGitPaths(ctx, t.root, t.host, " (rename staged in git)", args.Source, args.Destination)
 	return okResult(call.ID, fmt.Sprintf("moved %s to %s%s%s",
 		args.Source, args.Destination, resolved, staged)), nil
 }

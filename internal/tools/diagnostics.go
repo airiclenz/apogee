@@ -43,10 +43,10 @@ import (
 // SubprocessTool (domain.SubprocessTool) because the go vet / linter half shells
 // out, and THAT marker is what classifies the call: the unfakeable marker outranks
 // the self-declaration (confinement-execution-contract §4, amended 2026-07-26), so
-// the call takes the subprocess row — confined in Auto (the shared runSubprocess
-// honours the handle the disposition installs), gated below it, and (since
-// 2026-08-02) neither offered nor run in Plan, because the Plan menu keys on that
-// same class — exactly like git_diff_range (P3.9). It is stateless across Turns
+// the call takes the subprocess row — confined in Auto (the host's run,
+// subprocess.RunSubprocess in production, honours the handle the disposition
+// installs), gated below it, and (since 2026-08-02) neither offered nor run in
+// Plan, because the Plan menu keys on that same class — exactly like git_diff_range (P3.9). It is stateless across Turns
 // (ADR 0008): a fresh parse / a fresh process per call, no persistent state.
 
 // vetTimeout bounds a single go vet (or external linter) invocation. Vetting a
@@ -142,7 +142,7 @@ func (t *Diagnostics) ApprovalScope(call domain.ToolCall) string {
 // Execute diagnoses the file at the requested path. An invalid path, a path escape,
 // or an unsupported language are surfaced as results (the last as a graceful "no
 // diagnostics available", not an error); the Go error is reserved for ctx
-// cancellation and a confinement-unavailable demotion (the runSubprocess contract).
+// cancellation and a confinement-unavailable demotion (the subprocess.RunSubprocess contract).
 func (t *Diagnostics) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -278,8 +278,11 @@ func goSyntaxDiagnostics(abs string, src []byte) string {
 // including a dependency the pinned environment cannot resolve — degrades rather than
 // failing the diagnosis). go vet writes findings to stderr and
 // exits non-zero when it finds problems; a clean package exits zero with no output.
+//
+// It launches through h.run — the calling tool's execHost, the same host whose look resolved
+// goPath — so a host carrying a fake look never has its answer executed by the real launcher.
 func runGoVet(ctx context.Context, h execHost, goPath, root, abs string) (findings string, hadFindings bool, err error) {
-	res, runErr := runSubprocess(ctx, goVetSpec(h, goPath, root, abs))
+	res, runErr := h.run(ctx, goVetSpec(h, goPath, root, abs))
 	if runErr != nil {
 		// ctx cancellation, or a confinement-unavailable demotion (diagnostics takes
 		// the subprocess class, so dispatch does confine it — the demote signal must

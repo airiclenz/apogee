@@ -174,7 +174,7 @@
 // the text that leaves the tool. Detection rather than a model-supplied command is the same
 // discovery lesson find_files embodies: a capability found by tool NAME beats one found by
 // parameter. It is a write-capable SubprocessTool on terminal's disposition — a suite runs the
-// project's own code — over the shared runSubprocess, with a 5-minute ceiling and the inherited
+// project's own code — over the execHost's run, with a 5-minute ceiling and the inherited
 // environment the toolchains need, minus apogee's own credentials.
 //
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
@@ -263,18 +263,20 @@
 // lookup, the subprocess runner, the platform shell rules and the Console opener — that
 // builtinTools builds once and hands to the five execution tools, the six git tools and the two
 // git-staging file operations, with the shell resolution and the PATH-scoped environment as its
-// methods. exec_common.go is the single runSubprocess every
-// execution tool above calls — the environment scrub and the denial labels — plus
-// RunHookSubprocess, the one exported door onto that funnel, so a HOOK that must spawn (an engine-origin Go Reaction) gets
-// the same exec fence on its argv[0], scrub, teardown, cap and clamp instead of an exec.Command
-// of its own. Neither the §2.4 teardown contract nor the spawn itself is this package's to own:
+// methods; every one-shot launch a tool makes goes through that host's run — the execution
+// tools' and diagnostics' go vet directly, the git family's and the staging helper's through
+// gitexec, handed the host as execHost.git(). exec_common.go carries the environment scrub and
+// the denial labels, plus runSubprocess and RunHookSubprocess — the one exported door onto that
+// funnel, which launches through runSubprocess — so a HOOK that must spawn (an engine-origin Go
+// Reaction) gets the same exec fence on its argv[0], scrub, teardown, cap and clamp instead of an
+// exec.Command of its own. Neither the §2.4 teardown contract nor the spawn itself is this package's to own:
 // planTreeKill, the ProcessTeardown seam, the POSIX process group and the Windows Job Object
 // live in internal/platform (teardown.go and its two per-OS halves), and the run — the ceilings,
 // the default timeout, the confinement handoff, the kill-on-denial watch and the raw Windows
 // command line — lives in internal/subprocess, which internal/gitexec spawns through too. The
 // execution tools build the core's subprocess.SubprocessSpec and read its SubprocessResult
 // directly (2026-09-15; the package's mirror of those two shapes is gone); what stays here is
-// runSubprocess itself, which execHost.run is in production. A test fakes a field of the host it
+// runSubprocess itself, over the same subprocess.RunSubprocess execHost.run is in production. A test fakes a field of the host it
 // hands the tool (capturedRunHost, fakeLookHost), never a package var: the package has no
 // function- or platform.Host-typed top-level var, and exec_host_test.go's
 // TestNoPackageLevelExecSeam holds it to none through go/types.

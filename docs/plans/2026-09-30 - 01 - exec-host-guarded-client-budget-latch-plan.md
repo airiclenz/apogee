@@ -52,7 +52,12 @@ NOTES (2026-10-01): withFakeGit became `fakeGitHost(path) gitexec.Host` and swap
 **Acceptance:** `go test ./internal/gitexec -run 'TestCapture|TestRun|TestCommandConfigRefusal|TestHost'`; `go test ./internal/tools -run 'TestBuiltinToolsShareOneExecHost|TestNoPackageLevelExecSeam|TestRunGitQuery|TestExecHost_GitMapsItsFacilities'`; `go test ./internal/snapshot`; `! grep -nE '^var (LookPath|host)\b' internal/gitexec/gitexec.go`
 **Commit:** `refactor(gitexec): drop the package lookup and host vars; engine git takes a Host`
 
-## 3. tools: git family and vet run through the execHost
+## 3. tools: git family and vet run through the execHost — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): gitRead, gitWrite, stageGitPaths, runGit and runGitUnchecked take the execHost and go through h.git() (Host.Program / Host.Capture / Host.CaptureUnchecked); runGoVet calls h.run. runSubprocess now serves RunHookSubprocess only. gitexec.go untouched — its package-level Program/Resolve(look) wrappers stay for item 5.
+NOTES (2026-10-01): consequential edit — internal/tools/exec_host.go: made necessary by the git tools now resolving AND launching through execHost (type doc said "take their git lookup from it"; shellArgv doc said argv[0] is "never handed to runSubprocess").
+NOTES (2026-10-01): new tests TestDiagnostics_VetRunsThroughTheHost (fails at base: the recorder sees no spec, the real launcher ran the fake go) and TestGitStatus_LaunchesThroughTheHostRun (scripted h.run: empty answers for the probe's split-stdout specs, a scripted failure for the command; asserts the final spec's argv and dir). TestGit_GracefulWhenAbsent kept unchanged on fakeLookHost.
+NOTES (2026-10-01): pre-existing doc drift left alone — internal/tools/terminal.go:140,392, docs/design/confinement-execution-contract.md:1389 and ADR 0056:44 still speak of the `runSubprocess` funnel for the execution tools, which already launched through execHost.run before this run.
 
 **Depends on:** item 2.
 **Files:** `internal/tools/git.go`, `internal/tools/git_stage.go`, `internal/tools/file_ops.go`, `internal/tools/delete_file.go`, `internal/tools/diagnostics.go`, `internal/tools/git_test.go`, `internal/tools/git_stage_test.go`, `internal/tools/diagnostics_test.go`, `internal/tools/exec_common.go`, `internal/tools/doc.go`

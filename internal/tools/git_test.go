@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // engineGitHost returns the real OS gitexec.Host with its lookup answering path — the host a test
@@ -1066,6 +1067,43 @@ func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
 	}
 }
 
+// TestGitStatus_LaunchesThroughTheHostRun pins that a git tool's git reaches the run of the
+// execHost it was built with, never the real launcher: the host's look answers a git that does
+// not exist and its run scripts every outcome — an empty answer to the command-config probe's own
+// invocations (the split-stdout specs) and a failure for the command itself — so the result can
+// only carry the scripted text if every launch went through the host. The final spec is the
+// status invocation itself, on the looked-up git and in the workspace root.
+func TestGitStatus_LaunchesThroughTheHostRun(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	fakeGit := filepath.Join(t.TempDir(), "git")
+	h := fakeLookHost(true, fakeGit)
+	var last subprocess.SubprocessSpec
+	h.run = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		last = spec
+		if spec.SplitStdout {
+			return subprocess.SubprocessResult{}, nil
+		}
+		return subprocess.SubprocessResult{CombinedOutput: "fatal: scripted outcome", ExitCode: 128}, nil
+	}
+
+	res, err := newGitStatus(root, h).Execute(context.Background(), statusCall("c1"))
+
+	if err != nil {
+		t.Fatalf("status err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "fatal: scripted outcome") {
+		t.Errorf("result = %q, want the host run's scripted failure", res.Content)
+	}
+	wantTail := []string{"status", "--porcelain=v2", "--branch", "--ignore-submodules=dirty", "-z"}
+	if len(last.Argv) <= len(wantTail) || last.Argv[0] != fakeGit || !slices.Equal(last.Argv[len(last.Argv)-len(wantTail):], wantTail) {
+		t.Errorf("final argv = %q, want %q … %q", last.Argv, fakeGit, wantTail)
+	}
+	if last.Dir != root {
+		t.Errorf("final dir = %q, want the workspace root %q", last.Dir, root)
+	}
+}
+
 // TestGitReadTrio_ArgvCarriesTheHardening pins the argv gitRead spells for the three reads the
 // readOnlySubprocess marker was first minted for (git_show's is pinned by
 // TestGitShow_ArgvIsHardenedAndCwdRelative). The marker's own doc names the conditions a tool
@@ -1727,7 +1765,7 @@ func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 			if tc.global {
 				// Guard against a vacuous pass: without git reading the injected HOME there is
 				// no global driver to leave alone.
-				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
+				seen, err := runGitUnchecked(context.Background(), defaultExecHost(), gitPath, root, gitTimeout,
 					"config", "--global", "--name-only", "--get-regexp", gitexec.CommandConfigName.String())
 				if err != nil || seen.ExitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
@@ -1866,7 +1904,7 @@ func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
 			if tc.globalOnly {
 				// Guard against a vacuous pass: without git reading the injected HOME there is
 				// no global driver to leave alone.
-				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
+				seen, err := runGitUnchecked(context.Background(), defaultExecHost(), gitPath, root, gitTimeout,
 					"config", "--global", "--name-only", "--get-regexp", gitexec.CommandConfigName.String())
 				if err != nil || seen.ExitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
@@ -2427,7 +2465,7 @@ func TestGitWrite_RendersTheOutcome(t *testing.T) {
 				}
 			}
 
-			res, text, ok, err := gitWrite(context.Background(), t.TempDir(), fakeLook(tc.found, fakeGit), "add", []string{"-A", "--", "a.txt"}, tc.failWording)
+			res, text, ok, err := gitWrite(context.Background(), t.TempDir(), fakeLookHost(tc.found, fakeGit), "add", []string{"-A", "--", "a.txt"}, tc.failWording)
 
 			if err != nil {
 				t.Fatalf("gitWrite err = %v", err)

@@ -16,8 +16,8 @@ import (
 // a one-shot subprocess, the platform shell's rules, and opening a Console. It is ONE value the
 // five execution tools (terminal, python_exec, run_tests, diagnostics, console_open) are built
 // with — and the six git tools and the two git-staging file operations (move_file, delete_file)
-// take their git lookup from it — so a test hands a tool a host whose facilities are fakes rather
-// than swapping a package-level var beside every other test that reads it.
+// resolve and launch their git through it (git) — so a test hands a tool a host whose facilities
+// are fakes rather than swapping a package-level var beside every other test that reads it.
 //
 // It is unexported by decision (2026-09-20): the composition root builds exactly one through
 // defaultExecHost and builtinTools hands it to every tool that takes it; a bench-facing HostTools
@@ -95,7 +95,7 @@ func (h execHost) resolveShell(ctx context.Context, root string) (string, error)
 // by the resolved, fenced program resolveShell answered with.
 //
 // It is binding for this package: the shell's bare argv[0] (h.shell.Command) is never handed to
-// runSubprocess: every consumer that wraps a model-supplied line in the platform shell builds its
+// the host's run: every consumer that wraps a model-supplied line in the platform shell builds its
 // argv here, so there is exactly one place the shell is resolved and exactly one place it is
 // fenced.
 func (h execHost) shellArgv(ctx context.Context, root, command string) ([]string, error) {

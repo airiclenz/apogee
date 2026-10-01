@@ -55,8 +55,9 @@ type deleteFileArgs struct {
 type DeleteFile struct {
 	toolSpec
 	root string
-	// host is the execHost whose look resolves the git the deletion is staged through
-	// (stageGitPaths) — the one host builtinTools builds, so a test hands the tool a fake look.
+	// host is the execHost whose look resolves, and whose run launches, the git the deletion
+	// is staged through (stageGitPaths) — the one host builtinTools builds, so a test hands the
+	// tool a fake look or run.
 	host execHost
 }
 
@@ -65,7 +66,7 @@ type DeleteFile struct {
 // host through newDeleteFile.
 func NewDeleteFile(root string) *DeleteFile { return newDeleteFile(root, defaultExecHost()) }
 
-// newDeleteFile is NewDeleteFile with the host whose look resolves git supplied.
+// newDeleteFile is NewDeleteFile with the host git is resolved and launched through supplied.
 func newDeleteFile(root string, host execHost) *DeleteFile {
 	return &DeleteFile{toolSpec: deleteFileSpec, root: root, host: host}
 }
@@ -140,7 +141,7 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	}
 	// Staging runs only after the unlink stands, and only ever adds to what the call reports: the
 	// probe reads the INDEX, so the path it takes is the one that was just removed from disk.
-	staged := stageGitPaths(ctx, t.root, t.host.look, " (deletion staged in git)", args.Path)
+	staged := stageGitPaths(ctx, t.root, t.host, " (deletion staged in git)", args.Path)
 	return okResult(call.ID, "deleted "+args.Path+resolved+staged), nil
 }
 

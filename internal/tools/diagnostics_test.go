@@ -406,6 +406,33 @@ func TestDiagnostics_VetSubprocessEnvironmentIsPinned(t *testing.T) {
 	}
 }
 
+// TestDiagnostics_VetRunsThroughTheHost pins that go vet launches through the host the tool was
+// built with: the host's look answers a go that does not exist and its run records the spec
+// instead of launching anything, so a fake look's answer is never handed to the real launcher —
+// and the spec the host receives is exactly goVetSpec's for the looked-up go.
+func TestDiagnostics_VetRunsThroughTheHost(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	writeGoFile(t, root, "clean.go", "package main\n\nfunc main() {}\n")
+	fakeGo := filepath.Join(t.TempDir(), "go")
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, fakeGo)
+
+	res, err := newDiagnostics(root, h).Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if res.IsError {
+		t.Errorf("the recorder's empty success must read as a clean vet: %q", res.Content)
+	}
+	want := goVetSpec(h, fakeGo, root, filepath.Join(root, "clean.go"))
+	if !slices.Equal(captured.Argv, want.Argv) || captured.Dir != want.Dir || captured.Timeout != want.Timeout {
+		t.Errorf("host run got argv %q dir %q timeout %v, want %q %q %v",
+			captured.Argv, captured.Dir, captured.Timeout, want.Argv, want.Dir, want.Timeout)
+	}
+}
+
 func TestDiagnostics_VetResultNamesThePackageDirectory(t *testing.T) {
 	realGo(t)
 	// The call names ONE file; the subprocess reads the whole directory. Both vet
