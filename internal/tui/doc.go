@@ -1160,7 +1160,9 @@
 // carries a same-line "// geometry:" comment naming what the arm reads after it, and
 // TestArmsLeaveLayoutToTail (settled_test.go) fails on one that does not.
 // The positioning repaints keep their calls under that reading: [Model.refreshViewportAnchored]
-// (an anchored block), the run view's openRun and upRun (a view landed or restored, runview.go),
+// (an anchored block), the run view's [Model.pushView] (the one move in, which openRun lands
+// through) and [Model.upRun] (a view landed or restored, runview.go), the child-addressed send's
+// [Model.stageChildMessage] (follow-the-tail re-armed for the message just sent, interject.go),
 // and the claim walk's [Model.freshenTranscriptClamp] (a pane key answered with its height fresh
 // for whatever the claimant reads next). Everything else is a mutation and a return.
 // TestMouseMotionNeverRepaints pins the one exemption the tail itself makes.

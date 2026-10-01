@@ -233,16 +233,16 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 	// laid out by Update's tail ([Model.settle]): its notes move the transcript generation, and a
 	// picker redrawn at a new height leaves the viewport widget's height stale, which the tail's
 	// height check catches. A beat that changed nothing misses neither, so it repaints nothing.
-	next, _ := m.foldBeat(msg.beat)
+	next := m.foldBeat(msg.beat)
 	return next, next.beatTick()
 }
 
-// foldBeat folds one landed observation into the heartbeat state and reports whether it changed
-// what the view shows (the repaint does not ride on the report: Update's tail lays out from what the
-// fold moved, [Model.settle]). Three things
-// can move: the offline state, the bindings themselves (through [Model.observeBinding]), and the row
-// count of a picker that is OPEN over the offering this beat replaces — which changes how tall that
-// pane is drawn, and so how many rows the transcript below it keeps ([Model.transcriptRows]).
+// foldBeat folds one landed observation into the heartbeat state. It reports nothing back: the
+// repaint is Update's tail's, which lays out from what the fold moved ([Model.settle]). Three things
+// the view shows can move: the offline state, the bindings themselves (through
+// [Model.observeBinding]), and the row count of a picker that is OPEN over the offering this beat
+// replaces — which changes how tall that pane is drawn, and so how many rows the transcript below
+// it keeps ([Model.transcriptRows]).
 //
 // A beat that crosses back online AND rebinds says so once, not twice: "connected: <model>" is the
 // stronger statement, and it already implies the server answered. The recovery note is for the
@@ -260,7 +260,7 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 // the fresh heartbeat state looks exactly like a launch's. The box is no longer "a few rows above"
 // but far up the scrollback, and the human explicitly asked for the move — so every post-switch
 // seed announces itself (see heartbeatState.switched).
-func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
+func (m Model) foldBeat(beat heartbeat.Beat) Model {
 	firstContact := !m.hb.everOnline && m.hb.failures == 0 && !m.hb.switched
 	if !beat.Reachable {
 		return m.foldBeatFailure(beat.Failure)
@@ -268,19 +268,10 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	m.hb.failures = 0
 	m.hb.everOnline = true
 	m.hb.lastFailure = ""
-	// The offering an open picker is drawn from, counted BEFORE and after the beat replaces it: a
-	// row list that grew or shrank under the pane changed how tall the pane is drawn, which is a
-	// change to what the view shows exactly as an offline crossing is (see this function's doc).
-	// Counted only while the pane is up — with it closed the rows are nobody's height.
-	shownBefore := 0
-	if m.picker.open {
-		shownBefore = m.pickerCount()
-	}
 	m.hb.models = beat.AvailableModels // the /model picker's rows are derived from it (picker.go)
 	m.hb.effort = beat.EffortSupport   // what the menu, the footer and the picker read (effortSupport)
 	// A shorter offering must not leave an open picker highlighting a row that no longer exists.
 	m.picker.clampSelection(m.pickerCount())
-	offeringMoved := m.picker.open && m.pickerCount() != shownBefore
 	crossed := m.hb.offline
 	m.hb.offline = false
 	if crossed {
@@ -291,7 +282,7 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	if crossed && !rebound {
 		m.transcript.addNote(onlineNote)
 	}
-	return m, crossed || rebound || offeringMoved
+	return m
 }
 
 // reportUpstream publishes one liveness crossing through [Options.ReportUpstream] — the offline
@@ -648,19 +639,19 @@ func serverSwitchNote(from string, to Options, saved bool) string {
 //
 // The crossing is noted exactly once — and published once, through [Options.ReportUpstream] —
 // every further failed beat is silent until a success crosses back (foldBeat).
-func (m Model) foldBeatFailure(failure string) (Model, bool) {
+func (m Model) foldBeatFailure(failure string) Model {
 	if !m.engineHolds().beatMayCount() {
-		return m, false
+		return m
 	}
 	m.hb.failures++
 	m.hb.lastFailure = failure
 	if m.hb.offline || (m.hb.everOnline && m.hb.failures < offlineFailureThreshold) {
-		return m, false
+		return m
 	}
 	m.hb.offline = true
 	m.transcript.addNote(offlineNote(failure))
 	m.reportUpstream(true, failure)
-	return m, true
+	return m
 }
 
 // blockedUpstream reports whether there is nothing to send to right now: the heartbeat says the
