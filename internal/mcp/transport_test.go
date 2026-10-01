@@ -788,77 +788,16 @@ func refusedAddr(t *testing.T) string {
 	return addr
 }
 
-// realURLErrorText is the text net/http itself produces for a failed POST to rawURL — the exact
-// shape the SDK's HTTP transports surface, userinfo spelling included.
-func realURLErrorText(t *testing.T, rawURL string) string {
-	t.Helper()
-	resp, err := http.Post(rawURL, "application/json", strings.NewReader("{}"))
-	if err == nil {
-		_ = resp.Body.Close()
-		t.Fatalf("POST %s succeeded; want a refused connection", rawURL)
-	}
-	return err.Error()
-}
-
-func TestEndpointRedactor_CutsTheEndpointToItsOrigin(t *testing.T) {
+func TestEndpointRedactor_StdioAndNilAreTheIdentity(t *testing.T) {
 	t.Parallel()
 
-	addr := refusedAddr(t)
-	origin := "http://" + addr
-	redactor := newEndpointRedactor(ServerConfig{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: origin + "/mcp?token=SECRET"})
-	if redactor == nil {
-		t.Fatal("newEndpointRedactor returned nil for an HTTP endpoint")
+	if r := newEndpointRedactor(ServerConfig{Name: "local", Transport: TransportStdio, Command: "srv"}); r != nil {
+		t.Errorf("newEndpointRedactor(stdio) = %v; want nil", r)
 	}
-
-	tests := []struct {
-		name string
-		text string
-	}{
-		{"token in query", `Post "` + origin + `/mcp?token=SECRET": dial tcp: connection refused`},
-		{"token in path", `Get "` + origin + `/SECRET/mcp": EOF`},
-		{"unquoted url", `sending to ` + origin + `/mcp?token=SECRET failed`},
-		{"same-origin session url", `Post "` + origin + `/messages?sessionid=SECRET": EOF`},
-		{"username-only userinfo", realURLErrorText(t, "http://SECRET@"+addr+"/mcp?token=SECRET")},
-		{"user and password userinfo", realURLErrorText(t, "http://SECRET:SECRET@"+addr+"/mcp?token=SECRET")},
+	var none *security.OriginRedactor
+	if got := none.Redact("x /mcp?token=SECRET"); got != "x /mcp?token=SECRET" {
+		t.Errorf("nil Redact = %q; want the text unchanged", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := redactor.redact(tt.text)
-			if strings.Contains(got, "SECRET") || strings.Contains(got, "/mcp") || strings.Contains(got, "@") {
-				t.Errorf("redact(%q) = %q; want no userinfo, path or query", tt.text, got)
-			}
-			if !strings.Contains(got, origin) {
-				t.Errorf("redact(%q) = %q; want the bare origin %q kept", tt.text, got, origin)
-			}
-		})
-	}
-
-	t.Run("unrelated text untouched", func(t *testing.T) {
-		const text = `Post "http://other.example/mcp?token=keep": EOF; tool missing`
-		if got := redactor.redact(text); got != text {
-			t.Errorf("redact(%q) = %q; want it unchanged", text, got)
-		}
-	})
-
-	t.Run("stdio and nil are the identity", func(t *testing.T) {
-		if r := newEndpointRedactor(ServerConfig{Name: "local", Transport: TransportStdio, Command: "srv"}); r != nil {
-			t.Errorf("newEndpointRedactor(stdio) = %v; want nil", r)
-		}
-		var none *endpointRedactor
-		if got := none.redact("x /mcp?token=SECRET"); got != "x /mcp?token=SECRET" {
-			t.Errorf("nil redact = %q; want the text unchanged", got)
-		}
-	})
-
-	t.Run("redactErr keeps the chain", func(t *testing.T) {
-		err := redactor.redactErr(fmt.Errorf("wrapped %s/mcp?token=SECRET: %w", origin, context.Canceled))
-		if strings.Contains(err.Error(), "SECRET") {
-			t.Errorf("redactErr text = %q; want the token cut", err.Error())
-		}
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("errors.Is(redactErr(...), context.Canceled) = false; want the chain intact")
-		}
-	})
 }
 
 func TestConnect_RedactsTheEndpointFromARefusedConnect(t *testing.T) {

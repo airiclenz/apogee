@@ -193,7 +193,11 @@ NOTES (2026-10-01): zero-field defaults resolve in `Host.withStdioDefaults()`, a
 **Acceptance:** `go test ./internal/security -run 'Scrub|Redact|DocMap'`; `go test ./internal/tools -run 'Redact|BlockedMessage|FailureMessages|WebSearch|DocMap'`
 **Commit:** `refactor(security): the network tools' URL scrubbers live beside the guarded client`
 
-## 10. security: mcp's origin redactor lives beside the client
+## 10. security: mcp's origin redactor lives beside the client — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): realURLErrorText moved to the security test rather than copied — after the move mcp has no caller left, so a copy would be dead code; refusedAddr is copied (mcp's connect test still uses it).
+NOTES (2026-10-01): redactedError (the chain-keeping error RedactErr returns) moved with the redactor into security/urlscrub.go; the moved test gained an "endpoint with no host is the identity" subtest for NewOriginRedactor's nil return, which the mcp-side stdio subtest no longer reaches.
+NOTES (2026-10-01): tool.go's serverTool field comments realigned by gofmt after the redactor field's type name grew.
 
 **Depends on:** items 7, 9.
 **Files:** `internal/security/urlscrub.go`, `internal/security/urlscrub_test.go`, `internal/security/doc.go`, `internal/mcp/transport.go`, `internal/mcp/tool.go`, `internal/mcp/client.go`, `internal/mcp/transport_test.go`, `internal/mcp/doc.go`

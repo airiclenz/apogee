@@ -37,7 +37,7 @@
 //     another port or virtual host on the endpoint's address, or any target behind an
 //     egress proxy, from the endpoint. The endpoint never
 //     reaches surfaced error text whole: a connect, list-tools or call-failed error that
-//     quotes it is cut to its bare scheme://host[:port] (endpointRedactor), so a token in
+//     quotes it is cut to its bare scheme://host[:port] (security.OriginRedactor), so a token in
 //     its userinfo, path or query stays out. A stdio server is a
 //     LOCAL launched subprocess — a different trust model (the host chose the
 //     command), so no URL check applies, but the launched tool calls still gate

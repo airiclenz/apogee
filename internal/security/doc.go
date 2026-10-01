@@ -180,7 +180,8 @@
 // SafeHost names a request by its bare host, ScrubURLError renders a transport error with the
 // request URL stripped out, and RedactSubstring removes a string in both its raw and its
 // %q-escaped spelling — so a config'd API key in a URL's query never reaches a model-facing
-// message.
+// message; OriginRedactor, mcp's, cuts a configured endpoint to its bare scheme://host[:port]
+// wherever error text quotes it, so a token in its userinfo, path or query stays out too.
 //
 // And doc.go this map.
 package security
