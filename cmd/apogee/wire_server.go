@@ -149,9 +149,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// discovery differs per wire: an anthropic entry is asked under its own headers and never for
 	// a /props it does not serve.
 	b.holder.Bind(entry.Endpoint, apiKey, entry.Model, entry.Wire, string(entry.RequestExtra),
-		heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
-			provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect)),
-			provider.WithWire(provider.WireFor(entry.Wire))))
+		bindingOfEntry(entry, apiKey).Monitor())
 	return nil
 }
 

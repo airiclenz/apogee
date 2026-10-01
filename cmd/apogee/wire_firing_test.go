@@ -571,8 +571,9 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 		Model: "session-model",
 		Turns: []stubllm.Turn{{Text: "nothing to delegate"}},
 	})
-	// The Sub-agent server is REAL too: the composer beats it through observeServer to resolve the
-	// far seat, so it is a scripted upstream that advertises the grunt model and a two-slot width.
+	// The Sub-agent server is REAL too: the composer beats it through its entry's own Monitor to
+	// resolve the far seat, so it is a scripted upstream that advertises the grunt model and a
+	// two-slot width.
 	gruntServer := stubllm.New(t, stubllm.Script{
 		Model:     "grunt-model",
 		Discovery: stubllm.Discovery{Props: &stubllm.Props{TotalSlots: 2}},
@@ -748,8 +749,8 @@ func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
 // is handed to the composer as firingInputs.beat — the Driver's hand-over of the run's OWN
 // observation, the one seam the composition still has — where a row needs a Beat no scripted server
 // can produce (the zero Beat, a dictated failure sentence) or has nothing to say about the server at
-// all. The Sub-agent server has no such seam: the composer beats it for real (observeServer), so a
-// test with an opinion about that box scripts it (internal/stubllm). The `called` half carries the
+// all. The Sub-agent server has no such seam: the composer beats it for real (its entry's own
+// Monitor), so a test with an opinion about that box scripts it (internal/stubllm). The `called` half carries the
 // claim that the primary beat is taken on EVERY Firing, whatever the entry pins.
 type stubBeat struct {
 	called    bool
@@ -1177,6 +1178,44 @@ func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
 	if routing.Beat.TotalSlots != 1 {
 		t.Errorf("routing.Beat reports %d slots; want the primary's 1 — the Sub-agent server's beat "+
 			"answered 2 and must not be what a Driver gates the run on", routing.Beat.TotalSlots)
+	}
+}
+
+// A routed target speaks the Sub-agent entry's forced `effort-dialect:` on both roads to it — a
+// session's delegation wiring and an unattended run's routing — when the server itself advertises
+// no thinking-effort tell. Both beat that box through the entry's own Monitor, which ranks the
+// forced dialect over what discovery detected, so the target takes it straight off the beat.
+func TestRoutedTargetResolvesTheForcedDialect(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "grunt-model", ContextLength: 4096}},
+	}})
+	grunt := config.ServerEntry{Name: "grunt", Endpoint: stub.URL, EffortDialect: "kwargs"}
+	entries := []config.ServerEntry{grunt}
+
+	spy := &delegationSpy{}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), spy, noProfiles, nil, config.NewKeyResolver(""))
+	wiring.observe(context.Background())()
+	if len(spy.pushes) != 1 || spy.pushes[0] == nil {
+		t.Fatalf("the session wiring pushed %v; want one target", spy.pushes)
+	}
+	if got := spy.pushes[0].EffortDialect; got != apiprovider.EffortDialectKwargs {
+		t.Errorf("the session's routed target speaks %q; want the entry's forced %q",
+			got, apiprovider.EffortDialectKwargs)
+	}
+
+	routing, _ := resolveFiringRouting(context.Background(), firingInputs{
+		opts:  config.Options{Servers: entries, SubAgentsServer: "grunt"},
+		roots: firingRoots(t),
+	}, config.NewKeyResolver(""))
+	if routing.target == nil {
+		t.Fatal("the Firing's routing resolved no target; want the grunt server")
+	}
+	if got := routing.target.EffortDialect; got != apiprovider.EffortDialectKwargs {
+		t.Errorf("the Firing's routed target speaks %q; want the entry's forced %q",
+			got, apiprovider.EffortDialectKwargs)
 	}
 }
 

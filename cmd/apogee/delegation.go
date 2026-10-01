@@ -334,6 +334,12 @@ func newSubAgentServer(entry config.ServerEntry) *subAgentServer {
 // subAgentBeat builds the beat for one named entry: the Monitor that observes it, constructed on
 // the first beat that has a key in hand and reused by every beat after it.
 //
+// The Monitor is the entry's dial facts' own (bindingOfEntry), so it is dialled exactly as the
+// session's Monitor for the same entry would be: with its wire and with its forced `effort-dialect:`,
+// which the beat's EffortSupport reports in place of what discovery detected (ADR 0060 decision 3)
+// — the one place that ranking happens, so resolveDelegationTarget reads the dialect off the beat
+// rather than ranking the entry's key a second time.
+//
 // The discovery hint it is built with is the entry's own `model:` pin, empty when it pins none — the
 // session Monitor's contract verbatim (heartbeat.NewMonitor): discovery resolves the pinned id's
 // window rather than the first advertised model's, and an id the server stops listing is still
@@ -354,8 +360,7 @@ func subAgentBeat(entry config.ServerEntry) func(context.Context, string) heartb
 	return func(ctx context.Context, apiKey string) heartbeat.Beat {
 		mu.Lock()
 		if monitor == nil || built != apiKey {
-			monitor, built = heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
-				provider.WithWire(provider.WireFor(entry.Wire))), apiKey
+			monitor, built = bindingOfEntry(entry, apiKey).Monitor(), apiKey
 		}
 		current := monitor
 		mu.Unlock()
@@ -820,7 +825,10 @@ func (d *delegationWiring) Retarget(name string) error {
 // window /props reported, and `parallel-agents:` outranks the slot count, which outranks the entry's
 // own default width (four for a keyed entry, one otherwise) — those last through
 // config.ResolveParallelAgents itself, so the Sub-agent server's width is resolved by the very
-// function the session's own cap is resolved by (ADR 0039: one width everywhere).
+// function the session's own cap is resolved by (ADR 0039: one width everywhere). The effort dialect
+// is the one field whose pin is ranked BEFORE it gets here: observed is a beat of the entry's own
+// Monitor (bindingOfEntry), which already reports the forced `effort-dialect:` over the tell it
+// detected, so the dialect is read off the beat as it stands.
 //
 // Two facts make a target UNUSABLE, and both mean the same thing to the caller: a beat that could not
 // read the server at all, and a beat on a server with no model bound and no pin to name one. Neither
@@ -857,14 +865,13 @@ func resolveDelegationTarget(
 	// the model the HUMAN is looking at, and this resolution re-runs on every beat on a model
 	// they are not — a beat is no place to repeat a sentence.
 	profile, _ := resolveModelProfile(model, userProfiles)
-	// The wire shape this server reads a thinking-effort intent in, pin-else-observe like every
-	// field above (ADR 0060 §3): the entry's forced `effort-dialect:` outranks the tell the beat
-	// saw, and with neither the zero says this target names none — a routed child then keeps the
-	// session's own shape (subagent.go), which is what dialectAdvice tells the human about.
-	dialect := provider.EffortDialectFor(entry.EffortDialect)
-	if dialect == provider.EffortDialectNone {
-		dialect = observed.EffortSupport.Dialect
-	}
+	// The wire shape this server reads a thinking-effort intent in, taken off the beat alone (ADR
+	// 0060 §3): the entry's forced `effort-dialect:` already outranked the tell discovery saw inside
+	// the Monitor that took it (bindingOfEntry's Monitor, forceEffortDialect), so ranking the key
+	// again here would be a second copy of one rule. With neither a forced dialect nor a tell the
+	// zero says this target names none — a routed child then keeps the session's own shape
+	// (subagent.go), which is what dialectAdvice tells the human about.
+	dialect := observed.EffortSupport.Dialect
 	return &apogee.DelegationTarget{
 		Endpoint: entry.Endpoint,
 		// The key the beat above just authenticated with, resolved from the entry's key source by

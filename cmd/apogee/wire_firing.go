@@ -332,18 +332,21 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 // existed. What the failure MEANS is on the Beat itself (Failure, Answered, Throttled) for the
 // Driver that gates on it.
 //
-// It serves two boxes and is never shared between them: firingConfig beats the run's OWN server
-// through it when no Driver hands over a beat (firingInputs.beat), and resolveFiringRouting beats
-// the Sub-agent server — its own endpoint, model and key — because a target resolved against the
-// primary's observation would route delegations to a box nobody observed. It is a plain function
-// rather than a seam: a test that wants a different answer scripts the server it dials
-// (internal/stubllm), or hands firingConfig a beat of its own.
+// It serves the run's OWN server only: firingConfig beats it through here when no Driver hands over
+// a beat (firingInputs.beat). The Sub-agent server is a different box with its own endpoint, model
+// and key, and resolveFiringRouting beats it through that entry's own Monitor (bindingOfEntry)
+// rather than through here, because this signature carries no forced `effort-dialect:` — an
+// own-server beat reports what discovery detected, and firingConfig ranks the entry's forced
+// dialect over it by hand. It is a plain function rather than a seam: a test that wants a different
+// answer scripts the server it dials (internal/stubllm), or hands firingConfig a beat of its own.
 //
 // wire is the entry's protocol (ADR 0078), carried because the beat IS a discovery and discovery
-// differs per wire: the Monitor is dialled with it so an anthropic entry is asked under its own
-// headers and never for a /props it does not serve.
+// differs per wire: the Monitor — built from the dial facts of these four arguments, like every
+// Monitor the host builds — is dialled with it so an anthropic entry is asked under its own headers
+// and never for a /props it does not serve.
 func observeServer(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat {
-	return heartbeat.NewMonitor(endpoint, model, apiKey, provider.WithWire(wire)).Beat(ctx)
+	binding := upstreamBinding{Endpoint: endpoint, Model: model, APIKey: apiKey, Wire: string(wire)}
+	return binding.Monitor().Beat(ctx)
 }
 
 // firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
@@ -555,8 +558,8 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 // re-derive without spending a second round trip: the composition takes exactly one beat of the
 // primary server, and a Driver that must refuse a Firing rather than send a prompt into a dead
 // endpoint reads it off here. It is the PRIMARY server's — never the Sub-agent server's, which
-// resolveFiringRouting observes separately (observeServer), because the two are different boxes
-// with different keys.
+// resolveFiringRouting observes separately (through that entry's own Monitor), because the two are
+// different boxes with different keys.
 //
 // Both zero is the DEFAULT and the floor: no `sub-agents-server:` key, or a key that resolved to
 // nothing, leaves the run exactly as every Firing was before it could route at all — children on the
@@ -636,15 +639,17 @@ func resolveFiringRouting(
 	}
 
 	// One beat, no retry: the composition happens once and there is no later beat to widen on, which
-	// is the contract observeServer already set for an unattended run's own server. It is the SAME
-	// one-liner and never the same observation: this beats the Sub-agent server's own endpoint,
-	// model and key, so the target below is resolved against the box it will actually dial. It
+	// is the contract observeServer already set for an unattended run's own server. It is never the
+	// same observation: this beats the Sub-agent server's own endpoint, model and key through the
+	// Monitor that entry's dial facts build — the one a session's subAgentBeat builds too, so its
+	// forced `effort-dialect:` is already ranked into the beat's EffortSupport — and the target below
+	// is resolved against the box it will actually dial. It
 	// fires ONLY when `sub-agents-server:` names an entry — a run that delegates to its own server
 	// asks nothing here, so the default composition path costs no third round trip — and an
 	// unreachable server, a cancelled context and a server with nothing bound are all "no target",
 	// which leaves the run unrouted: the fallback every Firing took before routing existed (ADR
 	// 0045 §4's floor).
-	observed := observeServer(ctx, entry.Endpoint, entry.Model, apiKey, provider.WireFor(entry.Wire))
+	observed := bindingOfEntry(entry, apiKey).Monitor().Beat(ctx)
 	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
 	// up routing to a window the other would not.

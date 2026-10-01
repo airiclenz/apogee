@@ -252,11 +252,12 @@ func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	}
 }
 
-// The dialect follows the same rank order every other field does (ADR 0060 §3): the entry's forced
-// `effort-dialect:` outranks the tell the beat saw, the beat answers what the file left open, and
-// with neither the zero says this target names none — which leaves a routed child on the SESSION
-// server's shape (internal/agent's routed spawn) and is what the advice below exists for.
-func TestResolveDelegationTargetRanksTheEffortDialect(t *testing.T) {
+// The dialect is the beat's (ADR 0060 §3): the entry's forced `effort-dialect:` was already ranked
+// over the detected tell inside the Monitor that took the beat (TestSubAgentBeatCarriesTheForcedDialect),
+// so the target carries whatever dialect the beat reports, and with none the zero says this target
+// names none — which leaves a routed child on the SESSION server's shape (internal/agent's routed
+// spawn) and is what the advice below exists for.
+func TestResolveDelegationTargetTakesTheBeatsEffortDialect(t *testing.T) {
 	t.Parallel()
 
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
@@ -266,13 +267,8 @@ func TestResolveDelegationTargetRanksTheEffortDialect(t *testing.T) {
 		EffortSupport: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectReasoning},
 	}
 
-	forced := entry
-	forced.EffortDialect = "kwargs"
-	if got := resolveDelegationTarget(forced, "", observed, nil).EffortDialect; got != provider.EffortDialectKwargs {
-		t.Errorf("dialect with a pin = %q; want the entry's forced %q", got, provider.EffortDialectKwargs)
-	}
 	if got := resolveDelegationTarget(entry, "", observed, nil).EffortDialect; got != provider.EffortDialectReasoning {
-		t.Errorf("dialect with no pin = %q; want the beat's observed %q", got, provider.EffortDialectReasoning)
+		t.Errorf("dialect = %q; want the beat's %q", got, provider.EffortDialectReasoning)
 	}
 
 	tellLess := observed
@@ -1489,8 +1485,11 @@ func TestDelegationSaysNothingWhenTheTargetNamesADialect(t *testing.T) {
 		Name: "grunt", Endpoint: "http://127.0.0.1:2222", EffortDialect: "kwargs",
 	}
 	notices := &noticeSpy{}
-	wiring := testDelegationWiring(entry,
-		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, &delegationSpy{}, notices)
+	// The beat a Monitor dialled with the entry's forced dialect reports (bindingOfEntry).
+	wiring := testDelegationWiring(entry, heartbeat.Beat{
+		Reachable: true, ActiveModel: "cheap-7b",
+		EffortSupport: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+	}, &delegationSpy{}, notices)
 
 	wiring.observe(context.Background())()
 

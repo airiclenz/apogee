@@ -410,6 +410,26 @@ func TestMonitorsAreDialledWithTheEntrysWire(t *testing.T) {
 	grunt.assertAnthropicRequests(t, "key-grunt")
 }
 
+// The Sub-agent server's beat is dialled with its entry's forced `effort-dialect:` (ADR 0060
+// decision 3), the way the session's own Monitor for the same entry is: a server that advertises no
+// thinking-effort tell is reported as speaking the dialect the entry forces, so the routed target
+// resolved from that beat carries it without ranking the key a second time.
+func TestSubAgentBeatCarriesTheForcedDialect(t *testing.T) {
+	t.Parallel()
+
+	stub := upstreamServer(t, "grunt-model", 4096)
+	entry := config.ServerEntry{Name: "grunt", Endpoint: stub.URL, EffortDialect: "kwargs"}
+
+	observed := subAgentBeat(entry)(context.Background(), "")
+	if !observed.Reachable {
+		t.Fatalf("sub-agent beat was unreachable: %s", observed.Failure)
+	}
+	want := provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
+	if !reflect.DeepEqual(observed.EffortSupport, want) {
+		t.Errorf("sub-agent beat saw effort %+v; want the entry's forced %+v", observed.EffortSupport, want)
+	}
+}
+
 // The recording seam, end to end through runRoot (ADR 0036 decision 2): a name the `servers:` list
 // holds is spliced into config.yaml as the entry the NEXT session starts on; a name it does not hold —
 // the synthesized ephemeral startup row is the one the picker offers — is skipped silently, without

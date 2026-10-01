@@ -132,7 +132,10 @@ NOTES (2026-10-01): bindingOfConfig leaves EffortDialect "" like bindingOfTarget
 **Acceptance:** `go test ./cmd/apogee -run 'TestDial|TestDocMap'`
 **Commit:** `refactor(cmd): an entry's dial facts build its Client and Monitor`
 
-## 8. cmd: the Sub-agent server's Monitors carry the forced dialect
+## 8. cmd: the Sub-agent server's Monitors carry the forced dialect — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): no CHANGELOG entry — the defect is latent (resolveDelegationTarget ranked the forced dialect by hand at both callers), so the routed target's dialect is unchanged for the user.
+NOTES (2026-10-01): TestSubAgentBeatCarriesTheForcedDialect sits in upstream_test.go beside TestMonitorsAreDialledWithTheEntrysWire (the other subAgentBeat stub test); TestRoutedTargetResolvesTheForcedDialect sits in wire_firing_test.go (it needs firingRoots). observeServer's body builds an upstreamBinding literal of its four arguments (Wire: string(wire)) — no new constructor.
 
 **Depends on:** item 7.
 **Files:** `cmd/apogee/upstream.go`, `cmd/apogee/wire_server.go`, `cmd/apogee/delegation.go`, `cmd/apogee/wire_firing.go`, `cmd/apogee/upstream_test.go`, `cmd/apogee/delegation_test.go`, `cmd/apogee/wire_firing_test.go`
