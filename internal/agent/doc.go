@@ -113,7 +113,10 @@
 // between-Steps boundary, and TakeWorkflowNotes hands a Driver the held finish notes to commit
 // there the same way. children.go is that same door one level down: the registry a parent
 // publishes its RUNNING sub-agents in, the mailbox each child drains at its own between-Steps
-// boundaries, and InterjectChild, which addresses a child by its run id (ADR 0063, ADR 0086). rebind.go swaps every per-model binding together when the Upstream's
+// boundaries, and InterjectChild, which addresses a child by its run id (ADR 0063, ADR 0086).
+// childrun.go is the one lifecycle a child's run goes through on that registry — register, arm,
+// Run, disarm, the stop verdict and an optional fold of a stopped child — and its teardown,
+// reapChild; the workflow spawner runs its item children on it with fold off. rebind.go swaps every per-model binding together when the Upstream's
 // loaded model changes, and moves the session to another server (ADR 0024); serverbinding.go is
 // the one presence-typed value a model change, a server switch or a routed target states its
 // bindings as, with the one pure projection onto a Config. setprofile.go is

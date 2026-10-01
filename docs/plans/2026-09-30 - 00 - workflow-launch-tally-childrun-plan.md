@@ -253,7 +253,10 @@ NOTES (2026-10-01): the ADR 0088 D3 amendment covers only the live-folder refusa
 **Acceptance:** `grep -c 'Amended 2026-09-30' docs/adr/0087-*.md docs/adr/0089-*.md docs/adr/0090-*.md docs/adr/0088-*.md` prints a non-zero count for each; `grep -c 'still driving' CONTEXT.md docs/manual/workflows.md` and `grep -c 'fan-out item' docs/manual/headless.md docs/manual/daemon.md` print a non-zero count for each; `grep -n 'a background run is still driving is refused' internal/tools/fan_out.go`; `go test ./internal/tools -run 'TestFanOut'`
 **Commit:** `docs: amend ADRs and manuals for the one launch builder and the engine tally`
 
-## 16. agent: a shared child-run lifecycle, the workflow spawner first
+## 16. agent: a shared child-run lifecycle, the workflow spawner first — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): runChild returns (res, stopped, stopLeftover, err) — the error moved last because the repo's staticcheck set enables ST1008; the plan's (res, err, stopped, stopLeftover) is otherwise unchanged in content. The stop verdict is a pure childRunStopped(ctx, childCtx, res, err, capFold), which TestChildRun_StopVerdict tables.
+NOTES (2026-10-01): `make lint` fails on internal/agent/workflowcall.go:121 (const launchFanOut unused), left by item 11's commit 9f3f034b — not touched here.
 
 **Depends on:** item 14.
 **Files:** `internal/agent/childrun.go`, `internal/agent/childrun_test.go`, `internal/agent/workflowspawn.go`, `internal/agent/workflowspawn_test.go`, `internal/agent/background_test.go`, `internal/agent/doc.go`

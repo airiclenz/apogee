@@ -1293,3 +1293,39 @@ func TestBackground_AStopAllDuringAnOpenExchangeLeavesNoNoteForAnAbortToHoldAgai
 		t.Errorf("the Exchange after the abort = %q, want no note from the stopped session", sent)
 	}
 }
+
+// TestBackground_AnItemChildStoppedThroughTheRootEndsStopped pins the registry a background item
+// child is published in: the ROOT Agent's, not the launch-time snapshot's that runs the workflow
+// (backgroundHost) — so the root's StopChild reaches it, and it ends stopped while its sibling
+// keeps its receipt.
+func TestBackground_AnItemChildStoppedThroughTheRootEndsStopped(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("pair", "alpha", "beta"))
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
+		route("sweep beta", signalThenWait(started, nil), cancelledScript())
+	a := newBackgroundParent(t, cfg, up)
+	id := launchBackground(t, a, "pair")
+	awaitClosed(t, started, "beta's child")
+
+	var betaRunID string
+	for _, child := range a.children.all() {
+		if child.workflowItem != nil && child.workflowItem.label == "beta" {
+			betaRunID = child.runID
+		}
+	}
+	if betaRunID == "" {
+		t.Fatal("the root Agent's registry lists no child for beta")
+	}
+	if err := a.StopChild(betaRunID); err != nil {
+		t.Fatalf("the root's StopChild of beta's child = %v, want nil", err)
+	}
+	a.background.waitAll()
+
+	phases := itemPhases(workflowInfo(t, a, id))
+	if phases["alpha"] != workflow.PhaseDone || phases["beta"] != workflow.PhaseStopped {
+		t.Errorf("item phases = %v, want alpha done and beta stopped", phases)
+	}
+}

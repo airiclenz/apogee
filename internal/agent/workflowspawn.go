@@ -258,8 +258,7 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	sub.tools = withFinish(sub.tools, narrowed, tools.NewFinish(spec.Stage.Returns, item.accept))
 	var ending workflow.Ending
 	defer func() {
-		s.children.unregister(runID)
-		sub.reportUndelivered(sub.turns.index, sub.mailbox.close(), undeliveredWorkflowReason(ending))
+		sub.reportUndelivered(sub.turns.index, reapChild(s.children, runID, sub), undeliveredWorkflowReason(ending))
 		_ = sub.Close()
 	}()
 
@@ -267,16 +266,9 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		return workflow.Outcome{}, fmt.Errorf("could not start the item's child: %w", err)
 	}
 	// Addressable and stoppable while it runs, as a sub_agent child is (ADR 0063, ADR 0086 D4): a
-	// human's stop of one item ends that child as stopped, and the Runner restarts it on resume.
-	s.children.register(runID, sub)
-	childCtx, stopRun := context.WithCancelCause(ctx)
-	defer stopRun(nil)
-	s.children.arm(runID, childCtx, stopRun)
-	res, runErr := sub.Run(childCtx)
-	s.children.disarm(runID)
-
-	stopped := runErr == nil && (res.Status == domain.StatusCancelled || (res.Faulted && sub.capFold == "")) &&
-		(ctx.Err() != nil || errors.Is(context.Cause(childCtx), errDelegationStopped))
+	// human's stop of one item ends that child as stopped, and the Runner restarts it on resume —
+	// so fold is off: nothing of a stopped item is kept.
+	res, stopped, _, runErr := runChild(ctx, childRun{registry: s.children, runID: runID, sub: sub})
 	outcome = sub.workflowOutcome(res, runErr, stopped)
 	outcome.Transcript = sub.conv.Messages()
 	ending = outcome.Ending
