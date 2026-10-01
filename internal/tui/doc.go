@@ -868,7 +868,12 @@
 // ([Model.queueCommand], drained by [Model.runDeferredCommands]) and the [Model.commandRunnable]
 // gate both invocation routes share, while the parse that classifies the line and the table whose
 // rows declare each verb stay in command.go and
-// [Model.submit] stays with the input concern; heartbeat.go the fourth cluster lifted out of
+// [Model.submit] stays with the input concern; engineholds.go who holds the engine — the
+// [engineHold] set (worker, actuation, /bg launch, session load, record write, quitting, prebound),
+// which overlap rather than exclude one another, the snapshot [Model.engineHolds] takes of it with
+// the non-hold facts the gates also read, and the named questions asked of that snapshot
+// (commandRunnable, canRunDeferred, canRebind, beatMayCount, canEditConfigExternally, canLaunchBg,
+// quiescent, canResumeWorkflows, canWake); heartbeat.go the fourth cluster lifted out of
 // model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
 // [heartbeatState] the footer and the send gate read, the tick chain that keeps it current
 // ([Model.beatCmd], [Model.armBeat], [Model.beatTick]), the folds a beat, a failure or a

@@ -35,7 +35,9 @@ NOTES (2026-10-01): the amendment names `cmd/apogee/dial.go` as the one host edi
 **Acceptance:** `grep -n 'Amended 2026-09-30' docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md` prints a line inside §4; `grep -n 'DelegationTarget' docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md` prints a line inside §4; `grep -n 'dial facts' docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md` prints a line under `## Consequences`; `grep -n 'stays denied' docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md` prints a line inside §4's amendment, naming the *Proposed* design
 **Commit:** `docs(adr): amend 0083 §4 — an entry's dial facts are one value`
 
-## 2. tui: named engine holds and questions, pinned by one table
+## 2. tui: named engine holds and questions, pinned by one table — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): TestEngineHolds_Questions also cross-checks each row against the Model's existing commandRunnable, quiescent, canResumeWorkflows and canWake, so the hold-set answers are pinned to today's gates as well as to the table; the hold groups the questions share are named constants (holdsOwningEngine, holdsTakingAgent, holdsBlockingRebind, holdsBlockingResume).
 
 **Files:** `internal/tui/engineholds.go`, `internal/tui/engineholds_test.go`, `internal/tui/doc.go`
 **Read first:** internal/tui/commandrun.go — commandRunnable, runDeferredCommands; internal/tui/schedule.go — quiescent; internal/tui/workflow.go — canWake; internal/tui/sessions.go — canResumeWorkflows; internal/tui/docmap_test.go — TestDocMapNamesEveryFile
