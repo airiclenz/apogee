@@ -9,6 +9,24 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- A workflow receipt's text field holding a carriage return, vertical tab or no-break space is now quoted in the result lines, like one holding a space, so it can no longer blur its `k=v` pair.
+
+- For embedders: a finished or stopped `WorkflowPhaseEvent` now carries `Tally *apogee.WorkflowTally` — the ok, partial, blocked and unfinished item counts the model's note reports (verify and merge outcomes are not items); it is nil on a failed end phase and every other phase, and the `workflow_phase` NDJSON line is unchanged.
+
+- **Fixed:** `apogee headless --recipe` and scheduled `run: workflow:` firings now judge a recipe's workflow on the same item tally its finish note reports: only fan-out items count, each on the receipt its latest round ended on, and verify or merge receipts are no longer items. A workflow whose every fan-out item blocked now exits `1` (and a scheduled firing records it as failed) even when its verify children answered ok — previously those ok verify receipts masked it and the run exited `0`.
+
+- A recipe's workflow block totals and a background workflow's finish line in the TUI no longer count verify or merge steps as items: they show the same item tally the model's finish note reports, and a saved session replays it.
+
+- The TUI's workflow item line now quotes a receipt field value holding a newline, carriage return or other whitespace, and a receipt summary that opens on a blank line or is padded with spaces shows its first real line instead of "(no summary)" or an empty gist; the /workflows list row counts items the way the engine's tally does (a skipped fan-out stage is left out).
+
+- The `workflow` tool's `status` detail now quotes a receipt field value that is empty or holds `=` or whitespace (`k="a b"`, `k=""`), as the finish note does, so a value can no longer blur into the next pair.
+
+- **Fixed:** re-issuing a workflow that is still running in the background — a `fan_out` call with the same plan or recipe, a typed `/<recipe>`, or a foreground recipe launch — no longer starts a second run in the same workflow folder (which raced its status file and ran duplicate item children). The blocking launch is now refused with `apogee: workflow <id> is already running in the background`, and nothing is created, run or written.
+
+- **Fixed:** the refusal of a blocking re-issue onto a workflow still running in the background now also holds for a sub-agent's `fan_out` and for a background workflow's item child: either one is refused with `apogee: workflow <id> is already running in the background` instead of starting a second run in that workflow's folder.
+
+- `fan_out`'s description now tells the model that a call whose workflow a background run is still driving is refused.
+
 ## [0.24.2] — 2026-09-30
 
 - **Fixed:** release builds now reach an LLM server named by an mDNS `.local` host (for example `http://Apollo-II.local:1111`). When the system resolver cannot find a `.local` name, apogee asks the local network itself with a one-shot mDNS query and connects to the address that answers. Every other host name, and a `.local` name the system already resolves, behaves exactly as before. A host name that resolves nowhere is now reported as such instead of a bare `lookup … no such host` behind "server offline": `cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts`.
@@ -67,7 +85,7 @@ or Moment is a **minor** bump, not a breaking change.
 
 - A workflow fanout stage whose `out:` path lacks `{item}` is now refused at validation, naming the stage, instead of letting every child write the same file at once.
 
-- Fixed: a scheduled `run: workflow:` firing whose workflow did not run, was stopped, failed or blocked on every item is now logged and notified as a failed firing — the same judgement `apogee headless --recipe` exits 1 on — instead of as a completed one.
+- Fixed: a scheduled `run: workflow:` firing whose workflow did not run, was stopped, failed or blocked on every fan-out item is now logged and notified as a failed firing — the same judgement `apogee headless --recipe` exits 1 on — instead of as a completed one.
 
 - Fixed: a recipe skill found on disk on Windows could not find its stage prompt files; stage prompts now stay slash-separated and relative to the skill folder on every OS, and a prompt an embedder spells under the recipe's folder (with either separator) still opens.
 
