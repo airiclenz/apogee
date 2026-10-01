@@ -2335,7 +2335,7 @@ func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
 	fixture := newMCPFixture(old, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
 		// The production recipe (wire_live.go): the file's blocks, this session's guard, the real client.
-		return mcp.Connect(context.Background(), servers, mcpGuard(nil, nil), workspace)
+		return mcp.ConnectWith(context.Background(), liveMCPHost(), servers, mcpGuard(nil, nil), workspace)
 	})
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})

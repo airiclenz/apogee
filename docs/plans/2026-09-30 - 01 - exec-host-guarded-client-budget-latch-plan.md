@@ -161,7 +161,10 @@ The three proxy tests inject `Host.Proxy`; only `TestVetEndpoint_TheEgressProxyC
 **Acceptance:** `go test ./internal/mcp -run 'TestGuardedClient|TestVetEndpoint|TestOriginPin|TestBuildTransport|TestCanonicalOrigin|TestConnect_SSE'`; `go test ./internal/security -run 'GuardedClient|Origin'`; `! grep -n 'proxyForRequest' internal/mcp/*.go`; `! grep -n newGuardedHTTPClient internal/mcp/*.go`
 **Commit:** `refactor(mcp): build the HTTP transport client through security`
 
-## 8. mcp: stdio gets its host from the composition root
+## 8. mcp: stdio gets its host from the composition root — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): wire_live.go builds the real host in a small `liveMCPHost()` helper (Proxy: http.ProxyFromEnvironment, Shell: platform.Current(), NewTeardown: platform.NewProcessTeardown) so both Connect sites and wire_settings_test.go's "production recipe" closure make the identical `mcp.ConnectWith(…, liveMCPHost(), …)` call; `mcp.Connect` stays as the zero-host convenience the package's own tests use.
+NOTES (2026-10-01): zero-field defaults resolve in `Host.withStdioDefaults()`, applied at the top of buildStdioTransport, so tests calling buildTransport with `Host{}` keep working; stdioTransport.Connect's own non-positive fallback is kept for hand-built transports.
 
 **Depends on:** items 5, 7.
 **Files:** `internal/mcp/transport.go`, `internal/mcp/client.go`, `internal/mcp/mcp_test.go`, `cmd/apogee/wire_live.go`, `docs/design/mcp-client.md`, `cmd/apogee/wire_settings_test.go`

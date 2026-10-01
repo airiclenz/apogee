@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -82,18 +83,47 @@ func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuar
 }
 
 // Host is what a connect takes from the process it runs in rather than from its configuration.
-// Connect supplies the real one; a test passes its own through ConnectWith instead of swapping a
-// package variable, so no connect ever depends on another test's state.
+// The composition root passes the real one through ConnectWith; a test passes its own the same way
+// instead of swapping a package variable, so no connect ever depends on another test's state.
+// Every field's zero value means the real facility, so a Host that sets only the field a test
+// cares about still launches, scopes and tears down exactly as production does.
 type Host struct {
 	// Proxy resolves the egress proxy for a request to an HTTP-transported server's endpoint.
 	// Nil means http.ProxyFromEnvironment: the process's HTTP_PROXY / HTTPS_PROXY / NO_PROXY, the
 	// same environment the LLM client honours through Go's default transport. There is no
 	// per-server `proxy:` config key — the environment is the whole surface.
 	Proxy func(*http.Request) (*url.URL, error)
+	// Shell is the platform facility a stdio server's env-allowlist is scoped through (the
+	// allowlisted keys, the platform's own essentials, PATH scoped away from the workspace).
+	// Nil means platform.Current().
+	Shell platform.Host
+	// NewTeardown builds the container a stdio server's process tree is held in, before the
+	// process starts. Nil means platform.NewProcessTeardown.
+	NewTeardown func(*exec.Cmd) platform.ProcessTeardown
+	// TerminateDuration is how long apogee's stdio shutdown ladder (stdinLadder.Close) waits at
+	// each rung (stdin close → SIGTERM → SIGKILL) before escalating. Zero — or any non-positive
+	// value — means defaultStdioTerminateDuration.
+	TerminateDuration time.Duration
+}
+
+// withStdioDefaults returns h with every unset stdio facility resolved to the real one, so a
+// stdio launch never has to nil-check its host.
+func (h Host) withStdioDefaults() Host {
+	if h.Shell == nil {
+		h.Shell = platform.Current()
+	}
+	if h.NewTeardown == nil {
+		h.NewTeardown = platform.NewProcessTeardown
+	}
+	if h.TerminateDuration <= 0 {
+		h.TerminateDuration = defaultStdioTerminateDuration
+	}
+	return h
 }
 
 // ConnectWith is Connect over an explicit Host: everything Connect documents holds, with host
-// supplying the egress proxy the HTTP transports resolve.
+// supplying the egress proxy the HTTP transports resolve and the platform facilities a stdio
+// server is launched, scoped and torn down through.
 func ConnectWith(
 	ctx context.Context,
 	host Host,

@@ -148,9 +148,13 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   Close) — a host without MCP pays nothing. Server names must be non-empty and unique (the name
   prefixes each surfaced tool's registry key as `mcp__…` — actually `<name>__<tool>`, see §4).
 - **Host** is what a connect takes from the process rather than from config: `Host.Proxy` resolves
-  the egress proxy the HTTP transports honour, nil meaning `http.ProxyFromEnvironment`. `Connect`
-  passes the real one; a test injects its own through `ConnectWith` rather than swapping a package
-  variable (2026-10-01).
+  the egress proxy the HTTP transports honour, nil meaning `http.ProxyFromEnvironment`; `Host.Shell`
+  scopes a stdio server's `env-allowlist` environment (nil: `platform.Current()`);
+  `Host.NewTeardown` builds the container its process tree is held in (nil:
+  `platform.NewProcessTeardown`); `Host.TerminateDuration` is the shutdown ladder's rung wait
+  (non-positive: 5s). The composition root (`cmd/apogee/wire_live.go`, `liveMCPHost`) passes the
+  real one through `ConnectWith`; a test injects its own the same way rather than swapping a
+  package variable — `internal/mcp` holds none (2026-10-01).
 - **Tool naming** qualifies each server tool as `<server-name>__<tool>` so two servers advertising
   the same tool name never collide in the single flat registry, and the human approving a call sees
   which server it reaches.
@@ -168,9 +172,9 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   `internal/platform` — the last for a stdio server's process-tree teardown (stopping a server
   kills its whole process tree, not just the first process) and for scoping its `env-allowlist`
   environment. It never imports the root facade (ADR 0010). It exports `Client`, `Connect`,
-  `ServerConfig`, `Transport`.
+  `ConnectWith`, `Host`, `ServerConfig`, `Transport`.
 - `cmd/apogee` owns the wiring: `config.yaml`'s `mcp-servers:` block (config-file-only, default-
-  empty) → `mcp.ServerConfig` values → `mcp.Connect` → `registryWithMCP` registers the discovered
+  empty) → `mcp.ServerConfig` values → `mcp.ConnectWith` → `registryWithMCP` registers the discovered
   tools on top of the default registry → `Config.Tools`. A discovered tool whose qualified name
   collides with a built-in is dropped with a stderr notice (the built-in wins).
 - The disposition's `tools.ClassMCP` gating is proven in `internal/agent/dispatch_test.go`; this package's

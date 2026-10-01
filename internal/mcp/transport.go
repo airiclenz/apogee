@@ -104,7 +104,8 @@ type ServerConfig struct {
 // missing or unparseable endpoint, an endpoint url-safety denies, and an endpoint that cannot be
 // resolved are all connect-time errors (the Client surfaces them per server).
 //
-// host supplies the egress proxy resolver the two HTTP transports' client honours (see Host).
+// host supplies the egress proxy resolver the two HTTP transports' client honours and the platform
+// facilities a stdio server is launched, scoped and torn down through (see Host).
 // workspaceRoot is the exec fence a stdio server's command is measured against; it is unused by
 // the two HTTP transports, which launch nothing. The returned cmd, ProcessTeardown and CancelFunc
 // are the launched process, the container holding its tree, and the cancel that ends the Cmd's own
@@ -112,7 +113,7 @@ type ServerConfig struct {
 func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
 	switch cfg.Transport {
 	case TransportStdio:
-		return buildStdioTransport(cfg, workspaceRoot)
+		return buildStdioTransport(host, cfg, workspaceRoot)
 	case TransportSSE:
 		transport, err := buildSSETransport(ctx, host, cfg, guard)
 		return transport, nil, nil, nil, err
@@ -166,7 +167,8 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // to those keys plus the platform's essentials, with PATH scoped away from the workspace exactly as
 // gitexec.SafeEnv scopes git's, and an explicitly empty list hands the child the platform floor alone.
 // cfg.Env is appended last either way, so a per-server variable still wins.
-func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
+func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
+	host = host.withStdioDefaults()
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
 	}
@@ -181,7 +183,7 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 		// The opt-in scrub: only the named keys (plus the platform's essentials) reach the child,
 		// with PATH scoped away from the workspace as gitexec.SafeEnv scopes git's. cfg.Env is appended
 		// last so a per-server variable still wins over an inherited one of the same name.
-		cmd.Env = append(stdioHost.ScopeEnv(workspaceRoot, *cfg.EnvAllowlist, nil), cfg.Env...)
+		cmd.Env = append(host.Shell.ScopeEnv(workspaceRoot, *cfg.EnvAllowlist, nil), cfg.Env...)
 	case len(cfg.Env) > 0:
 		cmd.Env = append(cmd.Environ(), cfg.Env...)
 	}
@@ -189,29 +191,11 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	// process group is a fork-time property of the Cmd, and on Windows the Job Object has to exist
 	// before there is a process to assign to it. The transport carries it too, because Connect is
 	// where the process starts and so where it must join its container.
-	td := newStdioTeardown(cmd)
-	return &stdioTransport{cmd: cmd, td: td, terminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
+	td := host.NewTeardown(cmd)
+	return &stdioTransport{cmd: cmd, td: td, terminateDuration: host.TerminateDuration}, cmd, td, cancel, nil
 }
 
-// newStdioTeardown builds the container a stdio server's process tree is held in. It is a package
-// var only so a test can wrap the platform teardown in a recorder that observes when Contain runs
-// relative to the handshake; production never reassigns it.
-var newStdioTeardown = platform.NewProcessTeardown
-
-// stdioHost is the platform facility a stdio server's env-allowlist is scoped through (the
-// allowlisted keys, the platform's own essentials, PATH scoped away from the workspace). It is a
-// package var so a test can substitute a fake (internal/tools' execution tools instead carry
-// their platform.Host on an execHost value each tool is built with).
-var stdioHost platform.Host = platform.Current()
-
-// stdioTerminateDuration is how long apogee's stdio shutdown ladder (stdinLadder.Close) waits at
-// each rung (stdin close → SIGTERM → SIGKILL) before escalating. Zero — or any non-positive value —
-// means defaultStdioTerminateDuration, which is what production runs on: it is a package var only
-// to give the drain test a seam short enough to run in milliseconds (a test that shrinks it must
-// not run in parallel).
-var stdioTerminateDuration time.Duration
-
-// defaultStdioTerminateDuration is the rung wait a non-positive stdioTerminateDuration maps to:
+// defaultStdioTerminateDuration is the rung wait a non-positive Host.TerminateDuration maps to:
 // 5s, the value the SDK's own CommandTransport defaults to, so replacing that transport with
 // stdioTransport changed nothing about how long a clean shutdown is given.
 const defaultStdioTerminateDuration = 5 * time.Second
