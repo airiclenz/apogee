@@ -425,13 +425,13 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	// this fold the quiescent boundary a binding change observed under the latch has been waiting
 	// for: observeBinding STASHES one rather than driving Agent.Rebind beside a move this completion
 	// may be about to make. It is finishWorker's posture, one level across, and it runs BEFORE the
-	// completion's own words because the beat that saw it landed before the completion did. A /bg
-	// launch still reading the Agent off the loop (holdBgLaunch) keeps it stashed for foldBgStarted —
-	// /bg is touchesServer, so the latch refuses it while a launcher verb is in flight, and this
-	// guard holds the boundary should the two ever overlap anyway.
-	if !m.holds.has(holdBgLaunch) {
-		m.applyPendingRebind()
-	}
+	// completion's own words because the beat that saw it landed before the completion did. Another
+	// hold still standing keeps it stashed for that hold's own release (releaseEngine): a worker an
+	// Exchange or a wake opened during the actuation keeps it for finishWorker, and a /bg launch
+	// still reading the Agent off the loop keeps it for foldBgStarted — /bg is touchesServer, so the
+	// latch refuses it while a launcher verb is in flight, and the gate holds the boundary should the
+	// two ever overlap anyway.
+	m.releaseEngine()
 
 	if ev.err != nil {
 		note := stripEscapes(ev.err.Error())

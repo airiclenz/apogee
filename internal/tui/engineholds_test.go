@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -188,4 +189,185 @@ func pickModelGates(a engineAnswers) engineAnswers {
 		resumesWorkflow: a.resumesWorkflow,
 		wakes:           a.wakes,
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The release transition
+// ----------------------------------------------------------------------------
+
+// releaseRebind is the observation every releaseEngine test stashes under a hold and expects bound
+// at the release that leaves no hold standing.
+var releaseRebind = rebindCall{model: "other-model", window: 16384}
+
+// stashRebind folds a beat advertising releaseRebind into a Model some hold keeps from rebinding, so
+// observeBinding stashes it rather than applying it.
+func stashRebind(t *testing.T, m Model, rb *fakeRebind) Model {
+	t.Helper()
+	m = foldBeatMsg(t, m, upBeat(releaseRebind.model, releaseRebind.window))
+	if len(rb.calls) != 0 || m.hb.pendingRebind == nil {
+		t.Fatalf("rebind calls %+v, pending %+v; want the observation stashed under the hold", rb.calls, m.hb.pendingRebind)
+	}
+	return m
+}
+
+// wantRebound asserts the stash was applied exactly once and cleared.
+func wantRebound(t *testing.T, m Model, rb *fakeRebind) {
+	t.Helper()
+	if want := []rebindCall{releaseRebind}; !reflect.DeepEqual(rb.calls, want) {
+		t.Errorf("rebind calls = %+v, want the stash applied exactly once (%+v)", rb.calls, want)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Errorf("pendingRebind = %+v, want it cleared by the apply", m.hb.pendingRebind)
+	}
+}
+
+// wantWithheld asserts the stash still stands with nothing driven into the engine.
+func wantWithheld(t *testing.T, m Model, rb *fakeRebind) {
+	t.Helper()
+	if len(rb.calls) != 0 {
+		t.Errorf("rebind calls = %+v, want none while another hold still stands", rb.calls)
+	}
+	if want := (rebindIntent{model: releaseRebind.model, window: releaseRebind.window}); m.hb.pendingRebind == nil || !reflect.DeepEqual(*m.hb.pendingRebind, want) {
+		t.Errorf("pendingRebind = %+v, want the observation still stashed (%+v)", m.hb.pendingRebind, want)
+	}
+}
+
+// An Exchange's end applies a rebind stashed under its worker, and withholds it while a /bg launch
+// still reads the Agent off the loop.
+func TestReleaseEngine_FinishWorker(t *testing.T) {
+	t.Parallel()
+	t.Run("alone", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		startStubWorker(t, &m)
+		m = stashRebind(t, m, rb)
+
+		m = step(t, m, exchangeDoneMsg{})
+
+		wantRebound(t, m, rb)
+	})
+	t.Run("under a /bg launch", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m.holds.hold(holdBgLaunch)
+		startStubWorker(t, &m)
+		m = stashRebind(t, m, rb)
+
+		m = step(t, m, exchangeDoneMsg{})
+
+		wantWithheld(t, m, rb)
+	})
+}
+
+// A launcher verb's completion applies a rebind stashed under its latch, and withholds it while a
+// /bg launch still reads the Agent off the loop.
+func TestReleaseEngine_FoldActuationDone(t *testing.T) {
+	t.Parallel()
+	t.Run("alone", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m, cmd := startLoad(t, m, "alpha")
+		m = stashRebind(t, m, rb)
+
+		m, _ = driveActuation(t, m, cmd)
+
+		wantRebound(t, m, rb)
+	})
+	t.Run("under a /bg launch", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m, cmd := startLoad(t, m, "alpha")
+		m.holds.hold(holdBgLaunch)
+		m = stashRebind(t, m, rb)
+
+		m, _ = driveActuation(t, m, cmd)
+
+		wantWithheld(t, m, rb)
+	})
+}
+
+// A /bg launch landing applies a rebind stashed under it, and withholds it while a worker a message
+// opened beside the launch still drives the engine.
+func TestReleaseEngine_FoldBgStarted(t *testing.T) {
+	t.Parallel()
+	t.Run("alone", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m.holds.hold(holdBgLaunch)
+		m = stashRebind(t, m, rb)
+
+		m = step(t, m, bgStartedMsg{id: testWorkflowID})
+
+		wantRebound(t, m, rb)
+	})
+	t.Run("under a worker", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m.holds.hold(holdBgLaunch)
+		startStubWorker(t, &m)
+		m = stashRebind(t, m, rb)
+
+		m = step(t, m, bgStartedMsg{id: testWorkflowID})
+
+		wantWithheld(t, m, rb)
+	})
+}
+
+// A background prompt's pane closing applies a rebind stashed while it stood, and withholds it while
+// a /bg launch still reads the Agent off the loop.
+func TestReleaseEngine_CloseWorkflowPrompt(t *testing.T) {
+	t.Parallel()
+	t.Run("alone", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m, _ = m.openWorkflowPrompt(bgApproval(7))
+		m = stashRebind(t, m, rb)
+
+		m, _ = m.dismissWorkflowPrompt()
+
+		wantRebound(t, m, rb)
+	})
+	t.Run("under a /bg launch", func(t *testing.T) {
+		t.Parallel()
+		m, rb := wireLauncher(t, newLauncher())
+		m.holds.hold(holdBgLaunch)
+		m, _ = m.openWorkflowPrompt(bgApproval(7))
+		m = stashRebind(t, m, rb)
+
+		m, _ = m.dismissWorkflowPrompt()
+
+		wantWithheld(t, m, rb)
+	})
+}
+
+// A worker and an actuation at once — a wake can run during a launcher verb — with the worker's
+// Exchange ending first: the rebind waits out the actuation and lands at its completion.
+func TestReleaseEngine_WorkerThenActuation(t *testing.T) {
+	t.Parallel()
+	m, rb := wireLauncher(t, newLauncher())
+	m, cmd := startLoad(t, m, "alpha")
+	startStubWorker(t, &m)
+	m = stashRebind(t, m, rb)
+
+	m = step(t, m, exchangeDoneMsg{})
+	wantWithheld(t, m, rb)
+
+	m, _ = driveActuation(t, m, cmd)
+	wantRebound(t, m, rb)
+}
+
+// The same overlap with the actuation completing first: the rebind waits out the worker and lands at
+// its Exchange's end.
+func TestReleaseEngine_ActuationThenWorker(t *testing.T) {
+	t.Parallel()
+	m, rb := wireLauncher(t, newLauncher())
+	m, cmd := startLoad(t, m, "alpha")
+	startStubWorker(t, &m)
+	m = stashRebind(t, m, rb)
+
+	m, _ = driveActuation(t, m, cmd)
+	wantWithheld(t, m, rb)
+
+	m = step(t, m, exchangeDoneMsg{})
+	wantRebound(t, m, rb)
 }

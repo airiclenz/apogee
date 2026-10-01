@@ -619,8 +619,10 @@
 // finishWorker when a worker does (the boundary SettleExchange and the idle save use), and the
 // actuation completion fold while a launcher verb owns the server the session talks to, since that
 // completion may re-point the session itself, and foldBgStarted while a /bg launch reads the Agent
-// off the loop (its launch-time snapshot must not meet an idle-only mutator) — the other two leave
-// the stash standing for it while that launch is in flight. [Model.applyRebind] then adopts what
+// off the loop (its launch-time snapshot must not meet an idle-only mutator). Each of those folds,
+// and the close of a background prompt's pane, runs the one release transition
+// [Model.releaseEngine], which applies the stash only when no other worker, actuation or /bg hold
+// still stands — so with two at once it lands at the second release. [Model.applyRebind] then adopts what
 // was actually BOUND
 // (never merely what was observed), restates the start-up box in place (transcript.refreshStartup —
 // its facts were frozen when it was seeded, and a late-bound session would otherwise keep a
@@ -873,7 +875,8 @@
 // which overlap rather than exclude one another, the snapshot [Model.engineHolds] takes of it with
 // the non-hold facts the gates also read, and the named questions asked of that snapshot
 // (commandRunnable, canRunDeferred, canRebind, beatMayCount, canEditConfigExternally, canLaunchBg,
-// quiescent, canResumeWorkflows, canWake); heartbeat.go the fourth cluster lifted out of
+// quiescent, canResumeWorkflows, canWake), and [Model.releaseEngine], the one release transition
+// every fold that hands the engine back runs; heartbeat.go the fourth cluster lifted out of
 // model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
 // [heartbeatState] the footer and the send gate read, the tick chain that keeps it current
 // ([Model.beatCmd], [Model.armBeat], [Model.beatTick]), the folds a beat, a failure or a

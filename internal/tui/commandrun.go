@@ -692,9 +692,7 @@ func (m Model) foldBgStarted(msg bgStartedMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.transcript.addNote(fmt.Sprintf(bgStartedFormat, msg.id))
 	}
-	if !m.busy() && !m.actuation.inFlight {
-		m.applyPendingRebind()
-	}
+	m.releaseEngine()
 	return m.runDeferredCommands()
 }
 

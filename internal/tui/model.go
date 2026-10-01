@@ -2332,8 +2332,9 @@ func (m *Model) stopEveryChild() {
 // the engine again at this boundary, so it takes its own Snapshot — else nil.
 //
 // It is also where a binding change the heartbeat observed mid-Exchange is applied
-// (applyPendingRebind): the Model owning the engine again is exactly the precondition
-// Agent.Rebind states, so the deferred apply and the idle Snapshot share one boundary.
+// (releaseEngine): the Model owning the engine again is exactly the precondition
+// Agent.Rebind states, so the deferred apply and the idle Snapshot share one boundary — unless a
+// launcher verb or a /bg launch still holds the engine, whose own release applies it instead.
 //
 // It also clears the generation clock: a cancelled or faulted stream emits no terminal
 // UsageEvent, so foldStats never zeroes genStart, and a stale start would time the *next*
@@ -2409,15 +2410,14 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 		}
 		return tea.Quit
 	}
-	// The engine is the Update loop's again, which is the boundary a binding change captured
-	// mid-Exchange has been waiting for (ADR 0024). It runs BEFORE the idle save so the session
-	// record is stamped with the model that is now bound, notes and all. A /bg launch still reading
-	// the Agent off the loop (holdBgLaunch — a message can open an Exchange beside it) makes this not
-	// that boundary yet: the rebind stays stashed for foldBgStarted, which binds it once the launch
-	// has landed.
-	if !m.holds.has(holdBgLaunch) {
-		m.applyPendingRebind()
-	}
+	// The worker's hold is released, which is the boundary a binding change captured mid-Exchange
+	// has been waiting for (ADR 0024). It runs BEFORE the idle save so that, when the rebind lands
+	// here, the session record is stamped with the model that is now bound, notes and all. Another
+	// hold still standing makes this not that boundary yet — a /bg launch reading the Agent off the
+	// loop (a message can open an Exchange beside it), or a launcher verb whose server is restarting
+	// (a wake can run during an actuation): the rebind stays stashed for that hold's own release
+	// (releaseEngine), and reaches the record at the save that follows it.
+	m.releaseEngine()
 	if next == stateIdle {
 		// A completed or cancelled Exchange settled at idle: persist the final conversation state
 		// (the per-Turn saves captured each Turn; this catches the closing boundary, including the

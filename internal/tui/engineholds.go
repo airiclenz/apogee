@@ -171,3 +171,16 @@ func (h engineHolds) canResumeWorkflows() bool {
 func (h engineHolds) canWake() bool {
 	return h.canResumeWorkflows() && !h.hasInterjections && !h.isModalPaneOpen
 }
+
+// releaseEngine is the one transition every fold that hands the engine back runs once its own hold
+// is released — finishWorker for a worker's Exchange, foldActuationDone for a launcher verb,
+// foldBgStarted for a /bg launch, closeWorkflowPrompt for a background prompt's pane. It applies a
+// rebind [Model.observeBinding] stashed meanwhile exactly when canRebind holds, so a rebind is
+// never driven into an engine a coexisting worker, actuation or /bg launch still holds: with two of
+// them at once, the stash lands at the second release (ADR 0024, rebind at a quiescent boundary).
+// A no-op when nothing was stashed.
+func (m *Model) releaseEngine() {
+	if m.engineHolds().canRebind() {
+		m.applyPendingRebind()
+	}
+}

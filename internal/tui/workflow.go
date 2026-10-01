@@ -489,16 +489,14 @@ func (m Model) dismissWorkflowPrompt() (Model, tea.Cmd) {
 // closeWorkflowPrompt closes the open background prompt's pane and returns the TUI to idle — the
 // state it was opened from, with no worker behind it, so nothing resumes (never resumeRunning).
 // The box the ask pane borrowed is handed back, a rebind stashed while the pane stood is applied
-// (the engine is the Update loop's, as at an Exchange's end), and the next waiting prompt is
-// offered at the tail.
+// unless another hold still stands (releaseEngine, as at an Exchange's end), and the next waiting
+// prompt is offered at the tail.
 func (m *Model) closeWorkflowPrompt() {
 	m.pendingDecision.reset()
 	m.restoreAskDraft()
 	m.state = stateIdle
 	m.layout()
-	if !m.holds.has(holdBgLaunch) && !m.actuation.inFlight {
-		m.applyPendingRebind()
-	}
+	m.releaseEngine()
 	m.promptPending = true
 }
 

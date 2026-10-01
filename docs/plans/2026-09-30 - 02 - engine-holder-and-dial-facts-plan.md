@@ -81,7 +81,11 @@ NOTES (2026-10-01): the stored set is Model.holds of the existing engineHold bit
 **Acceptance:** `go test ./internal/tui -run 'TestBgLaunch(Queues|Holds|Keeps)|TestRebindDeferredWhileBusy|TestActuation|TestBackgroundWorkflow_|TestReportActivity|TestWorkflowsView|TestQueued|TestEngineHold|TestSessionSwitch|TestABgOnly|TestAFailedWorkflowResume|TestPreboundClear|TestBusyFailure|TestSessionBrowserResume'`; `go test ./internal/tui -run '^TestBgLaunchStashesARebindUntilItLands$'`; `! grep -nE '\b(bgLaunching|sessionLoading)\b' internal/tui/*.go`
 **Commit:** `refactor(tui): the engine holds are one recorded set`
 
-## 5. tui: one released transition applies the stashed rebind
+## 5. tui: one released transition applies the stashed rebind — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): consequential edit — internal/tui/heartbeat.go: made necessary by releaseEngine (applyPendingRebind's doc now names releaseEngine as its only caller)
+NOTES (2026-10-01): consequential edit — internal/tui/doc.go: made necessary by releaseEngine (the rebind-boundary paragraph and the engineholds.go file map name the one release transition)
+NOTES (2026-10-01): command_test.go change is comment-only (TestBgLaunchKeepsARebindStashedPastAnActuationEnd now names releaseEngine); all TestReleaseEngine_* tests live in engineholds_test.go, each release-point test with an "alone" and a coexisting-hold subtest
 
 **Depends on:** item 4.
 **Files:** `internal/tui/model.go`, `internal/tui/actuation.go`, `internal/tui/commandrun.go`, `internal/tui/workflow.go`, `internal/tui/engineholds.go`, `internal/tui/engineholds_test.go`, `internal/tui/command_test.go`

@@ -1257,7 +1257,7 @@ func TestBgLaunchKeepsARebindStashedPastAnExchangeEnd(t *testing.T) {
 
 // A launcher verb's completion is not that boundary either while a /bg launch is in flight. The
 // latch refuses /bg while a launcher verb runs (touchesServer), so the overlap is forced here to pin
-// the completion fold's own guard: the stash stands until the launch lands.
+// the completion fold's release transition (releaseEngine): the stash stands until the launch lands.
 func TestBgLaunchKeepsARebindStashedPastAnActuationEnd(t *testing.T) {
 	t.Parallel()
 	m, rb := wireLauncher(t, newLauncher())
