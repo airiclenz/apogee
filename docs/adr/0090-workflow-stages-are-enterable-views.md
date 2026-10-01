@@ -58,6 +58,16 @@ question, and — once the Workflow has ended — the totals line and a failure'
 > structure (D5), so after a session resume a replayed stopped block still shows it, and re-running
 > it in the resumed session opens a new block exactly as in the live one.
 
+> **Amended 2026-09-30.** A Recipe block's totals line no longer counts its own item rows: it reads
+> the tally its finished or stopped end phase carries — the engine's tally (ADR 0089 D3, amended
+> 2026-09-30), so the block counts the same item set as the model's finish note and the headless
+> and daemon exit verdict: the fan-out items, each on its latest round's receipt, a verify or merge
+> receipt never an item. It shows the items that finished on a receipt, by status, and omits the
+> note's unfinished and verdict segments. D5 holds: the session record keeps the end phase's tally
+> with the block's structure, so a replayed block shows the same totals, and a block from a record
+> written before the tally was kept counts its items as before. A re-run whose folder a background
+> run still drives is refused (ADR 0087 D4, amended 2026-09-30).
+
 **D2 — Each item run has a run head of its own.** When an item's run starts, a head for it is seated
 under the Workflow's block, inside the block's span. It is a delegation's head in every way a view
 asks: it opens as the run's view, `^x` stops that one run, a message typed in its view reaches its

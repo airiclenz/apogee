@@ -85,7 +85,8 @@ var fanOutSpec = toolSpec{
 		"asked for in returns. You get back one line per item plus the path of a full report, " +
 		"not the helpers' prose. Use it for many similar pieces of work over a list; use " +
 		"sub_agent for one self-contained task. Calling it again with the same arguments " +
-		"skips the items already done.",
+		"skips the items already done; a call whose workflow " +
+		"a background run is still driving is refused.",
 	schema: fanOutSchema(FanOutOptions{}),
 }
 

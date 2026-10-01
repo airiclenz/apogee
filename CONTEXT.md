@@ -497,7 +497,11 @@ stage) and a human-written **Recipe** (any number of stages). The model asks for
 engine never plans work on its behalf (the distinction from the retired **Guided decomposition**).
 A workflow lives in a folder under the session's **Scratch dir**, so it survives `esc`, a crash and
 a resume: cancel stops it and keeps every finished item, and asking again with the same task,
-items and inputs picks it up where it stopped. It runs **blocking** by default, or as a
+items and inputs picks it up where it stopped — unless a **Background workflow** is still driving its
+folder, when a blocking re-issue is refused, naming that run, and nothing starts (2026-09-30). Its
+item tally is the engine's: the fan-out items, each on its latest round's receipt, a verify or
+merge receipt never an item — the set the finish note, the TUI's totals line and the headless and
+daemon exit verdict all count. It runs **blocking** by default, or as a
 **Background workflow**. Ratified 2026-09-27 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
 In the TUI each run of a blocking workflow draws one block — a Recipe's own, or the `fan_out` call's card — and
 its item runs never paint in the conversation: a Recipe's block shows one row per stage from the
@@ -548,7 +552,9 @@ which model classes see only where the bench has shown it helps. It keeps one se
 for the conversation; a second one on the same server waits in line. When it finishes, a one-line
 note reaches the parent — at the next pause between tool calls if a reply is under way, otherwise
 by apogee **waking** the agent with a reply of its own, bounded by the **Mode** as any reply is.
-Quitting apogee stops it; resuming the session resumes it. Ratified 2026-09-27
+Quitting apogee stops it; resuming the session resumes it. While it is still driving its folder, a
+blocking launch of the same workflow — a `fan_out`, a typed `/<id>` or a foreground recipe — is
+refused rather than run beside it (2026-09-30). Ratified 2026-09-27
 ([ADR 0089](docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md); [ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
 _Avoid_: "async delegation" (ADR 0086's rejected option A — a spawn/message/wait tool family),
 "detached run".

@@ -237,7 +237,10 @@ NOTES (2026-10-01): admitBlocking treats a nil workflowLive as admitting every f
 **Acceptance:** `go test ./internal/agent -run 'TestBlockingLaunchRefused|TestNewChildAgent_|TestBackground_|TestWorkflowCall_'`; `! grep -n 'background.isLive' internal/agent/launch.go`
 **Commit:** `fix(agent): a delegate's blocking launch refuses a live background folder`
 
-## 15. docs: workflow launch and tally amendments
+## 15. docs: workflow launch and tally amendments — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): headless.md already carried item 6's "fan-out items" sentence, so its one-sentence change is the exit-code table row ("blocked on every fan-out item"); regression-guard hits ADR 0090 D1's "plan hash" amendment and ADR 0088 D3's 2026-09-29 amendment are left standing and qualified by the new 2026-09-30 amendments rather than rewritten.
+NOTES (2026-10-01): the ADR 0088 D3 amendment covers only the live-folder refusal — the stopped answer's `K of N done` is computed by workflow.Format's countItems, not the engine Tally, so no tally claim was made there.
 
 **Depends on:** items 6, 7, 14.
 **Files:** `docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md`, `docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md`, `docs/adr/0090-workflow-stages-are-enterable-views.md`, `docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md`, `CONTEXT.md`, `docs/manual/workflows.md`, `docs/manual/headless.md`, `docs/manual/daemon.md`, `internal/tools/fan_out.go`

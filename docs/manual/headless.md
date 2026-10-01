@@ -172,7 +172,7 @@ thing happened:
 | Exit | Means |
 |---|---|
 | `0` | the run completed |
-| `1` | the run started and failed — model or tool error, cancellation, a record that would not save, a `--recipe` workflow that did not run, was stopped, failed or blocked on every item |
+| `1` | the run started and failed — model or tool error, cancellation, a record that would not save, a `--recipe` workflow that did not run, was stopped, failed or blocked on every fan-out item |
 | `2` | the run never started — usage, configuration, a refused mode, a server that did not answer |
 | `3` | the run started and reached its boundary, but its final turn was abandoned (a model or upstream fault the loop could not recover) — stdout holds the run's last text, not an answer; the record is saved |
 

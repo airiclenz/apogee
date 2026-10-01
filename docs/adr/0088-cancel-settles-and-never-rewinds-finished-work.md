@@ -72,6 +72,11 @@ items and answers the call with how many items finished and the report-so-far pa
 > same way resumes the stored Workflow by its plan hash exactly as a `fan_out` does (ADR 0087 D4);
 > its cancel keeps the launch's opening (D1, amended 2026-09-29).
 
+> **Amended 2026-09-30.** The re-run resumes the stored Workflow only once no background run
+> (ADR 0089) is still driving its folder: a blocking re-issue onto a folder a background run still
+> drives is refused, naming that run, and nothing is created or spawned (ADR 0087 D4, amended
+> 2026-09-30).
+
 **D4 — Finished work written to disk stays written.** Nothing apogee does on a cancel reverts a
 file. A settled Turn's results tell the model what happened, so its next request starts from the
 truth rather than from a conversation that forgot work the workspace still shows.

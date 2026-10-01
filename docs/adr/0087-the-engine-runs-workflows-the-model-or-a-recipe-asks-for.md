@@ -77,6 +77,15 @@ its own.
 > A model's own `terminal` call in Plan stays refused, and the other modes run script stages as
 > before.
 
+> **Amended 2026-09-30.** Re-issuing the same workflow skips its finished items only when no
+> background run (ADR 0089) is still driving its folder. Every launch now goes through one launch
+> builder, and a blocking one — a `fan_out` plan, a `fan_out` recipe form, a typed `/<id>` or a
+> foreground recipe launch, from the top-level agent, a sub-agent or a background item child alike
+> — that resolves to a folder a background run still drives is refused with
+> `apogee: workflow <id> is already running in the background`: nothing is created, spawned or
+> written there, so two runs never share one folder's status file. Once the background run ends,
+> the same re-issue resumes the folder as before.
+
 **D5 — ADR 0022 D8 is amended for workflow items.** A workflow item's conversation is saved in its
 workflow folder, for `/workflows` inspection. It is still never a Session record, and a plain
 `sub_agent` child stays ephemeral.

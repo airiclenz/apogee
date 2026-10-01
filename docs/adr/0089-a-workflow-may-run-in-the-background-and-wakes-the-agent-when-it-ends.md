@@ -49,6 +49,14 @@ The engine only emits the event; the Driver decides to wake (ADR 0031's wire-sil
 finish and the note rides on the user's next message. ADR 0007 is amended: an Exchange may open on
 an engine note as well as a user message.
 
+> **Amended 2026-09-30.** The note's item counts are the engine's tally of the run (`workflow.Tally`):
+> its fan-out items only, each counted on the receipt its latest round ended on, a skipped fan-out
+> left out; a verify or merge receipt is not an item. The finished or stopped end phase carries the
+> same tally on its Go event (the `workflow_phase` NDJSON line is unchanged), so the note, the TUI's
+> totals and background finish line, the `/workflows` listing, and the headless and daemon exit
+> verdict count the same item set. The note's text is unchanged. A blocking re-issue of a workflow
+> whose folder this background run still drives is refused (ADR 0087 D4, amended 2026-09-30).
+
 **D4 — The `workflow` control tool.** A model shown the background switch also gets `workflow`, with
 three actions:
 - **status:** every workflow in the session, or one in detail (stages, item counts, receipts so far);

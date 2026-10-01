@@ -60,7 +60,9 @@ its end before the model is asked anything, an `ask` stage takes its declared de
 lines say `(default taken: no one to ask)`), and a recipe no skill answers to, or a required
 input the text leaves unbound, fails the firing before anything is sent. A workflow that did not
 run, was stopped, failed or blocked on every item fails the firing too — the same judgement
-headless exits 1 on — and the log's failed line says which. The log's fired line names the recipe as you would type it —
+headless exits 1 on — and the log's failed line says which. The items are the ones the workflow's
+finish note counts: each fan-out item on the receipt its latest round ended on; a verify or merge
+receipt is not an item. The log's fired line names the recipe as you would type it —
 `fired     weekly-audit — /audit internal/`.
 
 The daemon watches the file and picks up every saved edit within a second or two — no

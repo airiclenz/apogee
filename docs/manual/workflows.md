@@ -84,7 +84,9 @@ The helpers run as many at a time as the server allows — its
 answers when the last one has reported. Each helper is spawned exactly as a `sub_agent` child is:
 the same privileges as your agent or fewer, the same depth limit, and every tool call it makes
 decided by the same mode, guard and approval rules. Calling `fan_out` again with the same
-arguments finds the workflow it already started and skips the items that finished. An item is
+arguments finds the workflow it already started and skips the items that finished — unless a
+[background workflow](#background-workflows) is still driving it, when the call is refused with
+`apogee: workflow <id> is already running in the background` and nothing runs. An item is
 keyed by its brief, the item itself and the content of its context files, so an item whose input
 changed runs again.
 
@@ -382,7 +384,10 @@ workflow runs one helper short of the server's width, so a slot stays free for t
 on a width-1 server the two take turns on the one slot. Only one background workflow runs per
 server at a time — a second one waits `queued` and starts when the first ends. It keeps the model,
 server and tools it started with, and `esc` never reaches it: it is stopped from
-[`/workflows`](#the-workflows-view--workflows) or by the model's `workflow` tool.
+[`/workflows`](#the-workflows-view--workflows) or by the model's `workflow` tool. While it is
+still driving its folder, starting the same workflow blocking — a `fan_out` call, a typed
+`/<recipe>` line — is refused with `apogee: workflow <id> is already running in the background`;
+once it ends, the same call resumes it.
 
 **Questions wait for you.** An approval one of its helpers needs, or an `ask` stage's question,
 never interrupts what you are doing. The status line adds `· 1 workflow waiting for you`, and the
