@@ -21,7 +21,10 @@
 **Not covered by plans 00–02:** review 2026-09-30 candidates #9, #11, #12, #13, #14, #16, #18, #20 (except its bead) and #17 (plan 00 item 10 only reuses `domain.RecipeLaunch`).
 **Regression check:** three rounds plus a re-check (2026-09-30 ×2, 2026-10-01) at 704514db; reports in docs/skill-runs/implement-plan/2026-09-30_-_00_-_workflow-launch-tally-childrun-plan/.
 
-## 1. workflow: Runner.Open shares Run's folder-open path
+## 1. workflow: Runner.Open shares Run's folder-open path — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): openStatus split into openFolder (validate/expand/PlanHash/Find/Create, shared by Open and Run) and resetStatus (Run's status rewrite with prior/replay); Run's no-ScriptRunner check now runs before Validate so it still refuses before any folder is created — an invalid plan that also has a script stage and no ScriptRunner now reports the ScriptRunner refusal first.
+NOTES (2026-10-01): a created folder's Create stamp and Run's Updated stamp now each read Runner.now (two reads, not one shared value); with a pinned Now they are identical.
 
 **Files:** `internal/workflow/runner.go`, `internal/workflow/runner_test.go`, `internal/workflow/doc.go`
 **Read first:** internal/workflow/runner.go — Runner.Run, openStatus, expandStages; internal/agent/background.go — openWorkflowFolder, rerunMovedFormat

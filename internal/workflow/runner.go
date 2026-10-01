@@ -146,6 +146,10 @@ type ItemEvent struct {
 	Receipt     *Receipt
 }
 
+// ErrFolderMoved refuses an Open of a named folder the plan no longer leads to: its PlanHash finds
+// no folder, or a different one — the items changed since the folder ran.
+var ErrFolderMoved = errors.New("workflow: the plan no longer leads to the named folder")
+
 // Runner runs a Workflow's stages over their items (ADR 0087): each item is one fresh child from
 // the Spawner, at most Width at a time, its receipt and transcript saved in the workflow folder as
 // it finishes, so a cancel keeps every finished item and a re-issue of the same plan skips them.
@@ -309,21 +313,14 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
 		return Result{}, errors.New("workflow: runner needs a Spawner, a Store and a Workspace")
 	}
-	if problems := Validate(plan); len(problems) > 0 {
-		return Result{}, fmt.Errorf("workflow: invalid plan: %s", joinProblems(problems))
-	}
 	if r.Scripts == nil && slices.ContainsFunc(plan.Stages, func(stage Stage) bool { return stage.Kind == StageScript }) {
 		return Result{}, errors.New("workflow: the plan has a script stage and the runner has no ScriptRunner")
 	}
-	stageItems, allItems, err := r.expandStages(plan)
+	status, found, stageItems, err := r.openFolder(plan, "")
 	if err != nil {
 		return Result{}, err
 	}
-	planHash, err := PlanHash(plan, nil, allItems)
-	if err != nil {
-		return Result{}, err
-	}
-	status, prior, replay, err := r.openStatus(plan, planHash)
+	status, prior, replay, err := r.resetStatus(plan, status, found)
 	if err != nil {
 		return Result{}, err
 	}
@@ -381,25 +378,65 @@ func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
 	return perStage, all, nil
 }
 
-// openStatus resumes the newest workflow carrying planHash, its stages reset to pending, or creates
-// a new one. prior is the resumed folder's stages as its last run left them, before the reset (nil
-// for a new folder): the stale guard on an older key scheme's receipt reads them (adoptable). replay reports that the folder it resumes had not finished — stopped, or cut off while
-// running — so its recorded script and ask stages are replayed rather than run again (StageRecord).
-// A re-issue of a workflow that ran to its end still skips its finished items, but runs its scripts
-// and asks its questions afresh: it is a new run of finished work, not the resume of unfinished work.
-func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, prior []StageStatus, replay bool, err error) {
-	now := r.now()
-	status, found, err := r.Store.Find(planHash)
-	if err != nil {
-		return RunStatus{}, nil, false, err
+// Open finds or creates the workflow folder Run will run plan in, the way Run does: the plan
+// validated, every fanout with a source of its own expanded, the PlanHash over them, the newest
+// folder with that hash, else a new one stamped by Now. A found folder is returned as it stands —
+// Open writes nothing to it — so the Run that follows resumes it. A launch opens its folder ahead of
+// Run when it needs the id and status path before the run starts (a queued background workflow).
+// folder "" finds or creates by hash; a named folder is the one the plan must lead to, and a plan
+// whose hash leads anywhere else — no folder, or another one — is refused with ErrFolderMoved
+// before anything is created.
+func (r *Runner) Open(plan Plan, folder string) (RunStatus, error) {
+	status, _, _, err := r.openFolder(plan, folder)
+	return status, err
+}
+
+// openFolder is the folder open Run and Open share: it validates plan, expands its items
+// (expandStages), and finds the newest folder with the plan's PlanHash, or — unless folder names
+// one the hash must lead to — creates one stamped by Now. found reports a folder that already
+// existed; stageItems are the expanded items per stage index.
+func (r *Runner) openFolder(plan Plan, folder string) (status RunStatus, found bool, stageItems map[int][]Item, err error) {
+	if r.Store == nil || r.Workspace == nil {
+		return RunStatus{}, false, nil, errors.New("workflow: runner needs a Store and a Workspace")
 	}
+	if problems := Validate(plan); len(problems) > 0 {
+		return RunStatus{}, false, nil, fmt.Errorf("workflow: invalid plan: %s", joinProblems(problems))
+	}
+	stageItems, allItems, err := r.expandStages(plan)
+	if err != nil {
+		return RunStatus{}, false, nil, err
+	}
+	planHash, err := PlanHash(plan, nil, allItems)
+	if err != nil {
+		return RunStatus{}, false, nil, err
+	}
+	status, found, err = r.Store.Find(planHash)
+	if err != nil {
+		return RunStatus{}, false, nil, err
+	}
+	if folder != "" && (!found || status.ID != folder) {
+		return RunStatus{}, false, nil, ErrFolderMoved
+	}
+	if !found {
+		status, err = r.Store.Create(plan, planHash, r.now())
+		if err != nil {
+			return RunStatus{}, false, nil, err
+		}
+	}
+	return status, found, stageItems, nil
+}
+
+// resetStatus readies the folder openFolder opened for a run: its stages reset to pending, its
+// phase running, its recipe and Updated stamped, written back. prior is a found folder's stages as
+// its last run left them, before the reset (nil for a created folder): the stale guard on an older
+// key scheme's receipt reads them (adoptable). replay reports that the found folder had not
+// finished — stopped, or cut off while running — so its recorded script and ask stages are replayed
+// rather than run again (StageRecord). A re-issue of a workflow that ran to its end still skips its
+// finished items, but runs its scripts and asks its questions afresh: it is a new run of finished
+// work, not the resume of unfinished work.
+func (r *Runner) resetStatus(plan Plan, status RunStatus, found bool) (_ RunStatus, prior []StageStatus, replay bool, err error) {
 	if found {
 		prior, replay = status.Stages, status.Phase != PhaseDone
-	} else {
-		status, err = r.Store.Create(plan, planHash, now)
-		if err != nil {
-			return RunStatus{}, nil, false, err
-		}
 	}
 	status.Stages = make([]StageStatus, 0, len(plan.Stages))
 	for _, stage := range plan.Stages {
@@ -407,7 +444,7 @@ func (r *Runner) openStatus(plan Plan, planHash string) (status RunStatus, prior
 	}
 	status.Phase = PhaseRunning
 	status.Recipe = r.Recipe
-	status.Updated = now
+	status.Updated = r.now()
 	return status, prior, replay, r.Store.WriteStatus(status)
 }
 
@@ -430,7 +467,7 @@ func (r *Runner) now() time.Time {
 // runState is one Run's shared state: the status.json it keeps current, under mu, which also
 // serialises the Observer's calls, the resumed folder's stages as its last run left them (prior,
 // nil for a new folder), and whether the run resumes an unfinished folder whose recorded
-// script and ask stages it replays (openStatus), and the workflow's folder, which item short names
+// script and ask stages it replays (resetStatus), and the workflow's folder, which item short names
 // are read relative to (ItemName). prior, replay and dir are fixed before the first stage runs.
 type runState struct {
 	runner *Runner

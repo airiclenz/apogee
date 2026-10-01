@@ -33,7 +33,9 @@
 // runner.go is Runner.Run and the Spawner seam the agent implements: a fanout stage's items run as
 // fresh children at most Width at a time, a capped child continued (ItemSpec.Prior) and a faulted
 // or receipt-less one retried within configured bounds, each receipt stored as it lands, so a
-// cancel keeps finished items and returns a stopped Result.
+// cancel keeps finished items and returns a stopped Result. Runner.Open is Run's own folder open —
+// validate, expand, PlanHash, find or create — for a launch that needs the folder before the run
+// starts; it writes nothing to a found folder and refuses a moved one (ErrFolderMoved).
 // stages.go is every stage kind beyond the fanout. verify and merge work over a fanout's results on
 // runner.go's wave path: verify runs one adversarial child per item its `when:` selects, the
 // engine's briefs/verify.txt leading the stage's brief, and folds each verdict into the item; merge

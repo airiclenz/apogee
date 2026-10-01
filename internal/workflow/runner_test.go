@@ -803,6 +803,71 @@ func TestRunnerRefusesWhatItCannotRunYet(t *testing.T) {
 	}
 }
 
+func TestRunnerOpenFindsOrCreatesTheFolderRunWillResume(t *testing.T) {
+	t.Parallel()
+	spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	})
+	runner := newTestRunner(t, spawner)
+	plan := fanPlan("a", "b")
+	folders := func() int {
+		entries, err := os.ReadDir(runner.Store.Root())
+		if err != nil {
+			t.Fatalf("read store root: %v", err)
+		}
+		return len(entries)
+	}
+
+	opened, err := runner.Open(plan, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if !opened.Created.Equal(storeClock) {
+		t.Errorf("created = %v, want the runner's clock %v", opened.Created, storeClock)
+	}
+	dir, err := runner.Store.Dir(opened.ID)
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	statusPath := filepath.Join(dir, "status.json")
+	before, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read status.json: %v", err)
+	}
+
+	for _, folder := range []string{"", opened.ID} {
+		again, err := runner.Open(plan, folder)
+		if err != nil {
+			t.Fatalf("Open(%q) again: %v", folder, err)
+		}
+		if again.ID != opened.ID {
+			t.Errorf("Open(%q) again id = %q, want the found %q", folder, again.ID, opened.ID)
+		}
+	}
+	after, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read status.json: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("Open of a found folder rewrote status.json:\n%s\nwant\n%s", after, before)
+	}
+
+	result := runPlan(t, runner, context.Background(), plan)
+	if result.ID != opened.ID || folders() != 1 {
+		t.Errorf("Run id = %q over %d folders, want it to resume %q, the only folder", result.ID, folders(), opened.ID)
+	}
+
+	if _, err := runner.Open(plan, opened.ID+"-2"); !errors.Is(err, ErrFolderMoved) {
+		t.Errorf("Open of another folder id err = %v, want ErrFolderMoved", err)
+	}
+	if _, err := runner.Open(fanPlan("z"), opened.ID); !errors.Is(err, ErrFolderMoved) {
+		t.Errorf("Open of a plan with no folder err = %v, want ErrFolderMoved", err)
+	}
+	if got := folders(); got != 1 {
+		t.Errorf("folders = %d after the refused opens, want 1 (nothing created)", got)
+	}
+}
+
 // itemEventLog is an Observer that records every item event it is told of.
 type itemEventLog struct {
 	items []ItemEvent
