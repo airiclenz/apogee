@@ -29,6 +29,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 - `fan_out`'s description now tells the model that a call whose workflow a background run is still driving is refused.
 
+- **Fixed:** the `diagnostics` tool's `go vet` run, and the git tools' own git runs (including the staging that `move_file` and `delete_file` do), now launch through the same execution host the tool resolved the program with, instead of the process-wide launcher.
+
 ## [0.24.2] — 2026-09-30
 
 - **Fixed:** release builds now reach an LLM server named by an mDNS `.local` host (for example `http://Apollo-II.local:1111`). When the system resolver cannot find a `.local` name, apogee asks the local network itself with a one-shot mDNS query and connects to the address that answers. Every other host name, and a `.local` name the system already resolves, behaves exactly as before. A host name that resolves nowhere is now reported as such instead of a bare `lookup … no such host` behind "server offline": `cannot send — server offline (http://Apollo-II.local:1111): host name Apollo-II.local did not resolve — use the server's IP address or add it to /etc/hosts`.
