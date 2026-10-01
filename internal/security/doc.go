@@ -176,7 +176,11 @@
 // destination" — egress-proxy resolution, the dial-time control a DialPolicy picks (the blanket
 // floor or the destination's own pin, the proxy pinned either way), the fixed transport and the
 // never-follow redirect policy — with its typed ErrProxyUnusable / PinError refusals. The
-// pre-flight stays with each adapter.
+// pre-flight stays with each adapter. urlscrub.go guards the same boundary from the failure side:
+// SafeHost names a request by its bare host, ScrubURLError renders a transport error with the
+// request URL stripped out, and RedactSubstring removes a string in both its raw and its
+// %q-escaped spelling — so a config'd API key in a URL's query never reaches a model-facing
+// message.
 //
 // And doc.go this map.
 package security

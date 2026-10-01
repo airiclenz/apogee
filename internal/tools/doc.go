@@ -401,8 +401,8 @@
 // redact.go is RedactSecrets, the OUTPUT side of the credential scrub whose input side is
 // exec_common.go's subprocessEnv: a pure replacement of every configured secret's current value
 // with "[redacted]", longest value first so a prefix never leaves the longer one's tail behind.
-// It is the sibling of network.go's redactRequestURL — that one keeps a request URL out of an
-// error string, this one keeps an `api-key-env:` value out of any text apogee passes on — and it
+// It is the sibling of security's ScrubURLError (urlscrub.go) — that one keeps a request URL out
+// of an error string, this one keeps an `api-key-env:` value out of any text apogee passes on — and it
 // registers nothing, so a caller outside this package (a sync Reaction's stdout) reaches it as a
 // plain function.
 //

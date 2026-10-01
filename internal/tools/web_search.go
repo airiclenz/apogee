@@ -182,7 +182,7 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// parameters it already carries"); it must never reach a model-facing or logged string
 	// (security-review M2). It rides along as the funnel's safeLabel, so every failure
 	// message the funnel renders names this host and nothing else.
-	endpointHost := safeHost(endpoint)
+	endpointHost := security.SafeHost(endpoint)
 
 	// The DuckDuckGo provider carries the query in a POST form body, so its reqURL is the
 	// bare endpoint: DDG's HTML front-end answers a GET with its bot-challenge ("anomaly")
@@ -193,7 +193,7 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		var err error
 		reqURL, err = buildSearchURL(endpoint, args.Query)
 		if err != nil {
-			return errorResult(call.ID, "could not build search url for host "+endpointHost+": "+scrubURLError(err, endpoint)), nil
+			return errorResult(call.ID, "could not build search url for host "+endpointHost+": "+security.ScrubURLError(err, endpoint)), nil
 		}
 	}
 

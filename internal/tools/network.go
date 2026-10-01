@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -119,7 +118,7 @@ type netRequest struct {
 	body      io.Reader     // nil ⇒ no request body
 	header    http.Header   // nil ⇒ no caller-supplied headers
 	timeout   time.Duration // ≤ 0 ⇒ defaultNetworkTimeout; clamped to maxNetworkTimeout
-	safeLabel string        // host-only label for failure messages; empty ⇒ safeHost(url)
+	safeLabel string        // host-only label for failure messages; empty ⇒ security.SafeHost(url)
 }
 
 // netResponse is what the funnel brings back: the wire facts, with the body already read
@@ -159,7 +158,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 
 	label := req.safeLabel
 	if label == "" {
-		label = safeHost(req.url)
+		label = security.SafeHost(req.url)
 	}
 
 	// Normalise ONCE, here, and use the result for the guard, the request AND every failure
@@ -237,7 +236,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	// caller's ctx, so a caller cancellation still reaches the in-flight request.
 	httpReq, err := http.NewRequestWithContext(rctx, method, target, req.body)
 	if err != nil {
-		return netResponse{}, "could not build request for host " + label + ": " + scrubURLError(err, target), nil
+		return netResponse{}, "could not build request for host " + label + ": " + security.ScrubURLError(err, target), nil
 	}
 	if len(req.header) > 0 {
 		httpReq.Header = req.header.Clone()
@@ -254,7 +253,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 			return netResponse{}, blockedMessage(label, err, target), nil
 		}
 		// A transport error's text (*url.Error) embeds the FULL request URL — scrub it.
-		return netResponse{}, "request to host " + label + " failed: " + scrubURLError(err, target), nil
+		return netResponse{}, "request to host " + label + " failed: " + security.ScrubURLError(err, target), nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -268,7 +267,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return netResponse{}, "", ctxErr
 		}
-		return netResponse{}, "response from host " + label + " was cut short: " + scrubURLError(err, target), nil
+		return netResponse{}, "response from host " + label + " was cut short: " + security.ScrubURLError(err, target), nil
 	}
 	return netResponse{
 		status:     resp.Status,
@@ -299,7 +298,7 @@ func blockedMessage(label string, err error, rawURL string) string {
 // the transport error's text, so the sentinel sits mid-string there.
 func blockedReason(err error, rawURL string) string {
 	sentinel := security.ErrURLBlocked.Error()
-	reason := scrubURLError(err, rawURL)
+	reason := security.ScrubURLError(err, rawURL)
 	reason = strings.ReplaceAll(reason, sentinel+": ", "")
 	reason = strings.ReplaceAll(reason, sentinel, "")
 	// A sentinel-only cause leaves a dangling separator; trim it rather than surface ": ".
@@ -397,68 +396,6 @@ func clampDuration(d time.Duration) time.Duration {
 		return maxNetworkTimeout
 	}
 	return d
-}
-
-// safeHost returns the bare host (no scheme, no path, no query) of rawURL — the only part of
-// a request URL safe to surface to the model, since the URL may carry the query and a
-// config'd API key (security-review M2). An unparseable URL yields a neutral placeholder
-// rather than echoing the raw (possibly key-bearing) string.
-func safeHost(rawURL string) string {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Host == "" {
-		return "the requested host"
-	}
-	return u.Hostname()
-}
-
-// scrubURLError renders a transport error WITHOUT the request URL it embeds. Go's
-// *url.Error stringifies as `<op> "<url>": <cause>`, and that url may carry a query and an
-// API-key parameter; scrubURLError strips the URL substring so only the operation and the
-// underlying cause survive (security-review M2). rawURL is the exact string to remove. A
-// non-url.Error is returned unchanged (it carries no URL).
-func scrubURLError(err error, rawURL string) string {
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		// Reconstruct from the parts that do NOT include the URL: the op and the cause.
-		cause := "request failed"
-		if ue.Err != nil {
-			cause = ue.Err.Error()
-		}
-		return strings.TrimSpace(ue.Op) + ": " + redactRequestURL(cause, rawURL)
-	}
-	return redactRequestURL(err.Error(), rawURL)
-}
-
-// redactRequestURL removes the request URL from s in BOTH the form the caller supplied and its
-// whitespace-trimmed form. The trimmed form matters because url-safety normalises the TRIMMED
-// URL (security/urlsafety.go), so a nested error keyed on that form — from a model passing
-// " http://exa mple.com/?key=SECRET" (note the leading space) — would otherwise be matched
-// against a string that never appears, leaking the key (M2).
-func redactRequestURL(s, rawURL string) string {
-	s = redactSubstring(s, rawURL)
-	return redactSubstring(s, strings.TrimSpace(rawURL))
-}
-
-// redactSubstring removes any occurrence of secret from s (defence-in-depth in case the
-// URL leaks into a nested error's text), returning the cleaned string.
-//
-// It strips the %q-QUOTED form of secret as well as the raw one, because a plain substring
-// search is exactly what an escaping formatter defeats (M-2): fmt's %q — which Go's own
-// *url.Error uses to embed the URL in its text — escapes control characters, so a URL carrying
-// an interior control byte appears as `…?key=SECRET\x01x` with a LITERAL backslash-x that the
-// raw byte sequence never matches. strconv.Quote applies the identical escaping, so its inner
-// form (the quoted string without its surrounding quotes) is the string to search for. When
-// nothing needed escaping the two forms are the same and the second pass is skipped.
-func redactSubstring(s, secret string) string {
-	if secret == "" {
-		return s
-	}
-	s = strings.ReplaceAll(s, secret, "[redacted-url]")
-	quoted := strconv.Quote(secret)
-	if inner := quoted[1 : len(quoted)-1]; inner != secret {
-		s = strings.ReplaceAll(s, inner, "[redacted-url]")
-	}
-	return s
 }
 
 // The marker assertions are the compile-time half of the funnel contract: each of Apogee's

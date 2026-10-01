@@ -179,7 +179,7 @@ NOTES (2026-10-01): zero-field defaults resolve in `Host.withStdioDefaults()`, a
 **Acceptance:** `go test ./internal/mcp -run 'TestClose_BoundsTheDrain|TestBuildStdioTransport|TestConnect'`; `go test ./cmd/apogee -run 'MCP|Mcp'`; `! grep -nE 'newStdioTeardown|stdioHost|stdioTerminateDuration' internal/mcp/*.go`
 **Commit:** `refactor(mcp): stdio servers run through a host from the composition root`
 
-## 9. security: the network tools' URL scrubbers live beside the client
+## 9. security: the network tools' URL scrubbers live beside the client — ✅ DONE (2026-10-01)
 
 **Depends on:** item 6.
 **Files:** `internal/security/urlscrub.go`, `internal/security/urlscrub_test.go`, `internal/security/doc.go`, `internal/tools/network.go`, `internal/tools/web_search.go`, `internal/tools/network_funnel_test.go`, `internal/tools/doc.go`
