@@ -196,8 +196,7 @@ func estimateContextCost(cfg apogee.Config, opts config.Options, mode domain.Mod
 // key the first composition resolved, so an `api-key-cmd:` runs once.
 func measureContextCost(ctx context.Context, cfg apogee.Config, opts config.Options, roots stateRoots, mode domain.Mode) (probe.ContextCost, error) {
 	if cfg.Model == "" {
-		info, err := provider.NewClient(cfg.Endpoint, "",
-			provider.WithAPIKey(cfg.APIKey), provider.WithWire(provider.WireFor(cfg.Wire))).Discover(ctx)
+		info, err := bindingOfConfig(cfg).Client().Discover(ctx)
 		if err != nil {
 			return probe.ContextCost{}, err
 		}

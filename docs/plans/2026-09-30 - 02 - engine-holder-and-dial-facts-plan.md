@@ -148,7 +148,11 @@ NOTES (2026-10-01): TestSubAgentBeatCarriesTheForcedDialect sits in upstream_tes
 **Acceptance:** `go test ./cmd/apogee -run 'TestMonitorsAreDialledWithTheEntrysWire|TestSubAgentBeatCarriesTheForcedDialect|TestRoutedTargetResolvesTheForcedDialect|TestMoveCarriesTheEntrysWire|TestUpstreamHolderBeatFollowsTheSwap|TestFiringConfigBeats|TestResolveDelegationTarget|TestDelegationSaysNothing|TestDelegationAdvises'`; `! grep -n 'heartbeat\.NewMonitor(' cmd/apogee/*.go | grep -v _test.go | grep -v dial.go`; `! grep -n 'EffortDialectFor' cmd/apogee/delegation.go`
 **Commit:** `fix(cmd): the Sub-agent server's Monitors carry the entry's forced dialect`
 
-## 9. cmd: every Client comes from the dial facts
+## 9. cmd: every Client comes from the dial facts — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): cmd/apogee/request_extra_test.go is listed in the item's Files but needed no change — its witnesses (TestE2ERequestExtra*, TestFiringNamerSpeaksTheEntrysWire, TestProbeModelRequestExtraRidesTheBattery, …) pass unchanged.
+NOTES (2026-10-01): measureContextCost's discovery client is bindingOfConfig(cfg).Client() (cfg.Model is "" on that branch), so it now carries cfg.RequestExtra; Discover sends no body, so nothing reaches the wire differently. probemodel's label discovery is an upstreamBinding literal of endpoint, key and wire, so it still carries no request-extra.
+NOTES (2026-10-01): the Firing namer's session binding is bindingOfEntry(in.entry, apiKey) with Model set to spec.Model, so it now also holds the entry's forced EffortDialect; the namer only builds a Client from it, which never reads that field.
 
 **Depends on:** item 8.
 **Files:** `cmd/apogee/title.go`, `cmd/apogee/probemodel.go`, `cmd/apogee/probecontext.go`, `cmd/apogee/delegation.go`, `cmd/apogee/naming.go`, `cmd/apogee/wire_firing.go`, `cmd/apogee/request_extra_test.go`

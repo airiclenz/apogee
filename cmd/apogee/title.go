@@ -109,10 +109,7 @@ func namingCall(
 	timeout time.Duration,
 	req provider.Request,
 ) (string, error) {
-	client := provider.NewClient(binding.Endpoint, binding.Model,
-		provider.WithRequestTimeout(timeout), provider.WithAPIKey(binding.APIKey),
-		provider.WithMaxRetries(0), provider.WithWire(provider.WireFor(binding.Wire)),
-		provider.WithRequestExtra(binding.RequestExtra))
+	client := binding.Client(provider.WithRequestTimeout(timeout), provider.WithMaxRetries(0))
 
 	resp, err := respondDroppingThinkingOff(ctx, client, req)
 	if err != nil {

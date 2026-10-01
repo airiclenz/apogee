@@ -341,7 +341,7 @@ func newSubAgentServer(entry config.ServerEntry) *subAgentServer {
 // rather than ranking the entry's key a second time.
 //
 // The discovery hint it is built with is the entry's own `model:` pin, empty when it pins none — the
-// session Monitor's contract verbatim (heartbeat.NewMonitor): discovery resolves the pinned id's
+// session Monitor's contract verbatim (upstreamBinding.Monitor): discovery resolves the pinned id's
 // window rather than the first advertised model's, and an id the server stops listing is still
 // reported as configured, never replaced (ADR 0085).
 //
@@ -506,10 +506,7 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 		// recorded beside the push rather than derived from it later because the target the engine
 		// holds is behind the latch, and the latch is the ENGINE's — reading it back out to build a
 		// host-side request would be the wire-silent engine handing the host its wiring back.
-		d.targetBinding = upstreamBinding{
-			Endpoint: target.Endpoint, Model: target.Model, APIKey: target.APIKey, Wire: target.Wire,
-			RequestExtra: target.RequestExtra,
-		}
+		d.targetBinding = bindingOfTarget(target)
 		d.targetDialect = target.EffortDialect
 		d.targetBound = true
 	}

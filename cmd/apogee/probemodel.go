@@ -131,9 +131,11 @@ func probeModelCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// And the wire both clients speak — the startup entry's `wire:` key (ADR 0078), so the
-			// battery dials the server the way a session on that entry would.
-			wire := provider.WireFor(opts.StartupEntry.Wire)
+			// And the dial facts both clients are built from — the startup entry's, with its `wire:`
+			// key (ADR 0078), so the battery dials the server the way a session on that entry would,
+			// at opts.Endpoint, because a flag may override the entry's own endpoint.
+			binding := bindingOfEntry(opts.StartupEntry, apiKey)
+			binding.Endpoint = opts.Endpoint
 
 			// Said BEFORE the first call, per ADR 0021 §4: a command that spends tokens and
 			// switches automatism on announces both in advance, not in its epilogue.
@@ -144,8 +146,8 @@ func probeModelCommand() *cobra.Command {
 			// a later OFFLINE session has in hand when it resolves identity.
 			label := opts.Model
 			if label == "" {
-				info, derr := provider.NewClient(opts.Endpoint, "",
-					provider.WithAPIKey(apiKey), provider.WithWire(wire)).Discover(cmd.Context())
+				discovery := upstreamBinding{Endpoint: binding.Endpoint, APIKey: binding.APIKey, Wire: binding.Wire}
+				info, derr := discovery.Client().Discover(cmd.Context())
 				if derr != nil {
 					return derr
 				}
@@ -167,9 +169,8 @@ func probeModelCommand() *cobra.Command {
 			// also carries the entry's `request-extra:` passthrough (ADR 0085), so the model is
 			// measured under the body a session on this entry sends it; the label discovery
 			// above sends no body and needs none.
-			client := provider.NewClient(opts.Endpoint, label,
-				provider.WithRequestTimeout(effectiveBatteryTimeout(batteryTimeout)), provider.WithAPIKey(apiKey),
-				provider.WithWire(wire), provider.WithRequestExtra(string(opts.StartupEntry.RequestExtra)))
+			binding.Model = label
+			client := binding.Client(provider.WithRequestTimeout(effectiveBatteryTimeout(batteryTimeout)))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.Endpoint,
 				Model:    label,

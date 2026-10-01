@@ -513,15 +513,12 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// (ADR 0031's Driver parity). Both of its Upstreams are constants for the run — the run's own
 	// server, and the Sub-agent server resolved just above when one was named — because an unattended
 	// run has no live door to move either through; the gate is `auto-title:` as it stood at startup
-	// for the same reason. The session binding carries the entry's wire and request-extra too, so a
-	// naming call speaks the protocol this entry speaks and sends the keys every other request to it
-	// sends.
-	cfg.Namer = newFiringNamer(
-		upstreamBinding{
-			Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey,
-			Wire: in.entry.Wire, RequestExtra: string(in.entry.RequestExtra),
-		},
-		effortDialect, routing.target, in.opts.AutoTitle)
+	// for the same reason. The session binding is the entry's dial facts, so a naming call speaks the
+	// protocol this entry speaks and sends the keys every other request to it sends — on the model the
+	// Driver overlaid (spec.Model), which is the one this run talks to, not the entry's own pin.
+	session := bindingOfEntry(in.entry, apiKey)
+	session.Model = spec.Model
+	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, in.opts.AutoTitle)
 
 	// And the one thing an unattended run cannot get from the engine: the `run_on` argument on
 	// sub_agent. `sub-agents-choice:` shapes the published schema rather than any Config field (ADR
