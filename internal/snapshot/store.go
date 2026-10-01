@@ -96,27 +96,29 @@ func (t Tree) validate() error {
 }
 
 // Store is one session's object database: a bare repository directory, the workspace it takes
-// images of, and the private index the captures stage into. It holds no mutable state of its
-// own, so a Store is safe to share between goroutines — git's own index lock serialises
-// concurrent captures, and the per-tree record of paths a capture could not read is only ever
-// appended to.
+// images of, the private index the captures stage into, and the gitexec.Host every git run it
+// makes goes through — the one it was opened with. It holds no mutable state of its own, so a
+// Store is safe to share between goroutines — git's own index lock serialises concurrent
+// captures, and the per-tree record of paths a capture could not read is only ever appended to.
 type Store struct {
-	dir       string // the bare GIT_DIR the session owns, outside the workspace
-	workspace string // the work-tree a capture stages, never written to
-	index     string // the private index file, inside dir
+	dir       string       // the bare GIT_DIR the session owns, outside the workspace
+	workspace string       // the work-tree a capture stages, never written to
+	index     string       // the private index file, inside dir
+	git       gitexec.Host // the host every git run resolves and spawns through
 }
 
-// Available reports whether a git this store could use is on PATH. It is the cheap predicate a
-// Driver asks before wiring snapshots at all; Open still resolves and fences git itself, so a
-// true answer here is an invitation rather than a guarantee.
-func Available() bool {
-	_, err := gitexec.OS().Resolve(context.Background(), "")
+// Available reports whether git resolves through host — whether a store opened with it could run
+// at all. It is the cheap predicate a Driver asks before wiring snapshots at all; Open still
+// resolves and fences git itself, so a true answer here is an invitation rather than a guarantee.
+func Available(host gitexec.Host) bool {
+	_, err := host.Resolve(context.Background(), "")
 	return err == nil
 }
 
 // Open prepares dir as the object store for images of workspace, creating it (0700) and
 // initialising a bare repository inside it on first use and reopening it on every later call.
-// Both paths are made absolute, because they are handed to a child process as GIT_DIR and
+// Every git run the Store makes — this initialisation included — resolves and spawns through
+// host, which the Store keeps. Both paths are made absolute, because they are handed to a child process as GIT_DIR and
 // GIT_WORK_TREE, where a relative path would resolve against whatever directory git happens to
 // run in.
 //
@@ -128,7 +130,7 @@ func Available() bool {
 //
 // It returns an error when git is missing, fenced or refused — the caller's signal to fall back
 // to the in-memory funnel journal (ADR 0074 decision 2), which is a supported configuration.
-func Open(ctx context.Context, dir, workspace string) (*Store, error) {
+func Open(ctx context.Context, host gitexec.Host, dir, workspace string) (*Store, error) {
 	if dir == "" {
 		return nil, errors.New("apogee: snapshot: no store directory")
 	}
@@ -158,6 +160,7 @@ func Open(ctx context.Context, dir, workspace string) (*Store, error) {
 		dir:       storeDir,
 		workspace: workTree,
 		index:     filepath.Join(storeDir, indexFileName),
+		git:       host,
 	}
 	if _, err := os.Stat(filepath.Join(storeDir, headFileName)); err == nil {
 		return store, nil
@@ -165,7 +168,7 @@ func Open(ctx context.Context, dir, workspace string) (*Store, error) {
 	// The init call carries GIT_DIR alone: git refuses a GIT_WORK_TREE without a repository to
 	// attach it to, and the repository is what this call is creating.
 	initEnv := []string{"GIT_DIR=" + storeDir}
-	if _, err := gitexec.Run(ctx, workTree, initEnv, snapshotTimeout, "init", "--bare", "--object-format=sha1", "-q"); err != nil {
+	if _, err := host.Run(ctx, workTree, initEnv, snapshotTimeout, "init", "--bare", "--object-format=sha1", "-q"); err != nil {
 		return nil, fmt.Errorf("apogee: snapshot: initialise store: %w", err)
 	}
 	return store, nil
@@ -300,7 +303,7 @@ func (s *Store) settleWarnings(ctx context.Context, out, warnings string) (strin
 		if err := s.dropFromIndex(ctx, stale); err != nil {
 			return "", nil, fmt.Errorf("drop the index entries git could not stat: %w", err)
 		}
-		if out, err = gitexec.Run(ctx, s.workspace, s.env(), snapshotTimeout, "write-tree"); err != nil {
+		if out, err = s.git.Run(ctx, s.workspace, s.env(), snapshotTimeout, "write-tree"); err != nil {
 			return "", nil, err
 		}
 	}
@@ -326,7 +329,7 @@ func (s *Store) dropFromIndex(ctx context.Context, paths []string) error {
 	if err := errors.Join(writeErr, file.Close()); err != nil {
 		return err
 	}
-	_, err = gitexec.Run(ctx, s.workspace, s.env(), snapshotTimeout, "--literal-pathspecs",
+	_, err = s.git.Run(ctx, s.workspace, s.env(), snapshotTimeout, "--literal-pathspecs",
 		"rm", "--cached", "--force", "--quiet", "--ignore-unmatch",
 		"--pathspec-from-file="+file.Name(), "--pathspec-file-nul")
 	return err
@@ -473,10 +476,10 @@ func coveredBy(path string, records []string) bool {
 // fatal on its own. The add runs in the C locale so its warnings read the same on every host.
 func (s *Store) stageAndWrite(ctx context.Context, index string) (out, warnings string, addErr, err error) {
 	env := s.envWithIndex(index)
-	_, warnings, addErr = gitexec.RunDiagnosed(ctx, s.workspace, append(env, cLocale), snapshotTimeout,
+	_, warnings, addErr = s.git.RunDiagnosed(ctx, s.workspace, append(env, cLocale), snapshotTimeout,
 		"-c", "core.excludesFile=", "add", "-A", "--ignore-errors")
 
-	out, err = gitexec.Run(ctx, s.workspace, env, snapshotTimeout, "write-tree")
+	out, err = s.git.Run(ctx, s.workspace, env, snapshotTimeout, "write-tree")
 	return out, warnings, addErr, err
 }
 
@@ -600,7 +603,7 @@ func (s *Store) envWithIndex(index string) []string {
 }
 
 // stream runs one read-side git command and returns its standard output UNCAPPED. The capped
-// path (gitexec.Run) would silently truncate at 256 KiB, which for a blob being restored or a
+// path (the Store's Host.Run) would silently truncate at 256 KiB, which for a blob being restored or a
 // wide Exchange's path list is a corrupt answer rather than a short one.
 func (s *Store) stream(ctx context.Context, args ...string) ([]byte, error) {
 	return s.streamWith(ctx, s.env(), args...)
@@ -609,7 +612,7 @@ func (s *Store) stream(ctx context.Context, args ...string) ([]byte, error) {
 // streamWith is stream with env in place of the persistent private index's redirection.
 func (s *Store) streamWith(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	var out bytes.Buffer
-	if err := gitexec.RunTo(ctx, s.workspace, env, snapshotTimeout, &out, args...); err != nil {
+	if err := s.git.RunTo(ctx, s.workspace, env, snapshotTimeout, &out, args...); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

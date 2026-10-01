@@ -91,7 +91,14 @@ No git-seam swaps (`shadowGitQuery`, PATH); `lowerCommitSecretsTimeout` and `t.S
 **Acceptance:** `go test ./internal/agent -run 'TreeSnapshot|Secrets'`; `go test ./internal/tools -run 'RunGitQuery'`; `! grep -n 'shadowGitQuery' internal/agent/*.go`
 **Commit:** `refactor(agent): engine git runs through an injectable gitexec host`
 
-## 5. snapshot: the store holds its Host; gitexec's OS wrappers go
+## 5. snapshot: the store holds its Host; gitexec's OS wrappers go — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): signatures take the host right after ctx — Available(host), Open(ctx, host, dir, workspace), OpenJournal(ctx, host, home, sessionID, workspace, enabled), OpenStored(ctx, host, home, sessionID); Store keeps it in an unexported `git` field. run.go, wire_live.go and undo.go pass gitexec.OS().
+NOTES (2026-10-01): with Program/Resolve gone, the unexported lookingHost helper was dead and is deleted; LookFunc lost its last production use, so Host.Look is now typed LookFunc (same underlying type; internal/tools/exec_host_test.go's fixture still names it). The deleted wrappers' doc comments moved onto the Host methods, replacing the "is the package-level X" one-liners.
+NOTES (2026-10-01): new test TestAStoreOnAHostWithNoGitIsUnavailableAndNeverSpawns (store_test.go) runs Available and Open on a fake Host whose lookup finds no git, in parallel with no PATH edit. The two PATH-clearing journal tests (TestOpenJournalReportsAnAbsentGit, TestOpenStoredReportsAnAbsentGit) were left as they are, passing gitexec.OS().
+NOTES (2026-10-01): consequential edit — internal/snapshot/doc.go: made necessary by removing gitexec.RunTo (the reads now stream through the Store's Host.RunTo)
+NOTES (2026-10-01): consequential edit — internal/tools/git.go: made necessary by removing gitexec.Capture (two comments now name gitexec.Host.Capture)
+NOTES (2026-10-01): consequential edit — internal/agent/dispatch.go: made necessary by removing gitexec.Resolve (comment now names gitexec.Host.Resolve)
 
 **Depends on:** item 4.
 **Files:** `internal/snapshot/store.go`, `internal/snapshot/journal.go`, `internal/snapshot/store_test.go`, `internal/run/run.go`, `cmd/apogee/wire_live.go`, `cmd/apogee/undo.go`, `cmd/apogee/undo_test.go`, `internal/gitexec/gitexec.go`, `internal/snapshot/journal_test.go`, `internal/run/run_test.go`, `internal/agent/undo_group_test.go`, `cmd/apogee/wire_live_test.go`, `internal/gitexec/gitexec_test.go`

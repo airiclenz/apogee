@@ -31,9 +31,10 @@
 // so what undo covers is a property of the workspace the human can see, not of a dotfile in
 // their home directory.
 //
-// Reads are uncapped. [Store.Content], [Store.Diff] and [Store.ListBlobs] stream through
-// gitexec.RunTo rather than the 256 KiB-capped capture path: a blob read back for a restore,
-// or the path list of a wide Exchange, must never be silently truncated into a corrupt undo.
+// Reads are uncapped. [Store.Content], [Store.Diff] and [Store.ListBlobs] stream through the
+// RunTo of the gitexec.Host the Store was opened with, rather than the 256 KiB-capped capture
+// path: a blob read back for a restore, or the path list of a wide Exchange, must never be
+// silently truncated into a corrupt undo.
 //
 // Restoration is NOT here. This package reads and writes objects; putting bytes back on disk
 // — the conflict check, the skip-and-report, the fenced writes — is internal/undo's, which

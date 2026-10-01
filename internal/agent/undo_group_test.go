@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
@@ -191,7 +192,7 @@ func snapshotAgent(t *testing.T) (*Agent, string) {
 	}
 
 	a := newWorkspaceAgent(t, root)
-	journal, note, err := snapshot.OpenJournal(context.Background(), home, "session-1", root, true)
+	journal, note, err := snapshot.OpenJournal(context.Background(), gitexec.OS(), home, "session-1", root, true)
 	if err != nil {
 		t.Fatalf("OpenJournal: %v", err)
 	}

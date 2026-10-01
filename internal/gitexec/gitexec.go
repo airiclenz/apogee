@@ -53,7 +53,7 @@ type LookFunc func(string) (string, error)
 type Host struct {
 	// Look is the PATH lookup for git. nil is passed on as nil to security.ResolveProgram, which
 	// takes exec.LookPath — never a path around the fence.
-	Look func(string) (string, error)
+	Look LookFunc
 	// Spawn runs one captured git subprocess. nil is subprocess.RunSubprocess.
 	Spawn func(context.Context, subprocess.SubprocessSpec) (subprocess.SubprocessResult, error)
 	// SpawnTo runs one git subprocess with its standard output streamed to the writer. nil is
@@ -67,14 +67,6 @@ type Host struct {
 // operating system's own.
 func OS() Host {
 	return Host{}
-}
-
-// lookingHost is the Host Program and Resolve wrap: OS() with the caller's lookup in place of
-// its own. A nil look leaves Look nil, so the resolution takes exec.LookPath behind the fence.
-func lookingHost(look LookFunc) Host {
-	h := OS()
-	h.Look = look
-	return h
 }
 
 // spawn runs spec through the Host's captured launcher.
@@ -195,13 +187,9 @@ var DiffHardeningArgs = []string{"--no-textconv", "--no-ext-diff"}
 // the fence's own refusal — which NAMES the resolved path — when the git that was found is one
 // the model could have written (a workspace-resident PATH entry).
 //
-// look is the lookup seam; nil takes exec.LookPath. A caller holding its own lookup — the tools'
-// execHost — passes it through, so a fake git installed for a test reaches this resolution.
-func Program(ctx context.Context, root string, look LookFunc) (gitPath, refusal string, ok bool) {
-	return lookingHost(look).Program(ctx, root)
-}
-
-// Program is the package-level Program resolving through the Host's lookup.
+// The Host's Look is the lookup seam; nil takes exec.LookPath. A caller holding its own lookup —
+// the tools' execHost — builds its Host with it, so a fake git installed for a test reaches this
+// resolution.
 func (h Host) Program(ctx context.Context, root string) (gitPath, refusal string, ok bool) {
 	path, err := h.Resolve(ctx, root)
 	if err != nil {
@@ -213,14 +201,9 @@ func (h Host) Program(ctx context.Context, root string) (gitPath, refusal string
 // Resolve is Program's error-returning form, for the callers that pass the failure ON as an
 // error rather than rendering it into a tool result: it keeps the fence's sentinel
 // (security.ErrExecFromWritablePath) intact through errors.Is, which a message string cannot.
-// Both forms resolve and fence identically — Program is this function plus the render.
-func Resolve(ctx context.Context, root string, look LookFunc) (string, error) {
-	return lookingHost(look).Resolve(ctx, root)
-}
-
-// Resolve is the package-level Resolve through the Host's lookup. A nil Look reaches
-// security.ResolveProgram as nil, so the zero Host resolves with exec.LookPath behind the same
-// fence.
+// Both forms resolve and fence identically — Program is this function plus the render. A nil
+// Look reaches security.ResolveProgram as nil, so the zero Host resolves with exec.LookPath
+// behind the same fence.
 func (h Host) Resolve(ctx context.Context, root string) (string, error) {
 	path, err := security.ResolveProgram(h.Look, "git", root, confinementBox(ctx))
 	if err != nil {
@@ -268,11 +251,6 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // only when a file that decided its answer changes, so it costs its three subprocesses once per
 // config rather than on every git call. A root no repository reaches is never memoised: it is
 // probed afresh on every call, so a `git init` made mid-session is seen by the next one.
-func Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	return OS().Capture(ctx, gitPath, root, timeout, args...)
-}
-
-// Capture is the package-level Capture, probing and running through the Host's launcher.
 func (h Host) Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
 	drivers, err := h.probeCommandConfig(ctx, gitPath, root, nil)
 	if err != nil {
@@ -289,11 +267,6 @@ func (h Host) Capture(ctx context.Context, gitPath, root string, timeout time.Du
 // own invocations — which must reach git to ASK about the config, and execute no configured
 // program — go through probeGit instead, which keeps git's diagnostics out of the listing it
 // parses. Everything a MODEL causes goes through Capture.
-func CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	return OS().CaptureUnchecked(ctx, gitPath, root, env, timeout, args...)
-}
-
-// CaptureUnchecked is the package-level CaptureUnchecked through the Host's launcher.
 func (h Host) CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
 	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, args...))
 }
@@ -348,11 +321,6 @@ func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration,
 // It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
 // included, so the git tools take Capture's captured outcome; this returns stdout as DATA, with
 // the diagnostics left out of the payload.
-func Run(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
-	return OS().Run(ctx, dir, env, timeout, args...)
-}
-
-// Run is the package-level Run, resolving and running through the Host.
 func (h Host) Run(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
 	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
@@ -367,11 +335,6 @@ func (h Host) Run(ctx context.Context, dir string, env []string, timeout time.Du
 // subprocess.MaxSubprocessOutputBytes would silently corrupt the answer. Every other guarantee
 // is Run's: the same resolution, the same hardening, the same probe under the same env, the same
 // teardown, and stderr still capped. A nil stdout discards the payload.
-func RunTo(ctx context.Context, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) error {
-	return OS().RunTo(ctx, dir, env, timeout, stdout, args...)
-}
-
-// RunTo is the package-level RunTo, resolving and streaming through the Host.
 func (h Host) RunTo(ctx context.Context, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) error {
 	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
@@ -390,11 +353,6 @@ func (h Host) RunTo(ctx context.Context, dir string, env []string, timeout time.
 // stderr is capped at subprocess.MaxSubprocessOutputBytes like every diagnostic stream: a longer
 // string was cut there and carries the cap's truncation marker, so a caller that reads it as a
 // complete list checks its length first.
-func RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
-	return OS().RunDiagnosed(ctx, dir, env, timeout, args...)
-}
-
-// RunDiagnosed is the package-level RunDiagnosed, resolving and running through the Host.
 func (h Host) RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
 	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
@@ -407,11 +365,6 @@ func (h Host) RunDiagnosed(ctx context.Context, dir string, env []string, timeou
 // package, whose git tools resolve through the execHost they were built with rather than
 // exec.LookPath. It is Run minus the resolution: the probe, the hardening and the stdout-as-data
 // contract are identical.
-func Query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
-	return OS().Query(ctx, gitPath, dir, env, timeout, args...)
-}
-
-// Query is the package-level Query, probing and running through the Host's launcher.
 func (h Host) Query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
 	return h.query(ctx, gitPath, dir, env, timeout, nil, args...)
 }

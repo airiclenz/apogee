@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -500,7 +501,7 @@ func TestRotateReopensTheJournalUnderTheNewSessionID(t *testing.T) {
 func requireSnapshotStore(t *testing.T) {
 	t.Helper()
 
-	if !snapshot.Available() {
+	if !snapshot.Available(gitexec.OS()) {
 		t.Skip("git is not on PATH: the snapshot store cannot be opened here")
 	}
 }

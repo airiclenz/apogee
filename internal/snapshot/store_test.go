@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
@@ -62,7 +64,7 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 func newStore(t *testing.T) (store *Store, workspace string) {
 	t.Helper()
 	workspace = t.TempDir()
-	store, err := Open(context.Background(), t.TempDir(), workspace)
+	store, err := Open(context.Background(), gitexec.OS(), t.TempDir(), workspace)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -353,13 +355,13 @@ func TestOpenReopensAnExistingStore(t *testing.T) {
 	workspace := t.TempDir()
 	writeFile(t, workspace, "a.txt", "first\n")
 
-	first, err := Open(context.Background(), storeDir, workspace)
+	first, err := Open(context.Background(), gitexec.OS(), storeDir, workspace)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	tree := mustCapture(t, first)
 
-	second, err := Open(context.Background(), storeDir, workspace)
+	second, err := Open(context.Background(), gitexec.OS(), storeDir, workspace)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -372,7 +374,7 @@ func TestOpenReopensAnExistingStore(t *testing.T) {
 func TestOpenRefusesAStoreDirectoryInsideTheWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 
-	_, err := Open(context.Background(), filepath.Join(workspace, ".apogee-snapshots"), workspace)
+	_, err := Open(context.Background(), gitexec.OS(), filepath.Join(workspace, ".apogee-snapshots"), workspace)
 
 	if err == nil || !strings.Contains(err.Error(), "inside the workspace") {
 		t.Fatalf("Open = %v, want a refusal naming the workspace", err)
@@ -390,7 +392,7 @@ func TestOpenRejectsMissingArguments(t *testing.T) {
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Open(context.Background(), testCase.dir, testCase.workspace); err == nil {
+			if _, err := Open(context.Background(), gitexec.OS(), testCase.dir, testCase.workspace); err == nil {
 				t.Fatal("Open succeeded, want an error")
 			}
 		})
@@ -462,8 +464,40 @@ func TestReadsRefuseAMalformedTreeID(t *testing.T) {
 func TestAvailableReportsGitOnPath(t *testing.T) {
 	requireGit(t)
 
-	if !Available() {
-		t.Fatal("Available() = false with git on PATH")
+	if !Available(gitexec.OS()) {
+		t.Fatal("Available(gitexec.OS()) = false with git on PATH")
+	}
+}
+
+// The store runs git through the Host it is handed, never the machine's own: a Host whose lookup
+// finds no git makes the store unavailable and its Open fail, with no git spawned — on a machine
+// that has git on PATH as much as on one that has not.
+func TestAStoreOnAHostWithNoGitIsUnavailableAndNeverSpawns(t *testing.T) {
+	t.Parallel()
+	spawned := false
+	absent := gitexec.Host{
+		Look: func(string) (string, error) { return "", exec.ErrNotFound },
+		Spawn: func(context.Context, subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+			spawned = true
+			return subprocess.SubprocessResult{}, nil
+		},
+		SpawnTo: func(context.Context, subprocess.SubprocessSpec, io.Writer) (subprocess.SubprocessResult, error) {
+			spawned = true
+			return subprocess.SubprocessResult{}, nil
+		},
+	}
+
+	available := Available(absent)
+	_, openErr := Open(context.Background(), absent, t.TempDir(), t.TempDir())
+
+	if available {
+		t.Error("Available = true on a Host whose lookup finds no git")
+	}
+	if openErr == nil || !strings.Contains(openErr.Error(), gitexec.UnavailableMessage) {
+		t.Errorf("Open err = %v, want the absent-git refusal %q", openErr, gitexec.UnavailableMessage)
+	}
+	if spawned {
+		t.Error("a git child was spawned through a Host with no git")
 	}
 }
 

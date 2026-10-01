@@ -1669,7 +1669,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// (ADR 0020) — for a read that changes nothing, and a backend that could not establish
 	// the box would turn the floor's silent skip into the D4 demote signal, gating a call on
 	// apogee's own bookkeeping. Stripping the handle also narrows the bookkeeping git's exec
-	// fence (gitexec.Resolve → security.ResolveProgram) from the box to the workspace root
+	// fence (gitexec.Host.Resolve → security.ResolveProgram) from the box to the workspace root
 	// alone — identical to what the Confine (box != nil) path below has always done, so the
 	// narrowing is intended, not a regression. Cancellation still reaches it: floorCtx is the
 	// same ctx chain, so a cancelled Turn skips the check, per contract.

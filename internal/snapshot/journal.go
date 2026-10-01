@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -61,7 +62,9 @@ func Dir(home, sessionID string) string {
 
 // OpenJournal is the one call a Driver makes to give a session snapshot-backed undo: it opens
 // the session's own object store under home, loads whatever index the last process left beside
-// it, and hands back a journal ready to capture (ADR 0074).
+// it, and hands back a journal ready to capture (ADR 0074). Every git run — the availability
+// check, the store's preparation and each later capture — goes through host, which the store
+// keeps for the session.
 //
 // It never fails a start. Where snapshots cannot be had — `undo-snapshots: false`, no git on
 // PATH, a store that images a different workspace, or a call with no home or workspace to name
@@ -73,7 +76,7 @@ func Dir(home, sessionID string) string {
 // index on disk is unreadable at all (a truncated file, an index from a newer apogee). The
 // journal is nil there, and a Driver's answer is the same fallback with the error's own text as
 // the reason — a start is never lost over an undo store.
-func OpenJournal(ctx context.Context, home, sessionID, workspace string, enabled bool) (*undo.Journal, string, error) {
+func OpenJournal(ctx context.Context, host gitexec.Host, home, sessionID, workspace string, enabled bool) (*undo.Journal, string, error) {
 	switch {
 	case !enabled:
 		return undo.New(), reasonDisabled, nil
@@ -81,12 +84,12 @@ func OpenJournal(ctx context.Context, home, sessionID, workspace string, enabled
 		return undo.New(), reasonNoHome, nil
 	case workspace == "":
 		return undo.New(), reasonNoWorkDir, nil
-	case !Available():
+	case !Available(host):
 		return undo.New(), reasonNoGit, nil
 	}
 
 	dir := Dir(home, sessionID)
-	store, err := Open(ctx, dir, workspace)
+	store, err := Open(ctx, host, dir, workspace)
 	if err != nil {
 		return nil, "", err
 	}
@@ -107,17 +110,17 @@ func OpenJournal(ctx context.Context, home, sessionID, workspace string, enabled
 // OpenStored opens the journal of a SAVED session from its own index alone: the workspace the
 // snapshots were taken of is the one the index records (ADR 0074 decision 5, trivially — the
 // recorded workspace is the workspace), so a caller that was never in the session, `apogee undo`,
-// needs nothing but the home and the id. Everything past the index read is [OpenJournal] with
-// `enabled` true: `undo-snapshots:` governs whether a RUN images its exchanges, not whether a
-// store that already exists may be read back, and a store is prepared or reopened exactly as a
-// live session's would be.
+// needs nothing but its git host, the home and the id. Everything past the index read is
+// [OpenJournal] with `enabled` true: `undo-snapshots:` governs whether a RUN images its
+// exchanges, not whether a store that already exists may be read back, and a store is prepared
+// or reopened exactly as a live session's would be, through host.
 //
 // The order of its refusals is the point. The index is looked for BEFORE git is, so an id that
 // names no session answers [ErrNoIndex] without leaving a freshly initialised object database
 // behind under home and without the "git not found" reason standing in for "no such session". An
 // index that exists but cannot be read, decoded or names no workspace is an error in its own
 // words — a store is there and something is wrong with it — and the reasons are [OpenJournal]'s.
-func OpenStored(ctx context.Context, home, sessionID string) (*undo.Journal, string, error) {
+func OpenStored(ctx context.Context, host gitexec.Host, home, sessionID string) (*undo.Journal, string, error) {
 	dir := Dir(home, sessionID)
 	if dir == "" {
 		return nil, "", ErrNoIndex
@@ -127,7 +130,7 @@ func OpenStored(ctx context.Context, home, sessionID string) (*undo.Journal, str
 	if err != nil {
 		return nil, "", err
 	}
-	return OpenJournal(ctx, home, sessionID, workspace, true)
+	return OpenJournal(ctx, host, home, sessionID, workspace, true)
 }
 
 // storedWorkspace reads the workspace one session's snapshots were taken of out of its index at

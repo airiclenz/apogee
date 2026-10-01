@@ -211,7 +211,7 @@ func gitReadTimeout(verb string) time.Duration {
 // absent or fenced, a refused repository, or a non-zero exit rendered with failWording), on
 // ok=true the success rendered with fallback. A git that could not be resolved is returned in the
 // same shape
-// gitexec.Capture gives a refused repository — a failed outcome carrying the sentence — so a
+// gitexec.Host.Capture gives a refused repository — a failed outcome carrying the sentence — so a
 // caller has one failure branch. The Go error is non-nil only for ctx cancellation or a
 // confinement-unavailable demotion (the subprocess.RunSubprocess contract).
 func gitRead(ctx context.Context, root string, h execHost, c gitReadCall) (res subprocess.SubprocessResult, text string, ok bool, err error) {
@@ -244,7 +244,7 @@ func gitRead(ctx context.Context, root string, h execHost, c gitReadCall) (res s
 // is the caller's, since it names the action ("Created and switched to branch …", "commit
 // created") and git_branch's list re-renders the raw output first. A git that could not be
 // resolved is returned in the shape
-// gitexec.Capture gives a refused repository — a failed outcome carrying the sentence — so a
+// gitexec.Host.Capture gives a refused repository — a failed outcome carrying the sentence — so a
 // caller has one failure branch. The Go error is non-nil only for ctx cancellation or a
 // confinement-unavailable demotion (the subprocess.RunSubprocess contract).
 //

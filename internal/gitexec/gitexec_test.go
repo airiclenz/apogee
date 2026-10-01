@@ -94,7 +94,7 @@ func TestCapture_AppliesHardeningToEveryInvocation(t *testing.T) {
 	fakeGit := writeFakeGit(t, dir,
 		"#!/bin/sh\n{ echo \"argv: $*\"; echo \"nosystem: ${GIT_CONFIG_NOSYSTEM-unset}\"; } > \""+record+"\"\n")
 
-	if _, err := gitexec.Capture(context.Background(), fakeGit, t.TempDir(), testTimeout, "status"); err != nil {
+	if _, err := gitexec.OS().Capture(context.Background(), fakeGit, t.TempDir(), testTimeout, "status"); err != nil {
 		t.Fatalf("Capture err = %v", err)
 	}
 	out, err := os.ReadFile(record)
@@ -126,7 +126,7 @@ func TestCapture_ServesTheCacheWhileTheConfigHolds(t *testing.T) {
 	firstRoot, secondRoot := t.TempDir(), t.TempDir()
 	runIn := func(root string) {
 		t.Helper()
-		if _, err := gitexec.Capture(context.Background(), fakeGit, root, testTimeout, "status"); err != nil {
+		if _, err := gitexec.OS().Capture(context.Background(), fakeGit, root, testTimeout, "status"); err != nil {
 			t.Fatalf("Capture err = %v", err)
 		}
 	}
@@ -180,7 +180,7 @@ func appendToConfig(t *testing.T, root, text string) {
 // captureStatus runs one status through Capture on root and returns the captured outcome.
 func captureStatus(t *testing.T, gitPath, root string) subprocess.SubprocessResult {
 	t.Helper()
-	res, err := gitexec.Capture(context.Background(), gitPath, root, testTimeout, "status", "--porcelain")
+	res, err := gitexec.OS().Capture(context.Background(), gitPath, root, testTimeout, "status", "--porcelain")
 	if err != nil {
 		t.Fatalf("Capture err = %v", err)
 	}
@@ -465,7 +465,7 @@ func TestCommandConfigRefusal_JudgesTheRepositoryTheRunActuallyReaches(t *testin
 	store := filepath.Join(t.TempDir(), "objects")
 	runRealGit(t, gitPath, filepath.Dir(store), "init", "--bare", store)
 
-	res, err := gitexec.Capture(context.Background(), gitPath, root, testTimeout, "status", "--porcelain")
+	res, err := gitexec.OS().Capture(context.Background(), gitPath, root, testTimeout, "status", "--porcelain")
 	if err != nil {
 		t.Fatalf("Capture err = %v", err)
 	}
@@ -476,7 +476,7 @@ func TestCommandConfigRefusal_JudgesTheRepositoryTheRunActuallyReaches(t *testin
 		t.Errorf("refusal = %q, want it to name the key it found", res.CombinedOutput)
 	}
 
-	out, err := gitexec.Run(context.Background(), root, []string{
+	out, err := gitexec.OS().Run(context.Background(), root, []string{
 		"GIT_DIR=" + store,
 		"GIT_WORK_TREE=" + root,
 		"GIT_INDEX_FILE=" + filepath.Join(store, "apogee-index"),

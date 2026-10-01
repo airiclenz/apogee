@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/refs"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -309,7 +310,7 @@ type SubAgentUsage struct {
 // error's own text as the reason.
 func openRecordJournal(ctx context.Context, spec Spec, cfg domain.Config) (*undo.Journal, string) {
 	journal, reason, err := snapshot.OpenJournal(
-		ctx, cfg.ConfigDir, spec.RecordID, cfg.WorkspaceDir, cfg.UndoSnapshots)
+		ctx, gitexec.OS(), cfg.ConfigDir, spec.RecordID, cfg.WorkspaceDir, cfg.UndoSnapshots)
 	if err != nil {
 		return undo.New(), err.Error()
 	}

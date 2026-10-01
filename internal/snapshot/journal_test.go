@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -58,7 +59,7 @@ func TestOpenJournalFallsBackWithAReasonRatherThanFailing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			journal, reason, err := OpenJournal(context.Background(), tt.home, tt.sessionID, tt.workspace, tt.enabled)
+			journal, reason, err := OpenJournal(context.Background(), gitexec.OS(), tt.home, tt.sessionID, tt.workspace, tt.enabled)
 			if err != nil {
 				t.Fatalf("OpenJournal: %v; a store that cannot be opened is a reason, not a failed start", err)
 			}
@@ -82,7 +83,7 @@ func TestOpenJournalReportsAnAbsentGit(t *testing.T) {
 	home, workspace := newHomeAndWorkspace(t)
 	t.Setenv("PATH", "")
 
-	journal, reason, err := OpenJournal(context.Background(), home, "s1", workspace, true)
+	journal, reason, err := OpenJournal(context.Background(), gitexec.OS(), home, "s1", workspace, true)
 	if err != nil {
 		t.Fatalf("OpenJournal: %v; a machine without git is a supported configuration", err)
 	}
@@ -103,7 +104,7 @@ func TestOpenJournalOpensAStoreAndReloadsItsIndex(t *testing.T) {
 	home, workspace := newHomeAndWorkspace(t)
 	ctx := context.Background()
 
-	journal, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	journal, reason, err := OpenJournal(ctx, gitexec.OS(), home, "s1", workspace, true)
 	if err != nil {
 		t.Fatalf("OpenJournal: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestOpenJournalOpensAStoreAndReloadsItsIndex(t *testing.T) {
 	}
 
 	// A second process, same session: the step the first one recorded is still there.
-	reopened, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	reopened, reason, err := OpenJournal(ctx, gitexec.OS(), home, "s1", workspace, true)
 	if err != nil {
 		t.Fatalf("re-OpenJournal: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestOpenJournalReportsAnIndexOfAnotherWorkspace(t *testing.T) {
 		t.Fatalf("write the index: %v", err)
 	}
 
-	journal, reason, err := OpenJournal(context.Background(), home, "s1", workspace, true)
+	journal, reason, err := OpenJournal(context.Background(), gitexec.OS(), home, "s1", workspace, true)
 	if err != nil {
 		t.Fatalf("OpenJournal: %v; a moved session is allowed, not an error", err)
 	}
@@ -192,7 +193,7 @@ func TestOpenJournalErrorsOnAnUnreadableIndex(t *testing.T) {
 		t.Fatalf("write the index: %v", err)
 	}
 
-	journal, reason, err := OpenJournal(context.Background(), home, "s1", workspace, true)
+	journal, reason, err := OpenJournal(context.Background(), gitexec.OS(), home, "s1", workspace, true)
 	if err == nil {
 		t.Fatalf("OpenJournal accepted a corrupt index: journal=%v reason=%q", journal != nil, reason)
 	}
@@ -212,7 +213,7 @@ func TestOpenStoredReadsTheWorkspaceFromTheIndex(t *testing.T) {
 	home, workspace := newHomeAndWorkspace(t)
 	ctx := context.Background()
 
-	journal, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	journal, reason, err := OpenJournal(ctx, gitexec.OS(), home, "s1", workspace, true)
 	if err != nil || reason != "" {
 		t.Fatalf("OpenJournal: err=%v reason=%q", err, reason)
 	}
@@ -225,7 +226,7 @@ func TestOpenStoredReadsTheWorkspaceFromTheIndex(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	stored, reason, err := OpenStored(ctx, home, "s1")
+	stored, reason, err := OpenStored(ctx, gitexec.OS(), home, "s1")
 
 	if err != nil {
 		t.Fatalf("OpenStored: %v", err)
@@ -248,7 +249,7 @@ func TestOpenStoredAnswersErrNoIndexBeforeLookingForGit(t *testing.T) {
 	home, _ := newHomeAndWorkspace(t)
 	t.Setenv("PATH", "")
 
-	journal, reason, err := OpenStored(context.Background(), home, "s-never")
+	journal, reason, err := OpenStored(context.Background(), gitexec.OS(), home, "s-never")
 
 	if !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("OpenStored: journal=%v reason=%q err=%v, want ErrNoIndex", journal != nil, reason, err)
@@ -256,7 +257,7 @@ func TestOpenStoredAnswersErrNoIndexBeforeLookingForGit(t *testing.T) {
 	if _, err := os.Stat(Dir(home, "s-never")); !os.IsNotExist(err) {
 		t.Errorf("an unknown id still opened a store (err %v)", err)
 	}
-	if _, _, err := OpenStored(context.Background(), "", "s-never"); !errors.Is(err, ErrNoIndex) {
+	if _, _, err := OpenStored(context.Background(), gitexec.OS(), "", "s-never"); !errors.Is(err, ErrNoIndex) {
 		t.Errorf("OpenStored with no home: %v, want ErrNoIndex", err)
 	}
 }
@@ -268,7 +269,7 @@ func TestOpenStoredReportsAnAbsentGit(t *testing.T) {
 	writeIndex(t, Dir(home, "s1"), undo.Index{Version: 1, Workspace: workspace})
 	t.Setenv("PATH", "")
 
-	journal, reason, err := OpenStored(context.Background(), home, "s1")
+	journal, reason, err := OpenStored(context.Background(), gitexec.OS(), home, "s1")
 
 	if err != nil {
 		t.Fatalf("OpenStored: %v", err)
@@ -303,7 +304,7 @@ func TestOpenStoredErrorsOnAnIndexItCannotUse(t *testing.T) {
 				t.Fatalf("write the index: %v", err)
 			}
 
-			journal, _, err := OpenStored(context.Background(), home, "s1")
+			journal, _, err := OpenStored(context.Background(), gitexec.OS(), home, "s1")
 
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("OpenStored: journal=%v err=%v, want %q", journal != nil, err, tc.want)
@@ -451,7 +452,7 @@ func TestUndoLeavesAloneTheFilesOfADirectoryTheCaptureOnlyWarnedAbout(t *testing
 func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace string, locked []string, survivors map[string]string, between func()) {
 	t.Helper()
 	ctx := context.Background()
-	journal, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	journal, reason, err := OpenJournal(ctx, gitexec.OS(), home, "s1", workspace, true)
 	if err != nil || reason != "" {
 		t.Fatalf("OpenJournal: reason %q, err %v", reason, err)
 	}
@@ -510,7 +511,7 @@ func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace st
 	}
 	requireNoDelete("live preview", step)
 
-	reopened, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	reopened, reason, err := OpenJournal(ctx, gitexec.OS(), home, "s1", workspace, true)
 	if err != nil || reason != "" {
 		t.Fatalf("re-OpenJournal: reason %q, err %v", reason, err)
 	}

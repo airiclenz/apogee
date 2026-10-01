@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -2649,7 +2650,7 @@ func TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal(t *testing.T) {
 	// OpenJournal that words a home-less call, and Once's whole job with it is to pass that
 	// wording on to the Driver untouched. A copied literal would keep agreeing with itself after
 	// the announced phrase had changed.
-	_, wantNote, err := snapshot.OpenJournal(context.Background(), "", "firing-2", t.TempDir(), true)
+	_, wantNote, err := snapshot.OpenJournal(context.Background(), gitexec.OS(), "", "firing-2", t.TempDir(), true)
 	if err != nil {
 		t.Fatalf("OpenJournal for a home-less call: %v", err)
 	}
@@ -2721,7 +2722,7 @@ func addedNames(before, after []string) []string {
 func requireSnapshots(t *testing.T) {
 	t.Helper()
 
-	if !snapshot.Available() {
+	if !snapshot.Available(gitexec.OS()) {
 		t.Skip("git is not on PATH: the snapshot store cannot be opened here")
 	}
 }

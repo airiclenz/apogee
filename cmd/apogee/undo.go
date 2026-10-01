@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
@@ -185,7 +186,7 @@ func runUndoVerb(cmd *cobra.Command, id string, confirm bool, generation uint64,
 
 	// A session with no index — an id that names none, or a run that recorded nothing — is this
 	// verb's "nothing to undo" rather than a failure; an index that is there and wrong IS one.
-	journal, reason, err := snapshot.OpenStored(cmd.Context(), roots.config, id)
+	journal, reason, err := snapshot.OpenStored(cmd.Context(), gitexec.OS(), roots.config, id)
 	switch {
 	case errors.Is(err, snapshot.ErrNoIndex):
 		return undoNothingToDo(id)

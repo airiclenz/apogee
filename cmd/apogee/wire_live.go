@@ -22,6 +22,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
@@ -462,7 +463,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 // key the projection fills for both Drivers (projectConfig, wire_config.go), and reading it back
 // from the one place it is carried is what keeps a session and a Firing answering the same value.
 func (w *rootWiring) openSessionJournal(ctx context.Context, id string) {
-	journal, reason, err := snapshot.OpenJournal(ctx, w.roots.config, id, w.roots.workspace, w.cfg.UndoSnapshots)
+	journal, reason, err := snapshot.OpenJournal(ctx, gitexec.OS(), w.roots.config, id, w.roots.workspace, w.cfg.UndoSnapshots)
 	if err != nil {
 		journal, reason = undo.New(), err.Error()
 	}

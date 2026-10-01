@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
@@ -36,7 +37,7 @@ func undoStore(t *testing.T, home, id string, change func(workspace string)) {
 	t.Helper()
 
 	workspace := t.TempDir()
-	journal, reason, err := snapshot.OpenJournal(context.Background(), home, id, workspace, true)
+	journal, reason, err := snapshot.OpenJournal(context.Background(), gitexec.OS(), home, id, workspace, true)
 	if err != nil {
 		t.Fatalf("OpenJournal: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestUndoVerbRestoresAFileTheExchangeChanged(t *testing.T) {
 	})
 	// The seed above created the file INSIDE the exchange, so re-seed the pair around an edit: a
 	// second exchange whose pre-image already holds the file is what a restore needs.
-	journal, reason, err := snapshot.OpenJournal(context.Background(), home, "s-undo-2",
+	journal, reason, err := snapshot.OpenJournal(context.Background(), gitexec.OS(), home, "s-undo-2",
 		filepath.Dir(file), true)
 	if err != nil || reason != "" {
 		t.Fatalf("reopen the store: %v (%s)", err, reason)
@@ -346,7 +347,7 @@ func TestUndoVerbRefusesAStaleGeneration(t *testing.T) {
 	// The journal moves under the stamp: another exchange, recorded the way the fixture records
 	// its first — through the same opener the verb uses.
 	second := filepath.Join(filepath.Dir(first), "second.txt")
-	journal, reason, err := snapshot.OpenJournal(context.Background(), home, "s-undo-9",
+	journal, reason, err := snapshot.OpenJournal(context.Background(), gitexec.OS(), home, "s-undo-9",
 		filepath.Dir(first), true)
 	if err != nil || reason != "" {
 		t.Fatalf("reopen the store: %v (%s)", err, reason)
