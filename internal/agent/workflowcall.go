@@ -1048,7 +1048,7 @@ func workflowListing(infos []WorkflowInfo) string {
 	lines := make([]string, 0, len(infos)+2)
 	lines = append(lines, fmt.Sprintf(workflowStatusHeadFormat, len(infos)))
 	for _, info := range infos {
-		done, total := itemCounts(info.Status)
+		done, total := itemProgress(info.Status)
 		lines = append(lines, fmt.Sprintf(workflowStatusLineFormat,
 			info.Status.ID, oneLine(info.Status.Name), workflowState(info), done, total))
 	}
@@ -1059,7 +1059,7 @@ func workflowListing(infos []WorkflowInfo) string {
 // workflowDetail is one workflow in detail: its line, its folder, every stage with its items and
 // their receipts so far, and the items running now.
 func workflowDetail(info WorkflowInfo, running []runningItem) string {
-	done, total := itemCounts(info.Status)
+	done, total := itemProgress(info.Status)
 	lines := []string{
 		fmt.Sprintf(workflowStatusLineFormat, info.Status.ID, oneLine(info.Status.Name), workflowState(info), done, total),
 		workflowStatusFolder + info.Dir,
@@ -1083,33 +1083,25 @@ func workflowDetail(info WorkflowInfo, running []runningItem) string {
 	return strings.Join(lines, "\n")
 }
 
-// workflowState is how a workflow stands: running or queued in the background when this session's
-// manager holds it, else the phase its status.json records.
+// workflowState words how the engine says a workflow stands (workflow.StateOf): queued or running
+// in the background when this session's manager holds it, else the phase its status.json records.
 func workflowState(info WorkflowInfo) string {
-	switch {
-	case info.Queued:
+	state := workflow.StateOf(info)
+	switch state.Kind {
+	case workflow.StateQueued:
 		return workflowStatusQueued
-	case info.Background:
+	case workflow.StateBackground:
 		return workflowStatusRunning
 	default:
-		return string(info.Status.Phase)
+		return string(state.Phase)
 	}
 }
 
-// itemCounts counts the items of a workflow's fan-out stages that are done, and all of them.
-func itemCounts(status workflow.RunStatus) (done, total int) {
-	for _, stage := range status.Stages {
-		if stage.Kind != workflow.StageFanout {
-			continue
-		}
-		for _, item := range stage.Items {
-			total++
-			if item.Phase == workflow.PhaseDone {
-				done++
-			}
-		}
-	}
-	return done, total
+// itemProgress is a workflow's finished items and all of them, by the engine's status.json tally
+// (workflow.TallyOfStatus).
+func itemProgress(status workflow.RunStatus) (done, total int) {
+	tally := workflow.TallyOfStatus(status)
+	return tally.Total() - tally.Unfinished, tally.Total()
 }
 
 // itemStatusText is one item's outcome so far: `<status> — <summary>[ k=v…]` once its receipt is in,

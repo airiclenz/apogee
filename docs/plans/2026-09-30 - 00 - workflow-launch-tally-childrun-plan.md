@@ -67,7 +67,10 @@ NOTES (2026-10-01): startBackground (shared by the fan_out and recipe background
 **Acceptance:** `go test ./internal/agent -run 'TestBackground_'`; `! grep -n 'openWorkflowFolder' internal/agent/*.go`
 **Commit:** `refactor(agent): background start opens its folder through Runner.Open`
 
-## 4. agent: finish note, listing and state read the engine's tally
+## 4. agent: finish note, listing and state read the engine's tally — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): `itemCounts` is replaced by a two-line adapter `itemProgress` (done = `TallyOfStatus(...).Total()-Unfinished`, total = `Total()`) shared by `workflowListing` and `workflowDetail`; it holds no counting of its own. The listing/detail counts now follow the engine's rule — a skipped fan-out is left out and a done item without a receipt counts as unfinished (item 2's notes).
+NOTES (2026-10-01): `internal/agent/wake_test.go` needed no change — `TestFinishNote_SaysHowTheWorkflowEnded` passes unchanged against `workflow.TallyOf(result).Line()`, confirming the note text is byte-identical.
 
 **Depends on:** items 2, 3.
 **Files:** `internal/agent/background.go`, `internal/agent/workflowcall.go`, `internal/agent/wake_test.go`, `internal/agent/workflowcall_test.go`

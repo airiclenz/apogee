@@ -119,7 +119,6 @@ const (
 	finishLeadFormat      = "workflow %s %s"
 	finishFailedFormat    = "workflow %s failed — %s"
 	finishSeparator       = " — "
-	finishTallySeparator  = " · "
 	finishReportPrefix    = "report: "
 	finishListingPrefix   = "items: "
 	finishPhaseFinished   = "finished"
@@ -1197,7 +1196,7 @@ func finishNote(name string, result workflow.Result, runErr error, fellBack bool
 	if result.Stopped() {
 		phase = finishPhaseStopped
 	}
-	parts := []string{fmt.Sprintf(finishLeadFormat, name, phase), finishTally(result)}
+	parts := []string{fmt.Sprintf(finishLeadFormat, name, phase), workflow.TallyOf(result).Line()}
 	switch {
 	case result.Report != "":
 		parts = append(parts, finishReportPrefix+result.Report)
@@ -1208,42 +1207,6 @@ func finishNote(name string, result workflow.Result, runErr error, fellBack bool
 		parts = append(parts, SeatFallbackNote)
 	}
 	return strings.Join(parts, finishSeparator)
-}
-
-// finishTally counts result's fan-out items by status — `items N · ok A · partial B · blocked C` —
-// adding the unfinished count and the verify verdicts only when there are any.
-func finishTally(result workflow.Result) string {
-	var tally workflow.Tally
-	for _, stage := range result.Stages {
-		if stage.Kind != workflow.StageFanout || stage.Phase == workflow.PhaseSkipped {
-			continue
-		}
-		tally.OK += stage.Tally.OK
-		tally.Partial += stage.Tally.Partial
-		tally.Blocked += stage.Tally.Blocked
-		tally.Unfinished += stage.Tally.Unfinished
-		tally.Confirmed += stage.Tally.Confirmed
-		tally.Refuted += stage.Tally.Refuted
-		tally.Unclear += stage.Tally.Unclear
-	}
-	total := tally.OK + tally.Partial + tally.Blocked + tally.Unfinished
-	parts := []string{
-		fmt.Sprintf("items %d", total),
-		fmt.Sprintf("ok %d", tally.OK),
-		fmt.Sprintf("partial %d", tally.Partial),
-		fmt.Sprintf("blocked %d", tally.Blocked),
-	}
-	if tally.Unfinished > 0 {
-		parts = append(parts, fmt.Sprintf("unfinished %d", tally.Unfinished))
-	}
-	if tally.Confirmed+tally.Refuted+tally.Unclear > 0 {
-		parts = append(parts,
-			fmt.Sprintf("confirmed %d", tally.Confirmed),
-			fmt.Sprintf("refuted %d", tally.Refuted),
-			fmt.Sprintf("unclear %d", tally.Unclear),
-		)
-	}
-	return strings.Join(parts, finishTallySeparator)
 }
 
 // oneLine folds every run of whitespace in text, line breaks included, into one space, so a note

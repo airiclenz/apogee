@@ -1710,3 +1710,25 @@ func TestWorkflowControl_ADelegateIsRefused(t *testing.T) {
 		t.Error("a delegate offers background; a background workflow belongs to the top-level Agent")
 	}
 }
+
+func TestWorkflowState_MapsTheEngineState(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		info WorkflowInfo
+		want string
+	}{
+		{"queued", WorkflowInfo{Queued: true, Background: true, Status: workflow.RunStatus{Phase: workflow.PhaseRunning}}, workflowStatusQueued},
+		{"running in the background", WorkflowInfo{Background: true, Status: workflow.RunStatus{Phase: workflow.PhaseRunning}}, workflowStatusRunning},
+		{"a recorded phase", WorkflowInfo{Status: workflow.RunStatus{Phase: workflow.PhaseStopped}}, string(workflow.PhaseStopped)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := workflowState(tc.info); got != tc.want {
+				t.Errorf("workflowState = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
