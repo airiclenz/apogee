@@ -243,7 +243,6 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	m.spendSkillHints()
 	m.promptEditor.reset()
 	m, record = m.recordSend(sent) // the row is queued: the human sent this line, so ↑ hands it back
-	m.layout()                     // the emptied box shrinks back; the strip above it gains a row
 	return m, record
 }
 
@@ -294,7 +293,6 @@ func (m Model) popDeferredCommand() (Model, bool) {
 	}
 	m.input.SetValue(commandLine(parsed))
 	m.input.MoveToEnd()
-	m.layout() // the box regrows around the restored line; the band loses a row
 	return m, true
 }
 
@@ -411,7 +409,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	m.promptEditor.reset()
 	m.detached = false // a sent message re-arms follow-the-tail, exactly as one sent at the top level does
 	m, record = m.recordSend(sent)
-	m.layout() // the emptied box shrinks back; the band above it gains a row
+	m.layout() // geometry: detached = false above is read only by refreshViewport (its GotoBottom); settleFrame's frameKey and stale-height checks never see the flag
 	return m, record
 }
 
@@ -522,7 +520,6 @@ func (m Model) popInterjection() (Model, tea.Cmd, bool) {
 	m.input.MoveToEnd()
 	var reload tea.Cmd
 	m, reload = m.recomputeAutocomplete() // the restored text may re-open the overlay it was typed with
-	m.layout()                            // the box regrows around the restored text; the strip loses a row
 	return m, reload, true
 }
 

@@ -113,23 +113,19 @@ func withoutInvoked(hints []skills.Suggestion, invoked []string) []skills.Sugges
 // foldSkillHintTick lands the debounce tick: a tick whose generation is still current means the
 // draft has stood still for [skillHintDelay], and the band is re-ranked over it. A stale tick
 // changes nothing — a later edit armed its own, or a send spent the row and retired the chain — so
-// it neither ranks nor re-lays the frame.
+// it neither ranks nor moves the frame.
 //
 // A current tick that lands while an overlay is open changes nothing either. The edit path already
 // cleared the row for a "/" or "@" menu it opened, so an overlay here is the one tab opened over
 // the band's own rows (openSuggestMenu), and those rows are what the band should come back with
-// when the menu closes. The frame is re-laid only when the row appears or leaves, since that is all
-// the band changes about the frame's row allocation ([Model.frameRowPlan]).
+// when the menu closes. The fold lays nothing out itself: a row that appears or leaves is all the
+// band changes about the frame's row allocation ([Model.frameRowPlan]), and the height that leaves
+// stale is the repaint tail's to re-lay ([Model.settle]).
 func (m Model) foldSkillHintTick(msg skillHintTickMsg) Model {
 	if msg.gen != m.skillHintGen || m.autocomplete.active {
 		return m
 	}
-	shown := m.hasSkillHints()
-	m = m.recomputeSkillHints(m.input.Value())
-	if m.hasSkillHints() != shown {
-		m.layout()
-	}
-	return m
+	return m.recomputeSkillHints(m.input.Value())
 }
 
 // recomputeSkillHints re-derives what the band shows from the draft as it now stands. It runs when

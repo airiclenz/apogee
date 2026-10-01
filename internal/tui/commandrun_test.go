@@ -351,3 +351,44 @@ func TestAFailedWorkflowResumeIsNoted(t *testing.T) {
 		t.Errorf("notes = %q, want %q", noteTexts(m), want)
 	}
 }
+
+// The command arms open and close panes and bands and return: the drain at a completion, the
+// boundary confirm and its cancel, and /compact at idle are each laid out by Update's tail (doc.go,
+// "an arm mutates").
+func TestCommandArmsAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the queued drain at completion", func(t *testing.T) {
+		t.Parallel()
+		m, _ := queuedRun(t, "/compact")
+		m = step(t, m, exchangeDoneMsg{})
+		if n := len(m.deferredCommands); n != 0 {
+			t.Fatalf("precondition: queued commands = %d after the completion, want 0", n)
+		}
+		assertSettled(t, m)
+	})
+
+	t.Run("the boundary confirm and its cancel", func(t *testing.T) {
+		t.Parallel()
+		m := runningWorkflowModel(t, &fakeEngine{})
+		m, _ = typeCommand(t, m, "/clear")
+		assertBoundaryConfirm(t, m)
+		assertSettled(t, m)
+
+		m = step(t, m, keyEsc())
+		if m.picker.open {
+			t.Fatal("precondition: the confirm stayed open after esc")
+		}
+		assertSettled(t, m)
+	})
+
+	t.Run("compact at idle", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModelEng(t, &fakeEngine{}, testOpts)
+		m, _ = typeCommand(t, m, "/compact")
+		if m.state != stateRunning {
+			t.Fatalf("precondition: state = %v after /compact, want running", m.state)
+		}
+		assertSettled(t, m)
+	})
+}

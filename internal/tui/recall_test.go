@@ -492,3 +492,23 @@ func TestRecallEndsOnPasteAndOnAClickInTheBox(t *testing.T) {
 	clicked = step(t, clicked, leftClick(2, y0))
 	assertBox(t, clicked, "recorded line", false)
 }
+
+// The walk's arms write the box and return: the box growing around a many-row recall, and
+// shrinking back past the newest, is laid out by Update's tail (doc.go, "an arm mutates").
+func TestRecallWalkIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	m, _ := recallModel(t, "one\ntwo\nthree\nfour")
+	empty := m.input.Height()
+
+	m = step(t, m, keyUp())
+	if m.input.Height() <= empty {
+		t.Fatalf("precondition: box height %d with a four-row recall, want more than %d", m.input.Height(), empty)
+	}
+	assertSettled(t, m)
+
+	m = step(t, m, keyDown())
+	if m.input.Height() != empty {
+		t.Errorf("box height %d past the newest, want the empty box's %d", m.input.Height(), empty)
+	}
+	assertSettled(t, m)
+}

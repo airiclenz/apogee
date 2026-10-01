@@ -2202,3 +2202,35 @@ func TestRunViewCommandsNeverReachTheChild(t *testing.T) {
 		}
 	})
 }
+
+// Staging and popping a queue row write the box and the band and return: the box shrinking, the
+// band gaining a row and both reversing on Backspace are laid out by Update's tail (doc.go, "an arm
+// mutates").
+func TestQueueArmsAreSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		line string
+	}{
+		{"a staged message", "a remark\nover\nthree rows"},
+		{"a queued command", "/compact"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := runningModel(t)
+			bare := m.viewport.Height()
+
+			m = stageRow(t, m, tc.line)
+			if m.viewport.Height() >= bare {
+				t.Fatalf("precondition: viewport height %d with a queued row, want less than %d", m.viewport.Height(), bare)
+			}
+			assertSettled(t, m)
+
+			m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+			if got := m.input.Value(); got != tc.line {
+				t.Fatalf("precondition: editor = %q after the pop, want %q", got, tc.line)
+			}
+			assertSettled(t, m)
+		})
+	}
+}

@@ -817,3 +817,30 @@ func BenchmarkBandKeystroke(b *testing.B) {
 		m = next.(Model)
 	}
 }
+
+// The debounce tick re-ranks and returns: the band row appearing and leaving moves the frame's row
+// allocation, and Update's tail lays that out (doc.go, "an arm mutates").
+func TestBandRowIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+	bare := m.viewport.Height()
+
+	m = typeDraft(t, m, "audit the parser")
+	if !m.hasSkillHints() {
+		t.Fatalf("precondition: no band after the tick (draft %q)", rec.draft)
+	}
+	if m.viewport.Height() >= bare {
+		t.Fatalf("precondition: viewport height %d with the band up, want less than %d", m.viewport.Height(), bare)
+	}
+	assertSettled(t, m)
+
+	for range len("the parser") {
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	m = settleBand(t, m)
+	if m.hasSkillHints() {
+		t.Fatalf("precondition: the band survived a draft under the gate (draft %q)", rec.draft)
+	}
+	assertSettled(t, m)
+}

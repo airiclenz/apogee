@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -369,4 +370,19 @@ func TestRunningPlaceholderAnnouncesTheDoubleEsc(t *testing.T) {
 	if got := plain(m.View()); !strings.Contains(got, want) {
 		t.Errorf("the empty box while running paints no %q:\n%s", want, got)
 	}
+}
+
+// A paste is an edit that writes the box and returns: the box growing around the pasted rows is
+// laid out by Update's tail, not by the paste arm (doc.go, "an arm mutates").
+func TestPasteIsSettledByTheTail(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	before := m.input.Height()
+
+	m = step(t, m, tea.PasteMsg{Content: "one\ntwo\nthree\nfour"})
+
+	if m.input.Height() <= before {
+		t.Fatalf("precondition: box height %d after a four-row paste, want more than %d", m.input.Height(), before)
+	}
+	assertSettled(t, m)
 }

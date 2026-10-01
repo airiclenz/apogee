@@ -164,7 +164,6 @@ func (m Model) showRecall(i int) Model {
 	m.input.MoveToEnd()
 	m.recall.pos, m.recall.active = i, true
 	m.dismissAutocomplete()
-	m.layout() // the box grows or shrinks around the recalled text, which may be many rows
 	return m
 }
 
@@ -176,7 +175,6 @@ func (m Model) recallPastNewest() Model {
 	m.input.Reset()
 	m.dropRecall()
 	m.dismissAutocomplete()
-	m.layout() // the emptied box shrinks back
 	return m
 }
 

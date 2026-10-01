@@ -346,7 +346,6 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		m, reload = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input
 		cmd = tea.Batch(cmd, reload)          // a "/" menu the paste opened owes a catalog re-scan, off the loop
 	}
-	m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
 	return m, cmd
 }
 

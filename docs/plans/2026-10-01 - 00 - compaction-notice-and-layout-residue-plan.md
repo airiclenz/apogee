@@ -65,7 +65,11 @@ budget); existing `renderBudgetedTranscript` tests stay green unchanged.
 **Closes:** apogee-transcript-notice-unbudgeted
 **Commit:** `fix(context): count the elision notice against the compaction transcript budget`
 
-## 2. Input-box arms leave layout to the tail
+## 2. Input-box arms leave layout to the tail — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): 12 belt calls dropped (showRecall, recallPastNewest, foldPaste, queueCommand, runDeferredCommands, confirmBoundary, answerBoundary, runCompact, stageInterjection, popDeferredCommand, popInterjection, foldSkillHintTick); stageChildMessage's call is the one kept, annotated `// geometry:` naming the detached flag, per the plan's folded keep criterion. foldSkillHintTick's doc comment is reworded because it claimed the fold re-lays the frame.
+NOTES (2026-10-01): settled_test.go holds only the assertSettled helper. Each per-file test sits in its source's own _test.go (Go convention {source}_test.go): TestRecallWalkIsSettledByTheTail, TestPasteIsSettledByTheTail, TestBandRowIsSettledByTheTail, TestQueueArmsAreSettledByTheTail, TestCommandArmsAreSettledByTheTail. The Acceptance -run glob already picks all of them up.
+NOTES (2026-10-01): the only direct test caller of a function that lost a call is schedule_test.go TestReportActivityHoldsWhileACommandIsQueued (queueCommand, runDeferredCommands). It reads no geometry, so it is unchanged and was added to the Acceptance -run alternation. It passes.
 
 **What:**
 **Goal:** no `.layout()` / `.refreshViewport()` call remains in `internal/tui/interject.go`,

@@ -69,7 +69,6 @@ func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m.runCommand(parsed)
 	}
 	m.deferredCommands = append(m.deferredCommands, parsed)
-	m.layout() // the band above the box gains a row
 	return m, nil
 }
 
@@ -100,7 +99,6 @@ func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 		m = next.(Model)
 		cmds = append(cmds, cmd)
 	}
-	m.layout() // the band above the box loses the rows that ran
 	return m, tea.Batch(cmds...)
 }
 
@@ -287,7 +285,6 @@ func (m Model) boundaryConfirmOpen() bool {
 // confirmBoundary opens the stop-or-keep confirm over boundary b.
 func (m Model) confirmBoundary(b pendingBoundary) (tea.Model, tea.Cmd) {
 	m.picker = picker{open: true, kind: pickerWorkflowBoundary, boundary: b}
-	m.layout()
 	return m, nil
 }
 
@@ -324,7 +321,6 @@ func (m Model) acceptBoundaryRow(offered int) (tea.Model, tea.Cmd) {
 func (m Model) answerBoundary(answer boundaryAnswer) (tea.Model, tea.Cmd) {
 	b := m.picker.boundary
 	m.picker = picker{}
-	m.layout()
 	next, cmd := tea.Model(m), tea.Cmd(nil)
 	if answer != boundaryCancel {
 		keep := answer == boundaryKeep
@@ -579,7 +575,6 @@ func (m Model) runContinue() (tea.Model, tea.Cmd) {
 // derived from stateRunning at paint, says "queue" here as well; and compaction emits no Events
 // until it lands, so the phrase the verb sets is the one that stands until then.
 func (m Model) runCompact() (tea.Model, tea.Cmd) {
-	m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out); the verb lays nothing out (enterRunning)
 	cmd, cancel := startCompact(m.parent, m.eng)
 	batch := m.enterRunning(cmd, cancel, nil, actCompacting)
 	return m, batch
