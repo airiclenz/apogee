@@ -211,7 +211,11 @@ NOTES (2026-10-01): tool.go's serverTool field comments realigned by gofmt after
 **Acceptance:** `go test ./internal/security -run 'Redact|DocMap'`; `go test ./internal/mcp -run 'Redact'`
 **Commit:** `refactor(security): mcp's origin redactor lives beside the guarded client`
 
-## 11. docs: exec host and guarded client
+## 11. docs: exec host and guarded client — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): internal/snapshot/doc.go, internal/agent/dispatch.go and internal/tools/git.go needed no edit — items 3, 4 and 5 had already brought their comments onto gitexec.Host (the removed-function grep was clean before this item).
+NOTES (2026-10-01): ADR 0012 (c)'s "reproduced the funnel's builder field-for-field" reworded to past-tense history ("was then built by a copy of the network funnel's client recipe") so the guard grep stays clean; the decision text is untouched and the dated note carries the consolidation.
+NOTES (2026-10-01): pre-existing — internal/gitexec/doc.go says all five entry points "take an env the caller appends", but Host.Capture takes none (only CaptureUnchecked does); left as is.
 
 **Depends on:** items 5, 8, 10.
 **Files:** `docs/adr/0042-external-programs-are-optional-enhancements-never-prerequisites.md`, `docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md`, `docs/design/confinement-execution-contract.md`, `internal/tools/doc.go`, `internal/gitexec/doc.go`, `internal/snapshot/doc.go`, `internal/agent/dispatch.go`, `internal/tools/git.go`, `internal/tools/run_tests.go`

@@ -7,9 +7,10 @@
 // never required — and it is also the most attackable program apogee runs, because a repository
 // tells git which OTHER programs to execute. The package answers both halves:
 //
-//   - [Resolve] and [Program] resolve git on PATH and fence what they found through
-//     internal/security's exec fence, so a git the model could have written into the workspace
-//     never becomes argv[0]. [UnavailableMessage] is the graceful sentence for a host with no git.
+//   - [Host.Resolve] and [Host.Program] resolve git on PATH and fence what they found
+//     through internal/security's exec fence, so a git the model could have written into the
+//     workspace never becomes argv[0]. [UnavailableMessage] is the graceful sentence for a host
+//     with no git.
 //   - Every invocation carries the global hardening options (an emptied core.hooksPath, a
 //     disabled core.fsmonitor) ahead of its subcommand and GIT_CONFIG_NOSYSTEM in an allowlisted,
 //     PATH-scoped environment ([SafeEnv]). [DiffHardeningArgs] closes the read-path diff drivers
@@ -25,21 +26,26 @@
 //     ([security.GitCommandConfigNameSource]), which the shell write view widens with
 //     core.hooksPath to name .git/config for a `git config` line that sets such a key.
 //
-// Five entry points, one funnel. [Capture] returns the captured outcome — exit code and output —
-// for a caller rendering what git printed to the model. [Run] and [Query] return the child's
-// stdout as DATA, with the diagnostics left out of the payload and every failure flattened to one
-// error. [RunTo] is Run with the payload streamed uncapped to the caller's writer, for output a
-// truncation would corrupt. [RunDiagnosed] is Run that also hands back the child's stderr on a
-// zero exit, for a command whose warning is the only sign its answer is partial. All five take an
+// Five entry points, one funnel. [Host.Capture] returns the captured outcome — exit code and
+// output — for a caller rendering what git printed to the model. [Host.Run] and [Host.Query]
+// return the child's stdout as DATA, with the diagnostics left out of the payload and every
+// failure flattened to one error. [Host.RunTo] is Run with the payload streamed uncapped to the
+// caller's writer, for output a truncation would corrupt. [Host.RunDiagnosed] is Run that also
+// hands back the child's stderr on a zero exit, for a command whose warning is the only sign its
+// answer is partial. All five take an
 // env the caller appends — GIT_DIR, GIT_WORK_TREE,
 // GIT_INDEX_FILE — which redirects the run to an object database of apogee's own without
 // weakening anything the hardening put there.
 //
 // Every entry point is a method of a [Host] value — the PATH lookup, the two subprocess
-// launchers and the per-OS environment rules one run goes through — and the package-level funcs
-// are thin wrappers over one. A nil field is the real OS's facility, so the zero Host ([OS]) runs
-// the system git; a fake Host scripts git's outcomes with no git installed, and its answers still
-// pass the exec fence, the hardening and the command-config refusal.
+// launchers and the per-OS environment rules one run goes through — and a caller runs git
+// through the Host it was handed: the git tools through their execHost's, the engine's tree
+// snapshotter and secrets guard through the one the Agent builds them with, the snapshot store
+// through the one it was opened with. There is no package-level lookup or launcher to swap; the one
+// package-level func left is [SafeEnv], a wrapper over [OS]. A nil field is the real OS's
+// facility, so the zero Host ([OS]) runs the system git; a fake Host scripts git's outcomes with
+// no git installed, and its answers still pass the exec fence, the hardening and the
+// command-config refusal.
 //
 // The package is a LEAF over internal/subprocess: it imports internal/domain, internal/platform,
 // internal/security and internal/subprocess, and nothing else in the tree — never internal/tools,

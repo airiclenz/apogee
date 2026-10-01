@@ -108,6 +108,16 @@ changes a handful of times a session.
   var or injected dep (so a test can fake it), a named degraded result the model can act on, and a
   test of the absent path — `autofix_test.go`'s "gracefully absent" case and
   `TestRunTestsMissingRunnerProgramDegradesGracefully` are the shape.
+
+  > **Note 2026-09-30 (architecture review 2026-09-30 #4).** For git, `go vet` and MCP stdio the
+  > seam is now always the injected dep, never a package-level variable: `internal/gitexec` has no
+  > package-level lookup or launcher left, and every git run goes through a `gitexec.Host` its
+  > caller passes — the git tools' `execHost` (as `execHost.git()`), the Host the Agent builds its
+  > tree snapshotter and secrets guard with (`gitexec.OS()` in production), the one the snapshot
+  > store was opened with. `go vet` (diagnostics) launches through the tool's `execHost`, and an
+  > MCP stdio server is env-scoped and torn down through the `mcp.Host` the composition root passes
+  > to `ConnectWith`. A test fakes the field of the host it hands in. The rule itself is unchanged.
+
 - **The policy costs capability, deliberately.** An `io/fs` walk is slower than ripgrep on a large
   tree, and in-process `go/format.Source` fixes less than `goimports`. Both are accepted: the fast
   path is still taken when the program is there, and the floor is a working agent everywhere.

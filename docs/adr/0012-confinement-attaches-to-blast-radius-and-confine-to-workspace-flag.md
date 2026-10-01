@@ -291,12 +291,30 @@ not "private addresses are fine on this connection". The addresses are resolved 
 so nothing the transport learns later can widen the set, and an endpoint that cannot be resolved is
 a connect-time error rather than an unpinned connection.
 
-**(c) Redirects on an MCP transport are no longer followed.** The MCP client's HTTP client
-reproduced the funnel's builder field-for-field but omitted its `CheckRedirect` policy, so MCP
-transports auto-followed redirects while Apogee's own tools refuse to. A redirect could carry a
-vetted connection to a host the endpoint's string-level allow/deny decision never saw. It now
-returns the redirect response instead of following it, on the funnel's own reasoning. A server that
-redirects must be configured at the URL it redirects to.
+**(c) Redirects on an MCP transport are no longer followed.** The MCP client's HTTP client was
+then built by a copy of the network funnel's client recipe that omitted its `CheckRedirect`
+policy, so MCP transports auto-followed redirects while Apogee's own tools refuse to. A redirect
+could carry a vetted connection to a host the endpoint's string-level allow/deny decision never
+saw. It now returns the redirect response instead of following it, on the funnel's own reasoning.
+A server that redirects must be configured at the URL it redirects to.
+
+> **Note 2026-09-30 (one guarded client; architecture review 2026-09-30 #7).** The two builders
+> (c) describes are now one: `security.URLGuard.GuardedClient` (`internal/security/httpclient.go`)
+> resolves the egress proxy once, chooses the dial-time control and assembles the fixed,
+> never-redirecting transport for both the network funnel (`internal/tools/network.go`) and the MCP
+> HTTP transports. **Only the dial-time half moved.** (b)'s endpoint pin became the client's
+> floor-policy parameter — `security.DialPinDestination` for a configured MCP endpoint,
+> `security.DialFloor` for a model-supplied URL. (a)'s floor-off pre-flight did not:
+> `checkEndpoint` (`internal/mcp/transport.go`), with its `DisableIPFloor()` — still the single
+> production use — runs in the MCP adapter as before, the network tools keep their own
+> blanket-floor pre-flight, and each adapter applies its own URL or origin redaction (the scrubbers
+> now live beside the client in `internal/security/urlscrub.go`, keeping their two distinct
+> algorithms) and its own refusal wording. The review's candidate put the pre-flight and the
+> redaction inside the client too; this narrowing is **deliberate, not deferred**: the pre-flight
+> is where each adapter's refusal wording and budget live, and a client that owned it would carry a
+> floor-off switch any caller could reach. Three host types remain — `tools.execHost`,
+> `gitexec.Host` and `mcp.Host` — each the set of facilities its own callers fake. Nothing in this
+> amendment's decision changes, and the behaviour is byte-identical per adapter.
 
 **(d) Everything else in this ADR is untouched.** The per-call disposition of an **MCP tool** is not
 in question: the `mcp` class still gates through Approval in Auto with its server-grain

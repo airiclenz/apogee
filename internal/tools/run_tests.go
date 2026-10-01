@@ -288,8 +288,10 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	runnerArgs := runner.args(subtree, filter)
-	// The environment is the caller's MINUS the credential variables (subprocessEnv, the same
-	// environment terminal and python_exec run in): a test suite reads the toolchain's own
+	// The environment is the caller's MINUS the credential variables (plain subprocessEnv, with
+	// PATH left unscoped — unlike terminal and python_exec, which take subprocessEnvScopedPath,
+	// because a workspace-resident runner such as node_modules/.bin/jest IS the test command
+	// here; the contract's 2026-08-13 amendment): a test suite reads the toolchain's own
 	// variables (build caches, virtualenv, NODE_PATH) and an allowlist written for git would break
 	// runs that work in the user's shell — but the runner it starts is repo-authored code, which
 	// under this threat model is untrusted bytes with no business reading the key apogee talks to

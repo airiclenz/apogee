@@ -282,8 +282,10 @@
 // TestNoPackageLevelExecSeam holds it to none through go/types.
 //
 // Network. network.go is the funnel itself — networkTool.do, the single path from a tool to
-// the network — carrying the URLGuard pre-flight and dial-time checks, the one per-call
-// deadline, the response cap, and the unexported url-filter marker the disposition keys on.
+// the network — carrying the URLGuard pre-flight, the one per-call deadline, the response cap,
+// and the unexported url-filter marker the disposition keys on; its client, and with it the
+// dial-time checks, is internal/security's guarded client (URLGuard.GuardedClient under
+// DialFloor), the same builder the MCP HTTP transports use.
 // web_fetch.go is web_fetch (GET plus its body rendering — an HTML page as readable text unless
 // raw asks for the markup), http_request.go is http_request (any method, headers, body), and
 // web_search.go is web_search — provider selection between the built-in DuckDuckGo, a

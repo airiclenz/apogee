@@ -585,6 +585,21 @@ one level down (D2), for free, with no threading.
 > reported absent, so the settings editor announces a refusal where it used to announce an install
 > hint, and the OS opener refuses loudly where it used to degrade silently.
 
+> **Amended 2026-09-30 (one exec host per caller, one guarded client; architecture review
+> 2026-09-30 #4, #7).** No cell moves and no verdict changes; what moved is where the facilities
+> above are held. `internal/gitexec` keeps no package-level PATH lookup or launcher: every git run
+> — a git tool's, the engine's tree snapshot (`tools.RunGitQuery`) and commit-secrets shadow runs,
+> the snapshot store's — resolves and spawns through a `gitexec.Host` its caller passes, so the
+> exec fence, the hardening and the command-config refusal above apply to a faked host exactly as
+> to the real one. The git tools hand gitexec their `execHost` (`execHost.git()`) and `go vet`
+> (diagnostics) launches through that same host's run, the one `execHost` `builtinTools` builds;
+> an MCP stdio server takes its env scoping and teardown from the `mcp.Host` the composition root
+> passes to `ConnectWith`. On the network side, `security.URLGuard.GuardedClient` builds the HTTP client for
+> both the network funnel and the MCP HTTP transports — proxy resolution, the dial-time control
+> (`DialFloor` / `DialPinDestination`), the fixed transport and the refused redirect — while each
+> adapter keeps its own pre-flight and refusal wording (ADR 0012 amendment 2026-07-26, note
+> 2026-09-30).
+
 > **Amended 2026-09-06 (a subprocess that is read-only by construction takes the RO row; ADR 0012
 > amendment 2026-09-06).** The 2026-07-26 rule above — an unfakeable marker outranks a tool's own
 > `ReadOnly()` declaration — **stands for every other marker carrier** and is superseded for **one**
