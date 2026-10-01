@@ -123,6 +123,13 @@ func TestWatchCoalescesABurstIntoOneReport(t *testing.T) {
 	expectNoChange(t, w, testQuiet, "the burst had already been reported once")
 }
 
+// stallResult is what the staged stall reports back: how late it armed when that was too late to
+// stage anything, or the outcome of the write it made inside the stall.
+type stallResult struct {
+	late time.Duration
+	err  error
+}
+
 // A still sample is quiet only as of the stat that took it. A poll goroutine held off the CPU between
 // the stat and its clock read wakes past reportAt, and reporting then would announce a sample the
 // rest of the burst has since overtaken — the next tick sees that write and reports the save a second
@@ -138,27 +145,41 @@ func TestWatchNeverSettlesOnASampleTakenBeforeAStall(t *testing.T) {
 	w.Interval = testInterval
 	w.Settle = testSettle
 	var armed atomic.Bool
-	stalled := make(chan error, 1)
+	var wroteFirst time.Time
+	stalled := make(chan stallResult, 1)
 	w.sampled = func() {
 		if !armed.CompareAndSwap(true, false) {
 			return
 		}
+		// The stalled tick's stat came after its first clock read and before this one, and any
+		// pending reportAt is at least a Settle past wroteFirst. Inside that Settle the tick is
+		// therefore still pending by construction; past it, the first write has rightly settled
+		// and been reported, and the write below is a second change, not the rest of a burst.
+		if late := time.Since(wroteFirst); late >= testSettle {
+			stalled <- stallResult{late: late}
+			return
+		}
 		time.Sleep(testSettle + testSettle/2)
-		stalled <- os.WriteFile(path, []byte("auto-title: true\n# a second line\n"), 0o600)
+		stalled <- stallResult{err: os.WriteFile(path, []byte("auto-title: true\n# a second line\n"), 0o600)}
 	}
 	w.Start()
 	t.Cleanup(w.Stop)
 
+	wroteFirst = time.Now()
 	writeWatchedFile(t, path, "auto-title: true\n")
 	// Let the poll observe the first write, so the stalled tick is a still one with a Settle
 	// pending. Should it not have yet, the stalled tick observes it instead and the burst
-	// still coalesces, so the arming cannot make a correct watcher fail.
+	// still coalesces, so arming early cannot make a correct watcher fail; arming late is
+	// caught by the hook and skips the test.
 	time.Sleep(testSettle / 5)
 	armed.Store(true)
 	select {
-	case err := <-stalled:
-		if err != nil {
-			t.Fatalf("write inside the stall: %v", err)
+	case res := <-stalled:
+		if res.late > 0 {
+			t.Skipf("the stall armed %v after the first write, past the %v Settle it had to land inside", res.late, testSettle)
+		}
+		if res.err != nil {
+			t.Fatalf("write inside the stall: %v", res.err)
 		}
 	case <-time.After(testDeadline):
 		t.Fatal("the poll never reached the staged stall")
