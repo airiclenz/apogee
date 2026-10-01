@@ -13,11 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // mutatingSubprocessTool is a fake SubprocessTool whose Execute runs an arbitrary
@@ -284,26 +287,65 @@ func TestTreeSnapshot_DiffHelpers(t *testing.T) {
 // The floor's git goes through the tools funnel (F-05)
 // ---------------------------------------------------------------------------
 
-// writeFakeGit installs an executable POSIX fake git at dir/git that appends its argv and the
-// two environment answers the funnel is judged on to record, then answers rev-parse so the floor
-// treats the workspace as a repository. It returns the fake's path.
-func writeFakeGit(t *testing.T, dir, record string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake-git fixture is a POSIX shell script; the funnel it pins is platform-independent")
+// specLog is the record of every git spec a fake Host was handed, in launch order.
+type specLog struct {
+	mu    sync.Mutex
+	specs []subprocess.SubprocessSpec
+}
+
+func (l *specLog) add(spec subprocess.SubprocessSpec) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.specs = append(l.specs, spec)
+}
+
+// all returns a copy of the specs recorded so far.
+func (l *specLog) all() []subprocess.SubprocessSpec {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.specs)
+}
+
+// gitCommand returns the git invocation spec carries with the binary and the hardening `-c`
+// options stripped — "status --porcelain" — so a fake Spawn can answer by subcommand.
+func gitCommand(spec subprocess.SubprocessSpec) string {
+	args := spec.Argv[1:]
+	for len(args) >= 2 && args[0] == "-c" {
+		args = args[2:]
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
+	return strings.Join(args, " ")
+}
+
+// scriptedGit returns a Host whose Look answers gitPath and whose Spawn answers every command
+// from answer, recording each spec it was handed. The command-config probe is answered as a
+// clean repository — its rev-parse names no file, every scope listing passes — so answer sees
+// only the commands themselves. Nothing is executed.
+func scriptedGit(gitPath string, answer func(command string) subprocess.SubprocessResult) (gitexec.Host, *specLog) {
+	log := &specLog{}
+	host := gitexec.Host{
+		Look: func(string) (string, error) { return gitPath, nil },
+		Spawn: func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+			log.add(spec)
+			command := gitCommand(spec)
+			switch {
+			case strings.HasPrefix(command, "rev-parse --git-path config "):
+				return subprocess.SubprocessResult{}, nil
+			case strings.HasPrefix(command, "config ") && strings.HasSuffix(command, " --show-origin --list -z"):
+				return subprocess.SubprocessResult{ExitCode: 1}, nil
+			}
+			return answer(command), nil
+		},
 	}
-	path := filepath.Join(dir, "git")
-	script := "#!/bin/sh\n" +
-		"{ echo \"argv: $*\"; echo \"nosystem: ${GIT_CONFIG_NOSYSTEM-unset}\"; echo \"apikey: ${APOGEE_API_KEY-unset}\"; } >> \"" + record + "\"\n" +
-		"case \"$*\" in *rev-parse*) echo true ;; esac\n" +
-		"exit 0\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
+	return host, log
+}
+
+// withEngineGit returns the setup hook that points the Agent's own git — the mutation floor's
+// and the commit-secrets pre-check's — at host.
+func withEngineGit(host gitexec.Host) func(*Agent) {
+	return func(a *Agent) {
+		a.gitHost = host
+		a.tree = newTreeSnapshotter(a.cfg.WorkspaceDir, host)
 	}
-	return path
 }
 
 // TestTreeSnapshot_GitRunsThroughTheFunnel pins F-05's fix at the floor's own seam: the git the
@@ -311,36 +353,47 @@ func writeFakeGit(t *testing.T, dir, record string) string {
 // core.hooksPath=/core.fsmonitor=false options, GIT_CONFIG_NOSYSTEM) and the allowlisted environment, so apogee's own
 // API key never reaches the most frequently spawned program the agent runs.
 func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
-	// No t.Parallel: PATH and APOGEE_API_KEY are process-wide.
+	// No t.Parallel: APOGEE_API_KEY is process-wide.
 	root := t.TempDir()
-	fakeDir := t.TempDir()
-	record := filepath.Join(fakeDir, "record")
-	writeFakeGit(t, fakeDir, record)
-	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("APOGEE_API_KEY", "shhh-secret")
+	host, log := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
+		if command == "rev-parse --is-inside-work-tree" {
+			return subprocess.SubprocessResult{Stdout: "true\n"}
+		}
+		return subprocess.SubprocessResult{}
+	})
 	a := newWorkspaceAgent(t, root)
+	withEngineGit(host)(a)
 
 	executeFake(t, a, mutatingSubprocessTool{
 		subprocess: true,
 		result:     domain.ToolResult{Content: "ok"},
 	})
 
-	logged, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatalf("the floor spawned no git at all: %v", err)
+	var argvs []string
+	var envs [][]string
+	for _, spec := range log.all() {
+		argvs = append(argvs, strings.Join(spec.Argv[1:], " "))
+		envs = append(envs, spec.Env)
 	}
-	got := string(logged)
-	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false rev-parse --is-inside-work-tree") {
-		t.Errorf("record = %q, want the probe hardened", got)
+	if len(argvs) == 0 {
+		t.Fatal("the floor spawned no git at all")
 	}
-	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false status --porcelain") {
-		t.Errorf("record = %q, want the snapshots hardened", got)
+	if !slices.Contains(argvs, "-c core.hooksPath= -c core.fsmonitor=false rev-parse --is-inside-work-tree") {
+		t.Errorf("argvs = %q, want the probe hardened", argvs)
 	}
-	if !strings.Contains(got, "nosystem: 1") {
-		t.Errorf("record = %q, want GIT_CONFIG_NOSYSTEM=1", got)
+	if !slices.Contains(argvs, "-c core.hooksPath= -c core.fsmonitor=false status --porcelain") {
+		t.Errorf("argvs = %q, want the snapshots hardened", argvs)
 	}
-	if strings.Contains(got, "shhh-secret") || !strings.Contains(got, "apikey: unset") {
-		t.Errorf("record = %q, want the allowlist to have dropped APOGEE_API_KEY", got)
+	for i, env := range envs {
+		if !slices.Contains(env, "GIT_CONFIG_NOSYSTEM=1") {
+			t.Errorf("run %q env lacks GIT_CONFIG_NOSYSTEM=1", argvs[i])
+		}
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "APOGEE_API_KEY=") || strings.Contains(kv, "shhh-secret") {
+				t.Errorf("run %q env carries %q, want the allowlist to have dropped APOGEE_API_KEY", argvs[i], kv)
+			}
+		}
 	}
 }
 
@@ -348,14 +401,21 @@ func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
 // workspace is bytes the model may have written, so the funnel refuses it — and the floor's
 // contract turns that refusal into a silent skip rather than a failed tool call.
 func TestTreeSnapshot_PlantedGitTurnsTheFloorOff(t *testing.T) {
-	// No t.Parallel: PATH is process-wide.
+	t.Parallel()
 	requireGit(t)
 	root, tracked := newGitWorkspace(t)
-	record := filepath.Join(t.TempDir(), "record")
-	plantedDir := filepath.Join(root, "node_modules", ".bin")
-	writeFakeGit(t, plantedDir, record)
-	t.Setenv("PATH", plantedDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	planted := filepath.Join(root, "node_modules", ".bin", "git")
+	if err := os.MkdirAll(filepath.Dir(planted), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(planted, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write planted git: %v", err)
+	}
+	host, log := scriptedGit(planted, func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{Stdout: "true\n"}
+	})
 	a := newWorkspaceAgent(t, root)
+	withEngineGit(host)(a)
 
 	result := executeFake(t, a, mutatingSubprocessTool{
 		subprocess: true,
@@ -369,8 +429,8 @@ func TestTreeSnapshot_PlantedGitTurnsTheFloorOff(t *testing.T) {
 	if strings.Contains(result.Content, "[warning:") {
 		t.Errorf("a refused git still produced a warning: %q", result.Content)
 	}
-	if _, err := os.Stat(record); err == nil {
-		t.Error("the planted git ran; the exec fence must refuse it before the spawn")
+	if specs := log.all(); len(specs) != 0 {
+		t.Errorf("the planted git was launched %d times; the exec fence must refuse it before the spawn", len(specs))
 	}
 }
 

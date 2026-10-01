@@ -55,11 +55,6 @@ var commitSecretsTimeout = 30 * time.Second
 // shadowDirPattern names the per-call temp dir the shadow index and object directory live in.
 const shadowDirPattern = "apogee-commit-secrets-*"
 
-// shadowGitQuery is the funnel every shadow run goes through — gitexec.Query, so the runs carry
-// the git tools' hardening, environment allowlist and command-config refusal. It is a package
-// var so a test can count the git children a mode spawns (Plan mode must spawn none).
-var shadowGitQuery = gitexec.Query
-
 // gitCommitFiles is the one git_commit argument the pre-check reads: the files the tool would
 // stage before committing. Everything else the tool validates itself.
 type gitCommitFiles struct {
@@ -134,7 +129,7 @@ func (a *Agent) commitSecretsCheck(ctx context.Context, call domain.ToolCall) (s
 	scanCtx, cancel := context.WithTimeout(ctx, commitSecretsTimeout)
 	defer cancel()
 
-	findings, err := scanStagedSecrets(scanCtx, root, pathspecs)
+	findings, err := scanStagedSecrets(scanCtx, a.gitHost, root, pathspecs)
 	switch {
 	case errors.Is(err, errNothingToScan):
 		return security.PreCheck{}, false
@@ -161,12 +156,17 @@ func (a *Agent) commitSecretsCheck(ctx context.Context, call domain.ToolCall) (s
 // a scan that RAN (an empty slice is a clean tree); errNothingToScan says there was nothing to
 // scan; any other error says the scan started against a resolved repository and could not
 // finish, which the caller turns into the forced look.
-func scanStagedSecrets(ctx context.Context, root string, pathspecs []string) ([]security.SecretFinding, error) {
-	gitPath, err := gitexec.Resolve(ctx, root, nil)
+//
+// Every git it runs — the resolution and the four shadow runs — goes through host's Resolve and
+// Query, so the runs carry the git tools' exec fence, hardening, environment allowlist and
+// command-config refusal; a test passes a fake host to script git's outcomes or count its
+// children (Plan mode must spawn none).
+func scanStagedSecrets(ctx context.Context, host gitexec.Host, root string, pathspecs []string) ([]security.SecretFinding, error) {
+	gitPath, err := host.Resolve(ctx, root)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errNothingToScan, err)
 	}
-	shadow, err := newShadowIndex(ctx, gitPath, root)
+	shadow, err := newShadowIndex(ctx, host, gitPath, root)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +192,7 @@ func scanStagedSecrets(ctx context.Context, root string, pathspecs []string) ([]
 // index (or no index at all, for a repository that has never staged anything) and an object
 // directory of its own, plus the environment that points git at both.
 type shadowIndex struct {
+	host    gitexec.Host
 	gitPath string
 	root    string
 	dir     string
@@ -205,8 +206,8 @@ type shadowIndex struct {
 // git treats as an empty index; an empty FILE would make every run fail with "index file
 // smaller than expected". The temp object directory must exist before git will accept it as a
 // repository, so it is created here; the alternate is the real object store, read-only.
-func newShadowIndex(ctx context.Context, gitPath, root string) (*shadowIndex, error) {
-	paths, err := runShadowGit(ctx, gitPath, root, nil,
+func newShadowIndex(ctx context.Context, host gitexec.Host, gitPath, root string) (*shadowIndex, error) {
+	paths, err := runShadowGit(ctx, host, gitPath, root, nil,
 		"rev-parse", "--git-path", "index", "--git-path", "objects")
 	if err != nil {
 		// This run IS the repository resolution, so git refusing it means there was nothing
@@ -227,7 +228,7 @@ func newShadowIndex(ctx context.Context, gitPath, root string) (*shadowIndex, er
 	if err != nil {
 		return nil, err
 	}
-	s := &shadowIndex{gitPath: gitPath, root: root, dir: dir}
+	s := &shadowIndex{host: host, gitPath: gitPath, root: root, dir: dir}
 	index := filepath.Join(dir, "index")
 	objects := filepath.Join(dir, "objects")
 	if err := os.Mkdir(objects, 0o700); err != nil {
@@ -255,19 +256,19 @@ var errGitPathShape = errors.New("apogee: commit-secrets: unexpected rev-parse -
 // error stops the scan: the repository resolved, so scanStagedSecrets hands the failure on as an
 // incomplete scan rather than as a clean one.
 func (s *shadowIndex) git(ctx context.Context, args ...string) (string, error) {
-	return runShadowGit(ctx, s.gitPath, s.root, s.env, args...)
+	return runShadowGit(ctx, s.host, s.gitPath, s.root, s.env, args...)
 }
 
-// runShadowGit runs one git command in root through the shadow funnel. ctx carries the check's
-// single budget (commitSecretsTimeout, taken once in commitSecretsCheck), so the four runs share
-// one ceiling and a cancelled Turn stops the check; the same duration goes to the funnel as the
-// per-run timeout, which is what bounds a run whose ctx outlives it.
+// runShadowGit runs one git command in root through host's Query — the shadow funnel. ctx
+// carries the check's single budget (commitSecretsTimeout, taken once in commitSecretsCheck), so
+// the four runs share one ceiling and a cancelled Turn stops the check; the same duration goes to
+// the funnel as the per-run timeout, which is what bounds a run whose ctx outlives it.
 //
 // The classification lives here: gitexec renders a run its own timeout killed as a plain
 // `git …: timed out after …` error and never wraps context.DeadlineExceeded, so the budget's
 // expiry is read from ctx AFTER the call and marked with errScanTimedOut.
-func runShadowGit(ctx context.Context, gitPath, root string, env []string, args ...string) (string, error) {
-	out, err := shadowGitQuery(ctx, gitPath, root, env, commitSecretsTimeout, args...)
+func runShadowGit(ctx context.Context, host gitexec.Host, gitPath, root string, env []string, args ...string) (string, error) {
+	out, err := host.Query(ctx, gitPath, root, env, commitSecretsTimeout, args...)
 	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return "", fmt.Errorf("%w: %v", errScanTimedOut, err)
 	}

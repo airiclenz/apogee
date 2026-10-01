@@ -74,6 +74,14 @@ func (eligibleConfiner) Confine(_ context.Context, _ domain.ConfinementBox, _ *e
 // returns the recorded events plus the agent for post-assertions.
 func driveToolCall(t *testing.T, cfg domain.Config, sink *recordingSink, callID, tool, args string) *Agent {
 	t.Helper()
+	return driveToolCallWith(t, cfg, sink, nil, callID, tool, args)
+}
+
+// driveToolCallWith is driveToolCall with a setup hook run on the constructed Agent before the
+// Turn starts — how a test injects an engine facility newAgent defaults, such as the git host
+// (withEngineGit). A nil setup is driveToolCall exactly.
+func driveToolCallWith(t *testing.T, cfg domain.Config, sink *recordingSink, setup func(*Agent), callID, tool, args string) *Agent {
+	t.Helper()
 	// The tool-call repair Floor guard is off for these drives. Several of them push a call the
 	// guard would answer BEFORE dispatch ever saw it — a deliberately bare {} on a tool whose schema
 	// declares required parameters, or a tool a mode has withdrawn from the menu — and every one of
@@ -87,6 +95,9 @@ func driveToolCall(t *testing.T, cfg domain.Config, sink *recordingSink, callID,
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
+	}
+	if setup != nil {
+		setup(a)
 	}
 	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
 		t.Fatalf("Submit: %v", err)

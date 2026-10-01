@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions/scope"
@@ -385,6 +386,12 @@ type Agent struct {
 	// only when the workspace root is a git repository (probed once per Agent,
 	// cached). newAgent always supplies it; nil is an inactive floor, never an error.
 	tree *treeSnapshotter
+
+	// gitHost is the git runner the commit-secrets pre-check (secretsguard.go) resolves and
+	// spawns its shadow runs through. newAgent sets gitexec.OS(); a test swaps in a fake Host to
+	// script git's outcomes. A literal that omits it — the background host — is no less safe:
+	// the zero Host is the real OS.
+	gitHost gitexec.Host
 
 	conv            domain.Conversation // serializable conversation state (ADR 0001)
 	turns           *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)

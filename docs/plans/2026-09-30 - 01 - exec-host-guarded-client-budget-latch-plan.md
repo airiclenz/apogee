@@ -72,7 +72,10 @@ The absent-git test is `TestGit_GracefulWhenAbsent` (no `TestGit_AbsentGitIsRepo
 **Acceptance:** `go test ./internal/tools -run 'Git|Stage|DeleteFile|MoveFile|Diagnostics|TestBuiltinToolsShareOneExecHost|TestNoPackageLevelExecSeam'`
 **Commit:** `fix(tools): git and go vet run through the tool's exec host`
 
-## 4. agent: engine git through an injectable gitexec.Host
+## 4. agent: engine git through an injectable gitexec.Host — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): two unexported fields, both defaulted to gitexec.OS() in newAgent's shared literal: treeSnapshotter.host (passed by newTreeSnapshotter(root, host); the field is `host` because the snapshotter already has a `git` method) and Agent.gitHost for the secrets guard; scanStagedSecrets/newShadowIndex/runShadowGit take the Host and call host.Resolve / host.Query. background.go's backgroundHost literal is untouched (zero Host is the OS). gofmt re-aligned the trailing comments of the neighbouring tokens/prompts/tasks lines in construct.go.
+NOTES (2026-10-01): tests — driveToolCallWith(t, cfg, sink, setup, ...) added (driveToolCall delegates with nil); withEngineGit(host) sets both fields; scriptedGit fake Host answers gitexec's config probe as a clean repo and matches the command after the hardening `-c` pairs (gitCommand). TestTreeSnapshot_GitRunsThroughTheFunnel and _PlantedGitTurnsTheFloorOff no longer swap PATH (the planted test now takes t.Parallel); writeFakeGit, writeSleepingGit and countShadowGit are deleted (countingGit wraps the real launcher); the incomplete-scan cases use a wedged Spawn (blocks until the budget's ctx expires) and a Spawn failing `diff` with exit 128; TestCommitSecretsSkipsInPlanMode and _HonoursStricterTextVerdict now take t.Parallel. lowerCommitSecretsTimeout and t.Setenv(APOGEE_API_KEY) stay, so those tests remain serial.
 
 **Depends on:** item 3.
 **Files:** `internal/agent/treesnapshot.go`, `internal/agent/secretsguard.go`, `internal/agent/treesnapshot_test.go`, `internal/agent/secretsguard_test.go`, `internal/agent/agent.go`, `internal/agent/construct.go`, `internal/agent/guardrails_test.go`

@@ -2,18 +2,18 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/subprocess"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -80,18 +80,17 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// countShadowGit swaps the shadow funnel for one that counts its invocations and restores it
-// when the test ends. The tests that use it must not run in parallel with each other.
-func countShadowGit(t *testing.T) *atomic.Int32 {
-	t.Helper()
+// countingGit returns the setup hook that runs the Agent's own git through a Host counting every
+// git child it launches — the real launcher behind the count — plus the count.
+func countingGit() (func(*Agent), *atomic.Int32) {
 	var calls atomic.Int32
-	orig := shadowGitQuery
-	shadowGitQuery = func(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
-		calls.Add(1)
-		return orig(ctx, gitPath, dir, env, timeout, args...)
+	host := gitexec.Host{
+		Spawn: func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+			calls.Add(1)
+			return subprocess.RunSubprocess(ctx, spec)
+		},
 	}
-	t.Cleanup(func() { shadowGitQuery = orig })
-	return &calls
+	return withEngineGit(host), &calls
 }
 
 // realIndexBytes reads the repository's index file, or nil when there is none.
@@ -279,20 +278,6 @@ func TestCommitSecretsGitFailureSkips(t *testing.T) {
 	})
 }
 
-// writeSleepingGit installs an executable POSIX git at dir/git that answers nothing and sleeps
-// well past any budget a test sets, so every shadow run the pre-check makes is one the check's
-// own context has to cut short. It returns dir.
-func writeSleepingGit(t *testing.T, dir string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the sleeping-git fixture is a POSIX shell script; the budget it pins is platform-independent")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
-		t.Fatalf("write sleeping git: %v", err)
-	}
-	return dir
-}
-
 // lowerCommitSecretsTimeout shrinks the pre-check's budget for one test and restores it after,
 // so a case can spend the whole ceiling in milliseconds. Tests using it must not run in parallel.
 func lowerCommitSecretsTimeout(t *testing.T, d time.Duration) {
@@ -308,17 +293,24 @@ func lowerCommitSecretsTimeout(t *testing.T, d time.Duration) {
 // as an unchecked commit rather than as a finding, and a denied look answers the model with the
 // same words. This is the outcome ADR 0080 decision 6's silent skip used to hide.
 func TestCommitSecretsIncompleteScanForcesApproval(t *testing.T) {
-	// No t.Parallel in either case: PATH, the shadow funnel and the budget are process-wide.
+	// No t.Parallel in either case: the budget is process-wide.
 	t.Run("the budget cuts the scan short", func(t *testing.T) {
 		root := newSecretsRepo(t)
 		stageSecrets(t, root)
-		slow := writeSleepingGit(t, t.TempDir())
-		t.Setenv("PATH", slow+string(os.PathListSeparator)+os.Getenv("PATH"))
 		lowerCommitSecretsTimeout(t, 250*time.Millisecond)
+		// A git that never answers: every run holds until the check's own budget cuts it short.
+		wedged := gitexec.Host{
+			Look: func(string) (string, error) { return filepath.Join(t.TempDir(), "git"), nil },
+			Spawn: func(ctx context.Context, _ subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+				<-ctx.Done()
+				return subprocess.SubprocessResult{}, ctx.Err()
+			},
+		}
 		sink := &recordingSink{}
 		approver := &gateApprover{decision: domain.ApprovalDeny}
 
-		driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit", `{"message":"add keys"}`)
+		driveToolCallWith(t, secretsConfig(sink, root, approver), sink, withEngineGit(wedged),
+			"c1", "git_commit", `{"message":"add keys"}`)
 
 		requireIncompleteScanLook(t, approver, sink)
 	})
@@ -326,19 +318,20 @@ func TestCommitSecretsIncompleteScanForcesApproval(t *testing.T) {
 	t.Run("a git failure after the repository resolved", func(t *testing.T) {
 		root := newSecretsRepo(t)
 		stageSecrets(t, root)
-		orig := shadowGitQuery
 		// rev-parse resolves the repository; the diff that would read the staged bytes dies.
-		shadowGitQuery = func(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "diff" {
-				return "", errors.New("git diff: exit 128: fatal: unable to read the index")
-			}
-			return orig(ctx, gitPath, dir, env, timeout, args...)
+		failingDiff := gitexec.Host{
+			Spawn: func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+				if strings.HasPrefix(gitCommand(spec), "diff ") {
+					return subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: unable to read the index"}, nil
+				}
+				return subprocess.RunSubprocess(ctx, spec)
+			},
 		}
-		t.Cleanup(func() { shadowGitQuery = orig })
 		sink := &recordingSink{}
 		approver := &gateApprover{decision: domain.ApprovalDeny}
 
-		driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit", `{"message":"add keys"}`)
+		driveToolCallWith(t, secretsConfig(sink, root, approver), sink, withEngineGit(failingDiff),
+			"c1", "git_commit", `{"message":"add keys"}`)
 
 		requireIncompleteScanLook(t, approver, sink)
 	})
@@ -372,15 +365,16 @@ func requireIncompleteScanLook(t *testing.T, approver *gateApprover, sink *recor
 // resolve() refuses the write leaf and applyOverlays ignores the overlay, so the shadow would
 // answer a question nobody asks.
 func TestCommitSecretsSkipsInPlanMode(t *testing.T) {
+	t.Parallel()
 	root := newSecretsRepo(t)
 	stageSecrets(t, root)
-	calls := countShadowGit(t)
+	setup, calls := countingGit()
 	sink := &recordingSink{}
 	approver := &gateApprover{decision: domain.ApprovalAllow}
 	cfg := secretsConfig(sink, root, approver)
 	cfg.Mode = domain.ModePlan
 
-	driveToolCall(t, cfg, sink, "c1", "git_commit", `{"message":"add keys"}`)
+	driveToolCallWith(t, cfg, sink, setup, "c1", "git_commit", `{"message":"add keys"}`)
 
 	if n := calls.Load(); n != 0 {
 		t.Errorf("shadow git spawned %d times in Plan mode, want 0", n)
@@ -399,13 +393,14 @@ func TestCommitSecretsSkipsInPlanMode(t *testing.T) {
 // key no rule reads) — that verdict stands as worded, its own Hint on the prompt rather than
 // the scanner's, and the shadow never runs, even with secret material staged.
 func TestCommitSecretsHonoursStricterTextVerdict(t *testing.T) {
+	t.Parallel()
 	root := newSecretsRepo(t)
 	stageSecrets(t, root)
-	calls := countShadowGit(t)
+	setup, calls := countingGit()
 	sink := &recordingSink{}
 	approver := &gateApprover{decision: domain.ApprovalDeny}
 
-	driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit",
+	driveToolCallWith(t, secretsConfig(sink, root, approver), sink, setup, "c1", "git_commit",
 		`{"message":"m","files":["~/.apogee/config.yaml"]}`)
 
 	if n := calls.Load(); n != 0 {

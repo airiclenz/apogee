@@ -41,15 +41,17 @@ const treeMutationWarningCap = 10
 // per Agent (sync.Once), on the first subprocess call rather than in the constructor,
 // so construction — including every sub-agent spawn — never pays a git invocation.
 type treeSnapshotter struct {
-	root      string    // the workspace root snapshots run in; "" disables the floor
-	probeOnce sync.Once // guards the one rev-parse probe per Agent
-	isRepo    bool      // the cached probe answer; false until proven true
+	root      string       // the workspace root snapshots run in; "" disables the floor
+	host      gitexec.Host // the git runner every snapshot goes through; a test passes a fake
+	probeOnce sync.Once    // guards the one rev-parse probe per Agent
+	isRepo    bool         // the cached probe answer; false until proven true
 }
 
-// newTreeSnapshotter builds the floor for one workspace root. An empty root yields a
-// permanently inactive snapshotter — an Agent with no workspace has no tree to watch.
-func newTreeSnapshotter(workspaceRoot string) *treeSnapshotter {
-	return &treeSnapshotter{root: workspaceRoot}
+// newTreeSnapshotter builds the floor for one workspace root, running its git through host
+// (gitexec.OS() in production). An empty root yields a permanently inactive snapshotter — an
+// Agent with no workspace has no tree to watch.
+func newTreeSnapshotter(workspaceRoot string, host gitexec.Host) *treeSnapshotter {
+	return &treeSnapshotter{root: workspaceRoot, host: host}
 }
 
 // active reports whether the floor applies at all: a workspace root is set and it is a
@@ -114,7 +116,7 @@ func (t *treeSnapshotter) mutationWarning(ctx context.Context, before string) st
 func (t *treeSnapshotter) git(ctx context.Context, args ...string) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, treeSnapshotTimeout)
 	defer cancel()
-	return tools.RunGitQuery(runCtx, gitexec.OS(), t.root, treeSnapshotTimeout, args...)
+	return tools.RunGitQuery(runCtx, t.host, t.root, treeSnapshotTimeout, args...)
 }
 
 // porcelainDiffPaths extracts the changed paths from two porcelain snapshots: every

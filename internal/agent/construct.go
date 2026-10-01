@@ -9,6 +9,7 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -115,10 +116,11 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 		parallelAgents:     cfg.ParallelAgents, // and the fan-out width the host resolved per bound server
 		textParser:         textParser,
 		stripper:           stripper,
-		tokens:             apogeectx.NewTokenEstimator(),        // fresh for a delegate too: a routed child starts uncalibrated by construction, so it never needs the reset SwitchUpstream and Rebind perform
-		prompts:            domain.NewPromptSlot(),               // the one prompt surface this Agent tree queues on
-		tasks:              tasklist.New(),                       // the model's checklist, empty and ENGINE-held: the tool may not hold it, because SwapTools rebuilds tool instances mid-session (ADR 0072, ADR 0008). A delegate's is fresh too — the delegation value carries no task-list handle by design (ADR 0072)
-		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
+		tokens:             apogeectx.NewTokenEstimator(),                      // fresh for a delegate too: a routed child starts uncalibrated by construction, so it never needs the reset SwitchUpstream and Rebind perform
+		prompts:            domain.NewPromptSlot(),                             // the one prompt surface this Agent tree queues on
+		tasks:              tasklist.New(),                                     // the model's checklist, empty and ENGINE-held: the tool may not hold it, because SwapTools rebuilds tool instances mid-session (ADR 0072, ADR 0008). A delegate's is fresh too — the delegation value carries no task-list handle by design (ADR 0072)
+		tree:               newTreeSnapshotter(cfg.WorkspaceDir, gitexec.OS()), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
+		gitHost:            gitexec.OS(),                                       // the git the commit-secrets pre-check runs (secretsguard.go)
 	}
 	// The fields the two kinds of Agent hold differently: a top-level Agent OWNS each afresh — its
 	// guards, its undo journal, its Console registry, its Delegation-target latch, its clock and the
