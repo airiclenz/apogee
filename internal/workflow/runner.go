@@ -192,6 +192,12 @@ type Runner struct {
 	Recipe string
 	// Now is the clock status.json is stamped with; nil means time.Now.
 	Now func() time.Time
+	// Admit, when set, is asked by Run whether it may run in the folder it found or created, with
+	// that folder's id, before Run writes to a found folder; nil admits every folder. A refusal ends
+	// Run with Admit's error and a zero Result, the found folder left as it was. A created folder is
+	// already written when Admit is asked, so a guard for a live folder — always a found one — sees
+	// every folder another run may be driving.
+	Admit func(id string) error
 }
 
 // Result is a run's outcome: the workflow's id and folder, its final phase — done, or stopped when
@@ -308,7 +314,8 @@ type Tally struct {
 // asks a question already answered. A cancelled ctx stops the running children, keeps the finished
 // items' receipts, and returns a Result whose Phase is PhaseStopped. Either way the run ends by
 // writing items.md (Store.WriteItems) into the folder. The error is for a run that
-// could not proceed: an invalid plan, an unreadable item source, a store that cannot be written.
+// could not proceed: an invalid plan, an unreadable item source, a store that cannot be written, a
+// folder Admit refused.
 func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
 		return Result{}, errors.New("workflow: runner needs a Spawner, a Store and a Workspace")
@@ -319,6 +326,11 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	status, found, stageItems, err := r.openFolder(plan, "")
 	if err != nil {
 		return Result{}, err
+	}
+	if r.Admit != nil {
+		if err := r.Admit(status.ID); err != nil {
+			return Result{}, err
+		}
 	}
 	status, prior, replay, err := r.resetStatus(plan, status, found)
 	if err != nil {

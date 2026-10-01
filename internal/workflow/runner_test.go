@@ -868,6 +868,63 @@ func TestRunnerOpenFindsOrCreatesTheFolderRunWillResume(t *testing.T) {
 	}
 }
 
+func TestRunnerAdmitRefusesBeforeAnyWrite(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	plan := fanPlan("a")
+	stored, err := runner.Open(plan, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	dir, err := runner.Store.Dir(stored.ID)
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	statusPath := filepath.Join(dir, "status.json")
+	before, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read status.json: %v", err)
+	}
+	errLive := errors.New("folder is live")
+	var asked []string
+	runner.Admit = func(id string) error {
+		asked = append(asked, id)
+		return errLive
+	}
+
+	result, err := runner.Run(context.Background(), plan)
+
+	if !errors.Is(err, errLive) {
+		t.Errorf("Run err = %v, want the Admit refusal", err)
+	}
+	if !slices.Equal(asked, []string{stored.ID}) {
+		t.Errorf("Admit asked %v, want only the stored folder %q", asked, stored.ID)
+	}
+	if result.ID != "" || result.Dir != "" || result.Phase != "" || result.Stages != nil {
+		t.Errorf("refused Run result = %+v, want a zero Result", result)
+	}
+	after, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read status.json: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("a refused Run rewrote status.json:\n%s\nwant\n%s", after, before)
+	}
+	if got := len(spawner.specsFor("a")); got != 0 {
+		t.Errorf("a refused Run spawned %d children, want none", got)
+	}
+
+	runner.Admit = nil
+	resumed := runPlan(t, runner, context.Background(), plan)
+	if resumed.ID != stored.ID || len(spawner.specsFor("a")) != 1 {
+		t.Errorf("nil Admit ran %q with %d spawns, want it to resume %q and spawn once",
+			resumed.ID, len(spawner.specsFor("a")), stored.ID)
+	}
+}
+
 // itemEventLog is an Observer that records every item event it is told of.
 type itemEventLog struct {
 	items []ItemEvent

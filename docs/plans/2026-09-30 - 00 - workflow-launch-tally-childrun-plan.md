@@ -197,7 +197,7 @@ NOTES (2026-10-01): newWorkflowRunner/newRecipeRunner fold into `newLaunchRunner
 **Acceptance:** `go test ./internal/agent -run 'TestWorkflowCall_|TestWorkflowControl_|TestRecipe_|TestStopped|TestFinishedWorkflow|TestFanOutStarted|TestRecipeStarted|TestBackground_|TestLaunch|TestDocMap'`; `! grep -nE 'func .*(newWorkflowRunner|newRecipeRunner)' internal/agent/*.go`
 **Commit:** `refactor(agent): blocking workflow launches go through the launch builder`
 
-## 12. workflow: Runner.Admit can refuse a folder before Run writes to it
+## 12. workflow: Runner.Admit can refuse a folder before Run writes to it — ✅ DONE (2026-10-01)
 
 **Depends on:** item 1.
 **Files:** `internal/workflow/runner.go`, `internal/workflow/runner_test.go`
