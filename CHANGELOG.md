@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed:** when a compaction trims the middle of a long conversation to fit the summary call's size budget, the "earlier message(s) omitted" marker now counts against that budget — the oldest kept recent message gives way to it — so the summary request no longer runs past the budget by the marker's length.
+
 - A model or context-window change the heartbeat observes while the engine is busy now lands only once every engine hold (worker, launcher actuation, /bg launch) has released: when an Exchange and a launcher verb overlap, the rebind waits for whichever of the two finishes last instead of landing at the first.
 
 - A workflow receipt's text field holding a carriage return, vertical tab or no-break space is now quoted in the result lines, like one holding a space, so it can no longer blur its `k=v` pair.
