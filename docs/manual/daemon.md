@@ -59,7 +59,7 @@ runs the recipe exactly as [`apogee headless --recipe`](headless.md) does: the w
 its end before the model is asked anything, an `ask` stage takes its declared default (the result
 lines say `(default taken: no one to ask)`), and a recipe no skill answers to, or a required
 input the text leaves unbound, fails the firing before anything is sent. A workflow that did not
-run, was stopped, failed or blocked on every item fails the firing too — the same judgement
+run, was stopped, failed or blocked on every fan-out item fails the firing too — the same judgement
 headless exits 1 on — and the log's failed line says which. The items are the ones the workflow's
 finish note counts: each fan-out item on the receipt its latest round ended on; a verify or merge
 receipt is not an item. The log's fired line names the recipe as you would type it —

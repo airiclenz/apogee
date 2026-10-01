@@ -174,7 +174,7 @@ func TestDaemonFireRunsTheEntrysRecipe(t *testing.T) {
 
 // A scheduled recipe whose workflow did not end in usable work is a FAILED Firing, judged exactly
 // as `apogee headless --recipe` judges it (recipeWorkflowFailure): the run reached an answer and
-// returned no error, yet a workflow that stopped, failed or blocked on every item must reach the
+// returned no error, yet a workflow that stopped, failed or blocked on every fan-out item must reach the
 // daemon's log as a failure — with the Outcome still carried as the salvage.
 func TestDaemonFireFailsARecipeWorkflowThatDidNotLand(t *testing.T) {
 	cases := []struct {

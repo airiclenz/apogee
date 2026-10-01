@@ -505,7 +505,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// A recipe whose workflow did not end in usable work is a failed Firing, though the run itself
 	// reached its answer: the same judgement `apogee headless --recipe` exits 1 on
 	// (recipeWorkflowFailure, wire_firing.go), so a scheduled workflow that stopped, failed or
-	// blocked on every item is logged and notified as the failure it is rather than as an answer.
+	// blocked on every fan-out item is logged and notified as the failure it is rather than as an answer.
 	// The Outcome still rides with it — the record, the writes and the counts are the salvage.
 	if err := recipeWorkflowFailure(recipe, res.Workflow); err != nil {
 		err = fmt.Errorf("apogee: daemon: the %q schedule's firing: %w", entry.Name, err)

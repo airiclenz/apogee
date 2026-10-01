@@ -456,10 +456,10 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 			"Exit codes: 0 the run\n" +
 			"completed, 1 the run started and failed (model or tool error, cancellation, a\n" +
 			"record that would not save, a --recipe workflow that did not run, stopped,\n" +
-			"failed or blocked on every item), 2 the run never started (usage, configuration, a\n" +
-			"refused mode, a server that did not answer), 3 the run started but its final\n" +
-			"turn was abandoned (stdout holds its last text, not an answer; the record is\n" +
-			"saved).",
+			"failed or blocked on every fan-out item), 2 the run never started (usage,\n" +
+			"configuration, a refused mode, a server that did not answer), 3 the run started\n" +
+			"but its final turn was abandoned (stdout holds its last text, not an answer;\n" +
+			"the record is saved).",
 		Args:          headlessArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,

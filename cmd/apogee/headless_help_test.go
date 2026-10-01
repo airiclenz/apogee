@@ -55,7 +55,7 @@ func TestHeadlessHelpNamesEveryExitCode(t *testing.T) {
 		t.Errorf("%s's exit table has %d rows for %d exit codes", manualHeadlessPath, len(rows), len(headlessExitCodes))
 	}
 
-	const recipeCause = "blocked on every item"
+	const recipeCause = "blocked on every fan-out item"
 	if !strings.Contains(long, recipeCause) {
 		t.Errorf("headless --help does not name %q among the exit-1 causes", recipeCause)
 	}
