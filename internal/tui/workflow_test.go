@@ -34,6 +34,13 @@ func bgItemOK() domain.WorkflowPhaseEvent {
 	return e
 }
 
+// bgEnd is the background workflow's finished or stopped end phase carrying the engine's tally.
+func bgEnd(phase domain.WorkflowPhase, tally domain.WorkflowTally) domain.WorkflowPhaseEvent {
+	e := bgPhase(phase)
+	e.Tally = &tally
+	return e
+}
+
 // bgChildBase is the stamp of an item run of the background workflow.
 func bgChildBase(runID string) domain.EventBase {
 	return domain.EventBase{Depth: 1, Turn: 1, CallID: domain.BackgroundWorkflowCallPrefix + bgWorkflowID, RunID: runID}
@@ -56,7 +63,7 @@ func foldEvents(t *testing.T, m Model, events ...domain.Event) Model {
 // finishBackground folds the background workflow's whole life: started, one ok item, finished.
 func finishBackground(t *testing.T, m Model) Model {
 	t.Helper()
-	return foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgItemOK(), bgPhase(domain.WorkflowFinished))
+	return foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgItemOK(), bgEnd(domain.WorkflowFinished, domain.WorkflowTally{OK: 1}))
 }
 
 // lastPrompt is the last depth-0 prompt row of the scrollback.
@@ -174,8 +181,38 @@ func TestBackgroundWorkflow_EventsReachNeitherTranscriptBoardNorStallClock(t *te
 	if !m.lastEvent.Equal(heard) {
 		t.Error("a background workflow's events moved the stall clock")
 	}
-	if view := m.workflows.live[bgWorkflowID]; view.name != bgWorkflowName || view.ok != 1 {
-		t.Errorf("workflow view = %+v, want %q with one ok item", view, bgWorkflowName)
+	if view := m.workflows.live[bgWorkflowID]; view.name != bgWorkflowName {
+		t.Errorf("workflow view = %+v, want %q", view, bgWorkflowName)
+	}
+}
+
+// A stopped background workflow's finish line reads its end phase's tally: neither a verify step's
+// ok receipt nor an earlier round's item is counted, and its unfinished items are left out.
+func TestBackgroundWorkflow_AStoppedRunsFinishLineReadsItsTally(t *testing.T) {
+	t.Parallel()
+	const want = "background workflow sweep stopped — items 1 · ok 1 · partial 0 · blocked 0"
+	verify := bgItemOK()
+	verify.Stage = "verify"
+	secondRound := bgItemOK()
+	secondRound.Round = 2
+	for name, items := range map[string][]domain.Event{
+		"a verify item":  {bgItemOK(), verify},
+		"a second round": {bgItemOK(), secondRound},
+		"no item events": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModelEng(t, &fakeEngine{}, testOpts)
+			startStubWorker(t, &m)
+
+			m = foldEvents(t, m, bgPhase(domain.WorkflowStarted))
+			m = foldEvents(t, m, items...)
+			m = foldEvents(t, m, bgEnd(domain.WorkflowStopped, domain.WorkflowTally{OK: 1, Unfinished: 2}))
+
+			if !slices.Contains(noteTexts(m), want) {
+				t.Errorf("notes = %q, want the finish line %q", noteTexts(m), want)
+			}
+		})
 	}
 }
 

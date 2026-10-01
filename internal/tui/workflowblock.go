@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // ----------------------------------------------------------------------------
@@ -85,17 +86,18 @@ const (
 // keeps its structure (toWireWorkflow) beside the text rendered from it on every fold; the id, the
 // running stage and an `ask` stage's question are the live run's alone and are not kept.
 type workflowView struct {
-	id        string               // the Workflow's id — what tells two Workflows' events apart
-	replayed  bool                 // the view came back from a record: it paints, and no phase folds into it
-	name      string               // the Workflow's name (a Recipe's name)
-	stage     string               // the stage running now; "" before the first and once it ended
-	stages    []workflowStage      // one row per stage of the Plan, in its order (workflowStagesOf)
-	items     []workflowItem       // the items that finished, in the order they finished
-	question  string               // an `ask` stage's question while it waits; "" otherwise
-	waitingOn string               // the stage the question waits in
-	end       domain.WorkflowPhase // finished, stopped or failed; "" while it runs
-	cause     string               // a failed Workflow's cause
-	resume    string               // how to resume a stopped run (the started phase's Resume); "" when none
+	id        string                // the Workflow's id — what tells two Workflows' events apart
+	replayed  bool                  // the view came back from a record: it paints, and no phase folds into it
+	name      string                // the Workflow's name (a Recipe's name)
+	stage     string                // the stage running now; "" before the first and once it ended
+	stages    []workflowStage       // one row per stage of the Plan, in its order (workflowStagesOf)
+	items     []workflowItem        // the items that finished, in the order they finished
+	question  string                // an `ask` stage's question while it waits; "" otherwise
+	waitingOn string                // the stage the question waits in
+	end       domain.WorkflowPhase  // finished, stopped or failed; "" while it runs
+	cause     string                // a failed Workflow's cause
+	resume    string                // how to resume a stopped run (the started phase's Resume); "" when none
+	tally     *domain.WorkflowTally // the finished or stopped end phase's item tally; nil while it runs, once it failed, and from a record that kept none
 }
 
 // live reports whether the view was folded in this session. A block replayed from a record is never
@@ -278,6 +280,11 @@ func (v workflowView) fold(e domain.WorkflowPhaseEvent) workflowView {
 		v.question, v.waitingOn = stripEscapes(firstLine(e.Detail)), stripEscapes(e.Stage)
 	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
 		v.end, v.stage, v.question = e.Phase, "", ""
+		v.tally = nil
+		if e.Tally != nil {
+			tally := *e.Tally
+			v.tally = &tally
+		}
 		switch e.Phase {
 		case domain.WorkflowFailed:
 			v.cause = stripEscapes(firstLine(e.Detail))
@@ -487,8 +494,14 @@ func (v workflowView) spansStages() bool {
 	return false
 }
 
-// totals is the totals line: `items N · ok a · partial b · blocked c`.
+// totals is the totals line: `items N · ok a · partial b · blocked c` — the end phase's tally where
+// the view carries one (tallyLine), so a verify or merge step's receipt is never counted as an item,
+// and its finished items counted by status where it carries none: a running or failed Workflow, and
+// one replayed from a record written before the tally was kept.
 func (v workflowView) totals() string {
+	if v.tally != nil {
+		return tallyLine(*v.tally)
+	}
 	counts := map[string]int{}
 	for _, item := range v.items {
 		counts[item.status]++
@@ -499,6 +512,13 @@ func (v workflowView) totals() string {
 		workflowStatusParts + " " + strconv.Itoa(counts[workflowStatusParts]),
 		workflowStatusBlock + " " + strconv.Itoa(counts[workflowStatusBlock]),
 	}, workflowTotalSep)
+}
+
+// tallyLine renders an end phase's tally as a totals line (workflow.Tally.Line): its items that
+// finished on a receipt, by status. An unfinished item is left out, so the line counts what a
+// Workflow's totals line has always counted, and the tally carries no verify verdicts to show.
+func tallyLine(t domain.WorkflowTally) string {
+	return workflow.Tally{OK: t.OK, Partial: t.Partial, Blocked: t.Blocked}.Line()
 }
 
 // renderWorkflowBlock paints a workflow block: from its view where it has one to draw

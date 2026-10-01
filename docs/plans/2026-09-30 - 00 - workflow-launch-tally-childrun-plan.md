@@ -116,7 +116,9 @@ cmd/apogee/headless_test.go — recipeHeadless, TestHeadlessRecipeWithEveryItemB
 **Acceptance:** `go test ./internal/run -run 'TestEventTap|TestOnceLaunchesALeadingRecipeReference'`; `go test ./cmd/apogee -run 'TestHeadless|TestDaemonFireFailsARecipeWorkflowThatDidNotLand'`
 **Commit:** `fix(run): recipe verdict counts the tally the model's note reports`
 
-## 7. tui: block totals and background finish line read the tally
+## 7. tui: block totals and background finish line read the tally — ✅ DONE (2026-10-01)
+
+NOTES (2026-10-01): the running/failed "keep counting items" case is TestWorkflowBlockWithoutATallyCountsItsItems (reads workflowView.totals directly); the pre-change-record case lives in TestWorkflowBlockReplaysTheEndPhaseTally (tally cleared on the decoded view). TestWorkflowBlockShowsProgressAndResultLines and TestWorkflowBlockSurvivesTheRecord now end on a tally-carrying end phase with the same pinned totals.
 
 **Depends on:** item 5.
 **Files:** `internal/tui/workflowblock.go`, `internal/tui/workflow.go`, `internal/tui/transcriptbridge.go`, `internal/session/transcript.go`, `internal/tui/workflowblock_test.go`, `internal/tui/workflow_test.go`, `internal/session/transcript_test.go`

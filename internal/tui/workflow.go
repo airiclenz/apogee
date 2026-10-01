@@ -56,7 +56,7 @@ import (
 
 // The words the finish line, the wake's prompt row and the two failure notes are built from.
 const (
-	backgroundFinishFormat = "background workflow %s %s — items %d · ok %d · partial %d · blocked %d"
+	backgroundFinishFormat = "background workflow %s %s — %s"
 	backgroundFailedFormat = "background workflow %s failed — %s"
 	wakePromptText         = "(background workflow report)"
 	wakeFailedPrefix       = "could not wake the agent on a background workflow's report: "
@@ -73,12 +73,9 @@ const (
 	workflowQuestionFormat = "background workflow %s asks:"
 )
 
-// The receipt statuses a finish line counts (domain.WorkflowReceipt.Status).
-const (
-	receiptOK      = "ok"
-	receiptPartial = "partial"
-	receiptBlocked = "blocked"
-)
+// The receipt status the background workflow tests build their item events on
+// (domain.WorkflowReceipt.Status).
+const receiptOK = "ok"
 
 // backgroundWorkflows is the session's live background workflows as their events fold: each one's
 // view by workflow id, the run id of every run a background run spawned, mapped to its workflow,
@@ -91,15 +88,12 @@ type backgroundWorkflows struct {
 	dismissed map[uint64]bool
 }
 
-// backgroundWorkflow is one live background workflow: its name, its items so far, counted by the
-// status their receipts ended on, how many of its prompts wait for the human, and what its runs
+// backgroundWorkflow is one live background workflow: its name, how many of its prompts wait for
+// the human, and what its runs
 // have spent — each run's latest reading (spend), less what they had spent when this session began
 // (base, the readings a session boundary rebased the view at).
 type backgroundWorkflow struct {
 	name    string
-	ok      int
-	partial int
-	blocked int
 	waiting int
 	spend   runSpend
 	base    runSpend
@@ -313,32 +307,24 @@ func (b backgroundWorkflows) view(id, name string) backgroundWorkflow {
 	return view
 }
 
-// count adds one finished item's receipt status to the tally.
-func (v backgroundWorkflow) count(status string) backgroundWorkflow {
-	switch status {
-	case receiptOK:
-		v.ok++
-	case receiptPartial:
-		v.partial++
-	case receiptBlocked:
-		v.blocked++
-	}
-	return v
-}
-
 // spent is what the workflow's runs have spent since the last session boundary.
 func (v backgroundWorkflow) spent() domain.Usage {
 	return usageSince(v.spend.total(), v.base.total())
 }
 
-// finishLine is the transcript line an end phase writes: how the workflow ended and its items by
-// status, or the cause of a failure.
+// finishLine is the transcript line an end phase writes: how the workflow ended and the end phase's
+// item tally (tallyLine) — the items the model's note counts, never a verify or merge step's
+// receipt — or the cause of a failure. A finished or stopped end carrying no tally (only a test
+// builds one) reads as no items.
 func (v backgroundWorkflow) finishLine(e domain.WorkflowPhaseEvent) string {
 	if e.Phase == domain.WorkflowFailed {
 		return fmt.Sprintf(backgroundFailedFormat, v.name, e.Detail)
 	}
-	total := v.ok + v.partial + v.blocked
-	return fmt.Sprintf(backgroundFinishFormat, v.name, e.Phase, total, v.ok, v.partial, v.blocked)
+	var tally domain.WorkflowTally
+	if e.Tally != nil {
+		tally = *e.Tally
+	}
+	return fmt.Sprintf(backgroundFinishFormat, v.name, e.Phase, tallyLine(tally))
 }
 
 // foldBackgroundEvent folds one event owns claimed: into the Inspector's rings, which record every
@@ -377,9 +363,6 @@ func (m Model) foldBackgroundPhase(e domain.WorkflowPhaseEvent) Model {
 	switch e.Phase {
 	case domain.WorkflowStarted:
 		m.workflows = m.workflows.withWorkflow(e.Workflow, backgroundWorkflow{name: e.Name})
-	case domain.WorkflowItemFinished:
-		view := m.workflows.view(e.Workflow, e.Name).count(e.Receipt.Status)
-		m.workflows = m.workflows.withWorkflow(e.Workflow, view)
 	case domain.WorkflowWaiting:
 		view := m.workflows.view(e.Workflow, e.Name)
 		view.waiting++

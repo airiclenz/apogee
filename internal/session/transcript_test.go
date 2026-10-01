@@ -459,6 +459,38 @@ func TestTranscriptRoundTripsAWorkflowBlock(t *testing.T) {
 	}
 }
 
+// TestTranscriptRoundTripsAWorkflowTally pins a Workflow block's end-phase tally through the codec:
+// a kept tally comes back as written, and a record without one — written before the tally was
+// kept — decodes with a nil tally.
+func TestTranscriptRoundTripsAWorkflowTally(t *testing.T) {
+	t.Parallel()
+	in := []Entry{{
+		Kind: EntryKindWorkflow, CallID: "recipe-sweep-1", Text: "Workflow sweep — finished", Done: true,
+		Workflow: &Workflow{Name: "sweep", End: "finished", Tally: &WorkflowTally{OK: 3, Partial: 1, Blocked: 2}},
+	}}
+	data, err := EncodeTranscript(in)
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	const older = `{"version":1,"entries":[{"kind":"workflow","workflow":{"name":"sweep","end":"finished"}}]}`
+
+	got, err := DecodeTranscript(data)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	old, err := DecodeTranscript([]byte(older))
+	if err != nil {
+		t.Fatalf("DecodeTranscript(older record): %v", err)
+	}
+
+	if len(got) != 1 || got[0].Workflow == nil || !reflect.DeepEqual(got[0].Workflow.Tally, in[0].Workflow.Tally) {
+		t.Errorf("round trip = %#v; want the tally %#v", got, in[0].Workflow.Tally)
+	}
+	if len(old) != 1 || old[0].Workflow == nil || old[0].Workflow.Tally != nil {
+		t.Errorf("older record decoded = %#v; want a workflow block with a nil tally", old)
+	}
+}
+
 // TestDecodeStripsTheWorkflowRecord pins the escape defence over a Workflow block's structure: its
 // name, its cause, its resume hint, every stage name and every finished item's words are display text
 // a tampered file could smuggle an escape in, so each comes back stripped.

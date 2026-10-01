@@ -193,6 +193,14 @@ func itemFinished(index int, item, status, summary string, fields map[string]str
 	return e
 }
 
+// endedWith is testWorkflowID's finished or stopped end phase carrying its item tally, as the engine
+// emits it: the items the model's note counts, never a verify or merge step's receipt.
+func endedWith(phase domain.WorkflowPhase, tally domain.WorkflowTally) domain.WorkflowPhaseEvent {
+	e := workflowPhase(phase)
+	e.Tally = &tally
+	return e
+}
+
 // workflowEntries returns the transcript's workflow blocks.
 func workflowEntries(m Model) []entry {
 	var out []entry
@@ -328,7 +336,7 @@ func TestWorkflowBlockShowsProgressAndResultLines(t *testing.T) {
 	assertStageRow(t, waiting, "ask", "waiting for you", false, false)
 
 	m.transcript.apply(stageFinished("ask", 1))
-	m.transcript.apply(workflowPhase(domain.WorkflowFinished))
+	m.transcript.apply(endedWith(domain.WorkflowFinished, domain.WorkflowTally{OK: 1, Blocked: 1}))
 
 	blocks := workflowEntries(m)
 	if len(blocks) != 1 {
@@ -584,6 +592,91 @@ func TestWorkflowBlockListsOnlyTroubleOnALargeRun(t *testing.T) {
 	}
 }
 
+// verifiedOneItem is a Recipe run whose one fan-out item and the verify step that checked it both
+// ended ok, ended on end — the tally the engine reports on a finished or stopped end, none on
+// another.
+func verifiedOneItem(end domain.WorkflowPhase) []domain.WorkflowPhaseEvent {
+	verify := stageItemFinished("verify", 1, 0, "ok")
+	phases := []domain.WorkflowPhaseEvent{
+		startedWith("items", "verify"),
+		stageStarted("items", 1, 1, 0),
+		itemFinished(0, "alpha", "ok", "alpha is fine", nil),
+		stageFinished("items", 1),
+		stageStarted("verify", 1, 1, 0),
+		verify,
+		stageFinished("verify", 1),
+	}
+	if end == domain.WorkflowFinished || end == domain.WorkflowStopped {
+		return append(phases, endedWith(end, domain.WorkflowTally{OK: 1}))
+	}
+	if end != "" {
+		phases = append(phases, workflowPhase(end))
+	}
+	return phases
+}
+
+// An ended block's totals are its end phase's tally: the verify step's ok receipt is not an item.
+func TestWorkflowBlockTotalsExcludeAVerifyItem(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	for _, e := range verifiedOneItem(domain.WorkflowFinished) {
+		m.transcript.apply(e)
+	}
+
+	painted, text := workflowPaint(m), workflowEntries(m)[0].text
+
+	for _, got := range []string{painted, text} {
+		if !strings.Contains(got, "items 1 · ok 1 · partial 0 · blocked 0") {
+			t.Errorf("the totals do not read the end phase's tally:\n%s", got)
+		}
+	}
+}
+
+// A block with no tally to read — a running Workflow, and a failed one — counts the items that
+// finished, a verify step's included.
+func TestWorkflowBlockWithoutATallyCountsItsItems(t *testing.T) {
+	t.Parallel()
+	for name, end := range map[string]domain.WorkflowPhase{"running": "", "failed": domain.WorkflowFailed} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			v := liveWorkflowView(verifiedOneItem(end)...)
+
+			if got, want := v.totals(), "items 2 · ok 2 · partial 0 · blocked 0"; got != want {
+				t.Errorf("totals = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+// The end phase's tally survives the session record: the replayed block paints the totals the live
+// one painted, the verify step left out, while a record written before the tally was kept counts
+// its items.
+func TestWorkflowBlockReplaysTheEndPhaseTally(t *testing.T) {
+	t.Parallel()
+	const want = "items 1 · ok 1 · partial 0 · blocked 0"
+	m := newTestModel(t)
+	for _, e := range verifiedOneItem(domain.WorkflowFinished) {
+		m.transcript.apply(e)
+	}
+	live := workflowPaint(m)
+	replayed := newTestModel(t)
+	replayed.transcript.entries = roundTrip(t, &m.transcript)
+	replayed.transcript.touch()
+	older := newTestModel(t)
+	older.transcript.entries = roundTrip(t, &m.transcript)
+	older.transcript.entries[0].workflow.tally = nil
+	older.transcript.touch()
+
+	painted := workflowPaint(replayed)
+
+	if !strings.Contains(live, want) || !strings.Contains(painted, want) {
+		t.Errorf("totals live:\n%s\nreplayed:\n%s\nwant both to read %q", live, painted, want)
+	}
+	if got := workflowPaint(older); !strings.Contains(got, "items 2 · ok 2 · partial 0 · blocked 0") {
+		t.Errorf("a record without a tally does not count its items:\n%s", got)
+	}
+}
+
 // A Workflow a fan_out call started is that call's block's: its phases draw no workflow block.
 func TestFanOutWorkflowDrawsNoBlock(t *testing.T) {
 	t.Parallel()
@@ -608,7 +701,7 @@ func TestWorkflowBlockSurvivesTheRecord(t *testing.T) {
 	m.transcript.apply(itemFinished(0, "alpha", "ok", "alpha is fine", nil))
 	m.transcript.apply(itemFinished(1, "beta", "partial", "beta is half done", nil))
 	m.transcript.apply(stageFinished("items", 1))
-	m.transcript.apply(workflowPhase(domain.WorkflowFinished))
+	m.transcript.apply(endedWith(domain.WorkflowFinished, domain.WorkflowTally{OK: 1, Partial: 1}))
 	live := workflowPaint(m)
 	if stageRowIn(live, "items") == "" || stageRowIn(live, "check") == "" {
 		t.Fatalf("the live block paints no stage rows:\n%s", plainTranscript(m))

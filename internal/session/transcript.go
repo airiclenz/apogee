@@ -195,9 +195,10 @@ const (
 // Workflow is the structure of one Workflow's block: its name, the end it came to (a
 // domain.WorkflowPhase — "finished", "stopped" or "failed" — and "" for a Workflow still running when
 // the record was written), a failed Workflow's cause, how to resume a Recipe launch's run (its started
-// phase's Resume, shown once it stopped), one row per stage of its Plan in its order, and every item
-// that finished, in the order it finished. Every string but End and the stage states is display text
-// and is stripped on decode.
+// phase's Resume, shown once it stopped), one row per stage of its Plan in its order, every item
+// that finished, in the order it finished, and the item tally its finished or stopped end phase
+// carried (nil while it ran, when it failed, and in a record written before the tally was kept).
+// Every string but End and the stage states is display text and is stripped on decode.
 type Workflow struct {
 	Name   string               `json:"name,omitempty"`
 	End    string               `json:"end,omitempty"`
@@ -205,6 +206,16 @@ type Workflow struct {
 	Resume string               `json:"resume,omitempty"`
 	Stages []WorkflowStage      `json:"stages,omitempty"`
 	Items  []WorkflowItemResult `json:"items,omitempty"`
+	Tally  *WorkflowTally       `json:"tally,omitempty"`
+}
+
+// WorkflowTally is a Workflow's item tally as its end phase reported it: its fan-out items that
+// finished on an ok, a partial and a blocked receipt. Verify, merge, script and ask outcomes are not
+// items, and an unfinished item is not counted.
+type WorkflowTally struct {
+	OK      int `json:"ok,omitempty"`
+	Partial int `json:"partial,omitempty"`
+	Blocked int `json:"blocked,omitempty"`
 }
 
 // WorkflowStage is one stage row: the stage's name, the 1-based round it shows (0 before any phase
