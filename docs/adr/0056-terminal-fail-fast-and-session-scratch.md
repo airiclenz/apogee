@@ -74,6 +74,12 @@ deliberately unmatched). The escape battery's `chained_script_clobber_denied` pr
 reproduces the incident shape under the real backends and asserts the watch matched, the
 script died non-zero, and the unguarded relative write never reached the workspace.
 
+*Note (2026-10-01):* the "shared `runSubprocess` funnel" above is now named
+`subprocess.RunSubprocess`, the shared core. `terminal` and `python_exec` reach it through their
+`execHost`'s `run`, and confined hook subprocesses reach it through `tools.RunHookSubprocess`.
+`internal/tools`' own `runSubprocess` wrapper remains only as the hook door's launcher. The watch
+wiring is unchanged.
+
 *Amended (2026-09-16, apogee-1mj):* two changes to the watch, replacing the "false match …
 surfaces loudly" trade above. The incident that forced them (session-mining `fc413fb5`) was a
 confined `cat` of a log to **stdout** whose lines ended in a real Go denial

@@ -137,7 +137,7 @@ type terminalArgs struct {
 // AND-OR list other than its last command (POSIX exempts them), so a denied
 // `mkdir d && cd d && …` chain still falls through to the lines after it — the 2026-08-22
 // incident's shape; that gap is closed by the live kill-on-denial watch every CONFINED
-// run is wired through (platform.DenialKillWriter in runSubprocess), which kills the
+// run is wired through (platform.DenialKillWriter in subprocess.RunSubprocess), which kills the
 // process group at the first OS-denial signature. That watch reads stderr alone — stdout is
 // the command's data (ADR 0056 D2) — so a line that merges its own streams (`2>&1`, `>&2`,
 // `&>`, `|&`; mergedStreamsPattern) would hand its denials to an unwatched stream: for such a
@@ -389,7 +389,7 @@ func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain
 	}
 	if res.DrainWedged {
 		// The exit code alone cannot say this: the leader may have exited 0 and left the
-		// pipe held by something else, which runSubprocess reports as -1 rather than as a
+		// pipe held by something else, which subprocess.RunSubprocess reports as -1 rather than as a
 		// success. Name the reason so the reader is not left guessing at the code.
 		b.WriteString("output was cut short: something the command left running still held the pipe and was killed\n")
 	}

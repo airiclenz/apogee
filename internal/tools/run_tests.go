@@ -34,8 +34,8 @@ import (
 //
 // It is a SubprocessTool with terminal's disposition (not read-only: a test suite runs the
 // project's own code, which writes): the dispatch disposition confines it in Auto and gates
-// it when fs-confinement is unavailable, over the shared runSubprocess that owns the
-// confinement handoff and the §2.4 process-group teardown. It is stateless across Turns
+// it when fs-confinement is unavailable, launching through its execHost's run — in production
+// subprocess.RunSubprocess, the shared core that owns the confinement handoff and the §2.4 process-group teardown. It is stateless across Turns
 // (ADR 0008) — a fresh runner process per call.
 
 const (

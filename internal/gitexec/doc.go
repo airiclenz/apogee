@@ -42,7 +42,7 @@
 // through the Host it was handed: the git tools through their execHost's, the engine's tree
 // snapshotter and secrets guard through the one the Agent builds them with, the snapshot store
 // through the one it was opened with. There is no package-level lookup or launcher to swap; the one
-// package-level func left is [SafeEnv], a wrapper over [OS]. A nil field is the real OS's
+// package-level wrapper over [OS] left is [SafeEnv]. A nil field is the real OS's
 // facility, so the zero Host ([OS]) runs the system git; a fake Host scripts git's outcomes with
 // no git installed, and its answers still pass the exec fence, the hardening and the
 // command-config refusal.

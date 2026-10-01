@@ -1401,7 +1401,8 @@ process-group / Job-Object teardown, no output cap and no timeout clamp. The per
 authorisation hole while every *other* execution guard stayed on the tool side of the fence.
 
 A hook now spawns through `tools.RunHookSubprocess` (`internal/tools/exec_common.go`), the single
-exported door onto the same `runSubprocess` funnel every execution tool goes through; the sync
+exported door onto `subprocess.RunSubprocess`, the same shared core every execution tool launches
+through (via its `execHost`'s `run`); the sync
 lane's executor, `(*Agent).runSyncArgv` (`internal/agent/syncexec.go`), is its second caller,
 spawning every `advise:` and `gate:` command through the same door under §10.4's permit, with the
 seam document on stdin and the class default deadline (advise 10s, gate 5s) or the entry's own
