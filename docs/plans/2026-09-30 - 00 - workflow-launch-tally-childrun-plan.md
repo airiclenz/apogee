@@ -209,7 +209,7 @@ NOTES (2026-10-01): newWorkflowRunner/newRecipeRunner fold into `newLaunchRunner
 **Acceptance:** `go test ./internal/workflow -run 'TestRunner'`
 **Commit:** `feat(workflow): Runner.Admit can refuse a folder before Run writes to it`
 
-## 13. agent: a blocking launch refuses a folder a background run is driving
+## 13. agent: a blocking launch refuses a folder a background run is driving — ✅ DONE (2026-10-01)
 
 **Depends on:** items 11, 12.
 **Files:** `internal/agent/launch.go`, `internal/agent/workflowcall.go`, `internal/agent/launch_test.go`

@@ -84,14 +84,18 @@ type builtLaunch struct {
 // delegate (errDelegateBackground), opens its folder at once — so a queued workflow already has the
 // id and status path it is listed and stopped by, and the Run that follows resumes that very folder
 // — and runs off the launch-time host (backgroundHost); a blocking one runs off this Agent under
-// launch.call. The error is a source that cannot be read or resolved, a refusal (launchRefusal), or
-// a folder the Runner cannot open.
+// launch.call, and its Runner refuses a folder a background run still drives (admitBlocking). The
+// error is a source that cannot be read or resolved, a refusal (launchRefusal), or a folder the
+// Runner cannot open.
 func (a *Agent) buildLaunch(launch workflowLaunch) (builtLaunch, error) {
 	built, err := a.launchRunner(launch)
 	if err != nil {
 		return builtLaunch{}, err
 	}
 	host, call := a, launch.call
+	if launch.mode == launchModeBlocking {
+		built.runner.Admit = a.admitBlocking
+	}
 	if launch.mode == launchModeBackground {
 		if a.isDelegate() {
 			return builtLaunch{}, errDelegateBackground
@@ -113,6 +117,17 @@ func (a *Agent) buildLaunch(launch workflowLaunch) (builtLaunch, error) {
 	built.host = host
 	built.observer = a.wireLaunch(launch, built, call)
 	return built, nil
+}
+
+// admitBlocking is a blocking launch's Runner.Admit: it refuses the folder id while a background
+// run drives it — running, queued, or stopped but still draining — with workflowAlreadyRunningFormat
+// naming that run, so a second Runner never races the first over its status.json and children.
+// A background launch sets none: the manager refuses a second live run under one id itself.
+func (a *Agent) admitBlocking(id string) error {
+	if a.background.isLive(id) {
+		return fmt.Errorf(workflowAlreadyRunningFormat, id)
+	}
+	return nil
 }
 
 // launchRunner builds the unwired Runner launch's source runs under: a fan_out's Runner for a plan,

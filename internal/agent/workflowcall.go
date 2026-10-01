@@ -12,7 +12,8 @@ package agent
 // its item children spawned through the recursion point (workflowspawn.go), its progress reported
 // as WorkflowPhaseEvents (workflowObserver), and the call is answered with workflow.Format's result
 // lines. The same call again finds the stored workflow by
-// its plan hash and skips the items already finished.
+// its plan hash and skips the items already finished — unless a background run still drives that
+// folder, when the call is refused with workflowAlreadyRunningFormat naming it (admitBlocking).
 //
 // A cancel stops the running items and keeps every finished one on disk: the call is answered with
 // `stopped by the user: K of N done`, the path of the item listing written so far and the line
