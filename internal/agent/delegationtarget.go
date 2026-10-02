@@ -176,7 +176,7 @@ func (l *delegationLatch) snapshot() *DelegationTarget {
 // to the top-level Agent they constructed.
 //
 // A usable target also STATES the far server's width for the number the engine tells the model
-// (statedDelegationWidth, agent.go): the fan-out ceiling's multiplier and the orientation block's
+// (statedDelegationWidth, delegationwidth.go): the fan-out ceiling's multiplier and the orientation block's
 // bounds. Only a non-nil target writes it — a nil one is a target-down beat, and the stated width
 // stands across it — so the model-facing number moves when a cap is first stated and not when the
 // far server flaps; the human's `/sub-agents-server` door (SetDelegationSeat) is what forgets it.

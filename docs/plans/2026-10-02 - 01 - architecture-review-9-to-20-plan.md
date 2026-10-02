@@ -128,7 +128,12 @@ prose that would parse differently (proves the summary wins) plus one summary-le
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestE2EDelegationStepCap$|^TestE2EDelegationChildCarriesTheReportBlock$|^TestE2ESubAgentStop$|^TestE2ESubAgentView$|^TestE2EOutcomeSlotsCarryTheToolsVerdict$|^TestE2EOutcomeCancelledDelegationCarriesTheFailureTone$' ./cmd/apogee/`
 **Commit:** `refactor(agent): attach a typed delegation outcome to the sub-agent tool result`
 
-## 3. Delegation width is one module (#11)
+## 3. Delegation width is one module (#11) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): fanOutCeilingOf (the ceiling formula the refusal text also reads) moved into delegationwidth.go beside fanOutCeiling, so the module alone answers the ceiling; the Approach's move list did not name it.
+NOTES (2026-10-02): added seatCap(seat) in delegationwidth.go — the cap of the server a child on one seat runs on — which workflowWidthOn and backgroundWidth now both ask instead of each restating the session-seat rule; every value is unchanged (workflowWidthOn = 1 on a delegate else max(seatCap,1); backgroundWidth = max(seatCap-1,1)).
+NOTES (2026-10-02): the far-width stickiness (ADR 0069 decision 6) is named once, in delegationwidth.go's file comment; statedDelegationWidth's doors paragraph moved there and the farWidth field comment in agent.go now points at it.
+NOTES (2026-10-02): consequential edit — internal/agent/delegationseat.go: made necessary by statedDelegationWidth moving out of agent.go (file pointer in SetDelegationSeat's doc).
 
 **What:**
 **Goal:** `internal/agent/delegationwidth.go` alone answers the width stated to the model, the

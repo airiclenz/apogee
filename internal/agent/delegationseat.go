@@ -59,7 +59,7 @@ type DelegationSeat struct {
 // a child renders no Delegations line and is handed no seat of its own.
 //
 // It is also the door that FORGETS the far width statedDelegationWidth latched from the last
-// usable target (agent.go): the key moved, so the width the old server stated describes a box
+// usable target (delegationwidth.go): the key moved, so the width the old server stated describes a box
 // delegations no longer go to, and the session width answers until the new server's first beat
 // states its own. A target-down beat never forgets it — that is what keeps the stated number off
 // the heartbeat's clock.

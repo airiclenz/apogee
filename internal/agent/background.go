@@ -667,14 +667,10 @@ func (a *Agent) backgroundHost() *Agent {
 
 // backgroundWidth is how many children a background workflow on seat runs at once: the width of the
 // server they run on minus the one slot the conversation keeps, and never below one (ADR 0089 D2).
-// A session-seated workflow runs on the session server whatever is latched, so its width is that
-// server's cap.
+// The server is the one seatCap (delegationwidth.go) answers for seat: a session-seated workflow
+// runs on the session server whatever is latched.
 func (a *Agent) backgroundWidth(seat delegationSeat) int {
-	width := a.delegationCap()
-	if seat == seatSession {
-		width = a.parallelAgentsCap()
-	}
-	return max(width-1, 1)
+	return max(a.seatCap(seat)-1, 1)
 }
 
 // backgroundServer names the server a background workflow's children on seat run on, which is what

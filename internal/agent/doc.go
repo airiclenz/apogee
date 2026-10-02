@@ -127,7 +127,10 @@
 // Delegation-target latch: the never-idle-gated door a host's second heartbeat pushes the
 // Sub-agent server through, held by one handle for a whole agent tree (ADR 0045).
 // delegationseat.go is that same server's DISPLAY half — the seat facts the orientation block
-// names it by, moved only where the human moves the key (ADR 0069).
+// names it by, moved only where the human moves the key (ADR 0069). delegationwidth.go is the one
+// module every delegation width is answered from: the width stated to the model, the width a
+// batch runs at (seat-aware), the fan-out ceiling, and the far-width stickiness those two doors
+// move (ADR 0039, ADR 0069 decision 6).
 // standingblocks.go is the standing system message as one ordered table — each block's render,
 // its forgery fences and whether it rides along — that standingSystem composes from and the
 // context-file fence is derived from, and the one ride-along-gated walk of it both the seed and

@@ -410,15 +410,15 @@ func (a *Agent) workflowContextLimitOn(seat delegationSeat) int {
 	return a.workflowContextLimit()
 }
 
-// workflowWidthOn is how many item children a workflow on seat runs at once: the session server's
-// cap for a session-seated workflow, even with a target latched (ADR 0069 decision 7's "a
-// single-seat reply keeps its seat's cap"), and this Agent's delegation width otherwise — the
-// latched target's cap, else the session's. It is 1 on a delegate either way.
+// workflowWidthOn is how many item children a workflow on seat runs at once: the cap of the server
+// they run on (seatCap, delegationwidth.go) — the session server's for a session-seated workflow
+// even with a target latched, else the latched target's, else the session's — floored at 1, and 1
+// on a delegate either way.
 func (a *Agent) workflowWidthOn(seat delegationSeat) int {
-	if seat != seatSession || a.isDelegate() {
-		return a.delegationWidth()
+	if a.isDelegate() {
+		return 1
 	}
-	return max(a.parallelAgentsCap(), 1)
+	return max(a.seatCap(seat), 1)
 }
 
 // fanOutSeat resolves the Delegation seat a fan_out call's `run_on` names, or the refusal an

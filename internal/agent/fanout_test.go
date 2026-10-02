@@ -1622,6 +1622,90 @@ func assertCeilingRefusal(t *testing.T, events []domain.Event, seen []string, re
 	}
 }
 
+// TestDelegationWidth_AnswersStatedBatchAndCeiling drives the delegation-width module's three
+// answers together from one latch state each: the width STATED to the model (statedDelegationWidth),
+// the width one reply's batch RUNS at (fanOutWidthFor, seat-aware) and the fan-out ceiling
+// (fanOutCeiling). The rows where the stated and the run width differ are the point: a split or
+// all-session reply runs narrower than the far width the model is told, and the ceiling follows the
+// stated number, never the batch's.
+func TestDelegationWidth_AnswersStatedBatchAndCeiling(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		depth       int
+		sessionCap  int
+		target      *DelegationTarget
+		seatChoice  bool
+		rounds      int
+		runOn       []string
+		wantStated  int
+		wantBatch   int
+		wantCeiling int
+	}{
+		{
+			name:       "nothing latched: the session cap answers all three",
+			sessionCap: 3, rounds: 2, runOn: []string{"", "", "", ""},
+			wantStated: 3, wantBatch: 3, wantCeiling: 6,
+		},
+		{
+			name:       "routed: the target's cap replaces the session's everywhere",
+			sessionCap: 1, target: &DelegationTarget{ParallelAgents: 4}, rounds: 2,
+			runOn:      []string{"", "", "", ""},
+			wantStated: 4, wantBatch: 4, wantCeiling: 8,
+		},
+		{
+			name:       "split reply: the batch takes the smaller cap, the stated width stays the far one",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 5}, seatChoice: true, rounds: 3,
+			runOn:      []string{"session", "sub-agents-server", ""},
+			wantStated: 5, wantBatch: 2, wantCeiling: 15,
+		},
+		{
+			name:       "all-session reply: the batch keeps the session cap (ADR 0069 decision 7)",
+			sessionCap: 2, target: &DelegationTarget{ParallelAgents: 3}, seatChoice: true, rounds: 2,
+			runOn:      []string{"session", "session", "session"},
+			wantStated: 3, wantBatch: 2, wantCeiling: 6,
+		},
+		{
+			name:       "zero rounds: no ceiling, the widths unchanged",
+			sessionCap: 3, rounds: 0, runOn: []string{"", ""},
+			wantStated: 3, wantBatch: 2, wantCeiling: 0,
+		},
+		{
+			name:       "serial target: the stated width is floored at 1, the batch is serial",
+			sessionCap: 4, target: &DelegationTarget{}, rounds: 2, runOn: []string{"", "", ""},
+			wantStated: 1, wantBatch: 1, wantCeiling: 2,
+		},
+		{
+			name:  "delegate: serial whatever is latched, the ceiling is the rounds outright",
+			depth: 1, sessionCap: 4, target: &DelegationTarget{ParallelAgents: 3}, rounds: 2,
+			runOn:      []string{"", "", ""},
+			wantStated: 1, wantBatch: 1, wantCeiling: 2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, delegation: &delegationLatch{}}
+			a.cfg.Delegation.FanOutRounds = tc.rounds
+			if tc.seatChoice {
+				a.tools = seatChoiceRegistry(t)
+			}
+			a.SetDelegationTarget(tc.target)
+
+			if got := a.statedDelegationWidth(); got != tc.wantStated {
+				t.Errorf("statedDelegationWidth() = %d, want %d", got, tc.wantStated)
+			}
+			if got := a.fanOutWidthFor(seatCalls(tc.runOn...)); got != tc.wantBatch {
+				t.Errorf("fanOutWidthFor(%v) = %d, want %d", tc.runOn, got, tc.wantBatch)
+			}
+			if got := a.fanOutCeiling(); got != tc.wantCeiling {
+				t.Errorf("fanOutCeiling() = %d, want %d", got, tc.wantCeiling)
+			}
+		})
+	}
+}
+
 // TestStatedDelegationWidth_LatchesPerSeat pins the one width seam the engine states: seeded from
 // cfg.ParallelAgents and moved by SetParallelAgents; the far width written by a non-nil
 // SetDelegationTarget, kept across a nil one and across a session-width beat, cleared by
