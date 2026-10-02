@@ -101,9 +101,14 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    and the start-up card draw their own rows, border glyphs and padding included. See the last
    Consequences bullet.)*
 6. **Widget mirrors are the deliberate exception: their oracle is the widget, never the
-   painter.** `wrapRowStarts`/`runesWidth` (`inputaccent.go`), `cellToRuneOffset` (`mouse.go`) and
-   `inputContentRows` (`inputaccent.go`) mirror third-party widgets' internal math — the textarea
+   painter.** `wrapRowStarts`/`runesWidth`, `cellToRuneOffset` and `inputContentRows`
+   (`editorgeometry.go`) mirror third-party widgets' internal math — the textarea
    wraps with `uniseg.StringWidth`, and it does not move when the painter does.
+   *(Amended 2026-10-02: the three used to sit in `inputaccent.go` and `mouse.go`; they moved, with
+   `sanitizeInputLine` and the line editor's offset arithmetic, into `editorgeometry.go`, the
+   string geometry the line editor owns. `cellToRuneOffsetIn` moved beside them as the
+   painter-measured sibling, not a mirror — its ruler is the authority. The rule and the list are
+   unchanged.)*
    *(Amended 2026-08-20: `inputContentRows` was written in `render.go`,
    moved to `chromelayout.go` with the render split, and now sits beside the other textarea mirrors
    this list names; the rule and the list are unchanged.)* *(`wrappedOffset` (`render.go`), the

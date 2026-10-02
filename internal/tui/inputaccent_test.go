@@ -2,21 +2,15 @@ package tui
 
 import (
 	"context"
-	"math/rand"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
-	"unicode"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
-	"github.com/rivo/uniseg"
 )
 
 // ----------------------------------------------------------------------------
@@ -60,118 +54,6 @@ func accentTestModel(t *testing.T, width int, workspace, value string) Model {
 	m.input.MoveToEnd()
 	m.layout()
 	return m
-}
-
-// wrapRowStarts is a MIRROR of the bubbles textarea's own soft-wrap, so the oracle is that widget
-// itself: at every column of a value, LineInfo names the wrapped row the caret stands on (RowOffset
-// — the row's INDEX — and StartColumn, that row's own rune offset), Height names the line's row
-// count, and CharOffset names the display cell the caret stands at. A change to the widget's wrap
-// has to fail HERE, where the accents are still only mis-measured, rather than in a screenshot
-// nobody diffs.
-//
-// The expectation is keyed by RowOffset rather than read off in order, because a row the widget
-// draws EMPTY is addressed by no column at all and would otherwise vanish from the oracle while
-// still occupying a row on screen — which is precisely the row an accent would then be painted one
-// line too high on. The widget leaves one when a first group overflows its row without ever
-// tripping the hard-word-break, which VS16 makes reachable (that break weighs the last rune with
-// go-runewidth, and U+FE0F weighs nothing there).
-//
-// The sanitizer cases are the reason the oracle's runes are read back OFF the widget rather than
-// taken from the case: what a textarea holds is what its sanitizer let in, and that rewrites each
-// TAB as four spaces and drops utf8.RuneError and every other control rune. So the widget is asked
-// about the line it actually wrapped, while the mirror is handed the raw line — which is exactly the
-// divergence being pinned, since a mirror that measured those runes as written would wrap such a
-// draft where the widget does not: a tab weighed as one column instead of four, a dropped rune
-// weighed as a column the widget never drew.
-func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name  string
-		line  string
-		width int
-	}{
-		{"empty", "", 10},
-		{"short", "/clean-code", 40},
-		{"exactly one row", "abcde", 5},
-		{"word-wrapped prose", "hello world", 5},
-		{"a word longer than the row", "averyveryverylongwordindeed", 6},
-		{"trailing space at a row boundary", "aaa aaa aaa aaax ", 8},
-		{"a line of nothing but spaces", "     ", 3},
-		{"wide runes", "日本語のテキスト 絵文字", 7},
-		// The VS16 cases are the ones a per-rune mirror gets wrong: go-runewidth reads U+26A0 as
-		// one cell and U+FE0F as none, while the widget measures the cluster whole (uniseg) and
-		// wraps as if it were two. The widths are chosen so that difference decides a break.
-		{"an emoji carrying VS16", "warn ⚠️ here", 7},
-		{"a VS16 run filling the row", "⚠️⚠️⚠️ end", 6},
-		{"VS16 inside a word too wide for the row", "aa⚠️bb⚠️cc", 4},
-		// Tabs: the widget's sanitizer turns each one into four spaces before it wraps, so a
-		// mirror that measured the tab itself would break these lines in the wrong places.
-		{"a leading tab", "\tabc def", 6},
-		{"a tab inside a word", "ab\tcd efgh", 6},
-		{"a tab at the wrap column", "abcd\tefg", 6},
-		{"a line of nothing but tabs", "\t\t", 5},
-		{"a tab in a draft", "/grill-me\tcheck @internal/tui/model.go", 12},
-		// The runes the sanitizer drops outright: a mirror that kept them would carry a phantom
-		// column per rune and break these lines one glyph early.
-		{"a replacement character ahead of a wrap boundary", "abc\uFFFDdefgh ij", 5},
-		{"replacement characters inside a word too wide for the row", "aa\uFFFDbb\uFFFDcc dd", 4},
-		{"a control rune inside a word", "ab\x07cd efg", 5},
-		{"a control rune at the wrap column", "abcd\x07efg", 5},
-		{"a line of nothing but dropped runes", "\uFFFD\x07", 1},
-		{"dropped runes around a tab", "ab\x07\tcd\uFFFD efgh", 6},
-		{"the acceptance draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-
-			ta := textarea.New()
-			ta.Prompt = ""
-			ta.ShowLineNumbers = false
-			ta.CharLimit = 0
-			ta.SetWidth(c.width)
-			ta.SetHeight(10)
-			ta.SetValue(c.line)
-
-			got := wrapRowStarts([]rune(c.line), ta.Width())
-
-			// The widget's geometry is addressed in the runes it KEPT, which is the raw line
-			// sanitised — tabs expanded, dropped runes gone — the same space wrapRowStarts
-			// answers in.
-			runes := []rune(ta.Value())
-
-			want := make([]int, len(got))
-			addressed := make([]bool, len(got))
-			for col := 0; col <= len(runes); col++ {
-				ta.SetCursorColumn(col)
-				li := ta.LineInfo()
-				if li.Height != len(got) {
-					t.Fatalf("col %d: widget draws %d rows, wrapRowStarts says %d (%v)", col, li.Height, len(got), got)
-				}
-				if li.RowOffset < 0 || li.RowOffset >= len(got) {
-					t.Fatalf("col %d: widget puts the caret on row %d of %d", col, li.RowOffset, len(got))
-				}
-				want[li.RowOffset] = li.StartColumn
-				addressed[li.RowOffset] = true
-				if cw := runesWidth(runes[li.StartColumn:col]); cw != li.CharOffset {
-					t.Fatalf("col %d: runesWidth from the row start = %d, widget's CharOffset = %d", col, cw, li.CharOffset)
-				}
-			}
-			for i := len(want) - 1; i >= 0; i-- {
-				if addressed[i] {
-					continue
-				}
-				want[i] = len(runes) // a trailing empty row begins past the last rune…
-				if i+1 < len(want) {
-					want[i] = want[i+1] // …and any other one begins where the row below it does
-				}
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("wrapRowStarts(%q, %d) = %v, the widget wraps at %v", c.line, ta.Width(), got, want)
-			}
-		})
-	}
 }
 
 // The byte range → visual geometry mapping: within one row, across a soft-wrap, and offset by the
@@ -424,125 +306,8 @@ func TestAccentSpansFollowTheCatalog(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Row counting cost (inputaccent.go wrapRowStarts, prompteditor.go rowCountMemo)
+// Row counting cost (editorgeometry.go inputContentRows, prompteditor.go rowCountMemo)
 // ----------------------------------------------------------------------------
-
-// baseWrapRowStarts is wrapRowStarts as it stood before the row and word widths were carried
-// forward: the row and the pending word re-measured whole at every step. It is the reference the
-// incremental measure must agree with rune for rune.
-func baseWrapRowStarts(line []rune, width int) []int {
-	if width < 1 {
-		width = 1
-	}
-	line = sanitizeInputLine(line)
-	starts := []int{0}
-	consumed := 0 // runes of line already placed on a row
-	wordLen := 0  // the pending word: a run of non-space runes
-	spaces := 0   // the whitespace run trailing that word
-	for _, r := range line {
-		if unicode.IsSpace(r) {
-			spaces++
-		} else {
-			wordLen++
-		}
-		word := line[consumed : consumed+wordLen] // the widget's `word`, r included
-		switch {
-		case spaces > 0: // the group is finished: place it, on a new row if it does not fit
-			row := line[starts[len(starts)-1]:consumed] // the widget's `lines[row]`
-			if runesWidth(row)+runesWidth(word)+spaces > width {
-				starts = append(starts, consumed)
-			}
-			consumed += wordLen + spaces
-			wordLen, spaces = 0, 0
-		case runesWidth(word)+runewidth.RuneWidth(r) > width: // a word wider than a row: break it here
-			if consumed > starts[len(starts)-1] { // the current row already holds something
-				starts = append(starts, consumed)
-			}
-			consumed += wordLen
-			wordLen = 0
-		}
-	}
-	row, word := line[starts[len(starts)-1]:consumed], line[consumed:consumed+wordLen]
-	if runesWidth(row)+runesWidth(word)+spaces >= width {
-		starts = append(starts, consumed) // the trailing row a width-filling line keeps for the caret
-	}
-	return starts
-}
-
-// wrapRowCorpus is the line shapes where carrying a width forward could drift from measuring the
-// run whole: every grapheme cluster that spans what the mirror appends in separate steps.
-var wrapRowCorpus = []string{
-	"",
-	"hello world, this is plain ASCII prose that wraps",
-	"日本語のテキスト 絵文字 と かな カナ",
-	"emoji 😀😃 in 🎉 prose 🚀",
-	"warn ⚠️ here ⚠️⚠️⚠️ end aa⚠️bb⚠️cc",
-	"family 👨‍👩‍👧‍👦 and 👩‍💻 zwj ❤️‍🔥 joins",
-	"flags 🇩🇪🇫🇷 and a lone 🇺 then 🇺🇸🇬🇧🇯🇵",
-	"cafe\u0301 re\u0301sume\u0301 and n\u0303o combining marks",
-	"a \u0301b  \u0301\u0302c space then combining",
-	"\tabc\tdef ghi\t\tjkl",
-	"aaa aaa aaa aaax aaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbb c",
-	"     spaces    only     ",
-	"averyveryverylongwordindeed with some short ones after",
-}
-
-// The incremental measure answers exactly what the whole-run measure did, over every corpus line at
-// every width that can break it — the soft-wrap boundaries of each line included — and over
-// generated lines built from the same awkward clusters.
-func TestWrapRowStartsMatchesTheWholeRunMeasure(t *testing.T) {
-	t.Parallel()
-	check := func(line string, width int) {
-		t.Helper()
-		runes := []rune(line)
-		if got, want := wrapRowStarts(runes, width), baseWrapRowStarts(runes, width); !reflect.DeepEqual(got, want) {
-			t.Errorf("wrapRowStarts(%q, %d) = %v, want %v", line, width, got, want)
-		}
-	}
-	for _, line := range wrapRowCorpus {
-		for width := 1; width <= uniseg.StringWidth(line)+2; width++ {
-			check(line, width)
-		}
-	}
-	glyphs := []string{"a", "b", " ", " ", "\t", "あ", "⚠️", "\u0301", "\u200d", "👩", "💻", "🇺", "🇸", "😀", "\ufe0f"}
-	rng := rand.New(rand.NewSource(20260923))
-	for i := 0; i < 2000; i++ {
-		var sb strings.Builder
-		for n := rng.Intn(32); n > 0; n-- {
-			sb.WriteString(glyphs[rng.Intn(len(glyphs))])
-		}
-		check(sb.String(), 1+rng.Intn(16))
-	}
-}
-
-// longProseLine is one 64 KB logical line of short words — a pasted paragraph with no newline.
-func longProseLine() []rune {
-	const sentence = "the quick brown fox jumps over the lazy dog and keeps on running "
-	return []rune(strings.Repeat(sentence, 64<<10/len(sentence)))
-}
-
-// wrapRowStartsTotalAlloc is the bytes one wrapRowStarts call over line allocates at width.
-func wrapRowStartsTotalAlloc(line []rune, width int) uint64 {
-	var stats runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&stats)
-	before := stats.TotalAlloc
-	runtime.KeepAlive(wrapRowStarts(line, width))
-	runtime.ReadMemStats(&stats)
-	return stats.TotalAlloc - before
-}
-
-// A line's wrap costs its length, not its length times the width: re-measuring the whole row at
-// every placement made width 400 cost ≈ 10× width 40 on the same line. Not parallel: TotalAlloc is
-// process-wide, and a neighbour's allocations would be read as this one's.
-func TestWrapRowStartsAllocationIsIndependentOfWidth(t *testing.T) {
-	line := longProseLine()
-	narrow, wide := wrapRowStartsTotalAlloc(line, 40), wrapRowStartsTotalAlloc(line, 400)
-	if wide > 2*narrow {
-		t.Fatalf("wrapRowStarts over a %d-rune line allocated %d KB at width 400 against %d KB at width 40; want ≤ 2×",
-			len(line), wide>>10, narrow>>10)
-	}
-}
 
 // A promptEditor built literally — no newPromptEditor, so no row-count memo — still counts its
 // draft's rows, every time, and the Model reading it through hiddenDraftRows agrees.

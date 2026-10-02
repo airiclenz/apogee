@@ -495,8 +495,8 @@ func (e *lineEditor) caretToOffset(byteOff int) {
 
 // caretToRune drives the caret to a RUNE offset into the current value — caretToOffset for a caller
 // that counts in runes rather than in bytes, which is what a SELECTION counts in (fieldSel) and what
-// a click on a painted cell resolves to (cellToRuneOffsetIn, mouse.go). The conversion lives here so
-// no caller has to pair the two functions itself and get the order right.
+// a click on a painted cell resolves to (cellToRuneOffsetIn, editorgeometry.go). The conversion
+// lives here so no caller has to pair the two functions itself and get the order right.
 func (e *lineEditor) caretToRune(off int) {
 	e.caretToOffset(byteOffsetOf(e.input.Value(), off))
 }

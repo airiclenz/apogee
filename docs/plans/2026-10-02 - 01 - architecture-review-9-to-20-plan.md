@@ -376,7 +376,11 @@ cmd/apogee/wire_boot.go — rootWiring.resolveConfig; apogee.go — NewReactionR
 - `GOMEMLIMIT=2GiB go test -count=1 -run '^TestNoWiringSiteWritesConfigReactions$|^TestHeadlessArmsTheSyncLaneOnTheFiringsSpec$|^TestScheduleFiringCarriesTheSessionsSyncLane$|^TestFiringConfigCarriesTheFloorGuardKeys$|^TestBootConfigCarriesTheFloorGuardKeys$|^TestProbeContextNamesArmedReactions$|^TestProbeContextLiveSendsTwiceWhenReactionsArmed$|^TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent$|^TestReactionsRowReloadSwapsObserveOnly$|^TestApplySettingReactionsReplacesTheRunnerAndTheProjection$|^TestLiveSettingsGenerationIsDerivedFromTheOverlay$' ./cmd/apogee/`
 **Commit:** `refactor(run): hand the reaction generation to the engine whole`
 
-## 11. The textarea mirror lives behind lineEditor (#14)
+## 11. The textarea mirror lives behind lineEditor (#14) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): consequential edit — internal/tui/chromelayout_test.go: made necessary by moving sanitizeInputLine to editorgeometry.go (comment locator "(sanitizeInputLine, inputaccent.go)" fixed).
+NOTES (2026-10-02): consequential edit — internal/tui/lineeditor.go: made necessary by moving cellToRuneOffsetIn to editorgeometry.go (comment locator "(cellToRuneOffsetIn, mouse.go)" fixed, the two-line comment reflowed).
+NOTES (2026-10-02): besides the three Read-first tests, the rest of inputaccent_test.go's wrapRowStarts cost section (wrapRowCorpus, longProseLine, wrapRowStartsTotalAlloc, TestWrapRowStartsAllocationIsIndependentOfWidth) moved to editorgeometry_test.go with baseWrapRowStarts; the promptEditor row-count memo tests and BenchmarkInputContentRows stay in inputaccent_test.go under a re-labelled section header, and chromelayout_test.go's inputContentRows oracle stays in place.
 
 **What:**
 **Goal:** the string geometry that mirrors `bubbles/textarea` — `wrapRowStarts`,

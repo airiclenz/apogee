@@ -372,7 +372,10 @@
 // single-line one of its own ([newPopupField] — the /settings value row, the picker's filter and the
 // /sessions browser's, the /sessions rename row), so a caret that moves correctly is written once,
 // "what does backspace do" is answered once, and a config value never inherits the chat box's
-// vocabulary (recall, submit, the "/" and "@" overlays). A field painted
+// vocabulary (recall, submit, the "/" and "@" overlays). The string geometry that caret family
+// stands on — where the widget wrapped a line, which rune a cell or a (row, column) names, the
+// byte↔rune bridge — is editorgeometry.go's: free functions the line editor owns, which mouse.go's
+// gestures and inputaccent.go's accent pass call by the same names. A field painted
 // inside the popup module cannot use the widget's own View or the real terminal cursor — the module
 // styles rows whole and takes plain cells — so it renders through textWithCaret, a caret glyph AT
 // the offset, and the glyph is the FIELD's own ([lineEditor.caret]) because the surfaces disagree on
@@ -897,9 +900,10 @@
 // width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its
-// "/id" and @file tokens with, and — beside them, since they answer to the same oracle — the
-// textarea mirrors ADR 0030 §6 exempts from that authority: [wrapRowStarts] and [runesWidth],
-// [sanitizeInputLine], and [inputContentRows], the row count the prompt box is sized to;
+// "/id" and @file tokens with; editorgeometry.go the textarea mirrors ADR 0030 §6 exempts from
+// that authority — [wrapRowStarts] and [runesWidth], [sanitizeInputLine], [cellToRuneOffset], and
+// [inputContentRows], the row count the prompt box is sized to — beside the line editor's rune and
+// byte offset arithmetic and [cellToRuneOffsetIn], the one painter-measured sibling;
 // transcript.go the append-only scrollback model, entrykind.go the
 // [entryKind] enum beside the behaviour table every kind-keyed rule outside the paint switch reads
 // — what a kind is called on the wire, whether it owns a block state, whether it is a host note,

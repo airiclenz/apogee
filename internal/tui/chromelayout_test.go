@@ -97,7 +97,7 @@ func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth in
 // height and the rows the accent pass paints on come off one ruler.
 //
 // Tabs are in the table because the count now sanitises each line the way the widget's own sanitizer
-// did (sanitizeInputLine, inputaccent.go): the oracle sets the raw value on a real textarea, which
+// did (sanitizeInputLine, editorgeometry.go): the oracle sets the raw value on a real textarea, which
 // keeps four spaces per tab, so a mirror still measuring the tab as written would come up short here.
 // The runes that sanitizer DROPS — utf8.RuneError and the other control runes — are in the table for
 // the mirror image of that reason: the textarea keeps none of them, so a mirror that measured one
