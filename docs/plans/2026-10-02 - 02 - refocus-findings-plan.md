@@ -353,7 +353,9 @@ field by field.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Effort|Heartbeat|Rebind' ./internal/tui/`
 **Commit:** `refactor(tui): read effort capabilities through internal/domain`
 
-## 8. An import guard keeps internal/tui production code off internal/provider
+## 8. An import guard keeps internal/tui production code off internal/provider — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the guard reuses seams_guard_test.go's `packageGoFiles(t, false)` for the non-test file walk instead of copying the webhook guard's os.ReadDir loop; bite-checked by hand with a blank `internal/provider` import in effort.go and in the build-tagged altscreen_windows.go (both fail the guard), then reverted. The ADR 0024 note also names e2e_test.go's test-only provider import (left by item 7) beside the live tests.
 
 **What:**
 **Goal:** A go/parser test in `internal/tui` fails when any non-test `.go` file in `internal/tui` imports

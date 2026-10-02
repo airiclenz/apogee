@@ -128,6 +128,14 @@ config the composition root owns: the per-model system prompt (ADR 0023), the va
 ([ADR 0010](0010-package-layout-domain-core-and-thin-root-facade.md)); the thin-renderer contract
 (ADR 0011) is unchanged.
 
+> **Note 2026-10-02 (production files; test-only import allowed).** The "never `internal/provider`"
+> rule binds `internal/tui`'s production (non-test) files; `TestTUIImportsNoProvider`
+> (`internal/tui/imports_guard_test.go`) enforces it over every non-test `.go` file, build-tagged
+> ones included. The live tests (`live_test.go`, `smoke_live_test.go`) and the e2e harness
+> (`e2e_test.go`) keep a test-only `internal/provider` import, which the rule allows. Effort
+> capabilities reach the renderer as `domain.EffortSupport` / `domain.EffortDialect`, converted
+> outside `internal/tui` (`internal/heartbeat` for the Beat, `cmd/apogee` for the rebind dialect).
+
 The seams degrade independently and honestly. `Heartbeat: nil` arms no chain, folds nothing and
 blocks nothing — the pre-heartbeat renderer exactly. `Rebind: nil` is a **display-frozen**
 heartbeat: offline state and the model list still live, no binding ever moves. `RebindResult`
