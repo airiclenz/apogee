@@ -542,7 +542,7 @@ func (a *Agent) draftOutputSurvives() bool {
 // It rides the closing tool result of the capping Turn as an engine note under wrapUpNoteTopic
 // (buildRequest → Request.NoteOnTail), where the model reads next; the system prompt carries it
 // only on the fallback — a tail that is not a tool result — through AppendToSystem, whose
-// idempotency contract needs the marker to be a phrase INSIDE the directive (domain/hooks.go).
+// idempotency contract needs the marker to be a phrase INSIDE the directive (domain/request.go).
 // %d is the cap actually applied (Agent.stepCap) — the same number the human reads in
 // stepCapErrFormat and the parent reads in stepCapResultFormat, so all three tell one story.
 // Package constants, pinned by test, because the child reads them as the contract for its last

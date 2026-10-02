@@ -686,7 +686,9 @@ internal/provider/localdial_test.go — stubResolver, stubMDNS, TestLocalFallbac
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestCancelInsideRestreamHoldOffStaysResumable$|^TestCapRetryLatchIsSeparateFromTheReStreamLatch$|^TestCompactDoesNotRestreamAPlainSummaryFault$|^TestCompactRestreamsUpToTheBudgetOnATransientSummaryFault$|^TestOverflowGiveUpNamesTheWindowRemedy$|^TestRespondAndReviewReStreamsAMidStreamEOF$|^TestRespondAndReviewReStreamsATransientFaultUpToTheBudget$|^TestReStreamBudgetComesFromConfig$|^TestReStreamBudgetIsPerTurn$|^TestReStreamBudgetNilConfigDefaultsToThree$|^TestReStreamBudgetZeroNeverReStreams$|^TestRestreamHoldoffLadder$|^TestRestreamHoldOffThatElapsesStillReStreams$|^TestRetryExchange_EmptyInjectIsBareRestream$|^TestSubAgent_TransientChildBlipStaysInsideTheDelegation$' ./internal/agent/`
 **Commit:** `refactor: turn the restream holdoff and local dial seams into fields`
 
-## 23. domain/hooks.go holds only hook types (#20f)
+## 23. domain/hooks.go holds only hook types (#20f) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): hooks.go's header comment stays in hooks.go (it describes the engine seam and facade aliasing of all three types) and now names the three new files; tooledit.go:135's "ToolOutcomeOf, hooks.go" is left as is — ToolOutcomeOf stays in hooks.go.
 
 **What:** Depends on item 2.
 **Goal:** `domain.Request`, `domain.Response` and `domain.Conversation` (with their methods) live

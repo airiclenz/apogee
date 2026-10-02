@@ -3,7 +3,8 @@ package domain
 import "encoding/json"
 
 // ----------------------------------------------------------------------------
-// Tool-stage hook working values (hooks.go's ToolCall / ToolResult half)
+// Tool-stage hook working values (the ToolCall / ToolResult half of request.go,
+// response.go and conversation.go)
 // ----------------------------------------------------------------------------
 //
 // ToolCallEdit and ToolResultEdit are what the two tool-stage hooks receive in place of

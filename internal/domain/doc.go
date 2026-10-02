@@ -47,8 +47,12 @@
 // the latest-wins Adopt every reader of a cumulative stream folds by.
 //
 // The loop's working values. hooks.go is the substrate a reaction actually touches — Message and
-// its wire JSON, Role, ToolDef, Budget, the method-only Request / Response / Conversation,
-// and the LoopView / ConversationView interfaces. hookview.go is the unexported read-only
+// its wire JSON, Role, ToolDef, Budget, the LoopView / ConversationView interfaces, and the
+// message-slice helpers the working values share. request.go is the method-only Request the
+// pre-request reactions shape, with NewRequest, RequestState, SamplingParams and MergeSystem;
+// response.go is the method-only Response a post-response reaction inspects, with NewResponse
+// and FinishReason; conversation.go is the method-only, serializable Conversation a
+// history-rewrite reaction edits, with NewConversation and its wire JSON. hookview.go is the unexported read-only
 // views backing those interfaces, so a reaction reading loop state can never mutate it.
 // exchange.go derives the current Exchange's boundary from the conversation instead of
 // caching it, skipping the Interjection that is deliberately not an opening. budget.go is
