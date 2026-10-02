@@ -186,7 +186,13 @@ internal/agent/turn.go — turnLifecycle.settle; internal/agent/subagent.go — 
 Depends on item 2.
 **Commit:** `docs(adr): guard replayed signed thinking with a prefix digest`
 
-## 4. stubllm scripts signed thinking on the anthropic route
+## 4. stubllm scripts signed thinking on the anthropic route — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the Turn key is `blocks:` (a list of `{type, text, thinking, signature, data, id, name, arguments}`), set INSTEAD of text/chunks/reasoning/reasoning_chunks/tool_calls and refused beside captures (nothing substitutes into a block; capture expansion in match.go was left untouched); a thinking block must carry a signature. A `cut` on a blocks turn streams every block and kills in the terminator's place (after_runes counts only `text`/`chunks`).
+
+NOTES (2026-10-02): wire_anthropic.go's `stopReason` gained one branch beyond the shape members the regression guard names — a blocks turn whose blocks include a tool_use ends on `tool_use` — because `finishReason` is shared with the chat route, which ignores blocks; the renderer itself (scriptedRuns, scriptedContent, textRun, toolUseRun) lives in server.go, and messageEvents' existing text/tool_use runs now go through textRun/toolUseRun with identical output.
+
+NOTES (2026-10-02): the Acceptance `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/stubllm/` was not run by the implementer — the harness permission classifier refused both it and a non-race whole-package run; `go vet ./internal/stubllm/` passed and a targeted run of `-run 'TestMessagesRoute|TestBlocksTurn'` (the new tests plus the existing Messages route tests) passed. `TestDesignDoc*` (parses test-drivers.md) was not run; the doc edit touched only the Wires paragraph and the Turn kinds table, no heading or yaml fence.
 
 **What:**
 **Goal:** An `internal/stubllm` script on the anthropic route can return an assistant turn holding `thinking` blocks

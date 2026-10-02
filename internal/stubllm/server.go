@@ -689,13 +689,14 @@ func writeWhole(w http.ResponseWriter, t Turn, model string) {
 }
 
 // writeMessagesStream plays a Turn as the Messages event stream: message_start, then one
-// content block per channel — thinking, text, one tool_use per call — each opened, streamed
-// as deltas and stopped, then message_delta with the stop reason and the output usage, then
-// message_stop — the order and framing the real API uses, with the `event:` line every payload
-// repeats its type on. The text deltas honour Turn.Chunks and ChunkRunes as the chat route's
-// do; a tool_use input streams as the head-and-tail split the chat route's fragments use. A
-// `cut` turn kills the connection where message_delta would go; an `error` turn writes the
-// in-band error event there instead — and no message_stop after it, as the real API sends none.
+// content block per channel — thinking, text, one tool_use per call — or a blocks turn's
+// scripted blocks in script order, each opened, streamed as deltas and stopped, then
+// message_delta with the stop reason and the output usage, then message_stop — the order and
+// framing the real API uses, with the `event:` line every payload repeats its type on. The text
+// deltas honour Turn.Chunks and ChunkRunes as the chat route's do; a tool_use input streams as
+// the head-and-tail split the chat route's fragments use. A `cut` turn kills the connection
+// where message_delta would go; an `error` turn writes the in-band error event there instead —
+// and no message_stop after it, as the real API sends none.
 func writeMessagesStream(ctx context.Context, w http.ResponseWriter, t Turn, model string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -768,8 +769,9 @@ func writeMessagesStream(ctx context.Context, w http.ResponseWriter, t Turn, mod
 
 // messageEvents is the ordered list of block events a Turn streams between message_start and
 // its terminator: the thinking block, the text block, then one tool_use block per call, each
-// as start, deltas and stop. An empty-reply turn yields none. Block indexes count up across
-// the channels, as the real API numbers them.
+// as start, deltas and stop — or, for a blocks turn, its scripted blocks in script order. An
+// empty-reply turn yields none. Block indexes count up across the channels, as the real API
+// numbers them.
 func messageEvents(t Turn) []anthropicEvent {
 	var events []anthropicEvent
 	index := 0
@@ -784,6 +786,12 @@ func messageEvents(t Turn) []anthropicEvent {
 		events = append(events, anthropicEvent{Type: eventBlockStop, Index: &at})
 	}
 
+	if len(t.Blocks) > 0 {
+		for _, run := range t.scriptedRuns() {
+			block(run.open, run.deltas)
+		}
+		return events
+	}
 	if t.hasReasoning() {
 		var deltas []anthropicDelta
 		for _, part := range t.reasoningDeltas() {
@@ -792,33 +800,117 @@ func messageEvents(t Turn) []anthropicEvent {
 		block(anthropicBlock{Type: blockThinking, Thinking: new(string)}, deltas)
 	}
 	if parts := t.contentDeltas(); len(parts) > 0 {
-		var deltas []anthropicDelta
-		for _, part := range parts {
-			deltas = append(deltas, anthropicDelta{Type: deltaText, Text: part})
-		}
-		block(anthropicBlock{Type: blockText, Text: new(string)}, deltas)
+		run := textRun(parts)
+		block(run.open, run.deltas)
 	}
 	for i, call := range t.ToolCalls {
-		var deltas []anthropicDelta
-		head, tail := splitHalf(call.arguments())
-		deltas = append(deltas, anthropicDelta{Type: deltaInputJSON, PartialJSON: head})
-		if tail != "" {
-			deltas = append(deltas, anthropicDelta{Type: deltaInputJSON, PartialJSON: tail})
-		}
-		block(anthropicBlock{
-			Type:  blockToolUse,
-			ID:    call.callID(i),
-			Name:  call.Name,
-			Input: json.RawMessage(`{}`),
-		}, deltas)
+		run := toolUseRun(call, i)
+		block(run.open, run.deltas)
 	}
 	return events
 }
 
+// blockRun is one content block as it streams: the block content_block_start opens with and
+// the content_block_delta fragments that fill it.
+type blockRun struct {
+	open   anthropicBlock
+	deltas []anthropicDelta
+}
+
+// textRun is a text block streamed in the given parts.
+func textRun(parts []string) blockRun {
+	var deltas []anthropicDelta
+	for _, part := range parts {
+		deltas = append(deltas, anthropicDelta{Type: deltaText, Text: part})
+	}
+	return blockRun{open: anthropicBlock{Type: blockText, Text: new(string)}, deltas: deltas}
+}
+
+// toolUseRun is the position'th tool call as a tool_use block: opened with its id, name and an
+// empty input, its arguments streamed as the head-and-tail split.
+func toolUseRun(call ToolCall, position int) blockRun {
+	var deltas []anthropicDelta
+	head, tail := splitHalf(call.arguments())
+	deltas = append(deltas, anthropicDelta{Type: deltaInputJSON, PartialJSON: head})
+	if tail != "" {
+		deltas = append(deltas, anthropicDelta{Type: deltaInputJSON, PartialJSON: tail})
+	}
+	return blockRun{
+		open: anthropicBlock{
+			Type:  blockToolUse,
+			ID:    call.callID(position),
+			Name:  call.Name,
+			Input: json.RawMessage(`{}`),
+		},
+		deltas: deltas,
+	}
+}
+
+// scriptedRuns is a blocks turn as the runs it streams, in script order. A thinking block opens
+// empty, streams its thinking in chunk_runes deltas and then its whole signature as one
+// signature_delta, the fragment that seals it; a redacted_thinking block arrives whole — its
+// data on the start, no deltas — as the real API sends one; a text block streams as the text
+// channel does and a tool_use block as a tool call does, numbered among the turn's tool_use
+// blocks.
+func (t Turn) scriptedRuns() []blockRun {
+	runs := make([]blockRun, 0, len(t.Blocks))
+	calls := 0
+	for _, b := range t.Blocks {
+		switch b.Type {
+		case blockThinking:
+			var deltas []anthropicDelta
+			for _, part := range splitRunes(b.Thinking, t.chunkRunes()) {
+				deltas = append(deltas, anthropicDelta{Type: deltaThinking, Thinking: part})
+			}
+			deltas = append(deltas, anthropicDelta{Type: deltaSignature, Signature: b.Signature})
+			runs = append(runs, blockRun{open: anthropicBlock{Type: blockThinking, Thinking: new(string)}, deltas: deltas})
+		case blockRedactedThinking:
+			runs = append(runs, blockRun{open: anthropicBlock{Type: blockRedactedThinking, Data: b.Data}})
+		case blockText:
+			runs = append(runs, textRun(splitRunes(b.Text, t.chunkRunes())))
+		case blockToolUse:
+			runs = append(runs, toolUseRun(b.toolCall(), calls))
+			calls++
+		}
+	}
+	return runs
+}
+
+// scriptedContent is a blocks turn as the whole message's content, in script order: each block
+// with every member its type carries, and each tool_use block numbered among the turn's
+// tool_use blocks.
+func (t Turn) scriptedContent() []anthropicBlock {
+	content := make([]anthropicBlock, 0, len(t.Blocks))
+	calls := 0
+	for _, b := range t.Blocks {
+		switch b.Type {
+		case blockThinking:
+			thinking := b.Thinking
+			content = append(content, anthropicBlock{Type: blockThinking, Thinking: &thinking, Signature: b.Signature})
+		case blockRedactedThinking:
+			content = append(content, anthropicBlock{Type: blockRedactedThinking, Data: b.Data})
+		case blockText:
+			text := b.Text
+			content = append(content, anthropicBlock{Type: blockText, Text: &text})
+		case blockToolUse:
+			call := b.toolCall()
+			content = append(content, anthropicBlock{
+				Type:  blockToolUse,
+				ID:    call.callID(calls),
+				Name:  call.Name,
+				Input: json.RawMessage(call.arguments()),
+			})
+			calls++
+		}
+	}
+	return content
+}
+
 // writeMessagesWhole plays a Turn as a single Messages body — the non-streamed path — with the
-// same content blocks the stream opens, whole. An `error` turn is the error body in place of
-// the message, the way the API frames one; a `cut` kills the connection after the 200 header,
-// before any body, as writeWhole does.
+// same content blocks the stream opens, whole (a blocks turn's in script order, signatures and
+// redacted data included). An `error` turn is the error body in place of the message, the way
+// the API frames one; a `cut` kills the connection after the 200 header, before any body, as
+// writeWhole does.
 func writeMessagesWhole(w http.ResponseWriter, t Turn, model string) {
 	w.Header().Set("Content-Type", "application/json")
 	if t.Cut != nil {
@@ -841,6 +933,9 @@ func writeMessagesWhole(w http.ResponseWriter, t Turn, model string) {
 		Model:      model,
 		Content:    []anthropicBlock{},
 		StopReason: &stop,
+	}
+	if len(t.Blocks) > 0 {
+		reply.Content = t.scriptedContent()
 	}
 	if t.hasReasoning() {
 		thinking := t.reasoning()

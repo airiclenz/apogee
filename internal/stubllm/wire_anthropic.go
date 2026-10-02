@@ -31,13 +31,15 @@ const (
 
 // The content block and fragment types the stub writes.
 const (
-	blockText       = "text"
-	blockThinking   = "thinking"
-	blockToolUse    = "tool_use"
-	blockToolResult = "tool_result"
-	deltaText       = "text_delta"
-	deltaThinking   = "thinking_delta"
-	deltaInputJSON  = "input_json_delta"
+	blockText             = "text"
+	blockThinking         = "thinking"
+	blockRedactedThinking = "redacted_thinking"
+	blockToolUse          = "tool_use"
+	blockToolResult       = "tool_result"
+	deltaText             = "text_delta"
+	deltaThinking         = "thinking_delta"
+	deltaSignature        = "signature_delta"
+	deltaInputJSON        = "input_json_delta"
 )
 
 // anthropicModelsReply is the GET /v1/models payload in the Messages API's list shape: a `data`
@@ -117,16 +119,19 @@ func (c *anthropicContent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// anthropicBlock is one content block in either direction: text, thinking, tool_use
-// (id/name/input) or tool_result (tool_use_id/content). The union is flat because every member
-// is omitted when zero, so each block type serialises to exactly its own keys. Text and Thinking
-// are pointers on purpose: a streamed block OPENS as `{"type":"text","text":""}` — the empty
-// string present, the way the real API frames it — and the pointer is what lets the encoder
-// write that empty member here while omitting it on every other block type.
+// anthropicBlock is one content block in either direction: text, thinking (with its signature),
+// redacted_thinking (data), tool_use (id/name/input) or tool_result (tool_use_id/content). The
+// union is flat because every member is omitted when zero, so each block type serialises to
+// exactly its own keys. Text and Thinking are pointers on purpose: a streamed block OPENS as
+// `{"type":"text","text":""}` — the empty string present, the way the real API frames it — and
+// the pointer is what lets the encoder write that empty member here while omitting it on every
+// other block type.
 type anthropicBlock struct {
 	Type      string           `json:"type"`
 	Text      *string          `json:"text,omitempty"`
 	Thinking  *string          `json:"thinking,omitempty"`
+	Signature string           `json:"signature,omitempty"`
+	Data      string           `json:"data,omitempty"`
 	ID        string           `json:"id,omitempty"`
 	Name      string           `json:"name,omitempty"`
 	Input     json.RawMessage  `json:"input,omitempty"`
@@ -280,7 +285,8 @@ type anthropicEvent struct {
 	Error        *anthropicWireError `json:"error,omitempty"`
 }
 
-// anthropicDelta is a content_block_delta's fragment or a message_delta's closing metadata.
+// anthropicDelta is a content_block_delta's fragment — text, thinking, the signature that seals
+// a thinking block, or tool input JSON — or a message_delta's closing metadata.
 // StopSequence is raw so message_delta alone writes the `null` the real API writes there
 // (jsonNull), and a block fragment carries no such key.
 type anthropicDelta struct {
@@ -288,6 +294,7 @@ type anthropicDelta struct {
 	Text         string          `json:"text,omitempty"`
 	PartialJSON  string          `json:"partial_json,omitempty"`
 	Thinking     string          `json:"thinking,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
 	StopReason   string          `json:"stop_reason,omitempty"`
 	StopSequence json.RawMessage `json:"stop_sequence,omitempty"`
 }
@@ -378,9 +385,14 @@ func (e InBandError) anthropicWire() anthropicWireError {
 
 // stopReason is the Messages stop_reason this Turn ends on: its finish_reason mapped onto the
 // wire's vocabulary — stop is end_turn, tool_calls is tool_use, length is max_tokens — and any
-// other scripted value passed through unchanged.
+// other scripted value passed through unchanged. A blocks turn that scripts a tool_use block ends
+// on tool_use too, as a tool_calls turn does: only this wire renders its blocks.
 func (t Turn) stopReason() string {
-	switch reason := t.finishReason(); reason {
+	reason := t.finishReason()
+	if t.FinishReason == "" && len(t.blockToolCalls()) > 0 {
+		reason = "tool_calls"
+	}
+	switch reason {
 	case "stop":
 		return "end_turn"
 	case "tool_calls":

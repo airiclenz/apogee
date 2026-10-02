@@ -128,7 +128,8 @@ type Props struct {
 // turn a real model produces when it abandons a reply mid-flight. A completion is text, tool
 // calls, or BOTH: a model that narrates before it calls a tool streams its content deltas first
 // and the tool-call fragments after them, framed head and tail exactly as a call without
-// narration is, so one Turn scripts that shape rather than two fakes stitched together.
+// narration is, so one Turn scripts that shape rather than two fakes stitched together. Blocks
+// script a Messages reply block by block instead, for an interleaving no channel order can spell.
 // Reasoning and Usage accompany a completion; they are refused on an http or hang turn, which
 // never reach the completion wire shape at all.
 //
@@ -196,6 +197,13 @@ type Turn struct {
 	// ToolCalls are the calls this Turn emits. Each is streamed as two fragments — the
 	// id-bearing head and an argument tail — the split real servers send.
 	ToolCalls []ToolCall `yaml:"tool_calls,omitempty"`
+	// Blocks scripts the reply as the Messages API's content blocks, in the exact order given:
+	// signed `thinking`, `redacted_thinking`, `text` and `tool_use` blocks interleaved however a
+	// test needs them — a thinking block between two text blocks, text after a tool call. It is
+	// set INSTEAD of text, chunks, reasoning, reasoning_chunks and tool_calls, which play one
+	// block per channel in a fixed order and so cannot spell such a reply. Only the anthropic
+	// route renders it; the chat-completions route has no such blocks and ignores it.
+	Blocks []Block `yaml:"blocks,omitempty"`
 	// Usage is the terminal accounting chunk. Nil means the server reports none, which is
 	// what most local servers do.
 	Usage *Usage `yaml:"usage,omitempty"`
@@ -214,6 +222,67 @@ type Turn struct {
 	// Error ends the stream with an in-band `{"error": {...}}` object on the 200 response —
 	// the way an aggregator reports the failure of the upstream it routed to.
 	Error *InBandError `yaml:"error,omitempty"`
+}
+
+// Block is one scripted Messages content block. Type names the block, and each type reads its
+// own members only: a `thinking` block its Thinking and Signature (the thinking may be empty, as
+// a reply with its display omitted sends it, but the signature may not — the API signs every
+// thinking block), a `redacted_thinking` block its opaque Data, a `text` block its Text, and a
+// `tool_use` block ID, Name and Arguments exactly as a ToolCall reads them, numbered by its
+// position among the turn's tool_use blocks when ID is unset.
+type Block struct {
+	Type      string `yaml:"type"`
+	Text      string `yaml:"text,omitempty"`
+	Thinking  string `yaml:"thinking,omitempty"`
+	Signature string `yaml:"signature,omitempty"`
+	Data      string `yaml:"data,omitempty"`
+	ID        string `yaml:"id,omitempty"`
+	Name      string `yaml:"name,omitempty"`
+	Arguments string `yaml:"arguments,omitempty"`
+}
+
+// toolCall is a tool_use Block as the ToolCall its id and arguments resolve through.
+func (b Block) toolCall() ToolCall {
+	return ToolCall{ID: b.ID, Name: b.Name, Arguments: b.Arguments}
+}
+
+// blockToolCalls is the Turn's tool_use blocks as ToolCalls, in block order; nil when it scripts
+// none.
+func (t Turn) blockToolCalls() []ToolCall {
+	var calls []ToolCall
+	for _, b := range t.Blocks {
+		if b.Type == blockToolUse {
+			calls = append(calls, b.toolCall())
+		}
+	}
+	return calls
+}
+
+// validate reports the first thing wrong with one scripted block: an unknown type, or the member
+// its type cannot go without.
+func (b Block) validate() error {
+	switch b.Type {
+	case blockThinking:
+		if b.Signature == "" {
+			return errors.New("a thinking block needs a signature — the Messages API signs every one")
+		}
+	case blockRedactedThinking:
+		if b.Data == "" {
+			return errors.New("a redacted_thinking block needs its data")
+		}
+	case blockText:
+		if b.Text == "" {
+			return errors.New("a text block needs text — no server sends an empty one")
+		}
+	case blockToolUse:
+		if b.Name == "" {
+			return errors.New("a tool_use block needs a name")
+		}
+	default:
+		return fmt.Errorf("type is %q, want %s, %s, %s or %s",
+			b.Type, blockThinking, blockRedactedThinking, blockText, blockToolUse)
+	}
+	return nil
 }
 
 // Cut is the mid-stream connection loss: the server streams the Turn's reasoning and the first
@@ -435,6 +504,9 @@ func (t Turn) validate() error {
 	if err := t.validateChunks(); err != nil {
 		return err
 	}
+	if err := t.validateBlocks(); err != nil {
+		return err
+	}
 	for i := range t.ToolCalls {
 		if t.ToolCalls[i].Name == "" {
 			return fmt.Errorf("tool call %d needs a name", i)
@@ -483,6 +555,28 @@ func (t Turn) validateChunks() error {
 	for i, chunk := range t.ReasoningChunks {
 		if chunk == "" {
 			return fmt.Errorf("reasoning_chunks[%d] is empty — no server sends an empty delta", i)
+		}
+	}
+	return nil
+}
+
+// validateBlocks reports the first thing wrong with a Turn's scripted blocks. The list IS the
+// reply, so the per-channel members it replaces are refused beside it, and so are captures:
+// nothing substitutes into a block.
+func (t Turn) validateBlocks() error {
+	if len(t.Blocks) == 0 {
+		return nil
+	}
+	if t.Text != "" || len(t.Chunks) > 0 || len(t.ToolCalls) > 0 || t.hasReasoning() {
+		return errors.New("sets blocks beside text, chunks, reasoning, reasoning_chunks or tool_calls — " +
+			"blocks IS the reply, every block in its place")
+	}
+	if len(t.Captures) > 0 {
+		return errors.New("a blocks turn carries no captures")
+	}
+	for i := range t.Blocks {
+		if err := t.Blocks[i].validate(); err != nil {
+			return fmt.Errorf("blocks[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -637,10 +731,10 @@ func (t Turn) kindCount() int {
 	return kinds
 }
 
-// isCompletion reports whether the Turn carries any completion content: text, chunks or tool
-// calls.
+// isCompletion reports whether the Turn carries any completion content: text, chunks, tool
+// calls or scripted blocks.
 func (t Turn) isCompletion() bool {
-	return t.Text != "" || len(t.Chunks) > 0 || len(t.ToolCalls) > 0
+	return t.Text != "" || len(t.Chunks) > 0 || len(t.ToolCalls) > 0 || len(t.Blocks) > 0
 }
 
 // hasReasoning reports whether the Turn carries a thinking channel, whole or chunked.

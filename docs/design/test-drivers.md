@@ -67,7 +67,10 @@ a leading role-`system` message, a `tool_result` block as a role-`tool` message 
 `Effort.OutputEffort`. The log's `Wire` member (`"openai"` / `"anthropic"`) says which route a
 request arrived on. Each route then renders the Turn it took in its own reply shape — on the
 Messages wire, `message_start`, one `content_block_start`/`delta`/`stop` run per channel
-(thinking, text, one `tool_use` per call with `input_json_delta` fragments), `message_delta`
+(thinking, text, one `tool_use` per call with `input_json_delta` fragments) — or, for a `blocks`
+turn, one run per scripted block in the scripted interleaved order (a signed `thinking` block's
+`thinking_delta` fragments then one `signature_delta`, a `redacted_thinking` block whole on its
+start), `message_delta`
 with the mapped `stop_reason` (`end_turn` / `tool_use` / `max_tokens`) and `message_stop`; a
 whole message on the non-streamed path; the `{"type":"error","error":{…}}` body for an
 `error` turn, its scripted code rendered as the API's class slug (the default 502 is
@@ -173,6 +176,7 @@ scripts that shape.
 | `text` | assistant content, streamed in `chunk_runes` (default 4) rune deltas with `token_delay` between them |
 | `chunks` | the content with its stream boundaries placed BY HAND — one delta per element, in order; set instead of `text` and `chunk_runes`, no element empty. For a test about what happens AT a boundary (a `<think>` tag in a delta of its own). `reasoning_chunks` is the same for the thinking channel |
 | `tool_calls` | one or more calls, each split into the id-bearing head and an argument tail real servers send; with `text` on the same turn, streamed after the content |
+| `blocks` | the reply as Messages content blocks in the exact order given — `{type: thinking, thinking, signature}` (signature required), `{type: redacted_thinking, data}`, `{type: text, text}`, `{type: tool_use, id, name, arguments}` — interleaved however the test needs (text, thinking, text; text after a call), whole and streamed, a `tool_use` block ending the reply on `tool_use`. Set instead of `text`, `chunks`, `reasoning`, `reasoning_chunks` and `tool_calls`, and with no captures. Only the anthropic route renders it; the chat-completions route ignores it. A `cut` on such a turn streams every block and kills in the terminator's place |
 | `http` | a raw HTTP reply — `status` (required), `body`, `location`, `content_type` — and not one SSE event |
 | `hang` | stalls for the duration, then answers as the empty-reply turn does; a cancelled request context releases it at once |
 | *(none of the above)* | the empty-reply turn |
