@@ -585,16 +585,14 @@ func (s *liveSettings) generation() apogee.Generation {
 // divided into the observe rows the Runner fires and the sync rows the Agent runs. Both composition
 // roots read the seed through it and every writer below hands its answer back through it, so a
 // partial edit knows where the fields it does not touch stand without a second value remembering
-// them. SplitLanes builds two fresh slices, which is what lets the answer leave without cloning.
+// them. The lanes come from domain.LanesOf, the one seam the list is divided at, which builds two
+// fresh slices — that is what lets the answer leave without cloning.
 func generationOf(o config.Options) apogee.Generation {
-	observe, sync := domain.SplitLanes(o.Reactions)
-	return apogee.Generation{
-		Floor:             floorFromOptions(o),
-		Bypass:            o.Bypass,
-		ContextFillNotice: o.ContextFillNotice,
-		Observe:           observe,
-		Sync:              sync,
-	}
+	gen := domain.LanesOf(o.Reactions)
+	gen.Floor = floorFromOptions(o)
+	gen.Bypass = o.Bypass
+	gen.ContextFillNotice = o.ContextFillNotice
+	return gen
 }
 
 // setReactionLanes installs BOTH halves of the re-read `reactions:` list the session has just
@@ -1886,13 +1884,13 @@ func (a settingsApplier) reloadReactions() error {
 	if err != nil {
 		return err
 	}
-	observe, sync := domain.SplitLanes(file.Reactions)
+	lanes := domain.LanesOf(file.Reactions)
 	gen := a.live.generation()
-	gen.Observe, gen.Sync = observe, sync
+	gen.Observe, gen.Sync = lanes.Observe, lanes.Sync
 	if err := a.engine.SetReactions(gen); err != nil {
 		return err
 	}
-	a.live.setReactionLanes(observe, sync)
+	a.live.setReactionLanes(lanes.Observe, lanes.Sync)
 	return nil
 }
 

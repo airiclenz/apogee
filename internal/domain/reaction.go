@@ -695,3 +695,14 @@ func SplitLanes(list []Reaction) (observe, sync []Reaction) {
 	}
 	return observe, sync
 }
+
+// LanesOf is the Generation one resolved reaction list arms: its observe and sync lanes, divided
+// by SplitLanes, with every other member zero. It is the one seam a Driver divides its list at, so
+// a host hands the arm (Agent.SetReactions, run.Spec.Generation) the two lanes as one value rather
+// than splitting them itself. A host that needs the observe lane alone — the list a Reaction Runner
+// is built over, which fires whatever it is handed whatever its class — reads it off the result.
+// The Floor, Bypass and notice members are the caller's to fill: the list does not carry them.
+func LanesOf(list []Reaction) Generation {
+	observe, sync := SplitLanes(list)
+	return Generation{Observe: observe, Sync: sync}
+}

@@ -874,11 +874,12 @@ type ReactionRunner = reactions.Runner
 // keeping the entries active at the given workspace and starting one worker per survivor. See
 // internal/reactions for the contract.
 //
-// The list is taken AS VALIDATED — the Runner does not re-check it. This is the embedder's door
-// that lost that check when validation moved to the callers (one Generation, validated once, at the
-// seam that arms it): a Driver building its list from a `reactions:` file gets the check from the
-// config layer, and a list composed in Go should be run through Reaction.Validate per entry — and
-// through Generation.Validate as the observe lane of a Generation — before it is handed here.
+// The list is taken AS VALIDATED — the Runner does not re-check it, because the arm does: hand the
+// same list as Config.Observe beside the Runner as Config.ObserveRunner, and New validates it as the
+// observe lane of the seeded Generation (one Generation, validated once, at the seam that arms it),
+// refusing the Agent over a bad entry — Close the Runner then. Every later list reaches the Runner
+// through Agent.SetReactions, which validates it before Replace. Nothing fires in between: the
+// Runner reacts only to the Events it is handed, and the engine hands none before the Agent exists.
 func NewReactionRunner(list []Reaction, o RunnerOptions) (*ReactionRunner, error) {
 	return reactions.New(list, o)
 }

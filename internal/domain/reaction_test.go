@@ -1036,6 +1036,29 @@ func TestSplitLanesDividesByClassAndKeepsOrder(t *testing.T) {
 	}
 }
 
+// TestLanesOfCarriesBothLanesAndNothingElse pins the seam a host divides its list at: the
+// Generation it returns holds the two lanes SplitLanes divides, and leaves Floor, Bypass and the
+// notice switch at their zero for the caller to fill.
+func TestLanesOfCarriesBothLanesAndNothingElse(t *testing.T) {
+	t.Parallel()
+
+	argv := ArgvHandler{Argv: []string{"/usr/bin/react"}}
+	observe := Reaction{ID: "notify", Origin: OriginUser, Class: ClassObserve, Handler: argv}
+	gate := Reaction{ID: "warden", Origin: OriginUser, Class: ClassGate, Handler: argv}
+
+	got := LanesOf([]Reaction{gate, observe})
+
+	if len(got.Observe) != 1 || got.Observe[0].ID != "notify" {
+		t.Errorf("LanesOf(...).Observe = %+v, want the one observe entry", got.Observe)
+	}
+	if len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
+		t.Errorf("LanesOf(...).Sync = %+v, want the one gate entry", got.Sync)
+	}
+	if got.Floor != (FloorConfig{}) || got.Bypass || got.ContextFillNotice {
+		t.Errorf("LanesOf(...) = %+v, want Floor, Bypass and the notice switch at their zero", got)
+	}
+}
+
 // TestSeamPayloadRevisionsForwardToTheWorkingValue pins the two paired payloads: the dispatcher
 // brackets a firing on the payload's Revision(), so each pair must report the revision of the
 // working value it wraps rather than one of its own.

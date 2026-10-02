@@ -209,9 +209,8 @@ func measureContextCost(ctx context.Context, cfg apogee.Config, opts config.Opti
 		}
 	}
 
-	_, sync := domain.SplitLanes(opts.Reactions)
 	armed := armedDirectiveReactions(opts.Reactions)
-	first, err := measureTurn1(ctx, cfg, sync, false)
+	first, err := measureTurn1(ctx, cfg, domain.LanesOf(opts.Reactions), false)
 	if err != nil {
 		return probe.ContextCost{}, err
 	}
@@ -228,7 +227,7 @@ func measureContextCost(ctx context.Context, cfg apogee.Config, opts config.Opti
 	if armed == 0 {
 		return report, nil
 	}
-	second, err := measureTurn1(ctx, cfg, nil, true)
+	second, err := measureTurn1(ctx, cfg, domain.Generation{}, true)
 	if err != nil {
 		return probe.ContextCost{}, err
 	}
@@ -271,15 +270,18 @@ func (r turn1Reading) column(label string) probe.ContextCostMeasured {
 // and permits scratch writes once ScratchDir is set — and the deny-all Approver the Config carries
 // is belt-and-braces only.
 //
-// The sync lane is armed as run.Once arms it (internal/run/run.go): Generation read, Sync set,
-// handed back through SetReactions, so the Floor enable set and Bypass agent.New seeded stay as
-// seeded; an empty lane makes no swap. Under bypass the lane stays unarmed and Bypass is switched
-// on through the same read-edit-hand-back — liveSettings.setBypass's shape — so the second reading
-// is the first with the model-shaping classes off (ADR 0076 D9) and nothing else moved.
+// The lanes are armed as run.Once arms them (internal/run/run.go): lanes is the Generation the
+// configured list divides into (domain.LanesOf), handed whole; Generation read, Observe and Sync
+// taken from lanes, handed back through SetReactions, so the Floor enable set and Bypass agent.New
+// seeded stay as seeded; two empty lanes make no swap. The observe lane reaches no Runner here —
+// the probe builds none — so only the sync lane moves what the request carries. Under bypass the
+// lanes stay unarmed and Bypass is switched on through the same read-edit-hand-back —
+// liveSettings.setBypass's shape — so the second reading is the first with the model-shaping
+// classes off (ADR 0076 D9) and nothing else moved.
 //
 // The reply ceiling is pinned on the Config: newProjection stamps the loop's own cap on every
 // request, and Context.MaxOutputTokens is the operator's pin for it.
-func measureTurn1(ctx context.Context, cfg apogee.Config, sync []domain.Reaction, bypass bool) (turn1Reading, error) {
+func measureTurn1(ctx context.Context, cfg apogee.Config, lanes domain.Generation, bypass bool) (turn1Reading, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	sink := &turn1Sink{cancel: cancel}
@@ -292,15 +294,15 @@ func measureTurn1(ctx context.Context, cfg apogee.Config, sync []domain.Reaction
 	}
 	defer func() { _ = a.Close() }()
 
-	if bypass || len(sync) > 0 {
+	if bypass || len(lanes.Observe) > 0 || len(lanes.Sync) > 0 {
 		gen := a.Generation()
 		if bypass {
 			gen.Bypass = true
 		} else {
-			gen.Sync = sync
+			gen.Observe, gen.Sync = lanes.Observe, lanes.Sync
 		}
 		if err := a.SetReactions(gen); err != nil {
-			return turn1Reading{}, fmt.Errorf("apogee probe context --live: arm the sync lane: %w", err)
+			return turn1Reading{}, fmt.Errorf("apogee probe context --live: arm the reaction lanes: %w", err)
 		}
 	}
 

@@ -206,13 +206,15 @@ func (w *rootWiring) resolveConfig() error {
 	// It is handed the OBSERVE half alone (ADR 0076 A8). One `reactions:` file resolves to both
 	// lanes in one list, and the sync half — the advise and gate entries the AGENT runs inside the
 	// loop — is armed through the generation the engine holder is seeded with (wire_live.go), which
-	// is the one route it takes into this session. The Runner itself is handed to the Agent too,
+	// is the one route it takes into this session. The observe half is read off that same
+	// projection (generationOf), so the list this Runner is built over and the lane the holder is
+	// seeded with are one division of one list. The Runner itself is handed to the Agent too,
 	// through the Config below, so the Agent's one swap moves both lanes.
 	//
 	// Its webhooks post through the url-safety guard built from the options' allow/deny host lists —
 	// off w.opts, since the projected cfg does not exist yet — so a host the operator closed for the
 	// network tools is closed for a Reaction's POST too.
-	observe, _ := domain.SplitLanes(w.opts.Reactions)
+	observe := generationOf(w.opts).Observe
 	webhookGuard := security.NewURLGuard(w.opts.URLAllowHosts, w.opts.URLDenyHosts)
 	runner, err := reactions.New(observe, reactions.Options{
 		Inner:     w.bridge.Sink(),

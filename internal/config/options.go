@@ -331,7 +331,7 @@ type Options struct {
 	// reactions is the resolved global user-origin list (ADR 0076) — every Reaction the `reactions:`
 	// block and the `hooks:` block it succeeds arm, BOTH lanes in one list, loaded from the config
 	// file only (default-empty ⇒ nothing fires). One entry contributes one Reaction per action key
-	// it spells, all under its id, so a Driver splits the list ([domain.SplitLanes]) into the observe
+	// it spells, all under its id, so a Driver divides the list ([domain.LanesOf]) into the observe
 	// lane its Runner fires and the sync lane its Agent runs. ApplyConfig sets it from settings, and
 	// the TUI re-reads it in place when the file changes.
 	Reactions []domain.Reaction

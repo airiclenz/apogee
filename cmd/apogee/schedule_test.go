@@ -1429,9 +1429,10 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 }
 
 // The SYNC half of that same promise: the `gate:` and `advise:` entries the session is answering to
-// travel with a Firing it raises. They reach the run through the Spec rather than the Runner (a
-// Firing builds its Agent inside run.Once), so this asserts the seam the Driver actually fills —
-// the observe lane must not leak into it, and the sync lane must not be dropped on the floor.
+// travel with a Firing it raises. They reach the run through the Spec's Generation rather than the
+// Runner (a Firing builds its Agent inside run.Once), so this asserts the seam the Driver actually
+// fills — each lane in its own member, the observe lane never leaking into the sync lane, and the
+// sync lane never dropped on the floor.
 func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
 	t.Parallel()
 
@@ -1477,8 +1478,11 @@ func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
 		t.Fatalf("fire: %v", err)
 	}
 
-	if len(stub.spec.Sync) != 1 || stub.spec.Sync[0].ID != "warden" {
-		t.Errorf("Spec.Sync = %+v, want the session's one gate: entry and nothing else", stub.spec.Sync)
+	if sync := stub.spec.Generation.Sync; len(sync) != 1 || sync[0].ID != "warden" {
+		t.Errorf("Spec.Generation.Sync = %+v, want the session's one gate: entry and nothing else", sync)
+	}
+	if observe := stub.spec.Generation.Observe; len(observe) != 1 || observe[0].ID != "notify" {
+		t.Errorf("Spec.Generation.Observe = %+v, want the session's one observe entry and nothing else", observe)
 	}
 	if stub.spec.Config.Reactions != nil {
 		t.Errorf("Config.Reactions = %+v, want nil — the sync lane takes ONE route into a Firing, "+

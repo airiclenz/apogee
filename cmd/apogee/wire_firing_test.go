@@ -1378,8 +1378,9 @@ func TestFiringConfigWiresTheSyncLanesReporter(t *testing.T) {
 	}
 }
 
-// The sync lane takes exactly ONE route into a run: the Driver splits its resolved `reactions:`
-// list, hands the observe half to a Reaction Runner and the sync half to run.Spec.Sync. A
+// The sync lane takes exactly ONE route into a run: the Driver divides its resolved `reactions:`
+// list once (domain.LanesOf), builds a Reaction Runner over the observe half and hands both lanes
+// whole to run.Spec.Generation. A
 // composition root that ALSO wrote domain.Config.Reactions — the engine's own construction-time
 // set — would arm every user entry twice, so the second route is closed by rule and this is the
 // rule. It reads the source rather than a Config value because the claim is about every wiring
@@ -1410,7 +1411,7 @@ func TestNoWiringSiteWritesConfigReactions(t *testing.T) {
 			}
 			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Reactions" {
 				t.Errorf("%s writes a Reactions field in a composite literal; the user's list "+
-					"reaches a run through the observe Runner and run.Spec.Sync, never through "+
+					"reaches a run through the observe Runner and run.Spec.Generation, never through "+
 					"Config.Reactions", fset.Position(kv.Pos()))
 			}
 			return true

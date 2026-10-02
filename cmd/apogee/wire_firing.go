@@ -767,7 +767,7 @@ func clockNow(c schedule.Clock) func() time.Time {
 // raise is the ONE act every unattended Firing is: it takes what a Driver decided (firingInputs, the
 // prompt, the Schedule the run belongs to, the store its record lands in) and does, in this order,
 // everything the three Drivers used to spell out for themselves — divides the `reactions:` list
-// into its lanes (ADR 0076 A8), builds this Firing's own Reaction Runner and drains it when the
+// into its lanes (domain.LanesOf, ADR 0076 A8), builds this Firing's own Reaction Runner and drains it when the
 // Firing ends (ADR 0073), mints the record id, composes the Config (firingConfig), refuses a server
 // that answered nothing (notice.ServerOffline), lets the Driver decorate the Event sink, and runs
 // the Firing once through its runner (in.runner, or the production run.Once when nil). It exists
@@ -819,9 +819,9 @@ func raise(
 	onID func(recordID string),
 	narrate func(recordID string, cfg apogee.Config, sink domain.EventSink) domain.EventSink,
 ) (run.Result, []string, error) {
-	observeReactions, syncReactions := domain.SplitLanes(in.opts.Reactions)
+	lanes := domain.LanesOf(in.opts.Reactions)
 	guard := security.NewURLGuard(in.opts.URLAllowHosts, in.opts.URLDenyHosts)
-	hookRunner, err := firingHooks(observeReactions, in.roots.workspace, guard, ref, in.report)
+	hookRunner, err := firingHooks(lanes.Observe, in.roots.workspace, guard, ref, in.report)
 	if err != nil {
 		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}
 	}
@@ -863,10 +863,12 @@ func raise(
 		RecordID: in.recordID,
 		// The clock the id above was minted from, so CreatedAt and the id prefix agree.
 		Now: now,
-		// The sync half of the `reactions:` list this Firing resolved, armed on the Agent run.Once
-		// builds before its first Step: a `gate:` answers this run's very first tool call, and its
-		// trouble reaches the same report line the Runner's does (Config.Report, firingConfig).
-		Sync: syncReactions,
+		// Both lanes of the `reactions:` list this Firing resolved, handed whole and armed on the
+		// Agent run.Once builds before its first Step: a `gate:` answers this run's very first tool
+		// call, and its trouble reaches the same report line the Runner's does (Config.Report,
+		// firingConfig). The observe lane is the one the Runner above was built over, so the Agent
+		// validates and reports it but has no Runner of its own to swap (Config.ObserveRunner).
+		Generation: lanes,
 		// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
 		// Firing delegates to the `sub-agents-server:` entry exactly as a session does, and both
 		// fields are nil when no key named one — the unrouted floor every Firing had before.

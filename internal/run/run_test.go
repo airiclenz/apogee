@@ -447,8 +447,8 @@ func TestOnceDeniesAGatedActionWithoutParking(t *testing.T) {
 
 // TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep pins the ONE route a `reactions:` file's advise
 // and gate entries take into an unattended run (ADR 0076 A8). A Firing holds no Agent the Driver
-// can reach — Once constructs it — so the lane rides the Spec and Once installs it through the
-// live swap door before the prompt is submitted. Witnessed at the earliest place it can fail: the
+// can reach — Once constructs it — so the lane rides the Spec's Generation and Once installs it
+// through the live swap door before the prompt is submitted. Witnessed at the earliest place it can fail: the
 // run's VERY FIRST tool call, which the gate must already be answering.
 //
 // A read-only tool in Plan mode is deliberate: the mode ladder runs that class, so a call that
@@ -468,7 +468,7 @@ func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
 
 	spec := planSpec(up.URL, "note something for me")
 	spec.Config.Tools = registry
-	spec.Sync = []domain.Reaction{denyingGate("warden")}
+	spec.Generation = domain.Generation{Sync: []domain.Reaction{denyingGate("warden")}}
 
 	// A generous deadline rather than a bare Background: a gate that never answered would hang
 	// the package rather than failing the assertion below.
@@ -485,15 +485,15 @@ func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
 		t.Fatalf("the server answered %d requests, want 2 (the refused tool Turn, then the final Turn)", len(reqs))
 	}
 	if got := up.LastMessage(2); !strings.Contains(got, "tool call denied by reaction warden") {
-		t.Errorf("the tool result read %q; want the gate's refusal — Spec.Sync never reached the Agent", got)
+		t.Errorf("the tool result read %q; want the gate's refusal — the Spec's sync lane never reached the Agent", got)
 	}
 	if res.FinalText != "I could not note it" {
 		t.Errorf("Result.FinalText = %q, want the answer the refused call led to", res.FinalText)
 	}
 }
 
-// TestOnceWithoutASyncLaneGatesNothing is the other half of that seam: an empty Spec.Sync is what
-// every Firing carried before the field existed, so the same call runs untouched. Without it a
+// TestOnceWithoutASyncLaneGatesNothing is the other half of that seam: an empty Spec.Generation is
+// what every Firing carried before the field existed, so the same call runs untouched. Without it a
 // gate that silently never fired would pass the test above by accident.
 func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 	t.Parallel()
@@ -529,6 +529,51 @@ func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 	if res.FinalText != "noted" {
 		t.Errorf("Result.FinalText = %q, want the answer the executed call led to", res.FinalText)
 	}
+}
+
+// TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner pins the other lane of the same route: the
+// Spec carries the Generation whole, and Once hands its observe lane through the same swap door, which
+// passes it to the Runner the Config holds (Config.ObserveRunner) before the prompt is submitted. The
+// Runner was built over nothing, so the one Replace it sees is the Spec's lane and only that.
+func TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, finalScript("done"))
+	runner := &recordingObserveRunner{}
+	spec := planSpec(up.URL, "do the thing")
+	spec.Config.ObserveRunner = runner
+	spec.Generation = domain.Generation{Observe: []domain.Reaction{{
+		ID:      "notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []domain.Moment{domain.MomentTurnFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Second,
+	}}}
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	got := runner.lists
+	if len(got) != 1 {
+		t.Fatalf("the Runner was handed %d list(s), want the Spec's one observe lane: %+v", len(got), got)
+	}
+	if len(got[0]) != 1 || got[0][0].ID != "notify" {
+		t.Errorf("the Runner was handed %+v, want the Spec's one observe entry", got[0])
+	}
+}
+
+// recordingObserveRunner is a Config.ObserveRunner that keeps every list it is handed, so a test
+// can read which observe lane the Agent passed on. It never refuses. Once swaps on the caller's
+// goroutine before it returns, so the test reads lists without a lock.
+type recordingObserveRunner struct {
+	lists [][]domain.Reaction
+}
+
+func (r *recordingObserveRunner) Replace(list []domain.Reaction) error {
+	r.lists = append(r.lists, slices.Clone(list))
+	return nil
 }
 
 // TestOncePinsAskerAndPresenterOff proves the pin is Once's, not the caller's: a Spec whose

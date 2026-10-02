@@ -92,18 +92,23 @@ type Spec struct {
 	// (ADR 0031): the Driver resolves the target, this seam only carries it.
 	DelegationTarget *agent.DelegationTarget
 
-	// Sync is the sync lane this Firing arms — the advise and gate Reactions the user's
-	// `reactions:` file resolved to (ADR 0076 A8), which the AGENT runs inside the loop. It is
-	// the ONE route the lane takes into a Firing: a Driver splits its resolved list
-	// ([domain.SplitLanes]), hands the observe half to its Reaction Runner and this half here,
-	// and never writes Config.Reactions — that field is the engine's own construction-time set,
-	// and a list written to both would arm every entry twice.
+	// Generation carries the two user lanes this Firing arms — the observe and sync Reactions the
+	// user's `reactions:` file resolved to (ADR 0076 A8) — handed WHOLE, as the Driver's one
+	// division of its list made them (domain.LanesOf). It is the ONE route the lanes take into a
+	// Firing: Once hands both to the Agent's swap door (Agent.SetReactions), which arms the sync lane
+	// inside the loop and passes the observe lane to the Config's ObserveRunner, and a Driver never
+	// writes Config.Reactions — that field is the engine's own construction-time set, and a list
+	// written to both would arm every entry twice.
+	//
+	// Only Observe and Sync are read. Floor, Bypass and ContextFillNotice come from the Agent Once
+	// builds (Agent.Generation, seeded from the Config), so a Generation that left them at their
+	// zero cannot switch every guard back on under a Config that had switched them off.
 	//
 	// It is a field of its own rather than part of the Config because a Firing has no
 	// post-construction seam: Once builds the Agent itself, so the only way a Driver can reach
-	// the live swap door is to hand the lane over here and let Once apply it. nil ⇒ nothing is
-	// armed and the run is byte-for-byte what it was before this field existed.
-	Sync []domain.Reaction
+	// the live swap door is to hand the lanes over here and let Once apply them. Both lanes empty ⇒
+	// nothing is armed and the run is byte-for-byte what it was before this field existed.
+	Generation domain.Generation
 
 	// DelegationSeat is what the orientation block TELLS the model about that far seat — the
 	// host's own words for it (ADR 0069). nil ⇒ the block names only the session seat. It is
@@ -392,21 +397,23 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	defer func() { _ = a.Close() }()
 
-	// The sync lane the caller armed (Spec.Sync), installed through the live swap door before the
-	// first Step so a gate answers the run's very first tool call and an advise span reaches its
-	// very first tool result. It goes through the read-edit-hand-back idiom SetReactions documents
-	// rather than a bare literal: the generation also carries the Floor enable set and Bypass that
-	// agent.New just seeded from the Config, and a value composed here would put both back to their
-	// zero — every guard on, Bypass off — under a caller that had switched them.
+	// The two lanes the caller armed (Spec.Generation), installed through the live swap door before
+	// the first Step so a gate answers the run's very first tool call, an advise span reaches its very
+	// first tool result and the observe lane reaches the Config's ObserveRunner. It goes through the
+	// read-edit-hand-back idiom SetReactions documents rather than handing the Spec's value on: only
+	// the two lanes are taken from it, because the generation also carries the Floor enable set,
+	// Bypass and the notice switch that agent.New just seeded from the Config, and the Spec's own
+	// would put them back to their zero — every guard on, Bypass off — under a caller that had
+	// switched them.
 	//
-	// An empty lane is left alone rather than handed over, so a Firing that arms nothing makes no
-	// swap at all. The swap door validates the lane (Agent.SetReactions) — a Firing whose Spec.Sync
-	// the engine will not arm fails here, before its first Step, rather than running without it.
-	if len(spec.Sync) > 0 {
+	// Two empty lanes are left alone rather than handed over, so a Firing that arms nothing makes no
+	// swap at all. The swap door validates both lanes (Agent.SetReactions) — a Firing whose lanes the
+	// engine will not arm fails here, before its first Step, rather than running without them.
+	if lanes := spec.Generation; len(lanes.Observe) > 0 || len(lanes.Sync) > 0 {
 		gen := a.Generation()
-		gen.Sync = spec.Sync
+		gen.Observe, gen.Sync = lanes.Observe, lanes.Sync
 		if err := a.SetReactions(gen); err != nil {
-			return Result{}, fmt.Errorf("apogee: arm the firing's sync lane: %w", err)
+			return Result{}, fmt.Errorf("apogee: arm the firing's reaction lanes: %w", err)
 		}
 	}
 

@@ -3995,9 +3995,10 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 	}
 }
 
-// A headless run arms the SYNC half of that same list on the Agent it runs. The Driver splits its
-// resolved `reactions:` block, hands the observe rows to the Runner it built and the advise and gate
-// rows to run.Spec — the one route a Firing has, since it holds no Agent to push them onto. Read at
+// A headless run arms the SYNC half of that same list on the Agent it runs. The Driver divides its
+// resolved `reactions:` block once (domain.LanesOf), builds its Runner over the observe rows and
+// hands both lanes whole to run.Spec.Generation — the one route a Firing has, since it holds no
+// Agent to push them onto. Read at
 // the seam the Driver fills: a `gate:` dropped here would leave a configured gate silently answering
 // nothing at every unattended root.
 func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
@@ -4012,8 +4013,11 @@ func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
 		t.Fatalf("headless: %v", err)
 	}
 
-	if len(stub.spec.Sync) != 1 || stub.spec.Sync[0].ID != "warden" {
-		t.Errorf("Spec.Sync = %+v, want the file's one gate: entry and nothing else", stub.spec.Sync)
+	if sync := stub.spec.Generation.Sync; len(sync) != 1 || sync[0].ID != "warden" {
+		t.Errorf("Spec.Generation.Sync = %+v, want the file's one gate: entry and nothing else", sync)
+	}
+	if observe := stub.spec.Generation.Observe; len(observe) != 1 || observe[0].ID != "record" {
+		t.Errorf("Spec.Generation.Observe = %+v, want the file's one run: entry and nothing else", observe)
 	}
 	if stub.spec.Config.Reactions != nil {
 		t.Errorf("Config.Reactions = %+v, want nil — the sync lane takes ONE route into a Firing",
