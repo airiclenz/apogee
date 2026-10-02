@@ -22,6 +22,10 @@ import (
 // the die-with-parent teardown (namespace_linux.go, namespaceArgv).
 var namespaceBaseFlags = []string{"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent"}
 
+// bwrapAbsentReason is the reason a host with no bwrap in any trusted directory discloses: the
+// four directories of bwrapCandidates, in order, and never PATH.
+const bwrapAbsentReason = "bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin"
+
 // existsIn returns an exists predicate answering true for exactly the given paths, so the
 // argv generator is exercised with no host state at all.
 func existsIn(paths ...string) func(string) bool {
@@ -151,7 +155,7 @@ func TestNamespaceConfineRejectsEmptyArgv(t *testing.T) {
 	// Confine must refuse a cmd with no argv rather than produce a malformed launch line —
 	// the deterministic guard runs before the availability check, so an unavailable backend
 	// still reports "no argv" rather than ErrConfinementUnavailable.
-	c := newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
+	c := newNamespaceConfiner("", bwrapAbsentReason, domain.CauseBackendAbsent)
 	cmd := &exec.Cmd{} // no Args
 
 	err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd)
@@ -173,7 +177,7 @@ func TestNamespaceConfineUnavailableIsErrConfinementUnavailable(t *testing.T) {
 	// bwrap absent => Confine returns ErrConfinementUnavailable (the "confine if you can,
 	// gate if you can't" safety net) carrying the reason, so dispatch falls back to Approval
 	// and the user reads why.
-	c := newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
+	c := newNamespaceConfiner("", bwrapAbsentReason, domain.CauseBackendAbsent)
 	cmd := exec.Command("/bin/echo", "hi")
 
 	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: "/ws"}, cmd)
@@ -184,8 +188,8 @@ func TestNamespaceConfineUnavailableIsErrConfinementUnavailable(t *testing.T) {
 	if !errors.Is(err, domain.ErrConfinementUnavailable) {
 		t.Errorf("Confine error = %v, want wrapping ErrConfinementUnavailable", err)
 	}
-	if !strings.Contains(err.Error(), "bwrap not on PATH") {
-		t.Errorf("Confine error = %q, want it to carry the reason %q", err, "bwrap not on PATH")
+	if !strings.Contains(err.Error(), bwrapAbsentReason) {
+		t.Errorf("Confine error = %q, want it to carry the reason %q", err, bwrapAbsentReason)
 	}
 	if cmd.Path != "/bin/echo" {
 		t.Errorf("cmd.Path = %q after a refused Confine, want it untouched", cmd.Path)
@@ -215,7 +219,7 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 		// not refused, ADR 0012) and the reason is disclosed (contract §5) in both forms.
 		// Nothing is fenced, so nothing is residual either: a residual is an admitted gap in a
 		// fence that exists.
-		{"bwrap_absent", "", "bwrap not on PATH", domain.CauseBackendAbsent, false, false, "bwrap not on PATH", domain.CauseBackendAbsent, nil},
+		{"bwrap_absent", "", bwrapAbsentReason, domain.CauseBackendAbsent, false, false, bwrapAbsentReason, domain.CauseBackendAbsent, nil},
 		// A probe that outlived its budget reaches the caps as its OWN cause: the sentence and
 		// the token both say the probe never answered, which is not the same host fact as a
 		// bwrap that is not installed.
@@ -359,21 +363,102 @@ func TestNamespaceProbeReasonNamesTheCause(t *testing.T) {
 		}
 	})
 
-	t.Run("bwrap_absent_from_path", func(t *testing.T) {
-		t.Setenv("PATH", t.TempDir())
-
-		c := NewNamespaceConfiner()
+	t.Run("candidates_absent_names_the_trusted_dirs", func(t *testing.T) {
+		// The production list, with nothing executable in it and nothing on PATH either: the
+		// reason names every directory apogee looked in, so the user knows where to install.
+		c := newProbedNamespaceConfiner(bwrapCandidates, func(string) bool { return false }, lookNothing)
 
 		caps := c.Capabilities()
 		if caps.FSWrite || caps.NetworkEgress {
 			t.Errorf("Capabilities = %+v, want neither cell when bwrap is absent", caps)
 		}
-		if caps.Unavailable != "bwrap not on PATH" {
-			t.Errorf("Unavailable = %q, want %q", caps.Unavailable, "bwrap not on PATH")
+		if caps.Unavailable != bwrapAbsentReason {
+			t.Errorf("Unavailable = %q, want %q", caps.Unavailable, bwrapAbsentReason)
 		}
 		if caps.Cause != domain.CauseBackendAbsent {
 			t.Errorf("Cause = %q, want %q: nothing ran, so nothing refused or timed out",
 				caps.Cause, domain.CauseBackendAbsent)
 		}
 	})
+
+	t.Run("bwrap_only_on_path_is_never_run", func(t *testing.T) {
+		// A bwrap reachable only through PATH — a direnv bin/, a project shim — must not build
+		// the fence: the backend is unavailable, the reason names where that bwrap is, and the
+		// stub never runs (it would leave the marker behind if it did).
+		marker := filepath.Join(t.TempDir(), "ran")
+		launcher := stubLauncher(t, "touch '"+marker+"'\nexit 0\n")
+		t.Setenv("PATH", filepath.Dir(launcher))
+
+		c := newProbedNamespaceConfiner([]string{filepath.Join(t.TempDir(), "bwrap")}, isExecutableFile, exec.LookPath)
+
+		caps := c.Capabilities()
+		if caps.FSWrite || caps.NetworkEgress {
+			t.Errorf("Capabilities = %+v, want neither cell for a bwrap found only on PATH", caps)
+		}
+		if want := "bwrap at " + launcher + " is outside the trusted system directories"; caps.Unavailable != want {
+			t.Errorf("Unavailable = %q, want %q", caps.Unavailable, want)
+		}
+		if caps.Cause != domain.CauseBackendAbsent {
+			t.Errorf("Cause = %q, want %q: an untrusted bwrap is no trusted bwrap", caps.Cause, domain.CauseBackendAbsent)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Errorf("the PATH-only bwrap at %s was executed; it must never run", launcher)
+		}
+	})
+
+	t.Run("candidate_present_is_used", func(t *testing.T) {
+		// The first EXECUTABLE candidate wins: a missing one and a non-executable one are
+		// skipped, and the stub that exits 0 is probed and kept as the launcher.
+		dir := t.TempDir()
+		notExecutable := filepath.Join(dir, "bwrap")
+		if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+			t.Fatalf("write non-executable candidate: %v", err)
+		}
+		launcher := stubLauncher(t, "exit 0\n")
+		candidates := []string{filepath.Join(t.TempDir(), "bwrap"), notExecutable, launcher}
+
+		c := newProbedNamespaceConfiner(candidates, isExecutableFile, lookNothing)
+
+		if c.bwrapPath != launcher {
+			t.Errorf("bwrapPath = %q, want the executable candidate %q", c.bwrapPath, launcher)
+		}
+		if caps := c.Capabilities(); !caps.FSWrite || caps.Unavailable != "" {
+			t.Errorf("Capabilities = %+v, want a fenceable backend from a candidate that exits 0", caps)
+		}
+	})
+}
+
+// lookNothing is a PATH lookup that finds no program at all.
+func lookNothing(string) (string, error) { return "", exec.ErrNotFound }
+
+func TestResolveBwrap(t *testing.T) {
+	t.Parallel()
+
+	const pathBwrap = "/home/user/project/.direnv/bin/bwrap"
+	lookPathBwrap := func(string) (string, error) { return pathBwrap, nil }
+
+	tests := []struct {
+		name       string
+		executable []string
+		look       func(string) (string, error)
+		wantPath   string
+		wantReason string
+	}{
+		{"none_anywhere", nil, lookNothing, "", bwrapAbsentReason},
+		{"first_trusted_dir_wins", []string{"/bin/bwrap", "/usr/local/bin/bwrap"}, lookNothing, "/bin/bwrap", ""},
+		{"nixos_profile", []string{"/run/current-system/sw/bin/bwrap"}, lookNothing, "/run/current-system/sw/bin/bwrap", ""},
+		{"trusted_dir_beats_path", []string{"/usr/bin/bwrap"}, lookPathBwrap, "/usr/bin/bwrap", ""},
+		{"path_only_is_refused", nil, lookPathBwrap, "", "bwrap at " + pathBwrap + " is outside the trusted system directories"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotPath, gotReason := resolveBwrap(bwrapCandidates, existsIn(tt.executable...), tt.look)
+
+			if gotPath != tt.wantPath || gotReason != tt.wantReason {
+				t.Errorf("resolveBwrap = (%q, %q), want (%q, %q)", gotPath, gotReason, tt.wantPath, tt.wantReason)
+			}
+		})
+	}
 }

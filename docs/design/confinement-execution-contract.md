@@ -202,12 +202,13 @@ decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and record
 **Linux (namespace, 2026-09-17, `//go:build linux`;
 [ADR 0081](../adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md)).** The second Linux
 backend, selected when landlock cannot fence on this kernel (§2.6). It is an **argv rewrite** of the
-seatbelt shape, not a re-exec of the Apogee binary: the launcher is bubblewrap (`bwrap`), resolved on
-`PATH` once at construction as an optional external enhancement (ADR 0042 §4 — Linux's bounded
-exception, macOS's twin), and `Confine` rewrites:
+seatbelt shape, not a re-exec of the Apogee binary: the launcher is bubblewrap (`bwrap`), taken once at
+construction as an optional external enhancement (ADR 0042 §4 — Linux's bounded exception, macOS's
+twin) from the first executable among `/usr/bin/bwrap`, `/bin/bwrap`, `/usr/local/bin/bwrap` and
+`/run/current-system/sw/bin/bwrap` — never from `PATH` (amended 2026-10-02) — and `Confine` rewrites:
 
 ```
-cmd.Path = <bwrap, resolved on PATH at construction>
+cmd.Path = <bwrap, the first trusted candidate at construction>
 cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent",
             ("--unshare-net" iff box.NetworkAllow is non-empty),
             "--bind", <root>, <root> (for WorkspaceRoot and each existing WritablePaths entry, canonicalised),
@@ -612,11 +613,17 @@ one level down (D2), for free, with no threading.
 > beside it and a refusal, like a missing helper, surfaces nowhere. Windows keeps the Win32
 > clipboard API, which runs no program. The 2026-08-30 list above no longer names the formatter
 > probe, which left the tree when the autofix mechanism was retired. **The one program not resolved through
-> `security.ResolveProgram` is bubblewrap** (§2 namespace backend): `NewNamespaceConfiner` resolves
-> `bwrap` once per process with `exec.LookPath`, at construction, before any session workspace
-> exists, so there is no root to fence it against. A workspace whose PATH entries reach apogee's own
-> environment before construction (a direnv-managed `PATH`, say) is the case that exception leaves
-> open, and it is tracked as a bead rather than fenced here.
+> `security.ResolveProgram` is bubblewrap** (§2 namespace backend): `NewNamespaceConfiner` takes
+> `bwrap` once per process, at construction, before any session workspace exists, and only from a
+> fixed list of absolute system paths — the first executable among `/usr/bin/bwrap`, `/bin/bwrap`,
+> `/usr/local/bin/bwrap` and `/run/current-system/sw/bin/bwrap`. `PATH` never chooses it, so a
+> workspace whose `PATH` entries reach apogee's own environment (a direnv-managed `PATH`, say) cannot
+> substitute the program that builds the fence. None present ⇒ the namespace backend is unavailable
+> (`bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin`); a bwrap found
+> only on `PATH` ⇒ unavailable too (`bwrap at <path> is outside the trusted system directories`) and
+> never executed. Both carry `CauseBackendAbsent`, and unavailable behaves as any unfenceable host:
+> Auto gates to approval, unattended runs block, sync reactions are refused — there is no unconfined
+> fallback.
 
 > **Amended 2026-09-06 (a subprocess that is read-only by construction takes the RO row; ADR 0012
 > amendment 2026-09-06).** The 2026-07-26 rule above — an unfakeable marker outranks a tool's own
@@ -883,7 +890,8 @@ never optimistic:
   (`landlock unavailable (landlock_create_ruleset: <errno>)`).
   *(Amended 2026-09-17, [ADR 0081](../adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md).)*
   Landlock is the **first rung**; when it cannot fence writes the selector (§2.6) constructs the
-  **namespace backend**, whose probe resolves `bwrap` on `PATH` and then **launches it once for real**
+  **namespace backend**, whose probe takes `bwrap` from the fixed system directories (§2; never
+  `PATH`, amended 2026-10-02) and then **launches it once for real**
   — the platform shell's no-op under the exact flag line `Confine` would generate for a box rooted at
   the temp dir, bounded by a timeout — because "bwrap is installed" is not "bwrap can fence here"
   (`apparmor_restrict_unprivileged_userns`, a seccomp filter and `user.max_user_namespaces=0` all
@@ -893,8 +901,9 @@ never optimistic:
   it), but a pathname AF_UNIX socket is reached through the path fence rather than the net one, so
   that one class stays open and is disclosed *(amended 2026-09-22, item 7 of plan
   `2026-09-22 - 00`; ADR 0081 §4's "nothing is residual" is superseded)*. Any failure ⇒
-  `{false, false}` with `Unavailable` = `bwrap not on PATH`, `bwrap refused: <bwrap's last stderr
-  line>` or `bwrap timed out`; when landlock could not fence either, the string carries **both**
+  `{false, false}` with `Unavailable` = `bwrap not found in /usr/bin, /bin, /usr/local/bin or
+  /run/current-system/sw/bin`, `bwrap at <path> is outside the trusted system directories`,
+  `bwrap refused: <bwrap's last stderr line>` or `bwrap timed out`; when landlock could not fence either, the string carries **both**
   reasons, landlock's first. The probe has no disk side effect, so `NewReportConfiner()` is
   `NewConfiner()` verbatim on Linux.
 - **macOS:** probe for `/usr/bin/sandbox-exec` (present on stock macOS). Present ⇒ `{true, true}` (one
@@ -1113,8 +1122,9 @@ user namespaces `confinetest.Probe` passes #1–#6, #11 and #12 (#12 denying —
 residual is disclosed) and `confinetest.ProbeNetwork` passes #7/#8 and #13; the argv line is unit-tested as a pure function of the box with
 no process (hermetic — `--unshare-net` iff `NetworkAllow` is non-empty, missing roots skipped, never
 `--new-session` or `--unshare-pid`); `bwrap` absent **or** userns refused ⇒ `Capabilities() ==
-{false, false}` with a non-empty `Unavailable` naming the cause (`bwrap not on PATH` / `bwrap refused:
-<stderr line>` / `bwrap timed out`), and `Confine` then returns `ErrConfinementUnavailable`; a
+{false, false}` with a non-empty `Unavailable` naming the cause (`bwrap not found in <the four trusted
+dirs>` / `bwrap at <path> is outside the trusted system directories` / `bwrap refused: <stderr line>` /
+`bwrap timed out`), and `Confine` then returns `ErrConfinementUnavailable`; a
 landlock-capable host **never constructs it** (`selectLinuxConfiner` returns landlock first, and the
 namespace constructor is not called); when neither rung fences, the returned backend's `Unavailable`
 carries both reasons; cross-build green (file `linux`-tagged; no new module dependency).

@@ -276,7 +276,7 @@ func TestReportDegradedHostCarriesTheStartupNotice(t *testing.T) {
 // report: the reason explains the gating, it never replaces the remedy.
 func TestReportUnfenceableHostSaysWhy(t *testing.T) {
 	t.Parallel()
-	const reason = "bwrap not on PATH"
+	const reason = bwrapAbsent
 	host := probe.GatherHost(context.Background(), probe.Inputs{
 		Confiner:           fakeConfiner{caps: domain.ConfinementCaps{Unavailable: reason}},
 		ConfineToWorkspace: true,

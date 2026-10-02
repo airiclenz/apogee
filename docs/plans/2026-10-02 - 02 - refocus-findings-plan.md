@@ -271,7 +271,11 @@ Depends on items 3 and 4.
 **Closes:** apogee-anthropic-prefix-rebuilt-per-request
 **Commit:** `fix(provider): replay signed thinking only over the prefix it was produced on`
 
-## 6. bwrap resolves only from fixed system directories and fails closed elsewhere
+## 6. bwrap resolves only from fixed system directories and fails closed elsewhere — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the seam is a pure resolver resolveBwrap(candidates, isExecutable, look) plus newProbedNamespaceConfiner(candidates, isExecutable, look) — both shapes the plan allowed; the not-found sentence is derived from the candidate list (candidateDirs) so it cannot drift from it, and exec.LookPath is kept only to word the PATH-only reason.
+
+NOTES (2026-10-02): ADR 0081 decision 1's neither-host example and decision 4's "`PATH`-lookup time" were reworded in place (named in the new dated note), because the acceptance grep forbids the old reason anywhere under docs; decision 2's "resolved on `PATH`" sentence is kept and superseded by the note. docs/manual/probe.md also gained one sentence giving the PATH-only reason.
 
 **What:**
 **Goal:** `NewNamespaceConfiner` takes bwrap only as the first executable among `/usr/bin/bwrap`, `/bin/bwrap`,

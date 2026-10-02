@@ -2165,7 +2165,9 @@ the workspace at the OS level, the network is open, and MCP still asks. All thre
 platforms have a backend — landlock on Linux, `sandbox-exec` on macOS, a restricted
 low-integrity token on Windows. A Linux host whose kernel has no landlock (Raspberry Pi
 OS, most containers, where it reports `ENOSYS` regardless of kernel version) uses
-`bwrap` when it is installed instead: the command runs in its own user + mount
+`bwrap` when it is installed in `/usr/bin`, `/bin`, `/usr/local/bin` or
+`/run/current-system/sw/bin` instead (never from `PATH`: a `bwrap` found only there
+is not used, and the host gates as if it had none): the command runs in its own user + mount
 namespaces with `/` read-only and only the workspace and scratch directory bound
 writable — the same fence, kept by a different mechanism, and landlock still wins
 wherever it exists. Where the OS cannot fence a command at all — a Windows build older
@@ -2175,7 +2177,7 @@ promise the honest way and asks before each shell call instead of running it unb
 startup rather than letting Auto look broken, and `apogee probe host` says *why* the
 backend cannot fence in a ` · why: …` cell on its `backend:` line (for example
 `why: landlock unavailable (landlock_create_ruleset: function not implemented); bwrap
-not on PATH`).
+not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin`).
 
 **The hardened git reads run free in every mode, and no fence applies to them.**
 `git_status`, `git_log`, `git_diff_range` and `git_show` build every argument themselves, run with

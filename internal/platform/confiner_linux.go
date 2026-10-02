@@ -15,8 +15,8 @@ import "github.com/airiclenz/apogee/internal/domain"
 //     once for real, so the rung is only ever climbed when landlock has already said no.
 //
 // When neither fences, the namespace backend is returned anyway, carrying BOTH reasons in
-// Capabilities().Unavailable ("landlock unavailable (...); bwrap not on PATH"), so every
-// wording surface — the startup notice, `apogee probe host`, /confine — names the namespace
+// Capabilities().Unavailable ("landlock unavailable (...); bwrap not found in /usr/bin, ..."),
+// so every wording surface — the startup notice, `apogee probe host`, /confine — names the namespace
 // backend and says what would have to change on this host. Only the PROSE joins the two rungs:
 // Capabilities().Cause is whatever the returned backend's own rung set, which is the namespace
 // rung's (bwrap absent, its probe timed out, its launch was refused) and never landlock's and

@@ -37,8 +37,10 @@ The others belong to network **deny**: a landlock backend that can claim it stil
 `connect(2) AF_UNIX` — egress no kernel closes, so it is named rather than implied away.
 Auto stays eligible; the field exists so the report never claims a fence it does not have.
 Where fs-write is `unavailable`, a backend that knows why appends a ` · why: <reason>` field
-instead — `namespace (fs-write: unavailable · network: unavailable · why: bwrap not on PATH)` —
-naming the host fact that stands between you and a confined Auto.
+instead — `namespace (fs-write: unavailable · network: unavailable · why: bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin)` —
+naming the host fact that stands between you and a confined Auto. bwrap is only ever taken
+from those four system directories; one found only on `PATH` is never run and reads
+`why: bwrap at <path> is outside the trusted system directories`.
 
 `apogee probe model` is the other half, and it is deliberately an **explicit act**
 rather than something the bare noun triggers, because it costs live model calls *and*

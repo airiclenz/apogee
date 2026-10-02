@@ -76,6 +76,14 @@ stays true of the first rung. Two of the three OSes now carry the exception; the
 because both are bounded the same way, and a native (bwrap-free) namespace launcher remains the
 recorded follow-up that would take Linux's back.
 
+*Amended (2026-10-02, [ADR 0081](0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md)'s
+note of the same date):* the 2026-09-17 note's "resolved on `PATH` at construction" is superseded for
+`bwrap`. It is the one external program this decision's `PATH` resolution does not cover: it is taken
+only from `/usr/bin`, `/bin`, `/usr/local/bin` or `/run/current-system/sw/bin`, because it builds the
+fence and a writable `PATH` entry must not choose it. A bwrap found only on `PATH` is treated as
+absent — the backend says where it found it and why it declined, and never runs it — so the
+exception stays gracefully absent in exactly the same shape.
+
 **5. The module graph stays lean and stdlib-first.** The direct requires are the set the policy
 named — Cobra, Bubble Tea/Lipgloss/Bubbles, the MCP go-sdk, `yaml.v3`, and small utilities — and a
 new direct dependency is a decision to be argued, not a convenience to be taken. The standing

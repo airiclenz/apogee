@@ -73,8 +73,9 @@
 // the ABI probe, the ruleset built from the box, the encode/decode of that box across the
 // re-exec, and ApplyLandlockAndExec, the helper mode the apogee binary re-enters as the
 // launcher. namespace_linux.go is the second Linux backend, for a kernel without landlock:
-// the bwrap flags built from the box (a read-only bind of / with the writable roots bound
-// over it), its capabilities and the launch under bwrap. seatbelt.go is the host-agnostic
+// bwrap taken only from a fixed list of system directories (never from PATH), the bwrap flags
+// built from the box (a read-only bind of / with the writable roots bound over it), its
+// capabilities and the launch under bwrap. seatbelt.go is the host-agnostic
 // half of the macOS backend — the generated profile and its quoting — so it unit-tests on
 // any host, and seatbelt_darwin.go is the darwin-tagged constructor that probes once for
 // sandbox-exec.

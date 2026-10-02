@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,10 +24,11 @@ import (
 // seccomp profile answers ENOSYS). It realises the same single, subprocess-granularity
 // confinement model as landlock and seatbelt: a confined tool call runs under a launcher
 // that fences the real child, and the parent (the main apogee process) is never
-// restricted. The launcher is bubblewrap (`bwrap`), resolved on PATH once at construction
-// (the probing NewNamespaceConfiner, which then launches it once for real) and never
-// re-queried, so Capabilities reports what this host can enforce here and now (§5). A host
-// without bwrap, or whose kernel refuses it the namespaces, fences nothing and says why,
+// restricted. The launcher is bubblewrap (`bwrap`), taken once at construction from a fixed
+// list of system directories and never from PATH (bwrapCandidates; the probing
+// NewNamespaceConfiner then launches it once for real) and never re-queried, so Capabilities
+// reports what this host can enforce here and now (§5). A host without a trusted bwrap, or
+// whose kernel refuses it the namespaces, fences nothing and says why,
 // and the dispatch disposition gates the subprocess surface instead ("confine if you can,
 // gate if you can't", ADR 0012).
 //
@@ -38,8 +40,10 @@ import (
 // constraint that made landlock a re-exec helper). bwrap is a small, single-threaded,
 // setuid-free binary built to do exactly this, present on every mainstream distribution
 // (Flatpak's own sandbox), so it is used as an optional external enhancement in the
-// ADR 0042 pattern: resolved on PATH, gracefully absent. A native launcher is a later,
-// separate decision.
+// ADR 0042 pattern: gracefully absent — but resolved from fixed system directories rather
+// than on PATH, because a PATH entry the user or a project tool writes (a direnv `bin/`, a
+// checked-in shim) would otherwise choose the program that builds the fence itself. A native
+// launcher is a later, separate decision.
 //
 // The box bounds where a confined child may WRITE. `--ro-bind / /` makes the whole
 // filesystem read-only, then each writable root is bound read-write over itself, so a
@@ -97,26 +101,90 @@ func newNamespaceConfiner(bwrapPath, unavailable string, cause domain.Confinemen
 	return &namespaceConfiner{bwrapPath: bwrapPath, unavailable: unavailable, cause: cause}
 }
 
-// NewNamespaceConfiner probes this host once and returns the namespace backend: bwrap is
-// resolved on PATH (ADR 0042 — an optional external enhancement, gracefully absent), and a
-// resolved bwrap is then launched for real once, because "bwrap is installed" is not "bwrap
-// can fence here" (contract §5). Kernels and profiles that refuse CLONE_NEWUSER to an
-// unprivileged process — `kernel.apparmor_restrict_unprivileged_userns`, a seccomp filter,
-// `user.max_user_namespaces=0` — refuse it at run time, not at PATH-lookup time, so only a
-// real launch can answer. Either failure yields a backend that fences nothing and says why
-// through Capabilities().Unavailable and, in the typed form a caller can branch on, through
-// Capabilities().Cause: an absent bwrap is domain.CauseBackendAbsent, while a launch that
-// refused or outlived the probe budget carries the cause probeNamespace returned. The probe
-// has no disk side effect, so the report confiner may construct it too.
+// bwrapCandidates is the fixed, ordered list of the only places bwrap is ever taken from: the
+// distribution's own binary directories, the conventional local-install one, and NixOS's system
+// profile. PATH never chooses the launcher — the program that builds the fence must not be one a
+// writable PATH entry (a direnv `bin/`, a project shim, ~/.local/bin) can substitute — so a bwrap
+// found anywhere else leaves the backend unavailable and the subprocess surface gated (fail
+// closed). It is the exec fence's declared exception (internal/security, ResolveProgram): a
+// fixed absolute list leaves no PATH answer to judge.
+var bwrapCandidates = []string{
+	"/usr/bin/bwrap",
+	"/bin/bwrap",
+	"/usr/local/bin/bwrap",
+	"/run/current-system/sw/bin/bwrap",
+}
+
+// NewNamespaceConfiner probes this host once and returns the namespace backend: bwrap is the
+// first executable in bwrapCandidates (ADR 0042 — an optional external enhancement, gracefully
+// absent; never resolved on PATH), and that bwrap is then launched for real once, because "bwrap
+// is installed" is not "bwrap can fence here" (contract §5). Kernels and profiles that refuse
+// CLONE_NEWUSER to an unprivileged process — `kernel.apparmor_restrict_unprivileged_userns`, a
+// seccomp filter, `user.max_user_namespaces=0` — refuse it at run time, not at resolution time,
+// so only a real launch can answer. Either failure yields a backend that fences nothing and says
+// why through Capabilities().Unavailable and, in the typed form a caller can branch on, through
+// Capabilities().Cause: an absent or untrusted bwrap is domain.CauseBackendAbsent, while a
+// launch that refused or outlived the probe budget carries the cause probeNamespace returned.
+// The probe has no disk side effect, so the report confiner may construct it too.
 func NewNamespaceConfiner() *namespaceConfiner {
-	bwrapPath, err := exec.LookPath("bwrap")
-	if err != nil {
-		return newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
+	return newProbedNamespaceConfiner(bwrapCandidates, isExecutableFile, exec.LookPath)
+}
+
+// newProbedNamespaceConfiner is NewNamespaceConfiner with its host inputs injected — the
+// candidate list, the executable test and the PATH lookup — so a test can point the candidates
+// at a stub launcher, or at nothing, without touching the host's real bwrap.
+func newProbedNamespaceConfiner(candidates []string, isExecutable func(string) bool, look func(string) (string, error)) *namespaceConfiner {
+	bwrapPath, reason := resolveBwrap(candidates, isExecutable, look)
+	if bwrapPath == "" {
+		return newNamespaceConfiner("", reason, domain.CauseBackendAbsent)
 	}
 	if reason, cause := probeNamespace(bwrapPath); reason != "" {
 		return newNamespaceConfiner("", reason, cause)
 	}
 	return newNamespaceConfiner(bwrapPath, "", "")
+}
+
+// resolveBwrap returns the first candidate isExecutable accepts, with an empty reason, or ""
+// and the reason the backend cannot use one. PATH is consulted ONLY to word that reason: a bwrap
+// look finds is named as outside the trusted directories and is never returned — nor executed —
+// so a user who installed bwrap somewhere unusual learns where apogee looked and why it declined,
+// rather than being told bwrap is missing.
+func resolveBwrap(candidates []string, isExecutable func(string) bool, look func(string) (string, error)) (string, string) {
+	for _, candidate := range candidates {
+		if isExecutable(candidate) {
+			return candidate, ""
+		}
+	}
+	// look's error is not needed: a lookup that found nothing returns "", and one that found
+	// a relative answer (exec.ErrDot) still names a bwrap outside the trusted directories.
+	if found, _ := look("bwrap"); found != "" {
+		return "", "bwrap at " + found + " is outside the trusted system directories"
+	}
+	return "", "bwrap not found in " + candidateDirs(candidates)
+}
+
+// candidateDirs words the directories of candidates as one list — "a, b, c or d" — for the
+// not-found reason, so the sentence can never drift from the list it describes.
+func candidateDirs(candidates []string) string {
+	dirs := make([]string, len(candidates))
+	for i, candidate := range candidates {
+		dirs[i] = filepath.Dir(candidate)
+	}
+	if len(dirs) < 2 {
+		return strings.Join(dirs, "")
+	}
+	return strings.Join(dirs[:len(dirs)-1], ", ") + " or " + dirs[len(dirs)-1]
+}
+
+// isExecutableFile is the executable test resolveBwrap applies to each candidate in production:
+// a regular file (after following symlinks — /bin is one on a merged-/usr host, and NixOS's
+// profile entries are links into the store) with an execute bit set.
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 // namespaceProbeTimeout bounds the construction probe's one real launch: a bwrap that hangs

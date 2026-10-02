@@ -72,7 +72,7 @@ type ConfinementCaps struct {
 
 	// Unavailable is the PROSE disclosure of WHY FSWrite is false — one short sentence naming
 	// the reason this backend cannot fence on this host ("landlock ABI 0: ENOSYS", "bwrap not
-	// on PATH"); empty whenever FSWrite is true, and empty too on the backends that cannot
+	// found in /usr/bin, ..."); empty whenever FSWrite is true, and empty too on the backends that cannot
 	// fence and have no sentence to offer (the no-backend stub every OS without a real
 	// facility gets, a macOS without sandbox-exec, and a Windows token backend the session
 	// has already closed). An empty sentence is therefore NOT the absence of a reason — Cause
@@ -99,10 +99,11 @@ type ConfinementCaps struct {
 type ConfinementCause string
 
 const (
-	// CauseBackendAbsent is the facility itself not being available here: bwrap not on PATH, a
-	// kernel whose landlock syscall answers ENOSYS or whose LSM was left out of the boot line,
-	// a macOS without sandbox-exec, a Windows token that would not mint or has been handed
-	// back at shutdown, and every OS that has no real backend compiled in at all. Nothing ran
+	// CauseBackendAbsent is the facility itself not being available here: no bwrap in a trusted
+	// system directory (one found only on PATH counts as absent — it is never run), a kernel
+	// whose landlock syscall answers ENOSYS or whose LSM was left out of the boot line, a macOS
+	// without sandbox-exec, a Windows token that would not mint or has been handed back at
+	// shutdown, and every OS that has no real backend compiled in at all. Nothing ran
 	// and refused — there was nothing to run.
 	CauseBackendAbsent ConfinementCause = "backend-absent"
 

@@ -11,6 +11,10 @@ import (
 	"github.com/airiclenz/apogee/internal/probe"
 )
 
+// bwrapAbsent is the reason the namespace backend discloses on a host with no bwrap in any of
+// its trusted system directories (internal/platform, bwrapCandidates).
+const bwrapAbsent = "bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin"
+
 // The degradation notice fires in EXACTLY one cell of the {mode} × {FSWrite} × {confine}
 // matrix: Auto, asking for confinement, on a backend that cannot fence the filesystem — the
 // common case in containers, where landlock reports ENOSYS. Every other cell is silent: the
@@ -74,10 +78,10 @@ func TestDegradedNoticeNamesTheReason(t *testing.T) {
 				"  why: bwrap timed out\n" + remedy},
 		// The facility is not here at all — a different fix for the user, and so a different line.
 		{"an absent backend", "namespace",
-			domain.ConfinementCaps{Unavailable: "bwrap not on PATH", Cause: domain.CauseBackendAbsent},
+			domain.ConfinementCaps{Unavailable: bwrapAbsent, Cause: domain.CauseBackendAbsent},
 			"apogee: auto mode is gating terminal commands — the namespace backend on this host reports no\n" +
 				"  filesystem confinement, so commands cannot be fenced and fall back to approval.\n" +
-				"  why: bwrap not on PATH\n" + remedy},
+				"  why: " + bwrapAbsent + "\n" + remedy},
 		// The no-backend stub, a macOS without sandbox-exec and a closed Windows token: nothing
 		// to say, so nothing is said.
 		{"a backend with nothing to say", "deny",
@@ -143,8 +147,8 @@ func TestCapabilityLine(t *testing.T) {
 			"landlock (fs-write: available · network: unavailable · unfenced: truncate(2), refer(2))"},
 		// No fence at all: the line says WHY, after the network cell, so the three surfaces
 		// tell the user which host fact stands between them and a confined Auto.
-		{"unfenceable with a reason", "namespace", domain.ConfinementCaps{Unavailable: "bwrap not on PATH"},
-			"namespace (fs-write: unavailable · network: unavailable · why: bwrap not on PATH)"},
+		{"unfenceable with a reason", "namespace", domain.ConfinementCaps{Unavailable: bwrapAbsent},
+			"namespace (fs-write: unavailable · network: unavailable · why: " + bwrapAbsent + ")"},
 		// A reason beside a working fence is stale by definition and is never rendered.
 		{"fs with a stale reason", "landlock", domain.ConfinementCaps{FSWrite: true, Unavailable: "stale"},
 			"landlock (fs-write: available · network: unavailable)"},

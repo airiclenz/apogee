@@ -47,7 +47,8 @@ if it can fence. **Landlock wins whenever both would work**: it is kernel-enforc
 process, needs no external binary, and fences network egress per-host from ABI 4, where the namespace
 backend's network tightening is all-or-nothing. When **neither** fences, the namespace backend is
 returned anyway, carrying **both reasons** in `Capabilities().Unavailable` (`landlock unavailable
-(landlock_create_ruleset: operation not supported); bwrap not on PATH`), so every wording surface
+(landlock_create_ruleset: operation not supported); bwrap not found in /usr/bin, /bin, /usr/local/bin or
+/run/current-system/sw/bin`), so every wording surface
 names what would have to change on this host. There is **no config key**: the backend is
 auto-selected only; "configurable" means the selector has two Linux rungs, nothing more. The backend
 type is `namespaceConfiner`, its label is `namespace` (`probe.BackendName`), and `NewReportConfiner()`
@@ -65,6 +66,19 @@ kernel never looks for it. `bwrap` is chosen because it is small, single-threade
 on every mainstream distribution (it is Flatpak's own sandbox), and built to do exactly this — a
 native re-exec is a later, separate decision (see *Considered options*). No new module dependency is
 taken; the backend is `os/exec` and argv.
+
+> **Amended 2026-10-02 — bwrap is taken from fixed system directories, never from `PATH`.** "`bwrap`
+> is resolved on `PATH` once at construction" above is superseded. Construction takes the first
+> executable among `/usr/bin/bwrap`, `/bin/bwrap`, `/usr/local/bin/bwrap` and
+> `/run/current-system/sw/bin/bwrap`, still once and never re-queried; `PATH` never chooses it,
+> because a `PATH` entry a project or the user writes (a direnv-managed `bin/`, a checked-in shim)
+> would otherwise pick the program that builds the fence itself (bead `apogee-bwrap-direnv-path`).
+> None present ⇒ unavailable with `bwrap not found in /usr/bin, /bin, /usr/local/bin or
+> /run/current-system/sw/bin`; a bwrap found only on `PATH` ⇒ unavailable with `bwrap at <path> is
+> outside the trusted system directories`, and that bwrap is never executed. Both are
+> `CauseBackendAbsent`, and unavailable behaves exactly as an absent bwrap always has — Auto gates to
+> approval, unattended runs block, sync reactions are refused; there is no unconfined fallback. The
+> neither-host example in decision 1 and decision 4's "not at lookup time" are reworded to match.
 
 **3. The box shape is fixed.** `Confine` rewrites the command to run under
 
@@ -104,7 +118,7 @@ seatbelt's profile string is.
 **4. The construction probe launches bwrap for real.** "bwrap is installed" is not "bwrap can fence
 here": kernels and profiles that refuse `CLONE_NEWUSER` to an unprivileged process
 (`kernel.apparmor_restrict_unprivileged_userns`, a seccomp filter, `user.max_user_namespaces=0`)
-refuse it at run time, not at `PATH`-lookup time. So construction runs the platform shell's no-op
+refuse it at run time, not at lookup time. So construction runs the platform shell's no-op
 under `bwrap` with the exact flag line `Confine` would generate for a box rooted at the temp dir,
 bounded by a timeout. Exit 0 ⇒ `{FSWrite:true, NetworkEgress:true}` — one launch fences both the
 filesystem and, when the box asks, the network. Any failure ⇒ `{false, false}` with `Unavailable`

@@ -156,9 +156,12 @@
 // resolves through it — the shells, the Reaction door tools.RunHookSubprocess, MCP stdio, the
 // settings editor, git, python_exec, run_tests, diagnostics, rung 1's OS opener,
 // the keystore's store probe, internal/config's api-key command — so no site can
-// acquire a program without also acquiring the judgement on it. Exactly two exceptions are
-// declared: internal/platform/confinetest, a test-support package, and the injected look defaults
-// callers hand to ResolveProgram itself.
+// acquire a program without also acquiring the judgement on it. Exactly three exceptions are
+// declared: internal/platform/confinetest, a test-support package; the injected look defaults
+// callers hand to ResolveProgram itself; and internal/platform's namespace backend, which takes
+// bwrap only from a fixed list of absolute system paths (/usr/bin, /bin, /usr/local/bin,
+// /run/current-system/sw/bin) and never from PATH, so there is no PATH answer for the fence to
+// judge — a bwrap found only on PATH is named in the backend's reason and never run.
 //
 // The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
 // WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its

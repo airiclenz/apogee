@@ -13,15 +13,16 @@ import (
 )
 
 // The neither-host wording every surface carries once both rungs have said no: the
-// namespace backend is named, and the reason cell joins landlock's errno to bwrap's absence.
-const neitherHostReason = "landlock unavailable (landlock_create_ruleset: function not implemented); bwrap not on PATH"
+// namespace backend is named, and the reason cell joins landlock's errno to bwrap's absence from
+// every trusted directory — the exact sentence `apogee probe host` prints.
+const neitherHostReason = "landlock unavailable (landlock_create_ruleset: function not implemented); bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin"
 
 func TestSelectLinuxConfiner(t *testing.T) {
 	t.Parallel()
 
 	fenceableNamespace := func() *namespaceConfiner { return newNamespaceConfiner("/usr/bin/bwrap", "", "") }
 	absentNamespace := func() *namespaceConfiner {
-		return newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
+		return newNamespaceConfiner("", bwrapAbsentReason, domain.CauseBackendAbsent)
 	}
 
 	tests := []struct {
