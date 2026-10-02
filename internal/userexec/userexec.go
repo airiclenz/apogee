@@ -1,5 +1,6 @@
 // Package userexec runs the USER's own argv — a Reaction's `run:` list, a server entry's
-// `api-key-cmd:` — under the one exec posture both of those share. It is a leaf: it imports
+// `api-key-cmd:` — and internal/keystore's store tools under the one exec posture all of those
+// share. It is a leaf: it imports
 // internal/security for the program fence and internal/platform for the process-tree teardown, and
 // nothing else of apogee's, so any package that holds a user-configured command line can call it
 // without pulling a subsystem in.
@@ -32,17 +33,20 @@
 //
 // Bounded, always. The run ends at the caller's deadline; stderr is capped at MaxStderr and folded
 // to a StderrTailRunes-long tail, because it is held only to quote back in a failure line read on
-// one row of a TUI; stdout is discarded unless the caller wants it, and then capped at the caller's
-// own bound, with the overflow reported as a fact rather than silently cut.
+// one row of a TUI — the raw capped text rides beside the tail for a caller that must edit it
+// before anything is folded or quoted; stdout is discarded unless the caller wants it, and then
+// capped at the caller's own bound, with the overflow reported as a fact rather than silently cut.
 //
 // The environment is inherited whole, deliberately: a notifier or a credential tool needs HOME,
 // DISPLAY, the D-Bus address and its agents' sockets, and this is the user's own command rather
 // than one the model chose (which is what internal/tools scrubs for). The caller's Env is appended
 // last, so it wins over an inherited variable of the same name.
 //
-// internal/keystore's run.go keeps its own runner on purpose: a store tool's exit status is data
-// ("no such secret" is the probe's healthy answer) and its argv is apogee's, not the user's — a
-// different posture, not a fourth copy of this one.
+// internal/keystore's store tools run here too, though their argv is apogee's rather than the
+// user's: the posture is the same where it matters — no shell, no terminal, bounded, the process
+// tree torn down at the deadline — and since a non-zero exit is reported as a fact, not an error,
+// keystore reads a store tool's status as the data it is ("no such secret" is its probe's healthy
+// answer). Its program is fenced before it gets here, at probe time, so it passes no root.
 package userexec
 
 import (
@@ -64,9 +68,9 @@ const (
 	// WaitGrace bounds the wait AFTER the deadline fired. Killing the process group ends the
 	// command and everything it spawned, but a descendant that detached with setsid is outside
 	// the group's reach and can still hold the stderr pipe it inherited, and Wait would then block
-	// on the copy forever; this is the drain bound that ends it (internal/keystore's run.go
-	// carries the same guard for the same reason). It replaces platform.ProcessWaitDelay for
-	// these runs because a failure line here is read by a person waiting on the deadline.
+	// on the copy forever; this is the drain bound that ends it. It replaces
+	// platform.ProcessWaitDelay for these runs because a failure line here is read by a person
+	// waiting on the deadline.
 	WaitGrace = 2 * time.Second
 
 	// MaxStderr bounds what one command may make apogee hold in memory. Stderr is kept only to
@@ -109,12 +113,17 @@ type Options struct {
 // its own failure line. ExitCode is the status the child exited with (-1 when a signal ended it,
 // which is what a deadline kill leaves). TimedOut says the deadline fired, whether the caller's
 // context or Options.Timeout set it. StderrTail is what the child complained about, folded onto one
-// line and cut to StderrTailRunes — empty when it stayed quiet. Stdout is what it printed when the
-// caller wanted it, capped; StdoutTruncated says there was more.
+// line and cut to StderrTailRunes — empty when it stayed quiet. Stderr is the same complaint raw,
+// unfolded and cut at MaxStderr BYTES, for a caller that has to edit it before quoting it (a cut
+// that may land mid-word, or mid-secret); StderrCapped says the child said more than that, the one
+// condition under which Stderr's end may be such a cut. Stdout is what it printed when the caller
+// wanted it, capped; StdoutTruncated says there was more.
 type Result struct {
 	ExitCode        int
 	TimedOut        bool
 	StderrTail      string
+	Stderr          string
+	StderrCapped    bool
 	Stdout          string
 	StdoutTruncated bool
 }
@@ -165,6 +174,8 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 	result := Result{
 		TimedOut:        errors.Is(ctx.Err(), context.DeadlineExceeded),
 		StderrTail:      stderrTail(stderr.String()),
+		Stderr:          stderr.String(),
+		StderrCapped:    stderr.over,
 		Stdout:          stdout.String(),
 		StdoutTruncated: stdout.over,
 	}

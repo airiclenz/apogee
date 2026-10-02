@@ -31,6 +31,7 @@ import (
 	"github.com/google/shlex"
 
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/userexec"
 )
 
 // The environment the fakes are steered by: where to record what they were asked, where to keep the
@@ -889,9 +890,9 @@ func TestWriteRedactsTheSecretFromWhatTheStoreSaid(t *testing.T) {
 }
 
 // The cap the capture runs under is a BYTE cut, and redaction only finds whole occurrences: a key
-// straddling maxToolStderr leaves its first bytes behind as a fragment no ReplaceAll can see, and
-// those bytes reach the terminal, the session log and the pasted bug report that the redaction exists
-// to keep the secret out of. The fixture is the same leaky tool, padded so the cut falls INSIDE the
+// straddling userexec.MaxStderr leaves its first bytes behind as a fragment no ReplaceAll can see,
+// and those bytes reach the terminal, the session log and the pasted bug report that the redaction
+// exists to keep the secret out of. The fixture is the same leaky tool, padded so the cut falls INSIDE the
 // key; the padding is blank because said() folds whitespace away, which leaves the fragment inside
 // the window a human actually reads.
 func TestWriteRedactsASecretTheStderrCapCutInHalf(t *testing.T) {
@@ -996,11 +997,11 @@ func assertRedacted(t *testing.T, err error, key, fragment string) {
 	}
 }
 
-// padToCutInsideTheKey is the complaint a fake tool has to print for the maxToolStderr cut to land
-// inside the key it echoes, leaving exactly keep bytes of the key's spelling in the buffer. The fake
-// prints its complaint, one space, then the standard input it was handed — so the padding is measured
-// against where the secret sits in that input, which differs per tool: `secret-tool` is handed the
-// bare key, while `security -i` is handed a whole command line ending in it.
+// padToCutInsideTheKey is the complaint a fake tool has to print for the userexec.MaxStderr cut to
+// land inside the key it echoes, leaving exactly keep bytes of the key's spelling in the capture.
+// The fake prints its complaint, one space, then the standard input it was handed — so the padding
+// is measured against where the secret sits in that input, which differs per tool: `secret-tool` is
+// handed the bare key, while `security -i` is handed a whole command line ending in it.
 func padToCutInsideTheKey(t *testing.T, store Store, complaint, key string, keep int) string {
 	t.Helper()
 
@@ -1014,7 +1015,7 @@ func padToCutInsideTheKey(t *testing.T, store Store, complaint, key string, keep
 		t.Fatalf("the fake tool would not echo the key at all: %q", echoed)
 	}
 
-	padding := maxToolStderr - keep - start - 1 - len(complaint)
+	padding := userexec.MaxStderr - keep - start - 1 - len(complaint)
 	if padding < 0 {
 		t.Fatalf("the complaint is %d bytes too long to put the cut inside the key", -padding)
 	}

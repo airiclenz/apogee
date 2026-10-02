@@ -206,7 +206,7 @@ func (s Store) Write(entry, key string) error {
 	// secret: it is fed one on stdin, and complaining about input it could not use means echoing that
 	// input. Redact before either message is built — never between them. The cap the capture ran under
 	// is a byte cut, so the tail goes first: a key the cut halved is a fragment no redaction can match.
-	complaint := redactKey(trimCappedKeyTail(outcome.stderr, key), key)
+	complaint := redactKey(trimCappedKeyTail(outcome, key), key)
 	if err != nil {
 		return fmt.Errorf("apogee: server %q: could not be stored in %s: %w%s%s",
 			entry, s.Name(), err, said(complaint), s.byHand(entry))

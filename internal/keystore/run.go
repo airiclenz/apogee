@@ -1,24 +1,22 @@
 package keystore
 
-// The exec contract every store command runs under — internal/userexec's contract, the one the
+// The exec contract every store command runs under is internal/userexec's — the one the
 // `api-key-cmd:` resolver and a Reaction's `run:` argv share, because these commands are the same
 // kind of thing: a credential tool, run by apogee on the user's behalf, from a process that owns
-// the terminal. It is kept as a runner of its own rather than a fourth caller of that package
-// because the posture differs where it matters: the argv is apogee's, not the user's, so there is
-// nothing to fence, and a non-zero exit is DATA here ("no such secret" is the probe's healthy
-// answer) rather than the failure the user reads.
+// the terminal. userexec.Run carries it out: no shell, no terminal, bounded by the caller's
+// deadline, stderr capped, and the tool's whole process tree torn down when that deadline fires —
+// a wrapper-shaped tool's grandchild dies with it rather than outliving the write.
 //
-// No shell. The argv is built here, word by word, from values apogee decided; there is nothing for a
-// shell to add but the chance that a character in a server name means something.
+// What keystore adds is its reading of the result, because its posture differs where it matters.
+// The argv is apogee's, not the user's: the program was fenced against the workspace when the store
+// was probed (fenceProgram), so the run passes no root of its own. A non-zero exit is DATA here ("no
+// such secret" is the probe's healthy answer) rather than the failure the user reads, and userexec
+// reports it as a fact, so each caller below decides what it means. And the sentences are keystore's
+// own: a deadline names the GUI agent a locked store must prompt through, and a tool that could not
+// start is named by its base name.
 //
-// No terminal, and stdin is ours. The child is running under a TUI holding the screen, so a tool
-// that tried to prompt there would draw over the frame and read the keystrokes meant for apogee — a
-// store that must ask the human to unlock has to do it through its own GUI agent. Stdin belongs to
-// the write: it is how the secret reaches the tool without passing through an argument vector.
-//
-// Bounded, always. A store tool can block for a very long time — a locked keychain, a bus autolaunch
-// waiting on a session that will never come — and an unbounded wait on the startup path is
-// indistinguishable from a hung apogee.
+// Stdin belongs to the write: it is how the secret reaches the tool without passing through an
+// argument vector. Stdout is discarded — see toolResult.
 //
 // The environment is inherited whole, deliberately: `security` and `secret-tool` need HOME, DISPLAY,
 // the D-Bus address and their agents' sockets, and these are apogee's own fixed invocations rather
@@ -28,11 +26,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/userexec"
 )
 
 // writeTimeout bounds one write into the store. It is generous for the same reason the resolver's
@@ -46,28 +44,22 @@ const writeTimeout = 60 * time.Second
 // degrade to "no store" quickly rather than hold the session's first frame.
 const probeTimeout = 5 * time.Second
 
-// waitGrace bounds the wait AFTER a timeout fired. Killing the process ends the process, but a
-// wrapper-shaped tool can leave a grandchild holding the stderr pipe it inherited, and cmd.Run would
-// then block on the copy forever (internal/userexec's WaitGrace is the same guard).
-const waitGrace = 2 * time.Second
-
-// maxToolStderr bounds what a store tool may make apogee hold in memory. Stderr is kept only to
-// quote back in a refusal, so it is bounded tightly; a tool that prints megabytes of it is
-// misbehaving, and reading to the end is how that becomes an out-of-memory kill.
-const maxToolStderr = 4 << 10
-
 // maxErrorStderr is how much of what the tool said survives into the error message. It is read on
 // one line of a TUI, and the first sentence of a tool's complaint is almost always the part that
 // names the fix.
 const maxErrorStderr = 240
 
-// toolResult is what one run of a store tool produced: what it complained about, and the status it
-// exited with. There is no stdout field — the only command here whose standard output could carry a
-// secret is the probe's lookup, and its answer is irrelevant to the question being asked, so it is
-// discarded rather than held in apogee's memory.
+// toolResult is what one run of a store tool produced: what it complained about — raw, capped at
+// userexec.MaxStderr bytes, and whether the tool said more than that — and the status it exited
+// with. The complaint is kept raw rather than folded because a store tool can echo the secret it
+// was handed, and redaction has to run on the text before folding and cutting can reshape it.
+// There is no stdout field — the only command here whose standard output could carry a secret is
+// the probe's lookup, and its answer is irrelevant to the question being asked, so it is discarded
+// rather than held in apogee's memory.
 type toolResult struct {
-	stderr string
-	code   int
+	stderr       string
+	stderrCapped bool
+	code         int
 }
 
 // runner runs one store-tool command line with the given standard input, and reports what came back.
@@ -78,26 +70,23 @@ type toolResult struct {
 // each caller decides what it means.
 type runner func(ctx context.Context, argv []string, stdin string) (toolResult, error)
 
-// runTool is the production runner: the contract at the top of this file, executed.
+// runTool is the production runner: the contract at the top of this file, executed through
+// userexec.Run. The deadline is checked first because userexec reports a run the deadline killed as
+// a run (nil error, TimedOut) — and that is the failure a locked store produces.
 func runTool(ctx context.Context, argv []string, stdin string) (toolResult, error) {
 	if len(argv) == 0 {
 		return toolResult{}, errors.New("no command to run")
 	}
 
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	var opts userexec.Options
 	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
+		opts.Stdin = strings.NewReader(stdin)
 	}
-	cmd.Stdout = io.Discard
-	stderr := &cappedBuffer{limit: maxToolStderr}
-	cmd.Stderr = stderr
-	cmd.WaitDelay = waitGrace
-
-	runErr := cmd.Run()
-	outcome := toolResult{stderr: stderr.String()}
+	result, runErr := userexec.Run(ctx, argv, opts)
+	outcome := toolResult{stderr: result.Stderr, stderrCapped: result.StderrCapped, code: result.ExitCode}
 
 	program := filepath.Base(argv[0])
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if result.TimedOut {
 		return outcome, fmt.Errorf("%s did not answer in time — a store that has to ask you to unlock must "+
 			"prompt through its own GUI agent, since this runs with no terminal of its own", program)
 	}
@@ -105,10 +94,10 @@ func runTool(ctx context.Context, argv []string, stdin string) (toolResult, erro
 		return outcome, nil
 	}
 
-	var exited *exec.ExitError
-	if errors.As(runErr, &exited) {
-		outcome.code = exited.ExitCode()
-		return outcome, nil
+	// userexec words its own "could not run <argv0>: <cause>"; this sentence names the program by
+	// its base name instead, so the cause is lifted out of that wrapper rather than quoted twice.
+	if cause := errors.Unwrap(runErr); cause != nil {
+		runErr = cause
 	}
 	return outcome, fmt.Errorf("%s could not be run: %w", program, runErr)
 }
@@ -129,20 +118,22 @@ func said(text string) string {
 
 // trimCappedKeyTail drops a secret the cap cut in half.
 //
-// maxToolStderr is a BYTE cut: it falls wherever 4096 bytes into a tool's complaint happens to land,
-// and when that is inside the key the tool echoed, the buffer keeps the key's first bytes as a
-// fragment. Redaction cannot take that back — it replaces whole occurrences of the secret, and half a
-// secret is not one — so the fragment would ride into the refusal message, which is the readable
-// place (terminal, session log, pasted bug report) the migration exists to get the key out of. Half a
-// key is worth having, too: it names the issuer and the shape, and shortens a guess.
+// userexec.MaxStderr is a BYTE cut: it falls wherever 4096 bytes into a tool's complaint happens to
+// land, and when that is inside the key the tool echoed, the capture keeps the key's first bytes as
+// a fragment. Redaction cannot take that back — it replaces whole occurrences of the secret, and
+// half a secret is not one — so the fragment would ride into the refusal message, which is the
+// readable place (terminal, session log, pasted bug report) the migration exists to get the key out
+// of. Half a key is worth having, too: it names the issuer and the shape, and shortens a guess.
 //
-// So when, and only when, the buffer filled to the cap — the one condition under which the text may
-// have been cut mid-word — the longest tail that spells the beginning of the key is dropped. Both
-// spellings are checked for the reason redactKey checks both: on macOS the key travels quoted, so
-// what the cut leaves behind is the beginning of the quoted word. A tail that is the WHOLE key is
-// left to redactKey, which marks its place — that reads better than a sentence ending nowhere.
-func trimCappedKeyTail(text, key string) string {
-	if key == "" || len(text) < maxToolStderr {
+// So when, and only when, the tool said more than the cap kept (toolResult.stderrCapped) — the one
+// condition under which the text may have been cut mid-word — the longest tail that spells the
+// beginning of the key is dropped. Both spellings are checked for the reason redactKey checks both:
+// on macOS the key travels quoted, so what the cut leaves behind is the beginning of the quoted
+// word. A tail that is the WHOLE key is left to redactKey, which marks its place — that reads better
+// than a sentence ending nowhere.
+func trimCappedKeyTail(outcome toolResult, key string) string {
+	text := outcome.stderr
+	if key == "" || !outcome.stderrCapped {
 		return text
 	}
 
@@ -156,28 +147,4 @@ func trimCappedKeyTail(text, key string) string {
 		}
 	}
 	return text[:len(text)-cut]
-}
-
-// cappedBuffer is the bounded sink a tool's stderr is read into: it keeps the first limit bytes,
-// drops the rest, and never fails a write. Failing one would kill the tool with a broken pipe and
-// report THAT instead of what the tool was trying to say.
-type cappedBuffer struct {
-	limit int
-	buf   []byte
-}
-
-// Write keeps what still fits and discards the rest, always reporting a full write.
-func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if room := b.limit - len(b.buf); room > 0 {
-		if len(p) < room {
-			room = len(p)
-		}
-		b.buf = append(b.buf, p[:room]...)
-	}
-	return len(p), nil
-}
-
-// String is what was kept.
-func (b *cappedBuffer) String() string {
-	return string(b.buf)
 }

@@ -407,7 +407,12 @@ internal/tui/doc.go — inputaccent.go/width.go paragraph; docs/adr/0030-the-tui
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestCaretOffset$|^TestCaretOffsetRoundTrips$|^TestSelectionText$|^TestCellToRuneOffset$|^TestCellToRuneOffsetInvertsWidth$|^TestVisualSubline$|^TestClickPositionsCaret$|^TestClickPositionsCaretCJK$|^TestWrapRowStartsMirrorsTheWidget$|^TestWrapRowStartsMatchesTheWholeRunMeasure$|^TestWrapRowStartsAllocationIsIndependentOfWidth$|^TestInputCellSpans$|^TestAccentSpansFollowTheCatalog$|^TestInputContentRowsWithoutAMemo$|^TestInputContentRowsMeasuredOncePerKeypressAndView$|^TestInputContentRows$|^TestInputContentRowsZeroWidth$|^TestInputContentRowsMirrorsTheWidget$|^TestInputContentRowsMirrorsTheWidgetOnGeneratedDrafts$|^TestDocMapNamesEveryFile$' ./internal/tui/`
 **Commit:** `refactor(tui): move the textarea geometry mirror behind the line editor`
 
-## 12. The keystore runs its tools through userexec (#15)
+## 12. The keystore runs its tools through userexec (#15) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): consequential edit — internal/keystore/keystore.go: made necessary by trimCappedKeyTail now taking the toolResult (it reads stderrCapped instead of measuring the text against the cap)
+NOTES (2026-10-02): keystore's maxToolStderr and waitGrace constants are gone with cappedBuffer (userexec.MaxStderr / userexec.WaitGrace now govern); keystore_test.go's padding reads userexec.MaxStderr. maxErrorStderr and said() stay as keystore's own sentence.
+NOTES (2026-10-02): trimming now fires only when the tool overran the cap (StderrCapped), not when the capture merely filled it to exactly MaxStderr bytes — such a capture was never cut. A store program missing at run time now reads `<tool> could not be run: "<path>" is not on this machine's PATH` (userexec's resolve sentence) instead of exec's raw error; Store.Write's sentence shape is unchanged.
+NOTES (2026-10-02): the new keystore_unix_test.go test was confirmed failing against the pre-item run.go (grandchild survived the deadline).
 
 **What:**
 **Goal:** `internal/keystore` runs credential tools via `userexec.Run`, so a timed-out tool's

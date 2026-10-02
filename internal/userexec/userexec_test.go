@@ -3,6 +3,7 @@ package userexec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -184,6 +185,55 @@ func TestRunCapsStderrWithoutKillingTheCommand(t *testing.T) {
 	}
 	if runes := []rune(result.StderrTail); len(runes) > StderrTailRunes+1 {
 		t.Errorf("tail is %d runes long; it is capped at %d", len(runes), StderrTailRunes)
+	}
+}
+
+// TestRunKeepsTheRawStderrAndSaysWhenItWasCut is the raw half of the stderr contract: the text a
+// caller edits before quoting is kept exactly as the command wrote it, up to MaxStderr bytes, and
+// StderrCapped marks only a capture the command overran — filling the cap exactly cut nothing.
+func TestRunKeepsTheRawStderrAndSaysWhenItWasCut(t *testing.T) {
+	requireShell(t)
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		script     string
+		wantStderr string
+		wantCapped bool
+	}{
+		{
+			name:       "a short complaint is kept unfolded",
+			script:     `printf '  no such\n\tsecret\n' >&2`,
+			wantStderr: "  no such\n\tsecret\n",
+		},
+		{
+			name:       "a complaint filling the cap exactly was not cut",
+			script:     fmt.Sprintf(`head -c %d /dev/zero | tr '\0' x >&2`, MaxStderr),
+			wantStderr: strings.Repeat("x", MaxStderr),
+		},
+		{
+			name:       "a complaint past the cap is cut at the cap and says so",
+			script:     fmt.Sprintf(`head -c %d /dev/zero | tr '\0' x >&2`, MaxStderr+1),
+			wantStderr: strings.Repeat("x", MaxStderr),
+			wantCapped: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := Run(context.Background(), shell(tc.script), Options{})
+
+			if err != nil {
+				t.Fatalf("Run returned an error: %v", err)
+			}
+			if result.Stderr != tc.wantStderr {
+				t.Errorf("Stderr = %q (%d bytes), want %q (%d bytes)",
+					result.Stderr, len(result.Stderr), tc.wantStderr, len(tc.wantStderr))
+			}
+			if result.StderrCapped != tc.wantCapped {
+				t.Errorf("StderrCapped = %v, want %v", result.StderrCapped, tc.wantCapped)
+			}
+		})
 	}
 }
 
