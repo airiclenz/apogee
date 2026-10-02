@@ -11,7 +11,7 @@ per-server `effort-dialect:` config key for providers detection can't see, so ef
 reaches the endpoint instead of being silently dropped.
 
 **Date:** 2026-08-25
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources (precedence in this order when an item disagrees with them):**

@@ -2,7 +2,7 @@
 
 **Goal:** Stop the confinement denial labels from asserting that a write was blocked when the denied operation may have been something else, and make the two Windows confiner tests that fail on the owner's windows/arm64 box check their own precondition so they skip (with the reason) where the host cannot produce the denial, and stay red where it can.
 **Date:** 2026-09-30
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** bfad66a1
 

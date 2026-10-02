@@ -5,7 +5,7 @@
 the model drives across Turns, held as live host state on the engine, default-off in the roster,
 POSIX only in this plan.
 **Date:** 2026-08-25
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources (precedence in this order when an item disagrees with them):**

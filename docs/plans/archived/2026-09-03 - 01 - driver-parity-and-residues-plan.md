@@ -4,7 +4,7 @@
 so a headless run and a daemon Firing narrate, refuse and report what an interactive session
 already does. No new config key, no new persistence format, no new cobra verb.
 
-**Date:** 2026-09-03 · **Status:** unexecuted · **Base:** `25611103` · **sized for:** ~200k-context host
+**Date:** 2026-09-03 · **Status:** done (status corrected 2026-10-02) · **Base:** `25611103` · **sized for:** ~200k-context host
 
 **Sources**
 - issue register (`bd`) → epic `apogee-kk0` *Driver-parity gaps — behaviour only the TUI can reach (architecture review 2026-08-30)* with children `apogee-kk0.1`–`apogee-kk0.8`; epic `apogee-1ov` *Issues-register sweep — residue (2026-09-02)* with children `apogee-1ov.1`–`apogee-1ov.3`; `apogee-4w7` *`TestReportKindsResolveDistinctly` does not walk `reportKind.follows`*. All three were migrated out of `ISSUES.md` on 2026-09-03, when that file was deleted.

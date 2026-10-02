@@ -4,7 +4,7 @@
 an upgrade, a rebuild or a session reload. A future change to the item-key formula cannot break
 this silently. When finished work is redone because its inputs changed, the stage says so.
 **Date:** 2026-09-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 1e3efe44
 

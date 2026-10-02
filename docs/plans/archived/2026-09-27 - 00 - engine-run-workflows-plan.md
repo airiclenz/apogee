@@ -2,7 +2,7 @@
 
 **Goal:** The engine runs Workflows (fan-outs the model asks for through `fan_out`, and Recipes a human wrote into a skill), hands back one line per item plus a report path, can run them in the background and wake the agent, and a cancel keeps every finished piece of work.
 **Date:** 2026-09-27
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 1fb91ac0
 **Closes:** apogee-engine-run-delegation

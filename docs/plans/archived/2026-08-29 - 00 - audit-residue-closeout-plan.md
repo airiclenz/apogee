@@ -11,7 +11,7 @@ recorded as closed-by-decision in `CHANGELOG.md`. 15 items; CHANGELOG entries la
 from the sidecars, per the skill.
 
 **Date:** 2026-08-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources:**

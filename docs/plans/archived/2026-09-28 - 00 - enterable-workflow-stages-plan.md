@@ -2,7 +2,7 @@
 
 **Goal:** A foreground Workflow stops painting its children's work inline. Its block shows one row per stage, and each row opens that stage's work full-screen the way a sub-agent run view does. The same run also fixes three filed beads, the /-dropdown click re-centre, and the missing context gauge during a workflow.
 **Date:** 2026-09-28
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 9fafafb1
 **Sources:** `IDEAS.md` (Workflows / Sub-Agents lines 30, 33); `docs/adr/0063-sub-agent-runs-are-user-addressable-views.md`; `docs/adr/0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md`; `docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md`; `docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md`; `layout.md` ("The workflow block", "Run view", "The status line's right slot"); `docs/plans/archived/2026-09-27 - 00 - engine-run-workflows-plan.md` (items 22, 43)

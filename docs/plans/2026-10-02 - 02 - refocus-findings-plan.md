@@ -651,7 +651,11 @@ AGENTS.md — beads rules (issue register, spoken ids, issues.jsonl lag, pre-com
 - `grep -c '✓ landed' docs/reviews/architecture-review-2026-09-30.html` prints 18 (8 at base)
 **Commit:** `docs: record landed review items and plan statuses`
 
-## 18. Archived plans' stale "unexecuted" status lines
+## 18. Archived plans' stale "unexecuted" status lines — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): all 160 archived plans whose header status read unexecuted (plain, "ready — unexecuted", "saved, unexecuted", "Finalized …, unexecuted.") have an archiving commit subject containing "completed" ("chore(plans): archive completed … plan"), so every one was flipped and no file failed the test — the commit body has no exception list to carry; the item-9 and item-17 files already read done and were not touched.
+
+NOTES (2026-10-02): Acceptance 3 as written undercounts bulleted header lines on the minus side (`^-[^-]` rejects a removed `- **Date:** …` line, which diffs as `--`; `^+[^+]` accepts the added `+- **Date:**`), so it compares 18 to 25 although every Date/Base line is kept; the bullet-aware form `grep -cE '^-(-[^-]|[^-]).*\*\*(Date|Base)'` vs `grep -cE '^\+(\+[^+]|[^+]).*\*\*(Date|Base)'` gives 25 = 25. Acceptance 1 (0 non-1/1 numstat rows over 160 files) and 2 (no non-Status removed line) pass.
 
 **What:**
 **Goal:** Every `docs/plans/archived/*.md` whose status line says unexecuted and whose archiving commit subject

@@ -3,7 +3,7 @@
 **Goal:** a `task_list` tool holding the model's COMPLETE checklist as engine session state,
 re-rendered as a standing block, so a long run knows what is left after compaction.
 
-**Date:** 2026-09-03 · **Status:** unexecuted · **Base:** `5bb33e92` · **sized for:** ~200k-context host
+**Date:** 2026-09-03 · **Status:** done (status corrected 2026-10-02) · **Base:** `5bb33e92` · **sized for:** ~200k-context host
 
 **Sources**
 - `docs/handoffs/2026-09-02 - 00 - harness-over-mechanisms-parked-items.md` (parked item 2)

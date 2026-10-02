@@ -8,7 +8,7 @@ through the retired roll (the `grammar` precedent) and their source files are de
 registry, `mechanisms:` key, `/settings` row and `--bypass` stay as the bench's lab surface; the shipped
 catalogue and the gemma Validated set end empty.
 
-**Date:** 2026-09-02 · **Status:** unexecuted · **Base:** `8c8d66bf` ·
+**Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02) · **Base:** `8c8d66bf` ·
 **sized for:** ~200k-context host
 
 **Sources**

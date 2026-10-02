@@ -8,7 +8,7 @@ delegate's tool use cannot be reviewed after the fact. 7 items; CHANGELOG entrie
 closeout from the sidecars.
 
 **Date:** 2026-08-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources:**

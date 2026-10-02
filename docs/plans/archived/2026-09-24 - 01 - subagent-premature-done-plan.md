@@ -2,7 +2,7 @@
 
 **Goal:** A sub-agent row shows ✓ done only once its own child has handed back a real report. Runs are told apart by an engine-minted run id instead of the model's or server's call ids. A child that ends without a report says so. The undelivered-interjection note gives the real reason the message did not land.
 **Date:** 2026-09-24
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 3d6fd1a6
 **Closes:** apogee-subagent-premature-done

@@ -4,7 +4,7 @@
 `security.ResolveProgram`; every package past the docmap threshold opts in; the verified-stale
 doc lines are corrected; Anthropic signed thinking is carried and replayed.
 **Date:** 2026-10-02
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** f68c5c56
 **Sources:**

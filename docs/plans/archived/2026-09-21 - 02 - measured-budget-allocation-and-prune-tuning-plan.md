@@ -9,7 +9,7 @@ fill, the same files re-read three and four times). After this plan History is t
 minus what the standing content actually measures, the band is 70%/50%, and six Turns are protected.
 
 **Date:** 2026-09-21
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **Standing requirements:** skills: coding-standards; any authorized deviation from item text lands as a dated NOTES line under the item; no version identifier changes; `CHANGELOG.md` entries travel in item sidecars and land at closeout. Items are written by symbol, never by line: other plans land first, so an implementer locates every site by the named symbol and the stated grep.
 

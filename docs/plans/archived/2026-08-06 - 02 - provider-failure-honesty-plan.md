@@ -6,7 +6,7 @@
   ignore that member, so the loop commits a blank assistant turn with no error shown. Fix the
   provider layer to parse and surface these, guard the loop against committing empty replies, and
   make 429 retries honor `Retry-After`.
-- **Date:** 2026-08-06 · **Status:** unexecuted
+- **Date:** 2026-08-06 · **Status:** done (status corrected 2026-10-02)
 - **Authoritative sources:**
   - Pinned code: commit `2e4346d` — `internal/provider/client.go`, `internal/provider/stream.go`,
     `internal/provider/wirejson.go`, `internal/agent/loop.go`. Line anchors below are as of this

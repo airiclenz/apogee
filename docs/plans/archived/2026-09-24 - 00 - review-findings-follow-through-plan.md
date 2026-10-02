@@ -2,7 +2,7 @@
 
 **Goal:** Close the drift and open cards found by the 2026-09-23 refocus follow-through: give `git_show` a tool card, fix stale plan paths and ADR/CONTEXT wording, fix three small engine/host defects, and land the still-open architecture-review cards #8, #9, #10, #14, #16 and #17.
 **Date:** 2026-09-24
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 78430eb7
 

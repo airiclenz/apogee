@@ -5,7 +5,7 @@ the child does, visible in the session chat (collapsed run header, status line, 
 prompts, headless run records); and the shift+enter newline regression in the prompt editor
 is hardened against, pinned to its culprit, and fixed.
 
-- **Date:** 2026-08-09 · **Status:** unexecuted
+- **Date:** 2026-08-09 · **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - TODO.md — the *apogee-code feature parity* entry's Remaining list, "Naming Sub-Agents" bullet (closed by item 4).

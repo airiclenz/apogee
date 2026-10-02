@@ -5,7 +5,7 @@ and tears down — no bare `exec.Command` is left outside it — and the three f
 is told to rely on (confinement capability honesty, the dangerous-action guard's everyday
 idiom, document extraction) hold as written.
 
-**Date:** 2026-08-26 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-26 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Evidence (security audit 2026-08-25 `docs/skill-runs/security-audit/2026-08-25/report.md`,
 code audit `docs/reviews/code-audit-2026-08-25.md`, merged in

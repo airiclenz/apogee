@@ -6,7 +6,7 @@ free-text notes; a Go dev tool `cmd/demorig` lints the storyboard, locates each 
 take from the saved session's timestamps, validates the take, and renders the GIF from the
 storyboard instead of hand-tuned `render.sh` arguments.
 
-**Date:** 2026-09-16 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-09-16 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:**
 - `graphics/demo/README.md`, `graphics/demo/tapes/hero.tape`, `graphics/demo/render.sh`, `graphics/demo/record.sh` — the rig as it stands

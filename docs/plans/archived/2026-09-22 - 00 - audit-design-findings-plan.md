@@ -7,7 +7,7 @@ defects (`apogee-73s`, `apogee-ea3`), snapshot ingestion (`apogee-mre`), and the
 repo-policy call (`apogee-242`). No plan chain gate — A/B/C/D are archived.
 
 **Date:** 2026-09-22
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** `a803bb46`
 **Standing requirements:** skills: coding-standards; any authorized deviation from item text lands as a dated NOTES line under the item; no version identifier changes; `CHANGELOG.md` entries travel in item sidecars and land at closeout.

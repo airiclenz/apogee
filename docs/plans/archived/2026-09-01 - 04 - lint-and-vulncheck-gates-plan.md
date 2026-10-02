@@ -2,7 +2,7 @@
 
 **Goal:** make lint and dependency-vulnerability signal a standing gate — `make check` and CI run `golangci-lint` and `govulncheck` as one pinned command each, the tree is clean under them, and the one reachable CVE the first scan found is closed. Closes the last IDEAS.md entry (no audit host had either tool; the 2026-08-25 `dependency-surface` family went unaudited).
 **Date:** 2026-09-01
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 6e9c461b (every line number below was read at this commit; the linter's own output is the locator, never the number)
 

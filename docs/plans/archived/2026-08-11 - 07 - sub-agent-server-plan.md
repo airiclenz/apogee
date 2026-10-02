@@ -6,7 +6,7 @@
   posture, observed by a second heartbeat, degrading loudly to today's behaviour when
   unusable.
 - **Date:** 2026-08-11
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **sized for:** ~200k-context host
 - **Authoritative sources:**
   - `docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md` —

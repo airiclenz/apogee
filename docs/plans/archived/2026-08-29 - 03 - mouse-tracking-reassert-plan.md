@@ -6,7 +6,7 @@ re-asserts cell-motion tracking itself after every tool result and resize. Two l
 row-map / decoder bugs found in the diagnosis are closed alongside, and `--tui-diag`
 gains the mouse lines that would have made this diagnosable.
 
-**Date:** 2026-08-29 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-29 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `docs/handoffs/2026-08-29 - 00 - mouse-toggle-dead-mid-session-diagnosis.md`
 (root cause + verified-sound chain); Bubble Tea v2.0.8 `cursed_renderer.go:350` (mouse

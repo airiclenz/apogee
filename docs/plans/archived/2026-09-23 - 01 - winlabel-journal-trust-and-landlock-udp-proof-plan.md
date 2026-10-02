@@ -2,7 +2,7 @@
 
 **Goal:** A Windows confinement journal entry acts only on the exact object it labelled, and its owner reads as alive only while the process that wrote it is running, so a recycled PID doesn't count. A Low child can never reach the journal directory. CI proves that confinetest row #13's landlock UDP arm runs, where today it may silently skip.
 **Date:** 2026-09-23
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** ea51204c
 **Closes:** apogee-winlabel-journal-secret

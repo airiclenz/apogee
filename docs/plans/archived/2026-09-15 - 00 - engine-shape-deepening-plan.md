@@ -8,7 +8,7 @@ one dialer seam (6); a `reactions:` entry validated once (14); the Exchange life
 inside `turnLifecycle` (20). Sibling plan B (`2026-09-15 - 01`) holds the host/config/tools half.
 
 **Date:** 2026-09-15
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Regression check (2026-09-15, b2e3d75d):** four independent read-only reviewers (`regression-1..4.md` under the run dir); every item's `**Regression guard.**` / `**Read first:**` line below is theirs, folded verbatim.

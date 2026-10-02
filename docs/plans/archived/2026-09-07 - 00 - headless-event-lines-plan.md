@@ -1,7 +1,7 @@
 # Plan — headless Event lines: `apogee headless --format json`
 
 **Goal:** `apogee headless --format json` writes the run to stdout as versioned JSONL Event lines — one envelope per engine Event plus a `run_started` / `run_finished` frame pair — while `--format text` stays byte-identical to today. Closes bead `apogee-tvw`.
-**Date:** 2026-09-07 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-09-07 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 **Base:** `main` at `850f09c7` (line numbers below verified there; the working tree carries the uncommitted ADR 0075 / CONTEXT.md / ADR 0031 edits this plan relies on — commit them first or with item 1).
 
 **Sources (precedence in this order):**

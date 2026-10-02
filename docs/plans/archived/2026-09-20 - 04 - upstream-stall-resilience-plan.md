@@ -2,7 +2,7 @@
 
 **Goal:** a delegate whose streaming call sits silent for minutes and then dies on an in-band 504 no longer loses 55 minutes of work: the engine cuts an upstream that goes silent — before its headers or mid-body — itself, re-streams a transient fault more than once with a growing hold-off, retains a faulted delegate the way a capped one is retained, and tells the parent where the child's draft output already sits (bead **apogee-60x**).
 **Date:** 2026-09-20
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** `182fc391`
 

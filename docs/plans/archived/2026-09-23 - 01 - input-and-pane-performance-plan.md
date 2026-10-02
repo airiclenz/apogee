@@ -2,7 +2,7 @@
 
 **Goal:** Typing and pasting into the prompt box stay responsive on long drafts, and the `/thinking` pane and the sub-agent run view stay responsive with large content. Every per-keystroke and per-frame cost that scales with content size is cut to linear-or-cached.
 **Date:** 2026-09-23
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 69d9ae67
 **Closes:** IDEAS.md: skill recommendations needs to run less often; IDEAS.md: Sub-Agent / Thinking panels are partly extremely slow

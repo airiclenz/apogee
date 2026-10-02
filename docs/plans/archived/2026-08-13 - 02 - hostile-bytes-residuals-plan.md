@@ -7,7 +7,7 @@ prompt-guard exemption run (ISSUES.md, "Sub-agent prompt-guard exemption run —
 operate on are not, and neither is the model.
 
 **Date:** 2026-08-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Skills:** coding-standards
 

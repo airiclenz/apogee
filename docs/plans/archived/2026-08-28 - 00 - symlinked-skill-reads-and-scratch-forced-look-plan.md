@@ -9,7 +9,7 @@ command that names the session's own scratch dir under `~/.apogee/scratch/`, so 
 on each `go test`/`go vet` the model routes through its sanctioned scratch space.
 
 **Date:** 2026-08-28
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources:**

@@ -5,7 +5,7 @@
   sub-agents a `┌─┶` header + column-0 gold rail + `┊` closer, open the
   body with the delegation's full prompt (markdown-rendered), then its tools,
   then its response, and mark finished sub-agents with a green `✓`.
-- **Date:** 2026-08-11 · **Status:** saved, unexecuted
+- **Date:** 2026-08-11 · **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative source:** `docs/layout/tool-layout.md`, section
   "Grouped Sub-agents" incl. the finished-sub-agent example (committed to

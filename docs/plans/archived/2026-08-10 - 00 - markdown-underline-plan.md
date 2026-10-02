@@ -2,7 +2,7 @@
 
 - **Goal:** assistant text containing `<u>text</u>` renders as underlined text in the TUI; everything else is unchanged.
 - **Date:** 2026-08-10
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - `internal/tui/markdown.go` file header (lines ~11–19) — the supported-subset statement and the "spare, pure, lipgloss-only, no external markdown library" posture (reaffirmed in `CHANGELOG.md` and `docs/plans/archived/2026-07-31 - 00 - markdown-table-rendering-plan.md`).

@@ -4,7 +4,7 @@
 scrolling (and by the block cursor), as `layout.md` already promises — today exactly the
 pane's height of tail lines is unreachable at every scroll position.
 
-**Date:** 2026-08-23 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-23 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:**
 - The defect: `ISSUES.md:26` (open-defects section).

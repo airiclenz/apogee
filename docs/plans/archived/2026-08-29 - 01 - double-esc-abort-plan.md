@@ -6,7 +6,7 @@ the armed state); a second ESC inside the window stops the in-flight worker — 
 the worker is running, including while an approval prompt is up. The gesture disarms
 on the window's expiry.
 
-**Date:** 2026-08-29 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-29 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `internal/tui/model.go` (the `ctrl+c` double-tap at
 model.go:1355-1362, `lastCtrlC` model.go:280, `ctrlCQuitWindow` model.go:1141,

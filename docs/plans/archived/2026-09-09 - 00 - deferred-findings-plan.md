@@ -5,7 +5,7 @@ test-coverage residuals the Reaction core stage-2 run deferred, the `wire_settin
 consolidation, the `go vet` redundancy, the ADR 0071 D5 / `/settings` disagreement, and the last
 `validated-sets`/`mechanisms` mention in the layout docs.
 
-**Date:** 2026-09-09 · **Status:** unexecuted · **Base:** `cebd60fd` · **sized for:** ~200k-context host
+**Date:** 2026-09-09 · **Status:** done (status corrected 2026-10-02) · **Base:** `cebd60fd` · **sized for:** ~200k-context host
 
 **Sources.**
 - issue register (`bd show`) → `apogee-yk9`, `apogee-370`, `apogee-3xx`, `apogee-zqs`, `apogee-d8q`, `apogee-boe`, `apogee-fso`, `apogee-o60`, `apogee-ilh`, `apogee-tbs`, `apogee-jwf`

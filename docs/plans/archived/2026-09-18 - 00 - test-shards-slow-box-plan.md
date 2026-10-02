@@ -2,7 +2,7 @@
 
 **Goal:** `make test` (scripts/test-shards.sh) becomes runnable on a Raspberry Pi 4 — a box whose kernel cannot run the race detector (39-bit VA, TSan needs 48) and whose cores are 3–5× slower than the 9-core box the shard plan is tuned for — through two explicit opt-in knobs, without changing the default plan CI and dev boxes run.
 **Date:** 2026-09-18
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** d76457415aaf4ac6b8a00119a8f9fdef3ac39a01
 

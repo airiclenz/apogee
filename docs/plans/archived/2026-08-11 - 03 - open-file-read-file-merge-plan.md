@@ -4,7 +4,7 @@
 line numbers where a substring occurs); the `open_file` tool, its `domain.OpenedFile`
 summary variant, and their TUI presenters are deleted; docs record the merge.
 
-**Date:** 2026-08-11 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-11 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources** (all file:line cites in this plan are pinned at commit
 `a0072a0`; if lines have drifted, the pinned commit's content is the ground truth):

@@ -2,7 +2,7 @@
 
 **Goal:** Close epic `apogee-mjk` (11 red `CI` runs 2026-09-11..17): one product bug (undo pre-image snapshot git runs inside the workspace box on confined Auto writes), one deterministic Windows golden failure (CRLF checkout), three load-exposed e2e waits, plus the two optional margin items (shard timings seed, schedule-test goroutine audit).
 **Date:** 2026-09-17
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 544b1f42
 

@@ -10,7 +10,7 @@ box. Tab opens the `/` menu filtered to those rows; a skill shown at the moment 
 is spent for the session and never suggested again. Model-facing discovery (auto-attach, a
 `load_skill` tool) is deferred and recorded, not built.
 
-**Date:** 2026-08-27 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-08-27 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 
 **Authoritative sources:**
 

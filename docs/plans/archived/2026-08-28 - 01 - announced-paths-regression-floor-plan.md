@@ -16,7 +16,7 @@ plan-writer "acceptance drives the announced surface"). Those live in the skills
 NOT items here.
 
 **Date:** 2026-08-28
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources:**

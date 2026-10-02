@@ -5,7 +5,7 @@
   granted (ISSUES.md item "sub agents need repeated approval in auto mode"). Includes
   twin coalescing: a queued approval whose key was allowed while it waited auto-clears.
 - **Date:** 2026-08-10
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:** repo @ `178fcb7`; `internal/agent/dispatch.go` `approve()`
   (~line 553) and its force-semantics comment (~line 580); `internal/agent/construct.go`

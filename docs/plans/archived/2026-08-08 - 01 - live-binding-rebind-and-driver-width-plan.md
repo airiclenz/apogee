@@ -3,7 +3,7 @@
 **Goal:** Fix ISSUES.md entries 1 and 2 (plus one adjacent gap found while scouting): (a) after a `/server` switch, the rebind resolver and scheduled Firings still key spec resolution on the LAUNCH endpoint — carry the live bound upstream into the rebind inputs instead; (b) the parallel-agents cap reaches the TUI driver only — install it in `apogee headless` (pin + one-shot probe) and in scheduled Firings, so every Driver gets the same width.
 
 **Date:** 2026-08-08
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Skills:** coding-standards
 
 **Authoritative sources:**

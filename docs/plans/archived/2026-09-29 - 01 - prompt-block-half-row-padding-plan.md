@@ -10,7 +10,7 @@ one delivery), where the upper block's `▀` stands in for the one separator and
 `▄` is an added row. A running workflow block's header `✦` blinks like a running sub-agent's.
 
 **Date:** 2026-09-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 7d474950
 

@@ -4,7 +4,7 @@
 color role `tool-header` in the scheme system, instead of reusing the `code` role that
 also paints inline code and fenced code blocks.
 
-**Date:** 2026-08-08 · **Status:** unexecuted
+**Date:** 2026-08-08 · **Status:** done (status corrected 2026-10-02)
 
 **Authoritative sources:**
 - ADR 0040 (`docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md`) —

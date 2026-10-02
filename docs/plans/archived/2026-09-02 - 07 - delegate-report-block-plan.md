@@ -6,7 +6,7 @@ changed and left unfinished by citing `path:line` rather than pasting file bodie
 config key, no Mechanism, on under Bypass, every depth > 0 wherever a standing system message is
 sent at all, routed and unrouted alike.
 
-**Date:** 2026-09-02 · **Status:** unexecuted · **Base:** `abb09e5a`
+**Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02) · **Base:** `abb09e5a`
 **sized for:** ~200k-context host
 
 **Sources**

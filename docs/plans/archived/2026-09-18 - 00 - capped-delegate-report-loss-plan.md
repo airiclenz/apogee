@@ -1,7 +1,7 @@
 # Capped delegates keep their report — engine fold, tail-fenced wrap-up, one write, structural step notice, continue
 
 **Goal:** A delegate that hits a bound (step, token or time cap) never hands its parent a fabricated tool dump: the engine folds the child's conversation into a summary the parent always receives, the wrap-up ask sits where the model reads it, one `write_file` survives the wrap-up, the step-budget notice fires for every delegate, and the parent can continue a capped delegate from that fold instead of re-spawning it.
-**Date:** 2026-09-18 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-09-18 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 **Base:** `6635f881`
 
 **Sources:** `docs/handoffs/2026-09-18 - 00 - capped-delegate-report-loss.md` (F1–F5, P1–P6, §7); `CONTEXT.md` **Step cap**, **Sub-agent**; ADR 0013 §5, 0022 D8 (+2026-08-25 addendum), 0025 §6, 0046, 0076 D6 + Rejected, 0077 D1/D2 (+2026-09-15 addendum); `docs/plans/archived/2026-08-26 - 00 - delegate-token-runaway-plan.md`, `…/2026-09-01 - 02 - capped-delegate-wrap-up-plan.md`, `…/2026-09-14 - 03 - delegation-bounds-and-loop-resilience-plan.md`; `docs/reviews/archived/session-mining-2026-09-14.md` (headline 3, §9); `docs/handoffs/2026-09-19 - 00 - step-budget-notice-investigation.md` (item 6 evidence: the Reaction-ladder notice fires and is delivered, session `20260919T062150Z-e0a3e5e6` — the delegate read the advice fence as file text; a fold dropped it in the headless repro).

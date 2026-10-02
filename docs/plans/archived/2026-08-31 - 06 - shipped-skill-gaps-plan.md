@@ -5,7 +5,7 @@ one host-side residue behind its fourth. `planning` gains the hard readiness gat
 skills all have; `code-review` names its review unit and excludes generated and vendored files;
 `/skills` names the export verb in the listing itself, where the human reading it can act on it.
 
-**Date:** 2026-08-31 · **Status:** unexecuted
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **Base commit:** `ad962676`
 

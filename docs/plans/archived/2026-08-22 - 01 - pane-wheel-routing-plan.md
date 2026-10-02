@@ -7,7 +7,7 @@ dropdown the notch falls through to the transcript scrolling behind them, which 
 the human as "scrolling is broken in that panel".
 
 **Date:** 2026-08-22
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 ## Authoritative sources

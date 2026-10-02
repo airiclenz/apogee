@@ -2,7 +2,7 @@
 
 **Goal:** The human stops one running delegation with `^x` while the parent's Turn goes on, and the parent receives a folded partial result. Every named delegation stays continuable with `continue:` for the whole session: saved with it, cut by forks, dropped by `/clear`, restored by a cancelled Turn's rollback. Interjection and stop address a child by its run id.
 **Date:** 2026-09-25
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 27552c2d
 **Closes:** apogee-single-delegation-stop; apogee-session-delegate-retention

@@ -6,7 +6,7 @@ axis against the default roster; tools gain a build-level default-off state with
 axis-wise across all three axes; the resolved roster rides Rebind and announces non-empty deltas
 in one line at a switch.
 
-**Date:** 2026-08-23 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-23 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources** (an item that disagrees with these follows these):
 - [ADR 0057](../adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md)

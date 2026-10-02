@@ -2,7 +2,7 @@
 
 **Goal:** Deepen per architecture review 2026-09-30 candidates #5 and #6. TUI: who holds the engine is one hold set (stored as one set, item 4), read through named questions, with one release transition. `cmd/apogee`: an entry's dial facts are one value that builds the Client and the Monitor and fills the dial fields of the engine's `Config`, `UpstreamSpec`, `DelegationTarget` and of `probe.Inputs` (items 1, 10; `Config.EffortDialect` stays hand-ranked, `DelegationTarget.EffortDialect` comes from the beat). Behaviour is preserved except one latent Monitor defect (item 8) and one rebind-timing change (item 5: with a worker and an actuation hold at once, a stashed rebind applies only once both have released).
 **Date:** 2026-09-30
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 704514db
 **Run order:** after plan 2026-09-30 - 00 has closed out; before plan - 01; never concurrently.

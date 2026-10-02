@@ -3,7 +3,7 @@
 **Goal:** the `task_list` card's header reads `✦ Task List (done/total)` instead of carrying an `N open` stat, the card folds again (collapsed = header only), and its fold state is one shared preference for every task-list card, remembered across sessions in `ui.task-list-open`.
 
 **Date:** 2026-09-14
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

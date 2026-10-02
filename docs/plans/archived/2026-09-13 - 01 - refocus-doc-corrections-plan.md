@@ -2,7 +2,7 @@
 
 **Goal:** Apply the nine documentation corrections the 2026-09-13 `/refocus` run found where the docs drifted from the shipped Reaction core, plus two stale code comments it turned up. Doc and comment edits only — no behaviour changes.
 **Date:** 2026-09-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 62a51ac5
 

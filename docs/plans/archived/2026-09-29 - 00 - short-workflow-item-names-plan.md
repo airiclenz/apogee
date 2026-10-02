@@ -5,7 +5,7 @@ apogee home — on every Driver surface, and the status line never loses the con
 name. The item's label stays the identity key (resume hashes, `{item}` output paths, model-facing
 result lines).
 **Date:** 2026-09-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 5135ef98
 

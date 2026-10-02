@@ -4,7 +4,7 @@
 (beads `apogee-apz.1`–`.6`). Every item is test-only; no production code changes.
 Three beads mis-cite their file — the corrected locations are binding here.
 
-**Date:** 2026-09-06 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-09-06 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Sources**
 - `docs/plans/archived/2026-09-06 - 01 - hooks-plan.md` (the run that deferred these)

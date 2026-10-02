@@ -6,7 +6,7 @@ parent is handed whatever text the child happened to narrate alongside its last 
 tools are gone and asked to report to the agent that delegated the task, so the partial result the
 parent reads is authored rather than scavenged.
 
-**Date:** 2026-09-01 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-09-01 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Sources (pinned at `23ff876b`):**
 - `internal/agent/agent.go:338` (`stepCapErrFormat`), `:560-597` (`Run`, `endAtStepCap`)

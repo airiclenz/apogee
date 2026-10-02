@@ -5,7 +5,7 @@
 register entry.
 
 **Date:** 2026-08-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host.
 
 **Authoritative sources:**

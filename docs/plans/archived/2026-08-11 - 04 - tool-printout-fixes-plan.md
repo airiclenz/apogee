@@ -5,7 +5,7 @@
   status in grouped sub-agents, a "scheduled" state for queued sub-agents, and removal of
   the flickering ongoing-action text.
 - **Date:** 2026-08-11
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **sized for:** ~200k-context host
 - **Authoritative sources:**
   - Owner defect report 2026-08-11 (transcribed into the binding **What** lines below).

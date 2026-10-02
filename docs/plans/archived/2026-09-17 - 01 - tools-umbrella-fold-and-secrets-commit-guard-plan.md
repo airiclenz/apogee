@@ -2,7 +2,7 @@
 
 **Goal:** Two IDEAS.md items shipped: (A) the `✦ Tools (N calls)` umbrella folds to one line once it is at rest with more than `ui.tools-fold-over` type rows, governed by one persisted `ui.tools-open` preference exactly like `ui.task-list-open`; (B) `git_commit` forces an approval look when the commit would carry secret material, detected pre-execute by built-in content patterns and path globs over a shadow-index staged diff.
 **Date:** 2026-09-17
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 35e1767a
 

@@ -4,7 +4,7 @@
 inside tmux on its default `set-clipboard external`, and a driven test pins the OSC 52 bytes apogee
 writes so the copy path cannot silently die again.
 **Date:** 2026-09-23
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** a4874a81
 **Closes:** apogee-tmux-copy-dropped

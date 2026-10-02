@@ -2,7 +2,7 @@
 
 **Goal.** Five host rules that only `internal/tui` (or `package main`) can reach today, and that every other Driver re-spells by hand, move into the `internal/<pkg>` that already owns half the concept — the `internal/sanitize` / `internal/format` pattern. Each move deletes the copies it replaces; two of them give headless and daemon runs a capability they lack (`@file` references, the retired-Mechanism notice). Nothing model-visible changes.
 
-**Date:** 2026-08-30 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-30 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `docs/reviews/architecture-review-20260830.html` (candidates A1–A3, B1–B2; A4–A8, B3–B5 deferred) · `docs/adr/0010-*` (dependencies flow toward `internal/domain`; `internal/*` never imports root) · `docs/adr/0011-*` (no agent logic in the TUI) · `docs/adr/0031-*` (engine sufficient for any Driver) · `docs/adr/0033-*` (Firing runner; "the surface that offers Auto refuses it") · `docs/adr/0043-*` (`internal/tui` stays flat — hoists go to siblings; every file added/renamed in a mapped package updates its `doc.go` in the same commit) · `CONTEXT.md:1062-1078` (File reference) · base commit `a9ec2131`.
 

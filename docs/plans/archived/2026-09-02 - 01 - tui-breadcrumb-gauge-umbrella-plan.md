@@ -2,7 +2,7 @@
 
 **Goal:** close the three open TUI entries in `IDEAS.md` and `ISSUES.md`: the run-view breadcrumb takes the prompt box's black field and gains a blank row beneath it; the status line stays one unbroken black band when the context gauge is dropped for width; and any run of 2+ same-type tool calls folds under the `✦ Tools (N calls)` umbrella exactly as a mixed batch does, retiring the `✦ Terminal (N)` shape.
 **Date:** 2026-09-02
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** a76a7a4f (every line number below was read at this commit; the symbol name is the locator, never the number)
 

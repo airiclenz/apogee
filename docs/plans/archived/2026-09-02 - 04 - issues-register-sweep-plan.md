@@ -5,7 +5,7 @@
   and an optional per-server env allowlist for stdio MCP launches. Two are behaviour fixes
   (`fanOutWidthFor`'s seat cap, the wrap-up's whitespace guard); the rest are guards, single-sourcing,
   dead-code retirement, spec text and two additive, default-off features.
-- **Date:** 2026-09-02 · **Status:** unexecuted
+- **Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:** `ISSUES.md` (the entries this plan retires);
   [ADR 0069](../adr/0069-the-top-level-model-picks-the-delegation-seat.md) decision 7 (item 7);

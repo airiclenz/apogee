@@ -4,7 +4,7 @@
 per-call deadline on MCP tool calls, no endpoint credential in surfaced error text, a size cap on
 server tool descriptions, and a same-origin constraint on the SSE `endpoint` event.
 **Date:** 2026-09-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** dba82f58
 

@@ -12,7 +12,7 @@ shows the cost — the model wrote to `/tmp`, was killed by confinement, was tol
 script `set -e` had silently aborted.
 
 **Date:** 2026-08-25
-**Status:** ready — unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources**

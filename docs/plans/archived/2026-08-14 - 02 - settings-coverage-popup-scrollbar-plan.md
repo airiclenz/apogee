@@ -2,7 +2,7 @@
 
 - **Goal:** give the shared popup module a scrollbar (all overflowing popups), add keyboard scrolling to `/usage`, and close the two ratified `/settings` coverage gaps: a per-mechanism toggle sub-list and an editable `validated-sets.enable` row.
 - **Date:** 2026-08-14
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - `internal/tui/popup.go` (row-window primitives: `popupRowWindow` ~:1294, `popupRowWindowFrom` ~:1335, `popupRowLines` ~:640; `popupSpec` ~:305)

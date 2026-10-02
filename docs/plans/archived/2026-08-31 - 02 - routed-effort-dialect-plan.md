@@ -6,7 +6,7 @@ ORCHESTRATOR's thinking-effort wire dialect, so its compaction summariser asks f
 output cap on reasoning and faults at every Turn boundary. Route the dialect with the
 server, and stop the fault text asserting more than the engine can know.
 
-**Date:** 2026-08-31 · **Status:** unexecuted
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02)
 **Base commit:** `4debb456` · **sized for:** ~200k-context host
 
 **Sources**

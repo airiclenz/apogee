@@ -2,7 +2,7 @@
 
 **Goal:** `demorig` records, judges and renders the README hero clip end to end without VHS: a captured model cassette is replayed into the real `apogee` binary in a pty, the storyboard alone drives typing, keys, waits and real mouse clicks, and the render composes fixed-length sections, zooms on on-screen targets and a drawn cursor into `graphics/demo.gif`. The new clip shows the v0.23 surface: mode click, sub-agent run view, queued message, split-diff card, context gauge.
 **Date:** 2026-09-24
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 34d1d724
 

@@ -1,7 +1,7 @@
 # Structural feedback and pruning — post-edit syntax trailer, closest-region edit failures, stale-result pruning, off-ramps on by default
 
 **Goal:** give every model precise feedback where it acts (the write tools) and stop long Exchanges from drowning in stale tool output, as structural engine behaviour that survives Bypass. Ship the two off-ramp Mechanisms on by default. No new Mechanism is added; the nudge catalogue is untouched (its retirement is parked in the 2026-09-02 handoff).
-**Date:** 2026-09-02 · **Status:** unexecuted · **Base commit:** `5d9d6b12`
+**Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02) · **Base commit:** `5d9d6b12`
 **Sized for:** ~200k-context host.
 
 **Sources:** `docs/design/mechanism-catalogue.md` (rule D1, C1, Table B rows 174–175) · `docs/adr/0006`, `0015`, `0016`, `0023` (§6 prefix-cache stability), `0045` · `internal/mechanisms/syntaxengine.go` · `internal/tools/regions.go` (`okEditRegions`) · `internal/tools/path_suggest.go` (`notFoundMessage`, the not-found shape to mirror) · `internal/agent/compact.go` (`autoCompact`, `shouldAutoCompact`, `historyExceedsAllocation`) · `internal/context/toolresult.go` · `ISSUES.md:396-407` (main-loop mid-Exchange reducer, referenced not closed) · `docs/reviews/code-audit-2026-08-25.md:25` (JS/TS regex false positive).

@@ -4,7 +4,7 @@
 hijacking the stopped one, a cancelled recipe launch stays in the model's conversation, and every
 stopped workflow says how to resume it.
 **Date:** 2026-09-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 5a1f8459
 

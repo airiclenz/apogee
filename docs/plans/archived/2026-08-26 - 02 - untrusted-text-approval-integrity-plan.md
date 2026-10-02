@@ -6,7 +6,7 @@ enumeration or seam test that should have caught it gains the field — and the 
 can no longer be cleared by a key the operator did not aim, an argument spelling the pane never
 showed, or a wrap that paints model text as pane furniture.
 
-**Date:** 2026-08-26 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-26 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Evidence:** security audit `docs/skill-runs/security-audit/2026-08-25/report.md` (F-11, F-12
 critical; F-16, F-17, F-19 high; F-22 medium; F-30, F-32 low) and code audit

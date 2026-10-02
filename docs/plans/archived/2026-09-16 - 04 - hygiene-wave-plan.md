@@ -2,7 +2,7 @@
 
 **Goal:** Close fifteen open P3/P4 beads that need no further design: four missing tests, two comment/template drift sweeps, four small bugs, three config-notice features, two TUI structural folds, and the internal/tui `t.Parallel` sweep. Every item is self-contained and closes its bead at the commit.
 
-**Date:** 2026-09-16 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-09-16 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Sources:** `bd show apogee-289 apogee-1kv apogee-1ah apogee-ah5 apogee-vf1 apogee-t74 apogee-bsg apogee-lq4 apogee-add apogee-2sj apogee-ibd apogee-970 apogee-lpi apogee-agk apogee-11s`; `docs/adr/0011-*.md`; `docs/adr/0012-*.md`; `docs/adr/0021-*.md`; `docs/adr/0041-*.md`; `docs/adr/0053-*.md` D3/D7; `docs/adr/0054-*.md`; `docs/adr/0064-*.md` §4; `docs/adr/0075-*.md` §4; `docs/design/test-drivers.md`; `cmd/apogee/seams_guard_test.go`.
 

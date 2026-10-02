@@ -16,7 +16,7 @@ match, and a bonus for id/display-name hits — and pins the real-library behavi
 fixture so future tuning stays honest. Everything else in the matcher (BM25, the ≥ 2-term evidence
 gate, the trigger boost, the spent-at-send rule, the band) is unchanged.
 
-**Date:** 2026-08-27 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-08-27 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 
 **Authoritative sources:**
 

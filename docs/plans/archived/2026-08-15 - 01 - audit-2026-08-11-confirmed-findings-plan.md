@@ -4,7 +4,7 @@
   re-verification on 2026-08-15: six still-open findings from the finished security-package
   report and three survivors of the raw (never-verified) TUI findings.
 - **Date:** 2026-08-15
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - `docs/reviews/2026-08-11 - 00 - code-audit-internal-security.md` — the finished report

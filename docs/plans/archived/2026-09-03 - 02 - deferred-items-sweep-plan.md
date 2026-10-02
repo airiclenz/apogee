@@ -4,7 +4,7 @@
 ten manual gaps, the tool-row error defect, the hero tape's clock, and the git-hook pair — so the
 register holds only work that is genuinely parked. No new config key, no new verb.
 
-**Date:** 2026-09-03 · **Status:** unexecuted · **Base:** `94c36e88` · **sized for:** ~200k-context host
+**Date:** 2026-09-03 · **Status:** done (status corrected 2026-10-02) · **Base:** `94c36e88` · **sized for:** ~200k-context host
 
 **Sources**
 - issue register (`bd`) → `apogee-5qe.1`, `apogee-5qe.2`; `apogee-i5h.1`–`.4`; `apogee-b3u`; `apogee-h64`; `apogee-t57.1`–`.10`

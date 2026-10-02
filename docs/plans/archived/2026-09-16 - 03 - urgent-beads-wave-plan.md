@@ -1,7 +1,7 @@
 # Urgent beads wave — defects, Anthropic Messages wire, session fork
 
 **Goal:** Close every open P2 bead and every open P3 bug in the register: six defect items (apogee-ku1, o4w, 5wb, mfh, 8as, 1mj), a second outbound wire codec — Anthropic Messages — selected per server by a `wire:` key (apogee-6fp), and session forking with a parent pointer on Meta and a `/fork` picker (apogee-zci).
-**Date:** 2026-09-16 · **Status:** unexecuted · **Base:** 63d6e631
+**Date:** 2026-09-16 · **Status:** done (status corrected 2026-10-02) · **Base:** 63d6e631
 **Sized for:** ~200k-context host.
 
 **Sources:** `bd show apogee-ku1 apogee-o4w apogee-5wb apogee-mfh apogee-8as apogee-1mj apogee-6fp apogee-zci`; `docs/adr/0031-*.md` (invariants); `docs/adr/0056-*.md` D2; `docs/adr/0060-*.md` D2/D3/D9; `docs/adr/0072-*.md`; `docs/adr/0074-*.md` D7; `docs/adr/0075-*.md` D10; `CONTEXT.md` §Upstream, §Session record, §Exchange, §Compaction; `docs/reviews/archived/session-mining-2026-09-14.md:33`; `docs/design/test-drivers.md`.

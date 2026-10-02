@@ -2,7 +2,7 @@
 
 **Goal.** Expanding a delegation opens it as a **run view** that takes the whole transcript slot (status line, prompt box and footer stay), follows the latest output, and carries a clickable breadcrumb / `esc` back up one level. Inside the view the prompt box addresses that child: a message queues into an engine-side per-child mailbox and lands at the child's next between-Steps boundary as an interjection. The activity line tracks one slot per run, so the top level stops flickering between concurrent children.
 
-**Date:** 2026-08-30 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-30 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `IDEAS.md:14,18` · `docs/adr/0013-…recursion-point…md` (D5: child runs atomically inside the parent Turn — unchanged) · `docs/adr/0025-*` (interjections commit between Steps) · `docs/adr/0031-*` (wire-silent engine, benchable all the way up) · `docs/adr/0035-*` (alternate-screen takeover rejected) · `docs/adr/0039-*` (spawn call-ID identifies a child's stream) · `docs/adr/0005-*` (child privileges ≤ parent) · `layout.md:109-230,742-1000` · `docs/layout/tool-layout.md:96-110,207-230` · `docs/design/test-drivers.md:709-800` · base commit `595b2f10`.
 

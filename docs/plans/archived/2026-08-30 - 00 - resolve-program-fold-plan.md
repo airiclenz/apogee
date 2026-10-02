@@ -5,7 +5,7 @@ remaining hand-rolled `exec.LookPath` + `RefuseExecFromWritablePath` pair onto i
 is the only exec entry rather than the newest of eight. Closes `ISSUES.md`'s "Improvements / Ideas"
 entry naming the five tool/present sites.
 
-**Date:** 2026-08-30 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-30 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:**
 - `internal/security/execsafety.go:89-125` — `ResolveProgram`'s contract and its three-outcome doc

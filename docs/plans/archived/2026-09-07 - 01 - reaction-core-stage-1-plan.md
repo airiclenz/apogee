@@ -1,7 +1,7 @@
 # Plan — Reaction core, stage 1: one ladder, one firing event, behaviour-identical
 
 **Goal:** Replace the Floor-guard, Mechanism and Hook plumbing with one Reaction core over Moments (ADR 0076 D1, D13 stage 1): `domain.Reaction` / `Moment` / `Outcome`, one `fire` per seam, one `ReactionFiredEvent`, the lab layer deleted, `internal/floor` byte-identical. Behaviour-identical, proved by an in-repo identity arm recorded before the refactor. Stage 2 (`reactions:` config, layers, adoption) and stage 3 (user cells) are separate plans gated on this one landing.
-**Date:** 2026-09-07 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-09-07 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 **Base:** `main` at `bc8b603d` (line numbers verified there).
 
 **Sources (precedence in this order):**

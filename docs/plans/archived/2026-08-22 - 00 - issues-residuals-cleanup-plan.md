@@ -3,7 +3,7 @@
 **Goal:** close all 16 open defects in `ISSUES.md` — the doc/comment corrections and small
 code fixes left behind as residuals of the 2026-08-19/20 plan runs.
 
-**Date:** 2026-08-22 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-08-22 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 
 **Authoritative sources:**
 

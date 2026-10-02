@@ -4,7 +4,7 @@
   Up loads the newest sent prompt, further Up/Down walk older/newer (terminal-style).
   Folds in ISSUES.md's "backspace/del on selected text should delete it" since it lands
   in the same key-handling seam.
-- **Date:** 2026-08-04 · **Status:** unexecuted
+- **Date:** 2026-08-04 · **Status:** done (status corrected 2026-10-02)
 - **Authoritative sources:** the ratified decisions below (owner grill session
   2026-08-04); code facts pinned at commit `520c3ea` — cited `file:line` refs are from
   that commit, and if lines have drifted the named symbols/behaviours govern, not the

@@ -8,7 +8,7 @@ denied` inside every confined tool call (observed live: apogee session
 exempts the single device file `/dev/null` from the write fence.
 
 **Date:** 2026-08-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources:**

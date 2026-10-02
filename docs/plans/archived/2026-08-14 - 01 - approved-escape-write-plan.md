@@ -5,7 +5,7 @@ the resolved target the approval pane disclosed, carried by a context write-esca
 `confine=false` run cell and the `box.WritablePaths` union stop being nullified by the
 workspace-pinned fence; the whole WS-write family behaves uniformly.
 
-**Date:** 2026-08-14 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-14 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources** (an item that disagrees with these follows these):
 - [ADR 0049](../adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)

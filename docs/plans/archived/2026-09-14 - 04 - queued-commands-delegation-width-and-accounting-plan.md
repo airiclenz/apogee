@@ -3,7 +3,7 @@
 **Goal:** close the host-side findings of the 2026-09-14 session-mining review: a slash command typed mid-run is queued and runs at idle instead of being refused, the coordinator is told how wide its fan-out really runs, and the session record stops distorting every number — usage resets on `/clear`, the served model is recorded, entries carry timestamps and result sizes, and a fold leaves a trace.
 
 **Date:** 2026-09-14
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

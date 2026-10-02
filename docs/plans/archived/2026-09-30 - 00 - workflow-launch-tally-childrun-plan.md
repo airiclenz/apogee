@@ -2,7 +2,7 @@
 
 **Goal:** Deepen the workflow engine per architecture review 2026-09-30 candidates #1, #2, #3: one launch builder with a live-folder guard, one tally the engine owns, one child-run lifecycle. Closes two live defects: two Runners in one folder, and a headless/daemon verdict that counts different items than the model's note.
 **Date:** 2026-09-30
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 704514db
 **Run order:** first of plans 2026-09-30 - 00/01/02; never concurrently with them.

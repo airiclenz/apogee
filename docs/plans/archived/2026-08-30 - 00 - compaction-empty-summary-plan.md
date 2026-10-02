@@ -6,7 +6,7 @@ retried with the same inputs. On 2026-08-29/30 a delegate on Qwen3.8-27B looped 
 `compaction: apogee: compaction produced an empty summary` — one ~40-minute summary call
 (54k-token prompt, 4096 tokens of reasoning, no content) per Turn boundary, seven times.
 
-**Date:** 2026-08-30 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-30 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `internal/agent/compact.go` (`compactCompleter.Complete` :379-420,
 `autoCompact` :106-175, `shouldAutoCompact` :188-218, `emergencyFold` :319-341); `internal/agent/wire.go:16-50`

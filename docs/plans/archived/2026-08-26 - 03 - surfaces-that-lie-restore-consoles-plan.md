@@ -4,7 +4,7 @@
 it lives — the live engine, the typed tool outcome, the walked diff, the verdict — and a session
 boundary (restore) leaves nothing of the outgoing conversation running or miscounted.
 
-**Date:** 2026-08-26 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-26 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Evidence (security audit 2026-08-25 §3.3/§3.6, code audit 2026-08-25 §7, refocus corrections
 §3, `ISSUES.md` open defects):** on a stock install `/settings` reports the BOOT value of

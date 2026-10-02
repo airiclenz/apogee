@@ -4,7 +4,7 @@
 Update arm outside `internal/tui/model.go` leaves layout to Update's tail, with a structural test
 that keeps it so.
 **Date:** 2026-10-01
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 81cde6a2
 **Sources:**

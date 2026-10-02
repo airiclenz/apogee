@@ -1,7 +1,7 @@
 # Plan — persistent undo snapshots and the tool-call salvage guard
 
 **Goal:** close gaps 1 and 2 of the contender assessment: a seventh Floor guard that runs a tool call a native-profile model wrote as JSON in its text instead of on the wire, and an undo that survives relaunch, covers `terminal`/`python_exec`/MCP writes, offers `/redo`, and gives headless and daemon runs a revert verb (closes bead apogee-kk0.7).
-**Date:** 2026-09-06 · **Status:** unexecuted · **Base:** `5359e90e` · **Sized for:** ~200k-context host.
+**Date:** 2026-09-06 · **Status:** done (status corrected 2026-10-02) · **Base:** `5359e90e` · **Sized for:** ~200k-context host.
 
 **Sources:** `docs/handoffs/2026-09-06 - 02 - contender-gap-assessment.md` (gaps 1, 2); ADR 0071 (admission test (a)(b)(c), lines 52-56); ADR 0051; ADR 0042 D2; ADR 0022 §8; `CONTEXT.md:657-675` (Undo journal), `:698-729` (Floor guard); `docs/design/archived/mechanism-catalogue.md:377-450`; `internal/floor/doc.go`; `internal/undo/doc.go`.
 

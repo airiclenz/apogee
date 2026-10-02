@@ -7,7 +7,7 @@ exception, not by mirroring — the one editable key whose live edit an in-sessi
 follow.
 
 **Date:** 2026-08-25
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Authoritative sources:**

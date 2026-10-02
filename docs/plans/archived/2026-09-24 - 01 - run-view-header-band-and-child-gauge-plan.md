@@ -2,7 +2,7 @@
 
 **Goal:** An open run view's breadcrumb header becomes a three-row black band: a blank black row above the trail, the trail, and a blank black row below it. The whole band is one click target that goes one level up. Inside a run view, the status line's right slot states the **viewed run's** context gauge, never the top-level agent's.
 **Date:** 2026-09-24
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 69565337
 

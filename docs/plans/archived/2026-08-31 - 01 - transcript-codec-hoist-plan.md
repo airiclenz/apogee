@@ -2,7 +2,7 @@
 
 **Goal.** The transcript model and codec leave `internal/tui` for `internal/session`, so any Driver can write and replay scrollback; `internal/run` then fills `Record.Transcript`, `Meta.Usage` and `Meta.DelegateUsage`, and a Firing's report line says what the run cost. Closes the review's blank-replay gap (never an ISSUES entry — CHANGELOG only) and the ISSUES.md Firing-spend entry.
 
-**Date:** 2026-08-31 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `docs/reviews/architecture-review-2026-08-30.html` (A6) · `docs/plans/archived/2026-08-30 - 02 - tui-host-hoist-plan.md` (the sibling-hoist pattern) · `docs/adr/0010-*` (layering) · `docs/adr/0022-*` §5 (three versions, three owners) · `docs/adr/0031-*` (Driver north star) · `docs/adr/0033-*` (runner-agnostic scheduler) · `docs/adr/0043-*` (tui stays flat) · `docs/adr/0052-*` §5 + 2026-08-24 amendment (region mirror) · `ISSUES.md:894-897` · base commit `adf418f5`.
 

@@ -3,7 +3,7 @@
 - **Goal:** a sent prompt that invokes a skill no longer renders a separate `✦ Name` chip
   row under the block; instead the `/token` occurrences inside the block's own text are
   painted in the skill colour, exactly as the prompt box already paints them before send.
-- **Date:** 2026-08-04 · **Status:** unexecuted
+- **Date:** 2026-08-04 · **Status:** done (status corrected 2026-10-02)
 - **Authoritative sources** (pinned at commit `2841828`):
   - ISSUES.md, the entry "sent prompts with skills should not look like this" — the
     requirement. It asks for the skill "in-line with the text and simply color marked

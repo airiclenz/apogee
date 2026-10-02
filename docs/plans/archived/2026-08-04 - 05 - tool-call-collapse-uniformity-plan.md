@@ -6,7 +6,7 @@ whether the block is expanded or collapsed, targetless calls no longer exempt, d
 outlier, and the write/edit tools finally showing their changed lines. Plus the separately ratified
 live-star timing change (0.5 s `✦`, 0.5 s bare cell).
 
-**Date.** 2026-08-04. **Status.** Finalized 2026-08-04, unexecuted. All design decisions —
+**Date.** 2026-08-04. **Status.** done (status corrected 2026-10-02). All design decisions —
 including the two formerly open DESIGN-CALLs (targetless collapse, diff cap) — were ratified by
 the owner on 2026-08-04 and are embedded below. Nothing is re-asked at execution time.
 

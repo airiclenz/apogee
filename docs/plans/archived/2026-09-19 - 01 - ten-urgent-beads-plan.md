@@ -1,7 +1,7 @@
 # 2026-09-19 - 01 - ten urgent beads
 
 **Goal:** close the ten most urgent open beads — the defects (`apogee-2un` Stage A, `apogee-tfp`, `apogee-zuu`, `apogee-9se`, `apogee-clb`), the shipped-plan residual (`apogee-bxi`) and four sanctioned small surfaces (`apogee-3b3`, `apogee-1d8`, `apogee-rw6` `/help` only, `apogee-d6t`). Every design call was grilled with the owner on 2026-09-19 and is binding below.
-**Date:** 2026-09-19 · **Status:** unexecuted · **sized for:** ~200k-context host · **Base commit:** dd98567a
+**Date:** 2026-09-19 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host · **Base commit:** dd98567a
 
 **Sources:** `bd show <id>` per bead; docs/adr/0007, 0013, 0017, 0022, 0025, 0034, 0039, 0046, 0071, 0076 (+ 2026-09-19 addendum), 0077; CONTEXT.md entries Exchange, Turn, Step cap, Reaction, Session, Delegation; docs/manual/{commands,configuration,reactions,sessions}.md; layout.md.
 

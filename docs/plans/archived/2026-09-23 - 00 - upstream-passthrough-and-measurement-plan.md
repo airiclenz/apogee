@@ -2,7 +2,7 @@
 
 **Goal:** Give every server entry an opaque `request-extra:` body passthrough (Layer 1) and measure every upstream HTTP attempt per server — ttfb, ttft, duration, tok/s, outcome — surfaced in the `/server` and `/sub-agents-server` pickers, `/inspect` and headless JSON (Layer 2). Apogee measures and passes routing hints through; it never routes.
 **Date:** 2026-09-23
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** d72dfd8a
 **Sources:** `docs/handoffs/2026-09-21 - 00 - provider-routing-speed-brainstorm.md`; ADR 0024, 0028, 0031, 0047, 0075, 0076, 0082; `CONTEXT.md`; `layout.md`

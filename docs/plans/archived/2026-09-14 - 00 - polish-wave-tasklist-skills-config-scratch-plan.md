@@ -2,7 +2,7 @@
 
 - **Goal:** close four IDEAS.md entries that are small, host-side and reverse no ADR: the `task_list` block renders as an always-open checklist without the model-facing instruction sentence; the skill-suggestion band stops offering three rows for any sentence; the config loader announces unknown keys and the embedded template is gated against the registry; and the announced scratch dir becomes writable by the native writers in the modes whose contract allows it.
 - **Date:** 2026-09-14
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Base commit:** `ff2bc6372509f92ea39f4ae74e1be74f47a3a163`
 - **Sources:** `IDEAS.md`; ADR 0072 (task list); `docs/layout/tool-layout.md` (task_list row, 2026-09-03 note); `layout.md` §"Collapsed and expanded blocks"; ADR 0061 + ADR 0065 §6 (skill matcher shared with `load_skill`); ADR 0036/0041 (config fold, live reload); ADR 0043 (registry); ADR 0012 (mode ladder), ADR 0049 (escape permits), ADR 0056 D3 (scratch dir); `docs/design/confinement-execution-contract.md` §box; ADR 0031 (wire-silent engine).

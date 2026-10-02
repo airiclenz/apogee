@@ -10,7 +10,7 @@ upstream scripted through stubllm (20); the write-side scope value (3); one conf
 archiving.
 
 **Date:** 2026-09-16
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Regression check (2026-09-16, 1da6d6fb):**

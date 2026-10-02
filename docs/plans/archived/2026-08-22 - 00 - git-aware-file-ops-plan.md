@@ -6,7 +6,7 @@
   Models — especially small ones — get correct rename tracking for free, with zero prompting;
   an untracked file or a non-repo workspace leaves behavior byte-identical to today.
 - **Date:** 2026-08-22
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **sized for:** ~200k-context host
 - **Authoritative sources:**
   - `internal/tools/git.go` — the hardened git-subprocess conventions every new git invocation

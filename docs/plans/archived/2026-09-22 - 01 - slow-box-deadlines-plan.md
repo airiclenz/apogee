@@ -6,7 +6,7 @@ returning the same value as a clean run; the test rows either assert the thing d
 budget a loaded box can meet.
 
 **Date:** 2026-09-22
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **skills:** coding-standards
 **base:** `0fb289d5`

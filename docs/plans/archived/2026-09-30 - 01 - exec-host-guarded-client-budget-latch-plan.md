@@ -2,7 +2,7 @@
 
 **Goal:** Deepen per architecture review 2026-09-30 candidates #4, #7, #8: git, vet, the snapshot store and mcp stdio run through one host value instead of package globals; one security-owned guarded HTTP client serves the network tools and mcp; the budget notices' latch becomes the note's own presence.
 **Date:** 2026-09-30
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 704514db
 **Run order:** after plan 2026-09-30 - 00 and - 02 have closed out; never concurrently with them.

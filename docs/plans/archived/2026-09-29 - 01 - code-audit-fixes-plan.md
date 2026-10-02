@@ -4,7 +4,7 @@
 cache stops hiding files, recipe and guard fences hold, MCP and git probes resist hostile input,
 lifecycle edges restore what they drain, and the merged-stdout denial kill stops killing data.
 **Date:** 2026-09-29
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 97bfaf0d
 

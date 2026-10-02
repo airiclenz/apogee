@@ -4,7 +4,7 @@
 closeouts deferred between 2026-08-28 and 2026-08-31 — so the register's defect half is empty. One
 item per residual, in the register's order, except where a residual's fix was split at write time.
 
-**Date:** 2026-09-01 · **Status:** unexecuted
+**Date:** 2026-09-01 · **Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **Base commit:** `af9341d2`
 

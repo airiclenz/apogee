@@ -8,7 +8,7 @@ kill), and record the review's standing denials as an ADR. Gated on plan A
 (`2026-09-20 - 01`) archiving; plan C (`2026-09-20 - 03`) is gated on this one.
 
 **Date:** 2026-09-20
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **Standing requirements:** skills: coding-standards; any authorized deviation from item text lands as a dated NOTES line under the item; no version identifier changes; `CHANGELOG.md` entries travel in item sidecars and land at closeout.
 

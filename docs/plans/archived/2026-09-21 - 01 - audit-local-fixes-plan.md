@@ -7,7 +7,7 @@ session rename, the pre-opened thinking channel, and the MCP environment claim. 
 A/B/C (`2026-09-20 - 01/02/03`) and must not touch the seams they own.
 
 **Date:** 2026-09-21
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **Standing requirements:** skills: coding-standards; any authorized deviation from item text lands as a dated NOTES line under the item; no version identifier changes; `CHANGELOG.md` entries travel in item sidecars and land at closeout.
 

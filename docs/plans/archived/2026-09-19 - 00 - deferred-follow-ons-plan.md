@@ -2,7 +2,7 @@
 
 **Goal:** Close the five small beads deferred out of the 2026-09-16..18 plans: two delegate-engine bugs reasoned from code (`apogee-if9`, `apogee-6ig`), the symlinked-root disclosure bug (`apogee-qm8`), and two test gaps (`apogee-2kj`, `apogee-n5k`). Every item is self-contained; the Files sets are pairwise disjoint.
 **Date:** 2026-09-19
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 8637d183
 

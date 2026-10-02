@@ -2,7 +2,7 @@
 
 **Goal:** Ship the user-origin `reactions:` surface in `~/.apogee/config.yaml` over the stage-1 core: `internal/hooks` becomes `internal/reactions` over `domain.Reaction`, the file migrates itself, one generation swap replaces three live-swap idioms, five seam-closing notices become observable, and `validated-sets:` and `mechanisms:` leave the tree. Behaviour of the seven Floor guards is unchanged and proved by the stage-1 identity fixtures.
 
-**Date:** 2026-09-08 · **Status:** unexecuted · **Sized for:** ~200k-context host · **Base:** `d84dd988` · **Bead:** `apogee-pjx`
+**Date:** 2026-09-08 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host · **Base:** `d84dd988` · **Bead:** `apogee-pjx`
 
 **Sources:** `docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md` (decisions 1–13 + amendment A1–A9 of 2026-09-08 — binding where the two differ) · `docs/design/reaction-core-greenfield.md` §2, §9.1, §9.4 Plan B · `docs/adr/0036-*.md` D9 (the migration idiom) · `docs/adr/0073-*.md` D6, D8, D9 · `docs/adr/0075-*.md` D10 · `docs/adr/0016-*.md` amendment 2026-09-08 · beads `apogee-pjx`, `apogee-jwf`.
 

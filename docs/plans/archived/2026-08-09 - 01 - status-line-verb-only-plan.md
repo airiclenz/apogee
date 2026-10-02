@@ -2,7 +2,7 @@
 
 - **Goal:** the running status line above the prompt shows `spinner · delegation-name · verb · elapsed` plus the right-slot throughput and context gauge — never the tool's target path. The path is redundant with the tool-call block in the transcript and routinely pushed the context gauge off the row.
 - **Date:** 2026-08-09
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:** `layout.md` (status-line sections), `internal/tui/activity.go` / `internal/tui/toolpresent.go` / `internal/tui/render.go` at commit `f35568c`, and the ratified design calls below. If item text disagrees with these sources, the sources win.
 - **Ratified design calls** (owner, 2026-08-09, via AskUserQuestion):

@@ -4,7 +4,7 @@
 numbers (write_file records none today); a finished delegation's `done` verdict reads in the
 scheme's `success` colour; clicking the footer's mode marker opens a four-rung mode picker.
 
-**Date:** 2026-08-31 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 **Base commit:** `ad962676`
 
 **Sources:** `IDEAS.md` (items 3–5) · `docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md`

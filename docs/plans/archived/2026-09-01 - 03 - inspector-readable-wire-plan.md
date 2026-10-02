@@ -2,7 +2,7 @@
 
 **Goal:** /inspect reads as what happened on the wire — thinking and reply text as wrapped prose, tool calls named, the request envelope summarised — with today's pretty-JSON rendering one key away, and the pane scoped to the sub-agent whose run view is open. Origin: `IDEAS.md` line 12 ("/inspect raw wire trafic should be human readable").
 
-**Date:** 2026-09-01 · **Status:** unexecuted · **Sized for:** ~200k-context host · **Base:** 2fc5dda9
+**Date:** 2026-09-01 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host · **Base:** 2fc5dda9
 
 **Sources:**
 - `internal/tui/inspector.go` — ring, `foldWire`, `wirePayloadLines`, `inspectorRows`, `hasUnrecordedReply` (authoritative for today's rendering)

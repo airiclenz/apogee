@@ -6,7 +6,7 @@ walk interleaved by a snapshot call, a closed undo group re-closed by a later ex
 no-repository answer memoised past a `git init`.
 
 **Date:** 2026-09-23
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **skills:** coding-standards
 **base:** `b8d74481`

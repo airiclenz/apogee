@@ -3,7 +3,7 @@
 **Goal:** close the three open `[ ]` defects in `ISSUES.md` "Open defects": the absurd `tok/s`
 reading, the next prompt landing above a cancelled partial reply, and the alternating
 `sub-agents: … unavailable` / `routing to …` notices.
-**Date:** 2026-09-02 · **Status:** unexecuted · **Base:** `cd2bd71f`
+**Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02) · **Base:** `cd2bd71f`
 **Sized for:** ~200k-context host.
 
 **Sources:** `ISSUES.md:28,32,34-40`; `internal/tui/fold.go:132-172`; `internal/tui/model.go:1872-1879`;

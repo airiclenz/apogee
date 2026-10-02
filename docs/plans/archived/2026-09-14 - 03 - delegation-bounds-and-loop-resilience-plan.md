@@ -3,7 +3,7 @@
 **Goal:** close the delegation and control-flow findings of the 2026-09-14 session-mining review: a child is warned before its step cap and can still write its output at it, transient stream faults are retried, every delegation is bounded in depth, tokens and wall-clock, degenerate results are faulted instead of returned, the loop breaker catches A-B-A-B, and a child's streamed text is committed once.
 
 **Date:** 2026-09-14
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

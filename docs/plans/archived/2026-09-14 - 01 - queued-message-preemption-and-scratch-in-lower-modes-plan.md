@@ -3,7 +3,7 @@
 **Goal:** a message queued while a delegation group runs no longer waits for children that have not started — they are skipped with an explicit tool result and the message lands when the running ones finish; and the session scratch dir becomes the one place Plan writes and the one write Ask-Before does not gate, recorded as ADR 0012's second loosen.
 
 **Date:** 2026-09-14
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

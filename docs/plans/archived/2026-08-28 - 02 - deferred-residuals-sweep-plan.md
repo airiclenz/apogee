@@ -10,7 +10,7 @@ item 34; item 35 closes one residual of the `2026-08-28 - 01` run that never rea
 `ISSUES.md`. The CHANGELOG entries land at the closeout from the sidecars, per the skill.
 
 **Date:** 2026-08-28
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Authoritative sources:**

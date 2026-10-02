@@ -5,7 +5,7 @@
 delegate shakeout, the stale README archive-install version pin, and the bare-colon upstream
 HTTP error message.
 
-**Date:** 2026-08-27 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-08-27 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 
 **Authoritative sources:**
 

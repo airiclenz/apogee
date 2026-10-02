@@ -3,7 +3,7 @@
 **Goal:** Stop the manual, README, default template and CONTEXT.md from denying the shipped `gate:` cell while keeping `advise:` worded as reserved; bring the beads register back in step with what stage 2/3 and the archived deferred-findings plan delivered; close the three small test beads (`apogee-itk`, `apogee-330`, `apogee-3h4`).
 
 **Date:** 2026-09-11
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base:** `de2263c0`
 

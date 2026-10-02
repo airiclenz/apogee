@@ -9,7 +9,7 @@ The engine is untouched: no snapshot is ever taken inside a Step, and a resumed 
 the delegating Turn exactly as a cancelled one does.
 
 **Date:** 2026-08-25
-**Status:** ready — unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Source defect:** `ISSUES.md` § *A running delegation — and the whole Turn around it — is absent
 from the session record until the Turn ends* (observed 2026-08-25 in session

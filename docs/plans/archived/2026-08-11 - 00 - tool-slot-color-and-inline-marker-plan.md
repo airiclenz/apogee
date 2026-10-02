@@ -2,7 +2,7 @@
 
 - **Goal:** fix the first three ISSUES.md items (2026-08-11 snapshot): fold the `+N more lines` marker into `<tool-top-level-details>` so a collapsed lone call is one line shorter, paint the outcome slot in the `tool-marker` role (brighter when open), and centralize the hardcoded `⋯` leader glyph.
 - **Date:** 2026-08-11
-- **Status:** saved, unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - `docs/layout/tool-layout.md` — canon for tool-block shape (`<tool-top-level-details>` defined at :49–53). Where it and `layout.md` disagree about a tool block, it wins (`layout.md:489`).

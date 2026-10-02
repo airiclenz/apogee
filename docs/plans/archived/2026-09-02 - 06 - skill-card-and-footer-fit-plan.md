@@ -6,7 +6,7 @@ adjacent fetches collapse under one `✦ Skill (N)` umbrella the way delegations
 drops the mode marker whole on a narrow window; it gains a priority-ordered fit that never gives up
 the model or the mode.
 
-**Date:** 2026-09-02 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Sources (authoritative):**
 - `docs/layout/tool-layout.md` — Rules `:44-51`, Vocabulary `:55-64`, Grouped Sub-agents `:213-246`, per-tool table `:261-292`

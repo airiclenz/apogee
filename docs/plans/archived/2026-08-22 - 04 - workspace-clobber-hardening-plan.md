@@ -6,7 +6,7 @@ stop the script, no writable scratch location outside the workspace, and a maske
 status that reported success for a call that destroyed a tracked file.
 
 - **Date:** 2026-08-22
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - `docs/handoffs/apogee-workspace-clobber-incident.md` (the incident, faults, ranked fixes A–E)

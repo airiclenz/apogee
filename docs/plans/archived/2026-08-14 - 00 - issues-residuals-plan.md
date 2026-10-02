@@ -5,7 +5,7 @@ comments/prose, the `\r` fold gap, test hardening, helper relocation), the two s
 gaps (`/model`–`/server` re-pin; the auto-title entry, which turned out to be stale and is
 retracted), and the `configwrite_scalar.go` split.
 
-**Date:** 2026-08-14 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-14 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Authoritative sources:** `ISSUES.md` at commit `ffc559e` (the entries each item quotes);
 code facts pinned at the same commit. Where an ISSUES entry disagrees with the code as found,

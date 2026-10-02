@@ -8,7 +8,7 @@ tab-width leak through `flattenField`, the stale `internal/domain/doc.go` marker
 `SetSampling` wholesale-replace defect.
 
 **Date:** 2026-08-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Skills:** coding-standards
 

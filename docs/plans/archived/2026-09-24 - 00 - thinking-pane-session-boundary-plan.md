@@ -2,7 +2,7 @@
 
 **Goal:** A new or switched session (`/clear`, `/new`, `/sessions` resume, `/fork`) opens with an empty `/thinking` board and an empty `/advice` board, like a launch does. The Inspector ring and the attempt ring keep surviving `/clear`, as documented.
 **Date:** 2026-09-24
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** cf01dee3
 **Closes:** apogee-thinking-pane-survives-clear

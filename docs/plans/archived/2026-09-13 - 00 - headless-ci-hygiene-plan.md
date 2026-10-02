@@ -2,7 +2,7 @@
 
 **Goal:** Close the four open "headless / CI hygiene" beads: `headless --format text` narrates live on stderr (apogee-czf), the seam-closing notices reach `--format json` behind an opt-in flag (apogee-5cf), CI runs the sharded suite (apogee-7ui), and the `cmd/apogee` e2e tests run under `t.Parallel` with per-test leak attribution (apogee-ed5, `cmd/apogee` half).
 **Date:** 2026-09-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 6d56a51e
 

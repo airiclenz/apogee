@@ -7,7 +7,7 @@ runs on the session server or the Sub-agent server (`run_on`), guided by a per-e
 `description:` the orientation block relays.
 
 **Date:** 2026-09-01
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

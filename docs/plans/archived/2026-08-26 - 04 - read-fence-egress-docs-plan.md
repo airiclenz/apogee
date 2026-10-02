@@ -5,7 +5,7 @@ skips the operator's proxy, the `url-safety:` lists bind every network path they
 the doc-server capability token never leaves the transcript — and the manual then documents
 every one of those controls with the semantics the code actually has.
 
-**Date:** 2026-08-26 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-26 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Evidence (security audit 2026-08-25 §F-13/F-18/F-21/F-40/F-41, chain-10; refocus 2026-08-25
 R-1/R-2/R-4/R-5/R-6/R-7/R-undoc; merged in `docs/handoffs/2026-08-26 - 00 - merged-audit-findings.md`

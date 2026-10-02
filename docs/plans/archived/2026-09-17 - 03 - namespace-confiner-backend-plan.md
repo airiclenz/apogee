@@ -2,7 +2,7 @@
 
 **Goal:** Give Linux a second Confiner backend that fences terminal commands with user + mount namespaces through `bwrap`, selected when landlock is unavailable (Raspberry Pi OS, ENOSYS containers), so Auto confines there instead of gating every command. Capability honesty gains a *why* — the reason a backend cannot fence — spoken on every wording surface.
 **Date:** 2026-09-17
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 0fc6bf17
 

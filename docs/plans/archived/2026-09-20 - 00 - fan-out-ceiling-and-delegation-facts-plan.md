@@ -2,7 +2,7 @@
 
 **Goal:** Bound how many `sub_agent` calls one reply may fan out (the overflow is refused and re-issued), tell the model the delegation bounds before its first call, and show the human each delegate's applied step cap at spawn plus what Esc will discard mid-group. Closes the 2026-09-20 `/code-audit` session (`~/.apogee/sessions/20260920T070407Z-0fd8eaff.json`): 56 dispatches in one reply at width 4, 35 never started, the coordinator blind for 1h41m and the whole Turn rolled back on Esc.
 **Date:** 2026-09-20
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** f30c37e0
 

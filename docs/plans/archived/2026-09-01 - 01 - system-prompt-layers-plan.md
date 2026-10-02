@@ -6,7 +6,7 @@ nothing the user did not enable is sent. The four-rung ladder, whole-entry repla
 the embedded default's fallback-only role are unchanged (ADR 0023 §2, ADR 0064 §2–§3).
 
 **Date:** 2026-09-01
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

@@ -5,7 +5,7 @@
   auto-applies by model name, the config key becomes a per-model pattern map, and the
   profile joins the bindings a model switch re-resolves.
 - **Date:** 2026-08-11
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **sized for:** ~200k-context host
 - **Authoritative sources:**
   - Grill session 2026-08-11 (this plan's ratified calls below).

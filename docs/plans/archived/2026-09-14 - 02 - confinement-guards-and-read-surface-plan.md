@@ -3,7 +3,7 @@
 **Goal:** close the confinement, guard and tool-surface findings of the 2026-09-14 session-mining review: the Go toolchain works under confinement, every path apogee announces is readable by its own read tools, the guards say why they refuse and stop refusing reads, and `read_file` / `@file` / `grep` / `web_fetch` are bounded by default.
 
 **Date:** 2026-09-14
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:**

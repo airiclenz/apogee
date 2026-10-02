@@ -8,7 +8,7 @@ command-registry flag prose predating `runsBareAtAccept` (`:173`); and the mispl
 `## Conventions` heading in `ISSUES.md` itself (`:193`).
 
 **Date:** 2026-08-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Skills:** coding-standards
 

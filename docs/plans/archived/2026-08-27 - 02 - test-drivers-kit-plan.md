@@ -10,7 +10,7 @@ The checklist is the kit's first consumer, not its scope: the kit is written and
 next feature gets a driver test instead of a numbered human step, and the `test-checklist` skill
 is taught to refuse a manual step where the kit can observe the claim.
 
-**Date:** 2026-08-27 · **Status:** unexecuted · **Sized for:** ~200k-context host
+**Date:** 2026-08-27 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host
 
 **Authoritative sources:**
 

@@ -7,7 +7,7 @@ contradicts a written invariant (opener allow-list, skill-cap priority, `interna
 package doc), bound what a streamed completion may cost in bytes on both sides of the wire, and
 pin the CI supply chain.
 
-**Date:** 2026-08-26 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-26 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Evidence:** merged audit findings `docs/handoffs/2026-08-26 - 00 - merged-audit-findings.md`
 §3.5, §3.8, §5 waves 8/9/12. Code audit (`docs/reviews/code-audit-2026-08-25.md`): C-02

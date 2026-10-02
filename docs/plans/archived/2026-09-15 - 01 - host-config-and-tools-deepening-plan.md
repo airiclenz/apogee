@@ -10,7 +10,7 @@ registration derived from one list (15r); one argument-key fold (16r); the subpr
 deleted (17r). Sibling plan A (`2026-09-15 - 00`) holds the engine half.
 
 **Date:** 2026-09-15
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 
 **Regression check (2026-09-15, b2e3d75d):**

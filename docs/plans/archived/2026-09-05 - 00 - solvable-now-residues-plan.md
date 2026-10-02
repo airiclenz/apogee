@@ -5,7 +5,7 @@
 claim — plus the `/schedule` context-file gap the defect's investigation turned up. No new config
 key, no new verb, no version change.
 
-**Date:** 2026-09-05 · **Status:** unexecuted · **Base:** `7cc9bc6c` · **sized for:** ~200k-context host
+**Date:** 2026-09-05 · **Status:** done (status corrected 2026-10-02) · **Base:** `7cc9bc6c` · **sized for:** ~200k-context host
 
 **Sources**
 - issue register (`bd`) → `apogee-m67`, `apogee-v00.3`, `apogee-v00.4`, `apogee-v00.5`, `apogee-v00.6`, `apogee-v00.7`, `apogee-y9g`, `apogee-at8`

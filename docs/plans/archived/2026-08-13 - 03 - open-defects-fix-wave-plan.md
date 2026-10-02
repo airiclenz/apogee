@@ -7,7 +7,7 @@ cited hard-coded prompt literals (plus their same-file sibling prompt consts) be
 files embedded into their packages.
 
 **Date:** 2026-08-13
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Skills:** coding-standards
 

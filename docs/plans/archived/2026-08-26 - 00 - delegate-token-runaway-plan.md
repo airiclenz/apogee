@@ -3,7 +3,7 @@
 **Goal:** a sub-agent run can no longer burn an unbounded number of tokens, and the
 session records what its delegates actually spent.
 
-**Date:** 2026-08-26 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-26 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Evidence (session `20260825T185936Z-0d2ba815`, `/code-audit` on `deepseek-v4-flash`,
 advertised window 1,310,720):** coordinator 68 calls / 1.6M prompt tokens; **124 delegates,

@@ -4,7 +4,7 @@
 delegation target, changeable mid-session through a `/sub-agents-server` picker. Every
 `servers:` entry becomes an eligible target; posture keys stay on entries and follow the target.
 
-**Date:** 2026-08-31 · **Status:** unexecuted
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 
 **Sources:** `docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md` ·

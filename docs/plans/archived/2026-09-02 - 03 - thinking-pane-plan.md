@@ -4,7 +4,7 @@
   of the model — the main agent's when at top level, the viewed sub-agent's alone when a run view
   is open — with no JSON, prefixes or wire clutter (deliberately unlike `/inspect`, whose
   readable view is passages of the wire payload).
-- **Date:** 2026-09-02 · **Status:** unexecuted
+- **Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:** `internal/tui/reasoning.go` (the retention seam this plan CASHES IN —
   "NOTHING IN THE VIEW READS THIS BUFFER … the retention seam a future reasoning display will be

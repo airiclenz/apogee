@@ -3,7 +3,7 @@
 **Goal:** every boxed pane painted by `renderPopup` keeps one blank row between what precedes its row block and the block, and one blank row above its hint row — the
 eleven hand-edited goldens under `cmd/apogee/testdata/frames/` become held goldens without `-update`. The five wheel-only pop-ups (ask, approval, picker, `/sessions` browser, `/` dropdown) gain a pointer through one shared row hit-test.
 
-**Date:** 2026-09-06 · **Status:** unexecuted · **Base:** `6e895e77` · **sized for:** ~200k-context host
+**Date:** 2026-09-06 · **Status:** done (status corrected 2026-10-02) · **Base:** `6e895e77` · **sized for:** ~200k-context host
 
 **Sources**
 - `docs/handoffs/2026-09-06 - 00 - popup-redesign-plan-handoff.md` (untracked; delta table, calls) · `docs/adr/0053-popup-surfaces-embed-one-list-surface.md` (verdicts, accept-through-filter, `bodyPad*` as painter contract), `0062` (cells, no test hooks), `0011`, `0043`, `0025` D10 · `internal/tui/popup.go` (`popupSpec` :302-321, pads :767-770, `popupPlacement` :404), `mouse.go` (:390-466 click chain, :1362-1392 wheel doctrine, `settingsPaint` :890-927), `layout.md` `## What "height" means`

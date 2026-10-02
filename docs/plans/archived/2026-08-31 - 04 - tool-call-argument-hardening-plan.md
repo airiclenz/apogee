@@ -4,7 +4,7 @@
 different call, and streamed parallel tool calls are accumulated by their wire index instead of by
 arrival order.
 
-**Date:** 2026-08-31 · **Status:** unexecuted · **Sized for:** ~200k-context host · **Base:** `07daba40`
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02) · **Sized for:** ~200k-context host · **Base:** `07daba40`
 
 **Sources**
 

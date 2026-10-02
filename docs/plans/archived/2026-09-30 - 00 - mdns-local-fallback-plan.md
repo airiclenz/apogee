@@ -4,7 +4,7 @@
 `.local` host, and a host name that does not resolve is reported as such instead of a raw
 `lookup … no such host` behind "server offline".
 **Date:** 2026-09-30
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 627d8c27
 **Closes:** bd apogee-mdns-local-unresolved

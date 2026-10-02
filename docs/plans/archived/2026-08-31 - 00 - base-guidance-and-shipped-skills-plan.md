@@ -1,7 +1,7 @@
 # Base guidance & shipped skills plan
 
 **Goal:** Ship a maintained embedded default system prompt (replacing the stale seeded-once template) and a set of four shipped skills with an on-demand `load_skill` door, closing the headless `/skill` gap and the unclamped skill-body injection.
-**Date:** 2026-08-31 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-08-31 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 **Sources:** ADR 0023, 0026, 0027, 0032, 0040, 0061; `internal/skills/doc.go`; `internal/scheme/` (embed pattern); base commit `e00fa144`.
 
 **Ratified design calls (owner, 2026-08-31):**

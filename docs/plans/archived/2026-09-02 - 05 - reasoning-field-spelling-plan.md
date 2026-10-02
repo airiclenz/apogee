@@ -7,7 +7,7 @@ as thinking, and `stubllm record` drops the channel. Ollama makes this a LOCAL-f
 gateway quirk. Teach the three decode sites `reasoning` as an alias, and prove the journey with a
 stub that can emit either.
 
-**Date:** 2026-09-02 · **Status:** unexecuted · **sized for:** ~200k-context host
+**Date:** 2026-09-02 · **Status:** done (status corrected 2026-10-02) · **sized for:** ~200k-context host
 
 **Sources:**
 - Base commit `24e95154` — every line number below was read against it.

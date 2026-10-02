@@ -2,7 +2,7 @@
 
 **Goal:** The `✦ Tools (N calls)` umbrella folds and toggles by its SIZE alone — the same whether the Turn is running, cancelled or finished, in the main transcript or a sub-agent's run view, live or resumed — and EVERY umbrella wears `▶`/`▼` and folds to its header: large ones under the shared `ui.tools-open`, small ones on their own session-only flag. Fixes the regression from `e3f098e5`/`fec8db32` (plan 2026-09-17 - 01): `umbrellaIsLarge` gated on `transcript.busy` and every member `done`, so an umbrella inside a sub-agent's run view opened while the parent Turn runs — the one place a >5-row umbrella ordinarily appears — never folded and carried no toggle.
 **Date:** 2026-09-18
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base:** `4ec355de`
 

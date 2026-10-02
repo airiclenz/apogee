@@ -7,7 +7,7 @@
   actuation latch) on launcher-fronted servers. Gated by a new top-level
   `remember-model` toggle, off by default.
 - **Date:** 2026-08-13
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **sized for:** ~200k-context host
 - **Authoritative sources:** ADR 0029 (launcher actuates, beat binds; D4 launcher
   config is read-only to apogee), ADR 0036 D2 (a profile's server is not a `servers:`

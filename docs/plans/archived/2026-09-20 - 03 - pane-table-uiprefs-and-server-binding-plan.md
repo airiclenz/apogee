@@ -7,7 +7,7 @@ the tree supports: the pane table holds the funcs while the two ordered lists ke
 become constructors onto one pure projection. Gated on plan B (`2026-09-20 - 02`) archiving.
 
 **Date:** 2026-09-20
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **Standing requirements:** skills: coding-standards; any authorized deviation from item text lands as a dated NOTES line under the item; no version identifier changes; `CHANGELOG.md` entries travel in item sidecars and land at closeout; where an item's **What** states a grep rule, the rule IS the scope — the `**Files:**` list is the write-time snapshot of what the rule matched, and every further file the rule matches at run time is in scope (items 6–8).
 

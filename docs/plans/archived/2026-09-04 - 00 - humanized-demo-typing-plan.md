@@ -4,7 +4,7 @@
 into the work-dir copy of `hero.tape`. Toolset work for future takes — no GIF is re-recorded here,
 so nothing visible ships until the next take uses it.
 
-**Date:** 2026-09-04 · **Status:** unexecuted · **Base:** `a586ab23` · **sized for:** ~200k-context host
+**Date:** 2026-09-04 · **Status:** done (status corrected 2026-10-02) · **Base:** `a586ab23` · **sized for:** ~200k-context host
 
 **Regression check (2026-09-04, a586ab23):**
 - 1: guard folded — `type.sh` is the single owner of the four-string table, published by a new `--strings` mode; the script lands 0755.

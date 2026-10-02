@@ -2,7 +2,7 @@
 
 **Goal:** Close every finding in `docs/reviews/code-audit-2026-09-26.md`, in the owner's tackle order: floor bypasses first, then injection/denial gaps, reopened protections, Windows fences, DoS caps, the ask latch, and the rest.
 **Date:** 2026-09-26
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **sized for:** ~200k-context host
 **base:** 3b54e29f
 **Sources:**

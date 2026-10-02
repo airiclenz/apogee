@@ -5,7 +5,7 @@
   `internal/context.Allocate`'s fraction guard, the tautological/incomplete kind-projection
   test, and the missing `response-reserve:` rebind ride + its missing arrival-site tests.
 - **Date:** 2026-08-15
-- **Status:** unexecuted
+- **Status:** done (status corrected 2026-10-02)
 - **Sized for:** ~200k-context host
 - **Authoritative sources:**
   - `ISSUES.md` "Open defects" section (the three bullets this plan removes).

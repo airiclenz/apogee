@@ -2,7 +2,7 @@
 
 **Goal:** Measure and surface what apogee itself puts in front of the model at Turn 1 — the standing system content and the tool menu — as a per-piece estimate and, once measured, the Turn-1 `prompt_tokens`. Surface it in `apogee probe context`, the headless frames and the facade so the bench can chart it, and pin the injected bytes with a golden so growth is deliberate.
 **Date:** 2026-09-17
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-02)
 **Sized for:** ~200k-context host
 **Base commit:** 6e025093
 
