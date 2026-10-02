@@ -27,8 +27,11 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
   prompt showed you, and nothing else. A call that runs under someone else's approval is in
   scope.
 - **Network fencing** — the `url-safety:` allow and deny lists and the private-range floor
-  bind the web tools and MCP endpoints; redirects are never followed. An SSRF past them is in
-  scope.
+  bind the web tools and MCP endpoints; redirects are never followed. A webhook reaction
+  (`run:`, `advise:` and `gate:` alike) obeys the same allow and deny lists and never follows a
+  redirect, but — like an MCP endpoint, an address you wrote yourself — skips the private-range
+  floor, so a loopback or LAN endpoint still works; webhooks pick up a `url-safety:` edit at the
+  next start. An SSRF past them is in scope.
 - **Secrets** — API keys are stripped from the environment of every tool subprocess and
   every `advise:` or `gate:` reaction command, and the variables your `api-key-env:` and
   `headers-env:` entries name are redacted from their output. Two exceptions inherit

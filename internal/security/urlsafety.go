@@ -100,12 +100,14 @@ func normalizeHostPatterns(list []string) []string {
 // merge), used by a test or a deliberately-unfenced embedder. A config layer cannot reach
 // this — it is a code-level opt-out, not a configuration key.
 //
-// One production path takes it deliberately and at ONE call: internal/mcp checks a configured
+// Two production paths take it deliberately, each at ONE call: internal/mcp checks a configured
 // server endpoint through a floor-disabled copy, because a `mcp-servers:` endpoint is the
 // user's own config-file address and is never model-supplied, so the anti-model floor is the
-// wrong control over it (ADR 0012, Amendment (2026-07-26)). The copy is used for that one
-// scheme/host check and threaded nowhere: the connection itself dials under
-// PinnedDialControl, which permits that endpoint's own addresses and keeps the floor over
+// wrong control over it (ADR 0012, Amendment (2026-07-26)); internal/webhook checks a webhook
+// Reaction's `url:` the same way, for the same reason — it is the operator's own address,
+// never the model's. Each copy is used for that one scheme/host check and threaded nowhere:
+// the connection itself dials under the destination pin (PinnedDialControl, via GuardedClient's
+// DialPinDestination), which permits that endpoint's own addresses and keeps the floor over
 // every other one.
 func (g URLGuard) DisableIPFloor() URLGuard {
 	g.disableFloor = true

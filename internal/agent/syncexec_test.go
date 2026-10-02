@@ -3,15 +3,20 @@ package agent
 // The SYNC lane's out-of-process executor (syncexec.go). These tests drive runSyncArgv directly
 // rather than through a seam: the seams that call it (the advise slot, the gate stage) arrive in
 // later items, and what is pinned here is the executor's own contract — the permit row, the class
-// deadline, the payload document and what a failure is reported as.
+// deadline, the payload document and what a failure is reported as. The webhook pair at the end is
+// the exception: it drives runSyncWebhook through the gate stage (gate_test.go's helpers), because
+// what it pins is what the gate makes of a post the url-safety guard refused or did not follow.
 
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -264,5 +269,78 @@ func TestReportReactionWithoutAReportSinkIsSilent(t *testing.T) {
 
 	if len(sink.events) != 1 {
 		t.Fatalf("emitted %d events, want exactly 1", len(sink.events))
+	}
+}
+
+// redirectingGateEndpoint is a gate webhook endpoint that answers every POST with a 307 to a second
+// server, which would answer "deny" were it ever reached; it returns the endpoint and the target's
+// hit counter.
+func redirectingGateEndpoint(t *testing.T) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+
+	targetHits := new(atomic.Int64)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHits.Add(1)
+		_, _ = w.Write([]byte("deny\nfollowed the redirect\n"))
+	}))
+	t.Cleanup(target.Close)
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/elsewhere", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(redirector.Close)
+	return redirector, targetHits
+}
+
+// TestSyncWebhookRedirectIsAFailedPost pins the sync lane onto the guarded client: a gate webhook
+// whose endpoint redirects gets the 3xx back as its reply, never followed, so the gate treats it as
+// any other failed post — it escalates to ask naming the status — and the host the redirect named
+// never hears from apogee (its "deny" would otherwise have refused the call outright).
+func TestSyncWebhookRedirectIsAFailedPost(t *testing.T) {
+	t.Parallel()
+
+	redirector, targetHits := redirectingGateEndpoint(t)
+	sink := &recordingSink{}
+	approver := &gateApprover{decision: domain.ApprovalDeny}
+	a := gateAgent(t, sink, approver, nil, userGateWebhook("warden", domain.WebhookHandler{URL: redirector.URL}))
+
+	prepareAndRun(a, readCallOnly())
+
+	if len(approver.requests) != 1 {
+		t.Fatalf("the Approver was consulted %d times, want 1 — a redirect is a failed post, which asks",
+			len(approver.requests))
+	}
+	if reason := approver.requests[0].Reason; !strings.Contains(reason, "HTTP 307") {
+		t.Errorf("Approval reason = %q, want it to name the redirect as %q", reason, "HTTP 307")
+	}
+	if targetHits.Load() != 0 {
+		t.Errorf("the redirect target was called %d times; it must never be reached", targetHits.Load())
+	}
+}
+
+// TestSyncWebhookDenyListedEndpointIsNeverPosted pins that the sync lane's guard is built from the
+// engine config's url-safety lists: a gate webhook whose host `deny-hosts` names is refused before
+// anything is dialled — the gate escalates to ask naming the url-safety refusal, and the endpoint,
+// which would have answered "allow", sees no request.
+func TestSyncWebhookDenyListedEndpointIsNeverPosted(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int64
+	server := gateEndpoint(t, &hits, nil, http.StatusOK, "allow")
+	sink := &recordingSink{}
+	approver := &gateApprover{decision: domain.ApprovalDeny}
+	a := gateAgent(t, sink, approver, nil, userGateWebhook("warden", domain.WebhookHandler{URL: server.URL}))
+	a.cfg.URLDenyHosts = []string{"127.0.0.1"}
+
+	prepareAndRun(a, readCallOnly())
+
+	if len(approver.requests) != 1 {
+		t.Fatalf("the Approver was consulted %d times, want 1 — a refused post is a failed post, which asks",
+			len(approver.requests))
+	}
+	if reason := approver.requests[0].Reason; !strings.Contains(reason, "refused by url-safety") {
+		t.Errorf("Approval reason = %q, want it to name the url-safety refusal", reason)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("the deny-listed endpoint was called %d times, want 0", hits.Load())
 	}
 }

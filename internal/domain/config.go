@@ -327,11 +327,11 @@ type Config struct {
 	// host's own assembly and is taken exactly as given (ADR 0001).
 	EnabledTools []string
 
-	// URLAllowHosts and URLDenyHosts are the host layer of the network tools' url-safety guard —
-	// the hosts web_fetch / http_request / web_search may reach, and the hosts they may not — which
-	// the host folds in from `url-safety:` in config.yaml. Deny wins over allow; a non-empty allow
-	// list restricts to exactly those hosts and their subdomains; empty/nil ⇒ every host, the
-	// byte-identical default before the key existed.
+	// URLAllowHosts and URLDenyHosts are the host layer of the url-safety guard — the hosts
+	// web_fetch / http_request / web_search and the sync lane's advise/gate webhooks may reach, and
+	// the hosts they may not — which the host folds in from `url-safety:` in config.yaml. Deny wins
+	// over allow; a non-empty allow list restricts to exactly those hosts and their subdomains;
+	// empty/nil ⇒ every host, the byte-identical default before the key existed.
 	//
 	// They can only ever TIGHTEN: the guard's default-on, resolved-IP SSRF floor is not reachable
 	// from configuration at all (security.URLGuard.DisableIPFloor is a code-level opt-out), so a
@@ -339,8 +339,11 @@ type Config struct {
 	// to the dialled host form when the guard is built (security.NewURLGuard), so an entry written
 	// with mixed case, a trailing root dot, non-ASCII, or an IPv6 literal in brackets still matches.
 	//
-	// Like DisabledTools they apply to the DEFAULT tool set only: an injected Config.Tools is the
-	// host's own assembly and is taken exactly as given (ADR 0001).
+	// For the network tools, like DisabledTools, they apply to the DEFAULT tool set only: an
+	// injected Config.Tools is the host's own assembly and is taken exactly as given (ADR 0001).
+	// The sync lane's webhooks read them whatever the tool set: runSyncWebhook builds its guard
+	// from these fields, injected Config.Tools or not — with the SSRF floor off, as for a
+	// configured MCP endpoint, because a webhook URL is the operator's own (ADR 0012).
 	URLAllowHosts []string
 	URLDenyHosts  []string
 

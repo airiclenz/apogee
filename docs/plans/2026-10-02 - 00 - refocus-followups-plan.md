@@ -132,7 +132,12 @@ loopback endpoint gets no request through `firingHooks` (pins the guard comes fr
 - `GOMEMLIMIT=2GiB go test -count=1 -run '^TestFiringHooksRefusesADenyListedWebhookEndpoint$|^TestFiringConfigInstallsTheHookRunner$|^TestE2EHooksFireFromAHeadlessRun$|^TestDaemonFiringFiresHooks$|^TestRootWiringEmitsThroughTheHookRunner$' ./cmd/apogee/`
 **Commit:** `fix(webhook): post reactions through the url-safety guarded client, never following redirects`
 
-## 3. Webhook sync lane fenced too; SECURITY.md and the manual say so
+## 3. Webhook sync lane fenced too; SECURITY.md and the manual say so — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): runSyncWebhook already passed the url-safety guard (item 2 moved the call site); this item added only the two sync-lane tests and the prose, per the item's regression guard
+NOTES (2026-10-02): the two new tests drive runSyncWebhook through the gate stage using gate_test.go's helpers (gateAgent, userGateWebhook, gateEndpoint); the syncexec_test.go header comment now says so
+NOTES (2026-10-02): configuration.md also rewords "A configured MCP endpoint is the one deliberate exemption" to "the first of two" and the section's opening line to cover webhooks — both made false/incomplete by the new webhook paragraph
+NOTES (2026-10-02): pre-existing debt, untouched — internal/security/urlsafety.go disableFloor field doc and internal/security/ssrf.go floorEnabled doc still say the floor is turned off only "for a test or a deliberately-unfenced embedder" (stale since the MCP exemption); internal/config/defaults/config.yaml's url-safety comment still names only the network tools and MCP, not webhooks
 
 **What:** Depends on item 2.
 **Goal:** advise/gate webhook reactions (`runSyncWebhook`) post through the same guard built from

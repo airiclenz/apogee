@@ -306,7 +306,12 @@ A server that redirects must be configured at the URL it redirects to.
 > floor-policy parameter — `security.DialPinDestination` for a configured MCP endpoint,
 > `security.DialFloor` for a model-supplied URL. (a)'s floor-off pre-flight did not:
 > `checkEndpoint` (`internal/mcp/transport.go`), with its `DisableIPFloor()` — still the single
-> production use — runs in the MCP adapter as before, the network tools keep their own
+> production use *(amended 2026-10-02: no longer the single one. Webhook Reactions are the second:
+> `webhook.Post` (`internal/webhook/webhook.go`) pre-flights an operator-named webhook `url:` through
+> a floor-disabled copy against the url-safety allow/deny lists and posts through `GuardedClient`
+> under `DialPinDestination`, never following a redirect — the owner's ratified webhook posture,
+> on this Amendment's own reasoning that an address the user wrote is not a model pivot)* — runs in
+> the MCP adapter as before, the network tools keep their own
 > blanket-floor pre-flight, and each adapter applies its own URL or origin redaction (the scrubbers
 > now live beside the client in `internal/security/urlscrub.go`, keeping their two distinct
 > algorithms) and its own refusal wording. The review's candidate put the pre-flight and the

@@ -406,7 +406,8 @@ var ErrEndpointDenied = errors.New("endpoint blocked by url-safety")
 // to be given.
 //
 // The check is scheme/host allow-deny ONLY: the guard's resolved-IP SSRF floor is deliberately
-// disabled for it (the single production use of DisableIPFloor). The floor exists to stop the
+// disabled for it (one of the two production uses of DisableIPFloor; internal/webhook's pre-flight
+// of a webhook Reaction's operator-named `url:` is the other). The floor exists to stop the
 // MODEL pivoting to internal addresses; an `mcp-servers:` endpoint is config-file-only, so the
 // floor there refused the user's own localhost/LAN server and — Connect being all-or-nothing —
 // made apogee fail to start, with no config escape. The user's allow/deny host policy still

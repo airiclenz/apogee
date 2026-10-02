@@ -314,9 +314,10 @@ already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the full
 
 ## What the network tools may reach — `url-safety:`
 
-`url-safety:` is the host layer over everything apogee reaches on the model's behalf. It takes two
-lists — `allow-hosts` and `deny-hosts` — and they bind `web_fetch`, `http_request`, `web_search`
-and an `sse` or `streamable-http` entry in `mcp-servers:` alike. Both are empty by default, which
+`url-safety:` is the host layer over everything apogee reaches on the model's behalf, and over the
+webhooks your Reactions post to. It takes two lists — `allow-hosts` and `deny-hosts` — and they bind
+`web_fetch`, `http_request`, `web_search`, an `sse` or `streamable-http` entry in `mcp-servers:`
+and a webhook [Reaction](reactions.md#sending-a-webhook) alike. Both are empty by default, which
 means every host. An entry matches the host it names **and its subdomains**, so `example.com`
 covers `api.example.com`; `deny-hosts` wins over `allow-hosts`, so a host written on both is
 blocked; and the moment `allow-hosts` names anything it becomes the whole permitted set, every
@@ -350,13 +351,19 @@ scratch — one vetted request can never be carried somewhere unvetted. The LLM 
 `servers:` is not subject to these lists at all; it is the address you launched apogee against
 rather than one a model chose, though it too refuses to follow a redirect.
 
-A configured MCP endpoint is the one deliberate exemption. An `mcp-servers:` address is one you
-wrote in your own config, so the floor — which exists to stop a *model* pivoting to internal
+A configured MCP endpoint is the first of two deliberate exemptions. An `mcp-servers:` address is
+one you wrote in your own config, so the floor — which exists to stop a *model* pivoting to internal
 addresses — is not applied to it, and the connection is pinned to that endpoint's own resolved
 addresses instead ([ADR
 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)). Your
 two host lists still apply: a denied endpoint is refused at startup with the same url-safety
 message, and any *other* private address that connection is later pointed at stays refused.
+
+A webhook Reaction's `url:` is the second, on the same terms: you wrote it, so the floor is off for
+it and the post is pinned to that endpoint's own addresses — a loopback or LAN receiver still gets
+it — while your two host lists still refuse a host they close before anything is dialled, and a 3xx
+is reported as the failed post it is, never followed ([Sending a
+webhook](reactions.md#sending-a-webhook)).
 
 If your machine reaches out through an egress proxy, apogee uses it. `HTTP_PROXY`, `HTTPS_PROXY`
 and `NO_PROXY` from the process environment are honoured by the network tools, by the MCP
@@ -371,7 +378,8 @@ mid-turn is reported on the row and re-committing retries it. The connected MCP 
 same edit: an `sse` or `streamable-http` endpoint your new lists close is disconnected there and
 then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
 your servers keep their connections, and an edit that closes no configured endpoint leaves every
-one of them untouched. The block is file-only (no flag, no
+one of them untouched. Webhook Reactions are the exception: they read the lists once, at startup,
+so an edit reaches them at the next start. The block is file-only (no flag, no
 environment variable) and global: it applies to every model this config runs.
 
 ## Where `web_search` looks — `web-search-endpoint:`

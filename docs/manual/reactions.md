@@ -275,11 +275,22 @@ interpolation anywhere in this file.
 Headers are resolved before the request goes out, so a `headers-env:` variable that is not set
 fails without your endpoint ever hearing from us; the failure names the header and the variable and
 never the value. Anything that is not a 2xx is reported as `HTTP <code>`. A `run:` webhook's
-response body is drained (up to 64 KiB) so the connection can be reused, and then dropped — nothing
+response body is drained (up to 64 KiB), and then dropped — nothing
 a `run:` webhook answers reaches the model; an `advise:` webhook's body is the advice and a
 `gate:` webhook's first line is the verdict, read on the same terms as a command's stdout. A
 transport failure is reported **without** the URL, because a webhook URL is exactly the kind of
 thing that carries a token in its path or query. `timeout:` bounds the whole POST.
+
+Every webhook — `run:`, `advise:` and `gate:` alike — is fenced by your
+[`url-safety:`](configuration.md#what-the-network-tools-may-reach--url-safety) lists: a host
+`deny-hosts` names, or one off a non-empty `allow-hosts`, is refused before anything is dialled, and
+the failure says it was refused by url-safety. The private-range floor is **off** for a webhook,
+as it is for an MCP endpoint: the address is one you wrote in your own config, so a loopback or LAN
+receiver still gets its POST, and the connection is pinned to that endpoint's own resolved
+addresses. A redirect is **never followed**: a 3xx comes back as itself and is reported as
+`HTTP <code>` — a failed post — so neither the body nor your `headers-env:` secrets ever reach a
+host you did not name. A webhook that redirects must be configured at the URL it redirects to.
+Webhooks read the lists once, at startup: an edit to `url-safety:` reaches them at the next start.
 
 ## Advising the model
 
