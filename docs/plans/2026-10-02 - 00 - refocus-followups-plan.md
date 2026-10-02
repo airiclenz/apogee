@@ -82,7 +82,12 @@ Run `bd show apogee-windows-confiner-test-failures` first; the closeout closes i
 **Closes:** apogee-windows-confiner-test-failures
 **Commit:** `chore(handoffs): archive the refocus handoffs superseded by the 2026-10-02 plans`
 
-## 2. Webhook observe lane posts through the guarded client
+## 2. Webhook observe lane posts through the guarded client — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): consequential edit — internal/reactions/doc.go: made necessary by reactions now importing internal/security for the webhook guard too (the one-direction import line named only path resolution)
+NOTES (2026-10-02): renamed TestWebhookPackageImportsOnlyDomainFromApogee to TestWebhookPackageImportsOnlyDomainAndSecurityFromApogee — relaxing it to domain + security made the old name false
+NOTES (2026-10-02): firingHooks takes the guard as a new third parameter (raise builds it off in.opts); webhook.Post's reply body is wrapped so closing it cancels the send's timeout ctx and closes the per-send client's idle connection (the ctx must outlive Post for the sync lane's body read); a URL that does not parse is now refused as "the URL does not parse" before any request is built
+NOTES (2026-10-02): added TestDefaultExecutorPostsThroughTheGuardItWasGiven (reactions) and TestWebhookPostWordsADeadlineInThePinAsATimeout (webhook) beyond the plan's named tests
 
 **What:**
 **Goal:** `webhook.Post` sends only through a `security.URLGuard`-built client: a host on the

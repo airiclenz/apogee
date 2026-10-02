@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -664,13 +665,23 @@ func resolveFiringRouting(
 // there.
 //
 // It is one constructor rather than three literals for firingConfig's own reason: everything except
-// the four arguments is the same at every root, and three copies of it is three chances for one
+// the five arguments is the same at every root, and three copies of it is three chances for one
 // `reactions:` list to mean two different things depending on which Driver read it.
 //
 // The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go)
 // — and a returned error fails the Firing: a `reactions:` list this root cannot resolve is
 // structural configuration, exactly as an unreadable prompt is.
-func firingHooks(observe []domain.Reaction, workspace string, sched *reactions.ScheduleRef, report func(string)) (*reactions.Runner, error) {
+//
+// guard is the url-safety guard every webhook Reaction posts through: the caller builds it from the
+// url-safety allow/deny lists of the options the Firing composes from (raise, off in.opts), so a
+// host the operator closed for the network tools is closed for a Firing's webhooks too.
+func firingHooks(
+	observe []domain.Reaction,
+	workspace string,
+	guard security.URLGuard,
+	sched *reactions.ScheduleRef,
+	report func(string),
+) (*reactions.Runner, error) {
 	return reactions.New(observe, reactions.Options{
 		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
@@ -679,7 +690,7 @@ func firingHooks(observe []domain.Reaction, workspace string, sched *reactions.S
 		Workspace: workspace,
 		Schedule:  sched,
 		Report:    report,
-		Exec:      reactions.DefaultExecutor(workspace),
+		Exec:      reactions.DefaultExecutor(workspace, guard),
 	})
 }
 
@@ -809,7 +820,8 @@ func raise(
 	narrate func(recordID string, cfg apogee.Config, sink domain.EventSink) domain.EventSink,
 ) (run.Result, []string, error) {
 	observeReactions, syncReactions := domain.SplitLanes(in.opts.Reactions)
-	hookRunner, err := firingHooks(observeReactions, in.roots.workspace, ref, in.report)
+	guard := security.NewURLGuard(in.opts.URLAllowHosts, in.opts.URLDenyHosts)
+	hookRunner, err := firingHooks(observeReactions, in.roots.workspace, guard, ref, in.report)
 	if err != nil {
 		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}
 	}

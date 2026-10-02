@@ -7,11 +7,15 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +29,7 @@ import (
 	// which shadows the package name inside those functions.
 	apiprovider "github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -1219,6 +1224,57 @@ func TestRoutedTargetResolvesTheForcedDialect(t *testing.T) {
 	}
 }
 
+// A Firing's webhook Reactions post through the url-safety guard built from the options' allow/deny
+// host lists — the guard raise builds off in.opts — so a loopback endpoint the operator's deny list
+// closes gets no request: the refusal reaches the Driver's report line instead.
+func TestFiringHooksRefusesADenyListedWebhookEndpoint(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	opts := config.Options{URLDenyHosts: []string{"127.0.0.1"}}
+	list := []domain.Reaction{{
+		ID:      "notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []reactions.Event{reactions.ExchangeFinished},
+		Handler: domain.WebhookHandler{URL: server.URL + "/fire"},
+		Timeout: 10 * time.Second,
+	}}
+	var (
+		mu    sync.Mutex
+		lines []string
+	)
+	report := func(line string) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, line)
+	}
+
+	guard := security.NewURLGuard(opts.URLAllowHosts, opts.URLDenyHosts)
+	runner, err := firingHooks(list, firingRoots(t).workspace, guard, nil, report)
+	if err != nil {
+		t.Fatalf("firingHooks: %v", err)
+	}
+	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = runner.Close(closeCtx)
+
+	if hits.Load() != 0 {
+		t.Errorf("the deny-listed endpoint was called %d times; it must not be dialled", hits.Load())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lines) != 1 || !strings.Contains(lines[0], "is denied") {
+		t.Errorf("report lines = %q, want one url-safety refusal naming the denied host", lines)
+	}
+}
+
 // The Reaction Runner a Driver built for ONE Firing reaches the run, and the variables its webhook
 // headers are read from reach the credential scrub. Both halves matter: a Runner the composer
 // dropped would leave a configured `reactions:` list silently dead at every unattended root, and a
@@ -1239,7 +1295,8 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 		},
 		Timeout: time.Second,
 	}}
-	runner, err := firingHooks(list, roots.workspace, &reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
+	runner, err := firingHooks(list, roots.workspace, security.URLGuard{},
+		&reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
 	if err != nil {
 		t.Fatalf("firingHooks: %v", err)
 	}

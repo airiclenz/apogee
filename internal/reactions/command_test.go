@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/userexec"
 )
 
@@ -62,7 +63,7 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 
 	// DefaultExecutor rather than commandExecutor directly, so the dispatch on `command:` is
 	// exercised by the same test that proves what the command receives.
-	if err := DefaultExecutor(dir).Run(context.Background(), hook, payload); err != nil {
+	if err := DefaultExecutor(dir, security.URLGuard{}).Run(context.Background(), hook, payload); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 

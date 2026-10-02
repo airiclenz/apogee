@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/webhook"
 )
@@ -90,8 +91,10 @@ func (a *Agent) runSyncArgv(
 //
 // No permit is taken: nothing is spawned, so the confinement contract's spawn posture
 // (docs/design/confinement-execution-contract.md §10.4) has nothing to say about the request, and
-// the deadline is the class's (syncTimeout) as it is for a command. Every failure — an unset
-// `headers-env:` variable, a transport error, the deadline, a non-2xx status — arrives as one error
+// the deadline is the class's (syncTimeout) as it is for a command. The post goes through the
+// url-safety guard built from the run's own allow/deny host lists, as the observe lane's does. Every
+// failure — an unset `headers-env:` variable, a url-safety refusal, a transport error, the deadline,
+// a non-2xx status (a redirect among them: it is never followed) — arrives as one error
 // worded by internal/webhook (never the URL, which may carry a token), for the classes to read as
 // they read a command's: an advise reaction contributes nothing, a gate escalates to ask.
 func (a *Agent) runSyncWebhook(
@@ -111,7 +114,8 @@ func (a *Agent) runSyncWebhook(
 		return "", err
 	}
 
-	response, err := webhook.Post(ctx, handler, syncTimeout(r), document)
+	response, err := webhook.Post(ctx, security.NewURLGuard(a.cfg.URLAllowHosts, a.cfg.URLDenyHosts), handler,
+		syncTimeout(r), document)
 	if err != nil {
 		return "", err
 	}

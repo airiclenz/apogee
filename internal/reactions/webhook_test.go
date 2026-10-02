@@ -3,6 +3,7 @@ package reactions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // TestWebhookSenderPostsTheJSONWithBothKindsOfHeader is the round trip the webhook half exists
@@ -65,7 +67,7 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 
 	// DefaultExecutor rather than webhookSender directly, so the dispatch on `webhook:` is
 	// exercised by the same test that proves what the endpoint receives.
-	if err := DefaultExecutor("").Run(context.Background(), hook, payload); err != nil {
+	if err := DefaultExecutor("", security.URLGuard{}).Run(context.Background(), hook, payload); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -188,5 +190,38 @@ func TestWebhookSenderReportsTheDeadlineOnAStalledEndpoint(t *testing.T) {
 	}
 	if elapsed > time.Second {
 		t.Errorf("Run took %s to give up on a 150ms timeout", elapsed)
+	}
+}
+
+// TestDefaultExecutorPostsThroughTheGuardItWasGiven pins that the webhook half posts under the
+// guard the root handed DefaultExecutor rather than a client of its own: a host the url-safety
+// deny list closes is refused, and the endpoint is never reached.
+func TestDefaultExecutorPostsThroughTheGuardItWasGiven(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	hook := domain.Reaction{
+		ID:      "ping",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{ExchangeFinished},
+		Handler: domain.WebhookHandler{URL: server.URL},
+		Timeout: 10 * time.Second,
+	}
+	exec := DefaultExecutor("", security.NewURLGuard(nil, []string{"127.0.0.1"}))
+
+	err := exec.Run(context.Background(), hook, domain.SeamPayload{Event: ExchangeFinished})
+
+	if !errors.Is(err, security.ErrURLBlocked) {
+		t.Errorf("error = %v, want a url-safety refusal", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("the endpoint was called %d times; a denied host must not be dialled", hits.Load())
 	}
 }

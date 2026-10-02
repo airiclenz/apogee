@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -206,12 +207,17 @@ func (w *rootWiring) resolveConfig() error {
 	// lanes in one list, and the sync half — the advise and gate entries the AGENT runs inside the
 	// loop — is armed through the generation the engine holder is seeded with (wire_live.go), which
 	// is the one route it takes into this session.
+	//
+	// Its webhooks post through the url-safety guard built from the options' allow/deny host lists —
+	// off w.opts, since the projected cfg does not exist yet — so a host the operator closed for the
+	// network tools is closed for a Reaction's POST too.
 	observe, _ := domain.SplitLanes(w.opts.Reactions)
+	webhookGuard := security.NewURLGuard(w.opts.URLAllowHosts, w.opts.URLDenyHosts)
 	runner, err := reactions.New(observe, reactions.Options{
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
-		Exec:      reactions.DefaultExecutor(w.roots.workspace),
+		Exec:      reactions.DefaultExecutor(w.roots.workspace, webhookGuard),
 	})
 	if err != nil {
 		return err

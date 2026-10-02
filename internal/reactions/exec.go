@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // DefaultExecutor is the Executor every Driver installs: it runs an entry's `run:` argv or POSTs
@@ -19,11 +20,17 @@ import (
 // the same value the Runner is given — and pass "" only where there is no workspace at all, which
 // leaves the fence to security.ResolveProgram's own defaults.
 //
+// guard is the webhook half's: every `run: url:` post goes through it (webhook.Post), so a host the
+// url-safety lists close is refused before any dial and a redirect is never followed. Pass the
+// guard the root builds from its url-safety allow/deny lists — security.NewURLGuard over the same
+// two fields the network tools are guarded by.
+//
 // The returned Executor is safe for concurrent use across every Reaction at the root, which the
 // Executor contract requires.
-func DefaultExecutor(workspaceRoot string) Executor {
+func DefaultExecutor(workspaceRoot string, guard security.URLGuard) Executor {
 	return defaultExecutor{
 		command: commandExecutor{workspaceRoot: workspaceRoot},
+		webhook: webhookSender{guard: guard},
 	}
 }
 

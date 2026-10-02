@@ -10,7 +10,7 @@
 // machine, outside confinement, as the user's config rather than a model action.
 //
 // One direction: this package imports internal/domain for the events it reads, internal/security
-// for path resolution, internal/userexec for the exec posture a Reaction's argv runs under and
+// for path resolution and the url-safety guard a webhook posts through, internal/userexec for the exec posture a Reaction's argv runs under and
 // internal/webhook for the one POST both lanes' webhooks send, and nothing else in the tree —
 // never internal/agent, never internal/tools, never internal/tui. Every fact a firing needs rides
 // the Event itself: the file a tool call changed arrives on domain.ToolResultEvent.WriteTarget,
