@@ -152,6 +152,11 @@ wire and only to the model that produced them, so the reason decision 4 gave is 
   sat), and the encoder splits the content back into those text blocks. A layout that no longer
   fits the message — content edited after the reply, a count that differs — is ignored, and the
   blocks go back at their places as above.
+  (*Narrowed by [ADR 0092](0092-replayed-signed-thinking-is-guarded-by-a-prefix-digest.md): on
+  the preserved-thinking models (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5) a reply's blocks go
+  back only while the prefix before that reply — `system`, `tools` and every earlier message —
+  digests as it did when the reply was produced; otherwise the codec drops them client-side. A
+  resumed session replays them only where the resumed prefix still matches.*)
 - **The compaction summary never requests thinking on this wire.** The summariser's request is
   forced to the off rung on an anthropic server, as it already was on the kwargs and reasoning
   dialects, so a thinking pass can never spend the summary's output cap.

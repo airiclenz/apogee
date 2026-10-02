@@ -150,7 +150,11 @@ Depends on item 1.
 **Closes:** apogee-anthropic-merged-text-blocks
 **Commit:** `fix(provider): replay an anthropic reply's text blocks in their original places`
 
-## 3. ADR 0092 — replayed signed thinking is guarded by a prefix digest
+## 3. ADR 0092 — replayed signed thinking is guarded by a prefix digest — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): ADR 0092 front matter carries an `Amends:` line (ADR 0078 Amendment 2026-10-02) beside `Status: accepted`, matching ADR 0078's own front-matter shape; the ADR records the decision, so CONTEXT.md and ADR 0078 now describe the guard ahead of item 5, which implements it.
+
+NOTES (2026-10-02): the plan's "mode/orientation" churn source is recorded as the orientation standing block plus the mode-filtered tool menu, and "tail notes" as `Request.NoteOnTail`, the names those mechanisms carry in the tree (internal/agent/standingblocks.go has no mode block).
 
 **What:**
 **Goal:** `docs/adr/0092-replayed-signed-thinking-is-guarded-by-a-prefix-digest.md` exists (front-matter
