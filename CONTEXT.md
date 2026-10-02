@@ -1125,8 +1125,10 @@ privilege ladder**. Four:
   `git_diff_range`, `git_show`), which are read-only by construction and so take the read-only row in every
   mode (the **RO-subproc** class, ADR 0012 amendment 2026-09-06) — **plus its own Scratch dir**:
   Apogee's own writers run there unprompted and every other target is refused with a reason
-  naming the dir (ADR 0012's second loosen, 2026-09-14); no other writes, no other command
-  execution (explore, propose, draft into the scratch dir, touch nothing else).
+  naming the dir (ADR 0012's second loosen, 2026-09-14); no other writes, and no other command
+  execution bar a Recipe's script stage — the engine's own call, confined so it writes only its own
+  workflow folder (ADR 0012 amendment 2026-09-27) — (explore, propose, draft into the scratch dir,
+  touch nothing else).
 - **Ask-Before** — workspace reads run free, the hardened git reads above included, and so do
   Apogee's own writes into the session **Scratch dir** (the one write it does not gate); every
   other write, every other command, and every external reach requires an Approval (the human is

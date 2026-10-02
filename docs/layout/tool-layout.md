@@ -5,8 +5,9 @@ This file is the canonical tool-block layout spec (grill session 2026-08-10),
 `layout.md` keeps the global grammar — widths, colors, path shortening, body
 quoting — and its tool sections point here.
 
-**As implemented**, four things below read differently on screen. Each was
-settled at implementation time and argued in that plan's item notes: labels are
+**As implemented**, four things read differently from the ratified sketch. Each was
+settled at implementation time and argued in that plan's item notes, and the
+per-tool table below states the shipped form (corrected 2026-10-02): labels are
 Title Case (`Diff Preview`, `Find Files`, `Git Status`, `Ask User`, `Sub-Agent`,
 `Task List`)
 rather than sentence case; no stat carries a duration, because no result exposes
@@ -77,7 +78,7 @@ closer is drawn today.
 - `<tool-details>` — the one-line collapsed summary of one call. Usually the key argument (path, pattern, command). It may differ from what opening the call shows: a sub-agent shows its *name* here and its task/result inside its run view.
 - `<tool-details-row-1..n>` — the expanded content of one call (diff, output, listing, …).
 - `<tool-top-level-details>` — the right-aligned outcome slot. It carries the
-  **whole summary**, whatever kind: a typed stat ("12 lines", "exit 0 · 1.2s",
+  **whole summary**, whatever kind: a typed stat ("12 lines", "exit 0",
   "+8 −3"), a promoted one-line output (quoted), or a red verdict — the bare
   word `error`, `denied`, `cancelled`, or the `error: …` a tool that words its
   own short failure carries (`error: exit 3`, the terminal, python_exec and a
@@ -374,32 +375,32 @@ its body whole while collapsed, and it appears only when the two differ.
 | move_file | Move | source `→` destination | — | full paths |
 | delete_file | Delete | path | — | — |
 | list_dir | List | path (`· recursive` when set) | `N entries` | the listing |
-| find_files | Find files | pattern | `N files` | matched paths |
+| find_files | Find Files | pattern | `N files` | matched paths |
 | grep | Grep | pattern (`· include` glob) | `N hits · M files` | `path:line` matches + context |
-| terminal | Terminal | the command line | `exit 0 · 1.2s` | command + output |
-| python_exec | Python | first code line | `exit 0 · 0.4s` | code + output |
+| terminal | Terminal | the command line | `exit 0` | command + output |
+| python_exec | Python | first code line | `exit 0` | code + output |
 | console_open | Console | the command line | `console N` (`exit N` when the program was already over) | the program's first output |
 | console_send | Console Send | `console N` (`· what was typed` when the input is not empty) | `alive` / `exit N` / `killed` | what the program printed back |
 | console_read | Console Read | `console N` | `alive` / `exit N` / `killed` | the output since the last read |
 | console_close | Console Close | `console N` | `exit N` / `killed` | the unread tail |
-| run_tests | Tests | path (`· filter` when set) | `PASS/FAIL · 3.1s` | runner summary + failing tests |
-| git_status | Git status | — | `N changed` | changed-file list |
-| git_log | Git log | ref | `N commits` | one line per commit |
+| run_tests | Tests | path (`· filter` when set) | `PASS` / `FAIL` | runner summary + failing tests |
+| git_status | Git Status | — | `N changed` | changed-file list |
+| git_log | Git Log | ref | `N commits` | one line per commit |
 | git_show | Git Show | path (`:12–80` when ranged) `@ ref` (`· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
-| git_branch | Git branch | action + branch name | — | command output |
-| git_commit | Git commit | message subject | short hash | full message + committed files |
-| git_diff_range | Git diff | `base..head` | `+A −R` | split/stacked diff, one header row per file section, see `split-diff-layout.md` |
-| view_diff | Diff preview | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
+| git_branch | Git Branch | action + branch name | — | command output |
+| git_commit | Git Commit | message subject | short hash | full message + committed files |
+| git_diff_range | Git Diff | `base...head` | `+A −R` | split/stacked diff, one header row per file section, see `split-diff-layout.md` |
+| view_diff | Diff Preview | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
 | diagnostics | Diagnostics | path | `N issues` / `clean` | one line per issue |
 | http_request | HTTP | METHOD + URL | `status · size` | response headers + body head |
 | web_fetch | Fetch | URL | size | extracted text head |
 | web_search | Search | the query | `N results` | result titles + URLs |
 | present_document | Present | document title (path fallback) | — | path + title |
-| ask_user | Ask user | the question | `answered` / `pending` | question + choices + the answer |
-| sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed/capped at its step cap/stopped by you/ended without a report` | task text + result summary |
+| ask_user | Ask User | the question | the human's own answer | question + choices + the answer |
+| sub_agent | Sub-Agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed/capped at its step cap/stopped by you/ended without a report` | task text + result summary |
 | fan_out | Fan-Out | the brief's first line (`task`) | the result's first line | the card's item rows, one delegation-shaped row per item run, each opening its run view |
 | workflow | Workflow | the action (`status` / `stop` / `message`) | the result's first line | — |
-| task_list | Task list (done/total) | — | — | the list, one row per task; collapsed = header only |
+| task_list | Task List (done/total) | — | — | the list, one row per task; collapsed = header only |
 | load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
 Notes:

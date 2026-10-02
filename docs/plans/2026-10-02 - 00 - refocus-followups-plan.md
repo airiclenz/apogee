@@ -292,7 +292,11 @@ docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md — "re
 - `grep -c "Amended 2026-10-02" docs/adr/00{10,57,63,75,76,71}-*.md` — each ≥ 1
 **Commit:** `docs(adr): amend stale lines in ADRs 0010, 0057, 0063, 0071, 0075 and 0076`
 
-## 8. Glossary, layout docs and IDEAS corrections
+## 8. Glossary, layout docs and IDEAS corrections — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): IDEAS.md was edited in place (the 2026-09-26 handoff link now reads `docs/handoffs/archived/…`; the master-agent stop/message line is marked delivered — the `workflow` tool's `stop`/`message` actions, v0.23.4, bead `apogee-engine-run-delegation` closed) but it is gitignored (`.gitignore:14`) and untracked, so it is deliberately left off FILES and out of the commit; IDEAS.md's own rule says a resolved item is removed, but the Goal's "marks as delivered" plus the Acceptance grep on the archived link keep the line.
+NOTES (2026-10-02): tool-layout.md — the per-tool table now carries the code's Title-Case labels (`toolregistry.go`), `exit 0` / `PASS` / `FAIL` with no durations, `ask_user`'s slot as the human's own answer and `git_diff_range`'s `base...head` target; the "As implemented" paragraph now says the table states the shipped form, and the Vocabulary example "exit 0 · 1.2s" became "exit 0".
+NOTES (2026-10-02): split-diff-layout.md carried `siff-layout.md` as plain code text (no markdown link) at base already; it now names it as an earlier sketch that was never committed.
 
 **What:**
 **Goal:** `CONTEXT.md`'s Plan-mode entry agrees with its later entry that Plan runs a recipe's

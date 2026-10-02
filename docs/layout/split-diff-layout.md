@@ -2,7 +2,7 @@
 
 This file is the canonical diff-body layout spec (grill session 2026-08-19),
 ratified by [ADR 0052](../adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md).
-It replaces the `siff-layout.md` sketch. `tool-layout.md` keeps the block
+It replaces `siff-layout.md`, an earlier sketch that was never committed. `tool-layout.md` keeps the block
 grammar — headers, slots, fold states — and its per-tool table's diff rows point
 here for what the expanded body paints. Terms (Split diff, Stacked diff, Edit
 regions) are `CONTEXT.md`'s.
