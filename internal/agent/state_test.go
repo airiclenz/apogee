@@ -119,6 +119,72 @@ func TestSnapshot_RestoresPendingInput(t *testing.T) {
 	}
 }
 
+// TestSnapshot_RestoresAPendingRecipeLaunch proves a recipe launch queued across a snapshot
+// launches the same way on the resume: StartRecipe's launch keeps its Recipe — the started phase
+// still offers StartRecipe's resume, not the typed line's — and a typed "/<id>" line, which carries
+// none (the snapshot omits it), still launches from its text.
+func TestSnapshot_RestoresAPendingRecipeLaunch(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		scope  string
+		launch func(a *Agent) error
+		line   string
+		resume string
+	}{
+		{
+			name:  "with a Recipe",
+			scope: "lib",
+			launch: func(a *Agent) error {
+				_, err := a.StartRecipe(context.Background(), RecipeLaunch{SkillID: "review", Text: "scope=lib"})
+				return err
+			},
+			line:   "/review scope=lib",
+			resume: "run `/review` again with the same inputs to resume",
+		},
+		{
+			name:  "without a Recipe",
+			scope: "src",
+			launch: func(a *Agent) error {
+				return a.Submit(domain.UserInput{Text: "/review src", SkillIDs: []string{"review"}})
+			},
+			line:   "/review src",
+			resume: "re-run `/review src` to resume",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, err := newAgent(recipeConfig(t, &recordingSink{}, reviewRecipe()), reviewUpstream(tc.scope))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := tc.launch(a); err != nil {
+				t.Fatalf("launch: %v", err)
+			}
+			snap, err := a.Snapshot()
+			if err != nil {
+				t.Fatalf("Snapshot: %v", err)
+			}
+
+			sink, up := &recordingSink{}, reviewUpstream(tc.scope)
+			b, err := resumeAgent(recipeConfig(t, sink, reviewRecipe()), snap, up)
+			if err != nil {
+				t.Fatalf("resumeAgent: %v", err)
+			}
+			if _, err := b.Run(context.Background()); err != nil {
+				t.Fatalf("Run (resumed): %v", err)
+			}
+
+			wantResultLines(t, up.first(t, "/review"), tc.line)
+			if got := startedPhase(t, sink.events).Resume; got != tc.resume {
+				t.Errorf("started Resume = %q, want %q", got, tc.resume)
+			}
+		})
+	}
+}
+
 // TestSnapshot_PreservesReasoningContent proves the model's reasoning channel is recorded on
 // the committed assistant message as reasoning_content Extra and survives snapshot/resume.
 func TestSnapshot_PreservesReasoningContent(t *testing.T) {

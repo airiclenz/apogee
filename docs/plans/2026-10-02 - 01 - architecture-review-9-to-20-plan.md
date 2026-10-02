@@ -551,7 +551,12 @@ cmd/apogee/headless_test.go — TestHeadlessRecipeFlowsToTheRunnerSpec; cmd/apog
 - `GOMEMLIMIT=2GiB go test -count=1 -run '^TestHeadlessRecipeFlowsToTheRunnerSpec$|^TestHeadlessComposesTheRunnerSpec$|^TestHeadlessReadsThePromptFromStdin$|^TestHeadlessArmsTheSyncLaneOnTheFiringsSpec$|^TestScheduleFiringCarriesTheSessionsSyncLane$|^TestDaemonFireRunsTheEntrysRecipe$|^TestDaemonFireRunsAPromptEntryAsAMessage$|^TestDaemonFireDoesNotJudgeAPromptEntryAsARecipe$|^TestDaemonFireFailsARecipeWorkflowThatDidNotLand$|^TestDaemonFiresAWorkflowEntryThroughTheEngine$|^TestRaiseCallsOnIDBeforeRefusingAndLatchesTheSchedule$|^TestUndoVerbRefusesAFiringInFlight$' ./cmd/apogee/`
 **Commit:** `refactor(run): carry the recipe launch as one value through firings`
 
-## 18. The foreground recipe launch stops re-parsing its text (#17c)
+## 18. The foreground recipe launch stops re-parsing its text (#17c) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): consequential edit — internal/agent/loop.go: made necessary by recipeLaunch now also reporting StartRecipe's launch (in.Recipe); composeUserMessage's doc comment named only the "/<id>" text match.
+NOTES (2026-10-02): `UserInput.Recipe` is a `*RecipeLaunch` (`json:",omitempty"`) placed between SkillIDs and RecipeInputs; RecipeInputs stays (StartRecipe's already-bound inputs, possibly asked), and `in.Recipe != nil` replaces `in.RecipeInputs != nil` as the StartRecipe discriminator in `recipeLaunchKind`. With Recipe set, `recipeLaunch` launches only while `SkillIDs[0] == Recipe.SkillID` (no text match), and unbound inputs bind from `Recipe.Text` (`recipeInputText`); the typed prefix match moved into `typesRecipeLaunch`. Text/SkillIDs[0] are kept beside Recipe per the regression guard; eventjson untouched.
+NOTES (2026-10-02): a pending input snapshotted before this change (RecipeInputs set, no Recipe) still loads and launches with its bound inputs, but its started phase now offers the typed-line resume hint rather than StartRecipe's. Restore checks bound only PendingInput.Text; Recipe.Text and RecipeInputs are unbounded on restore, as RecipeInputs already was (pre-existing).
+NOTES (2026-10-02): tests added: TestSnapshot_RestoresAPendingRecipeLaunch (state_test.go, with and without Recipe, asserting result lines and the resume hint after resume) and TestRecipe_TheStepReadsTheSubmittedLaunch (recipe_test.go: launch from Recipe when Text does not open with "/<id>"; a Recipe of another skill launches nothing).
 
 **What:** Depends on item 17.
 **Goal:** `Agent.StartRecipe` submits a `domain.UserInput` with a `Recipe *RecipeLaunch`

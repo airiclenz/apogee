@@ -9,8 +9,9 @@ package agent
 // else, a skill without a recipe, a delegate's task and an interjection attach the body as before
 // (an interjection that would launch one is refused instead). StartRecipe is the same launch for a
 // Driver that holds a recipe id rather than a typed line: it binds the inputs first, asking the
-// user for a missing required one, and submits the launch — or, for a background launch, hands the
-// recipe to the background workflow manager (background.go) and submits nothing.
+// user for a missing required one, and submits the launch as the input's Recipe, which the opening
+// Step reads instead of re-parsing the line — or, for a background launch, hands the recipe to the
+// background workflow manager (background.go) and submits nothing.
 //
 // The catalog reaches the loop through workflow.RecipeSource, read off Config.Skills, so the loop
 // never imports internal/skills (ADR 0010). runBlocking (launch.go) is the core both launches share
@@ -123,8 +124,15 @@ func (a *Agent) StartRecipe(ctx context.Context, launch RecipeLaunch) (string, e
 	if err != nil {
 		return "", err
 	}
-	line := RecipeLaunch{SkillID: recipe.ID, Text: launch.Text}.Line()
-	return "", a.Submit(domain.UserInput{Text: line, SkillIDs: []string{recipe.ID}, RecipeInputs: inputs})
+	// Text and SkillIDs still spell the launch: Text is the user's line the opening message carries,
+	// and composeUserMessage drops SkillIDs[0] — the recipe's body — once the launch runs.
+	foreground := RecipeLaunch{SkillID: recipe.ID, Text: launch.Text}
+	return "", a.Submit(domain.UserInput{
+		Text:         foreground.Line(),
+		SkillIDs:     []string{recipe.ID},
+		Recipe:       &foreground,
+		RecipeInputs: inputs,
+	})
 }
 
 // recipeSource is the recipe port Config.Skills serves, nil when it serves none.
@@ -149,16 +157,21 @@ func (a *Agent) recipeByID(id string) (workflow.Recipe, error) {
 	return workflow.Recipe{}, fmt.Errorf("apogee: %q is not a recipe; the recipes are: %s", id, known)
 }
 
-// recipeLaunch reports the recipe in launches: its first attached skill carries a recipe and its
-// text opens with that skill's "/<id>" as a word of its own. A delegate never launches one — a
-// workflow's children do not delegate (ADR 0087 D9) — so its task attaches the body as before.
+// recipeLaunch reports the recipe in launches: its first attached skill carries a recipe, and
+// either in carries StartRecipe's launch of that same skill (in.Recipe) or — for a line the user
+// typed — its text opens with that skill's "/<id>" as a word of its own. A delegate never launches
+// one — a workflow's children do not delegate (ADR 0087 D9) — so its task attaches the body as
+// before.
 func (a *Agent) recipeLaunch(in domain.UserInput) (workflow.Recipe, bool) {
 	if a.isDelegate() || len(in.SkillIDs) == 0 {
 		return workflow.Recipe{}, false
 	}
 	id := in.SkillIDs[0]
-	rest, opens := strings.CutPrefix(strings.TrimLeft(in.Text, " \t\n"), "/"+id)
-	if !opens || (rest != "" && !strings.ContainsAny(rest[:1], " \t\n")) {
+	launches := typesRecipeLaunch(in.Text, id)
+	if in.Recipe != nil {
+		launches = in.Recipe.SkillID == id
+	}
+	if !launches {
 		return workflow.Recipe{}, false
 	}
 	source := a.recipeSource()
@@ -168,17 +181,23 @@ func (a *Agent) recipeLaunch(in domain.UserInput) (workflow.Recipe, bool) {
 	return source.Recipe(id)
 }
 
+// typesRecipeLaunch reports whether text, as the user typed it, opens with "/<id>" as a word of
+// its own.
+func typesRecipeLaunch(text, id string) bool {
+	rest, opens := strings.CutPrefix(strings.TrimLeft(text, " \t\n"), "/"+id)
+	return opens && (rest == "" || strings.ContainsAny(rest[:1], " \t\n"))
+}
+
 // launchRecipe runs the recipe in opens and returns what the opening message carries after the
 // user's line: the result lines, or — reported as an ErrorEvent too — why the recipe did not run.
 // A run that produced result lines marks the opening as carrying them (carryRecipeResult), so a
 // cancel keeps it; a refusal does not, and a cancelled refused launch is scrapped as before.
-// The inputs are in.RecipeInputs when StartRecipe bound them, else bound from the text after
-// "/<id>".
+// The inputs are in.RecipeInputs when StartRecipe bound them, else bound from the launch's text
+// (recipeInputText).
 func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput, recipe workflow.Recipe) string {
 	inputs := in.RecipeInputs
 	if inputs == nil {
-		text := strings.TrimPrefix(strings.TrimLeft(in.Text, " \t\n"), "/"+recipe.ID)
-		bound, err := a.bindRecipeInputs(ctx, recipe, text)
+		bound, err := a.bindRecipeInputs(ctx, recipe, recipeInputText(in, recipe.ID))
 		if err != nil {
 			return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 		}
@@ -196,10 +215,19 @@ func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput,
 	return "\n\n" + fmt.Sprintf(recipeResultFormat, recipe.ID, workflowAnswer(result, fellBack, launch))
 }
 
-// recipeLaunchKind is how the user launched recipe id through in: from StartRecipe when it bound
-// the inputs (in.RecipeInputs), else by the "/<id>" line they typed, kept trimmed.
+// recipeInputText is the text recipe id's inputs bind from: the Text of StartRecipe's launch
+// (in.Recipe), else what the user typed after "/<id>".
+func recipeInputText(in domain.UserInput, id string) string {
+	if in.Recipe != nil {
+		return in.Recipe.Text
+	}
+	return strings.TrimPrefix(strings.TrimLeft(in.Text, " \t\n"), "/"+id)
+}
+
+// recipeLaunchKind is how the user launched recipe id through in: from StartRecipe (in.Recipe),
+// else by the "/<id>" line they typed, kept trimmed.
 func recipeLaunchKind(in domain.UserInput, id string) workflowLaunch {
-	if in.RecipeInputs != nil {
+	if in.Recipe != nil {
 		return workflowLaunch{kind: launchStartRecipe, recipe: domain.RecipeLaunch{SkillID: id}}
 	}
 	return workflowLaunch{kind: launchTypedRecipe, recipe: domain.RecipeLaunch{SkillID: id}, line: strings.TrimSpace(in.Text)}

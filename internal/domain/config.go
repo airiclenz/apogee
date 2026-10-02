@@ -1044,15 +1044,20 @@ func modeRank(m Mode) int {
 // each through Config.Skills and prepends its body to the user message for that one turn. The
 // refs round-trip through a snapshot, so a resumed session re-resolves them.
 //
-// A recipe launch (ADR 0087 D6) is spelled in the same fields: when SkillIDs[0] names a skill
-// carrying a recipe and Text begins with "/" and that id, the opening Step runs the recipe as a
-// Workflow instead of attaching its body, binding its inputs from the rest of Text. RecipeInputs,
-// when set, are those inputs already bound (Agent.StartRecipe binds them, asking for any missing
-// one, before it submits), and the Step takes them as they are instead of binding Text again.
+// A recipe launch (ADR 0087 D6) the user TYPED is spelled in the same fields: when SkillIDs[0]
+// names a skill carrying a recipe and Text begins with "/" and that id, the opening Step runs the
+// recipe as a Workflow instead of attaching its body, binding its inputs from the rest of Text.
+// Recipe is the launch a Driver handed Agent.StartRecipe, carried as a value so the Step reads it
+// instead of re-parsing Text: StartRecipe sets it beside Text (the launch's Line) and SkillIDs[0]
+// (its id), and the Step launches it only while SkillIDs[0] names the same skill. It is omitted
+// from a snapshot when nil, so a snapshot saved before it existed still loads. RecipeInputs, when
+// set, are the launch's inputs already bound (StartRecipe binds them, asking for any missing one,
+// before it submits), and the Step takes them as they are instead of binding the text again.
 type UserInput struct {
 	Text         string
 	FileRefs     []string
 	SkillIDs     []string          `json:",omitempty"`
+	Recipe       *RecipeLaunch     `json:",omitempty"`
 	RecipeInputs map[string]string `json:",omitempty"`
 }
 

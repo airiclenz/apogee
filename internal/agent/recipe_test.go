@@ -265,6 +265,50 @@ func TestRecipe_StartRecipeSubmitsTheLaunch(t *testing.T) {
 	wantResultLines(t, up.first(t, "/review"), "/review scope=lib")
 }
 
+// TestRecipe_TheStepReadsTheSubmittedLaunch: an input carrying StartRecipe's launch (Recipe) is
+// launched from that value, not from its text — inputs bind from Recipe.Text even when the line
+// does not open with "/<id>" — and only while SkillIDs[0] names the same skill; otherwise the
+// skill's body is attached and nothing runs.
+func TestRecipe_TheStepReadsTheSubmittedLaunch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("launched from the Recipe", func(t *testing.T) {
+		t.Parallel()
+		up := reviewUpstream("lib")
+		a, err := newAgent(recipeConfig(t, &recordingSink{}, reviewRecipe()), up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+
+		runInput(t, a, domain.UserInput{
+			Text:     "run the review",
+			SkillIDs: []string{"review"},
+			Recipe:   &domain.RecipeLaunch{SkillID: "review", Text: "scope=lib"},
+		})
+
+		wantResultLines(t, up.first(t, "ran as a workflow"), "run the review")
+	})
+
+	t.Run("a Recipe of another skill launches nothing", func(t *testing.T) {
+		t.Parallel()
+		up := reviewUpstream("src")
+		a, err := newAgent(recipeConfig(t, &recordingSink{}, reviewRecipe()), up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+
+		runInput(t, a, domain.UserInput{
+			Text:     "/review src",
+			SkillIDs: []string{"review"},
+			Recipe:   &domain.RecipeLaunch{SkillID: "other", Text: "src"},
+		})
+
+		if got := up.first(t, "/review"); !strings.Contains(got, reviewBody) || strings.Contains(got, "ran as a workflow") {
+			t.Errorf("a mismatched Recipe launched or did not attach the body:\n%s", got)
+		}
+	})
+}
+
 func TestRecipe_StartRecipeRefusals(t *testing.T) {
 	t.Parallel()
 

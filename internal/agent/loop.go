@@ -1515,8 +1515,8 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 // interjected marks the message as committed inside a running Exchange (Interject) so the
 // derived Exchange opening does not move (domain.Message.Interjected).
 //
-// An opening input that launches a recipe (recipeLaunch — its first skill carries one and its text
-// opens with that skill's "/<id>") runs the recipe here, before anything else is resolved, and the
+// An opening input that launches a recipe (recipeLaunch — its first skill carries one, and its text
+// opens with that skill's "/<id>" or it carries StartRecipe's launch of it) runs the recipe here, before anything else is resolved, and the
 // leading skill is not attached: the message is the other skills' blocks, the @file blocks, the
 // human's line, and the workflow's result lines after it (recipe.go). An interjection never
 // launches one — Interject refuses such an input before it reaches here.
