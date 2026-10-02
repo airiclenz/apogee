@@ -571,6 +571,63 @@ func TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer(t *testing.T
 	assertKwargsEffort(t, "summary request", up.lastSummary(), provider.EffortHigh) // the session's resolved effort, untouched
 }
 
+// TestCompactSummarizerAsksForNoThinkingOnTheAnthropicWire pins the override on the anthropic
+// wire, where the server names no effort dialect but off means off — it requests
+// `thinking: {"type":"disabled"}` (ADR 0078 amendment 2026-10-02). The assertion sits at the
+// provider seam: the summary request carries EffortOff although the profile resolves high, while
+// the next real Turn still carries high.
+func TestCompactSummarizerAsksForNoThinkingOnTheAnthropicWire(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Wire = string(provider.WireAnthropic)
+	cfg.Profile.Thinking.Effort = domain.EffortHigh
+	scripted := summaryEffortResponder(t, "FOLDED", "done")
+	up := &loggingResponder{inner: scripted}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	foldOnce(t, a, scripted, 1)
+	if err := a.Submit(domain.UserInput{Text: "carry on"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	summary, main := splitSummaryRequests(t, up)
+	if summary.ThinkingEffort != provider.EffortOff {
+		t.Errorf("summary request ThinkingEffort = %q, want %q", summary.ThinkingEffort, provider.EffortOff)
+	}
+	if main.ThinkingEffort != provider.EffortHigh {
+		t.Errorf("main-turn request ThinkingEffort = %q, want %q", main.ThinkingEffort, provider.EffortHigh)
+	}
+}
+
+// splitSummaryRequests returns the last summarizer request and the last main-turn request the
+// logging responder saw, told apart by the summarizer's system message; it fails the test when
+// either is missing.
+func splitSummaryRequests(t *testing.T, up *loggingResponder) (summary, main provider.Request) {
+	t.Helper()
+	up.mu.Lock()
+	defer up.mu.Unlock()
+	var sawSummary, sawMain bool
+	for _, req := range up.requests {
+		isSummary := len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, summaryInstructionMark)
+		if isSummary {
+			summary, sawSummary = req, true
+		} else {
+			main, sawMain = req, true
+		}
+	}
+	if !sawSummary || !sawMain {
+		t.Fatalf("logged %d requests: summary seen = %v, main turn seen = %v; want both", len(up.requests), sawSummary, sawMain)
+	}
+	return summary, main
+}
+
 // TestChildSummarizerFollowsTheParentsReboundDialect is the delegate half of the incident: the
 // dialect is discovered and committed by Rebind onto the Agent, NOT onto the Config a child is
 // built from, so a child spawned after a rebind must take its parent's LIVE dialect — otherwise
@@ -693,7 +750,7 @@ func TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut(t *testing.T) {
 // TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked pins the halves of the capped-summary
 // fault. The engine cannot inspect the server it just called, so the text stops at what it knows:
 // when the summary request itself carried the off rung it says the ask went out and the server
-// reasoned regardless; when it carried none — the three dialects compactCompleter leaves alone —
+// reasoned regardless; when it carried none — a server compactCompleter leaves alone —
 // it says the cap went on a pass nobody asked to skip, rather than accusing a template of ignoring
 // a key that was never sent. The split is keyed on the REQUEST, not the dialect: the last case is a
 // session on no dialect at all whose profile pins `effort: off`, which DID ask (applyEffort emits

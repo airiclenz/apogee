@@ -532,8 +532,9 @@ func (a *Agent) compactTranscriptChars() int {
 // server was sent.
 //
 // The cause is chosen on what THIS request actually asked for — its own ThinkingEffort — and never
-// on the dialect. compactCompleter's EffortOff override fires on two dialects only, but a session
-// whose profile pins `effort: off` carries EffortOff under any of them (internal/agent/wire.go's
+// on the dialect. compactCompleter's EffortOff override fires only where off means off (two
+// dialects and the anthropic wire), but a session whose profile pins `effort: off` carries
+// EffortOff under any dialect (internal/agent/wire.go's
 // resolvedEffort), and telling that session it never asked would be a lie. The engine cannot
 // inspect the server either, so neither cause diagnoses one: the asked half reports what was asked
 // and what came back, and stops short of a verdict on a template it has never seen.
@@ -546,7 +547,7 @@ const cappedSummaryErrFmt = "compaction summary hit its output cap (%d tokens) w
 const cappedSummaryAskedOffCause = "the summarizer asked for no reasoning and this server reasoned anyway"
 
 // cappedSummaryNotAskedCause is the cause for a summary request that carried no off rung at all —
-// the three dialects compactCompleter leaves alone, with nothing pinning `effort: off`. Nothing was
+// a server compactCompleter leaves alone, with nothing pinning `effort: off`. Nothing was
 // ignored there: the cap simply went on a reasoning pass nobody suppressed, and the remedy is to ask
 // (a profile `effort: off`, or a server whose dialect apogee can switch off).
 const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server was never asked to skip"
@@ -578,14 +579,16 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // call does (internal/title). Like that one it states an INTENT, not a guarantee: the intent lands
 // only on a server whose chat template honours it.
 //
-// The override is gated on the SERVER's wire dialect (a.effortDialect — the dialect is the
-// server's, ADR 0060) being one whose "off" rung actually means off: llama.cpp's
+// The override is gated on the SERVER's wire and dialect (a.cfg.Wire and a.effortDialect — both
+// are the server's, ADRs 0078 and 0060) being ones whose "off" rung actually means off: the
+// anthropic wire, where off requests `thinking: {"type":"disabled"}` and any named level requests
+// adaptive thinking (ADR 0078 amendment 2026-10-02); and, on the openai wire, llama.cpp's
 // chat_template_kwargs (what the incident server is detected as, through the /props probe) and
-// OpenRouter's reasoning object. The other three keep resolvedEffort exactly as today — on
-// EffortDialectNone because a caller that asks for nothing must change nothing on the wire
-// (ADR 0050), on EffortDialectOpenAI because "off" is a documented FLOOR there rather than an off
-// switch (it lands as `minimal`), and on EffortDialectOff because nothing effort-shaped reaches
-// the wire at all. The dialect itself is never touched here.
+// OpenRouter's reasoning object. Every other openai-wire dialect keeps resolvedEffort exactly as
+// today — no named dialect because a caller that asks for nothing must change nothing on the wire
+// (ADR 0050), EffortDialectOpenAI because "off" is a documented FLOOR there rather than an off
+// switch (it lands as `minimal`), and EffortDialectOff because nothing effort-shaped reaches the
+// wire at all. The dialect itself is never touched here.
 //
 // delegateFold marks the completer the ENGINE FOLD of a capped delegate runs on (Agent.foldForParent):
 // the same call in every respect — model, budget, dialect, sampling, the Maintenance accounting —
@@ -602,10 +605,10 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	temp, maxTok := compactTemperature, compactMaxTokens
 	req.SetSampling(domain.SamplingParams{Temperature: &temp, MaxTokens: &maxTok})
 
-	// No reasoning pass for the summarizer, on the dialects whose "off" rung means off — this
-	// type's doc carries the incident and why the other three keep the session's resolved effort.
+	// No reasoning pass for the summarizer, wherever the "off" rung means off — this type's doc
+	// carries the incident and why the remaining dialects keep the session's resolved effort.
 	preq := c.a.toProviderRequest(req)
-	if c.a.effortDialect == provider.EffortDialectKwargs || c.a.effortDialect == provider.EffortDialectReasoning {
+	if c.offMeansOff() {
 		preq.ThinkingEffort = provider.EffortOff
 	}
 	// What the request itself ended up asking for decides which cause the capped-summary fault
@@ -699,4 +702,15 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 		return visible + "\n\n" + summaryTruncatedMarker, nil
 	}
 	return visible, nil
+}
+
+// offMeansOff reports whether the server this Agent is bound to reads the off rung as "no
+// reasoning pass": the anthropic wire (off requests disabled thinking) whatever the dialect, or an
+// openai-wire server on the kwargs or reasoning dialect. See compactCompleter for why the other
+// dialects keep the session's resolved effort.
+func (c compactCompleter) offMeansOff() bool {
+	if provider.WireFor(c.a.cfg.Wire) == provider.WireAnthropic {
+		return true
+	}
+	return c.a.effortDialect == provider.EffortDialectKwargs || c.a.effortDialect == provider.EffortDialectReasoning
 }

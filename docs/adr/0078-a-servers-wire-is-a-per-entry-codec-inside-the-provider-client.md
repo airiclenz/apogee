@@ -64,6 +64,8 @@ Three facts bounded the shape:
    therefore never turns thinking on — no request enables a `thinking` configuration, so the model
    answers without it — and folds nothing. A signed-thinking carrier on the session record is a
    follow-up bead, not a v1 promise.
+   *(Superseded by the Amendment (2026-10-02) below: thinking is requested whenever an effort
+   resolves.)*
 
 5. **Auth is `x-api-key` only.** The entry's key source ([ADR 0047](0047-api-keys-resolve-through-a-per-entry-key-source.md))
    is unchanged — `api-key`, `api-key-cmd`, `api-key-env`, exactly one — and the codec decides the
@@ -119,4 +121,27 @@ Three facts bounded the shape:
   dial seams in `cmd/apogee` thread the wire; `stubllm` serves `/v1/messages`; the Inspector reads
   Anthropic SSE. Each is its own plan item under `docs/plans/2026-09-16 - 03`.
 - Signed-thinking replay on the anthropic wire is filed as a follow-up bead when the codec lands.
+  *(Delivered — see the Amendment (2026-10-02) below.)*
 - ADR 0036's entry shape and ADR 0060 decision 3 carry this ADR as the dated widening.
+
+## Amendment (2026-10-02) — thinking is requested whenever an effort resolves
+
+Supersedes decision 4 ("v1 never requests `thinking`") and the Consequences line filing
+signed-thinking replay as a follow-up bead (apogee-4kl). The session record now carries the
+signed `thinking` and `redacted_thinking` blocks and replays them verbatim, only to the anthropic
+wire and only to the model that produced them, so the reason decision 4 gave is gone.
+
+- **The thinking mode follows the resolved effort.** When the request's thinking effort resolves to
+  a level the Messages API has (`low`, `medium`, `high`, `xhigh`, `max`), the body requests
+  `thinking: {"type": "adaptive"}` beside `output_config.effort`. When it resolves to `off`,
+  `none` or `minimal`, or to nothing at all, the body requests `thinking: {"type": "disabled"}`
+  explicitly, exactly as before, so a request with no effort is byte-identical to what v1 sent.
+- **The compaction summary never requests thinking on this wire.** The summariser's request is
+  forced to the off rung on an anthropic server, as it already was on the kwargs and reasoning
+  dialects, so a thinking pass can never spend the summary's output cap.
+- **Thinking wins over sampling.** While the body requests adaptive thinking, it leaves out the
+  request's `temperature`, `top_p` and `top_k`, because the API restricts them while thinking is on.
+  With thinking disabled they are sent as before. This drop covers only the body the codec builds.
+  A `request-extra:` block is merged after the codec and is never refused, so a `temperature` or
+  `top_k` written there still reaches the wire and still conflicts with thinking at a resolved
+  effort. Leave sampling knobs out of an anthropic entry's `request-extra:`.

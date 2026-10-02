@@ -1628,6 +1628,15 @@ your own block (`provider: {model: …}`) is yours. A value that is not a mappin
 refused too. With no `request-extra:` the request is byte-for-byte what it was
 without the key.
 
+On a `wire: anthropic` server, a thinking effort from `low` up also turns the model's
+thinking on (`thinking: {"type": "adaptive"}`), and `off`, `none`, `minimal` or no effort
+at all turns it off. While thinking is on, apogee leaves `temperature`, `top_p` and
+`top_k` out of the body it builds, because the API restricts them with thinking on.
+`request-extra:` is merged after that and is not checked, so a `temperature` or `top_k`
+you put there is still sent and still conflicts with thinking: leave sampling knobs out
+of an anthropic entry's `request-extra:`. Compaction summaries never ask for thinking
+on this wire.
+
 ### How fast each server answers — the picker summary
 
 With [`server-stats:`](#keeping-the-session-store-bounded--sessions) on (the default),

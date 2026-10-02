@@ -421,7 +421,13 @@ the new Delta kind.
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/domain/`
 **Commit:** `feat(agent): persist and replay anthropic signed thinking`
 
-## 12. Thinking is requested with effort
+## 12. Thinking is requested with effort — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): re-derived from the assumption that a model profile carries sampling knobs. No profile key sets temperature/top_p/top_k today: the request's Sampling comes from a hook's SamplingParams (temperature, max_tokens) and the compaction summary's own temperature. buildBody drops the request's temperature/top_p/top_k whatever set them, and the ADR amendment and the manual say "the request's" / "the body apogee builds", not "the profile's".
+NOTES (2026-10-02): the compaction override's wire gate is a small compactCompleter.offMeansOff helper (anthropic wire via provider.WireFor(a.cfg.Wire), the same source item 11's replay gate reads; otherwise the kwargs/reasoning dialects as before). TestCompactSummarizerAsksForNoThinkingOnTheAnthropicWire wraps summaryEffortResponder in subagent_test.go's loggingResponder and was seen failing with the wire gate disabled.
+NOTES (2026-10-02): consequential edit — internal/agent/compact_test.go: the TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked comment "the three dialects compactCompleter leaves alone" was made false by the anthropic-wire override (now "a server compactCompleter leaves alone").
+NOTES (2026-10-02): ADR 0078 decision 4 and its Consequences bead line keep their text as history, each with an italic pointer to the new Amendment (2026-10-02) section. The manual's paragraph is placed at the end of the `request-extra:` section.
+NOTES (2026-10-02): whole ./internal/provider/ ran without -race; race runs were narrowed to the anchored -run (`^TestAnthropic` in provider, the Acceptance's three tests plus the child and capped-fault compact tests in agent), per the Pi 5 machine rule.
 
 **What:** Recast at the regression check (2026-10-02). Depends on item 11.
 **Goal:** a resolved ThinkingEffort above off/none/minimal requests `thinking: {type: "adaptive"}`

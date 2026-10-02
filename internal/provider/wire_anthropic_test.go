@@ -104,26 +104,28 @@ func TestAnthropicCodecEncode(t *testing.T) {
 	}
 }
 
-// TestAnthropicCodecEffort pins the effort mapping and the thinking rule together: every
-// request carries `thinking: {"type":"disabled"}`, and output_config.effort appears — with
-// carriesEffort reporting it — only for the five levels the Messages API has.
+// TestAnthropicCodecEffort pins the effort mapping and the thinking rule together: the five
+// levels the Messages API has write output_config.effort — with carriesEffort reporting it — and
+// request `thinking: {"type":"adaptive"}`; every other effort writes no output_config and requests
+// `thinking: {"type":"disabled"}`.
 func TestAnthropicCodecEffort(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		effort     Effort
-		wantEffort string // "" ⇒ no output_config at all
+		effort       Effort
+		wantEffort   string // "" ⇒ no output_config at all
+		wantThinking string
 	}{
-		{effort: "", wantEffort: ""},
-		{effort: EffortOff, wantEffort: ""},
-		{effort: EffortNone, wantEffort: ""},
-		{effort: EffortMinimal, wantEffort: ""},
-		{effort: Effort("bogus"), wantEffort: ""},
-		{effort: EffortLow, wantEffort: "low"},
-		{effort: EffortMedium, wantEffort: "medium"},
-		{effort: EffortHigh, wantEffort: "high"},
-		{effort: EffortXHigh, wantEffort: "xhigh"},
-		{effort: EffortMax, wantEffort: "max"},
+		{effort: "", wantEffort: "", wantThinking: "disabled"},
+		{effort: EffortOff, wantEffort: "", wantThinking: "disabled"},
+		{effort: EffortNone, wantEffort: "", wantThinking: "disabled"},
+		{effort: EffortMinimal, wantEffort: "", wantThinking: "disabled"},
+		{effort: Effort("bogus"), wantEffort: "", wantThinking: "disabled"},
+		{effort: EffortLow, wantEffort: "low", wantThinking: "adaptive"},
+		{effort: EffortMedium, wantEffort: "medium", wantThinking: "adaptive"},
+		{effort: EffortHigh, wantEffort: "high", wantThinking: "adaptive"},
+		{effort: EffortXHigh, wantEffort: "xhigh", wantThinking: "adaptive"},
+		{effort: EffortMax, wantEffort: "max", wantThinking: "adaptive"},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.effort), func(t *testing.T) {
@@ -143,8 +145,8 @@ func TestAnthropicCodecEffort(t *testing.T) {
 			if err := json.Unmarshal(body, &got); err != nil {
 				t.Fatalf("decode body: %v", err)
 			}
-			if got.Thinking["type"] != "disabled" {
-				t.Errorf("thinking = %v, want type disabled on every request", got.Thinking)
+			if got.Thinking["type"] != tc.wantThinking {
+				t.Errorf("thinking = %v, want type %s", got.Thinking, tc.wantThinking)
 			}
 			if carries != (tc.wantEffort != "") {
 				t.Errorf("carriesEffort = %v, want %v", carries, tc.wantEffort != "")
@@ -154,6 +156,51 @@ func TestAnthropicCodecEffort(t *testing.T) {
 				t.Errorf("output_config = %v, want absent", *got.OutputConfig)
 			case tc.wantEffort != "" && (got.OutputConfig == nil || (*got.OutputConfig)["effort"] != tc.wantEffort):
 				t.Errorf("output_config = %v, want effort %q", got.OutputConfig, tc.wantEffort)
+			}
+		})
+	}
+}
+
+// TestAnthropicCodecEffortDropsSamplingUnderThinking pins the owner call of 2026-10-02: while the
+// body requests adaptive thinking it carries none of the profile's temperature, top_p or top_k,
+// and with thinking disabled all three reach the wire as set.
+func TestAnthropicCodecEffortDropsSamplingUnderThinking(t *testing.T) {
+	t.Parallel()
+
+	temp, topP, topK := 0.2, 0.9, 40
+	cases := []struct {
+		name        string
+		effort      Effort
+		wantSampled bool
+	}{
+		{name: "adaptive thinking drops the knobs", effort: EffortHigh, wantSampled: false},
+		{name: "disabled thinking keeps the knobs", effort: EffortOff, wantSampled: true},
+		{name: "no effort keeps the knobs", effort: "", wantSampled: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			codec := &anthropicCodec{}
+			req := Request{
+				Model:          "m",
+				Messages:       []Message{{Role: "user", Content: "x"}},
+				ThinkingEffort: tc.effort,
+				Sampling:       Sampling{Temperature: &temp, TopP: &topP, TopK: &topK},
+			}
+
+			body, _, err := codec.encode(req)
+
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			for _, key := range []string{"temperature", "top_p", "top_k"} {
+				if _, present := got[key]; present != tc.wantSampled {
+					t.Errorf("%s present = %v, want %v in %s", key, present, tc.wantSampled, body)
+				}
 			}
 		})
 	}

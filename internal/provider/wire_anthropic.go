@@ -15,14 +15,15 @@ import (
 // half, in wire_anthropic_stream.go. The JSON shapes live at the foot of this file; nothing
 // outside the two branches on the Messages dialect.
 //
-// Thinking is never requested on this wire yet: every request carries
-// `thinking: {"type":"disabled"}` explicitly, because the current models run adaptive thinking
-// when the key is omitted and their thinking blocks are signed and must be replayed verbatim.
-// The codec already carries that replay: a reply's `thinking` and `redacted_thinking` blocks
+// Thinking follows the resolved effort: a named effort at or above low requests
+// `thinking: {"type":"adaptive"}` beside `output_config.effort`, and every other request —
+// off, none, minimal, or no effort at all — carries `thinking: {"type":"disabled"}` explicitly,
+// because the current models run adaptive thinking when the key is omitted. Thinking blocks are
+// signed and must be replayed verbatim: a reply's `thinking` and `redacted_thinking` blocks
 // surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock) and an assistant
-// Message's ThinkingBlocks are written back ahead of its other blocks (bead apogee-4kl).
-// `output_config.effort` is written independently of the thinking mode: it is the
-// dial the wire's models read for how hard to work, and the ratified per-wire effort mapping.
+// Message's ThinkingBlocks are written back ahead of its other blocks. While thinking is
+// requested the body drops the profile's sampling knobs (temperature, top_p, top_k), which the
+// API constrains under thinking (ADR 0078 amendment 2026-10-02).
 
 const (
 	// anthropicMessagesPath is the Messages endpoint every anthropic request is posted to.
@@ -32,8 +33,11 @@ const (
 	// anthropicDefaultMaxTokens is the `max_tokens` written when the request pins none —
 	// the field is mandatory on this wire, where chat-completions leaves it to the server.
 	anthropicDefaultMaxTokens = 4096
-	// anthropicThinkingDisabled is the one thinking mode this wire ever asks for.
+	// anthropicThinkingDisabled is the thinking mode a request with no effort above minimal asks for.
 	anthropicThinkingDisabled = "disabled"
+	// anthropicThinkingAdaptive is the thinking mode a request with a named effort (low..max)
+	// asks for: the model decides how much to think, steered by output_config.effort.
+	anthropicThinkingAdaptive = "adaptive"
 )
 
 // anthropicCodec speaks the Anthropic Messages protocol on behalf of one Client. The Messages
@@ -91,16 +95,22 @@ func (a *anthropicCodec) decodeWhole(body io.Reader) (RawResponse, *wireError, e
 // top-level `system` (blank-line joined, in order), the rest become content-block messages
 // (see anthropicMessages), tools become `tools[]` with their schema under `input_schema`,
 // `max_tokens` is always present (anthropicDefaultMaxTokens when the request pins none),
-// the sampling knobs the wire knows are written only when set — there is no repeat penalty on
-// this wire, so Sampling.RepeatPenalty is dropped — `thinking` is always disabled, and a named
-// effort at or above low lands in `output_config.effort` (off/none/minimal ask for nothing
-// and are omitted: the Messages API has no rung below low, and thinking is off regardless).
+// and a named effort at or above low lands in `output_config.effort` and requests
+// `thinking: {"type":"adaptive"}`; off/none/minimal and an absent effort write no effort and
+// request `thinking: {"type":"disabled"}` (the Messages API has no rung below low). The sampling
+// knobs the wire knows are written only when set, and only while thinking is disabled — there is
+// no repeat penalty on this wire, so Sampling.RepeatPenalty is always dropped.
 func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
+	effort, requestsThinking := anthropicEffort(req.ThinkingEffort)
 	body := anthropicRequest{
 		Model:     req.Model,
 		Stream:    req.Stream,
 		MaxTokens: anthropicDefaultMaxTokens,
 		Thinking:  anthropicThinking{Type: anthropicThinkingDisabled},
+	}
+	if requestsThinking {
+		body.Thinking.Type = anthropicThinkingAdaptive
+		body.OutputConfig = &anthropicOutputConfig{Effort: effort}
 	}
 
 	system, messages, err := anthropicMessages(req.Messages, len(req.Tools) > 0)
@@ -114,12 +124,12 @@ func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
 	if s.MaxTokens != nil {
 		body.MaxTokens = *s.MaxTokens
 	}
-	body.Temperature = s.Temperature
-	body.TopP = s.TopP
-	body.TopK = s.TopK
-
-	if effort, ok := anthropicEffort(req.ThinkingEffort); ok {
-		body.OutputConfig = &anthropicOutputConfig{Effort: effort}
+	// The API refuses most sampling values while thinking is on, so a requested thinking pass
+	// wins over the profile's knobs (owner call, 2026-10-02) rather than failing the request.
+	if !requestsThinking {
+		body.Temperature = s.Temperature
+		body.TopP = s.TopP
+		body.TopK = s.TopK
 	}
 
 	if len(req.Tools) > 0 {
@@ -312,7 +322,8 @@ type anthropicRequest struct {
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
-// anthropicThinking is the `thinking` object — only ever {"type":"disabled"} from this codec.
+// anthropicThinking is the `thinking` object: {"type":"adaptive"} when an effort resolves,
+// {"type":"disabled"} otherwise.
 type anthropicThinking struct {
 	Type string `json:"type"`
 }
