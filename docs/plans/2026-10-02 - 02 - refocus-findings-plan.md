@@ -533,7 +533,11 @@ internal/domain/uiprefs.go — UIPrefs; internal/config/registry.go — ui.* row
 Depends on item 3.
 **Commit:** `docs(context): reconcile CONTEXT.md's guard, settings and driver claims with the code`
 
-## 14. Verify, then fix: layout docs
+## 14. Verify, then fix: layout docs — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): verified against commandSpecs.whileRunning (command.go) and engineHolds.commandRunnable: layout.md had three conflicting claims (the /usage pane as "the one pane" that can sit beside a prompt, the /schedule panes plus /sub-agents-server as "the only panes" open mid-run, and an incomplete reporting-verb list); they now state one rule under "The box never goes dead while the model works": a pane opens mid-run exactly when its verb is whileRunning (the four reports, /workflows, and the picker for /effort, /schedule, /schedule-stop, /sub-agents-server).
+
+NOTES (2026-10-02): tool-layout.md: `toolDetail`/`toolDetailBright` are theme style names, not roles — now the `muted`/`muted-bright` scheme roles; `tool-leader` no longer called "new"; the "capped preview" fold wording now matches toolbranch.go (collapsedBodyRows = 0 for a targeted call, collapsedBodyCap = 2 for a targetless one). The "Rules", "Vocabulary" and "Grouped Sub-agents" headings are unchanged.
 
 **What:**
 **Goal:** `layout.md` states one rule for which panes may open mid-run, per the tui code; `docs/layout/tool-layout.md`

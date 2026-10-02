@@ -2075,8 +2075,8 @@ would scroll what is hidden.
 four: it is a question already answered rather than a decision surface, so the input box behind it
 stays live and every other key — a printable one included — goes where it always went. Its verb is safe while the agent works — the pane reads
 what the frame already holds and calls nothing — which is exactly when the question gets asked, so
-it is the one pane that can be up beside an approval or ask prompt, seated below it, nearest the
-chrome. In the give-way order it sits between the `/settings` pane and the `/inspect` pane: it
+it is one of the four reports — with `/inspect`, `/thinking` and `/advice` — that can be up beside an
+approval or ask prompt, seated below it, nearest the chrome. In the give-way order it sits between the `/settings` pane and the `/inspect` pane: it
 yields to every surface the human is acting **in**, and the panes below it — the wire-traffic view,
 and the dropdown the next keystroke re-derives among them — yield before it.
 
@@ -2436,9 +2436,9 @@ Auto-eligibility ladder has closed it. That row is still offered and still selec
 prints the reason and leaves the pane open, so `plan` is one keypress away and the prompt need not
 be retyped. `/schedule-stop` with more than one schedule live opens a third pane over them — `name`,
 `— every 1h`, `· plan`, `· running` — and stops the row that is taken. None of the three switches
-anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎ stop`. They and the `/sub-agents-server` picker are the
-only panes that open while the model is working, and they claim the keyboard there exactly as they
-do at idle.
+anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎ stop`. They open while the model is working as well as at
+idle, on the one rule stated under **The box never goes dead while the model works** below, and they claim
+the keyboard there exactly as they do at idle.
 
 **And the same overlay makes the start-up's offer about a plaintext key.** A `servers:` entry whose
 `api-key:` is written out in the config file, on a machine whose own secret store apogee can both
@@ -2596,11 +2596,17 @@ draft and joins the staged band above the box as a `queued command: /verb` row, 
 idle, and the rest of the draft stays exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
-verbs that only report (`/version`, `/help`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/confine` with no
-arguments)
-run there and then, and
-so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of
-its own, so creating or stopping one needs no quiet moment in this session.
+verbs that only report (`/version`, `/help`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/advice`,
+`/workflows`, `/confine` with no arguments) run there and then, and so do `/schedule` and
+`/schedule-stop`, which touch no engine at all: a schedule fires as a run of its own, so creating or
+stopping one needs no quiet moment in this session. So do `/sub-agents-server`, which moves only
+where the next delegation is spawned, and `/effort`, whose level is read when the next request is
+built. **That is the one rule for which panes open mid-run:** a pane opens while the model works
+exactly when its verb runs there and then — the four reports (`/usage`, `/inspect`, `/thinking`,
+`/advice`), the `/workflows` view, and the picker as `/effort`, `/schedule`, `/schedule-stop` and
+`/sub-agents-server` open it — and every other pane-opening verb (`/model`, `/server`, `/sessions`,
+`/settings`, …) wears the tag and opens at the next idle. The one pane no verb opens, a background
+workflow's waiting prompt, waits for idle too.
 
 **Prompt recall — ↑ walks what this workspace has already sent.** On an **empty** box ↑ loads the
 newest prompt sent from this workspace, caret at its end; further ↑ steps older and stops at the

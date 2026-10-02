@@ -44,7 +44,7 @@ closer is drawn today.
   umbrella header acts on the umbrella.
 - grouped tool calls should display the group-count
 - expanded tools should be printed with a brighter gray than collapsed
-  (existing roles: `toolDetail` / `toolDetailBright`)
+  (scheme roles `muted` / `muted-bright`)
 - Sub-agent calls group with **each other** (`✦ Sub-Agent (N)`, one row per
   agent: name left, stat right; expanding a member opens its span) but never
   join a super-group — a sub-agent block or group breaks the run.
@@ -55,7 +55,7 @@ closer is drawn today.
   twice, not two: a call that groups with its OWN kind never joins the mixed
   super-group.
 - dotted lines like `⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯` must be painted in a damped color
-  (new `tool-leader` scheme role, dark + light values)
+  (the `tool-leader` scheme role, dark + light values)
 - **time order is always kept.** Calls are never reordered to merge calls of
   one tool type that were not adjacent; a super-group gets one row per
   *consecutive run* (`read_file, terminal, read_file` = three rows).
@@ -127,9 +127,11 @@ closer is drawn today.
 
 ## Fold states and interaction
 
-- Exactly **two states** per call: collapsed (capped preview + count in the
-  outcome slot, as today) and expanded (the whole body) with a `see less…`
-  footer as an extra collapse target. No third stage; scrollback handles long
+- Exactly **two states** per call: collapsed and expanded (the whole body)
+  with a `see less…` footer as an extra collapse target. Collapsed, a call
+  with a target shows no body line at all — its header and its one target
+  row, the hidden body counted in the outcome slot — and a call with no
+  target shows its first two lines and counts the rest the same way. No third stage; scrollback handles long
   bodies. This holds for the delegation row too, and the **run view** is no
   exception to it: a framed sub-agent has one state, collapsed, and opening it
   opens a different *surface* rather than a third fold stage of the row

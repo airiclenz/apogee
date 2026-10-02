@@ -5,7 +5,7 @@
 Arrow keys (up and down) navigate.
 Enter selects the item and sends the answer.
 ~~If shortcuts are given, the directly select the corresponding item and send the answer.~~
-Please refer to the menu system UI-laypout in llama-launcher for reference.
+The rules both menus follow on screen — height, pointer, chrome — are `layout.md`'s.
 
 > Amended 2026-08-04 by `docs/plans/archived/2026-08-04 - 03 - user-questions-menu-layout-plan.md`,
 > whose ratified design calls struck the digit shortcuts out ("no digit shortcuts"): a question's
