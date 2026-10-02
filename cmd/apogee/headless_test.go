@@ -1779,6 +1779,33 @@ func TestHeadlessOutputRouting(t *testing.T) {
 	})
 }
 
+// TestClipSubAgentTaskPrintsAnExactFitWhole pins where the sub-agent label's fit test sits: the
+// ellipsis is spent from headlessTaskMax rather than added past it, but only a label LONGER than
+// the cap pays for it — one of exactly headlessTaskMax runes prints whole, not clipped to make room
+// for a mark it does not need. Runes, not bytes, so a multibyte label fits on the same terms.
+func TestClipSubAgentTaskPrintsAnExactFitWhole(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"under the cap", strings.Repeat("a", headlessTaskMax-1), strings.Repeat("a", headlessTaskMax-1)},
+		{"exactly the cap", strings.Repeat("a", headlessTaskMax), strings.Repeat("a", headlessTaskMax)},
+		{"exactly the cap, multibyte", strings.Repeat("é", headlessTaskMax), strings.Repeat("é", headlessTaskMax)},
+		{"one past the cap", strings.Repeat("a", headlessTaskMax+1), strings.Repeat("a", headlessTaskMax-1) + "…"},
+		{"one past the cap, multibyte", strings.Repeat("é", headlessTaskMax+1), strings.Repeat("é", headlessTaskMax-1) + "…"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := clipSubAgentTask(tc.in); got != tc.want {
+				t.Errorf("clipSubAgentTask(%d runes) = %q, want %q", len([]rune(tc.in)), got, tc.want)
+			}
+		})
+	}
+}
+
 // TestHeadlessPrintsTheContextFileNotices is this Driver's half of the context-files parity call:
 // what a session narrates in its transcript, an unattended run says on stderr — every notice, the
 // plain record of what loaded as much as the two anomalies, because a script's operator has no

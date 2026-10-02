@@ -40,7 +40,9 @@
 //
 //   - [ClampRunes] cuts text to a rune budget on a rune boundary, with no trim and no ellipsis —
 //     the one clamp for a gate's reason, a skill's summary and a delegation's cause, which used to
-//     be three private copies (internal/agent twice, internal/skills once).
+//     be three private copies (internal/agent twice, internal/skills once). The display clips that
+//     mark a cut with an ellipsis (internal/title, the TUI, the headless Driver) cut through it as
+//     well and keep only their marking rule.
 //   - [FirstLine] reduces text to its first line, trimmed — the form every single-line display
 //     paints a delegation's name or task in, spelled once for the recursion point, the ledger, the
 //     headless Driver and internal/title's DelegateLabel.

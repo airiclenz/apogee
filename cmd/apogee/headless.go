@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -1470,10 +1471,14 @@ const headlessTaskMax = 80
 // (headlessSubAgentTarget): it stands in the same slot, and a name is not licence to be wider. So
 // is the live narration's summary and error text (narrationLine): one width for every label this
 // Driver prints beside a tool or a delegation.
+//
+// The cut itself is sanitize.ClampRunes; what stays here is the one way this rule differs from the
+// other clips: the ellipsis is spent from the cap rather than added past it, so the fit test runs
+// at headlessTaskMax and only a longer label is clamped, to headlessTaskMax-1. A label of exactly
+// headlessTaskMax runes therefore prints whole.
 func clipSubAgentTask(task string) string {
-	runes := []rune(task)
-	if len(runes) <= headlessTaskMax {
+	if utf8.RuneCountInString(task) <= headlessTaskMax {
 		return task
 	}
-	return string(runes[:headlessTaskMax-1]) + "…"
+	return sanitize.ClampRunes(task, headlessTaskMax-1) + "…"
 }

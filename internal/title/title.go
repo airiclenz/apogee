@@ -394,13 +394,15 @@ func excerpt(s string) string {
 }
 
 // capRunes trims s to limit RUNES — the characters the model reads, not bytes — marking a cut
-// with an ellipsis so the model knows it is reading an opening rather than a whole request.
+// with an ellipsis so the model knows it is reading an opening rather than a whole request. The cut
+// is sanitize.ClampRunes; the rule it adds is the marking: a cut line loses the whitespace the cut
+// left trailing before the ellipsis goes on, where the plain clamp trims nothing.
 func capRunes(s string, limit int) string {
-	runes := []rune(s)
-	if len(runes) <= limit {
+	clamped := sanitize.ClampRunes(s, limit)
+	if clamped == s {
 		return s
 	}
-	return strings.TrimRight(string(runes[:limit]), " \t\n") + "…"
+	return strings.TrimRight(clamped, " \t\n") + "…"
 }
 
 // Sanitize turns a raw reply into a session title, reporting ok=false when nothing usable
@@ -606,16 +608,18 @@ func truncate(s string, maxRunes int) string {
 // to the three it replaced on every input, ASCII or not. On a multibyte line the byte index runs
 // ahead of the rune one, so the floor is cleared sooner than "60% of the characters" reads — a
 // quirk the tests pin against today's output rather than against an idealised rune boundary.
+//
+// The hard cut is sanitize.ClampRunes; the rule Clip keeps for itself is the word boundary and the
+// ellipsis past the cap, neither of which the plain clamp makes.
 func Clip(text string, max int) string {
 	line := strings.TrimSpace(text)
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = strings.TrimSpace(line[:i])
 	}
-	runes := []rune(line)
-	if len(runes) <= max {
+	truncated := sanitize.ClampRunes(line, max)
+	if truncated == line {
 		return line
 	}
-	truncated := string(runes[:max])
 	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > max*6/10 {
 		truncated = truncated[:lastSpace]
 	}

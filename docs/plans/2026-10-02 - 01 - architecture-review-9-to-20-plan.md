@@ -637,7 +637,11 @@ instead of `m.spin.style`/`m.spin.color`; no new test.
 - `grep -c "spin\.style\|spin\.color" internal/tui/*.go` prints `0` for every file (today 2/3/5)
 **Commit:** `refactor(tui): read UI preferences instead of mirroring them`
 
-## 21. Rune clipping goes through sanitize.ClampRunes (#20d)
+## 21. Rune clipping goes through sanitize.ClampRunes (#20d) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): all four helpers stay as functions and make their rune cut through sanitize.ClampRunes; each keeps only its own marking rule, named in its comment — capRunes trims trailing whitespace before the ellipsis, Clip keeps the 60% word boundary, clipRunes adds the ellipsis past the cap, clipSubAgentTask fits at headlessTaskMax and clamps to headlessTaskMax-1 (fit test now utf8.RuneCountInString). Output bytes unchanged.
+NOTES (2026-10-02): the exactly-headlessTaskMax pin is the new TestClipSubAgentTaskPrintsAnExactFitWhole (cmd/apogee/headless_test.go), a table over clipSubAgentTask covering under, exactly and one past the cap, in ASCII and multibyte.
+NOTES (2026-10-02): consequential edit — internal/sanitize/doc.go: made necessary by the display clips now cutting through ClampRunes (its bullet listed only the gate/skill/delegation callers).
 
 **What:**
 **Goal:** `capRunes` and `Clip` (`internal/title/title.go`), `tui/textutil.go` `clipRunes` and `cmd/apogee/headless.go`

@@ -193,7 +193,10 @@ func lineRunes(runes []rune) int {
 // wants the cut marked (the "…" a ledger row or a delegation label carries) decides that on the
 // result, by comparing it with what went in. It is the one clamp for text that must fit a fixed
 // budget — a gate's reason, a skill's summary, a delegation's cause — where the budget is a rune
-// count and nothing else.
+// count and nothing else. The display clips that do mark a cut make it through this clamp too
+// (internal/title's capRunes and Clip, the TUI's clipRunes, the headless Driver's
+// clipSubAgentTask): each keeps only its own marking rule — a trim, a word boundary, an ellipsis
+// past the cap or inside it — and none spells the rune cut for itself.
 func ClampRunes(s string, n int) string {
 	runes := []rune(s)
 	if len(runes) <= n {

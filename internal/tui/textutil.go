@@ -3,6 +3,8 @@ package tui
 import (
 	"strconv"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // ----------------------------------------------------------------------------
@@ -55,12 +57,15 @@ func clipDetail(s string) string {
 // Sub-agent line (approvalTaskClipRunes), and in both the rune spend is settled at the caller
 // rather than being a shortfall to be swept: see detailClipRunes for why the transcript's bound is
 // allowed to be a rune count where the status line's is not.
+//
+// The cut is sanitize.ClampRunes; the one thing this clip adds is the mark: a cut text gets an
+// ellipsis past the n runes, where the plain clamp appends nothing.
 func clipRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
+	clamped := sanitize.ClampRunes(s, n)
+	if clamped == s {
 		return s
 	}
-	return string(r[:n]) + "…"
+	return clamped + "…"
 }
 
 // plural renders "1 result" / "3 results" — count plus the word, naively pluralised.
