@@ -4,9 +4,9 @@
 review plus the two deferred teardown globals, as behaviour-preserving refactors except where an
 item says otherwise. The review records #1–#8 as landed.
 **Date:** 2026-10-02
-**Status:** unexecuted
+**Status:** in progress — items 1–19 done; 20–23 pending
 **sized for:** ~200k-context host
-**base:** f68c5c56
+**base:** 75c04f57
 **Sources:**
 - `docs/reviews/architecture-review-2026-09-30.html` (candidates #9–#20)
 - archived plans `2026-09-30 - 00/01/02` (their "Not covered" lines), `2026-10-01 - 00`
@@ -65,6 +65,7 @@ item says otherwise. The review records #1–#8 as landed.
 - 6: guard folded (prose grep widened to `cannotApply`'s doc and TestRunRootWiresTheLiveApplySeam's reactions block; removal-count Acceptance grep).
 - 7: guard folded (decision: loop-built rows carry no `reaches`, KeyRegistry order, config's derived var follows the domain table; comment grep over the five sites; `config/reactions.go:65-68` no longer claimed true; literal-count Acceptance greps).
 - 20: guard folded (`paintcache.go`, `mouse_test.go`, `model_test.go` in Files; blink/spinner tests run by name; Goal restated; `spin.style|spin.color` grep; the field-reading test sites rewritten instead of a new test).
+- refresh (2026-10-02, after items 1–19 landed): items 20–23 re-checked at the new base; 20's mouse_test.go site re-pointed, 23 names the moved constructors; multi-package race commands split one per package.
 
 ## 1. The review records #1–#8 as landed — ✅ DONE (2026-10-02)
 
@@ -435,7 +436,8 @@ internal/keystore/keystore_test.go — TestMain, useFakeTools, probedStore, padT
 test in `keystore_unix_test.go` that a timed-out tool's child is killed (fails before).
 **Acceptance:**
 - `go vet ./internal/userexec/ ./internal/keystore/`
-- `go test -race -count=1 ./internal/userexec/ ./internal/keystore/`
+- `go test -race -count=1 ./internal/userexec/`
+- `go test -race -count=1 ./internal/keystore/`
 **Commit:** `fix(keystore): run credential tools through userexec for whole-tree teardown`
 
 ## 13. The subprocess teardown constructor is injected — ✅ DONE (2026-10-02)
@@ -478,7 +480,9 @@ internal/mcp/transport.go — buildStdioTransport; internal/mcp/client.go — Ho
 **Acceptance:**
 - `GOOS=windows go vet ./internal/platform/ && go vet ./internal/platform/ ./internal/subprocess/ ./internal/mcp/`
 - `grep -rn "^var ProcessWaitDelay" internal/platform/` prints nothing
-- `go test -race -count=1 ./internal/platform/ ./internal/subprocess/ ./internal/mcp/`
+- `go test -race -count=1 ./internal/platform/`
+- `go test -race -count=1 ./internal/subprocess/`
+- `go test -race -count=1 ./internal/mcp/`
 **Commit:** `refactor(platform): make the process wait delay a default callers override`
 
 ## 15. The audit ring goes; the event stream is the trail (#16) — ✅ DONE (2026-10-02)
@@ -525,7 +529,9 @@ NOTES (2026-10-02): `Agent.StartRecipe` renders from the resolved `recipe.ID` (n
 **Read first:** internal/domain/config.go — RecipeLaunch; internal/daemon/file.go — WorkflowAction.Launch (keep its empty-Recipe ""); internal/daemon/diff.go — Entry.Spec; internal/run/run.go — Spec.line, Spec.title; internal/agent/recipe.go — StartRecipe; internal/daemon/diff_test.go — the Launch table cases
 **Tests:** a `Line()` table test (with and without inputs).
 **Acceptance:**
-- `go test -race -count=1 ./internal/domain/ ./internal/daemon/ ./internal/run/`
+- `go test -race -count=1 ./internal/domain/`
+- `go test -race -count=1 ./internal/daemon/`
+- `go test -race -count=1 ./internal/run/`
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestRecipe_StartRecipeSubmitsTheLaunch$|^TestRecipe_StartRecipeRefusals$|^TestRecipe_ALeadingReferenceLaunchesAndTheFirstRequestCarriesTheResultLines$|^TestRecipeStartedEventCarriesResume$|^TestCancelledRecipeLaunchKeepsItsOpening$|^TestLaunch_BackgroundAndResumeSharePlanAndRecipeWiring$' ./internal/agent/`
 **Commit:** `refactor(domain): render the recipe launch line in one place`
 
@@ -575,7 +581,8 @@ yields to ADR 0075 — a new wire member would fall under its versioning rule.
 internal/agent/state.go — PendingInput, restore checks; internal/agent/state_test.go — TestSnapshot_RestoresPendingInput, TestRestore_RefusesAForgedOrOversizedPendingInput; internal/agent/workflowcall.go — resumeHint, resumeCommand
 **Tests:** a pending-input snapshot round-trip with `Recipe` set and one without.
 **Acceptance:**
-- `go test -race -count=1 ./internal/domain/ ./internal/eventjson/`
+- `go test -race -count=1 ./internal/domain/`
+- `go test -race -count=1 ./internal/eventjson/`
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestRecipe_StartRecipeSubmitsTheLaunch$|^TestRecipe_StartRecipeRefusals$|^TestRecipe_ALeadingReferenceLaunchesAndTheFirstRequestCarriesTheResultLines$|^TestRecipe_AMidTextReferenceAttachesTheBody$|^TestRecipe_InterjectRefusesALaunch$|^TestRecipe_ADelegateLaunchesNothing$|^TestCancelledRecipeLaunchKeepsItsOpening$|^TestSnapshot_RestoresPendingInput$|^TestRestore_RefusesAForgedOrOversizedPendingInput$' ./internal/agent/` plus the round-trip tests this item adds
 **Commit:** `refactor(agent): hand the recipe launch to the step instead of re-parsing it`
 
@@ -611,7 +618,7 @@ Behaviour unchanged.
 fold seed read with no Model in reach (document that on the fields) and the setters' repaint bumps stay; only the spinner's
 style/color stop mirroring and read UIPrefs. The item yields to transcript.go:55-66 (the fold seed lives on the transcript for
 `ws`'s reason).
-Re-check: interval/blink/framesPerBlinkHalf/view change, so their callers paintcache.go:446, mouse_test.go:1967 and model_test.go:6558 are in
+Re-check: interval/blink/framesPerBlinkHalf/view change, so their callers paintcache.go:446, mouse_test.go:1786 and model_test.go:6558 are in
 Files and their tests run; the field-reading test sites (settings_test.go:844,1676; spinner_test.go:886-903) are rewritten to assert the
 painted glyph instead of adding a duplicate test (settingsApplyLocal already moves m.spin, so a new test passes pre-item).
 **Files:** internal/tui/settingsapply.go; internal/tui/spinner.go; internal/tui/transcript.go; internal/tui/model.go; internal/tui/paintcache.go; internal/tui/settingsapply_test.go; internal/tui/settings_test.go; internal/tui/spinner_test.go; internal/tui/mouse_test.go; internal/tui/model_test.go
@@ -671,14 +678,14 @@ internal/provider/localdial_test.go — stubResolver, stubMDNS, TestLocalFallbac
 **What:** Depends on item 2.
 **Goal:** `domain.Request`, `domain.Response` and `domain.Conversation` (with their methods) live
 in `internal/domain/request.go` (`Request`, `NewRequest`, `RequestState`, `SamplingParams`, `MergeSystem`),
-`response.go` (`Response`, `FinishReason`) and `conversation.go` (`Conversation`, `conversationJSON`); `hooks.go` keeps the hook
+`response.go` (`Response`, `NewResponse`, `FinishReason`) and `conversation.go` (`Conversation`, `NewConversation`, `conversationJSON`); `hooks.go` keeps the hook
 types, `Message` and the shared helpers; `domain/doc.go`'s map names the new files. Pure move.
 **Regression guard.** Each new file's set is the Goal's; `firstIndex`, `lastIndex`, `insertMessage` and `cloneRawMap` stay in
 hooks.go. Prose rule: every in-code comment that places Request/Response/Conversation or their methods in domain/hooks.go —
 `grep -rn 'hooks\.go' internal/ | grep -v 'internal/reactions\|internal/config'` (hooks.go's header, domain/doc.go,
 tooledit.go, agent/subagent.go's wrap-up marker). ADRs 0001, 0017 and 0046 are history and stay.
 **Files:** internal/domain/hooks.go; internal/domain/request.go; internal/domain/response.go; internal/domain/conversation.go; internal/domain/doc.go; internal/domain/tooledit.go; internal/agent/subagent.go
-**Read first:** internal/domain/hooks.go — header comment, Request, NewRequest, SamplingParams, MergeSystem, Response, FinishReason, Conversation, conversationJSON, firstIndex; internal/domain/doc.go — "The loop's working values" paragraph; internal/domain/docmap_test.go — TestDocMapNamesEveryFile;
+**Read first:** internal/domain/hooks.go — header comment, Request, NewRequest, SamplingParams, MergeSystem, Response, NewResponse, FinishReason, Conversation, NewConversation, conversationJSON, firstIndex; internal/domain/doc.go — "The loop's working values" paragraph; internal/domain/docmap_test.go — TestDocMapNamesEveryFile;
 internal/domain/hooks_test.go; internal/domain/tooledit.go — header comment; internal/agent/subagent.go — wrap-up marker comment
 **Tests:** existing domain tests green, docmap included.
 **Acceptance:**
