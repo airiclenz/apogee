@@ -8,7 +8,7 @@ doc lines are corrected; Anthropic signed thinking is carried and replayed.
 **sized for:** ~200k-context host
 **base:** f68c5c56
 **Sources:**
-- `docs/handoffs/2026-10-02 - 00 - refocus findings and plan for planned items 1-4.md`
+- `docs/handoffs/archived/2026-10-02 - 00 - refocus findings and plan for planned items 1-4.md`
 - beads `apogee-windows-confiner-test-failures`, `apogee-refused-hold-followers-move`, `apogee-4kl`
 - `SECURITY.md`; ADR 0012 Amendment 2026-07-26 (operator-named endpoints); ADR 0043 D4; ADR 0078 D4; ADR 0050
 - `docs/design/confinement-execution-contract.md` (ResolveProgram amendment 2026-08-30)
@@ -57,7 +57,10 @@ doc lines are corrected; Anthropic signed thinking is carried and replayed.
 - decision round:
 - 12: recast (writer decision: adaptive thinking drops profile temperature/top_p/top_k in `buildBody`; sampling bytes unchanged at effort off/unset; ADR 0078 amendment + manual say so; request-extra caveat kept)
 
-## 1. Bookkeeping: archive superseded handoffs, close the Windows confiner bead
+## 1. Bookkeeping: archive superseded handoffs, close the Windows confiner bead — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): all four FILES paths are ignored by docs/handoffs/.gitignore (`*` / `!.gitignore`), so the plain `mv` leaves `git status --porcelain` empty — nothing to stage and no per-item commit; the bead close (closeout `bd close`, reason: fixed by 8c76961a, owner saw both tests pass on windows/arm64) carries the item's only tracked change.
+NOTES (2026-10-02): the one repo link to an old handoff path is the plan header's Sources line; left unedited because implementers never write into the plan document — the verifier or closeout may repoint it to docs/handoffs/archived/.
 
 **What:**
 **Goal:** `docs/handoffs/` holds neither the 2026-09-30 nor the 2026-10-02 refocus handoff (both
