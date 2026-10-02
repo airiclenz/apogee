@@ -24,7 +24,6 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
-	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -838,6 +837,12 @@ func (s *liveSettings) rebindInputs(bound upstreamBinding) (config.Options, int,
 // constructor that grows an argument per key class. It is composed at the composition root, where all
 // six members already exist, and it is what makes the dispatcher exercisable without a session: every
 // member is either a narrow interface, a closure, or a plain value a test can supply.
+//
+// It is TOTAL: the one Driver that builds it (rootWiring.options) sets every member, so the
+// dispatcher dereferences what an entry needs without asking first, and no key refuses over a
+// member the Driver left out. The reachability seam that let a Driver compose a partial applier —
+// a per-key predicate, read before the apply — returns when a second Driver builds an applier out
+// of less than the whole set.
 type settingsApplier struct {
 	// engine is the anytime-safe mutator class: a key here is in force the moment it returns.
 	engine settingsEngine
@@ -864,12 +869,6 @@ type settingsApplier struct {
 	// mcp is the session's live MCP connections: the one key whose apply is a reconnect rather than a
 	// write, and the source of half the tool set the door above swaps.
 	mcp *liveMCP
-	// hooks is the session's Reaction Runner (ADR 0073), which a re-read `reactions:` list is swapped
-	// into wholesale — through the engine's one generation door (ADR 0076 A8), which holds the Runner
-	// itself, so nothing here calls it. It is held as the `reactions` row's REACHABILITY: nil ⇒ this
-	// Driver composed no Runner and an armed list would fire nowhere, so the key refuses on its own
-	// row rather than reporting an edit that reached nothing.
-	hooks *reactions.Runner
 	// present is the presentation ladder, which rebuilds from a changed `present:` block and
 	// re-installs itself on the presenter the engine holds.
 	present *livePresentation
@@ -878,16 +877,15 @@ type settingsApplier struct {
 	roots stateRoots
 	// caps is the session's Parallel agents cap (ADR 0039), reached by exactly one key: a re-read
 	// `servers:` list can carry a new `parallel-agents:` for the entry this session is already on, and
-	// that is a value the engine holds. nil ⇒ this Driver composed no cap, so the list still applies
-	// and only the width stands still.
+	// that is a value the engine holds. reloadServers skips a nil one, leaving the list applied and
+	// only the width standing still.
 	caps *parallelAgentsCap
 	// delegation is the Sub-agent server (ADR 0045), reached by that same one key: the flag lives on
-	// a `servers:` entry, so adding, removing or re-pointing it is a `servers:` edit. nil ⇒ this
-	// Driver routes no delegations, and the list applies with routing left where it was.
+	// a `servers:` entry, so adding, removing or re-pointing it is a `servers:` edit. reloadServers
+	// skips a nil one, applying the list with routing left where it was.
 	delegation *delegationWiring
 	// stats is the session's per-server stats recorder (ADR 0085), which the `server-stats` row
-	// opens or stops live. nil ⇒ this Driver records no stats, and the row refuses on its own
-	// row rather than reporting an edit that reached nothing.
+	// opens or stops live.
 	stats *statsRecorder
 }
 
@@ -899,8 +897,7 @@ type settingsApplier struct {
 // (ADR 0031: the engine is handed values, never config text).
 //
 // The keys themselves are settingsTable below — one entry per key, carrying both what the apply
-// needs composed and the apply itself — so this is a lookup rather than a switch, and the
-// reachability question the same lookup read one field over (unreachable).
+// needs and the apply itself — so this is a lookup rather than a switch.
 //
 // It returns the row's boundary note and the apply's refusal. A key this build cannot apply is an
 // ERROR naming the key rather than a silent success: the write has already landed, so the honest
@@ -936,15 +933,8 @@ type settingsApplier struct {
 // holder doc closes are the only ones that do not.
 func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
-		// A member this Driver did not compose is a legitimate configuration rather than a bug (ADR
-		// 0031: the engine stays sufficient for any Driver), so the key it would have been reached
-		// through is refused in the dispatcher's own words — never dereferenced. Asked first, so a
-		// key that cannot land does no work on its way to saying so.
-		if err := a.unreachable(key); err != nil {
-			return "", err
-		}
-		// A key with no entry at all is the refusal from the other side: this build knows no seam for
-		// it, so the file changed and the session did not.
+		// A key with no entry is the one refusal: this build knows no seam for it, so the file
+		// changed and the session did not.
 		entry, ok := settingsEntryFor(key)
 		if !ok {
 			return "", cannotApply(key)
@@ -959,9 +949,6 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 type settingsEntry struct {
 	// key is the registry path the pane names this setting by (config.KeyRegistry).
 	key string
-	// reaches reports whether this applier holds every member the apply below dereferences — the
-	// predicate unreachable answers with, negated.
-	reaches func(a settingsApplier) bool
 	// apply puts the committed value into effect and answers the row's boundary note. It is handed
 	// the key as well as the value because one apply can serve a GROUP of rows — the four `present.`
 	// keys rebuild one ladder, the two `url-safety:` lists move through one door — and the key is
@@ -970,10 +957,7 @@ type settingsEntry struct {
 }
 
 // settingsTable is the ONE list of keys a committed edit can reach the running session through.
-// Both entry points are lookups over it — applySettingFor runs the entry's apply, unreachable
-// negates the entry's reaches — so the drift the two switches this replaced could fall into (a key
-// wired into one and not the other, which is a panic on the Update goroutine) has nowhere to
-// happen: there is no second list of keys to keep in step.
+// applySettingFor is a lookup over it, so there is no second list of keys to keep in step with it.
 //
 // It is kept in config.KeyRegistry order, which is the order the pane renders the rows in, so the
 // surface and the table can be read side by side (TestSettingsTableIsInRegistryOrder). A key with
@@ -982,11 +966,6 @@ type settingsEntry struct {
 var settingsTable = []settingsEntry{
 	{
 		key: "servers",
-		// The holder alone is enough to ACCEPT this key: the list itself reaches no engine seam (ADR
-		// 0036), and the rebind the bound entry's two token pins ride is conditional — asked for only
-		// by an edit that moved one of them. Requiring the whole riding triple here would refuse every
-		// list edit on a Driver that composed no rebind, for a ride most list edits never ask for.
-		reaches: reachesTheHolder,
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// Most of the `servers:` list reaches no engine seam at all: it is the single upstream
 			// definition (ADR 0036) that the picker, the `/server` switch and the choice recording
@@ -1009,9 +988,8 @@ var settingsTable = []settingsEntry{
 			// one spec and one ride carries them all. A rebind is not free: it re-resolves every per-model
 			// binding, resets the token estimator and the compaction latch, and is idle-only, so an
 			// edit to some OTHER entry that drove one would refuse mid-Exchange to install numbers
-			// nobody changed. And a Driver that composed no rebind to ride installs the list and stands
-			// still on both bounds, the posture reloadServers' own optional members take.
-			if !moved || !a.rides() {
+			// nobody changed.
+			if !moved {
 				return "", nil
 			}
 			return "", a.rideTheRebind()
@@ -1022,7 +1000,6 @@ var settingsTable = []settingsEntry{
 		// The swap door, `tools.disabled`'s class: what the gate decides is which SCHEMA sub_agent
 		// publishes, and that is settled when the tool is constructed — so moving it builds the set
 		// again and hands it to the engine (ADR 0037 binding F), rather than writing on a tool.
-		reaches: reachesTheSwapDoor,
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// An empty value is the pane's RESET, and it means what an absent key means: `fixed`, the
 			// seat the `sub-agents-server:` key picks on its own — the row's own Default, which is what
@@ -1043,8 +1020,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "mode",
-		reaches: reachesTheEngine,
+		key: "mode",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// Hand-written rather than landed through the row (landSetting): the apply is an engine
 			// push of a domain.Mode, not an Options edit — the row's Set lands the file's word onto
@@ -1060,31 +1036,26 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "system-prompt-text",
-		reaches: settingsApplier.rides,
-		apply:   applySystemPromptBlock,
+		key:   "system-prompt-text",
+		apply: applySystemPromptBlock,
 	},
 	{
-		key:     "system-prompt-file",
-		reaches: settingsApplier.rides,
-		apply:   applySystemPromptBlock,
+		key:   "system-prompt-file",
+		apply: applySystemPromptBlock,
 	},
 	{
 		// The fourth key of the same one prompt (ADR 0064 §2), so it lands on the same apply: what
 		// the switch changes is which prompt the block resolves to, and only the re-resolution can
 		// say that.
-		key:     "use-default-prompt",
-		reaches: settingsApplier.rides,
-		apply:   applySystemPromptBlock,
+		key:   "use-default-prompt",
+		apply: applySystemPromptBlock,
 	},
 	{
-		key:     "system-prompt-models",
-		reaches: settingsApplier.rides,
-		apply:   applySystemPromptBlock,
+		key:   "system-prompt-models",
+		apply: applySystemPromptBlock,
 	},
 	{
-		key:     "context-files.enable",
-		reaches: reachesTheEngineAndTheHolder,
+		key: "context-files.enable",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// Hand-written rather than landed through the row: the switch owns no Options field (its
 			// registry row has no Set — the block resolves to ONE list, and the pair the pane edits is
@@ -1102,8 +1073,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "context-files.names",
-		reaches: reachesTheEngineAndTheHolder,
+		key: "context-files.names",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The value arrives as the FILE spells it — the one-line flow sequence the writer just
 			// rendered — and is read back by the same parse, so the engine is handed the list a reader
@@ -1115,8 +1085,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "web-search-endpoint",
-		reaches: reachesTheSwapDoor,
+		key: "web-search-endpoint",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			if err := a.tools.setSearchEndpoint(value, a.engine); err != nil {
 				return "", err
@@ -1126,8 +1095,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "mcp-servers",
-		reaches: func(a settingsApplier) bool { return a.mcp != nil && a.tools != nil && a.engine != nil },
+		key: "mcp-servers",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
 			// re-resolved into a holder either: it is dialled, and the session moves onto the servers
@@ -1137,8 +1105,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "tools.disabled",
-		reaches: reachesTheSwapDoor,
+		key: "tools.disabled",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The roster reaches the session as a whole tool SET rather than as a value on a tool, so
 			// this is the swap door and not a re-point (setDisabled). The value arrives as the FILE
@@ -1162,18 +1129,15 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "url-safety.allow-hosts",
-		reaches: reachesTheSwapDoor,
-		apply:   applyURLSafetyHosts,
+		key:   "url-safety.allow-hosts",
+		apply: applyURLSafetyHosts,
 	},
 	{
-		key:     "url-safety.deny-hosts",
-		reaches: reachesTheSwapDoor,
-		apply:   applyURLSafetyHosts,
+		key:   "url-safety.deny-hosts",
+		apply: applyURLSafetyHosts,
 	},
 	{
-		key:     "use-project-skills",
-		reaches: func(a settingsApplier) bool { return a.skills != nil },
+		key: "use-project-skills",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			return applySkillSourceGate(a, key, value, func(src *skills.Sources, landed config.Options) {
 				src.UseProjectSkills = landed.UseProjectSkills
@@ -1181,8 +1145,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "use-shipped-skills",
-		reaches: func(a settingsApplier) bool { return a.skills != nil },
+		key: "use-shipped-skills",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			return applySkillSourceGate(a, key, value, func(src *skills.Sources, landed config.Options) {
 				src.UseShippedSkills = landed.UseShippedSkills
@@ -1190,8 +1153,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "auto-compact",
-		reaches: reachesTheEngine,
+		key: "auto-compact",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			landed, err := landSetting(key, value)
 			if err != nil {
@@ -1207,8 +1169,7 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
-		key:     "prune-tool-results",
-		reaches: reachesTheEngine,
+		key: "prune-tool-results",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			landed, err := landSetting(key, value)
 			if err != nil {
@@ -1229,102 +1190,85 @@ var settingsTable = []settingsEntry{
 	// engine. Nothing else about them is special: each is an ordinary editable bool, on by default,
 	// in force the moment its apply returns.
 	{
-		key:     "tool-use-enforcer",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "tool-use-enforcer",
+		apply: applyFloorGuard,
 	},
 	{
-		key:     "empty-response-recovery",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "empty-response-recovery",
+		apply: applyFloorGuard,
 	},
 	{
-		key:     "tool-call-repair",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "tool-call-repair",
+		apply: applyFloorGuard,
 	},
 	{
-		key:     "tool-loop-breaker",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "tool-loop-breaker",
+		apply: applyFloorGuard,
 	},
 	{
-		key:     "tool-result-cap",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "tool-result-cap",
+		apply: applyFloorGuard,
 	},
 	{
-		key:     "read-cache",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "read-cache",
+		apply: applyFloorGuard,
 	},
 	{
-		key:     "tool-call-salvage",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
+		key:   "tool-call-salvage",
+		apply: applyFloorGuard,
 	},
 	// The context-fill notice's switch (ADR 0077): the seven Floor rows' shape — one field of the
 	// generation the single seam takes, so the row needs the holder for the fields it does not
 	// name — but not a Floor guard, so it takes no part in their negation seam and ships off.
 	{
-		key:     "context-fill-notice",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyContextFillNotice,
+		key:   "context-fill-notice",
+		apply: applyContextFillNotice,
 	},
 	{
 		key: "delegate-max-steps",
-		// No member of the applier is needed: the bound reaches no engine seam and rides no
-		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// The bound reaches no engine seam and rides no re-resolution: the apply is the mirror onto
+		// the holder a Firing composes from.
+		apply: applyMirror,
 	},
 	{
 		key: "delegate-fanout-rounds",
-		// As delegate-max-steps above: no member, no seam, no re-resolution.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// As delegate-max-steps above: no seam, no re-resolution.
+		apply: applyMirror,
 	},
 	{
 		key: "delegate-max-depth",
-		// As delegate-max-steps above: no member, no seam, no re-resolution.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// As delegate-max-steps above: no seam, no re-resolution.
+		apply: applyMirror,
 	},
 	{
 		key: "delegate-max-tokens",
-		// As delegate-max-steps above: no member, no seam, no re-resolution.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// As delegate-max-steps above: no seam, no re-resolution.
+		apply: applyMirror,
 	},
 	{
 		key: "delegate-timeout",
-		// As delegate-max-steps above: no member, no seam, no re-resolution.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// As delegate-max-steps above: no seam, no re-resolution.
+		apply: applyMirror,
 	},
 	{
 		key: "stream-idle-timeout",
-		// As delegate-max-steps above: no member, no seam, no re-resolution.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// As delegate-max-steps above: no seam, no re-resolution.
+		apply: applyMirror,
 	},
 	{
 		key: "re-stream-budget",
-		// As delegate-max-steps above: no member, no seam, no re-resolution.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		// As delegate-max-steps above: no seam, no re-resolution.
+		apply: applyMirror,
 	},
 	{
 		key: "server-stats",
 		// The recorder alone: the store it opens or stops is a Driver sink, never an engine seam,
 		// so the switch is in force at the next upstream attempt (ADR 0037 decision 8).
-		reaches: func(a settingsApplier) bool { return a.stats != nil },
-		apply:   applyServerStats,
+		apply: applyServerStats,
 	},
 	{
-		key:     "undo-snapshots",
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		key:   "undo-snapshots",
+		apply: applyMirror,
 	},
 	{
 		key: "remember-model",
@@ -1333,14 +1277,11 @@ var settingsTable = []settingsEntry{
 		// it gates is a WRITE apogee will make later — the entry key an explicit `/model` pick or a
 		// committed profile load records — and a decision the next start-up makes, so the seams that
 		// ask (recordModelChoice, recordLaunchProfile, launcherWiring.restore) read it from the holder
-		// at the moment they have something to record. Unlike the other mirror rows it requires the
-		// holder: a Driver without one has nothing the toggle could gate.
-		reaches: reachesTheHolder,
-		apply:   applyMirror,
+		// at the moment they have something to record.
+		apply: applyMirror,
 	},
 	{
-		key:     "context-window",
-		reaches: settingsApplier.rides,
+		key: "context-window",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			landed, err := landSetting(key, value)
 			if err != nil {
@@ -1356,61 +1297,50 @@ var settingsTable = []settingsEntry{
 	},
 	{
 		key: "working-window",
-		// No member of the applier is needed: the room reaches no engine seam and rides no
-		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense. A
-		// Firing is not the mirror's only reader: a `/server` move resolves an entry's bound over
+		// The room reaches no engine seam and rides no re-resolution: the apply is the mirror onto
+		// the holder. A Firing is not the mirror's only reader: a `/server` move resolves an entry's bound over
 		// this number (workingPin), so mirroring it onto the holder is what lets a room the human
 		// just set bound both.
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		apply: applyMirror,
 	},
 	{
-		key:     "response-reserve",
-		reaches: reachesWithoutAMember,
-		apply:   applyTheWriteAlone,
+		key:   "response-reserve",
+		apply: applyTheWriteAlone,
 	},
 	{
-		key:     "present.auto-open",
-		reaches: reachesThePresentation,
-		apply:   applyPresentation,
+		key:   "present.auto-open",
+		apply: applyPresentation,
 	},
 	{
-		key:     "present.command",
-		reaches: reachesThePresentation,
-		apply:   applyPresentation,
+		key:   "present.command",
+		apply: applyPresentation,
 	},
 	{
-		key:     "present.port",
-		reaches: reachesThePresentation,
-		apply:   applyPresentation,
+		key:   "present.port",
+		apply: applyPresentation,
 	},
 	{
-		key:     "present.host",
-		reaches: reachesThePresentation,
-		apply:   applyPresentation,
+		key:   "present.host",
+		apply: applyPresentation,
 	},
 	{
-		key:     "ui.inspector",
-		reaches: reachesWithoutAMember,
-		apply:   applyMirror,
+		key:   "ui.inspector",
+		apply: applyMirror,
 	},
 	{
 		// The retention sweep runs once while a session is being WIRED, so nothing here can re-sweep
 		// the store for a session already open — and there is no holder to mirror onto either, since
 		// a Firing raises no sweep of its own. The write is therefore the whole of the apply, and the
 		// Description's closing sentence carries the promise.
-		key:     "sessions.max-age",
-		reaches: reachesWithoutAMember,
-		apply:   applyTheWriteAlone,
+		key:   "sessions.max-age",
+		apply: applyTheWriteAlone,
 	},
 	{
-		key:     "sessions.max-count",
-		reaches: reachesWithoutAMember,
-		apply:   applyTheWriteAlone,
+		key:   "sessions.max-count",
+		apply: applyTheWriteAlone,
 	},
 	{
-		key:     "editor",
-		reaches: reachesWithoutAMember,
+		key: "editor",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
 			// FRESH projection of the file every time an external edit starts (externalEdit.spec), so the
@@ -1427,7 +1357,6 @@ var settingsTable = []settingsEntry{
 		// The holder as well as the engine, for the seven Floor rows' reason: the switch is one field
 		// of the generation the single seam takes, so the row has to read the fields it does not name
 		// off the holder rather than compose a generation out of its own key.
-		reaches: reachesTheEngineAndTheHolder,
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			landed, err := landSetting(key, value)
 			if err != nil {
@@ -1441,14 +1370,9 @@ var settingsTable = []settingsEntry{
 	},
 	{
 		key: "reactions",
-		// The engine holds the one swap door and the holder holds the generation it swaps, so both
-		// are required — and the RUNNER beside them, which is the half that actually fires: a Driver
-		// that composed none would take the edit, move the mirror and arm nothing, leaving the
-		// session and the Firings it raises on two different lists (ADR 0073 §9 — one library at
-		// every root, composed from one list).
-		reaches: func(a settingsApplier) bool {
-			return a.engine != nil && a.hooks != nil && a.live != nil
-		},
+		// The engine holds the one swap door — and the Runner behind it, the half that actually
+		// fires — and the holder holds the generation it swaps, so the session and the Firings it
+		// raises arm from one list (ADR 0073 §9 — one library at every root, composed from one list).
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// A list of blocks is a shape no single string spells, so the value the pane persisted
 			// is not read — the file layer is re-resolved exactly as startup resolved it, the
@@ -1461,9 +1385,8 @@ var settingsTable = []settingsEntry{
 	{
 		key: "model-profiles",
 		// The engine for the swap and the binding for the model to resolve the map AGAINST — the one
-		// key that both pushes and re-resolves, so it needs a member from each class. The holder is
-		// in the list because the map it stores is what the NEXT rebind reads.
-		reaches: func(a settingsApplier) bool { return a.engine != nil && a.binding != nil && a.live != nil },
+		// key that both pushes and re-resolves, so it uses a member from each class. The holder
+		// stores the map, which is what the NEXT rebind reads.
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The map is an INPUT to the per-model resolution — but the model has NOT changed, and re-driving a whole rebind to move one field would refuse the
 			// edit whenever an Exchange is open. So it takes the profile's own engine door instead
@@ -1597,9 +1520,9 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 // liveMCP.reconnect words for the `mcp-servers:` row, so the human is told the same two things:
 // what failed, and that the connections they had are still theirs.
 //
-// And it does nothing at all for a Driver that composed no MCP holder or no config path (ADR 0031's
-// documented embedder: wire_mcp.go). The host lists still reach that Driver's tools; there is simply
-// no connection for them to reach.
+// And it does nothing at all over a nil MCP holder or an empty config path, the shape ADR 0031's
+// documented embedder holds (wire_mcp.go). The host lists still reach the tools; there is simply no
+// connection for them to reach.
 func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 	if a.mcp == nil || a.configPath == "" {
 		return ""
@@ -1708,9 +1631,9 @@ func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
 // validator and landing are one parser (config.ParseDelegateTimeout, config.ParseStreamIdleTimeout)
 // takes an empty value as the built-in default and refuses a bad one in that parser's words.
 //
-// The holder is optional in the reloadServers sense: a Driver that composed none has no Firing to
-// compose either, and refusing the key over its absence would report a failure over a save that did
-// what the key promises.
+// A nil holder is skipped in the reloadServers sense rather than refused: there is no Firing to
+// compose from it either, and refusing the key over its absence would report a failure over a save
+// that did what the key promises.
 func applyMirror(a settingsApplier, key, value string) (string, error) {
 	_, err := mirrorSetting(a, key, value)
 	return "", err
@@ -1787,74 +1710,11 @@ func applyContextFillNotice(a settingsApplier, key, value string) (string, error
 	return "", a.engine.SetReactions(a.live.setContextFillNotice(landed.ContextFillNotice))
 }
 
-// reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
-// PUSHED at the engine and are in force the moment their apply returns.
-func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
-
-// reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
-// are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
-// switch and the names together and only the holder remembers the half the row did not carry, and
-// the pair the seven Floor-guard rows, the `bypass` row and the notice row need for
-// the same shape of reason: SetReactions takes one whole Generation and only the holder remembers
-// the fields those rows did not carry.
-func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }
-
-// reachesTheHolder reports whether the live holder is composed. It is the whole of what two keys
-// need, for two different reasons their entries give.
-func reachesTheHolder(a settingsApplier) bool { return a.live != nil }
-
-// reachesTheSwapDoor reports whether the tool set and the engine are both composed: a registry with
-// no web_search to re-point is rebuilt and handed through SwapTools, which is the swap door and not
-// this holder's to skip — and the roster switch and the two host lists are that door every time.
-func reachesTheSwapDoor(a settingsApplier) bool { return a.tools != nil && a.engine != nil }
-
-// reachesThePresentation reports whether the presentation ladder is composed — the one member every
-// `present.` row's apply rebuilds through.
-func reachesThePresentation(a settingsApplier) bool { return a.present != nil }
-
-// reachesWithoutAMember is the predicate for a key whose apply reaches no member at all, so there
-// is nothing a Driver could have been composed without: it answers yes for every applier, the zero
-// one included. That is the honest answer for the keys whose apply is the write itself.
-func reachesWithoutAMember(settingsApplier) bool { return true }
-
-// cannotApply is the dispatcher's one refusal for a key that will not reach the session at all —
-// because this build knows no seam for it, or because this Driver composed the dispatcher without
-// the member that seam lives behind. It names the key, since the row it lands on is that key's, and
-// it is deliberately the SAME sentence for both: to the human they are one fact, that the file
-// changed and the session did not.
+// cannotApply is the dispatcher's one refusal for a key that will not reach the session at all:
+// this build knows no seam for it. It names the key, since the row it lands on is that key's — the
+// file changed and the session did not.
 func cannotApply(key string) error {
 	return fmt.Errorf("apogee: %s cannot be applied to the running session", key)
-}
-
-// unreachable reports, for one key, that this applier was composed without something that key's
-// apply has to reach. Every member is optional by design — a Driver builds the dispatcher out of
-// what it HAS, and a bench or a daemon has no presenter and no skill catalogue (ADR
-// 0031) — so a nil member has to degrade to the refusal above rather than panic on the Update
-// goroutine, halfway through an edit that has already been written to the file.
-//
-// It reads the same table the dispatcher applies out of, one field over, so the two can no longer
-// disagree about which keys exist. A key with no entry is not unreachable here at all — it is
-// refused by the dispatcher's own lookup, in the same sentence. TestApplySettingRefusesEveryKeyItCannotReach
-// drives EVERY registry key through a zero applier and holds both halves of that.
-func (a settingsApplier) unreachable(key string) error {
-	entry, ok := settingsEntryFor(key)
-	if !ok || entry.reaches(a) {
-		return nil
-	}
-	return cannotApply(key)
-}
-
-// rides reports whether this applier was composed with everything a rebind-riding key needs: the
-// value lands in the holder and the per-model resolution is re-driven over it, so all three members
-// together are what makes that apply an apply.
-//
-// It is asked in two voices. unreachable asks it about the keys that are NOTHING but a ride — a
-// missing member there is the honest refusal, since the file changed and the session cannot. The
-// `servers:` case asks it about a ride that is one part of a larger apply, where a missing member
-// leaves the list installed and only the entry's two token bounds standing still, exactly as a nil
-// caps or a nil delegation leaves the width and the routing standing still.
-func (a settingsApplier) rides() bool {
-	return a.live != nil && a.binding != nil && a.rebind != nil
 }
 
 // recordToolSet mirrors the spec the live tool set was just built from onto the holder, so the four
@@ -1865,8 +1725,8 @@ func (a settingsApplier) rides() bool {
 // place and no set was built at all.
 //
 // It is called only after the door has RETURNED, so a refused swap leaves the overlay on the set
-// the session is still running. A Driver that composed no holder records nothing, the posture
-// reloadServers takes toward its own optional members (ADR 0031): the tool set moved either way.
+// the session is still running. A nil holder records nothing, the posture reloadServers takes
+// toward its own nil members: the tool set moved either way.
 func (a settingsApplier) recordToolSet() {
 	if a.live == nil {
 		return

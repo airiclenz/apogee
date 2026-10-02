@@ -451,17 +451,6 @@ func TestBypassRowAppliesOneGeneration(t *testing.T) {
 	if got := live.options(); !got.Bypass || got.ReadCache {
 		t.Errorf("options() = bypass:%v read-cache:%v, want true/false", got.Bypass, got.ReadCache)
 	}
-
-	// Which is why the row now requires the holder as well as the engine, exactly as the seven Floor
-	// rows do: a Driver composed with an engine alone refuses the key by name rather than pushing a
-	// generation composed out of the one switch it was handed.
-	entry, ok := settingsEntryFor("bypass")
-	if !ok {
-		t.Fatal("the settings table has no `bypass` arm")
-	}
-	if entry.reaches(settingsApplier{engine: spy}) {
-		t.Error("the bypass arm claims to reach a Driver with no live holder")
-	}
 }
 
 // The Generation is DERIVED from the overlay, never held beside it: what generation() reports after
@@ -580,17 +569,6 @@ func TestContextFillNoticeRowAppliesOneGeneration(t *testing.T) {
 		t.Errorf("options() = context-fill-notice:%v bypass:%v read-cache:%v, want false/true/false",
 			got.ContextFillNotice, got.Bypass, got.ReadCache)
 	}
-
-	// Which is why the row requires the holder as well as the engine, exactly as the seven Floor rows
-	// and the `bypass` row do: a Driver composed with an engine alone refuses the key by name rather
-	// than pushing a generation composed out of the one switch it was handed.
-	entry, ok := settingsEntryFor("context-fill-notice")
-	if !ok {
-		t.Fatal("the settings table has no `context-fill-notice` arm")
-	}
-	if entry.reaches(settingsApplier{engine: spy}) {
-		t.Error("the context-fill-notice arm claims to reach a Driver with no live holder")
-	}
 }
 
 // The step-budget notice has no row: it is structural for every delegate (ADR 0077, 2026-09-19
@@ -684,9 +662,6 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			// The holder rides along because the `bypass` row now reads the generation it moves one
-			// field of off it (ADR 0076 A8): without one the row would refuse for being unreachable
-			// rather than for the value it was handed, which is a different sentence.
 			applier := fakeApplier(t)
 			applier.engine = spy
 			note, err := applySettingFor(applier)(tt.key, tt.value)
@@ -707,8 +682,7 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 // editor ladder reads it off a fresh projection of the file every time an external edit starts, so
 // the pane's write has already put it in force — and the default refusal would have told the user
 // "editor cannot be applied to the running session" about a change that had taken effect. It answers
-// with the empty note every in-force key answers with, drives no seam, and needs no member — so an
-// applier holding nothing at all still applies it (TestApplySettingRefusesEveryKeyItCannotReach).
+// with the empty note every in-force key answers with and drives no seam.
 func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
@@ -731,22 +705,6 @@ func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 // the session itself moves), so the pane's Description header is the single place the human is told.
 const startupOnlyContract = "takes effect at the next start."
 
-// settingKeysWithNoMemberToReach are the keys whose entire live apply is the write the pane has
-// already made. They hold the dispatcher's only exemption from the nil-member refusal, and they are
-// the only shape that can be one: the apply REQUIRES no member of the applier, so there is nothing a
-// Driver could have been composed without. `editor` is re-read off a fresh projection of the file
-// every time an external edit starts (ADR 0041 decision 1); the other five are read once, while
-// the session is being built, and say so in their Descriptions. `ui.inspector`,
-// `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
-// `delegate-timeout`, `stream-idle-timeout`, `re-stream-budget`, `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
-// Firings a session raises, and do nothing at all where a Driver composed none — which is why they
-// are exempt rather than reaching for one.
-var settingKeysWithNoMemberToReach = []string{
-	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "delegate-fanout-rounds",
-	"delegate-max-depth", "delegate-max-tokens", "delegate-timeout", "stream-idle-timeout",
-	"re-stream-budget", "working-window", "undo-snapshots", "sessions.max-age", "sessions.max-count",
-}
-
 // The five START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
 // that must not refuse either. `ui.inspector` decides whether a wire observer is installed while
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
@@ -759,6 +717,14 @@ var settingKeysWithNoMemberToReach = []string{
 //
 // The promise itself is asserted beside the silence, because they are one design: a row with no note
 // says nothing, so the Description is where the human learns when the edit lands.
+//
+// These keys, `editor` and the two `sessions.` bounds are the keys whose entire live apply is the
+// write the pane has already made. `editor` is re-read off a fresh projection of the file every time
+// an external edit starts (ADR 0041 decision 1); the keys here are read once, while the session is
+// being built, and say so in their Descriptions. `ui.inspector`, `delegate-max-steps`,
+// `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`, `delegate-timeout`,
+// `stream-idle-timeout`, `re-stream-budget`, `working-window` and `undo-snapshots` still mirror their
+// value onto the live holder for the Firings a session raises — a mirror, never an engine seam.
 func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ key, value string }{
@@ -861,8 +827,8 @@ func TestApplyStreamIdleTimeoutReadsThroughTheOneParser(t *testing.T) {
 
 // `delegate-timeout` has ONE reading — config.ParseDelegateTimeout — and the live apply reads through
 // it rather than a duration parse of its own: an empty value resolves to the built-in default the
-// registry row declares, exactly as an absent key does at startup (unreachable from the pane, which
-// hands a reset key its Default, but one rule all the same), `0` is unbounded, and a value the parser
+// registry row declares, exactly as an absent key does at startup (the pane never sends one — it
+// hands a reset key its Default — but one rule all the same), `0` is unbounded, and a value the parser
 // refuses is refused here in the parser's own words — the sentence the row's validator already uses —
 // with the live holder left where it was.
 func TestApplyDelegateTimeoutReadsThroughTheOneParser(t *testing.T) {
@@ -1020,11 +986,7 @@ func TestSettingsTableIsInRegistryOrder(t *testing.T) {
 //	a. the renderer applies it itself (settingKeysAppliedByTheRenderer),
 //	b. the pane intercepts it before the dispatcher is ever asked (`server`, whose live apply is the
 //	   picker's own switch — ADR 0037 decision 4), or
-//	c. applySettingFor accepts it when every member it could need is composed.
-//
-// It is the mirror of TestApplySettingRefusesEveryKeyItCannotReach, which drives the same registry
-// through a ZERO applier: that one holds what a missing MEMBER must answer, this one holds that a
-// missing CASE is not a way to answer anything.
+//	c. applySettingFor accepts it.
 func TestEveryEditableSettingKeyHasAnApply(t *testing.T) {
 	t.Parallel()
 	apply := applySettingFor(fakeApplier(t))
@@ -1669,50 +1631,6 @@ func TestLiveSettingsContextFilesReEnableReinstallsTheNames(t *testing.T) {
 
 	if got := live.boot.ContextFiles; !slices.Equal(got, []string{"AGENTS.md"}) {
 		t.Errorf("boot.ContextFiles = %v, want the launch snapshot untouched by every apply", got)
-	}
-}
-
-// The same sentence answers a key whose seam this Driver did not COMPOSE. Every member of the
-// applier is optional by design — a bench, a daemon or an embedder has no presenter, no launcher and
-// no skill catalogue (ADR 0031: the engine stays sufficient for any Driver) — so a missing member
-// degrades to the refusal rather than panicking on the Update goroutine, halfway through an edit the
-// file already carries. `use-project-skills` and `web-search-endpoint` are the two that used to.
-//
-// Driving EVERY registry key through a ZERO applier is also what keeps the nil guard in step with
-// the switch it mirrors: a key wired into one and not the other panics right here.
-func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
-	t.Parallel()
-	apply := applySettingFor(settingsApplier{})
-	for _, k := range config.KeyRegistry {
-		if slices.Contains(settingKeysWithNoMemberToReach, k.Path) {
-			// The exceptions, and the only shape that can be one: a key whose apply reaches no
-			// member at all, so there is nothing a Driver could be composed without. Each answers
-			// success even here; TestApplySettingAcceptsTheEditorKey and
-			// TestApplySettingAcceptsTheStartupOnlyKeys hold the rest of that side.
-			t.Run(k.Path, func(t *testing.T) {
-				t.Parallel()
-				if _, err := apply(k.Path, k.Default); err != nil {
-					t.Errorf("apply %s through an applier holding nothing: %v; the key reaches no member",
-						k.Path, err)
-				}
-			})
-			continue
-		}
-		t.Run(k.Path, func(t *testing.T) {
-			t.Parallel()
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("apply %s reached a member this applier does not hold: %v", k.Path, r)
-				}
-			}()
-			note, err := apply(k.Path, k.Default)
-			if err == nil {
-				t.Fatalf("apply %s: want a refusal naming the key, got note %q", k.Path, note)
-			}
-			if !strings.Contains(err.Error(), k.Path) {
-				t.Errorf("error = %q, want it to name %q", err, k.Path)
-			}
-		})
 	}
 }
 
@@ -2710,14 +2628,14 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if _, err := rec.opts.Settings.Apply("mcp-servers", "none"); err != nil {
 		t.Errorf("Settings.Apply(mcp-servers): %v", err)
 	}
-	// And the fourth: the Reaction Runner (ADR 0073). A member the root forgot to pass would refuse
-	// this key with the dispatcher's own "cannot be applied" in the running binary while the arm's own
-	// tests stayed green, so this is where the literal is proved. It is asked for the ABSENCE of that
-	// sentence rather than for success, because runRoot has already returned here and close() ends the
-	// Runner with everything else it opened: reaching a CLOSED Runner is the wiring being right.
+	// And the fourth: the `reactions:` row, whose swap reaches the Reaction Runner (ADR 0073) through
+	// the engine's one generation door (ADR 0076 A8). It is asked for the ABSENCE of the dispatcher's
+	// "cannot be applied" rather than for success, because runRoot has already returned here and
+	// close() ends the Runner with everything else it opened: reaching a CLOSED Runner is the wiring
+	// being right.
 	if _, err := rec.opts.Settings.Apply("reactions", "none"); err != nil &&
 		strings.Contains(err.Error(), "cannot be applied") {
-		t.Errorf("Settings.Apply(reactions): %v; the composition root did not pass its Runner to the applier", err)
+		t.Errorf("Settings.Apply(reactions): %v; the running binary's applier has no reactions row", err)
 	}
 	if _, err := rec.opts.Settings.Apply("model-profiles", "1 model profile"); err != nil {
 		t.Errorf("Settings.Apply(model-profiles): %v", err)
@@ -3794,7 +3712,6 @@ func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 	applier := fakeApplier(t)
 	applier.engine = engine
 	applier.live = live
-	applier.hooks = runner
 	applier.configPath = path
 	apply := applySettingFor(applier)
 	// The value is not read for this key — a list of blocks is a shape no single string spells — so
@@ -3848,7 +3765,6 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 	applier := fakeApplier(t)
 	applier.engine = engine
 	applier.live = live
-	applier.hooks = runner
 	applier.configPath = path
 	apply := applySettingFor(applier)
 	if _, err := apply("reactions", "1 reaction"); err == nil {
@@ -3856,27 +3772,6 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 	}
 	if got := live.options().Reactions; len(got) != 1 || got[0].ID != "boot" {
 		t.Errorf("options().Reactions = %+v, want the boot list a refused edit leaves standing", got)
-	}
-}
-
-// The three members the arm needs are all required, so a Driver composed without any of them refuses
-// the key by name on the Update goroutine rather than panicking halfway through an edit the file
-// already carries (ADR 0031) — or, for the Runner, reporting success for a list that would fire
-// nowhere.
-func TestApplySettingReactionsRefusesWithoutTheRunnerOrTheHolder(t *testing.T) {
-	t.Parallel()
-	entry, ok := settingsEntryFor("reactions")
-	if !ok {
-		t.Fatal("the settings table has no `reactions` arm; a reactions: edit could never reach the session")
-	}
-	if entry.reaches(settingsApplier{live: newLiveSettings(config.Options{}), hooks: &reactions.Runner{}}) {
-		t.Error("the arm claims to reach a Driver with no engine")
-	}
-	if entry.reaches(settingsApplier{engine: &applySettingSpy{}, live: newLiveSettings(config.Options{})}) {
-		t.Error("the arm claims to reach a Driver with no Runner")
-	}
-	if entry.reaches(settingsApplier{engine: &applySettingSpy{}, hooks: &reactions.Runner{}}) {
-		t.Error("the arm claims to reach a Driver with no live holder")
 	}
 }
 
@@ -3935,7 +3830,6 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 	applier := fakeApplier(t)
 	applier.engine = engine
 	applier.live = live
-	applier.hooks = runner
 	applier.configPath = path
 	apply := applySettingFor(applier)
 	if _, err := apply("reactions", "1 reaction"); err != nil {
@@ -4004,7 +3898,6 @@ func TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent(t *testing.T) {
 	applier := fakeApplier(t)
 	applier.engine = engine
 	applier.live = live
-	applier.hooks = runner
 	applier.configPath = path
 	apply := applySettingFor(applier)
 	if _, err := apply("reactions", "2 reactions"); err != nil {

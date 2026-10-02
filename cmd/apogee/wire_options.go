@@ -55,7 +55,6 @@ func (w *rootWiring) options() tui.Options {
 		skills:     w.skillProvider,
 		tools:      w.toolSet,
 		mcp:        w.mcpSet,
-		hooks:      w.hooks,
 		roots:      w.roots,
 		present:    w.presentation,
 		caps:       w.caps,
