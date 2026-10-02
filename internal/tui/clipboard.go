@@ -1,15 +1,13 @@
 package tui
 
 import (
-	"context"
-	"fmt"
 	"os"
-	"os/exec"
-	"strings"
-	"time"
+	"runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+
+	"github.com/airiclenz/apogee/internal/present"
 )
 
 // ----------------------------------------------------------------------------
@@ -30,81 +28,67 @@ import (
 // inside tmux the copy also hands the text to it. `set-clipboard off` blocks that route as well,
 // and apogee neither detects nor rewrites the user's tmux options.
 
-// writeSystemClipboard writes text to the host's system clipboard. It is a package-level variable
-// rather than a direct call so a test can substitute a recorder — the same injectable seam
-// [ConfigHost.ExternalEditSpec] uses for the external editor, one level down: the platform program
-// (pbcopy, xclip/xsel/wl-copy, clip.exe) is the one thing a unit test cannot have.
-var writeSystemClipboard = clipboard.WriteAll
+// writeSystemClipboard writes text to the host's system clipboard, resolving the helper program
+// against workspace (hostClipboard). It is a package-level variable rather than a direct call so a
+// test can substitute a recorder — the same injectable seam [ConfigHost.ExternalEditSpec] uses for
+// the external editor, one level down: the platform program (pbcopy, xclip/xsel/wl-copy, clip.exe)
+// is the one thing a unit test cannot have. Only tests assign it, never before the model they
+// drive is built from it.
+var writeSystemClipboard = writeHostClipboard
 
 // writeTmuxClipboard hands text to tmux's paste buffer and, through `-w`, to the outer terminal's
 // clipboard — only when apogee runs inside tmux (TMUX non-empty, read at call time); outside tmux
-// it starts no process and returns nil. A package-level variable for the same reason as
-// writeSystemClipboard: a test substitutes a recorder, so a suite run inside tmux never overwrites
-// the developer's own tmux buffer.
-var writeTmuxClipboard = func(text string) error {
-	return loadTmuxBuffer(os.Getenv, runWithStdin, text)
+// it starts no process and returns nil. tmux is resolved against workspace (hostClipboard). A
+// package-level variable for the same reason as writeSystemClipboard: a test substitutes a
+// recorder, so a suite run inside tmux never overwrites the developer's own tmux buffer.
+var writeTmuxClipboard = func(workspace, text string) error {
+	return hostClipboard(workspace).WriteTmux(text)
 }
 
-// tmuxClipboardTimeout bounds the `tmux load-buffer` child: a wedged tmux server must not leave a
-// Cmd goroutine waiting forever on a copy nothing in the model waits for.
-const tmuxClipboardTimeout = 2 * time.Second
+// hostClipboard is the production present.Clipboard for a session in workspace: this process's
+// OS and environment, exec.LookPath, and the session workspace as the exec fence, so a workspace
+// directory on the inherited PATH can never supply the clipboard or tmux program.
+func hostClipboard(workspace string) present.Clipboard {
+	return present.Clipboard{GOOS: runtime.GOOS, Env: os.Getenv, WorkspaceRoot: workspace}
+}
 
-// commandRunner runs the program name with args, feeding stdin to its standard input, and returns
-// its exit error. ctx bounds the run. It is the one piece of loadTmuxBuffer a unit test replaces.
-type commandRunner func(ctx context.Context, stdin, name string, args ...string) error
-
-// loadTmuxBuffer runs `tmux load-buffer -w -` with text on stdin when getenv("TMUX") is non-empty,
-// under tmuxClipboardTimeout. Outside tmux it calls nothing and returns nil. The environment and
-// the runner are parameters so the gate and the argv are testable without touching the process env
-// or spawning tmux.
-func loadTmuxBuffer(getenv func(string) string, run commandRunner, text string) error {
-	if getenv("TMUX") == "" {
-		return nil
+// writeHostClipboard is writeSystemClipboard's production value. Windows keeps atotto's Win32
+// clipboard write — no program runs there, so there is nothing to resolve; every other OS goes
+// through hostClipboard's resolved helper program.
+func writeHostClipboard(workspace, text string) error {
+	if runtime.GOOS == "windows" {
+		return clipboard.WriteAll(text)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), tmuxClipboardTimeout)
-	defer cancel()
-	if err := run(ctx, text, "tmux", "load-buffer", "-w", "-"); err != nil {
-		return fmt.Errorf("tmux load-buffer: %w", err)
-	}
-	return nil
+	return hostClipboard(workspace).WriteSystem(text)
 }
 
-// runWithStdin is the real commandRunner: it starts name with args, stdin as its standard input and
-// no stdout or stderr of ours — a nil stream in [exec.Cmd] is the null device, so the child can
-// never write into the frame — and waits for it, or for ctx to kill it.
-func runWithStdin(ctx context.Context, stdin, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = strings.NewReader(stdin)
-	return cmd.Run()
-}
-
-// systemClipboardCmd returns a Cmd that writes text to the system clipboard, best-effort. Any
-// error is swallowed deliberately: the write runs BESIDE tea.SetClipboard, never instead of it, so
-// a machine with no clipboard program (a bare Linux box, a container) must degrade to exactly
-// today's OSC-52-only behaviour rather than report a failure for a copy that may well have landed.
-// The Cmd body runs off the Update goroutine, which is what keeps the shell-out off the render
-// path; it yields no message because nothing in the model depends on the outcome. The seam is read
-// HERE, when the copy builds its batch, not when the Cmd body runs: the body runs on a goroutine
-// the copy never waits for, so a late read would reach whatever the seam holds by then — in a test,
-// a real clipboard program once the recorder is restored, or the next test's recorder.
-func systemClipboardCmd(text string) tea.Cmd {
+// systemClipboardCmd returns a Cmd that writes text to the system clipboard, best-effort, with the
+// helper program resolved against workspace. Any error is swallowed deliberately: the write runs
+// BESIDE tea.SetClipboard, never instead of it, so a machine with no clipboard program (a bare
+// Linux box, a container) must degrade to exactly today's OSC-52-only behaviour rather than report
+// a failure for a copy that may well have landed. The Cmd body — the PATH lookup and the
+// shell-out both — runs off the Update goroutine, which is what keeps them off the render path; it
+// yields no message because nothing in the model depends on the outcome. The seam is read HERE,
+// when the copy builds its batch, not when the Cmd body runs: the body runs on a goroutine the copy
+// never waits for, so a late read would reach whatever the seam holds by then — in a test, a real
+// clipboard program once the recorder is restored, or the next test's recorder.
+func systemClipboardCmd(workspace, text string) tea.Cmd {
 	write := writeSystemClipboard
 	return func() tea.Msg {
-		_ = write(text)
+		_ = write(workspace, text)
 		return nil
 	}
 }
 
 // tmuxClipboardCmd returns a Cmd that hands text to tmux (writeTmuxClipboard), best-effort on the
-// same terms as systemClipboardCmd: the error is swallowed — a tmux that refuses the buffer must
-// not turn a copy OSC 52 or the system write may well have landed into a reported failure — the
-// shell-out runs off the Update goroutine, the Cmd yields no message, and the seam is read when the
-// Cmd is built, not when it runs.
-func tmuxClipboardCmd(text string) tea.Cmd {
+// same terms as systemClipboardCmd: the error is swallowed — a tmux that refuses the buffer, or a
+// tmux the exec fence refuses, must not turn a copy OSC 52 or the system write may well have
+// landed into a reported failure — the lookup and the shell-out run off the Update goroutine, the
+// Cmd yields no message, and the seam is read when the Cmd is built, not when it runs.
+func tmuxClipboardCmd(workspace, text string) tea.Cmd {
 	write := writeTmuxClipboard
 	return func() tea.Msg {
-		_ = write(text)
+		_ = write(workspace, text)
 		return nil
 	}
 }

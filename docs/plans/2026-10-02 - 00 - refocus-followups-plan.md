@@ -174,7 +174,13 @@ sees no request. `TestSyncWebhookDenyListedEndpointIsNeverPosted`: the deny-list
 - `grep -n "redirect" docs/manual/reactions.md` and `grep -n "url-safety" docs/manual/reactions.md` each print a line
 **Commit:** `fix(agent): fence advise and gate webhooks with the url-safety guard`
 
-## 4. Clipboard and tmux programs resolve through ResolveProgram
+## 4. Clipboard and tmux programs resolve through ResolveProgram — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): tmux moved to present — `present.Clipboard.WriteTmux` owns the gate, the resolved `tmux load-buffer -w -` argv, the 2s deadline and the runner; internal/tui/clipboard_test.go is deleted and its three TestTmuxClipboard{StartsNothingOutsideTmux,LoadsTheBufferInsideTmux,ReportsARunnerFailure} tests live on under the same names in internal/present/clipboard_test.go (argv[0] now the resolved absolute path), so the Acceptance `-run` over ./internal/tui/ no longer matches those three there.
+NOTES (2026-10-02): the tui seams changed signature to `func(workspace, text string) error` and the Cmds to `systemClipboardCmd(workspace, text)` / `tmuxClipboardCmd(workspace, text)`; copyFlash passes `m.opts.Workspace`, and the PATH lookup runs inside the Cmd body. The seams are assigned only in tests.
+NOTES (2026-10-02): a candidate needs only its copy program on PATH — atotto also demanded the paste partner (wl-paste, termux-clipboard-get, powershell.exe), which a write never runs; the system write keeps atotto's no-deadline run; a refused candidate stops the walk (returns the fence's error) rather than falling to the next candidate.
+NOTES (2026-10-02): bead `apogee-bwrap-direnv-path` opened with `bd create` (P3 bug) for the direnv-PATH bwrap case; its export is the .beads/issues.jsonl line.
+NOTES (2026-10-02): the contract's 2026-08-30 amendment list drops the formatter probe (autofix was retired in eaa340de) and a new 2026-10-02 amendment records the clipboard/tmux fence and names bwrap as the one exception.
 
 **What:**
 **Goal:** the TUI's clipboard write (unix/darwin helper programs) and its tmux buffer load run

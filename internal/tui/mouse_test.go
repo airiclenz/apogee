@@ -299,11 +299,11 @@ func recordSystemClipboard(t *testing.T, err error) <-chan string {
 	previous, previousTmux := writeSystemClipboard, writeTmuxClipboard
 	t.Cleanup(func() { writeSystemClipboard, writeTmuxClipboard = previous, previousTmux })
 	wrote := make(chan string, 4)
-	writeSystemClipboard = func(text string) error {
+	writeSystemClipboard = func(_, text string) error {
 		wrote <- text
 		return err
 	}
-	writeTmuxClipboard = func(string) error { return nil }
+	writeTmuxClipboard = func(string, string) error { return nil }
 	return wrote
 }
 
@@ -318,7 +318,7 @@ func recordTmuxClipboard(t *testing.T, err error) <-chan string {
 	previous := writeTmuxClipboard
 	t.Cleanup(func() { writeTmuxClipboard = previous })
 	wrote := make(chan string, 4)
-	writeTmuxClipboard = func(text string) error {
+	writeTmuxClipboard = func(_, text string) error {
 		wrote <- text
 		return err
 	}
@@ -400,7 +400,7 @@ func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the copy never reached the system clipboard")
 	}
-	if msg := systemClipboardCmd("hello")(); msg != nil {
+	if msg := systemClipboardCmd("", "hello")(); msg != nil {
 		t.Fatalf("a failed system write produced msg %#v, want nil — it must dispatch nothing", msg)
 	}
 	<-wrote
@@ -463,7 +463,7 @@ func TestTmuxClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the copy never reached the tmux seam")
 	}
-	if msg := tmuxClipboardCmd("hello")(); msg != nil {
+	if msg := tmuxClipboardCmd("", "hello")(); msg != nil {
 		t.Fatalf("a failed tmux write produced msg %#v, want nil — it must dispatch nothing", msg)
 	}
 	<-wrote

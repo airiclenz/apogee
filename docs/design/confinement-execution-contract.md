@@ -574,8 +574,8 @@ one level down (D2), for free, with no threading.
 > and `internal/present` — are gone, and with them every hand-rolled `exec.LookPath` + fence pair
 > beside them. Every site that resolves a program now calls `security.ResolveProgram`, which does
 > the lookup and applies the refusal in one step: the shells and the hook door, MCP stdio, the
-> settings editor, `git`, `python_exec`, `run_tests`, `diagnostics`, rung 1's OS opener, autofix's
-> formatter probe, the keystore's secret-store probe, and `internal/config`'s `api-key-cmd`, which
+> settings editor, `git`, `python_exec`, `run_tests`, `diagnostics`, rung 1's OS opener, the
+> keystore's secret-store probe, and `internal/config`'s `api-key-cmd`, which
 > ran bare until now. It stays a **tool-side fence, not a ladder cell**: no cell moves and no
 > verdict changes. Two things do move, at the edges. The fence reaches one program more — an
 > `api-key-cmd` whose `argv[0]` resolves inside the workspace is refused before it runs, a relative
@@ -599,6 +599,24 @@ one level down (D2), for free, with no threading.
 > (`DialFloor` / `DialPinDestination`), the fixed transport and the refused redirect — while each
 > adapter keeps its own pre-flight and refusal wording (ADR 0012 amendment 2026-07-26, note
 > 2026-09-30).
+
+> **Amended 2026-10-02 (the copy's programs are fenced too; bwrap is the one exception).** No cell
+> moves and no verdict changes. The TUI's copy writes — the system clipboard helper on unix and
+> darwin (`wl-copy` under `WAYLAND_DISPLAY`, then `xclip`, `xsel`, `termux-clipboard-set` and WSL's
+> `clip.exe`; `pbcopy` on darwin) and, inside tmux, `tmux load-buffer -w -` — were bare names
+> handed to `exec.Command`, looked up on apogee's inherited `PATH` at launch, on every drag-copy the
+> human makes, with no approval and no box behind them. They now resolve through
+> `security.ResolveProgram` against the session workspace (`present.Clipboard`), inside the copy's
+> Cmd body and off the Update goroutine: a candidate that resolves inside the workspace, or to a
+> relative path, is refused and nothing runs. The copy stays best-effort — OSC 52 is unchanged
+> beside it and a refusal, like a missing helper, surfaces nowhere. Windows keeps the Win32
+> clipboard API, which runs no program. The 2026-08-30 list above no longer names the formatter
+> probe, which left the tree when the autofix mechanism was retired. **The one program not resolved through
+> `security.ResolveProgram` is bubblewrap** (§2 namespace backend): `NewNamespaceConfiner` resolves
+> `bwrap` once per process with `exec.LookPath`, at construction, before any session workspace
+> exists, so there is no root to fence it against. A workspace whose PATH entries reach apogee's own
+> environment before construction (a direnv-managed `PATH`, say) is the case that exception leaves
+> open, and it is tracked as a bead rather than fenced here.
 
 > **Amended 2026-09-06 (a subprocess that is read-only by construction takes the RO row; ADR 0012
 > amendment 2026-09-06).** The 2026-07-26 rule above — an unfakeable marker outranks a tool's own

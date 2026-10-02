@@ -909,7 +909,9 @@ func (m *Model) releaseField(sel *fieldSel, value string) (tea.Model, tea.Cmd) {
 // escape — where the flash used to promise a copy that went nowhere (the ISSUES defect) — and the
 // tmux write (tmuxClipboardCmd) is the route tmux forwards on its default `set-clipboard external`,
 // where it drops an application's OSC52 (apogee-tmux-copy-dropped); it starts nothing outside tmux.
-// Both are best-effort, so the confirmation stays unconditional. Shared by the prompt, transcript
+// Both are best-effort, so the confirmation stays unconditional, and both resolve their program
+// against the session workspace (m.opts.Workspace) inside the Cmd body, so a workspace directory on
+// PATH cannot supply it. Shared by the prompt, transcript
 // and /settings drag-release paths so all three confirm a copy identically.
 func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	n := len([]rune(text))
@@ -920,8 +922,8 @@ func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	flashCmd := m.showFlash(fmt.Sprintf("copied %d %s", n, noun))
 	return m, tea.Batch(
 		tea.SetClipboard(text),
-		systemClipboardCmd(text),
-		tmuxClipboardCmd(text),
+		systemClipboardCmd(m.opts.Workspace, text),
+		tmuxClipboardCmd(m.opts.Workspace, text),
 		flashCmd,
 	)
 }
