@@ -56,4 +56,5 @@
 //     Cassette, carrying the upstream's key so the client's config stays keyless.
 //   - replay.go — the Replayer: a Cassette served as an upstream, each key's exchanges replayed in
 //     capture order at their recorded offsets (scaled by a pace factor), probes answered verbatim.
+//   - doc.go — this map.
 package stubllm

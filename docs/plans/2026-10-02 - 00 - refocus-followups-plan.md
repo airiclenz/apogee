@@ -216,7 +216,7 @@ calls follow the new Cmd signatures.
 - `tr '\n' ' ' < docs/design/confinement-execution-contract.md | sed 's/ > / /g' | grep -c "autofix's formatter probe"` prints `0` (1 at base; the :1279/:1399 `autofix` lines stay as history)
 **Commit:** `fix(present): resolve clipboard and tmux programs through ResolveProgram`
 
-## 5. Every package past the docmap threshold opts in
+## 5. Every package past the docmap threshold opts in — ✅ DONE (2026-10-02)
 
 **What:**
 **Goal:** `internal/provider`, `internal/stubllm` and `cmd/demorig` each carry a

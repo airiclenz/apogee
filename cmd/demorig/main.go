@@ -1,25 +1,3 @@
-// Command demorig is the developer-facing tool behind graphics/demo: it records a clip from its
-// storyboard (`graphics/demo/storyboards/<clip>.yaml`), judges the take, and renders the shipped
-// GIF from it, so a re-record is a repeatable loop rather than a hand-tuned session.
-//
-//	demorig lint graphics/demo/storyboards/hero.yaml
-//	demorig record graphics/demo/storyboards/hero.yaml [--work <dir>]
-//	demorig capture graphics/demo/storyboards/hero.yaml --upstream <url> [--key-env <VAR>] [--work <dir>]
-//	demorig check graphics/demo/storyboards/hero.yaml [<take>] [--stage <dir>]
-//	demorig render graphics/demo/storyboards/hero.yaml [<take>] [-o out.gif] [--dry-run]
-//
-// `lint` checks the storyboard against its schema, printing every problem and exiting 1 on any.
-// `record` resets the rig's stage, replays the storyboard's cassette as the model, runs apogee in
-// a pty through every beat, writes <work>/<clip>.take and checks it; `capture` does the same
-// against a live model behind a recording proxy and saves the cassette. Both record on unix only.
-// `check` judges a take by the session it saved, the screens it recorded and the stage repo:
-// every expect as a PASS/FAIL row, exit 1 on any FAIL. `render` lays the take's beats onto the
-// storyboard's section durations, rasterizes and composes every frame — zoom and click cursor
-// included — and encodes the GIF through ffmpeg, then gifsicle when it is on PATH. A take
-// argument left off defaults to <work>/<clip>.take, the file `record` writes.
-//
-// It is a dev tool, not a release asset: `make demorig` builds it, and `make dist` does not
-// ship it.
 package main
 
 import (
