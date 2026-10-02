@@ -156,6 +156,11 @@ The first `SIGTERM` or `Ctrl-C` stops the clock and gives a firing already in fl
 to `shutdown-grace` (10m by default) to finish; a second one cancels it immediately, and
 whatever the run completed is still saved. Either way the daemon exits `0`.
 
+A daemon that refuses to start — another daemon holds the lock, the configuration does
+not resolve, or `schedules.yaml` is invalid when it starts — prints why on stderr and
+exits `1`, with nothing scheduled: fix the cause and start it again. A supervisor that
+restarts on failure meets the same refusal on every restart until the cause is fixed.
+
 ```console
 $ apogee daemon
 2026-08-22T21:00:00+02:00 created   nightly-audit — on the clock

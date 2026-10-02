@@ -200,7 +200,11 @@ re-list the ones you still want under `enabled:`.
 
 ## Keys apogee migrates for you
 
-Five keys earlier releases carried have left the schema. Three of them apogee handles for you, and
+Five keys earlier releases carried have left the schema, beside the retired top-level
+`endpoint:`/`api-key:`/`host-alias:`/`model:` shape the `servers:` list replaced — that one folds
+itself into a `servers:` entry once and is refused when the fold cannot be made safely, as
+[The servers you run models on](#the-servers-you-run-models-on) describes. Of the five, three
+apogee handles for you, and
 none of those three is a reason a saved file stops loading: apogee **rewrites the file for you** on
 the start-up that first reads it — it takes a
 dated backup beside `config.yaml`, applies every fold and strip in one edit, and prints one line
@@ -659,7 +663,8 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
 
-Seven more keys live under `ui:`, and they change how the screen looks rather than what it says.
+Nine more keys live under `ui:`. Seven of them change how the screen looks rather than what it
+says; the other two, `ui.inspector` and `ui.stall-after`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.

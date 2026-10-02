@@ -75,10 +75,12 @@ func FloorGuardKeys() []string { return slices.Clone(floorGuardKeys) }
 const contextFillNoticeKey = "context-fill-notice"
 
 // entryReactions maps one on-disk entry onto the user-origin Reactions it arms — ONE per action key
-// it spells, all carrying the entry's id, `on:` list and `workspace:` filter, so `run:` and `gate:`
-// on one entry resolve to an observe Reaction and a gate Reaction that [domain.SplitLanes] later
-// sends down their own lanes, and `run:` beside `advise:` to an observe Reaction and an advise
-// Reaction the same way. The id is checked against the names it may not take, every `on:` entry
+// it spells, all carrying the entry's id, `on:` list and `workspace:` filter, which [domain.SplitLanes]
+// later sends down their own lanes. Because every one of them takes the whole `on:` list, the only
+// combined entry that validates is `run:` beside `advise:` on `[file-changed]` — the one Moment that
+// is both a notice `run:` reacts to and a Moment `advise:` reacts at. `run:` beside `gate:` never
+// validates: `gate:` reacts at `pre-tool-exec` alone, and that is a seam, which `run:` refuses. The
+// id is checked against the names it may not take, every `on:` entry
 // is read as a Moment, each action key is turned into the handler that runs it — every key takes
 // the same two shapes, an argv list or a webhook mapping, and the class decides what the reply is
 // worth (ADR 0076 D2, bead apogee-1d8) — an absent `timeout:` takes the class default, and

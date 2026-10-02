@@ -238,7 +238,10 @@ internal/stubllm/doc.go — package comment (lacks doc.go only); cmd/demorig/mai
 - `go test -count=1 -run TestDocMapNamesEveryFile ./internal/provider/ ./internal/stubllm/ ./cmd/demorig/`
 **Commit:** `docs(docmap): opt provider, stubllm and demorig into the file-map rule`
 
-## 6. Manual and code-comment corrections
+## 6. Manual and code-comment corrections — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): configuration.md names the retired `endpoint:`/`api-key:`/`host-alias:`/`model:` shape beside the "Five keys" count as folded once at start-up and refused when the fold cannot be made safely (and on a live re-read) — `migrateLegacyConfig`/`legacyRefusal` fold it rather than refuse it outright, so "refused" alone would misstate the code; the count stays five because the quadruple is described as a shape, linked to its own section.
+NOTES (2026-10-02): the `ui:` count reads "Nine more keys" (registry: ten `ui.*` rows, `ui.skill-suggestions` documented above it), seven of them visual plus `ui.inspector` and `ui.stall-after`, which the section already describes further down.
 
 **What:**
 **Goal:** each of these says what the code does: `docs/manual/daemon.md` (a daemon that refuses
