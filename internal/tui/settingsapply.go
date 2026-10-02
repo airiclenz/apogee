@@ -268,15 +268,14 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
-		// Both halves: the option is the record of what is selected, m.spin is what paints. The
-		// frame counter is left where it is — every style's glyph indexes it modulo its own frame
-		// count — so a style swapped mid-run continues the animation instead of restarting it.
-		m.spin.style = m.opts.UI.Spinner
+		// The option is the one record of what is selected and the spinner paints from it
+		// (spinnerAnim), so this write is the whole apply. The frame counter is left where it is —
+		// every style's glyph indexes it modulo its own frame count — so a style swapped mid-run
+		// continues the animation instead of restarting it.
 	case domain.UIKeySpinnerColor:
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
-		m.spin.color = m.opts.UI.SpinnerColor
 	case domain.UIKeySkillSuggestions:
 		// Nothing is laid out again and nothing is recomputed here: the band is derived from the
 		// draft where the frame is built, so the very next render already answers the new value —

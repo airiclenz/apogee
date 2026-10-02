@@ -799,7 +799,6 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		notify:       notify,
 		promptEditor: newPromptEditor(opts.CursorShape, th.surface),
 		viewport:     vp,
-		spin:         newSpinnerAnim(opts.UI.Spinner, opts.UI.SpinnerColor),
 		th:           th,
 		state:        stateIdle,
 	}
@@ -2205,7 +2204,7 @@ func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelCauseFunc, box *i
 	m.markRunning()
 	m.setActivity(runRef{}, kind, "")
 	m.thinking.commitAll()
-	tick := m.spin.arm(m.worker.gen)
+	tick := m.spin.arm(m.worker.gen, m.opts.UI.Spinner)
 	return tea.Batch(cmd, tick)
 }
 
@@ -2221,7 +2220,7 @@ func (m *Model) resumeRunning() tea.Cmd {
 	m.markRunning()
 	m.layout()
 	m.worker.resume()
-	return m.spin.arm(m.worker.gen)
+	return m.spin.arm(m.worker.gen, m.opts.UI.Spinner)
 }
 
 // markRunning is the tail the two launch verbs share and the ONLY writer of stateRunning. The
@@ -2807,7 +2806,7 @@ func (m Model) hiddenDraftRows() int {
 // is still down — is exempt and always survives: it shades nothing, and the release still needs the
 // line the press named to toggle the block under it (spanUnchanged, mouse.go).
 func (m *Model) refreshViewport() {
-	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(), m.backHint()).
+	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(m.opts.UI.Spinner), m.backHint()).
 		reserveWidgetCells(m.viewport.Width())
 	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {
 		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)
@@ -4025,7 +4024,8 @@ func (m Model) statusLeftWithin(width int) string {
 		}
 	case stateRunning:
 		now := time.Now()
-		spinner, throughput := m.spin.view(m.th)+m.th.statusBar.Render(" "), m.throughputSuffix()
+		glyph := m.spin.view(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor)
+		spinner, throughput := glyph+m.th.statusBar.Render(" "), m.throughputSuffix()
 		// The row speaks for the run the human is LOOKING at: the top-level conversation, or the
 		// delegation whose run view is open (ADR 0063, runview.go). A stage level is not a run, so
 		// it speaks for the run the stage's workflow stands in (Model.viewedRun) — the stage's items

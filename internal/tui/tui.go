@@ -1133,9 +1133,9 @@ type Options struct {
 	// so a hand-built Options seeds it deliberately (the tests' testUIPrefs) rather than leaning on
 	// zero meaning "shown" and "open".
 	//
-	// Which fields the renderer reads, and where: Spinner and SpinnerColor select the animation at
-	// construction (spinnerAnim.spec — the zero style resolves to classic, the animation with no
-	// registry entry); ShowScrollbar reserves the bar's gutter column or gives it to the body
+	// Which fields the renderer reads, and where: Spinner and SpinnerColor select the animation, read
+	// at every paint and tick rather than copied onto it (spinnerAnim.spec — the zero style resolves
+	// to classic, the animation with no registry entry); ShowScrollbar reserves the bar's gutter column or gives it to the body
 	// (layout) and is in the frame key for it (paintcache.go); ColorScheme is the NAME the palette
 	// below was loaded under, so a report can say which scheme is in force; StallAfter is the quiet
 	// threshold the status line reports past (0 ⇒ off); Inspector WORDS /inspect's empty pane — the

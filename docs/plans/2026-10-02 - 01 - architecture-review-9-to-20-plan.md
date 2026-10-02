@@ -608,8 +608,13 @@ internal/tui/keyclaim_test.go — TestKeyClaimOrderMatchesTheDocumentedPrecedenc
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestKeyClaimOrderMatchesTheDocumentedPrecedence$|^TestTheFirstClaimantThatWantsAKeyAnswersIt$|^TestTabAtIdleWithHintsReachesTheFramesOwnVerb$|^TestPointerPanesWalkInTheClickChainOrder$|^TestEveryFramePaneHasASpec$|^TestTheFourReportsPaintInTheFramePaneOrder$' ./internal/tui/`
 **Commit:** `refactor(tui): keep each pane's rank on its row`
 
-## 20. The spinner reads UI preferences (#20b)
+## 20. The spinner reads UI preferences (#20b) — ✅ DONE (2026-10-02)
 
+NOTES (2026-10-02): spinnerAnim now holds only the frame; every pacing/painting method (spec, interval, glyph, framesPerBlinkHalf, blink, framesPerColorLoop, view, arm, tick) takes the style (view also the colour flag) from its caller, which reads m.opts.UI. newSpinnerAnim is deleted — the zero spinnerAnim is the still, unarmed animation — so newModel no longer sets spin and the pure-animation tests use `var s spinnerAnim`.
+NOTES (2026-10-02): the three field-reading test sites now go through a new helper assertSpinnerPaints (spinner_test.go), which renders the running status line and checks the expected cell (and the absence of the other colour setting's cell); it is a helper, not a new test.
+NOTES (2026-10-02): internal/tui/transcript.go and internal/tui/settingsapply_test.go were listed in Files but needed no change — the fold-seed fields already document why they live on the transcript (no Model in reach), and settingsapply_test.go never read spin.style/spin.color.
+NOTES (2026-10-02): consequential edit — internal/tui/tui.go: made necessary by the spinner reading Options.UI at paint (the Options.UI doc said Spinner/SpinnerColor select the animation "at construction").
+NOTES (2026-10-02): gofmt realigned the trailing comment of the neighbouring line in mouse_test.go's TestTranscriptClickTogglesALiveBlockAcrossTheBlink; the status-line spinner statement in model.go is split over two lines for width.
 **What:** Recast at the regression check (2026-10-02). Depends on item 19.
 **Goal:** `settingsApplyLocal` writes the spinner's preferences only through `m.opts.UI`; `spinnerAnim`
 holds no style or colour; the spinner paints from `m.opts.UI`. The transcript keeps `taskListOpen`/`toolsOpen`/`toolsFoldOver`.

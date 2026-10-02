@@ -31,8 +31,8 @@ var legacyClassicFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "�
 func TestSpinnerClassicMatchesLegacyFrames(t *testing.T) {
 	t.Parallel()
 
-	s := newSpinnerAnim(SpinnerClassic, false)
-	if got, want := s.interval(), time.Second/10; got != want {
+	var s spinnerAnim
+	if got, want := s.interval(SpinnerClassic), time.Second/10; got != want {
 		t.Errorf("classic interval = %v, want %v (the 10 fps it has always run at)", got, want)
 	}
 
@@ -41,7 +41,7 @@ func TestSpinnerClassicMatchesLegacyFrames(t *testing.T) {
 	for frame := 0; frame < 2*len(legacyClassicFrames); frame++ {
 		s.frame = frame
 		want := legacyClassicFrames[frame%len(legacyClassicFrames)]
-		got := s.glyph()
+		got := s.glyph(SpinnerClassic)
 		if got != want {
 			t.Errorf("frame %d = %q, want %q", frame, got, want)
 		}
@@ -60,10 +60,10 @@ func TestSpinnerClassicUncolouredIsUnchanged(t *testing.T) {
 
 	th := newTheme(scheme.Default())
 	legacy := lipgloss.NewStyle().Background(th.surface) // exactly how newModel styled the widget
-	s := newSpinnerAnim(SpinnerClassic, false)
+	var s spinnerAnim
 	for frame, glyph := range legacyClassicFrames {
 		s.frame = frame
-		if got, want := s.view(th), legacy.Render(glyph); got != want {
+		if got, want := s.view(th, SpinnerClassic, false), legacy.Render(glyph); got != want {
 			t.Errorf("frame %d renders %q, want %q (the pre-plan spinner, byte for byte)", frame, got, want)
 		}
 	}
@@ -83,10 +83,10 @@ func TestSpinnerFrameWidth(t *testing.T) {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
-			s := newSpinnerAnim(style, false)
+			var s spinnerAnim
 			for frame := 0; frame < sweep; frame++ {
 				s.frame = frame
-				if got := ansi.StringWidth(s.glyph()); got != spec.width {
+				if got := ansi.StringWidth(s.glyph(style)); got != spec.width {
 					t.Errorf("frame %d of %s is %d columns wide, want the declared %d",
 						frame, style, got, spec.width)
 				}
@@ -102,11 +102,11 @@ func TestSpinnerStyleFallsBackToClassic(t *testing.T) {
 	t.Parallel()
 
 	for _, style := range []SpinnerStyle{"", SpinnerStyle("not-a-style")} {
-		s := newSpinnerAnim(style, false)
-		if got := s.glyph(); got != legacyClassicFrames[0] {
+		var s spinnerAnim
+		if got := s.glyph(style); got != legacyClassicFrames[0] {
 			t.Errorf("style %q frame 0 = %q, want classic's %q", style, got, legacyClassicFrames[0])
 		}
-		if got, want := s.interval(), classicInterval; got != want {
+		if got, want := s.interval(style), classicInterval; got != want {
 			t.Errorf("style %q interval = %v, want classic's %v", style, got, want)
 		}
 	}
@@ -162,28 +162,28 @@ func litDots(t *testing.T, glyph string) [][2]int {
 }
 
 // TestSnakeFrames pins the twelve glyphs the ring derivation produces, in order, and the rate that
-// makes them one lap a second. It goes through newSpinnerAnim so the registry wiring is covered
+// makes them one lap a second. It goes through spinnerAnim so the registry wiring is covered
 // too: a style that derives its frames correctly but is registered at the wrong interval — or not
 // registered at all, which falls back to classic — fails here.
 func TestSnakeFrames(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	s := newSpinnerAnim(SpinnerSnake, false)
-	if got, want := s.interval(), time.Second/12; got != want {
+	var s spinnerAnim
+	if got, want := s.interval(SpinnerSnake), time.Second/12; got != want {
 		t.Errorf("snake interval = %v, want %v (twelve positions, one lap a second)", got, want)
 	}
 
 	for frame, want := range snakeFrames {
 		s.frame = frame
-		got := s.glyph()
+		got := s.glyph(SpinnerSnake)
 		if got != want {
 			t.Errorf("frame %d = %q, want %q", frame, got, want)
 		}
 		if width := ansi.StringWidth(got); width != 2 {
 			t.Errorf("frame %d is %d columns wide, want 2", frame, width)
 		}
-		if rendered := s.view(th); !strings.Contains(rendered, want) {
+		if rendered := s.view(th, SpinnerSnake, false); !strings.Contains(rendered, want) {
 			t.Errorf("frame %d renders %q, which does not carry the glyph %q", frame, rendered, want)
 		}
 	}
@@ -195,11 +195,11 @@ func TestSnakeFrames(t *testing.T) {
 func TestSnakeIsSixDotsOnTheRing(t *testing.T) {
 	t.Parallel()
 
-	s := newSpinnerAnim(SpinnerSnake, false)
+	var s spinnerAnim
 	// Two laps: the frame counter only grows, so the wrap has to hold as well as the first pass.
 	for frame := 0; frame < 2*len(snakeRing); frame++ {
 		s.frame = frame
-		dots := litDots(t, s.glyph())
+		dots := litDots(t, s.glyph(SpinnerSnake))
 		if len(dots) != snakeLength {
 			t.Errorf("frame %d lights %d dots, want the snake's %d", frame, len(dots), snakeLength)
 		}
@@ -217,11 +217,11 @@ func TestSnakeIsSixDotsOnTheRing(t *testing.T) {
 func TestSnakeCycles(t *testing.T) {
 	t.Parallel()
 
-	s := newSpinnerAnim(SpinnerSnake, false)
+	var s spinnerAnim
 	seen := make(map[string]int, len(snakeRing))
 	for frame := 0; frame < len(snakeRing); frame++ {
 		s.frame = frame
-		glyph := s.glyph()
+		glyph := s.glyph(SpinnerSnake)
 		if prev, dup := seen[glyph]; dup {
 			t.Errorf("frame %d repeats frame %d's glyph %q — the snake would appear to stall",
 				frame, prev, glyph)
@@ -230,9 +230,9 @@ func TestSnakeCycles(t *testing.T) {
 	}
 
 	s.frame = 0
-	first := s.glyph()
+	first := s.glyph(SpinnerSnake)
 	s.frame = len(snakeRing)
-	if got := s.glyph(); got != first {
+	if got := s.glyph(SpinnerSnake); got != first {
 		t.Errorf("frame %d = %q, want frame 0's %q — the lap must close", len(snakeRing), got, first)
 	}
 }
@@ -306,16 +306,16 @@ func TestGlitterDensityBreathes(t *testing.T) {
 
 // TestGlitterCellMatchesDensity proves the breath actually governs the glyph across several breaths:
 // both cells of every frame light exactly the number of dots that frame's density calls for. A pick
-// from the wrong bucket would still sparkle but would not breathe. It goes through newSpinnerAnim so
+// from the wrong bucket would still sparkle but would not breathe. It goes through spinnerAnim so
 // the registry wiring is covered too — an unregistered style falls back to classic's single cell and
 // fails the cell count.
 func TestGlitterCellMatchesDensity(t *testing.T) {
 	t.Parallel()
 
-	s := newSpinnerAnim(SpinnerGlitter, false)
+	var s spinnerAnim
 	for frame := 0; frame < 3*glitterFramesPerBreath; frame++ {
 		s.frame = frame
-		cells := []rune(s.glyph())
+		cells := []rune(s.glyph(SpinnerGlitter))
 		if len(cells) != glitterCells {
 			t.Fatalf("frame %d is %d cells, want the %d that glitter paints", frame, len(cells), glitterCells)
 		}
@@ -330,7 +330,7 @@ func TestGlitterCellMatchesDensity(t *testing.T) {
 	// The peak's bucket holds only ⣿, so the swell tops out on a solid pair — the effect's visual
 	// anchor, and the proof the density really does reach the top of the block.
 	s.frame = glitterPeakFrame
-	if got, want := s.glyph(), "⣿⣿"; got != want {
+	if got, want := s.glyph(SpinnerGlitter), "⣿⣿"; got != want {
 		t.Errorf("the peak frame %d = %q, want the solid %q", glitterPeakFrame, got, want)
 	}
 }
@@ -342,15 +342,15 @@ func TestGlitterCellMatchesDensity(t *testing.T) {
 func TestGlitterIsPure(t *testing.T) {
 	t.Parallel()
 
-	first := newSpinnerAnim(SpinnerGlitter, false)
-	second := newSpinnerAnim(SpinnerGlitter, false)
+	var first spinnerAnim
+	var second spinnerAnim
 	for frame := 0; frame < glitterFramesPerBreath; frame++ {
 		first.frame, second.frame = frame, frame
-		once, twice := first.glyph(), first.glyph()
+		once, twice := first.glyph(SpinnerGlitter), first.glyph(SpinnerGlitter)
 		if once != twice {
 			t.Fatalf("frame %d rendered %q then %q — the glyph is not pure in the frame", frame, once, twice)
 		}
-		if other := second.glyph(); other != once {
+		if other := second.glyph(SpinnerGlitter); other != once {
 			t.Fatalf("frame %d rendered %q on one copy and %q on another", frame, once, other)
 		}
 	}
@@ -369,11 +369,11 @@ func TestGlitterSparkles(t *testing.T) {
 		wantGlyphs = 10
 	)
 
-	s := newSpinnerAnim(SpinnerGlitter, false)
-	if got, want := s.interval(), time.Second/20; got != want {
+	var s spinnerAnim
+	if got, want := s.interval(SpinnerGlitter), time.Second/20; got != want {
 		t.Errorf("glitter interval = %v, want %v (the fast half of the contrast)", got, want)
 	}
-	if got, want := time.Duration(glitterFramesPerBreath)*s.interval(), 6*time.Second; got != want {
+	if got, want := time.Duration(glitterFramesPerBreath)*s.interval(SpinnerGlitter), 6*time.Second; got != want {
 		t.Errorf("one breath spans %v at the registered rate, want %v (the slow half)", got, want)
 	}
 
@@ -383,7 +383,7 @@ func TestGlitterSparkles(t *testing.T) {
 		if dots := glitterDensity(frame, glitterFramesPerBreath); dots < 2 {
 			t.Fatalf("frame %d breathes at %d dots — too sparse a bucket to prove a re-roll", frame, dots)
 		}
-		seen[s.glyph()] = true
+		seen[s.glyph(SpinnerGlitter)] = true
 	}
 	if len(seen) < wantGlyphs {
 		t.Errorf("%d consecutive frames produced only %d distinct glyphs, want at least %d — the spinner would read as a pulse, not as glitter",
@@ -436,7 +436,7 @@ func TestSpinnerColorLoops(t *testing.T) {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
-			loop := newSpinnerAnim(style, true).framesPerColorLoop()
+			loop := spinnerAnim{}.framesPerColorLoop(style)
 			if got, want := th.spinnerColor(loop, loop), th.spinnerColor(0, loop); got != want {
 				t.Errorf("frame %d is %v, want frame 0's %v — the loop must close on itself", loop, got, want)
 			}
@@ -468,7 +468,7 @@ func TestSpinnerColorIsSoft(t *testing.T) {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
-			loop := newSpinnerAnim(style, true).framesPerColorLoop()
+			loop := spinnerAnim{}.framesPerColorLoop(style)
 			for frame := 0; frame < loop; frame++ {
 				step := oklabDistance(t, th.spinnerColor(frame, loop), th.spinnerColor(frame+1, loop))
 				if step > spinnerSoftStep {
@@ -492,12 +492,12 @@ func TestSpinnerColorOffPaintsNoForeground(t *testing.T) {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
-			s := newSpinnerAnim(style, false)
+			var s spinnerAnim
 			// Two laps of the colour loop: long enough that a foreground creeping in at some phase
 			// of the (absent) gradient would show up.
-			for frame := 0; frame < 2*s.framesPerColorLoop(); frame++ {
+			for frame := 0; frame < 2*s.framesPerColorLoop(style); frame++ {
 				s.frame = frame
-				if got, want := s.view(th), th.spinnerBase.Render(s.glyph()); got != want {
+				if got, want := s.view(th, style, false), th.spinnerBase.Render(s.glyph(style)); got != want {
 					t.Fatalf("frame %d renders %q, want the bare field's %q — colour off must add no foreground",
 						frame, got, want)
 				}
@@ -519,25 +519,25 @@ func TestSpinnerColorIsOrthogonalToStyle(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/colour=%t", style, colour), func(t *testing.T) {
 				t.Parallel()
 
-				s := newSpinnerAnim(style, colour)
-				bare := newSpinnerAnim(style, false)
-				loop := s.framesPerColorLoop()
+				var s spinnerAnim
+				var bare spinnerAnim
+				loop := s.framesPerColorLoop(style)
 				// A third of a lap apart, so a working loop is on a different tone at each one.
 				frames := [3]int{0, loop / 3, 2 * loop / 3}
 
 				for _, frame := range frames {
 					s.frame, bare.frame = frame, frame
 					glyph := spinnerSpecs[style].glyph(frame)
-					if got := s.glyph(); got != glyph {
+					if got := s.glyph(style); got != glyph {
 						t.Errorf("frame %d glyph = %q, want %s's own %q — the colour setting must not touch the animation",
 							frame, got, style, glyph)
 					}
-					rendered := s.view(th)
+					rendered := s.view(th, style, colour)
 					if !strings.Contains(rendered, glyph) {
 						t.Errorf("frame %d renders %q, which does not carry %s's glyph %q", frame, rendered, style, glyph)
 					}
 					if colour {
-						if rendered == bare.view(th) {
+						if rendered == bare.view(th, style, false) {
 							t.Errorf("frame %d renders identically with the loop on and off — %s never gets a colour",
 								frame, style)
 						}
@@ -596,15 +596,15 @@ func TestSpinnerColorPeriodIsTenSeconds(t *testing.T) {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
-			s := newSpinnerAnim(style, true)
-			loop := s.framesPerColorLoop()
+			var s spinnerAnim
+			loop := s.framesPerColorLoop(style)
 			if loop != want {
 				t.Errorf("%s spends %d frames on a colour lap, want %d at its %v interval",
-					style, loop, want, s.interval())
+					style, loop, want, s.interval(style))
 			}
-			if diff := time.Duration(loop)*s.interval() - spinnerColorPeriod; diff < -slack || diff > slack {
+			if diff := time.Duration(loop)*s.interval(style) - spinnerColorPeriod; diff < -slack || diff > slack {
 				t.Errorf("%s's lap takes %v, want %v (±%v) — the styles' differing rates must not drift the period",
-					style, time.Duration(loop)*s.interval(), spinnerColorPeriod, slack)
+					style, time.Duration(loop)*s.interval(style), spinnerColorPeriod, slack)
 			}
 		})
 	}
@@ -716,10 +716,10 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	// The tick that flips the phase is the last frame of a half-period; arm left the frame at 0, so
 	// the boundary is one short of the half. A style whose half is a single frame would make the
 	// "no flip" case unreachable, which no bundled style is (framesPerBlinkHalf is 5, 6 or 10).
-	boundary := running.spin.framesPerBlinkHalf() - 1
+	boundary := running.spin.framesPerBlinkHalf(running.opts.UI.Spinner) - 1
 	if boundary < 1 {
 		t.Fatalf("precondition: framesPerBlinkHalf() = %d leaves no non-flipping tick to test",
-			running.spin.framesPerBlinkHalf())
+			running.spin.framesPerBlinkHalf(running.opts.UI.Spinner))
 	}
 
 	// Nothing open, on a tick that DOES flip: every block paints the same at either phase, so there
@@ -783,7 +783,7 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 		t.Fatalf("precondition: the settled star is not on screen:\n%s", before)
 	}
 
-	m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that crosses the phase
+	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1 // the next tick is the one that crosses the phase
 	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
 
 	if !m.detached {
@@ -813,7 +813,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 		leadIn(&m)
 		openCall(&m, "c1", "go test ./...")
 		m.refreshViewport()
-		m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that flips the phase
+		m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1 // the next tick is the one that flips the phase
 		return armTranscriptSelection(t, m, 0)
 	}
 
@@ -868,8 +868,8 @@ func TestParseSpinnerStyle(t *testing.T) {
 	}
 }
 
-// TestNewModelSelectsTheConfiguredSpinner pins the construction seam the `ui:` config block feeds:
-// newModel carries Options.UI.Spinner and Options.UI.SpinnerColor onto the Model's animation, both of
+// TestNewModelSelectsTheConfiguredSpinner pins the seam the `ui:` config block feeds: a Model built
+// from Options.UI.Spinner and Options.UI.SpinnerColor paints its status line's spinner from both of
 // them, independently — the table walks all six combinations, so folding the colour flag into the
 // style (or reading one off the other) fails here rather than in a live run. The zero Options are
 // covered too: cmd/apogee always resolves a real style, so the zero value reaches only hand-built
@@ -883,16 +883,7 @@ func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
 			opts := testOpts
 			opts.UI.Spinner, opts.UI.SpinnerColor = style, colour
 			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
-			if m.spin.style != style {
-				t.Errorf("newModel with Spinner %q built the animation for %q", style, m.spin.style)
-			}
-			if m.spin.color != colour {
-				t.Errorf("newModel with SpinnerColor %v built the animation with color = %v (style %q)",
-					colour, m.spin.color, style)
-			}
-			if got, want := m.spin.glyph(), spinnerSpecs[style].glyph(0); got != want {
-				t.Errorf("newModel with Spinner %q renders %q at frame 0; want that style's own %q", style, got, want)
-			}
+			assertSpinnerPaints(t, m, style, colour)
 		}
 	}
 
@@ -900,11 +891,39 @@ func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
 	// uncoloured spinner the hand-built test Options in this package rely on (classic, one column,
 	// no foreground).
 	m := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
-	if m.spin.color {
-		t.Error("a zero spinner key built a coloured spinner; the colour loop must be opt-in")
-	}
-	if got, want := m.spin.view(m.th), m.th.spinnerBase.Render(legacyClassicFrames[0]); got != want {
+	assertSpinnerPaints(t, m, SpinnerClassic, false)
+	if got, want := m.spin.view(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor),
+		m.th.spinnerBase.Render(legacyClassicFrames[0]); got != want {
 		t.Errorf("a zero spinner key renders %q at frame 0; want the bare classic cell %q", got, want)
+	}
+}
+
+// assertSpinnerPaints checks the spinner cell m's status line paints at m's frame against what
+// style and colour call for. The line is rendered as a running turn's — the one state the spinner
+// shows in — and the expected cell is composed here from the registry and the theme rather than
+// through spinnerAnim.view, so a Model whose paint stopped following its UI preferences fails. Both
+// polarities are checked: the other colour setting's cell must be absent, so a loop left running
+// (or never started) cannot hide behind a substring match.
+func assertSpinnerPaints(t *testing.T, m Model, style SpinnerStyle, colour bool) {
+	t.Helper()
+
+	m.width, m.state = 80, stateRunning
+	spec := spinnerAnim{}.spec(style) // the zero style resolves to classic, as it paints
+	glyph := spec.glyph(m.spin.frame)
+	loop := int(spinnerColorPeriod / spec.interval)
+	bare := m.th.spinnerBase.Render(glyph)
+	coloured := m.th.spinnerBase.Foreground(m.th.spinnerColor(m.spin.frame, loop)).Render(glyph)
+	want, other := bare, coloured
+	if colour {
+		want, other = coloured, bare
+	}
+	line := m.statusLine()
+	if !strings.Contains(line, want) {
+		t.Errorf("style %q colour=%t: the status line %q does not paint the cell %q", style, colour, line, want)
+	}
+	if strings.Contains(line, other) {
+		t.Errorf("style %q colour=%t: the status line %q paints the other colour setting's cell %q",
+			style, colour, line, other)
 	}
 }
 
@@ -930,7 +949,7 @@ func TestSpinnerFlipRepaintsForRunningWorkflow(t *testing.T) {
 		t.Fatal("precondition: the running workflow block is not a live header")
 	}
 	m.refreshViewport()
-	m.spin.frame = m.spin.framesPerBlinkHalf() - 1
+	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1
 	m.lines = []string{sentinel}
 	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
 	if got := strings.Join(m.lines, "\n"); got == sentinel {
@@ -949,7 +968,7 @@ func TestSpinnerFlipIsSettledByTheTail(t *testing.T) {
 	m = step(t, m, keyEnter())
 	openCall(&m, "c1", "go test ./...")
 	m.refreshViewport()
-	m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that crosses the phase
+	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1 // the next tick is the one that crosses the phase
 	before := m.painted
 
 	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})

@@ -6555,7 +6555,7 @@ func assertClampFresh(t *testing.T, m Model, when string) {
 // which is what refreshViewport stashes from.
 func assertPaintFresh(t *testing.T, m Model, when string) {
 	t.Helper()
-	fresh := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(), m.backHint()).
+	fresh := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(m.opts.UI.Spinner), m.backHint()).
 		reserveWidgetCells(m.viewport.Width()).lines
 	if !reflect.DeepEqual(m.lines, fresh) {
 		t.Fatalf("%s: the lines on screen are not the lines the model composes now — the paint is stale", when)

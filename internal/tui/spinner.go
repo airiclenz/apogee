@@ -230,8 +230,8 @@ var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
 	SpinnerClassic: {interval: classicInterval, width: 1, glyph: classicGlyph},
 }
 
-// The colour loop is ORTHOGONAL to the glyph animation: it is a flag on [spinnerAnim], never a
-// property of a style, so all three styles × colour on/off are valid combinations and every one of
+// The colour loop is ORTHOGONAL to the glyph animation: it is a flag beside the style in the UI
+// preferences ([domain.UIPrefs].SpinnerColor), never a property of a style, so all three styles × colour on/off are valid combinations and every one of
 // them renders. [spinnerAnim.view] is the single place the two compose — nothing below branches on
 // the style to decide a colour, and no style carries one of its own.
 
@@ -289,38 +289,37 @@ func (th theme) spinnerColor(frame, framesPerLoop int) color.Color {
 }
 
 // spinnerAnim is the animation state carried on the value-copied Model (ADR 0011): plain ints,
-// no RNG handle, no self-referential type. It is the whole animation — the widget it replaced held
-// its frame counter the same way; the chain bookkeeping (the generation a tick must carry to be
-// live) is the in-flight worker's ([worker.gen]), because a chain is opened exactly when a worker
-// starts or resumes.
+// no RNG handle, no self-referential type. It is the animation's STATE only — the widget it
+// replaced held its frame counter the same way; the chain bookkeeping (the generation a tick must
+// carry to be live) is the in-flight worker's ([worker.gen]), because a chain is opened exactly
+// when a worker starts or resumes.
+//
+// What it animates is not its own: the style and the colour loop are the human's preferences,
+// whose one record is the Model's Options.UI (Spinner, SpinnerColor), and every method that paints
+// or paces takes the style (and view the colour flag) from the caller, which reads them there. A
+// mirror of either here would be a second record a settings apply has to keep in step; reading the
+// record at paint is what makes a `/settings` edit move the spinner with no write of its own. The
+// zero value is the still, unarmed animation: it schedules nothing until a run arms it (arm).
 type spinnerAnim struct {
-	style SpinnerStyle // which animation paints the glyph
-	color bool         // the colour loop runs; false renders the glyph on the bare status field
-	frame int          // frames elapsed since the chain was armed
+	frame int // frames elapsed since the chain was armed
 }
 
-// newSpinnerAnim builds the still, unarmed animation for a style. It schedules nothing: the
-// chain starts when a run does (arm).
-func newSpinnerAnim(style SpinnerStyle, color bool) spinnerAnim {
-	return spinnerAnim{style: style, color: color}
-}
-
-// spec resolves this style's animation. An unregistered style — the zero value, or a name this
+// spec resolves a style's animation. An unregistered style — the zero value, or a name this
 // build parses but has no animation for — falls back to classic, so the status line always shows
 // something moving rather than a blank column where the spinner should be.
-func (s spinnerAnim) spec() spinnerSpec {
-	if spec, ok := spinnerSpecs[s.style]; ok {
+func (spinnerAnim) spec(style SpinnerStyle) spinnerSpec {
+	if spec, ok := spinnerSpecs[style]; ok {
 		return spec
 	}
 	return spinnerSpecs[SpinnerClassic]
 }
 
-// interval is how long this style holds one frame — its frame rate, inverted. The tick chain
+// interval is how long style holds one frame — its frame rate, inverted. The tick chain
 // re-schedules itself at this period, so a style's rate is its own business.
-func (s spinnerAnim) interval() time.Duration { return s.spec().interval }
+func (s spinnerAnim) interval(style SpinnerStyle) time.Duration { return s.spec(style).interval }
 
-// glyph is this frame's braille cell(s), pure in [spinnerAnim.frame].
-func (s spinnerAnim) glyph() string { return s.spec().glyph(s.frame) }
+// glyph is this frame's braille cell(s) under style, pure in [spinnerAnim.frame].
+func (s spinnerAnim) glyph(style SpinnerStyle) string { return s.spec(style).glyph(s.frame) }
 
 // starBlinkHalfPeriod is how long the transcript's LIVE STAR holds one phase: ✦ for half a second,
 // then a bare cell for half a second (layout.md, "The live star"). It is a wall-clock duration
@@ -333,8 +332,8 @@ const starBlinkHalfPeriod = 500 * time.Millisecond
 // 10 fps, 6 at snake's 12, 10 at glitter's 20. The floor of one keeps a hypothetical style slower
 // than the phase itself blinking — without it the division would round to zero and the star would
 // freeze on one glyph — which is the same reasoning framesPerColorLoop's derivation carries.
-func (s spinnerAnim) framesPerBlinkHalf() int {
-	return max(1, int(starBlinkHalfPeriod/s.interval()))
+func (s spinnerAnim) framesPerBlinkHalf(style SpinnerStyle) int {
+	return max(1, int(starBlinkHalfPeriod/s.interval(style)))
 }
 
 // blink is this frame's phase of the transcript's LIVE STAR — the alternation between ✦ and a bare
@@ -344,26 +343,31 @@ func (s spinnerAnim) framesPerBlinkHalf() int {
 // is the same tick that flips the star, and a run that is not spinning has a star that is not
 // blinking either. A fresh chain starts at the ✦-showing phase — [spinnerAnim.arm] zeroes the
 // frame, and the first half-period of frames is the false phase.
-func (s spinnerAnim) blink() bool { return (s.frame/s.framesPerBlinkHalf())%2 == 1 }
+func (s spinnerAnim) blink(style SpinnerStyle) bool {
+	return (s.frame/s.framesPerBlinkHalf(style))%2 == 1
+}
 
 // framesPerColorLoop is how many of THIS style's frames one colour lap spans: 100 at classic's
 // 10 fps, 120 at snake's 12, 200 at glitter's 20. Deriving the count from the style's interval is
 // what keeps the loop's wall-clock period at spinnerColorPeriod under every style, so selecting a
 // faster animation does not speed the colour up with it.
-func (s spinnerAnim) framesPerColorLoop() int { return int(spinnerColorPeriod / s.interval()) }
+func (s spinnerAnim) framesPerColorLoop(style SpinnerStyle) int {
+	return int(spinnerColorPeriod / s.interval(style))
+}
 
-// view paints this frame's glyph for the status line, on the theme's spinner field — the status
+// view paints this frame's glyph under style for the status line — coloured by the loop when
+// color is set, on the bare field when not — on the theme's spinner field — the status
 // bar's black background. This is the single place the glyph animation and the colour loop compose:
 // the two are orthogonal settings, so no style carries a colour of its own and nothing here
 // branches on the style to decide one. Uncoloured, the field adds no foreground at all and the
 // glyph keeps the terminal's own text colour — byte for byte what the pre-plan spinner rendered
 // (TestSpinnerClassicUncolouredIsUnchanged), which is why this branch paints on spinnerBase rather
 // than through the status bar's faint grey.
-func (s spinnerAnim) view(th theme) string {
-	if !s.color {
-		return th.spinnerBase.Render(s.glyph())
+func (s spinnerAnim) view(th theme, style SpinnerStyle, color bool) string {
+	if !color {
+		return th.spinnerBase.Render(s.glyph(style))
 	}
-	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop())).Render(s.glyph())
+	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop(style))).Render(s.glyph(style))
 }
 
 // arm opens a fresh tick chain on generation gen: back at frame 0, with the first tick scheduled.
@@ -372,16 +376,19 @@ func (s spinnerAnim) view(th theme) string {
 // generation is what makes a tick still in flight from the previous chain inert, so the frame
 // rate cannot double. It takes a pointer because the frame reset must land on the Model copy the
 // caller returns — which is also why every caller arms in a statement of its own: in
-// `return m, m.spin.arm(…)` the order of the reset and the copy of m is unspecified.
-func (s *spinnerAnim) arm(gen int) tea.Cmd {
+// `return m, m.spin.arm(…)` the order of the reset and the copy of m is unspecified. style paces
+// the first tick ([spinnerAnim.tick]).
+func (s *spinnerAnim) arm(gen int, style SpinnerStyle) tea.Cmd {
 	s.frame = 0
-	return s.tick(gen)
+	return s.tick(gen, style)
 }
 
 // tick schedules the next frame of generation gen — the CURRENT one, worker.gen, at every caller
 // — snapshotting it into the Msg so a chain the Update loop has since retired identifies itself.
-func (s spinnerAnim) tick(gen int) tea.Cmd {
-	return tea.Tick(s.interval(), func(time.Time) tea.Msg { return spinnerTickMsg{gen: gen} })
+// It waits style's interval, read afresh on every tick, so a style swapped mid-run re-paces the
+// chain from its next frame on.
+func (s spinnerAnim) tick(gen int, style SpinnerStyle) tea.Cmd {
+	return tea.Tick(s.interval(style), func(time.Time) tea.Msg { return spinnerTickMsg{gen: gen} })
 }
 
 // spinnerTickMsg advances the spinner one frame. gen names the chain that scheduled it; the
@@ -409,5 +416,5 @@ func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 	// human and every drag-selection they hold through a turn. A selection spanning a header that
 	// DOES flip is dropped, which is that same rule doing its ordinary job on a line that changed.
 	m.spin.frame++
-	return m, m.spin.tick(m.worker.gen)
+	return m, m.spin.tick(m.worker.gen, m.opts.UI.Spinner)
 }

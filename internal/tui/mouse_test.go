@@ -1783,8 +1783,8 @@ func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 
 	m = step(t, m, leftClick(2, row))
 	painted := m.lines[header]
-	m.spin.frame = m.spin.framesPerBlinkHalf() - 1    // …so the next tick is the one that crosses the phase
-	m = step(t, m, spinnerTickMsg{gen: m.worker.gen}) // the star flips: the pressed line is rewritten
+	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1 // …so the next tick is the one that crosses the phase
+	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})               // the star flips: the pressed line is rewritten
 	if m.lines[header] == painted {
 		t.Fatal("setup: the tick left the header line alone, so this case tests nothing")
 	}

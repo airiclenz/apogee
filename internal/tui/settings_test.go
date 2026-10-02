@@ -841,9 +841,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 		t.Errorf("value cell = %q, want %q", got, want)
 	}
 	// The spinner is a key the RENDERER owns: it moved here, and the apply seam was never asked.
-	if committed.spin.style != SpinnerGlitter {
-		t.Errorf("spinner style = %q, want glitter — the commit changed what paints", committed.spin.style)
-	}
+	assertSpinnerPaints(t, committed, SpinnerGlitter, committed.opts.UI.SpinnerColor)
 	if len(log.applies) != 0 {
 		t.Errorf("applies = %+v, want none: a renderer-owned key never leaves the renderer", log.applies)
 	}
@@ -1673,9 +1671,8 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 			},
 			check: func(t *testing.T, m Model) {
 				t.Helper()
-				if m.spin.color {
-					t.Error("the spinner is still running its colour loop")
-				}
+				// The spinner is still running its colour loop if the bare cell does not paint.
+				assertSpinnerPaints(t, m, m.opts.UI.Spinner, false)
 			},
 		},
 		{
