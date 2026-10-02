@@ -66,7 +66,10 @@ item says otherwise. The review records #1–#8 as landed.
 - 7: guard folded (decision: loop-built rows carry no `reaches`, KeyRegistry order, config's derived var follows the domain table; comment grep over the five sites; `config/reactions.go:65-68` no longer claimed true; literal-count Acceptance greps).
 - 20: guard folded (`paintcache.go`, `mouse_test.go`, `model_test.go` in Files; blink/spinner tests run by name; Goal restated; `spin.style|spin.color` grep; the field-reading test sites rewritten instead of a new test).
 
-## 1. The review records #1–#8 as landed
+## 1. The review records #1–#8 as landed — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the landed badges use a solid emerald (bg-emerald-600, white text) rather than the legend's bg-emerald-100, so they don't read as a second "Strong" badge.
+NOTES (2026-10-02): #20's layout-calls note says every remaining layout()/refreshViewport() call outside model.go carries a same-line "// geometry:" comment and TestArmsLeaveLayoutToTail keeps it so (retry fix: the first attempt wrongly claimed no such calls remain).
 
 **What:**
 **Goal:** in `docs/reviews/architecture-review-2026-09-30.html`, articles `c1`–`c8` each carry a
