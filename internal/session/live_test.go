@@ -222,7 +222,10 @@ func TestLiveActivateWithoutParkHoldsAfresh(t *testing.T) {
 	assertLiveHeld(t, store, parked, false)
 }
 
-// A hold Activate cannot take is returned, and the followers still move: the identity moved.
+// A hold Activate cannot take is returned, and the followers still move: the identity moved. That
+// is intended, not a gap (owner call 2026-10-02, bead apogee-refused-hold-followers-move): the
+// scratch dir and the undo journal follow the session the human switched to, and the refused hold
+// is left for the next Begin to report before anything is written over the other instance's record.
 func TestLiveActivateRefusedStillMovesFollowers(t *testing.T) {
 	t.Parallel()
 	live, store, log := newTestLive(t, nil)

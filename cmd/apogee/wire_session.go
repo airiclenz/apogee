@@ -212,7 +212,9 @@ func (h *sessionHost) Load(id string) (session.Record, error) {
 func (h *sessionHost) Activate(meta session.Meta) {
 	// Activate reports nothing (tui.SessionHost), so a hold Live could not take is left for the next
 	// Save to re-attempt and report: the Save is what would write over the other instance's record,
-	// and it refuses before writing.
+	// and it refuses before writing. The followers below have already moved by then — a refused hold
+	// still moves the scratch dir and the undo journal to meta's id, by design (owner call 2026-10-02):
+	// the identity moved, so what fences the next tool call and what /undo reaches move with it.
 	_ = h.live.Activate(meta)
 }
 
@@ -229,6 +231,8 @@ func (h *sessionHost) SessionScratchDir() string {
 // is Live's first onMove follower, so it runs outside Live's lock: scratchMoved reaches into the
 // engine holder. A disabled seam (no root) does nothing; a creation failure pushes "", removing the old
 // session's dir from the box rather than leaving a stale — or nonexistent — path fenced writable.
+// It runs on every Activate, a refused hold included (owner call 2026-10-02): the scratch dir
+// follows the identity, not the hold.
 func (h *sessionHost) followScratch(id string) {
 	if h.scratchRoot == "" {
 		return
@@ -242,6 +246,7 @@ func (h *sessionHost) followScratch(id string) {
 // followJournal tells the listener the active session's id moved, so the undo journal is re-opened
 // under the store that id names. It is Live's second onMove follower, outside Live's lock for
 // followScratch's reason: the listener reaches into the engine holder. A host with no listener does nothing.
+// Like followScratch it runs on every Activate, a refused hold included (owner call 2026-10-02).
 func (h *sessionHost) followJournal(id string) {
 	if h.journalMoved == nil {
 		return

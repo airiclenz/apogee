@@ -317,7 +317,9 @@ IDEAS.md — master-agent stop/message idea line (apogee-engine-run-delegation);
 - `grep -n "siff-layout" docs/layout/split-diff-layout.md` shows no markdown link
 **Commit:** `docs: align CONTEXT, layout docs and IDEAS with the shipped behaviour`
 
-## 9. A refused hold moving the followers is documented as intended
+## 9. A refused hold moving the followers is documented as intended — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): comment-only; `Live.Activate`'s doc already says followers move "even when the hold was refused", so it is unchanged; the pin stays `TestLiveActivateRefusedStillMovesFollowers`, whose comment now cites the 2026-10-02 owner call. The implementer's `go test -race ./internal/session/` run was refused by the host's permission classifier, so the Acceptance test run is left to the verifier (go vet ./internal/session/ and gofmt are clean).
 
 **What:**
 **Goal:** the doc comments on `session.Live.Activate` and on the scratch/journal follower move in
