@@ -204,8 +204,12 @@ func TestWatchedConfigRepointedMCPServerReconnects(t *testing.T) {
 		return next, nil
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{
-		engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: c.path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = c.path
+	apply := applySettingFor(applier)
 
 	writeSettingsFixture(t, c.path, strings.Replace(mcpServersFixture,
 		"https://mcp.example.com/", "https://192.0.2.1/mcp", 1))

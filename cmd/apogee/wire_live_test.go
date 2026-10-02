@@ -239,7 +239,12 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 		return &fakeMCPSession{}, nil
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
 
@@ -279,7 +284,12 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 		return &fakeMCPSession{}, nil
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	note, err := apply("url-safety.deny-hosts", "[unrelated.example.com]")
 
@@ -320,7 +330,12 @@ func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T
 		return nil, errors.New("dial: connection refused")
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
 

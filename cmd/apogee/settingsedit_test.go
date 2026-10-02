@@ -366,7 +366,10 @@ func TestApplySettingServersInstallsTheReReadList(t *testing.T) {
 	path := filepath.Join(home, "config.yaml")
 	launchOpts := config.Options{Servers: []config.ServerEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
 	live := newLiveSettings(launchOpts)
-	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, live: live, configPath: path})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	writeSettingsFixture(t, path, "servers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+

@@ -188,14 +188,15 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
 	live := newLiveSettings(config.Options{})
-	apply := applySettingFor(settingsApplier{
-		engine:     spy,
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} },
-		configPath: path,
-		tools:      rosterEditTools(t.TempDir(), nil),
-		// No rebind closure at all: this key must not need one.
-	})
+	probe := &rebindProbe{}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	applier.binding = func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} }
+	applier.rebind = probe.rebind
+	applier.configPath = path
+	applier.tools = rosterEditTools(t.TempDir(), nil)
+	apply := applySettingFor(applier)
 
 	writeSettingsFixture(t, path, "model-profiles:\n"+
 		"  minimax:\n    thinking:\n      style: delimited\n      start: \"<edited>\"\n      end: \"</edited>\"\n")
@@ -204,6 +205,9 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 	}
 	if len(spy.profiles) != 1 || spy.profiles[0].Thinking.Start != "<edited>" {
 		t.Fatalf("SetProfile = %+v, want one call carrying the re-read user entry", spy.profiles)
+	}
+	if len(probe.calls) != 0 {
+		t.Errorf("rebind calls = %+v, want none: this key reaches SetProfile, never a whole rebind", probe.calls)
 	}
 
 	// And the map lands in the holder, so the NEXT model the session switches to is resolved against
@@ -233,13 +237,12 @@ func TestApplySettingModelProfilesRecomposesTheToolSet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
 	live := rosterEditTools(t.TempDir(), []string{"view_diff"})
-	apply := applySettingFor(settingsApplier{
-		engine:     spy,
-		live:       newLiveSettings(config.Options{}),
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} },
-		configPath: path,
-		tools:      live,
-	})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.binding = func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} }
+	applier.configPath = path
+	applier.tools = live
+	apply := applySettingFor(applier)
 
 	writeSettingsFixture(t, path, "model-profiles:\n  minimax:\n    tools:\n      enabled: [view_diff]\n")
 	if _, err := apply("model-profiles", "1 model profile"); err != nil {
@@ -281,12 +284,12 @@ func TestApplySettingModelProfilesWithNothingBoundHoldsOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
 	live := newLiveSettings(config.Options{})
-	apply := applySettingFor(settingsApplier{
-		engine:     spy,
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{} },
-		configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	applier.binding = func() upstreamBinding { return upstreamBinding{} }
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	writeSettingsFixture(t, path, "model-profiles:\n  gemma:\n    thinking:\n      style: harmony\n")
 	if _, err := apply("model-profiles", "1 model profile"); err != nil {

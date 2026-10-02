@@ -153,7 +153,10 @@ func TestServerStatsSettingsToggleOpensAndStopsTheStore(t *testing.T) {
 	home := t.TempDir()
 	rec := newStatsRecorder(serverStatsPath(home), true)
 	live := newLiveSettings(config.Options{ServerStats: true})
-	apply := applySettingFor(settingsApplier{live: live, stats: rec})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.stats = rec
+	apply := applySettingFor(applier)
 	sink := rec.wrap(nil)
 	attempt := func(id string) {
 		sink.Emit(domain.UpstreamAttemptEvent{

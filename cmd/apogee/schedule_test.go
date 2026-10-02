@@ -654,9 +654,11 @@ func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 	set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{
 		disabled: launchOpts.ToolsDisabled, denyHosts: launchOpts.URLDenyHosts,
 	}, func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
-	apply := applySettingFor(settingsApplier{
-		engine: &applySettingSpy{}, live: live, tools: set, configPath: configPath,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.tools = set
+	applier.configPath = configPath
+	apply := applySettingFor(applier)
 	// The human's session, three commits in. The `servers:` value is unread — that key re-reads the
 	// file the pane just persisted — which is why the file above is what carries the new entry.
 	for _, edit := range []struct{ key, value string }{

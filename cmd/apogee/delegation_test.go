@@ -1005,7 +1005,11 @@ func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
 	live := newLiveSettings(launchOpts)
 	spy := &delegationSpy{}
 	wiring := &delegationWiring{userProfiles: noProfiles, engine: spy}
-	apply := applySettingFor(settingsApplier{live: live, configPath: path, delegation: wiring})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.configPath = path
+	applier.delegation = wiring
+	apply := applySettingFor(applier)
 
 	writeSettingsFixture(t, path, "servers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
