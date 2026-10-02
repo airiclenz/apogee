@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/reactions/scope"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tasklist"
@@ -1426,9 +1427,10 @@ func (a *Agent) closeUndoGroup() {
 // caller moving a single field reads Generation, edits its copy and hands the whole value back,
 // so nothing downstream can observe a state that is half one generation and half the next.
 //
-// gen.Observe is IGNORED here. The observe lane belongs to the Runner, and an agent takes Floor,
-// Bypass and the SYNC lane out of a generation (domain.Generation); the Driver hands the SAME
-// value to both, which is what keeps the two halves of one swap in step.
+// gen.Observe is VALIDATED here but never armed. The observe lane belongs to the Runner, and an
+// agent takes Floor, Bypass and the SYNC lane out of a generation (domain.Generation); the Driver
+// hands the SAME value to both, which is what keeps the two halves of one swap in step — and is why
+// a bad observe lane is refused here exactly as a bad sync lane is, installing nothing.
 //
 // gen.Sync is the user's advise and gate list, and it is TAKEN — this is the seam that arms the
 // sync lane live. An entry scoped to another workspace is dropped on the way in (scopeSync), so
@@ -1442,16 +1444,13 @@ func (a *Agent) closeUndoGroup() {
 // this would guard against cannot be configured, and refusing a swap at fire time has nowhere to
 // report the refusal to.
 //
-// The Generation is VALIDATED here, once, and a refusal installs nothing — the previous generation
-// stays exactly as it was, every field of it. This is the arming step for the live route, the
-// counterpart of what armReactions is for Config.Reactions: Generation.Validate answers the lane
-// rules (a sync entry is user origin and of class advise or gate, no id twice within a lane) and
-// refuseReservedIDs the one rule only the engine can answer — a sync entry may not take the name
-// of a Floor guard or an engine notice (reservedIDs), switched on or off. Each ENTRY's own rules
-// (Reaction.Validate) are the caller's, answered where the entry was built: the config layer's
-// mapping for a `reactions:` file, the Firing's or embedder's own check for a list composed in Go.
-// The error wraps domain.ErrInvalidReaction and names the entry, which is the sentence a settings
-// row shows the human.
+// The Generation is VALIDATED here, once, by validateGeneration — both lanes — and a refusal
+// installs nothing: the previous generation stays exactly as it was, every field of it. This is
+// the arming step for the live route, the counterpart of what armReactions is for
+// Config.Reactions. A sync ENTRY's own rules (Reaction.Validate) are the caller's, answered where
+// the entry was built: the config layer's mapping for a `reactions:` file, the Firing's or
+// embedder's own check for a list composed in Go. The error wraps domain.ErrInvalidReaction and
+// names the entry, which is the sentence a settings row shows the human.
 //
 // The builtin ladder is REBUILT from gen.Floor and gen.ContextFillNotice, because a Floor guard
 // whose boolean is off — or the fill notice while its switch is off — is absent from the ladder
@@ -1470,10 +1469,7 @@ func (a *Agent) closeUndoGroup() {
 // SetMode. A sub-agent spawned AFTER the swap inherits the new generation (newChildAgent reads
 // it at spawn); one already mid-flight keeps what it was spawned with.
 func (a *Agent) SetReactions(gen domain.Generation) error {
-	if err := gen.Validate(); err != nil {
-		return err
-	}
-	if err := refuseReservedIDs(gen.Sync); err != nil {
+	if err := validateGeneration(gen); err != nil {
 		return err
 	}
 	scoped, err := a.scopeSync(gen.Sync)
@@ -1483,6 +1479,32 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 	gen.Sync = scoped
 	a.installGeneration(gen)
 	return nil
+}
+
+// validateGeneration is the arming step's ONE validation of a whole Generation, lane by lane:
+//   - Generation.Validate answers the lane rules — an observe entry is class observe, a sync entry
+//     user origin and of class advise or gate, no id twice WITHIN a lane (the same id in both lanes
+//     is one configured entry that armed two classes, and stays legal);
+//   - reactions.ValidateAll answers each OBSERVE entry's own rules — a known notice event on every
+//     Moment (a sync seam Moment is not one), a positive timeout, a runnable handler — which only
+//     the Runner's package knows; its refusal is wrapped in domain.ErrInvalidReaction when it does
+//     not already carry it, keeping the sentence that names the entry;
+//   - refuseReservedIDs answers the one rule only the engine can — a SYNC entry may not take the
+//     name of a Floor guard or an engine notice (reservedIDs), switched on or off.
+//
+// It lives here rather than on domain.Generation because domain cannot import internal/reactions
+// and reservedIDs is this package's own.
+func validateGeneration(gen domain.Generation) error {
+	if err := gen.Validate(); err != nil {
+		return err
+	}
+	if err := reactions.ValidateAll(gen.Observe); err != nil {
+		if errors.Is(err, domain.ErrInvalidReaction) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", domain.ErrInvalidReaction, err)
+	}
+	return refuseReservedIDs(gen.Sync)
 }
 
 // scopeSync reduces a sync lane to the entries active in this Agent's workspace (scope.ActiveAt):

@@ -743,7 +743,8 @@ type Reaction = domain.Reaction
 //
 // A Driver hands the SAME value to both halves of the engine, and each takes the lane that is its
 // own: Agent.SetReactions arms Floor, Bypass and Sync — the advise and gate entries the loop runs
-// inline — and ignores Observe, which belongs to the observe Runner. Moving one field means
+// inline — and validates but never arms Observe, which belongs to the observe Runner; a bad lane on
+// either side refuses the whole value. Moving one field means
 // reading Agent.Generation, editing the copy and handing the whole value back, so a swap never
 // silently drops the lane it was not about.
 type Generation = domain.Generation

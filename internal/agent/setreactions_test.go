@@ -13,6 +13,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -103,6 +104,89 @@ func TestSetReactionsRefusesAMalformedGeneration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The swap door validates the OBSERVE lane too, with the per-entry rules only the Runner's package
+// knows (reactions.ValidateAll): a zero timeout, a seam Moment that is no notice event, a handler
+// with nothing to run. Generation.Validate alone passes each of these — the class is observe and no
+// id repeats — so the refusal is the arm's own. It wraps ErrInvalidReaction, names the entry, and
+// installs nothing. A well-formed observe lane is accepted, may share an id with the sync lane,
+// and is never armed here: Generation keeps reporting an empty Observe.
+func TestSetReactionsRefusesAMalformedObserveLane(t *testing.T) {
+	t.Parallel()
+
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "reply"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	armed := syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny, Reason: "not today"}))
+	armed.Bypass = true
+	mustSetReactions(t, a, armed)
+
+	observer := func(id string) domain.Reaction {
+		return domain.Reaction{
+			ID:      id,
+			Origin:  domain.OriginUser,
+			Class:   domain.ClassObserve,
+			On:      []domain.Moment{domain.MomentTurnFinished},
+			Handler: domain.ArgvHandler{Argv: []string{"say", "done"}},
+			Timeout: 30 * time.Second,
+		}
+	}
+	noTimeout := observer("untimed")
+	noTimeout.Timeout = 0
+	seamMoment := observer("seamed")
+	seamMoment.On = []domain.Moment{domain.MomentPreToolExec}
+	blankArgv := observer("blank")
+	blankArgv.Handler = domain.ArgvHandler{}
+	cases := []struct {
+		name  string
+		entry domain.Reaction
+	}{
+		{name: "a zero timeout", entry: noTimeout},
+		{name: "a seam Moment", entry: seamMoment},
+		{name: "a blank argv", entry: blankArgv},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			refused := armed
+			refused.Bypass = false
+			refused.Observe = []domain.Reaction{tc.entry}
+			if err := refused.Validate(); err != nil {
+				t.Fatalf("Generation.Validate = %v, want it to pass: the fault must be per-entry only", err)
+			}
+
+			err := a.SetReactions(refused)
+
+			if !errors.Is(err, domain.ErrInvalidReaction) {
+				t.Fatalf("SetReactions = %v, want ErrInvalidReaction", err)
+			}
+			if !strings.Contains(err.Error(), `"`+tc.entry.ID+`"`) {
+				t.Errorf("SetReactions = %q, want the sentence to name %q", err, tc.entry.ID)
+			}
+			got := a.Generation()
+			if !got.Bypass || len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
+				t.Errorf("after the refusal Generation = %+v, want the previous swap untouched (Bypass on, warden armed)", got)
+			}
+		})
+	}
+
+	t.Run("a well-formed lane sharing an id with the sync lane", func(t *testing.T) {
+		accepted := armed
+		accepted.Observe = []domain.Reaction{observer("warden")}
+
+		mustSetReactions(t, a, accepted)
+
+		got := a.Generation()
+		if len(got.Observe) != 0 {
+			t.Errorf("after the swap Observe = %+v, want it empty: the agent never arms the observe lane", got.Observe)
+		}
+		if len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
+			t.Errorf("after the swap Sync = %+v, want warden armed", got.Sync)
+		}
+	})
 }
 
 // A sync entry may not take a builtin's name: the seven Floor-guard keys and the context-fill

@@ -602,12 +602,13 @@ type Generation struct {
 	// Bypass switches the model-shaping classes off (ADR 0006). The structural guards above stay
 	// on under it.
 	Bypass bool
-	// Observe is the async-lane observe list the Runner fires. The AGENT ignores it: the observe
-	// lane is the Runner's, and an agent takes Floor, Bypass and the sync lane out of a generation.
+	// Observe is the async-lane observe list the Runner fires. The AGENT validates it at the swap
+	// but never arms it: the observe lane is the Runner's, and an agent takes Floor, Bypass and the
+	// sync lane out of a generation.
 	Observe []Reaction
 	// Sync is the user's advise and gate list — the lane the AGENT runs inside the loop, where a
 	// handler holds the Turn while it runs and its output reaches the model or the Approver. The
-	// RUNNER ignores it, exactly as the agent ignores Observe.
+	// RUNNER ignores it, exactly as the agent never arms Observe.
 	Sync []Reaction
 	// ContextFillNotice switches the engine's context-fill notice on (ADR 0077 D1/D2): the one
 	// builtin of class advise, off by default and not a Floor guard, which is why it is a member of
@@ -628,7 +629,9 @@ type Generation struct {
 // It does NOT re-run Reaction.Validate per entry: an entry's own rules are answered ONCE, where the
 // entry is built — the config layer's mapping for a `reactions:` file, the agent's arming step for
 // Config.Reactions — and the lanes here are the checks only the whole value can make. A Generation
-// handed to the swap seam (Agent.SetReactions) is validated there, and nowhere below it.
+// handed to the swap seam (Agent.SetReactions) is validated there, and nowhere below it: the seam's
+// one validation runs this, the observe lane's per-entry rules (internal/reactions' ValidateAll,
+// which this package cannot import) and the engine's reserved sync ids.
 func (g Generation) Validate() error {
 	seen := make(map[string]bool, len(g.Observe))
 	for _, r := range g.Observe {

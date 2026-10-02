@@ -283,7 +283,11 @@ one another" comment with it); no new test.
 - `GOMEMLIMIT=2GiB go test -count=1 -run '^TestFloorGuardTableMatchesTheConfigKeys$|^TestFloorRowAppliesOneGeneration$|^TestSettingsTableIsInRegistryOrder$|^TestEveryEditableSettingKeyHasAnApply$|^TestLiveSettingsGenerationIsDerivedFromTheOverlay$|^TestBootConfigCarriesTheFloorGuardKeys$|^TestFiringConfigCarriesTheFloorGuardKeys$|^TestLateEngineReplaysTheFloorGatesAtTheBind$' ./cmd/apogee/`
 **Commit:** `refactor(agent): drive floor guard config and settings rows from one table`
 
-## 8. One arm validates both reaction lanes (#10a)
+## 8. One arm validates both reaction lanes (#10a) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): consequential edit — apogee.go: made necessary by SetReactions now validating Observe (the Generation alias doc said the agent "ignores Observe")
+NOTES (2026-10-02): the one validation is a new agent-private `validateGeneration` beside SetReactions in agent.go (Generation.Validate, then reactions.ValidateAll over Observe, then refuseReservedIDs over Sync); refuseReservedIDs stays in reactions.go unchanged; an observe-lane error not already wrapping domain.ErrInvalidReaction is wrapped as `%w: %w`, so the sentence reads `apogee: invalid reaction: reaction "x": ...`
+NOTES (2026-10-02): internal/domain/reaction.go and internal/reactions/hooks.go change in doc comments only; added test TestSetReactionsRefusesAMalformedObserveLane (zero timeout, seam Moment, blank argv, plus an accepted lane sharing an id with Sync)
 
 **What:** Depends on item 7.
 **Goal:** `Agent.SetReactions` validates the whole `domain.Generation` — sync and observe lanes —

@@ -121,6 +121,10 @@ func reactionError(id string, format string, args ...any) error {
 // ValidateAll validates every entry and refuses duplicate names. Names must be unique because they
 // are the identity a failure notice, a de-dup record and the payload's "reaction" field all key on:
 // two entries called "notify" would report as one.
+//
+// It is the observe lane's whole-list check wherever that lane is accepted: the config layer's
+// parse-time check of a `reactions:` file, and the agent's swap seam (Agent.SetReactions), which
+// runs it over a Generation's Observe beside the lane rules only the whole value can make.
 func ValidateAll(list []domain.Reaction) error {
 	seen := make(map[string]bool, len(list))
 	for _, r := range list {
