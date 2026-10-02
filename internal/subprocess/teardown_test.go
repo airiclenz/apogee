@@ -48,16 +48,13 @@ func (t *fakeTeardown) counts() (contained, reaped, released int) {
 	return t.contained, t.reaped, t.released
 }
 
-// installFakeTeardown substitutes the platform teardown constructor with one handing out td
-// for the duration of the test, restoring the real one afterwards. Tests using it must not run
-// in parallel — the seam is a package var.
-func installFakeTeardown(t *testing.T) *fakeTeardown {
-	t.Helper()
+// installFakeTeardown sets spec's teardown constructor to one handing out a fresh fakeTeardown,
+// returned beside the spec it now rides on. The seam is the spec's own field, so nothing is
+// shared with any other test.
+func installFakeTeardown(spec SubprocessSpec) (SubprocessSpec, *fakeTeardown) {
 	td := &fakeTeardown{}
-	prev := NewProcessTeardown
-	NewProcessTeardown = func(*exec.Cmd) platform.ProcessTeardown { return td }
-	t.Cleanup(func() { NewProcessTeardown = prev })
-	return td
+	spec.NewTeardown = func(*exec.Cmd) platform.ProcessTeardown { return td }
+	return spec, td
 }
 
 // TestRunSubprocessReleasesTheTeardownOnEveryExitPath pins the handle-ownership rule: the
@@ -67,13 +64,13 @@ func installFakeTeardown(t *testing.T) *fakeTeardown {
 // counts ride along, pinning the other half — a tree is reaped only where one can exist.
 func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 	t.Run("a confine refusal releases the handle it never used", func(t *testing.T) {
-		td := installFakeTeardown(t)
+		spec, td := installFakeTeardown(SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}})
 		ctx := domain.WithConfinement(context.Background(), domain.Confinement{
 			Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true},
 			Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
 		})
 
-		_, err := RunSubprocess(ctx, SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}})
+		_, err := RunSubprocess(ctx, spec)
 		if !errors.Is(err, domain.ErrConfinementUnavailable) {
 			t.Fatalf("RunSubprocess err = %v, want ErrConfinementUnavailable", err)
 		}
@@ -87,10 +84,10 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 	})
 
 	t.Run("a start failure releases the handle", func(t *testing.T) {
-		td := installFakeTeardown(t)
 		missing := filepath.Join(t.TempDir(), "no-such-binary")
+		spec, td := installFakeTeardown(SubprocessSpec{Argv: []string{missing}})
 
-		res, err := RunSubprocess(context.Background(), SubprocessSpec{Argv: []string{missing}})
+		res, err := RunSubprocess(context.Background(), spec)
 		if err != nil {
 			t.Fatalf("RunSubprocess err = %v, want nil (a failed start is a result, not a Go error)", err)
 		}
@@ -107,11 +104,11 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 	})
 
 	t.Run("a clean run contains then releases exactly once", func(t *testing.T) {
-		td := installFakeTeardown(t)
-
 		// The test binary itself is the one executable every host is guaranteed to have;
 		// -test.list with a regexp matching nothing prints nothing and exits 0.
-		res, err := RunSubprocess(context.Background(), SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}})
+		spec, td := installFakeTeardown(SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}})
+
+		res, err := RunSubprocess(context.Background(), spec)
 		if err != nil {
 			t.Fatalf("RunSubprocess err = %v, want nil", err)
 		}

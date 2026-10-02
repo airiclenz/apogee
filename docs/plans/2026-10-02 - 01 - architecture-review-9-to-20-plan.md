@@ -438,7 +438,7 @@ test in `keystore_unix_test.go` that a timed-out tool's child is killed (fails b
 - `go test -race -count=1 ./internal/userexec/ ./internal/keystore/`
 **Commit:** `fix(keystore): run credential tools through userexec for whole-tree teardown`
 
-## 13. The subprocess teardown constructor is injected
+## 13. The subprocess teardown constructor is injected — ✅ DONE (2026-10-02)
 
 **What:** Depends on item 12.
 **Goal:** `subprocess.NewProcessTeardown` is no longer a package var: the subprocess Spec/host

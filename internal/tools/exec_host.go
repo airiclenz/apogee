@@ -27,7 +27,8 @@ type execHost struct {
 	// (security.ResolveProgram) measures against the writable box.
 	look func(string) (string, error)
 	// run launches one subprocess through internal/subprocess, the shared core owning the §2.4
-	// confinement-and-teardown contract.
+	// confinement-and-teardown contract. The specs the tools hand it leave NewTeardown nil, so
+	// every run is held in the platform's own process-tree teardown.
 	run func(context.Context, subprocess.SubprocessSpec) (subprocess.SubprocessResult, error)
 	// shell is the platform shell/path facility a command line is wrapped with (sh -c on POSIX,
 	// cmd /c on Windows) and the environment is scoped through.

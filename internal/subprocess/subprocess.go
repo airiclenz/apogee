@@ -94,6 +94,11 @@ type SubprocessSpec struct {
 	// last tool result, not on a system-prompt line from a dozen calls earlier. Only the
 	// terminal's POSIX branch sets it: python_exec, git and the Console family prepend nothing.
 	FailFast bool
+	// NewTeardown builds the per-run process-tree teardown for the cmd, before the process
+	// starts. Nil means platform.NewProcessTeardown (one per build tag), which every production
+	// caller leaves it at; a test sets it to hand out a fake platform.ProcessTeardown and observe
+	// the release lifecycle on every OS, without a package var other tests also read.
+	NewTeardown func(*exec.Cmd) platform.ProcessTeardown
 }
 
 // SubprocessResult is the captured outcome of one subprocess execution.
@@ -149,12 +154,6 @@ type SubprocessResult struct {
 	// never ran a process (a test table, a stub), where no line is rendered.
 	Dir string
 }
-
-// NewProcessTeardown builds the per-run process-tree teardown for cmd. It is this package's seam
-// onto the platform constructor (platform.NewProcessTeardown, one per build tag) — a package var
-// so a test can substitute a fake platform.ProcessTeardown and observe the release lifecycle on
-// every OS. Production code never reassigns it.
-var NewProcessTeardown = platform.NewProcessTeardown
 
 // RunSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
 // persistent shell/REPL) and captures its combined output and exit code. It is the single
@@ -268,7 +267,11 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
 	// two compose. The returned handle is what the teardown needs once the process exists —
 	// nothing on POSIX, the Job Object assignment on Windows (internal/platform/teardown.go).
-	teardown := NewProcessTeardown(cmd)
+	newTeardown := spec.NewTeardown
+	if newTeardown == nil {
+		newTeardown = platform.NewProcessTeardown
+	}
+	teardown := newTeardown(cmd)
 	// The teardown owns an OS resource from the moment it is built (the Windows Job Object
 	// handle), so this function owns releasing it: the confine refusal below and a cmd.Start()
 	// failure both return without ever reaching Wait, and neither may leak the handle. release
