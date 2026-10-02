@@ -377,7 +377,13 @@ added to a non-test file (check by hand, then revert).
 Depends on item 7.
 **Commit:** `test(tui): guard internal/tui production code off internal/provider`
 
-## 9. ADR notes for the removed Mechanism layer, ADR 0075's package name, a stale plan status
+## 9. ADR notes for the removed Mechanism layer, ADR 0075's package name, a stale plan status — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): ADR 0075 re-check — the cited behaviours drifted, not just the path: `file-changed` no longer correlates a write call with its result (it reads `ToolResultEvent.WriteTarget`, match.go:162-174) and `approval-waiting` is gone (ADR 0076 A6 made both approval phases events, match.go:99-124); the Context paragraph now says "correlated" (past tense), keeps the live depth-filter cite (match.go:68-70), and adds one dated "Re-checked 2026-10-02" parenthetical naming the current sites instead of citing lines that no longer show the described behaviour.
+
+NOTES (2026-10-02): ADR 0075 — the three present-tense `hooks.Runner` mentions became `reactions.Runner` (same type, renamed package; runner.go cites now 249-250 and 66-74); the historical `hooks.Payload` mentions stay, since that type no longer exists under any package name (now `domain.SeamPayload`).
+
+NOTES (2026-10-02): ADR 0034's Headless line sits in the same top blockquote as the Mechanism note (separated by a `>` line), not beside the body's "deferred `headless`" sentence, which is left untouched.
 
 **What:**
 **Goal:** ADRs 0018, 0023, 0024, 0026, 0028, 0033, 0034, 0044, 0055, 0057, 0061, 0064, 0065 and 0072 each carry, as the

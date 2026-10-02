@@ -1,6 +1,7 @@
 ---
 Status: accepted; §8's "no compiled-in fallback" rule and its rejected alternative superseded by ADR 0064, §1's key count by ADR 0067, §2's Validated-set tie by ADR 0076 A9
 ---
+> Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The system prompt is a configured template, rendered per request
 

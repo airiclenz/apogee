@@ -1,6 +1,7 @@
 ---
 Status: accepted; decision 5's session-scoped half superseded by ADR 0036; decision 3's validated Mechanism set retired by ADR 0076 A9
 ---
+> Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # A server switch rehomes the session, and the first beat completes it
 

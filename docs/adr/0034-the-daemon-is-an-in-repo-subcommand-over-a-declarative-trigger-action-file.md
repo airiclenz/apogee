@@ -1,6 +1,9 @@
 ---
 Status: accepted; decision 8's catalogued-Mechanism route retired by ADR 0076
 ---
+> Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
+>
+> Headless has since shipped (`apogee headless`, ADR 0075).
 
 # The daemon is an in-repo subcommand over a declarative trigger-action file
 

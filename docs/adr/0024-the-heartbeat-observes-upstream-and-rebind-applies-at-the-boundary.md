@@ -1,6 +1,7 @@
 ---
 Status: accepted
 ---
+> Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The heartbeat observes the Upstream; rebind applies the change at the boundary
 

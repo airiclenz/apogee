@@ -30,10 +30,13 @@ program outside the repo can depend on.
 
 [ADR 0073](0073-hooks-are-observe-only-driver-side-reactions-to-engine-events.md) shipped a JSON
 projection of the same events days earlier — `hooks.Payload` — but a deliberately lossy one: five
-moments, flat, one synthesized (`file-changed` correlates a write call with its result,
-`internal/hooks/match.go:144` and `:158-172`), one depth-filtered (`turn-finished`, `match.go:87-89`),
-one phase-dropped (`approval-waiting`, `match.go:116`). It answers "tell my script when something
-happened". It cannot answer "let a program observe this run".
+moments, flat, one synthesized (`file-changed` correlated a write call with its result), one
+depth-filtered (`turn-finished`, `internal/reactions/match.go:68-70`), one phase-dropped
+(`approval-waiting`). It answers "tell my script when something happened". It cannot answer "let a
+program observe this run". (Re-checked 2026-10-02 against `internal/reactions`, the package ADR
+0073's Hooks were renamed to: `file-changed` now reads the engine-stamped
+`ToolResultEvent.WriteTarget` instead of correlating (`match.go:162-174`), and ADR 0076 A6 made both
+approval phases events (`match.go:99-124`).)
 
 The owner settled the scope on 2026-09-07: **JSONL first, `serve` later**. `apogee serve` as a fourth
 wire-facing Driver is out of scope here and is dependency-blocked on this bead (`apogee-afu`), so the
@@ -65,7 +68,7 @@ genuinely collide. Binding details of the envelope:
 - Every envelope member is always present, and is `null` where the line has no value for it: a
   frame's `turn`, `depth` and `call_id`, and an Event's empty `call_id`. A consumer never tests for
   a missing key.
-- `time` is RFC3339Nano, matching what `hooks.Runner` stamps.
+- `time` is RFC3339Nano, matching what `reactions.Runner` stamps.
 - `seq` starts at 1 and counts every line, so the two frames consume a `seq` each.
 - `AuditEvent` embeds `EventBase` and declares its own `CallID`, which shadows the embedded one
   (`events.go:423-434`). The envelope therefore reads `ev.EventBase.CallID` explicitly — the
@@ -120,8 +123,8 @@ stdout under `text` is still the answer alone.)
 
 **7. Identity is Driver-stamped.** The encoder adds `time`, `seq` and `session`; `EventBase`
 (`events.go:37-58`) is not extended. A timestamp is neither model-visible nor safety-relevant, so
-ADR 0031's "nothing in one Driver's surface alone" does not reach it, and `hooks.Runner` already
-stamps `time` and `workspace` itself (`internal/hooks/runner.go:220-221`). A sequence number is
+ADR 0031's "nothing in one Driver's surface alone" does not reach it, and `reactions.Runner` already
+stamps `time` and `workspace` itself (`internal/reactions/runner.go:249-250`). A sequence number is
 meaningful only per-stream, so it has no single owner on the engine. `workspace` appears in
 `run_started` only — one run has one workspace for life.
 
@@ -171,8 +174,8 @@ Two consequences of blocking are owned here rather than discovered later:
   reader that stops draining parks the writer inside `write(2)` under that mutex; every fan-out
   child then stalls on its next `Emit`, and Ctrl-C cancels a context nobody is observing. Lossless
   stays, and the ADR owns the cost: (a) a second interrupt exits hard; (b) the encoder is the
-  **outermost** sink wrapper — never inside `hooks.Runner`, whose `Report` callback is documented
-  must-not-block (`internal/hooks/runner.go:66-70`).
+  **outermost** sink wrapper — never inside `reactions.Runner`, whose `Report` callback is documented
+  must-not-block (`internal/reactions/runner.go:66-74`).
 
 **10. Versioned `v:1`, per line, additive within it.** (Amended 2026-09-30: the version is `v:2`
 since the 2026-09-16 bump recorded under decision 4 — ADR 0076 D1; `lineVersion` in

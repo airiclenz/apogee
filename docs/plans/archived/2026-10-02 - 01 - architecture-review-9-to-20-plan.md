@@ -4,7 +4,7 @@
 review plus the two deferred teardown globals, as behaviour-preserving refactors except where an
 item says otherwise. The review records #1–#8 as landed.
 **Date:** 2026-10-02
-**Status:** in progress — items 1–19 done; 20–23 pending
+**Status:** done — all 23 items done (#20c dropped by owner decision)
 **sized for:** ~200k-context host
 **base:** 75c04f57
 **Sources:**

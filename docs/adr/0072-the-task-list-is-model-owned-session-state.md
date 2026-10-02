@@ -2,6 +2,7 @@
 Status: accepted
 Amends: ADR 0023 (the 2026-08-25 per-session-constant bullet); ADR 0057 decision 3 is untouched
 ---
+> Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The task list is model-owned session state
 
