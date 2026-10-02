@@ -160,7 +160,11 @@ table test in `fanout_test.go` driving the module's three answers.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestDelegationCapPicksTheGoverningServer$|^TestDispatchSerially_CeilingAppliesAtDepthOne$|^TestRoutedWidthReachesTheHookView$|^TestStatedDelegationWidth_LatchesPerSeat$|^TestFanOutWidth_BoundsTheGroup$|^TestFanOutWidth_MixedSeatsTakeTheSmallerCap$|^TestFanOutWidth_UnparseableSeatIsNotASplit$|^TestFanOut_CeilingReadsTheLatchedFarWidth$|^TestFanOut_CeilingRefusesTheCallsPastIt$|^TestFanOut_RoutedWidthComesFromTheTargetCap$|^TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth$|^TestLoopViewParallelAgents_StampsTheDelegationWidth$|^TestAgentSetParallelAgentsMovesTheFanOutWidth$|^TestBackground_RunsAtTheServerWidthMinusOne$|^TestOrientation_DelegationBoundsStateWidthCeilingAndCap$|^TestLaunch_BackgroundAndResumeSharePlanAndRecipeWiring$|^TestDocMapNamesEveryFile$' ./internal/agent/` plus the table test this item adds
 **Commit:** `refactor(agent): answer delegation width from one module`
 
-## 4. Settings tests build one complete fake applier — wire_settings_test.go (#13a)
+## 4. Settings tests build one complete fake applier — wire_settings_test.go (#13a) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the two "through an applier holding nothing" checks in TestApplySettingAcceptsTheEditorKey and TestApplySettingAcceptsTheStartupOnlyKeys moved into TestApplySettingRefusesEveryKeyItCannotReach. Its exempt-key branch now applies each settingKeysWithNoMemberToReach key at its Default through the zero applier and expects success, where it used to `continue`. This keeps every `settingsApplier{}` inside the refusal test, as the Acceptance grep requires, and keeps the coverage. The two Accepts tests now migrate onto fakeApplier, and the comments that pointed between the tests were updated to match.
+NOTES (2026-10-02): migrated call sites drop override lines that only repeat fakeApplier's own default (a fresh `&applySettingSpy{}` engine, an empty-snapshot live holder, the "bound-model" binding). A binding override stays only where a test needs an unbound session.
+NOTES (2026-10-02): TestSettingsApplierReloadsRefuseAnUnparseableFile now runs over the full fake applier with only configPath overridden; it used to hold just `mcp: &liveMCP{}`. Its comment was reworded to match, since every reload refuses at the file read before it reaches any member.
 
 **What:**
 **Goal:** `cmd/apogee/wire_settings_test.go` builds every `settingsApplier` through one helper

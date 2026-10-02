@@ -45,7 +45,10 @@ func TestApplySettingToolsDisabledSwapsTheSet(t *testing.T) {
 			return tools.NewDefaultRegistryWithHost(workspace,
 				tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 		})
-	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = live
+	apply := applySettingFor(applier)
 
 	note, err := apply("tools.disabled", "[view_diff, python_exec]")
 	if err != nil {
@@ -105,7 +108,10 @@ func TestApplySettingURLSafetyHostsSwapTheSet(t *testing.T) {
 			guards = append(guards, guard)
 			return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{URLGuard: guard})
 		})
-	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = live
+	apply := applySettingFor(applier)
 
 	note, err := apply("url-safety.deny-hosts", "[metadata.internal, EVIL.example.com]")
 	if err != nil {
@@ -251,7 +257,10 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
 			live := newLiveSettings(config.Options{ContextFiles: names})
-			note, err := applySettingFor(settingsApplier{engine: spy, live: live})(tt.key, tt.value)
+			applier := fakeApplier(t)
+			applier.engine = spy
+			applier.live = live
+			note, err := applySettingFor(applier)(tt.key, tt.value)
 			if err != nil {
 				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
 			}
@@ -272,7 +281,10 @@ func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
 	live := newLiveSettings(config.Options{}) // a session that launched with the block off
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	apply := applySettingFor(applier)
 
 	if _, err := apply("context-files.enable", "true"); err != nil {
 		t.Fatalf("apply the switch: %v", err)
@@ -333,7 +345,10 @@ func TestFloorRowAppliesOneGeneration(t *testing.T) {
 		Bypass:                true,
 		Reactions:             boot,
 	})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	apply := applySettingFor(applier)
 
 	// Every toggle drives the ONE swap door, and each generation carries the two halves this row
 	// never named: the switch the session is on, and the list it is firing.
@@ -410,7 +425,10 @@ func TestBypassRowAppliesOneGeneration(t *testing.T) {
 		ReadCache:             false,
 		Reactions:             boot,
 	})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	apply := applySettingFor(applier)
 
 	if _, err := apply("bypass", "true"); err != nil {
 		t.Fatalf("apply bypass=true: %v", err)
@@ -464,7 +482,10 @@ func TestLiveSettingsGenerationIsDerivedFromTheOverlay(t *testing.T) {
 		ReadCache:             true,
 		Reactions:             armed,
 	})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	apply := applySettingFor(applier)
 
 	if _, err := apply("bypass", "true"); err != nil {
 		t.Fatalf("apply bypass=true: %v", err)
@@ -519,7 +540,10 @@ func TestContextFillNoticeRowAppliesOneGeneration(t *testing.T) {
 		Bypass:                true,
 		Reactions:             boot,
 	})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	apply := applySettingFor(applier)
 
 	if _, err := apply("context-fill-notice", "true"); err != nil {
 		t.Fatalf("apply context-fill-notice=true: %v", err)
@@ -663,7 +687,8 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 			// The holder rides along because the `bypass` row now reads the generation it moves one
 			// field of off it (ADR 0076 A8): without one the row would refuse for being unreachable
 			// rather than for the value it was handed, which is a different sentence.
-			applier := settingsApplier{engine: spy, live: newLiveSettings(config.Options{})}
+			applier := fakeApplier(t)
+			applier.engine = spy
 			note, err := applySettingFor(applier)(tt.key, tt.value)
 			if err == nil {
 				t.Fatalf("apply %s=%s: want a refusal naming the key, got note %q", tt.key, tt.value, note)
@@ -682,12 +707,14 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 // editor ladder reads it off a fresh projection of the file every time an external edit starts, so
 // the pane's write has already put it in force — and the default refusal would have told the user
 // "editor cannot be applied to the running session" about a change that had taken effect. It answers
-// with the empty note every in-force key answers with, drives no seam, and needs no member, so an
-// applier holding nothing at all still applies it.
+// with the empty note every in-force key answers with, drives no seam, and needs no member — so an
+// applier holding nothing at all still applies it (TestApplySettingRefusesEveryKeyItCannotReach).
 func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	note, err := applySettingFor(settingsApplier{engine: spy})("editor", "code -w")
+	applier := fakeApplier(t)
+	applier.engine = spy
+	note, err := applySettingFor(applier)("editor", "code -w")
 	if err != nil {
 		t.Fatalf("apply editor: %v", err)
 	}
@@ -696,9 +723,6 @@ func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 	}
 	if spy.drove() != 0 {
 		t.Errorf("applying editor drove an engine seam: %+v", spy)
-	}
-	if _, err := applySettingFor(settingsApplier{})("editor", "code -w"); err != nil {
-		t.Errorf("apply editor through an applier holding nothing: %v; the key reaches no member", err)
 	}
 }
 
@@ -754,7 +778,9 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		t.Run(tt.key, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			note, err := applySettingFor(settingsApplier{engine: spy})(tt.key, tt.value)
+			applier := fakeApplier(t)
+			applier.engine = spy
+			note, err := applySettingFor(applier)(tt.key, tt.value)
 			if err != nil {
 				t.Fatalf("apply %s: %v; the write is the whole of the apply, not a failure", tt.key, err)
 			}
@@ -764,11 +790,6 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 			if spy.drove() != 0 {
 				t.Errorf("applying %s drove an engine seam: %+v", tt.key, spy)
 			}
-			if _, err := applySettingFor(settingsApplier{})(tt.key, tt.value); err != nil {
-				t.Errorf("apply %s through an applier holding nothing: %v; the key reaches no member",
-					tt.key, err)
-			}
-
 			row, ok := config.LookupKey(tt.key)
 			if !ok {
 				t.Fatalf("no registry row for %q", tt.key)
@@ -812,7 +833,9 @@ func TestApplyStreamIdleTimeoutReadsThroughTheOneParser(t *testing.T) {
 			t.Parallel()
 			live := newLiveSettings(config.Options{StreamIdleTimeout: 2 * time.Minute})
 
-			note, err := applyMirror(settingsApplier{live: live}, "stream-idle-timeout", tt.value)
+			applier := fakeApplier(t)
+			applier.live = live
+			note, err := applyMirror(applier, "stream-idle-timeout", tt.value)
 
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -869,7 +892,9 @@ func TestApplyDelegateTimeoutReadsThroughTheOneParser(t *testing.T) {
 			t.Parallel()
 			live := newLiveSettings(config.Options{DelegateTimeout: 10 * time.Minute})
 
-			note, err := applyMirror(settingsApplier{live: live}, "delegate-timeout", tt.value)
+			applier := fakeApplier(t)
+			applier.live = live
+			note, err := applyMirror(applier, "delegate-timeout", tt.value)
 
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -924,7 +949,9 @@ func TestApplyMirrorMovesOnlyTheKeysFieldOfTheBlock(t *testing.T) {
 	boot.UI.Spinner = domain.SpinnerGlitter
 	live := newLiveSettings(boot)
 
-	note, err := applyMirror(settingsApplier{live: live}, "ui.inspector", "true")
+	applier := fakeApplier(t)
+	applier.live = live
+	note, err := applyMirror(applier, "ui.inspector", "true")
 
 	if err != nil || note != "" {
 		t.Fatalf("apply ui.inspector=true: note %q, err %v; want success with no note", note, err)
@@ -1000,7 +1027,7 @@ func TestSettingsTableIsInRegistryOrder(t *testing.T) {
 // missing CASE is not a way to answer anything.
 func TestEveryEditableSettingKeyHasAnApply(t *testing.T) {
 	t.Parallel()
-	apply := applySettingFor(fullyComposedApplier(t))
+	apply := applySettingFor(fakeApplier(t))
 	for _, k := range config.KeyRegistry {
 		if !k.Editable || k.Path == settingKeyServer ||
 			slices.Contains(settingKeysAppliedByTheRenderer, k.Path) {
@@ -1015,43 +1042,6 @@ func TestEveryEditableSettingKeyHasAnApply(t *testing.T) {
 	}
 }
 
-// fullyComposedApplier builds the dispatcher a Driver that composed EVERYTHING hands over — every
-// optional member present, so a refusal from it is the dispatcher's own answer about the key rather
-// than a member this test forgot. The seams behind it are the fixtures the per-key tests above use:
-// a spy engine, a rebind probe, an empty config file for the keys re-read whole, and a tool set that
-// rebuilds into a fresh registry.
-func fullyComposedApplier(t *testing.T) settingsApplier {
-	t.Helper()
-	workspace := t.TempDir()
-	roots, err := resolveRoots(t.TempDir(), workspace)
-	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	writeSettingsFixture(t, path, "")
-
-	return settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       newLiveSettings(config.Options{}),
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     (&rebindProbe{}).rebind,
-		configPath: path,
-		skills: skills.NewProvider(skills.Sources{
-			Home:      roots.config,
-			Workspace: roots.workspace,
-		}),
-		tools: newLiveTools(apogee.NewToolRegistry(), toolSetSpec{},
-			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
-		mcp: newLiveMCP(&fakeMCPSession{}, func([]mcp.ServerConfig) (mcpSession, error) {
-			return &fakeMCPSession{}, nil
-		}),
-		present: newLivePresentation(config.PresentSettings{AutoOpen: true}, workspace, "darwin",
-			func(string) string { return "" }, func(tui.Presentation) {}),
-		roots: roots,
-		stats: newStatsRecorder(serverStatsPath(roots.config), false),
-	}
-}
-
 // `remember-model` is the third shape again: a toggle with no engine seam and no re-resolution, whose
 // whole apply is a store on the live holder. What makes the store the apply is that everything the
 // toggle gates is still in the future — the next explicit `/model` pick, the next committed profile
@@ -1061,7 +1051,10 @@ func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
 	live := newLiveSettings(config.Options{})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	apply := applySettingFor(applier)
 
 	if live.remember() {
 		t.Fatal("the holder opened with remembering on; a zero Options carries the toggle off")
@@ -1142,7 +1135,11 @@ func TestApplySettingSubAgentsChoiceSwapsTheSeatGate(t *testing.T) {
 			return tools.NewDefaultRegistryWithHost(workspace,
 				tools.HostTools{SubAgentSeatChoice: spec.seatChoice})
 		})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live, tools: set})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	applier.tools = set
+	apply := applySettingFor(applier)
 
 	note, err := apply("sub-agents-choice", "model")
 	if err != nil {
@@ -1221,7 +1218,11 @@ func TestApplySettingSubAgentsChoiceSwapRefusalKeepsTheGate(t *testing.T) {
 		return tools.NewDefaultRegistryWithHost(t.TempDir(),
 			tools.HostTools{SubAgentSeatChoice: spec.seatChoice})
 	})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live, tools: set})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	applier.tools = set
+	apply := applySettingFor(applier)
 
 	if _, err := apply("sub-agents-choice", "model"); err == nil {
 		t.Fatal("apply sub-agents-choice: want the engine's refusal, got none")
@@ -1547,9 +1548,11 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				denyHosts:  boot.URLDenyHosts,
 				seatChoice: boot.SubAgentsChoice == config.SubAgentsChoiceModel,
 			}, func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
-			apply := applySettingFor(settingsApplier{
-				engine: &applySettingSpy{}, live: live, tools: set, configPath: path,
-			})
+			applier := fakeApplier(t)
+			applier.live = live
+			applier.tools = set
+			applier.configPath = path
+			apply := applySettingFor(applier)
 
 			assertBootHooks(t, live.options())
 
@@ -1603,7 +1606,10 @@ func TestRebindInputsCarriesTheToggledToolRoster(t *testing.T) {
 	live := newLiveSettings(boot)
 	set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{disabled: boot.ToolsDisabled},
 		func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
-	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, live: live, tools: set})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.tools = set
+	apply := applySettingFor(applier)
 
 	if _, err := apply("tools.disabled", "[grep, view_diff]"); err != nil {
 		t.Fatalf("apply tools.disabled: %v", err)
@@ -1681,8 +1687,15 @@ func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
 		if slices.Contains(settingKeysWithNoMemberToReach, k.Path) {
 			// The exceptions, and the only shape that can be one: a key whose apply reaches no
 			// member at all, so there is nothing a Driver could be composed without. Each answers
-			// success even here — TestApplySettingAcceptsTheEditorKey and
-			// TestApplySettingAcceptsTheStartupOnlyKeys hold that side.
+			// success even here; TestApplySettingAcceptsTheEditorKey and
+			// TestApplySettingAcceptsTheStartupOnlyKeys hold the rest of that side.
+			t.Run(k.Path, func(t *testing.T) {
+				t.Parallel()
+				if _, err := apply(k.Path, k.Default); err != nil {
+					t.Errorf("apply %s through an applier holding nothing: %v; the key reaches no member",
+						k.Path, err)
+				}
+			})
 			continue
 		}
 		t.Run(k.Path, func(t *testing.T) {
@@ -1713,12 +1726,11 @@ func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 	live.observe(8192, provider.EffortDialectNone) // what the last landed beat could name about the server's own window
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{
-		engine:  spy,
-		live:    live,
-		binding: func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:  probe.rebind,
-	})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	applier.rebind = probe.rebind
+	apply := applySettingFor(applier)
 
 	note, err := apply("context-window", "32768")
 	if err != nil {
@@ -1755,12 +1767,11 @@ func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 	t.Parallel()
 	live := newLiveSettings(config.Options{})
 	probe := &rebindProbe{}
-	apply := applySettingFor(settingsApplier{
-		engine:  &applySettingSpy{},
-		live:    live,
-		binding: func() upstreamBinding { return upstreamBinding{} },
-		rebind:  probe.rebind,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.binding = func() upstreamBinding { return upstreamBinding{} }
+	applier.rebind = probe.rebind
+	apply := applySettingFor(applier)
 
 	note, err := apply("context-window", "16384")
 	if err != nil || note != "" {
@@ -1781,12 +1792,10 @@ func TestApplySettingReportsARefusedRebind(t *testing.T) {
 	t.Parallel()
 	live := newLiveSettings(config.Options{})
 	probe := &rebindProbe{err: errors.New("input pending")}
-	apply := applySettingFor(settingsApplier{
-		engine:  &applySettingSpy{},
-		live:    live,
-		binding: func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:  probe.rebind,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.rebind = probe.rebind
+	apply := applySettingFor(applier)
 
 	if _, err := apply("context-window", "16384"); err == nil {
 		t.Fatal("apply context-window: want the rebind's refusal, got none")
@@ -1826,13 +1835,11 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
-	apply := applySettingFor(settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     rebind,
-		configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.rebind = rebind
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	// What the pane's write left behind, then the apply that follows it.
 	writeSettingsFixture(t, path, "system-prompt-text: the edited prompt\n")
@@ -1874,11 +1881,11 @@ func TestApplySettingWebSearchEndpointMovesTheRegisteredTool(t *testing.T) {
 	t.Parallel()
 	registry := tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{
-		engine: spy,
-		tools: newLiveTools(registry, toolSetSpec{},
-			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
-	})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = newLiveTools(registry, toolSetSpec{},
+		func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
+	apply := applySettingFor(applier)
 
 	if _, err := apply("web-search-endpoint", "https://search.example.com/s"); err != nil {
 		t.Fatalf("apply web-search-endpoint: %v", err)
@@ -1910,7 +1917,10 @@ func TestApplySettingWebSearchEndpointSwapsWhenTheToolIsAbsent(t *testing.T) {
 			return tools.NewDefaultRegistryWithHost(workspace,
 				tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 		})
-	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = live
+	apply := applySettingFor(applier)
 
 	if _, err := apply("web-search-endpoint", "https://first.example.com/s"); err != nil {
 		t.Fatalf("apply web-search-endpoint: %v", err)
@@ -1945,7 +1955,10 @@ func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
 		return tools.NewDefaultRegistryWithHost(t.TempDir(),
 			tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 	})
-	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = live
+	apply := applySettingFor(applier)
 
 	if _, err := apply("web-search-endpoint", "off"); err == nil {
 		t.Fatal("apply web-search-endpoint: want the engine's refusal, got none")
@@ -1975,7 +1988,10 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 		live := newLiveTools(registry, toolSetSpec{endpoint: "https://search.example.com/s"},
 			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
 
-		if _, err := applySettingFor(settingsApplier{engine: spy, tools: live})("web-search-endpoint", ""); err != nil {
+		applier := fakeApplier(t)
+		applier.engine = spy
+		applier.tools = live
+		if _, err := applySettingFor(applier)("web-search-endpoint", ""); err != nil {
 			t.Fatalf("apply web-search-endpoint on an empty value: %v", err)
 		}
 		if got := live.built().endpoint; got != "" {
@@ -1997,7 +2013,9 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 				return tools.NewDefaultRegistryWithHost(workspace,
 					tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 			})
-		if _, err := applySettingFor(settingsApplier{engine: &applySettingSpy{}, tools: bare})("web-search-endpoint", ""); err != nil {
+		bareApplier := fakeApplier(t)
+		bareApplier.tools = bare
+		if _, err := applySettingFor(bareApplier)("web-search-endpoint", ""); err != nil {
 			t.Fatalf("apply web-search-endpoint on a set with no web_search: %v", err)
 		}
 		if want := []string{""}; !slices.Equal(built, want) {
@@ -2012,7 +2030,9 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 	t.Run("editor", func(t *testing.T) {
 		t.Parallel()
 		spy := &applySettingSpy{}
-		note, err := applySettingFor(settingsApplier{engine: spy})("editor", "")
+		applier := fakeApplier(t)
+		applier.engine = spy
+		note, err := applySettingFor(applier)("editor", "")
 		if err != nil {
 			t.Fatalf("apply editor on an empty value: %v", err)
 		}
@@ -2034,7 +2054,9 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 			func(string) string { return "" }, // no SSH: a local session, so rung 1 is wired
 			func(p tui.Presentation) { installed = append(installed, p) })
 
-		if _, err := applySettingFor(settingsApplier{present: live})("present.command", ""); err != nil {
+		applier := fakeApplier(t)
+		applier.present = live
+		if _, err := applySettingFor(applier)("present.command", ""); err != nil {
 			t.Fatalf("apply present.command on an empty value: %v", err)
 		}
 		if len(installed) != 2 || installed[1].Opener == nil {
@@ -2090,12 +2112,12 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 				}
 				spy := &applySettingSpy{}
 				probe := &rebindProbe{}
-				apply := applySettingFor(settingsApplier{
-					engine:  spy,
-					live:    live,
-					binding: func() upstreamBinding { return upstreamBinding{} },
-					rebind:  probe.rebind,
-				})
+				applier := fakeApplier(t)
+				applier.engine = spy
+				applier.live = live
+				applier.binding = func() upstreamBinding { return upstreamBinding{} }
+				applier.rebind = probe.rebind
+				apply := applySettingFor(applier)
 
 				note, err := apply(row.key, value)
 
@@ -2136,7 +2158,12 @@ func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing
 		return next, nil
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	note, err := apply("mcp-servers", "1 server")
 	if err != nil || note != "" {
@@ -2181,7 +2208,12 @@ func TestMCPReconnectRebuildsWithTheEndpointTheSessionIsOn(t *testing.T) {
 		return &fakeMCPSession{}, nil
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	// The fixture's registry has no web_search to re-point, so the endpoint edit goes through the
 	// swap door — and the endpoint it installed is what the reconnect must build the next set from.
@@ -2209,7 +2241,12 @@ func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.
 		return nil, errors.New("mcp: connect to server \"docs\": dial: connection refused")
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	_, err := apply("mcp-servers", "1 server")
 	if err == nil {
@@ -2244,7 +2281,12 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	next := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}
 	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) { return next, nil })
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	_, err := apply("mcp-servers", "1 server")
 	if err == nil {
@@ -2338,7 +2380,12 @@ func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 		return mcp.ConnectWith(context.Background(), liveMCPHost(), servers, mcpGuard(nil, nil), workspace)
 	})
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	// Closing the docs host changes WHICH servers are admitted, which is what makes the row dial at
 	// all; the dial then fails on the block behind it and the row reports that in one sentence.
@@ -2397,7 +2444,10 @@ func TestApplySettingUseProjectSkillsRescansTheSources(t *testing.T) {
 	if _, ok := provider.Get("project-only"); !ok {
 		t.Fatal("the fixture skill is not discovered with the flag on; the test proves nothing")
 	}
-	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, skills: provider, roots: roots})
+	applier := fakeApplier(t)
+	applier.skills = provider
+	applier.roots = roots
+	apply := applySettingFor(applier)
 
 	if _, err := apply("use-project-skills", "false"); err != nil {
 		t.Fatalf("apply use-project-skills=false: %v", err)
@@ -2437,7 +2487,10 @@ func TestApplySettingSkillGatesLeaveEachOtherAlone(t *testing.T) {
 	if _, ok := provider.Get("debugging"); !ok {
 		t.Fatal("a shipped skill is missing with both gates on; the test proves nothing")
 	}
-	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, skills: provider, roots: roots})
+	applier := fakeApplier(t)
+	applier.skills = provider
+	applier.roots = roots
+	apply := applySettingFor(applier)
 
 	if _, err := apply("use-project-skills", "false"); err != nil {
 		t.Fatalf("apply use-project-skills=false: %v", err)
@@ -2490,7 +2543,9 @@ func TestApplySettingPresentRebuildsTheLadder(t *testing.T) {
 		config.PresentSettings{AutoOpen: true}, t.TempDir(), "darwin",
 		func(string) string { return "" }, // no SSH: a local session, so rungs 1/3
 		func(p tui.Presentation) { installed = append(installed, p) })
-	apply := applySettingFor(settingsApplier{present: live})
+	applier := fakeApplier(t)
+	applier.present = live
+	apply := applySettingFor(applier)
 
 	if len(installed) != 1 || installed[0].Opener == nil {
 		t.Fatalf("startup installed %+v; want one ladder carrying the opener", installed)
@@ -2777,12 +2832,10 @@ func TestApplySettingServersReResolvesTheParallelAgentsCap(t *testing.T) {
 	caps.follow(config.ServerEntry{Name: "here", Endpoint: "http://127.0.0.1:1111", ParallelAgents: 2})
 	caps.observe(6) // what this server's own beat reported, which the pin outranks
 
-	apply := applySettingFor(settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       newLiveSettings(config.Options{}),
-		configPath: path,
-		caps:       caps,
-	})
+	applier := fakeApplier(t)
+	applier.configPath = path
+	applier.caps = caps
+	apply := applySettingFor(applier)
 
 	write("    parallel-agents: 5\n")
 	if _, err := apply("servers", ""); err != nil {
@@ -2826,7 +2879,10 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if got := live.window(); got != 32768 {
 		t.Fatalf("the bound window = %d; want the startup entry's 32768", got)
 	}
-	apply := applySettingFor(settingsApplier{live: live, configPath: path})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	write("    context-window: 65536\n")
 	if _, err := apply("servers", ""); err != nil {
@@ -2905,13 +2961,11 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
-	apply := applySettingFor(settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     rebind,
-		configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.rebind = rebind
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	write("    context-window: 65536\n")
 	if _, err := apply("servers", ""); err != nil {
@@ -2988,13 +3042,11 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 				StartupEntry: config.ServerEntry{Name: "here", ContextWindow: config.TokenCount(tt.entryPin)},
 			})
 			probe := &rebindProbe{}
-			apply := applySettingFor(settingsApplier{
-				engine:     &applySettingSpy{},
-				live:       live,
-				binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-				rebind:     probe.rebind,
-				configPath: path,
-			})
+			applier := fakeApplier(t)
+			applier.live = live
+			applier.rebind = probe.rebind
+			applier.configPath = path
+			apply := applySettingFor(applier)
 
 			if _, err := apply("servers", ""); err != nil {
 				t.Fatalf("apply servers: %v", err)
@@ -3066,13 +3118,11 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
-	apply := applySettingFor(settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     rebind,
-		configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.rebind = rebind
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	write("    max-output-tokens: 8192\n")
 	if _, err := apply("servers", ""); err != nil {
@@ -3154,13 +3204,11 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 				StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: config.WholeCount(tt.entryCap)},
 			})
 			probe := &rebindProbe{}
-			apply := applySettingFor(settingsApplier{
-				engine:     &applySettingSpy{},
-				live:       live,
-				binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-				rebind:     probe.rebind,
-				configPath: path,
-			})
+			applier := fakeApplier(t)
+			applier.live = live
+			applier.rebind = probe.rebind
+			applier.configPath = path
+			apply := applySettingFor(applier)
 
 			if _, err := apply("servers", ""); err != nil {
 				t.Fatalf("apply servers: %v", err)
@@ -3227,13 +3275,11 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
-	apply := applySettingFor(settingsApplier{
-		engine:     &applySettingSpy{},
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     rebind,
-		configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.live = live
+	applier.rebind = rebind
+	applier.configPath = path
+	apply := applySettingFor(applier)
 
 	write("    response-reserve: 0.35\n")
 	if _, err := apply("servers", ""); err != nil {
@@ -3317,13 +3363,11 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 				StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: tt.entryReserve},
 			})
 			probe := &rebindProbe{}
-			apply := applySettingFor(settingsApplier{
-				engine:     &applySettingSpy{},
-				live:       live,
-				binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-				rebind:     probe.rebind,
-				configPath: path,
-			})
+			applier := fakeApplier(t)
+			applier.live = live
+			applier.rebind = probe.rebind
+			applier.configPath = path
+			apply := applySettingFor(applier)
 
 			if _, err := apply("servers", ""); err != nil {
 				t.Fatalf("apply servers: %v", err)
@@ -3364,13 +3408,12 @@ func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *t
 	})
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{
-		engine:     spy,
-		live:       live,
-		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
-		rebind:     probe.rebind,
-		configPath: filepath.Join(t.TempDir(), "config.yaml"),
-	})
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.live = live
+	applier.rebind = probe.rebind
+	applier.configPath = filepath.Join(t.TempDir(), "config.yaml")
+	apply := applySettingFor(applier)
 
 	note, err := apply("response-reserve", "0.35")
 	if err != nil {
@@ -3748,7 +3791,12 @@ func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 	// path into the same Runner.
 	engine := newLateEngine(domain.ModePlan, false)
 	engine.seedReactions(runner, apogee.Generation{Observe: boot})
-	apply := applySettingFor(settingsApplier{engine: engine, live: live, hooks: runner, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = engine
+	applier.live = live
+	applier.hooks = runner
+	applier.configPath = path
+	apply := applySettingFor(applier)
 	// The value is not read for this key — a list of blocks is a shape no single string spells — so
 	// what the pane persisted is the row's own summary.
 	if _, err := apply("reactions", "1 reaction"); err != nil {
@@ -3797,7 +3845,12 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 	live := newLiveSettings(config.Options{Reactions: boot})
 	engine := newLateEngine(domain.ModePlan, false)
 	engine.seedReactions(runner, apogee.Generation{Observe: boot})
-	apply := applySettingFor(settingsApplier{engine: engine, live: live, hooks: runner, configPath: path})
+	applier := fakeApplier(t)
+	applier.engine = engine
+	applier.live = live
+	applier.hooks = runner
+	applier.configPath = path
+	apply := applySettingFor(applier)
 	if _, err := apply("reactions", "1 reaction"); err == nil {
 		t.Fatal("a reactions: block naming an unknown moment applied silently; want a refusal")
 	}
@@ -3879,9 +3932,12 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 		t.Fatalf("bind: %v", err)
 	}
 
-	apply := applySettingFor(settingsApplier{
-		engine: engine, live: live, hooks: runner, configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.engine = engine
+	applier.live = live
+	applier.hooks = runner
+	applier.configPath = path
+	apply := applySettingFor(applier)
 	if _, err := apply("reactions", "1 reaction"); err != nil {
 		t.Fatalf("apply reactions: %v", err)
 	}
@@ -3945,9 +4001,12 @@ func TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent(t *testing.T) {
 		t.Fatalf("bind: %v", err)
 	}
 
-	apply := applySettingFor(settingsApplier{
-		engine: engine, live: live, hooks: runner, configPath: path,
-	})
+	applier := fakeApplier(t)
+	applier.engine = engine
+	applier.live = live
+	applier.hooks = runner
+	applier.configPath = path
+	apply := applySettingFor(applier)
 	if _, err := apply("reactions", "2 reactions"); err != nil {
 		t.Fatalf("apply reactions: %v", err)
 	}
@@ -4157,9 +4216,10 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 	}
 	want := loadErr.Error()
 
-	// Only the members the refusal path itself reaches are composed: each reload answers before it
-	// touches the holder, and readmitMCP only needs an MCP holder to exist to get as far as the read.
-	a := settingsApplier{configPath: path, mcp: &liveMCP{}}
+	// A fully composed applier over the unparseable file: each reload answers at the read, before it
+	// touches any member, so the members' own fixtures never come into it.
+	a := fakeApplier(t)
+	a.configPath = path
 	// Each row takes the subtest's t so a row-specific failure is attributed to its own subtest.
 	for _, tc := range []struct {
 		name string
