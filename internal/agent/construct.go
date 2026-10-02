@@ -242,6 +242,7 @@ func (d *delegation) seed(a *Agent) {
 	a.timeCap = d.timeCap
 	a.now = d.now
 	a.cancelFoldBound = d.cancelFoldBound
+	a.restreamHoldoff = d.restreamHoldoff
 	a.effortDialect = d.effortDialect
 	a.dial = d.dial                  // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
 	a.ownsUpstream = d.upstreamOwned // a routed child closes the client it dialled; an unrouted one must never close the session's out from under the parent still speaking over it (Agent.Close)

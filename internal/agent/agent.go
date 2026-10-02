@@ -500,6 +500,10 @@ type Agent struct {
 	// stops may take (foldStoppedChild); 0 reads as defaultCancelFoldBound. A child inherits it at
 	// spawn, so one value bounds the whole tree's cancel folds.
 	cancelFoldBound time.Duration
+	// restreamHoldoff is the base of the wait before a transient fault's re-stream
+	// (restreamHoldoffFor); 0 reads as defaultRestreamHoldoff. Only a test sets it, to skip the
+	// production second. A child inherits it at spawn, so a test's short wait holds across the tree.
+	restreamHoldoff time.Duration
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by

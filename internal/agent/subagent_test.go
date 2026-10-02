@@ -1017,8 +1017,6 @@ func TestSubAgent_FaultedDelegationReportsAsError(t *testing.T) {
 // ever set (subagent.go is unchanged — it never learns a blip happened), so the parent receives
 // the delegated RESULT and nothing surfaces to the human.
 func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	const childAnswer = "the repo is a Go TUI agent"
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
@@ -1032,6 +1030,7 @@ func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

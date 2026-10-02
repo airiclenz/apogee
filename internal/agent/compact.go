@@ -643,7 +643,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 		if summary.retryable && restreamed < c.a.restreamBudget() {
 			rung := restreamed
 			restreamed++
-			if holdOffRestream(ctx, rung) {
+			if c.a.holdOffRestream(ctx, rung) {
 				continue
 			}
 			// The wait ended on a cancel, not the clock: route it as the cancel it is, never as the

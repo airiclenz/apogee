@@ -340,8 +340,6 @@ func TestCappedReasoningReplyFaultsNamingTheRaisedCap(t *testing.T) {
 // together cost exactly two StreamResetEvents and three provider calls — neither the re-stream
 // counter nor the cap latch pays for the other's remedy.
 func TestCapRetryLatchIsSeparateFromTheReStreamLatch(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.Context.MaxContextTokens = 98304
@@ -351,7 +349,17 @@ func TestCapRetryLatchIsSeparateFromTheReStreamLatch(t *testing.T) {
 		contentTurn("answered on the third pass"),
 	)
 
-	a := driveExchange(t, cfg, responder, "audit the repository")
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	shortRestreamHoldoff(t, a)
+	if err := a.Submit(domain.UserInput{Text: "audit the repository"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 
 	if got := len(responder.requests()); got != 3 {
 		t.Fatalf("provider was called %d times, want 3 (blip, capped reply, cap retry)", got)

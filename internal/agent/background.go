@@ -660,6 +660,7 @@ func (a *Agent) backgroundHost() *Agent {
 		tree:               a.tree,
 		depth:              a.depth,
 		cancelFoldBound:    a.cancelFoldBound,
+		restreamHoldoff:    a.restreamHoldoff,
 	}
 	host.turns = &turnLifecycle{conv: &host.conv, observer: host}
 	return host

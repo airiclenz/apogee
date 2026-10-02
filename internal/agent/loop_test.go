@@ -110,8 +110,6 @@ const eofFaultMsg = "apogee: read stream: unexpected EOF"
 // commits, and the recovered Turn stays quiet — one StreamResetEvent, no ErrorEvent. It used to
 // fail the Turn on the spot, because the read fault carried no Retryable verdict.
 func TestRespondAndReviewReStreamsAMidStreamEOF(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	sink := &recordingSink{}
 	responder := scriptedResponder(t,
 		retryableErrorTurn(eofFaultMsg), // the connection drops mid-reply
@@ -121,6 +119,7 @@ func TestRespondAndReviewReStreamsAMidStreamEOF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 	req, _ := a.buildRequest(0)
 	run := &turnRun{turn: 0, req: req}
 
@@ -151,21 +150,22 @@ func TestRespondAndReviewReStreamsAMidStreamEOF(t *testing.T) {
 
 // TestRestreamHoldoffLadder pins the hold-off ladder on the pure function, where the wall clock
 // cannot blur it: the first re-stream keeps the base wait every re-stream used to get, and each
-// later one waits twice the one before — 1×, 2×, 4× of restreamHoldoff for the three re-streams
-// the default budget allows.
+// later one waits twice the one before — 1×, 2×, 4× of defaultRestreamHoldoff for the three
+// re-streams the default budget allows, on an Agent whose restreamHoldoff field is unset.
 func TestRestreamHoldoffLadder(t *testing.T) {
 	tests := []struct {
 		rung int
 		want time.Duration
 	}{
-		{rung: 0, want: restreamHoldoff},
-		{rung: 1, want: 2 * restreamHoldoff},
-		{rung: 2, want: 4 * restreamHoldoff},
+		{rung: 0, want: defaultRestreamHoldoff},
+		{rung: 1, want: 2 * defaultRestreamHoldoff},
+		{rung: 2, want: 4 * defaultRestreamHoldoff},
 	}
 
+	a := &Agent{}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("re-stream %d", tc.rung), func(t *testing.T) {
-			if got := restreamHoldoffFor(tc.rung); got != tc.want {
+			if got := a.restreamHoldoffFor(tc.rung); got != tc.want {
 				t.Errorf("restreamHoldoffFor(%d) = %v, want %v", tc.rung, got, tc.want)
 			}
 		})
@@ -178,8 +178,6 @@ func TestRestreamHoldoffLadder(t *testing.T) {
 // key reaches Config the only zero the loop can meet is a counter already at the budget, so the
 // test walks that counter to it; the same branch decides both.
 func TestReStreamBudgetZeroNeverReStreams(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	const blip = "provider swapped out"
 	sink := &recordingSink{}
 	responder := scriptedResponder(t,
@@ -190,6 +188,7 @@ func TestReStreamBudgetZeroNeverReStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 	req, _ := a.buildRequest(0)
 	run := &turnRun{turn: 0, req: req, restreamsSpent: a.restreamBudget()}
 
@@ -216,8 +215,6 @@ func TestReStreamBudgetZeroNeverReStreams(t *testing.T) {
 // "never re-stream": the first transient fault fails the Turn on the spot. The two cases share one
 // script so the only difference between them is the budget the Config carries.
 func TestReStreamBudgetNilConfigDefaultsToThree(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	zero := 0
 	tests := []struct {
 		name        string
@@ -244,6 +241,7 @@ func TestReStreamBudgetNilConfigDefaultsToThree(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
+			shortRestreamHoldoff(t, a)
 			req, _ := a.buildRequest(0)
 			run := &turnRun{turn: 0, req: req}
 
@@ -266,8 +264,6 @@ func TestReStreamBudgetNilConfigDefaultsToThree(t *testing.T) {
 // not the engine's constant: a Config carrying 1 re-streams once and the second transient fault
 // fails the Turn — two requests, one StreamResetEvent, the second fault surfaced.
 func TestReStreamBudgetComesFromConfig(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	one := 1
 	sink := &recordingSink{}
 	responder := scriptedResponder(t,
@@ -281,6 +277,7 @@ func TestReStreamBudgetComesFromConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 	req, _ := a.buildRequest(0)
 	run := &turnRun{turn: 0, req: req}
 
@@ -305,8 +302,6 @@ func TestReStreamBudgetComesFromConfig(t *testing.T) {
 // wait ends because it EXPIRED rather than because the ctx died, the Turn re-streams exactly as it
 // always did. Without this the fix above could pass by never re-streaming at all.
 func TestRestreamHoldOffThatElapsesStillReStreams(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	sink := &recordingSink{}
 	responder := scriptedResponder(t,
 		retryableErrorTurn(transientFaultMsg),
@@ -316,6 +311,7 @@ func TestRestreamHoldOffThatElapsesStillReStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 	if err := a.Submit(domain.UserInput{Text: "ask the model"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

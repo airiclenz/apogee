@@ -976,8 +976,6 @@ func (r *flakySummaryResponder) Stream(_ context.Context, req provider.Request) 
 // fault than the budget allows surfaces as every fault always did, and the conversation is left
 // untouched.
 func TestCompactRestreamsUpToTheBudgetOnATransientSummaryFault(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	tests := []struct {
 		name       string
 		faultCalls int
@@ -997,6 +995,7 @@ func TestCompactRestreamsUpToTheBudgetOnATransientSummaryFault(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
+			shortRestreamHoldoff(t, a)
 			seedFoldable(a)
 			before := a.conv.Len()
 
@@ -1034,13 +1033,12 @@ func TestCompactRestreamsUpToTheBudgetOnATransientSummaryFault(t *testing.T) {
 // fault without the transient verdict fails the fold at once, and the upstream saw ONE summary
 // request.
 func TestCompactDoesNotRestreamAPlainSummaryFault(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	up := &flakySummaryResponder{summary: "FOLDED", faultCalls: 1, faults: []provider.Delta{{Kind: provider.DeltaError, Err: "boom"}}}
 	a, err := newAgent(baseConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 	seedFoldable(a)
 	before := a.conv.Len()
 

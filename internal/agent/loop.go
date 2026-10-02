@@ -401,27 +401,32 @@ func (a *Agent) restreamBudget() int {
 	return *a.cfg.RestreamBudget
 }
 
-// restreamHoldoff is the base of the ladder the respond phase waits out before re-streaming a
-// transient in-band fault: long enough for the momentary condition behind it — an aggregator
+// defaultRestreamHoldoff is the base of the ladder the respond phase waits out before re-streaming
+// a transient in-band fault: long enough for the momentary condition behind it — an aggregator
 // swapping out the provider it routed to, a server shedding load — to pass, short enough that a
 // human watching the stream reads the first re-stream as a stutter rather than a stall. Each
 // further re-stream in the same Turn doubles it (restreamHoldoffFor), so a condition that outlasts
-// one wait gets a longer one before the next attempt instead of three stutters in a row. It is a
-// var solely so the loop's tests need not sit through it; nothing outside a test writes it.
-var restreamHoldoff = time.Second
+// one wait gets a longer one before the next attempt instead of three stutters in a row. An
+// Agent's restreamHoldoff field overrides it; a zero field reads as this.
+const defaultRestreamHoldoff = time.Second
 
 // restreamHoldoffFor returns the wait before the Turn's re-stream number n, counted from zero:
-// restreamHoldoff doubled n times, so the first re-stream keeps the base wait and each later one
-// waits twice as long as the one before.
-func restreamHoldoffFor(n int) time.Duration {
-	return restreamHoldoff << n
+// the Agent's base hold-off (restreamHoldoff, defaultRestreamHoldoff when unset) doubled n times,
+// so the first re-stream keeps the base wait and each later one waits twice as long as the one
+// before.
+func (a *Agent) restreamHoldoffFor(n int) time.Duration {
+	base := a.restreamHoldoff
+	if base <= 0 {
+		base = defaultRestreamHoldoff
+	}
+	return base << n
 }
 
 // holdOffRestream waits restreamHoldoffFor(n) and reports whether the wait completed — false
 // means ctx was cancelled first, and the caller must route the cancel rather than re-stream into
 // a context that is already gone.
-func holdOffRestream(ctx context.Context, n int) bool {
-	timer := time.NewTimer(restreamHoldoffFor(n))
+func (a *Agent) holdOffRestream(ctx context.Context, n int) bool {
+	timer := time.NewTimer(a.restreamHoldoffFor(n))
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -499,7 +504,7 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 				rung := t.restreamsSpent
 				t.restreamsSpent++
 				a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
-				if holdOffRestream(ctx, rung) {
+				if a.holdOffRestream(ctx, rung) {
 					continue
 				}
 				if ctx.Err() != nil {

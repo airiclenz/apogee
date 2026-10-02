@@ -1621,6 +1621,9 @@ type delegation struct {
 	// cancelFoldBound is the parent's bound on a cancel's fold of each running child
 	// (foldStoppedChild), so the child holds its own children's to the same one.
 	cancelFoldBound time.Duration
+	// restreamHoldoff is the parent's re-stream hold-off base (restreamHoldoffFor), so a child's
+	// re-streams wait what its parent's do.
+	restreamHoldoff time.Duration
 
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
@@ -1858,6 +1861,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// pinned the child's.
 		now:             a.now,
 		cancelFoldBound: a.cancelFoldBound,
+		restreamHoldoff: a.restreamHoldoff,
 		// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
 		// than the childCfg copy the child's Config carries. The field is the authority the way it is
 		// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two

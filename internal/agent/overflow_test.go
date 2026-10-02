@@ -247,14 +247,12 @@ func retryableErrorTurn(msg string) stubllm.Turn {
 	return stubllm.Turn{Error: &stubllm.InBandError{Code: http.StatusBadGateway, Message: msg}}
 }
 
-// shortRestreamHoldoff shrinks the loop's re-stream hold-off for the duration of one test, so a
-// test driving the recovery does not sit through the production second, and restores it after.
-// Safe because the tests that call it are serial: none of them calls t.Parallel.
-func shortRestreamHoldoff(t *testing.T) {
+// shortRestreamHoldoff shrinks a's re-stream hold-off, so a test driving the recovery does not
+// sit through the production second. It sets the field on a alone, and a's children inherit it at
+// spawn, so nothing outside the test's own tree sees the change.
+func shortRestreamHoldoff(t *testing.T, a *Agent) {
 	t.Helper()
-	previous := restreamHoldoff
-	restreamHoldoff = time.Millisecond
-	t.Cleanup(func() { restreamHoldoff = previous })
+	a.restreamHoldoff = time.Millisecond
 }
 
 // countEvents reports how many of events are of type T.
@@ -294,8 +292,6 @@ func lastFaultMsg(scripts []stubllm.Turn) string {
 // that was never transient never re-streams at all. Under shortRestreamHoldoff the wall clock says
 // nothing about the ladder — TestRestreamHoldoffLadder pins the rungs on the pure function.
 func TestRespondAndReviewReStreamsATransientFaultUpToTheBudget(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	tests := []struct {
 		name        string
 		scripts     []stubllm.Turn
@@ -359,6 +355,7 @@ func TestRespondAndReviewReStreamsATransientFaultUpToTheBudget(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
+			shortRestreamHoldoff(t, a)
 			req, _ := a.buildRequest(0)
 			run := &turnRun{turn: 0, req: req}
 
@@ -403,8 +400,6 @@ func TestRespondAndReviewReStreamsATransientFaultUpToTheBudget(t *testing.T) {
 // Session-scoping it would leave every Turn after the first few recovered stutters with no
 // recovery at all.
 func TestReStreamBudgetIsPerTurn(t *testing.T) {
-	shortRestreamHoldoff(t)
-
 	sink := &recordingSink{}
 	responder := scriptedResponder(t,
 		retryableErrorTurn(transientFaultMsg), contentTurn("first"), // Turn 0: a blip, then the answer
@@ -414,6 +409,7 @@ func TestReStreamBudgetIsPerTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	shortRestreamHoldoff(t, a)
 
 	for _, text := range []string{"first question", "second question"} {
 		if err := a.Submit(domain.UserInput{Text: text}); err != nil {

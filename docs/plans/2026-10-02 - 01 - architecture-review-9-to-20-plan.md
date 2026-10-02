@@ -661,7 +661,11 @@ cmd/apogee/headless_test.go — TestHeadlessOutputRouting, TestNarrationSinkSumm
 - `GOMEMLIMIT=2GiB go test -count=1 -run '^TestHeadlessOutputRouting$|^TestNarrationSinkSummarisesTheFirstStringArgument$' ./cmd/apogee/` plus the exactly-`headlessTaskMax` test, by name
 **Commit:** `refactor: clip runes through sanitize.ClampRunes`
 
-## 22. Test-seam globals become fields (#20e)
+## 22. Test-seam globals become fields (#20e) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): re-derived from the assumption that the Agent's fields can be added without touching agent.go — the new `restreamHoldoff time.Duration` field (0 = `defaultRestreamHoldoff`, the cancelFoldBound shape) is declared on the Agent struct in internal/agent/agent.go, beside cancelFoldBound.
+NOTES (2026-10-02): `lookupLocal` joins `localDialer` as its `lookup` field (zero = mdns.Lookup); `localDialer.dial` is a plain dialFunc whose zero is the wrapped transport's captured DialContext, so `dialWithLocalFallback`/`dialResolved` became `localDialer` methods and `withLocalFallback` takes the localDialer (production passes the zero value).
+NOTES (2026-10-02): the TestLocalFallback_* tests no longer touch package state, so they now call t.Parallel and the file's "these tests run serially" header is gone; TestCapRetryLatchIsSeparateFromTheReStreamLatch inlines driveExchange's newAgent/Submit/Run so the field is set before the run.
 
 **What:**
 **Goal:** `agent/loop.go` `restreamHoldoff` and `provider/localdial.go` `dialAddress` are fields

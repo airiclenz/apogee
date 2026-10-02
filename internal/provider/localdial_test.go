@@ -13,18 +13,12 @@ import (
 	"testing"
 )
 
-// The tests in this file swap the package's dial and mDNS seams, so none of them calls
-// t.Parallel: Go runs every serial top-level test before releasing the parallel ones, which keeps
-// the ~200 parallel tests sharing providerTransport off the stubs.
-
-// stubResolver answers the dial seam for host names: resolved maps a name to the IP literal the
-// "system resolver" finds, and any other name fails with a *net.DNSError as the pure-Go resolver
-// does. An IP literal is dialled for real through the captured original dialer.
-func stubResolver(t *testing.T, resolved map[string]string) {
-	t.Helper()
-	prev := dialAddress
-	t.Cleanup(func() { dialAddress = prev })
-	dialAddress = func(ctx context.Context, orig dialFunc, network, address string) (net.Conn, error) {
+// stubResolver returns a dial seam that answers for host names: resolved maps a name to the IP
+// literal the "system resolver" finds, and any other name fails with a *net.DNSError as the
+// pure-Go resolver does. An IP literal is dialled for real through orig, the wrapped transport's
+// own dialer.
+func stubResolver(orig dialFunc, resolved map[string]string) dialFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
@@ -43,10 +37,21 @@ func stubResolver(t *testing.T, resolved map[string]string) {
 	}
 }
 
-// mdnsStub records the hosts lookupLocal was asked for.
+// mdnsStub is an mDNS lookup seam that answers addrs (or err) and records the hosts it was asked
+// for.
 type mdnsStub struct {
+	addrs []netip.Addr
+	err   error
+
 	mu    sync.Mutex
 	hosts []string
+}
+
+func (s *mdnsStub) lookup(_ context.Context, host string) ([]netip.Addr, error) {
+	s.mu.Lock()
+	s.hosts = append(s.hosts, host)
+	s.mu.Unlock()
+	return s.addrs, s.err
 }
 
 func (s *mdnsStub) calls() []string {
@@ -55,19 +60,24 @@ func (s *mdnsStub) calls() []string {
 	return append([]string(nil), s.hosts...)
 }
 
-// stubMDNS substitutes lookupLocal with one that answers addrs (or err) and records its calls.
-func stubMDNS(t *testing.T, addrs []netip.Addr, err error) *mdnsStub {
+// stubMDNS returns an mDNS seam that answers addrs (or err) and records its calls.
+func stubMDNS(addrs []netip.Addr, err error) *mdnsStub {
+	return &mdnsStub{addrs: addrs, err: err}
+}
+
+// localFallbackClient returns a Client for baseURL over a transport of its own, built by
+// withLocalFallback from a DefaultTransport clone: the system resolver answers from resolved
+// (stubResolver) and mDNS from mdnsCalls. Nothing is shared with providerTransport, so the test
+// may run in parallel.
+func localFallbackClient(t *testing.T, baseURL string, resolved map[string]string, mdnsCalls *mdnsStub) *Client {
 	t.Helper()
-	stub := &mdnsStub{}
-	prev := lookupLocal
-	t.Cleanup(func() { lookupLocal = prev })
-	lookupLocal = func(_ context.Context, host string) ([]netip.Addr, error) {
-		stub.mu.Lock()
-		stub.hosts = append(stub.hosts, host)
-		stub.mu.Unlock()
-		return addrs, err
-	}
-	return stub
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	transport := withLocalFallback(base, localDialer{
+		dial:   stubResolver(base.DialContext, resolved),
+		lookup: mdnsCalls.lookup,
+	})
+	t.Cleanup(transport.CloseIdleConnections)
+	return NewClient(baseURL, "", WithHTTPClient(&http.Client{Transport: transport}))
 }
 
 // serverAs returns srv's URL with its host replaced by name, keeping the port.
@@ -84,12 +94,13 @@ func serverAs(t *testing.T, srv *httptest.Server, name string) string {
 var loopback = []netip.Addr{netip.MustParseAddr("127.0.0.1")}
 
 func TestLocalFallback_DiscoverReachesMDNSAddress(t *testing.T) {
+	t.Parallel()
+
 	srv, _ := modelsServer(`{"data":[{"id":"model-a","context_length":4096}]}`)
 	defer srv.Close()
-	stubResolver(t, nil)
-	mdnsCalls := stubMDNS(t, loopback, nil)
+	mdnsCalls := stubMDNS(loopback, nil)
 
-	info, err := NewClient(serverAs(t, srv, "Box.local"), "").Discover(context.Background())
+	info, err := localFallbackClient(t, serverAs(t, srv, "Box.local"), nil, mdnsCalls).Discover(context.Background())
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -102,12 +113,13 @@ func TestLocalFallback_DiscoverReachesMDNSAddress(t *testing.T) {
 }
 
 func TestLocalFallback_NonLocalHostSkipsMDNS(t *testing.T) {
+	t.Parallel()
+
 	srv, _ := modelsServer(`{"data":[{"id":"model-a"}]}`)
 	defer srv.Close()
-	stubResolver(t, nil)
-	mdnsCalls := stubMDNS(t, loopback, nil)
+	mdnsCalls := stubMDNS(loopback, nil)
 
-	_, err := NewClient(serverAs(t, srv, "box.lan"), "").Discover(context.Background())
+	_, err := localFallbackClient(t, serverAs(t, srv, "box.lan"), nil, mdnsCalls).Discover(context.Background())
 	var dnsErr *net.DNSError
 	if !errors.As(err, &dnsErr) {
 		t.Fatalf("Discover error = %v, want a *net.DNSError", err)
@@ -118,12 +130,13 @@ func TestLocalFallback_NonLocalHostSkipsMDNS(t *testing.T) {
 }
 
 func TestLocalFallback_MDNSFailureKeepsDNSError(t *testing.T) {
+	t.Parallel()
+
 	srv, _ := modelsServer(`{"data":[{"id":"model-a"}]}`)
 	defer srv.Close()
-	stubResolver(t, nil)
-	mdnsCalls := stubMDNS(t, nil, errors.New("mdns: no responder answered"))
+	mdnsCalls := stubMDNS(nil, errors.New("mdns: no responder answered"))
 
-	_, err := NewClient(serverAs(t, srv, "box.local."), "").Discover(context.Background())
+	_, err := localFallbackClient(t, serverAs(t, srv, "box.local."), nil, mdnsCalls).Discover(context.Background())
 	var transportErr *TransportError
 	if !errors.As(err, &transportErr) {
 		t.Fatalf("Discover error = %v (%T), want a *TransportError", err, err)
@@ -141,12 +154,14 @@ func TestLocalFallback_MDNSFailureKeepsDNSError(t *testing.T) {
 }
 
 func TestLocalFallback_SystemResolvedLocalSkipsMDNS(t *testing.T) {
+	t.Parallel()
+
 	srv, _ := modelsServer(`{"data":[{"id":"model-a"}]}`)
 	defer srv.Close()
-	stubResolver(t, map[string]string{"box.local": "127.0.0.1"})
-	mdnsCalls := stubMDNS(t, loopback, nil)
+	mdnsCalls := stubMDNS(loopback, nil)
+	resolved := map[string]string{"box.local": "127.0.0.1"}
 
-	if _, err := NewClient(serverAs(t, srv, "box.local"), "").Discover(context.Background()); err != nil {
+	if _, err := localFallbackClient(t, serverAs(t, srv, "box.local"), resolved, mdnsCalls).Discover(context.Background()); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	if got := mdnsCalls.calls(); len(got) != 0 {
@@ -158,11 +173,13 @@ func TestLocalFallback_SystemResolvedLocalSkipsMDNS(t *testing.T) {
 // the per-address fallback dial go through the DialContext the wrapped transport already carried,
 // never a fresh zero net.Dialer.
 func TestLocalFallback_DialsThroughCapturedDialer(t *testing.T) {
+	t.Parallel()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	stubMDNS(t, loopback, nil)
+	mdnsCalls := stubMDNS(loopback, nil)
 
 	var mu sync.Mutex
 	var dialled []string
@@ -178,7 +195,7 @@ func TestLocalFallback_DialsThroughCapturedDialer(t *testing.T) {
 			return real.DialContext(ctx, network, address)
 		},
 	}
-	transport := withLocalFallback(base)
+	transport := withLocalFallback(base, localDialer{lookup: mdnsCalls.lookup})
 	defer transport.CloseIdleConnections()
 
 	resp, err := (&http.Client{Transport: transport}).Get(serverAs(t, srv, "box.local"))
