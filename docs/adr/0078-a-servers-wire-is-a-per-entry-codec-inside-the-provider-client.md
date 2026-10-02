@@ -136,6 +136,13 @@ wire and only to the model that produced them, so the reason decision 4 gave is 
   `thinking: {"type": "adaptive"}` beside `output_config.effort`. When it resolves to `off`,
   `none` or `minimal`, or to nothing at all, the body requests `thinking: {"type": "disabled"}`
   explicitly, exactly as before, so a request with no effort is byte-identical to what v1 sent.
+- **Thinking blocks go back in the order received.** A reply can put a thinking block after its
+  text or between its `tool_use` blocks (interleaved thinking, and the progress update that sits
+  just before each tool call). The API takes the latest assistant turn back only with its thinking
+  blocks in their original sequence, and on the models that check preserved thinking a reordered
+  block is an edit that invalidates every later one (a 400). So each carried block keeps its place
+  — whether text and how many tool calls preceded it — and the encoder puts it back there rather
+  than ahead of the message's other blocks. A block that led its reply is carried bare, as before.
 - **The compaction summary never requests thinking on this wire.** The summariser's request is
   forced to the off rung on an anthropic server, as it already was on the kwargs and reasoning
   dialects, so a thinking pass can never spend the summary's output cap.

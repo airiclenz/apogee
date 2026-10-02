@@ -20,10 +20,12 @@ import (
 // off, none, minimal, or no effort at all — carries `thinking: {"type":"disabled"}` explicitly,
 // because the current models run adaptive thinking when the key is omitted. Thinking blocks are
 // signed and must be replayed verbatim: a reply's `thinking` and `redacted_thinking` blocks
-// surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock) and an assistant
-// Message's ThinkingBlocks are written back ahead of its other blocks. While thinking is
-// requested the body drops the profile's sampling knobs (temperature, top_p, top_k), which the
-// API constrains under thinking (ADR 0078 amendment 2026-10-02).
+// surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock), each with the
+// place it held among the reply's text and tool_use blocks, and an assistant Message's
+// ThinkingBlocks are written back at those places — the API takes an assistant turn back only in
+// the order it sent it (anthropicReasoningEntry). While thinking is requested the body drops the
+// profile's sampling knobs (temperature, top_p, top_k), which the API constrains under thinking
+// (ADR 0078 amendment 2026-10-02).
 
 const (
 	// anthropicMessagesPath is the Messages endpoint every anthropic request is posted to.
@@ -177,9 +179,9 @@ func anthropicEffortSupport() EffortSupport {
 // into the returned system text; a run of consecutive tool-result messages folds into ONE user
 // message of tool_result blocks (the API wants every result of a parallel call in a single
 // turn); an assistant message carries a text block for its content and one tool_use block per
-// call, behind the thinking blocks it carries verbatim (Message.ThinkingBlocks). A message
-// that ends up with no block at all — an assistant turn with neither text nor
-// calls — is dropped: the API refuses an empty content array.
+// call, with the thinking blocks it carries verbatim at their places (Message.ThinkingBlocks,
+// assistantBlocks). A message that ends up with no block at all — an assistant turn with neither
+// text, calls nor thinking — is dropped: the API refuses an empty content array.
 //
 // Without tools the wire refuses tool_use and tool_result blocks outright (a 400 naming the
 // missing `tools[]`), so a tool history sent with none — the compaction summariser does exactly
@@ -232,13 +234,13 @@ func textBlocks(content string) []anthropicBlock {
 	return []anthropicBlock{{Type: "text", Text: content}}
 }
 
-// assistantBlocks renders an assistant message: its thinking blocks verbatim, then its text,
-// then one tool_use block per call whose `input` is the call's argument string re-marshalled as
-// an object — an argument string that is not valid JSON is an encode error naming the call,
-// since the wire cannot carry it. Without tools the calls are appended to the text instead (see
-// anthropicMessages); the thinking blocks lead either way.
+// assistantBlocks renders an assistant message: its text, then one tool_use block per call whose
+// `input` is the call's argument string re-marshalled as an object — an argument string that is
+// not valid JSON is an encode error naming the call, since the wire cannot carry it — with its
+// thinking blocks put back among them where the reply had them (placeReasoning). Without tools
+// the calls are appended to the text instead (see anthropicMessages), so a thinking block that
+// followed a call follows the text.
 func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
-	blocks := thinkingBlocks(m.ThinkingBlocks)
 	if !hasTools {
 		text := m.Content
 		for _, tc := range m.ToolCalls {
@@ -247,10 +249,10 @@ func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
 			}
 			text += anthropicToolCallText(tc)
 		}
-		return append(blocks, textBlocks(text)...), nil
+		return placeReasoning(m.ThinkingBlocks, textBlocks(text))
 	}
 
-	blocks = append(blocks, textBlocks(m.Content)...)
+	blocks := textBlocks(m.Content)
 	for _, tc := range m.ToolCalls {
 		input, err := anthropicToolInput(tc)
 		if err != nil {
@@ -263,21 +265,97 @@ func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
 			Input: input,
 		})
 	}
-	return blocks, nil
+	return placeReasoning(m.ThinkingBlocks, blocks)
 }
 
-// thinkingBlocks wraps each carried reasoning block so it marshals as the bytes it arrived as
-// (anthropicBlock.MarshalJSON); an empty entry carries no block and is skipped. A block that is
-// not valid JSON fails the request's marshal rather than reaching the wire.
-func thinkingBlocks(raw []json.RawMessage) []anthropicBlock {
-	var blocks []anthropicBlock
-	for _, r := range raw {
-		if len(r) == 0 {
+// placeReasoning interleaves the carried reasoning entries into rest — the message's text block,
+// if any, then its tool_use blocks — each at the slot its place names (anthropicReasoningEntry),
+// in carried order; a slot past the end of rest is the end. An empty entry carries no block and is
+// skipped; an entry that is not JSON is an encode error, so it never reaches the wire.
+func placeReasoning(entries []json.RawMessage, rest []anthropicBlock) ([]anthropicBlock, error) {
+	leadingText := len(rest) > 0 && rest[0].Type == "text"
+	blocks := make([]anthropicBlock, 0, len(entries)+len(rest))
+	next := 0 // rest[:next] is written
+	for _, raw := range entries {
+		if len(raw) == 0 {
 			continue
 		}
-		blocks = append(blocks, anthropicBlock{raw: r})
+		entry, err := decodeReasoningEntry(raw)
+		if err != nil {
+			return nil, err
+		}
+		if slot := min(entry.slot(leadingText), len(rest)); slot > next {
+			blocks = append(blocks, rest[next:slot]...)
+			next = slot
+		}
+		blocks = append(blocks, anthropicBlock{raw: entry.Block})
 	}
-	return blocks
+	return append(blocks, rest[next:]...), nil
+}
+
+// anthropicReasoningEntry is how one reasoning block rides the seam (RawResponse.ThinkingBlocks,
+// DeltaThinkingBlock, Message.ThinkingBlocks) when something came before it in its reply: the
+// wire block verbatim under Block, and its place — whether a text block with text preceded it
+// and how many tool_use blocks did. A block that led its reply rides as the bare wire block, so
+// the common case is the block itself, and so is every entry a session saved before places were
+// recorded; a bare block reads as the zero place.
+//
+// The place exists because the API takes an assistant turn back only as it sent it: "every block
+// type, in the order received", and a serializer that "reorders blocks edits the prefix for every
+// later turn" (platform.claude.com/docs/en/build-with-claude/preserved-thinking, "Send assistant
+// turns back exactly as returned"); the latest turn's consecutive thinking blocks "must match what
+// the model generated" or the request is a 400 (…/build-with-claude/thinking, "Preserving thinking
+// blocks"). A reply can put a thinking block after text or between tool_use blocks — a progress
+// update sits immediately before the tool call it introduces — so leading every block is not the
+// order received.
+type anthropicReasoningEntry struct {
+	AfterText  bool            `json:"after_text,omitempty"`
+	AfterCalls int             `json:"after_calls,omitempty"`
+	Block      json.RawMessage `json:"block"`
+}
+
+// reasoningEntry is the seam entry for a reasoning block at a place: the block itself when
+// nothing preceded it, else the block wrapped with its place. block is one JSON object — a decoded
+// block's bytes or a streamed block's encoding — and is spliced in as it is, never re-encoded.
+func reasoningEntry(block json.RawMessage, afterText bool, afterCalls int) json.RawMessage {
+	if !afterText && afterCalls == 0 {
+		return block
+	}
+	var b bytes.Buffer
+	b.WriteByte('{')
+	if afterText {
+		b.WriteString(`"after_text":true,`)
+	}
+	if afterCalls > 0 {
+		fmt.Fprintf(&b, `"after_calls":%d,`, afterCalls)
+	}
+	b.WriteString(`"block":`)
+	b.Write(block)
+	b.WriteByte('}')
+	return b.Bytes()
+}
+
+// decodeReasoningEntry reads one seam entry back: a wrapped block with its place, or a bare wire
+// block — no `block` member — at the zero place.
+func decodeReasoningEntry(raw json.RawMessage) (anthropicReasoningEntry, error) {
+	var entry anthropicReasoningEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return anthropicReasoningEntry{}, fmt.Errorf("apogee: carried thinking block: %w", err)
+	}
+	if entry.Block == nil {
+		return anthropicReasoningEntry{Block: raw}, nil
+	}
+	return entry, nil
+}
+
+// slot is the number of the message's rendered text and tool_use blocks the entry goes after.
+// The encoder renders the text first, so a block that followed any of the reply's text or calls
+// goes after that text block — when the message has one — and after its AfterCalls calls.
+func (e anthropicReasoningEntry) slot(leadingText bool) int {
+	if leadingText && (e.AfterText || e.AfterCalls > 0) {
+		return e.AfterCalls + 1
+	}
+	return e.AfterCalls
 }
 
 // anthropicToolInput re-marshals a call's raw argument string as the object `input` carries:
@@ -456,7 +534,8 @@ func (u anthropicUsage) usage() Usage {
 
 // toRawResponse assembles the seam RawResponse: text blocks concatenate into Content, thinking
 // blocks into Thinking, every thinking and redacted_thinking block is kept verbatim on
-// ThinkingBlocks in reply order, each tool_use block is one ToolCall with its input re-stringified as
+// ThinkingBlocks in reply order with its place among the text and tool_use blocks
+// (anthropicReasoningEntry), each tool_use block is one ToolCall with its input re-stringified as
 // the argument string, and the stop reason is mapped onto the chat-completions vocabulary the
 // loop reads (anthropicFinishReason).
 func (r anthropicResponse) toRawResponse() RawResponse {
@@ -465,12 +544,11 @@ func (r anthropicResponse) toRawResponse() RawResponse {
 		switch b.Type {
 		case "text":
 			out.Content += b.Text
-		case anthropicBlockThinking:
+		case anthropicBlockThinking, anthropicBlockRedactedThinking:
 			out.Thinking += b.Thinking
-			out.ThinkingBlocks = append(out.ThinkingBlocks, b.raw)
-		case anthropicBlockRedactedThinking:
-			out.ThinkingBlocks = append(out.ThinkingBlocks, b.raw)
-		case "tool_use":
+			out.ThinkingBlocks = append(out.ThinkingBlocks,
+				reasoningEntry(b.raw, out.Content != "", len(out.ToolCalls)))
+		case anthropicBlockToolUse:
 			out.ToolCalls = append(out.ToolCalls, ToolCall{
 				ID:       b.ID,
 				Type:     "function",

@@ -87,8 +87,9 @@ type Delta struct {
 	MalformedChunks int
 	// Attempt is meaningful only on DeltaAttempt: the attempt's measurement.
 	Attempt *Attempt
-	// ThinkingBlock is meaningful only on DeltaThinkingBlock: the block as one JSON object, for
-	// the consumer to hand back on the assistant Message it builds (Message.ThinkingBlocks).
+	// ThinkingBlock is meaningful only on DeltaThinkingBlock: the block as one opaque JSON entry
+	// (RawResponse.ThinkingBlocks), for the consumer to hand back, in arrival order, on the
+	// assistant Message it builds (Message.ThinkingBlocks).
 	ThinkingBlock json.RawMessage
 }
 

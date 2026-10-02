@@ -16,9 +16,9 @@ type Message struct {
 	ToolCalls  []ToolCall // assistant-only: the tool calls the model emitted
 	ToolCallID string     // tool-result-only: links a result to its originating call
 	// ThinkingBlocks is assistant-only: the reasoning blocks the reply that produced this message
-	// carried, each one wire block kept opaque and verbatim (see RawResponse.ThinkingBlocks). The
-	// anthropic codec writes them back, in order, ahead of the message's text and tool_use blocks;
-	// the openai codec never reads them.
+	// carried, each one opaque entry as RawResponse.ThinkingBlocks holds it. The anthropic codec
+	// writes them back, in order, at the places the reply had them among the message's text and
+	// tool_use blocks; the openai codec never reads them.
 	ThinkingBlocks []json.RawMessage
 }
 
@@ -183,10 +183,11 @@ type RawResponse struct {
 
 	// ThinkingBlocks are the reply's reasoning blocks as the wire carried them — on the anthropic
 	// wire every `thinking` block (its text and `signature`) and `redacted_thinking` block (its
-	// `data`), one JSON object each, in reply order. They are opaque to everything above the codec:
-	// a signed block must go back upstream byte-for-byte or the server refuses it, so nothing reads
-	// into them, and Thinking stays the readable text. Nil on the openai wire, which has no such
-	// blocks.
+	// `data`), one JSON entry each, in reply order: the block itself, or the block beside its place
+	// among the reply's text and tool_use blocks when something preceded it. They are opaque to
+	// everything above the codec: a signed block must go back upstream unaltered and in the order
+	// it came, or the server refuses it, so nothing reads into them, and Thinking stays the
+	// readable text. Nil on the openai wire, which has no such blocks.
 	ThinkingBlocks []json.RawMessage
 
 	// TopCandidates are the candidate tokens the server reported for the FIRST generated

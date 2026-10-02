@@ -78,6 +78,17 @@ func TestAnthropicCodecEncode(t *testing.T) {
 			want: `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"go"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"c2ln"}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
 		},
 		{
+			name: "without tools a block placed after a call follows the prose the call folds into",
+			req: Request{Model: "m", Messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", ThinkingBlocks: []json.RawMessage{
+					replayBlocks[0],
+					[]byte(`{"after_calls":1,"block":{"type":"thinking","thinking":"","signature":"czE="}}`),
+				}, ToolCalls: []ToolCall{{ID: "tc_1", Function: FunctionCall{Name: "ls", Arguments: `{}`}}}},
+			}},
+			want: `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"go"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"c2ln"},{"type":"text","text":"ls({})"},{"type":"thinking","thinking":"","signature":"czE="}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
+		},
+		{
 			name: "assistant text beside its call, empty assistant turn dropped",
 			req: Request{Model: "m", Tools: lsTool, Messages: []Message{
 				{Role: "user", Content: "go"},
@@ -265,6 +276,88 @@ func TestOpenAICodecIgnoresThinkingBlocks(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Errorf("body with thinking blocks\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestAnthropicReplyReplaysInTheOrderReceived pins that a reply's assistant turn goes back
+// upstream in the order the reply had its blocks, whole or streamed: a thinking block after the
+// text, a progress block between two tool_use blocks, and one trailing the last call keep their
+// places, because the API refuses a latest turn whose thinking blocks were rearranged and treats
+// any reordered block as an edit that invalidates later thinking (anthropicReasoningEntry).
+func TestAnthropicReplyReplaysInTheOrderReceived(t *testing.T) {
+	t.Parallel()
+	const content = `[{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"checking"},{"type":"thinking","thinking":"","signature":"czE="},{"type":"tool_use","id":"tc_1","name":"ls","input":{}},{"type":"redacted_thinking","data":"RU5D"},{"type":"tool_use","id":"tc_2","name":"ls","input":{"p":"."}},{"type":"thinking","thinking":"","signature":"czM="}]`
+	const stream = `data: {"type":"message_start","message":{"model":"claude-x"}}
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"czA="}}
+data: {"type":"content_block_stop","index":0}
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"checking"}}
+data: {"type":"content_block_stop","index":1}
+data: {"type":"content_block_start","index":2,"content_block":{"type":"thinking","thinking":""}}
+data: {"type":"content_block_delta","index":2,"delta":{"type":"signature_delta","signature":"czE="}}
+data: {"type":"content_block_stop","index":2}
+data: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"tc_1","name":"ls","input":{}}}
+data: {"type":"content_block_stop","index":3}
+data: {"type":"content_block_start","index":4,"content_block":{"type":"redacted_thinking","data":"RU5D"}}
+data: {"type":"content_block_stop","index":4}
+data: {"type":"content_block_start","index":5,"content_block":{"type":"tool_use","id":"tc_2","name":"ls","input":{}}}
+data: {"type":"content_block_delta","index":5,"delta":{"type":"input_json_delta","partial_json":"{\"p\":\".\"}"}}
+data: {"type":"content_block_stop","index":5}
+data: {"type":"content_block_start","index":6,"content_block":{"type":"thinking","thinking":""}}
+data: {"type":"content_block_delta","index":6,"delta":{"type":"signature_delta","signature":"czM="}}
+data: {"type":"content_block_stop","index":6}
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
+data: {"type":"message_stop"}
+`
+	codec := &anthropicCodec{}
+	whole, wireErr, err := codec.decodeWhole(strings.NewReader(`{"type":"message","content":` + content + `,"stop_reason":"tool_use"}`))
+	if err != nil || wireErr != nil {
+		t.Fatalf("decodeWhole: %v %v", err, wireErr)
+	}
+	streamed := Message{Role: "assistant"}
+	for _, d := range parseAnthropicSSE(t, stream) {
+		switch d.Kind {
+		case DeltaContent:
+			streamed.Content += d.Content
+		case DeltaThinkingBlock:
+			streamed.ThinkingBlocks = append(streamed.ThinkingBlocks, d.ThinkingBlock)
+		case DeltaToolCall:
+			streamed.ToolCalls = append(streamed.ToolCalls, *d.ToolCall)
+		}
+	}
+	replies := map[string]Message{
+		"whole":    {Role: "assistant", Content: whole.Content, ToolCalls: whole.ToolCalls, ThinkingBlocks: whole.ThinkingBlocks},
+		"streamed": streamed,
+	}
+
+	for name, reply := range replies {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			req := Request{Model: "m", Tools: []ToolSpec{{Name: "ls", Parameters: []byte(`{"type":"object"}`)}}, Messages: []Message{
+				{Role: "user", Content: "go"},
+				reply,
+				{Role: "tool", Content: "a", ToolCallID: "tc_1"},
+				{Role: "tool", Content: "b", ToolCallID: "tc_2"},
+			}}
+
+			body, _, err := (&anthropicCodec{}).encode(req)
+
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			var sent struct {
+				Messages []struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &sent); err != nil || len(sent.Messages) != 3 {
+				t.Fatalf("body %s: %v", body, err)
+			}
+			if got := string(sent.Messages[1].Content); got != content {
+				t.Errorf("assistant turn sent back\n got: %s\nwant: %s", got, content)
+			}
+		})
 	}
 }
 
