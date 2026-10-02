@@ -148,7 +148,7 @@ The full tour is in [the manual](docs/manual/README.md).
 - **Model profiles** adapt to models that don't speak native tool calls: tool menus
   injected as text, fenced or custom-regex calls parsed back out, thinking channels
   stripped — while native models stay byte-identical on the wire. Profiles for Gemma,
-  gpt-oss, MiniMax and Qwen ship built in; a profile can carry its own tool list too, so
+  gpt-oss, `minimax-m3` and `qwen3.8` ship built in; a profile can carry its own tool list too, so
   a small model sees fewer, clearer tools.
 - **Switch without restarting.** `/model` and `/server` move the session; `/effort` sets
   how hard the model thinks, from the levels your model reports.

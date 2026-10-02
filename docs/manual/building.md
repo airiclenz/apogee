@@ -93,7 +93,7 @@ any parallel test that swaps a seam, so the exception cannot creep back in unnot
 processes as well. A shard is a process of its own, so every test runs exactly as it does
 today — same flags but two, same isolation, nothing skipped or reordered within its shard —
 and the run is bounded by the slowest shard rather than the slowest package. Measured on a
-9-core box before the `cmd/apogee` sweep: 212s in one process, 82s sharded cold (no timing
+9-core box on 2026-09-06, before the `cmd/apogee` sweep: 212s in one process, 82s sharded cold (no timing
 cache) and around 55s warm.
 
 The first flag is `-parallel`. `go test` runs a package's `t.Parallel` tests GOMAXPROCS at a
@@ -105,7 +105,7 @@ passes each heavy shard that share as `-parallel`: 1 whenever the plan already f
 with processes (the default sizing, and CI's cap below), more only when `APOGEE_TEST_SHARDS`
 leaves slots over. The bound is the script's, not the tests': the isolated
 `go test -race -count=1 ./cmd/apogee/` keeps `go test`'s default and the whole box, which is
-where the `cmd/apogee` sweep's 202s → 66s shows.
+where the `cmd/apogee` sweep's 202s → 66s (measured 2026-09-14) shows.
 
 The second flag is `-timeout 30m`, and it follows from the first. `go test`'s default alarm is
 10 minutes per test binary, sized for a binary that fans its tests out; a shard running them
@@ -220,7 +220,7 @@ settled decisions, `docs/design/` for the contracts, `layout.md` for the TUI spe
 states the conventions you cannot derive from the source. Per-package `doc.go` files
 carry the file-by-file tours from there.
 
-> **Note:** launch the TUI with a bare `apogee` — it starts on a `servers:` entry of
+> **Note (as of 2026-10-02):** launch the TUI with a bare `apogee` — it starts on a `servers:` entry of
 > `~/.apogee/config.yaml` (an entry with `wire: anthropic` speaks the Anthropic Messages API) —
 > or point one session straight at an OpenAI-compatible server with
 > `apogee --endpoint <openai-compatible-url> --model <name>`. All four autonomy modes, the

@@ -56,8 +56,10 @@ settings the session is running at the moment it fires, so a tool you disabled o
 is disabled and denied for it as well. A file that does not parse changes nothing — the session
 keeps running the settings it had, because a poll will sooner or later read a half-written save —
 and only when three saves in a row fail to parse does apogee say so in the transcript, once, until
-the file parses again. `server:` is the one ordinary key a re-read never moves: it names where the
-*next* session starts (see [The servers you run models on](#the-servers-you-run-models-on)). The
+the file parses again. `server:` and `sub-agents-server:` are the two ordinary keys a re-read never
+moves: they name where the *next* session starts and where its delegations run (see
+[The servers you run models on](#the-servers-you-run-models-on)); moving the running session is
+`/server`'s act, or the `server:` row's in `/settings`. The
 confinement pair — `confine-to-workspace:` and `unconfined-hosts:` — is left alone by a re-read as
 well; that interlock stays single-homed in `/confine` (ADR 0012). A re-read that applied anything
 says so in the transcript, in one line naming the keys that landed. The watcher is a poll of the
@@ -491,7 +493,7 @@ an `id:`, lists the moments it fires on under `on:`, and takes its action under 
 list run directly (no shell; write `["sh", "-c", "…"]` when you want one) or a mapping naming a
 `url:` the JSON payload is POSTed to — or under `advise:` or `gate:`. It is **empty by default**.
 A `run:` reaction is told what already happened, and nothing it prints reaches the model, the
-conversation or the saved session. Its eleven moments are the six notices `exchange-finished`,
+conversation or the saved session. It takes the eleven notices — the six standalone notices `exchange-finished`,
 `turn-finished`, `file-changed`, `approval-requested` (raised, before you answer),
 `approval-decided` (its verdict) and `error`, and the five seam-closing notices `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and

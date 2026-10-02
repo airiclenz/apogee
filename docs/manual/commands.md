@@ -628,7 +628,9 @@ row asks you to wait, while in-pane edits stay open. The confinement keys are th
 goes nowhere near it: they carry `· use /confine`, because switching Auto's fence off asks for an
 acknowledgement that belongs with [that verb](configuration.md#auto-modes-blast-radius). And the `server:` row
 **moves the session** — the same switch `/server` performs, chosen from the same list, recorded
-the same way.
+the same way. A hand edit of `server:` in the file does not: a re-read never moves that key, nor
+`sub-agents-server:`, and the edit names where the next session starts
+([configuration](configuration.md)).
 
 **The seven [Floor guards](configuration.md) are ordinary rows.** They are not switches you arm —
 they are on already — so each is an `on`/`off` row in the pane's **Session** section, edited in place

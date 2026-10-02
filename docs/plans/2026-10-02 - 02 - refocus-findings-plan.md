@@ -552,7 +552,15 @@ docs/layout/user-questions-layout.md — line 8 llama-launcher pointer
 **Acceptance:** `! grep -n 'llama-launcher' docs/layout/user-questions-layout.md`
 **Commit:** `docs(layout): reconcile layout docs with the tui`
 
-## 15. Verify, then fix: manual cross-doc conflicts and the README profile line
+## 15. Verify, then fix: manual cross-doc conflicts and the README profile line — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): verified, no edit needed — docs/manual/reactions.md (its "eleven notices" matches allNotices) and docs/manual/headless.md (its `data.cancelled` row, always false and kept for shape, matches subAgentPhaseData.Cancelled in internal/eventjson/encode.go).
+
+NOTES (2026-10-02): Moment counts now say what they count — the manual index's "sixteen Moments" names five seams + eleven notices (TestManualStatesTheMomentCount still pins it); configuration.md's `run:` passage counts "the eleven notices" instead of "eleven moments".
+
+NOTES (2026-10-02): configuration.md's "`server:` is the one ordinary key a re-read never moves" was wrong — externalEdit.changed also skips `sub-agents-server:`; both are now named, and commands.md's `server:` row passage now contrasts the pane edit (moves the session) with a hand edit (a re-read never moves it).
+
+NOTES (2026-10-02): building.md's benchmark numbers dated from their introducing commits (458a7b19 2026-09-06, 4295f196 2026-09-14); the closing note is dated "as of 2026-10-02".
 
 **What:**
 **Goal:** The Moment count in `docs/manual/README.md` and `configuration.md` agrees with `reactions.md`'s notice count
