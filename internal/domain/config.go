@@ -505,6 +505,37 @@ type FloorConfig struct {
 	DisableReadCache bool
 }
 
+// FloorGuard pairs one Floor guard's id with the FloorConfig field that opts it out. The id is the
+// guard's identity everywhere outside internal/floor: the config key that switches it, the id its
+// builtin Reaction fires under, and a name a `reactions:` entry may not take.
+type FloorGuard struct {
+	// ID is the guard's key, spelled as a config file spells it (e.g. "read-cache").
+	ID string
+	// Gate addresses the guard's Disable… field on a FloorConfig, so the one accessor serves both a
+	// reader of the gate (the engine's ladder) and a writer of it (the host's negation seam).
+	Gate func(f *FloorConfig) *bool
+}
+
+// floorGuards is the ONE id→field table of the seven Floor guards, one row per FloorConfig field.
+// Every place that knows a guard by name derives from it: internal/agent joins its guard table's
+// gates on these ids, internal/config refuses them as a `reactions:` id, and the composition root
+// builds its negation seam and its seven settings rows by looping over it. It is kept in the order
+// the config registry presents the keys (internal/config's KeyRegistry), which is the order the
+// settings pane renders them — NOT the ladder's firing order, which is the engine's table's own.
+var floorGuards = []FloorGuard{
+	{ID: "tool-use-enforcer", Gate: func(f *FloorConfig) *bool { return &f.DisableToolUseEnforcer }},
+	{ID: "empty-response-recovery", Gate: func(f *FloorConfig) *bool { return &f.DisableEmptyResponseRecovery }},
+	{ID: "tool-call-repair", Gate: func(f *FloorConfig) *bool { return &f.DisableToolCallRepair }},
+	{ID: "tool-loop-breaker", Gate: func(f *FloorConfig) *bool { return &f.DisableToolLoopBreaker }},
+	{ID: "tool-result-cap", Gate: func(f *FloorConfig) *bool { return &f.DisableToolResultCap }},
+	{ID: "read-cache", Gate: func(f *FloorConfig) *bool { return &f.DisableReadCache }},
+	{ID: "tool-call-salvage", Gate: func(f *FloorConfig) *bool { return &f.DisableToolCallSalvage }},
+}
+
+// FloorGuards returns the Floor-guard table (floorGuards) as a fresh copy, so a caller that sorts
+// or edits what it was handed cannot reorder or rewire the table every other reader derives from.
+func FloorGuards() []FloorGuard { return slices.Clone(floorGuards) }
+
 // DelegationConfig bounds a sub-agent run. It is NOT an armed Reaction (ADR 0006): a delegate that
 // cannot be stopped is a structural hole, so the bound stays on under Bypass.
 type DelegationConfig struct {

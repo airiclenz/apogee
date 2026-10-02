@@ -34,22 +34,23 @@ import (
 
 // floorGuard is one row of the Floor-guard table: the guard's key (its config key and the id its
 // builtin fires under, floorguards.go), the one Moment it is consulted at, the action its firing is
-// booked under, the gate that reads its opt-out off the live Floor, and the handler that binds it to
-// an Agent. The gate and the handler are funcs of the Floor and of the Agent rather than values
-// because a package-level table can hold neither a live Generation nor a bound *Agent method: each
-// row is resolved against both when the ladder is built (buildBuiltins).
+// booked under, and the handler that binds it to an Agent. The handler is a func of the Agent rather
+// than a value because a package-level table cannot hold a bound *Agent method: each row is resolved
+// against the Agent when the ladder is built (buildBuiltins). The gate that reads the row's opt-out
+// off the live Floor is not a column here: it is joined on the key from internal/domain's id→field
+// table (floorGates), the one place a guard's id is paired with its FloorConfig field.
 type floorGuard struct {
 	key     string
 	moment  domain.Moment
 	action  string
-	gate    func(domain.FloorConfig) bool
 	handler func(*Agent) domain.Handler
 }
 
-// floorGuards is the ONE table of the seven Floor guards, in the order they fire. guardIDs
-// (floorguards.go) and buildBuiltins are both derived from it, and cmd/apogee's settings switch is
-// pinned to its key set through the facade (FloorGuardKeys), so a guard added or renamed here is
-// added or renamed everywhere it is known by name.
+// floorGuards is the engine's table of the seven Floor guards, in the order they fire. guardIDs
+// (floorguards.go) and buildBuiltins are both derived from it, and its key set is held to
+// internal/domain's Floor-guard table at init (floorGates) — the table the config keys and
+// cmd/apogee's settings rows are derived from too — so a guard added or renamed here without its
+// domain row stops the build's first run rather than going ungated.
 //
 // Within post-response the order is ratified (ADR 0071): tool-call salvage, then the tool-loop
 // breaker, tool-call repair, empty-response recovery and the tool-use enforcer — the coarser "you
@@ -82,7 +83,6 @@ var floorGuards = []floorGuard{
 		key:    guardToolCallSalvage,
 		moment: domain.MomentPostResponse,
 		action: guardActionSalvage,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableToolCallSalvage },
 		handler: func(a *Agent) domain.Handler {
 			return domain.PostResponseFunc(a.salvageToolCall)
 		},
@@ -91,7 +91,6 @@ var floorGuards = []floorGuard{
 		key:    guardToolLoopBreaker,
 		moment: domain.MomentPostResponse,
 		action: guardActionRetry,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableToolLoopBreaker },
 		handler: func(*Agent) domain.Handler {
 			return retryGuard(floor.ToolLoopBreak)
 		},
@@ -100,7 +99,6 @@ var floorGuards = []floorGuard{
 		key:    guardToolCallRepair,
 		moment: domain.MomentPostResponse,
 		action: guardActionRetry,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableToolCallRepair },
 		handler: func(a *Agent) domain.Handler {
 			return retryGuard(func(resp *domain.Response) (string, bool) {
 				return floor.ToolCallRepair(resp, a.registeredToolNames())
@@ -111,7 +109,6 @@ var floorGuards = []floorGuard{
 		key:    guardEmptyResponseRecovery,
 		moment: domain.MomentPostResponse,
 		action: guardActionRetry,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableEmptyResponseRecovery },
 		handler: func(*Agent) domain.Handler {
 			return retryGuard(floor.RecoverEmpty)
 		},
@@ -120,7 +117,6 @@ var floorGuards = []floorGuard{
 		key:    guardToolUseEnforcer,
 		moment: domain.MomentPostResponse,
 		action: guardActionRetry,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableToolUseEnforcer },
 		handler: func(*Agent) domain.Handler {
 			return retryGuard(floor.EnforceToolUse)
 		},
@@ -129,7 +125,6 @@ var floorGuards = []floorGuard{
 		key:    guardReadCache,
 		moment: domain.MomentPreToolExec,
 		action: guardActionIntercept,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableReadCache },
 		handler: func(a *Agent) domain.Handler {
 			return domain.PreToolExecFunc(a.cacheRead)
 		},
@@ -138,7 +133,6 @@ var floorGuards = []floorGuard{
 		key:    guardToolResultCap,
 		moment: domain.MomentPreRequest,
 		action: guardActionCap,
-		gate:   func(f domain.FloorConfig) bool { return f.DisableToolResultCap },
 		handler: func(a *Agent) domain.Handler {
 			return domain.PreRequestFunc(a.capToolResults)
 		},
@@ -146,14 +140,40 @@ var floorGuards = []floorGuard{
 }
 
 // FloorGuardKeys lists the seven Floor guards' keys in the order they fire — the table's key set,
-// exported so the composition root can pin its own key list (the settings switch, the config
-// keys) to it without importing the table. The slice is a fresh copy every call.
+// exported so the composition root can pin its own key list (the settings rows it loops out of
+// domain.FloorGuards) to it without importing the table. The slice is a fresh copy every call.
 func FloorGuardKeys() []string {
 	keys := make([]string, 0, len(floorGuards))
 	for _, g := range floorGuards {
 		keys = append(keys, g.key)
 	}
 	return keys
+}
+
+// floorGates joins the engine's guard table to internal/domain's on the guard id: each key maps to
+// the accessor of the FloorConfig field that opts that guard out (domain.FloorGuards). The two tables
+// must name the same seven ids — a guard here with no domain row would have no gate, and a domain
+// row with no guard here would be a switch that switches nothing — so a mismatch panics at init: the
+// tables are this build's own.
+var floorGates = joinFloorGates()
+
+// joinFloorGates builds floorGates, panicking when the engine's table and the domain's disagree on
+// the set of guard ids.
+func joinFloorGates() map[string]func(*domain.FloorConfig) *bool {
+	domainGuards := domain.FloorGuards()
+	gates := make(map[string]func(*domain.FloorConfig) *bool, len(domainGuards))
+	for _, g := range domainGuards {
+		gates[g.ID] = g.Gate
+	}
+	if len(gates) != len(floorGuards) {
+		panic(fmt.Sprintf("agent: the domain names %d Floor guards, the engine's table %d", len(gates), len(floorGuards)))
+	}
+	for _, g := range floorGuards {
+		if _, known := gates[g.key]; !known {
+			panic("agent: Floor guard " + g.key + " has no row in domain.FloorGuards")
+		}
+	}
+	return gates
 }
 
 // buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON and, when its
@@ -175,7 +195,7 @@ func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice bool) []armedReac
 		}
 	}
 	for _, g := range floorGuards {
-		enabled(g.gate(gates), engineBuiltin(g.key, g.action, g.moment, g.handler(a)))
+		enabled(*floorGates[g.key](&gates), engineBuiltin(g.key, g.action, g.moment, g.handler(a)))
 	}
 	enabled(!notice,
 		classedBuiltin(contextFillNoticeID, actionNotice, domain.ClassAdvise, domain.MomentPostToolResult,

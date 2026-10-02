@@ -408,9 +408,10 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 	}
 }
 
-// The ids an entry may not take are the seven Floor-guard config keys, and the list is a literal —
-// so this is what keeps it honest: every name in it is a real registry key, and a guard key renamed
-// out from under it fails here rather than silently letting a `reactions:` entry take the name.
+// The ids an entry may not take are the seven Floor-guard config keys, and the list is derived from
+// domain.FloorGuards, not from the registry — so this is what keeps it honest: every name in it is
+// a real registry key, and a guard key renamed out from under it fails here rather than silently
+// letting a `reactions:` entry take the name.
 func TestFloorGuardKeysAreRegistryKeys(t *testing.T) {
 	t.Parallel()
 

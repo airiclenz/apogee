@@ -666,8 +666,9 @@ func (s *liveSettings) setBypass(on bool) apogee.Generation {
 // spell the negation a second time.
 //
 // An unknown key is a programming error the seven table rows cannot make, so it changes nothing and
-// the generation is handed back as it stands. The key set floorGuardFields answers for is pinned to
-// the engine's guard table and the config keys (TestFloorGuardTableMatchesTheConfigKeys).
+// the generation is handed back as it stands. The key set floorGuardFields answers for is
+// internal/domain's Floor-guard table, the one the engine's guard table joins its gates on, held to
+// the config registry by TestFloorGuardTableMatchesTheConfigKeys.
 func (s *liveSettings) setFloorGuard(key string, landed config.Options) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -678,23 +679,37 @@ func (s *liveSettings) setFloorGuard(key string, landed config.Options) apogee.G
 }
 
 // floorGuardFields maps each Floor-guard key onto its config registry row, whose Copy is how
-// setFloorGuard moves the one key's field and nothing else — so the key→field mapping is the
-// registry's, never restated here. It is built from config.FloorGuardKeys, and is a map so its key
-// set can be read: a test holds it equal to the engine's guard table (apogee.FloorGuardKeys),
-// which is how a guard added to the engine without a config key is caught. A Floor-guard key with
-// no row, or a row with no Copy, panics at init: the seven keys are this build's own table.
+// setFloorGuard moves the one key's field and nothing else, and whose Read is how floorFromOptions
+// reads the key's positive value — so the key→Options-field mapping is the registry's, never
+// restated here. It is built by looping over internal/domain's Floor-guard table
+// (domain.FloorGuards), the table the engine's guard table joins its gates on, and is a map so its
+// key set can be read. A Floor-guard key with no bool row, or a row with no Copy or Read, panics at
+// init: the seven keys are this build's own table, and TestFloorGuardTableMatchesTheConfigKeys
+// holds every one of them to a registry row.
 var floorGuardFields = floorGuardRows()
 
 // floorGuardRows builds floorGuardFields from the registry rows of the seven Floor-guard keys.
 func floorGuardRows() map[string]config.Key {
-	keys := config.FloorGuardKeys()
-	rows := make(map[string]config.Key, len(keys))
-	for _, key := range keys {
-		row, ok := config.LookupKey(key)
-		if !ok || row.Copy == nil {
-			panic("apogee: Floor-guard key " + key + " has no config registry row with a Copy")
+	guards := domain.FloorGuards()
+	rows := make(map[string]config.Key, len(guards))
+	for _, g := range guards {
+		row, ok := config.LookupKey(g.ID)
+		if !ok || row.Kind != config.KindBool || row.Copy == nil || row.Read == nil {
+			panic("apogee: Floor-guard key " + g.ID + " has no bool config registry row with a Copy and a Read")
 		}
-		rows[key] = row
+		rows[g.ID] = row
+	}
+	return rows
+}
+
+// floorGuardSettings is settingsTable's seven Floor-guard rows, one per row of internal/domain's
+// Floor-guard table and in its order — config.KeyRegistry's — so the rows sit in the pane's own
+// order without a key being spelled here. Every one applies through applyFloorGuard.
+func floorGuardSettings() []settingsEntry {
+	guards := domain.FloorGuards()
+	rows := make([]settingsEntry, 0, len(guards))
+	for _, g := range guards {
+		rows = append(rows, settingsEntry{key: g.ID, apply: applyFloorGuard})
 	}
 	return rows
 }
@@ -716,16 +731,16 @@ func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
 // Disable… gates (ADR 0071: the zero FloorConfig is the full floor). Both composition roots and
 // every `/settings` apply go through it, so "off in the file" and "off in the pane" cannot come to
 // mean two different things.
+//
+// It loops over internal/domain's Floor-guard table: each guard's key is read off o through its
+// registry row (floorGuardFields) and its Disable… gate is set exactly when that key reads false,
+// so a key that read anything else would leave its guard on — the zero FloorConfig's side.
 func floorFromOptions(o config.Options) apogee.FloorConfig {
-	return apogee.FloorConfig{
-		DisableToolUseEnforcer:       !o.ToolUseEnforcer,
-		DisableEmptyResponseRecovery: !o.EmptyResponseRecovery,
-		DisableToolCallRepair:        !o.ToolCallRepair,
-		DisableToolCallSalvage:       !o.ToolCallSalvage,
-		DisableToolLoopBreaker:       !o.ToolLoopBreaker,
-		DisableToolResultCap:         !o.ToolResultCap,
-		DisableReadCache:             !o.ReadCache,
+	var floor apogee.FloorConfig
+	for _, g := range domain.FloorGuards() {
+		*g.Gate(&floor) = floorGuardFields[g.ID].Read(o) == strconv.FormatBool(false)
 	}
+	return floor
 }
 
 // options reports this session's configuration as it stands NOW: the Options this run launched with,
@@ -963,7 +978,7 @@ type settingsEntry struct {
 // surface and the table can be read side by side (TestSettingsTableIsInRegistryOrder). A key with
 // no entry here cannot be applied to a running session at all: applySettingFor refuses it by name,
 // and TestEveryEditableSettingKeyHasAnApply is what fails if that key was Editable.
-var settingsTable = []settingsEntry{
+var settingsTable = slices.Concat([]settingsEntry{
 	{
 		key: "servers",
 		apply: func(a settingsApplier, key, value string) (string, error) {
@@ -1184,39 +1199,13 @@ var settingsTable = []settingsEntry{
 			return "", nil
 		},
 	},
-	// The seven Floor-guard gates (ADR 0071). They share one apply and one engine seam: SetReactions
-	// takes the WHOLE Generation, so a row that knows only its own key has to read the other six back
-	// off the holder — which is why these are the one bool family that needs the holder as well as the
+	// The seven Floor-guard gates (ADR 0071) come next, looped out of internal/domain's Floor-guard
+	// table (floorGuardSettings). They share one apply and one engine seam: SetReactions takes the
+	// WHOLE Generation, so a row that knows only its own key has to read the other six back off the
+	// holder — which is why these are the one bool family that needs the holder as well as the
 	// engine. Nothing else about them is special: each is an ordinary editable bool, on by default,
 	// in force the moment its apply returns.
-	{
-		key:   "tool-use-enforcer",
-		apply: applyFloorGuard,
-	},
-	{
-		key:   "empty-response-recovery",
-		apply: applyFloorGuard,
-	},
-	{
-		key:   "tool-call-repair",
-		apply: applyFloorGuard,
-	},
-	{
-		key:   "tool-loop-breaker",
-		apply: applyFloorGuard,
-	},
-	{
-		key:   "tool-result-cap",
-		apply: applyFloorGuard,
-	},
-	{
-		key:   "read-cache",
-		apply: applyFloorGuard,
-	},
-	{
-		key:   "tool-call-salvage",
-		apply: applyFloorGuard,
-	},
+}, floorGuardSettings(), []settingsEntry{
 	// The context-fill notice's switch (ADR 0077): the seven Floor rows' shape — one field of the
 	// generation the single seam takes, so the row needs the holder for the fields it does not
 	// name — but not a Floor guard, so it takes no part in their negation seam and ships off.
@@ -1396,7 +1385,7 @@ var settingsTable = []settingsEntry{
 			return "", a.reloadModelProfiles()
 		},
 	},
-}
+})
 
 // settingsEntryFor finds the table row for one registry path. The scan is linear because the table
 // is short and an apply happens at human speed — one keypress in the settings pane — so an index

@@ -580,13 +580,15 @@ func TestStepBudgetNoticeHasNoSettingsRow(t *testing.T) {
 	}
 }
 
-// The seven Floor-guard keys are known by name in three places that cannot import one another —
-// the engine's guard table (apogee.FloorGuardKeys), the config keys a file spells and an entry's
-// `id:` is refused against (config.FloorGuardKeys), and this package's key→row map behind
-// setFloorGuard with the seven table rows that apply through it — so this is the one test that
-// holds them to one SET. Set rather than list: config keeps the enforcer first, the engine keeps
-// salvage first, and neither order is the other's business. A guard added to the engine without a
-// config key, or a row here without a guard, is what fails.
+// The seven Floor-guard keys are ONE table, internal/domain's (domain.FloorGuards), and every place
+// that knows them by name is derived from it: the engine joins its guard table's gates on its ids,
+// config refuses them as an entry's `id:` (config.FloorGuardKeys), and this package loops its
+// settings rows, the key→row map behind setFloorGuard and the negation seam out of it. What none of
+// them derives is the config REGISTRY — the rows that give each key its Options field — so this
+// test holds the table to registry-row coverage: every id is an editable bool registry row, the
+// rows applying through applyFloorGuard are exactly the ids, and the engine's key set
+// (apogee.FloorGuardKeys) and config's are the table's. Set rather than list: the engine keeps
+// salvage first, the table keeps the registry's order, and neither order is the other's business.
 func TestFloorGuardTableMatchesTheConfigKeys(t *testing.T) {
 	t.Parallel()
 	sorted := func(keys []string) []string {
@@ -594,19 +596,36 @@ func TestFloorGuardTableMatchesTheConfigKeys(t *testing.T) {
 		slices.Sort(out)
 		return out
 	}
-	engine := sorted(apogee.FloorGuardKeys())
-	if len(engine) != 7 {
-		t.Fatalf("apogee.FloorGuardKeys() = %v, want the seven Floor guards", engine)
+	ids := make([]string, 0, 7)
+	for _, g := range domain.FloorGuards() {
+		ids = append(ids, g.ID)
 	}
-	if file := sorted(config.FloorGuardKeys()); !slices.Equal(file, engine) {
-		t.Errorf("config.FloorGuardKeys() = %v, want the engine's %v", file, engine)
+	ids = sorted(ids)
+	if len(ids) != 7 {
+		t.Fatalf("domain.FloorGuards() ids = %v, want the seven Floor guards", ids)
 	}
-	if fields := sorted(slices.Collect(maps.Keys(floorGuardFields))); !slices.Equal(fields, engine) {
-		t.Errorf("floorGuardFields keys = %v, want the engine's %v", fields, engine)
+	for _, id := range ids {
+		row, ok := config.LookupKey(id)
+		if !ok {
+			t.Errorf("Floor guard %q has no config registry row", id)
+			continue
+		}
+		if row.Kind != config.KindBool || !row.Editable {
+			t.Errorf("Floor guard %q's registry row is kind %v, editable %v; want an editable bool", id, row.Kind, row.Editable)
+		}
+	}
+	if engine := sorted(apogee.FloorGuardKeys()); !slices.Equal(engine, ids) {
+		t.Errorf("apogee.FloorGuardKeys() = %v, want the table's %v", engine, ids)
+	}
+	if file := sorted(config.FloorGuardKeys()); !slices.Equal(file, ids) {
+		t.Errorf("config.FloorGuardKeys() = %v, want the table's %v", file, ids)
+	}
+	if fields := sorted(slices.Collect(maps.Keys(floorGuardFields))); !slices.Equal(fields, ids) {
+		t.Errorf("floorGuardFields keys = %v, want the table's %v", fields, ids)
 	}
 
-	// The rows that apply through applyFloorGuard are exactly the engine's keys: one row per guard,
-	// and no row applying a key the engine does not gate.
+	// The rows that apply through applyFloorGuard are exactly the table's keys: one row per guard,
+	// and no row applying a key the table does not hold.
 	floorApply := reflect.ValueOf(applyFloorGuard).Pointer()
 	var rows []string
 	for _, entry := range settingsTable {
@@ -614,16 +633,16 @@ func TestFloorGuardTableMatchesTheConfigKeys(t *testing.T) {
 			rows = append(rows, entry.key)
 		}
 	}
-	if rows = sorted(rows); !slices.Equal(rows, engine) {
-		t.Errorf("settingsTable rows applying through applyFloorGuard = %v, want the engine's %v", rows, engine)
+	if rows = sorted(rows); !slices.Equal(rows, ids) {
+		t.Errorf("settingsTable rows applying through applyFloorGuard = %v, want the table's %v", rows, ids)
 	}
 
 	// And each key moves its own field and no other's: setting one key on over an all-off Options
 	// leaves exactly one Disable… gate off at the engine, and the seven keys leave seven different
 	// ones — the map is a bijection onto the seven bools.
 	gateType := reflect.TypeFor[apogee.FloorConfig]()
-	moved := make([]string, 0, len(engine))
-	for _, key := range engine {
+	moved := make([]string, 0, len(ids))
+	for _, key := range ids {
 		var positive config.Options
 		if err := floorGuardFields[key].Set("true", &positive); err != nil {
 			t.Fatalf("%s row Set(true): %v", key, err)

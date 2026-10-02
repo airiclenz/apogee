@@ -245,7 +245,11 @@ cmd/apogee/wire_settings_test.go — TestRunRootWiresTheLiveApplySeam; cmd/apoge
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestLandSettingIsTheRowsOwnReading$|^TestApplySettingRefusesWhatItCannotApply$|^TestApplySettingAcceptsTheStartupOnlyKeys$|^TestEveryEditableSettingKeyHasAnApply$|^TestSettingsTableIsInRegistryOrder$|^TestBypassRowAppliesOneGeneration$|^TestContextFillNoticeRowAppliesOneGeneration$|^TestFloorRowAppliesOneGeneration$|^TestApplySettingDrivesTheRightEngineSeam$|^TestApplySettingRideIsSilentBeforeAServerIsBound$|^TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow$|^TestApplySettingServersReResolvesTheParallelAgentsCap$|^TestApplySettingServersDrivesTheSubAgentServer$|^TestApplySettingReactionsReplacesTheRunnerAndTheProjection$|^TestRunRootWiresTheLiveApplySeam$' ./cmd/apogee/`
 **Commit:** `refactor(apogee): treat the settings applier as always composed`
 
-## 7. Floor guard rows loop over the engine's guard table (#12a)
+## 7. Floor guard rows loop over the engine's guard table (#12a) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the domain table is the unexported `floorGuards` slice behind `domain.FloorGuards()`, which returns a fresh copy; each row pairs `ID` with a `Gate func(*FloorConfig) *bool` accessor. The engine's join is `floorGates` in builtins.go, and it panics at init if the two id sets differ. internal/agent/floorguards.go needed no edit because its `guardIDs` comment is still true.
+NOTES (2026-10-02): `floorFromOptions` now reads each key's positive value through its registry row (`Read(o) == "false"` sets the gate). `floorGuardRows` also requires a KindBool row with a Read. settingsTable is now `slices.Concat(head, floorGuardSettings(), tail)` so the rows stay in place before `context-fill-notice`.
+NOTES (2026-10-02): consequential edit — internal/config/reactions_test.go: made necessary by deriving floorGuardKeys from domain.FloorGuards (the TestFloorGuardKeysAreRegistryKeys doc comment called the list a literal); the matching "second literal" phrase on contextFillNoticeKey in reactions.go was reworded too.
 
 **What:** Recast at the regression check (2026-10-02). Depends on item 6.
 **Goal:** a table in `internal/domain` beside `FloorConfig` pairs each guard id with its `FloorConfig`

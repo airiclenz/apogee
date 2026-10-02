@@ -49,29 +49,32 @@ type reactionConfig struct {
 // floorGuardKeys is the seven Floor guards' config keys, which are also the ids their builtin
 // Reactions fire under (internal/agent's floorguards.go). An entry that takes one of them as its
 // `id:` is refused: the two would report as one reaction, and the user almost certainly meant the
-// top-level boolean that switches the guard off. The list is a literal rather than a filter over
-// [KeyRegistry] because "is a Floor guard" is not something a row records; a test pins every name
-// here as a real registry key so the two cannot drift.
-var floorGuardKeys = []string{
-	"tool-use-enforcer",
-	"empty-response-recovery",
-	"tool-call-repair",
-	"tool-call-salvage",
-	"tool-loop-breaker",
-	"tool-result-cap",
-	"read-cache",
+// top-level boolean that switches the guard off. The list is derived from internal/domain's
+// Floor-guard table (domain.FloorGuards), in its order, rather than filtered out of [KeyRegistry]
+// because "is a Floor guard" is not something a row records; a test pins every name here as a
+// real registry key so the two cannot drift.
+var floorGuardKeys = floorGuardIDs()
+
+// floorGuardIDs reads the id column of internal/domain's Floor-guard table, in the table's order.
+func floorGuardIDs() []string {
+	guards := domain.FloorGuards()
+	keys := make([]string, 0, len(guards))
+	for _, g := range guards {
+		keys = append(keys, g.ID)
+	}
+	return keys
 }
 
-// FloorGuardKeys returns the seven Floor guards' config keys (floorGuardKeys) as a fresh copy. It is
-// exported for the composition root, which pins its own key set — the settings switch — to this
-// list and to the engine's guard table through one test, since neither side can import the other.
+// FloorGuardKeys returns the seven Floor guards' config keys (floorGuardKeys) as a fresh copy: the
+// ids of internal/domain's Floor-guard table, the same table the engine's guard table and the
+// composition root's settings rows are built from.
 func FloorGuardKeys() []string { return slices.Clone(floorGuardKeys) }
 
 // contextFillNoticeKey is the config key of the engine's context-fill notice (ADR 0077), which is
 // also the id its builtin advise Reaction fires under (internal/agent's fillnotice.go). It is
-// refused as an entry's `id:` for the Floor guards' reason, and kept as a second literal beside
+// refused as an entry's `id:` for the Floor guards' reason, and kept as a literal of its own beside
 // floorGuardKeys rather than an eighth name in it because the notice is NOT a Floor guard — that
-// list stays the seven — and its refusal says so.
+// list, derived from domain.FloorGuards, stays the seven — and its refusal says so.
 const contextFillNoticeKey = "context-fill-notice"
 
 // entryReactions maps one on-disk entry onto the user-origin Reactions it arms — ONE per action key
