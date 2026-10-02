@@ -342,7 +342,15 @@ cmd/apogee/wire_session.go — sessionHost.Activate, sessionHost.followScratch, 
 **Closes:** apogee-refused-hold-followers-move
 **Commit:** `docs(session): record that a refused hold still moves the followers`
 
-## 10. Anthropic thinking blocks are carried verbatim through the provider
+## 10. Anthropic thinking blocks are carried verbatim through the provider — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): approach deviation — instead of `Signature`/`Data` members on `anthropicBlock`, the block gains an unexported `raw` field with `UnmarshalJSON` (keeps a thinking/redacted_thinking block's bytes as received) and `MarshalJSON` (writes them back as-is), so the empty-`thinking` guard holds by construction; stream-built thinking blocks marshal through `anthropicThinkingBlock`, whose members carry no `omitempty`.
+NOTES (2026-10-02): signature_delta and redacted_thinking `data` bytes are charged to maxReplyTextBytes (new `anthropicStream.charge`) so an endless signature cannot grow unbounded; pinned by a `signature_delta` case in TestAnthropicParseSSE_ReplyTextIsCapped.
+NOTES (2026-10-02): a reasoning block still open when the stream ends (no content_block_stop) is dropped — its signature may be cut short; pinned in TestAnthropicParseSSE_Thinking.
+NOTES (2026-10-02): stream-rebuilt thinking blocks are re-encoded by encoding/json (`<`,`>`,`&` escaped as < etc.), value-identical to the wire; whole-reply and redacted blocks keep their exact bytes until the request marshal compacts them.
+NOTES (2026-10-02): the OpenAI-ignores-the-field check, TestOpenAICodecIgnoresThinkingBlocks, lives in wire_anthropic_test.go beside the carrier's other tests.
+NOTES (2026-10-02): race Acceptance run narrowed to an anchored -run over the touched tests per the Pi 5 machine rule; the whole package passed without -race.
+NOTES (2026-10-02): prepending every block reorders interleaved thinking (thinking, tool_use, thinking, tool_use) to thinking-first, since the seam Message keeps no block order; the plan calls for prepend — worth confirming against the API once replay (item 11) is live.
 
 **What:**
 **Goal:** the anthropic codec keeps `thinking` and `redacted_thinking` blocks — text, `signature`,

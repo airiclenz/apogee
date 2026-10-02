@@ -15,11 +15,13 @@ import (
 // half, in wire_anthropic_stream.go. The JSON shapes live at the foot of this file; nothing
 // outside the two branches on the Messages dialect.
 //
-// Thinking is never requested on this wire in v1: every request carries
+// Thinking is never requested on this wire yet: every request carries
 // `thinking: {"type":"disabled"}` explicitly, because the current models run adaptive thinking
-// when the key is omitted and their thinking blocks are signed and must be replayed verbatim —
-// a carrier the seam does not have. The signed-thinking carrier is the follow-up bead
-// apogee-4kl. `output_config.effort` is written independently of the thinking mode: it is the
+// when the key is omitted and their thinking blocks are signed and must be replayed verbatim.
+// The codec already carries that replay: a reply's `thinking` and `redacted_thinking` blocks
+// surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock) and an assistant
+// Message's ThinkingBlocks are written back ahead of its other blocks (bead apogee-4kl).
+// `output_config.effort` is written independently of the thinking mode: it is the
 // dial the wire's models read for how hard to work, and the ratified per-wire effort mapping.
 
 const (
@@ -165,7 +167,8 @@ func anthropicEffortSupport() EffortSupport {
 // into the returned system text; a run of consecutive tool-result messages folds into ONE user
 // message of tool_result blocks (the API wants every result of a parallel call in a single
 // turn); an assistant message carries a text block for its content and one tool_use block per
-// call. A message that ends up with no block at all — an assistant turn with neither text nor
+// call, behind the thinking blocks it carries verbatim (Message.ThinkingBlocks). A message
+// that ends up with no block at all — an assistant turn with neither text nor
 // calls — is dropped: the API refuses an empty content array.
 //
 // Without tools the wire refuses tool_use and tool_result blocks outright (a 400 naming the
@@ -219,11 +222,13 @@ func textBlocks(content string) []anthropicBlock {
 	return []anthropicBlock{{Type: "text", Text: content}}
 }
 
-// assistantBlocks renders an assistant message: its text, then one tool_use block per call
-// whose `input` is the call's argument string re-marshalled as an object — an argument string
-// that is not valid JSON is an encode error naming the call, since the wire cannot carry it.
-// Without tools the calls are appended to the text instead (see anthropicMessages).
+// assistantBlocks renders an assistant message: its thinking blocks verbatim, then its text,
+// then one tool_use block per call whose `input` is the call's argument string re-marshalled as
+// an object — an argument string that is not valid JSON is an encode error naming the call,
+// since the wire cannot carry it. Without tools the calls are appended to the text instead (see
+// anthropicMessages); the thinking blocks lead either way.
 func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
+	blocks := thinkingBlocks(m.ThinkingBlocks)
 	if !hasTools {
 		text := m.Content
 		for _, tc := range m.ToolCalls {
@@ -232,10 +237,10 @@ func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
 			}
 			text += anthropicToolCallText(tc)
 		}
-		return textBlocks(text), nil
+		return append(blocks, textBlocks(text)...), nil
 	}
 
-	blocks := textBlocks(m.Content)
+	blocks = append(blocks, textBlocks(m.Content)...)
 	for _, tc := range m.ToolCalls {
 		input, err := anthropicToolInput(tc)
 		if err != nil {
@@ -249,6 +254,20 @@ func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
 		})
 	}
 	return blocks, nil
+}
+
+// thinkingBlocks wraps each carried reasoning block so it marshals as the bytes it arrived as
+// (anthropicBlock.MarshalJSON); an empty entry carries no block and is skipped. A block that is
+// not valid JSON fails the request's marshal rather than reaching the wire.
+func thinkingBlocks(raw []json.RawMessage) []anthropicBlock {
+	var blocks []anthropicBlock
+	for _, r := range raw {
+		if len(r) == 0 {
+			continue
+		}
+		blocks = append(blocks, anthropicBlock{raw: r})
+	}
+	return blocks
 }
 
 // anthropicToolInput re-marshals a call's raw argument string as the object `input` carries:
@@ -320,9 +339,21 @@ type anthropicMessage struct {
 	isToolResults bool
 }
 
+// The content block types that carry reasoning — the ones kept verbatim in both directions.
+const (
+	// anthropicBlockThinking is a reasoning block: its text and the `signature` that seals it.
+	anthropicBlockThinking = "thinking"
+	// anthropicBlockRedactedThinking is a reasoning block the server encrypted: only `data`.
+	anthropicBlockRedactedThinking = "redacted_thinking"
+)
+
 // anthropicBlock is one content block in either direction: text, tool_use (id/name/input),
 // tool_result (tool_use_id/content/is_error) or thinking. The union is flat because every
-// member is omitted when zero, so each block type serialises to exactly its own keys.
+// member is omitted when zero, so each block type serialises to exactly its own keys. A
+// reasoning block is the exception: raw holds it as its JSON object — captured on decode
+// (UnmarshalJSON), or a carried Message.ThinkingBlocks entry on encode — and MarshalJSON writes
+// those bytes instead of the flat members, so a signature, a `data` payload or an empty
+// `thinking` member (display omitted) reaches the wire exactly as the server sent it.
 type anthropicBlock struct {
 	Type string `json:"type"`
 	// text
@@ -338,6 +369,34 @@ type anthropicBlock struct {
 	IsError   *bool  `json:"is_error,omitempty"`
 	// thinking
 	Thinking string `json:"thinking,omitempty"`
+
+	// raw is a reasoning block's own JSON object; nil for every other block.
+	raw json.RawMessage
+}
+
+// MarshalJSON writes a reasoning block's raw bytes as they are and every other block by its
+// flat members.
+func (b anthropicBlock) MarshalJSON() ([]byte, error) {
+	if len(b.raw) > 0 {
+		return b.raw, nil
+	}
+	type plain anthropicBlock // no methods: marshals by the struct tags
+	return json.Marshal(plain(b))
+}
+
+// UnmarshalJSON decodes the flat members and, for a thinking or redacted_thinking block, keeps
+// a copy of the block's bytes in raw — the decoder's buffer is reused, so it is never aliased.
+func (b *anthropicBlock) UnmarshalJSON(data []byte) error {
+	type plain anthropicBlock // no methods: decodes by the struct tags
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*b = anthropicBlock(p)
+	if b.Type == anthropicBlockThinking || b.Type == anthropicBlockRedactedThinking {
+		b.raw = append(json.RawMessage(nil), data...)
+	}
+	return nil
 }
 
 // anthropicResponse is the whole-reply body, or the error body the API frames as
@@ -385,7 +444,8 @@ func (u anthropicUsage) usage() Usage {
 }
 
 // toRawResponse assembles the seam RawResponse: text blocks concatenate into Content, thinking
-// blocks into Thinking, each tool_use block is one ToolCall with its input re-stringified as
+// blocks into Thinking, every thinking and redacted_thinking block is kept verbatim on
+// ThinkingBlocks in reply order, each tool_use block is one ToolCall with its input re-stringified as
 // the argument string, and the stop reason is mapped onto the chat-completions vocabulary the
 // loop reads (anthropicFinishReason).
 func (r anthropicResponse) toRawResponse() RawResponse {
@@ -394,8 +454,11 @@ func (r anthropicResponse) toRawResponse() RawResponse {
 		switch b.Type {
 		case "text":
 			out.Content += b.Text
-		case "thinking":
+		case anthropicBlockThinking:
 			out.Thinking += b.Thinking
+			out.ThinkingBlocks = append(out.ThinkingBlocks, b.raw)
+		case anthropicBlockRedactedThinking:
+			out.ThinkingBlocks = append(out.ThinkingBlocks, b.raw)
 		case "tool_use":
 			out.ToolCalls = append(out.ToolCalls, ToolCall{
 				ID:       b.ID,

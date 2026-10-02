@@ -157,22 +157,39 @@ func TestAnthropicParseSSE_OpenToolCallCountAtTheCapStillFlushes(t *testing.T) {
 }
 
 // TestAnthropicParseSSE_Thinking pins the thinking channel: thinking_delta is a DeltaThinking,
-// the signature_delta that closes a thinking block is ignored, and end_turn is "stop".
+// and every reasoning block is also yielded whole as it closes — a thinking block with its text
+// and its signature joined across signature_delta fragments, one whose display was omitted
+// keeping its empty `thinking` member, and a redacted_thinking block as the bytes its start
+// event carried. A block the stream never closed is dropped, and end_turn is "stop".
 func TestAnthropicParseSSE_Thinking(t *testing.T) {
 	t.Parallel()
 
 	const body = `data: {"type":"message_start","message":{"model":"claude-x","usage":{"input_tokens":3,"output_tokens":1}}}
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}
-data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig=="}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hm"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"m <ok>"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"=="}}
 data: {"type":"content_block_stop","index":0}
-data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ok"}}
+data: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"RU5DUllQVEVE"}}
+data: {"type":"content_block_stop","index":1}
+data: {"type":"content_block_start","index":2,"content_block":{"type":"thinking","thinking":""}}
+data: {"type":"content_block_delta","index":2,"delta":{"type":"signature_delta","signature":"c2ln"}}
+data: {"type":"content_block_stop","index":2}
+data: {"type":"content_block_start","index":3,"content_block":{"type":"text","text":""}}
+data: {"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"ok"}}
+data: {"type":"content_block_stop","index":3}
+data: {"type":"content_block_start","index":4,"content_block":{"type":"thinking","thinking":""}}
+data: {"type":"content_block_delta","index":4,"delta":{"type":"signature_delta","signature":"cut"}}
 data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}
 data: {"type":"message_stop"}
 `
 	want := []Delta{
-		{Kind: DeltaThinking, Thinking: "hmm"},
+		{Kind: DeltaThinking, Thinking: "hm"},
+		{Kind: DeltaThinking, Thinking: "m <ok>"},
+		{Kind: DeltaThinkingBlock, ThinkingBlock: []byte(`{"type":"thinking","thinking":"hmm \u003cok\u003e","signature":"sig=="}`)},
+		{Kind: DeltaThinkingBlock, ThinkingBlock: []byte(`{"type":"redacted_thinking","data":"RU5DUllQVEVE"}`)},
+		{Kind: DeltaThinkingBlock, ThinkingBlock: []byte(`{"type":"thinking","thinking":"","signature":"c2ln"}`)},
 		{Kind: DeltaContent, Content: "ok"},
 		{Kind: DeltaDone, FinishReason: "stop", Model: "claude-x", Usage: &Usage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}},
 	}
@@ -325,7 +342,7 @@ func TestAnthropicParseSSE_ConsumerBreakStopsTheRead(t *testing.T) {
 
 // TestAnthropicParseSSE_ReplyTextIsCapped pins maxReplyTextBytes on this wire, the way
 // TestStream_ReplyTextIsCapped and TestStream_ThinkingCountsTowardTheCap pin it on the openai
-// wire: an endless text or thinking block ends at the byte cap with the one non-retryable
+// wire: an endless text or thinking block, or a thinking block's endless signature, ends at the byte cap with the one non-retryable
 // DeltaError, the crossing fragment is never yielded, and the parser stops reading there — the
 // error is the last delta even though the body runs on past it.
 func TestAnthropicParseSSE_ReplyTextIsCapped(t *testing.T) {
@@ -349,6 +366,11 @@ func TestAnthropicParseSSE_ReplyTextIsCapped(t *testing.T) {
 			name:       "thinking_delta",
 			blockStart: `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
 			delta:      `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + chunk + `"}}`,
+		},
+		{
+			name:       "signature_delta",
+			blockStart: `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+			delta:      `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + chunk + `"}}`,
 		},
 	}
 	for _, tc := range tests {
@@ -423,10 +445,15 @@ func TestWireObserver_StreamRecordsTheAnthropicResponse(t *testing.T) {
 	}
 }
 
-// dumpDeltas renders deltas one per line, tool calls dereferenced, for a readable diff.
+// dumpDeltas renders deltas one per line, tool calls dereferenced and thinking blocks as text,
+// for a readable diff.
 func dumpDeltas(deltas []Delta) string {
 	var b strings.Builder
 	for _, d := range deltas {
+		if d.ThinkingBlock != nil {
+			fmt.Fprintf(&b, "%s thinking_block=%s\n", d.Kind, d.ThinkingBlock)
+			continue
+		}
 		if d.ToolCall != nil {
 			fmt.Fprintf(&b, "%+v tool_call=%+v\n", d, *d.ToolCall)
 			continue

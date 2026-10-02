@@ -25,7 +25,7 @@ const (
 	anthropicEventBlockStart = "content_block_start"
 	// anthropicEventBlockDelta carries one fragment of the block at an index.
 	anthropicEventBlockDelta = "content_block_delta"
-	// anthropicEventBlockStop closes a block; nothing is read from it.
+	// anthropicEventBlockStop closes a block; a reasoning block open at its index is yielded.
 	anthropicEventBlockStop = "content_block_stop"
 	// anthropicEventMessageDelta closes the reply's metadata: stop reason and output usage.
 	anthropicEventMessageDelta = "message_delta"
@@ -45,6 +45,8 @@ const (
 	anthropicDeltaInputJSON = "input_json_delta"
 	// anthropicDeltaThinking is a chunk of a thinking block.
 	anthropicDeltaThinking = "thinking_delta"
+	// anthropicDeltaSignature is a chunk of the signature that seals a thinking block.
+	anthropicDeltaSignature = "signature_delta"
 )
 
 // anthropicBlockToolUse is the content_block type that opens a tool call.
@@ -54,7 +56,8 @@ const anthropicBlockToolUse = "tool_use"
 const sseDataPrefix = "data: "
 
 // parseSSE reads the Messages event stream line by line and yields Deltas: text_delta as
-// content, thinking_delta as thinking, tool_use blocks accumulated in openToolCalls by block
+// content, thinking_delta as thinking, every thinking and redacted_thinking block — its text,
+// signature or data — as one verbatim DeltaThinkingBlock when the block closes, tool_use blocks accumulated in openToolCalls by block
 // index across their input_json_delta fragments and emitted together immediately before the
 // terminal Done, the stop reason mapped onto the loop's finish vocabulary
 // (anthropicFinishReason), and usage assembled from message_start's input side and
@@ -101,6 +104,10 @@ type anthropicStream struct {
 	yield         func(Delta) bool
 	// open holds every tool_use block under accumulation, addressed by its block index.
 	open openToolCalls
+	// reasoning holds every thinking or redacted_thinking block under accumulation, addressed by
+	// its block index; nil until the first one opens. A block still open when the stream ends
+	// never closed — its signature may be cut short — and is dropped with the map.
+	reasoning map[int]*anthropicReasoningBlock
 	// usage is the accounting so far: input tokens from message_start, output tokens from
 	// message_delta; nil until either arrives.
 	usage *anthropicUsage
@@ -108,7 +115,8 @@ type anthropicStream struct {
 	servedModel string
 	// stopReason is message_delta's stop reason, already mapped; "" until it arrives.
 	stopReason string
-	// textBytes is the running total of content plus thinking bytes yielded, against
+	// textBytes is the running total of content plus thinking bytes yielded, and of the
+	// signature and redacted data bytes the reasoning blocks accumulate, against
 	// maxReplyTextBytes; tool-call bytes are openToolCalls' own count.
 	textBytes int
 	// malformed counts the payloads that failed to decode; it rides the terminal Delta.
@@ -137,9 +145,10 @@ func (s *anthropicStream) event(data string) (ended bool) {
 		return true
 	case anthropicEventError:
 		return s.fail(ev, data)
-	case anthropicEventBlockStop, anthropicEventPing:
-		// Named so the vocabulary stays complete: a block's close carries nothing the
-		// accumulator needs, and the keep-alive is just that.
+	case anthropicEventBlockStop:
+		return s.stopBlock(ev)
+	case anthropicEventPing:
+		// Named so the vocabulary stays complete: the keep-alive is just that.
 	}
 	return false
 }
@@ -156,20 +165,52 @@ func (s *anthropicStream) startMessage(ev anthropicEvent) {
 }
 
 // startBlock opens a tool call for a tool_use block — its id and name arrive here, keyed by
-// the block index that every input_json_delta of the block repeats. Text and thinking blocks
-// open nothing: their fragments are yielded as they come.
+// the block index that every input_json_delta of the block repeats — and a reasoning block for
+// a thinking or redacted_thinking one (openReasoning). A text block opens nothing: its
+// fragments are yielded as they come.
 func (s *anthropicStream) startBlock(ev anthropicEvent) (ended bool) {
-	if ev.ContentBlock == nil || ev.ContentBlock.Type != anthropicBlockToolUse {
+	if ev.ContentBlock == nil {
 		return false
 	}
-	frag := sseToolCall{ID: ev.ContentBlock.ID, Index: ev.Index}
-	frag.Function.Name = ev.ContentBlock.Name
-	return s.foldCall(frag)
+	switch ev.ContentBlock.Type {
+	case anthropicBlockToolUse:
+		frag := sseToolCall{ID: ev.ContentBlock.ID, Index: ev.Index}
+		frag.Function.Name = ev.ContentBlock.Name
+		return s.foldCall(frag)
+	case anthropicBlockThinking, anthropicBlockRedactedThinking:
+		return s.openReasoning(ev)
+	}
+	return false
+}
+
+// openReasoning starts accumulating the reasoning block at the event's index. A thinking block
+// opens empty and is filled by its thinking_delta and signature_delta fragments; a
+// redacted_thinking block arrives whole — its `data` is on the start event — so its bytes are
+// kept as they came and charged to the text cap here. A block with no index cannot be closed
+// and is not opened.
+func (s *anthropicStream) openReasoning(ev anthropicEvent) (ended bool) {
+	if ev.Index == nil {
+		return false
+	}
+	block := &anthropicReasoningBlock{}
+	if ev.ContentBlock.Type == anthropicBlockRedactedThinking {
+		block.redacted = ev.ContentBlock.raw
+		if s.charge(len(block.redacted)) {
+			return true
+		}
+	}
+	if s.reasoning == nil {
+		s.reasoning = map[int]*anthropicReasoningBlock{}
+	}
+	s.reasoning[*ev.Index] = block
+	return false
 }
 
 // deltaBlock yields one fragment: text as content, thinking as thinking — both under the
-// text cap — and input JSON onto the call open at the fragment's index. A signature_delta or
-// any other fragment type is ignored.
+// text cap — and input JSON onto the call open at the fragment's index. Thinking text and
+// signature fragments also accumulate on the reasoning block open at their index; a signature
+// is charged to the text cap but yields nothing until the block closes. Any other fragment
+// type is ignored.
 func (s *anthropicStream) deltaBlock(ev anthropicEvent) (ended bool) {
 	if ev.Delta == nil {
 		return false
@@ -178,7 +219,15 @@ func (s *anthropicStream) deltaBlock(ev anthropicEvent) (ended bool) {
 	case anthropicDeltaText:
 		return s.text(Delta{Kind: DeltaContent, Content: ev.Delta.Text}, len(ev.Delta.Text))
 	case anthropicDeltaThinking:
+		if block := s.reasoningAt(ev.Index); block != nil {
+			block.thinking.WriteString(ev.Delta.Thinking)
+		}
 		return s.text(Delta{Kind: DeltaThinking, Thinking: ev.Delta.Thinking}, len(ev.Delta.Thinking))
+	case anthropicDeltaSignature:
+		if block := s.reasoningAt(ev.Index); block != nil {
+			block.signature.WriteString(ev.Delta.Signature)
+			return s.charge(len(ev.Delta.Signature))
+		}
 	case anthropicDeltaInputJSON:
 		frag := sseToolCall{Index: ev.Index}
 		frag.Function.Arguments = ev.Delta.PartialJSON
@@ -187,13 +236,46 @@ func (s *anthropicStream) deltaBlock(ev anthropicEvent) (ended bool) {
 	return false
 }
 
-// text yields one content or thinking fragment of n bytes under maxReplyTextBytes. Crossing
-// the cap is terminal and NOT retryable — the same request re-streamed would overflow again —
-// and the crossing fragment is never yielded, so what the consumer received stays under it.
+// reasoningAt is the reasoning block open at index, or nil when none is.
+func (s *anthropicStream) reasoningAt(index *int) *anthropicReasoningBlock {
+	if index == nil {
+		return nil
+	}
+	return s.reasoning[*index]
+}
+
+// stopBlock closes the block at the event's index: a reasoning block open there is yielded as
+// one DeltaThinkingBlock and forgotten; any other block's close carries nothing the
+// accumulator needs.
+func (s *anthropicStream) stopBlock(ev anthropicEvent) (ended bool) {
+	block := s.reasoningAt(ev.Index)
+	if block == nil {
+		return false
+	}
+	delete(s.reasoning, *ev.Index)
+	raw, err := block.encode()
+	if err != nil {
+		s.yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: encode thinking block: %v", err)})
+		return true
+	}
+	return !s.yield(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: raw})
+}
+
+// text yields one content or thinking fragment of n bytes under maxReplyTextBytes (charge).
 func (s *anthropicStream) text(d Delta, n int) (ended bool) {
 	if n == 0 {
 		return false
 	}
+	if s.charge(n) {
+		return true
+	}
+	return !s.yield(d)
+}
+
+// charge counts n more reply bytes against maxReplyTextBytes. Crossing the cap is terminal and
+// NOT retryable — the same request re-streamed would overflow again — and the bytes that
+// crossed it are never yielded, so what the consumer received stays under it.
+func (s *anthropicStream) charge(n int) (ended bool) {
 	s.textBytes += n
 	if s.textBytes > maxReplyTextBytes {
 		s.yield(Delta{
@@ -205,7 +287,7 @@ func (s *anthropicStream) text(d Delta, n int) (ended bool) {
 		})
 		return true
 	}
-	return !s.yield(d)
+	return false
 }
 
 // foldCall folds one tool-call fragment into the open set; crossing maxToolCallBytes or
@@ -320,11 +402,44 @@ type anthropicEvent struct {
 }
 
 // anthropicDelta is the `delta` member of a content_block_delta (Type names the fragment kind,
-// one of Text / PartialJSON / Thinking carries it) or of a message_delta (StopReason).
+// one of Text / PartialJSON / Thinking / Signature carries it) or of a message_delta
+// (StopReason).
 type anthropicDelta struct {
 	Type        string `json:"type"`
 	Text        string `json:"text"`
 	PartialJSON string `json:"partial_json"`
 	Thinking    string `json:"thinking"`
+	Signature   string `json:"signature"`
 	StopReason  string `json:"stop_reason"`
+}
+
+// anthropicReasoningBlock is one reasoning block under accumulation: a thinking block's text
+// and signature as their fragments arrive, or a redacted_thinking block's bytes as its start
+// event carried them.
+type anthropicReasoningBlock struct {
+	thinking  strings.Builder
+	signature strings.Builder
+	redacted  json.RawMessage
+}
+
+// encode is the finished block as the one JSON object the Messages API takes back: a redacted
+// block's own bytes, or a thinking block with both members always present — an empty
+// `thinking` (display omitted) is still a member the signature covers.
+func (b *anthropicReasoningBlock) encode() (json.RawMessage, error) {
+	if b.redacted != nil {
+		return b.redacted, nil
+	}
+	return json.Marshal(anthropicThinkingBlock{
+		Type:      anthropicBlockThinking,
+		Thinking:  b.thinking.String(),
+		Signature: b.signature.String(),
+	})
+}
+
+// anthropicThinkingBlock is the wire shape of a thinking block rebuilt from its stream
+// fragments; no member is omitted when empty.
+type anthropicThinkingBlock struct {
+	Type      string `json:"type"`
+	Thinking  string `json:"thinking"`
+	Signature string `json:"signature"`
 }

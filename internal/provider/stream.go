@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,11 @@ const (
 	// ContextOverflow it ends on. It is not terminal and changes no other kind's order. Only a
 	// Client stamped by WithServerIdentity yields it; an unstamped stream carries none.
 	DeltaAttempt DeltaKind = "attempt"
+	// DeltaThinkingBlock carries one finished reasoning block of the reply, opaque and verbatim
+	// (Delta.ThinkingBlock): the anthropic wire yields one as each `thinking` or
+	// `redacted_thinking` block closes, after the DeltaThinking fragments of its text. It is not
+	// terminal; the openai wire never yields it.
+	DeltaThinkingBlock DeltaKind = "thinking_block"
 )
 
 // Delta is one event from a streamed completion. Only the fields relevant to Kind are
@@ -81,6 +87,9 @@ type Delta struct {
 	MalformedChunks int
 	// Attempt is meaningful only on DeltaAttempt: the attempt's measurement.
 	Attempt *Attempt
+	// ThinkingBlock is meaningful only on DeltaThinkingBlock: the block as one JSON object, for
+	// the consumer to hand back on the assistant Message it builds (Message.ThinkingBlocks).
+	ThinkingBlock json.RawMessage
 }
 
 // Stream performs a streaming completion and yields Deltas as they arrive. It is the SSE

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -25,6 +26,12 @@ func TestAnthropicCodecEncode(t *testing.T) {
 		{Role: "user", Content: "thanks"},
 	}
 	lsTool := []ToolSpec{{Name: "ls", Description: "list", Parameters: []byte(`{"type":"object"}`)}}
+	replayBlocks := []json.RawMessage{
+		[]byte(`{"type":"thinking","thinking":"","signature":"c2ln"}`),
+		[]byte(`{"type":"redacted_thinking","data":"RU5D"}`),
+		nil, // an empty entry carries no block
+		[]byte(`{ "type": "thinking", "thinking": "a\nb", "signature": "czI=" }`),
+	}
 
 	cases := []struct {
 		name string
@@ -52,6 +59,23 @@ func TestAnthropicCodecEncode(t *testing.T) {
 			name: "no tools folds the tool history to prose: no tool_use or tool_result block",
 			req:  Request{Model: "m", Messages: toolLoop},
 			want: `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"list"}]},{"role":"assistant","content":[{"type":"text","text":"ls({\"p\": \".\"})\npwd()"}]},{"role":"user","content":[{"type":"text","text":"a b"}]},{"role":"user","content":[{"type":"text","text":"/w"}]},{"role":"user","content":[{"type":"text","text":"thanks"}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
+		},
+		{
+			name: "thinking blocks replay verbatim ahead of text and tool_use: empty signed thinking kept, redacted data kept",
+			req: Request{Model: "m", Tools: lsTool, Messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", Content: "listing", ThinkingBlocks: replayBlocks, ToolCalls: []ToolCall{{ID: "tc_1", Function: FunctionCall{Name: "ls", Arguments: `{}`}}}},
+				{Role: "tool", Content: "a", ToolCallID: "tc_1"},
+			}},
+			want: `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"go"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"c2ln"},{"type":"redacted_thinking","data":"RU5D"},{"type":"thinking","thinking":"a\nb","signature":"czI="},{"type":"text","text":"listing"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"tc_1","content":"a"}]}],"max_tokens":4096,"stream":false,"tools":[{"name":"ls","description":"list","input_schema":{"type":"object"}}],"thinking":{"type":"disabled"}}`,
+		},
+		{
+			name: "thinking blocks lead the no-tools fold too, and keep an assistant turn with no text",
+			req: Request{Model: "m", Messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", ThinkingBlocks: replayBlocks[:1]},
+			}},
+			want: `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"go"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"c2ln"}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
 		},
 		{
 			name: "assistant text beside its call, empty assistant turn dropped",
@@ -152,6 +176,51 @@ func TestAnthropicCodecEncodeRejectsNonObjectArguments(t *testing.T) {
 	}
 }
 
+// TestAnthropicCodecEncodeRejectsMalformedThinkingBlock pins that a carried thinking block that
+// is not JSON fails the encode rather than reaching the wire.
+func TestAnthropicCodecEncodeRejectsMalformedThinkingBlock(t *testing.T) {
+	t.Parallel()
+	codec := &anthropicCodec{}
+	req := Request{Model: "m", Messages: []Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "x", ThinkingBlocks: []json.RawMessage{[]byte(`{"type":"thinking"`)}},
+	}}
+
+	_, _, err := codec.encode(req)
+
+	if err == nil {
+		t.Fatal("encode error = nil, want the malformed thinking block refused")
+	}
+}
+
+// TestOpenAICodecIgnoresThinkingBlocks pins that the carrier is the anthropic wire's alone: an
+// assistant message's thinking blocks change nothing in a chat-completions body.
+func TestOpenAICodecIgnoresThinkingBlocks(t *testing.T) {
+	t.Parallel()
+	client := NewClient("http://unused.invalid", "m")
+	plain := Request{Model: "m", Messages: []Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "x"},
+	}}
+	carried := Request{Model: "m", Messages: []Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "x", ThinkingBlocks: []json.RawMessage{[]byte(`{"type":"thinking","thinking":"t","signature":"s"}`)}},
+	}}
+
+	want, _, err := client.codec.encode(plain)
+	if err != nil {
+		t.Fatalf("encode plain: %v", err)
+	}
+	got, _, err := client.codec.encode(carried)
+
+	if err != nil {
+		t.Fatalf("encode carried: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("body with thinking blocks\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestAnthropicCodecHeadersAndPath pins the endpoint and the key spelling: x-api-key only when
 // a key is set, anthropic-version always.
 func TestAnthropicCodecHeadersAndPath(t *testing.T) {
@@ -192,6 +261,15 @@ func TestAnthropicCodecDecodeWhole(t *testing.T) {
 			want: RawResponse{Content: "on it", FinishReason: "tool_calls", ToolCalls: []ToolCall{
 				{ID: "toolu_1", Type: "function", Function: FunctionCall{Name: "ls", Arguments: `{"p":"."}`}},
 				{ID: "toolu_2", Type: "function", Function: FunctionCall{Name: "pwd", Arguments: `{}`}},
+			}},
+		},
+		{
+			name: "thinking and redacted_thinking blocks are kept verbatim beside the folded text",
+			body: `{"type":"message","content":[{"type":"thinking","thinking":"step <1>","signature":"c2lnMQ=="},{"type":"redacted_thinking","data":"RU5D"},{"type":"thinking", "thinking":"", "signature":"c2lnMg=="},{"type":"text","text":"done"}],"stop_reason":"end_turn"}`,
+			want: RawResponse{Content: "done", Thinking: "step <1>", FinishReason: "stop", ThinkingBlocks: []json.RawMessage{
+				[]byte(`{"type":"thinking","thinking":"step <1>","signature":"c2lnMQ=="}`),
+				[]byte(`{"type":"redacted_thinking","data":"RU5D"}`),
+				[]byte(`{"type":"thinking", "thinking":"", "signature":"c2lnMg=="}`),
 			}},
 		},
 		{
@@ -247,14 +325,21 @@ func TestAnthropicCodecDecodeWholeErrorBody(t *testing.T) {
 	}
 }
 
-// rawResponseEqual compares the fields the decode tests pin; TopCandidates is never set here.
+// rawResponseEqual compares the fields the decode tests pin, each thinking block byte for byte;
+// TopCandidates is never set here.
 func rawResponseEqual(a, b RawResponse) bool {
 	if a.Content != b.Content || a.Thinking != b.Thinking || a.FinishReason != b.FinishReason ||
-		a.Model != b.Model || a.Usage != b.Usage || len(a.ToolCalls) != len(b.ToolCalls) {
+		a.Model != b.Model || a.Usage != b.Usage || len(a.ToolCalls) != len(b.ToolCalls) ||
+		len(a.ThinkingBlocks) != len(b.ThinkingBlocks) {
 		return false
 	}
 	for i := range a.ToolCalls {
 		if a.ToolCalls[i] != b.ToolCalls[i] {
+			return false
+		}
+	}
+	for i := range a.ThinkingBlocks {
+		if !bytes.Equal(a.ThinkingBlocks[i], b.ThinkingBlocks[i]) {
 			return false
 		}
 	}

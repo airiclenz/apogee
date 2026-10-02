@@ -15,6 +15,11 @@ type Message struct {
 	Content    string
 	ToolCalls  []ToolCall // assistant-only: the tool calls the model emitted
 	ToolCallID string     // tool-result-only: links a result to its originating call
+	// ThinkingBlocks is assistant-only: the reasoning blocks the reply that produced this message
+	// carried, each one wire block kept opaque and verbatim (see RawResponse.ThinkingBlocks). The
+	// anthropic codec writes them back, in order, ahead of the message's text and tool_use blocks;
+	// the openai codec never reads them.
+	ThinkingBlocks []json.RawMessage
 }
 
 // ToolCall is one tool invocation the model emitted, in the OpenAI "function" shape.
@@ -175,6 +180,14 @@ type RawResponse struct {
 	// Model is the id the server put on the reply — what it actually answered with, on the same
 	// terms as the streamed [Delta.Model]; empty when the server sends none.
 	Model string
+
+	// ThinkingBlocks are the reply's reasoning blocks as the wire carried them — on the anthropic
+	// wire every `thinking` block (its text and `signature`) and `redacted_thinking` block (its
+	// `data`), one JSON object each, in reply order. They are opaque to everything above the codec:
+	// a signed block must go back upstream byte-for-byte or the server refuses it, so nothing reads
+	// into them, and Thinking stays the readable text. Nil on the openai wire, which has no such
+	// blocks.
+	ThinkingBlocks []json.RawMessage
 
 	// TopCandidates are the candidate tokens the server reported for the FIRST generated
 	// token position, most-likely first. It is non-nil only when the Request asked for
