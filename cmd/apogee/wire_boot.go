@@ -206,7 +206,8 @@ func (w *rootWiring) resolveConfig() error {
 	// It is handed the OBSERVE half alone (ADR 0076 A8). One `reactions:` file resolves to both
 	// lanes in one list, and the sync half — the advise and gate entries the AGENT runs inside the
 	// loop — is armed through the generation the engine holder is seeded with (wire_live.go), which
-	// is the one route it takes into this session.
+	// is the one route it takes into this session. The Runner itself is handed to the Agent too,
+	// through the Config below, so the Agent's one swap moves both lanes.
 	//
 	// Its webhooks post through the url-safety guard built from the options' allow/deny host lists —
 	// off w.opts, since the projected cfg does not exist yet — so a host the operator closed for the
@@ -246,6 +247,11 @@ func (w *rootWiring) resolveConfig() error {
 	// nothing until the `/settings` row switches it on.
 	w.stats = newStatsRecorder(serverStatsPath(w.roots.config), w.opts.ServerStats)
 	w.cfg.Events = w.stats.wrap(w.hooks)
+	// And the same Runner as the Agent's observe half (ADR 0076 A8), with the list it was built
+	// from: Agent.SetReactions swaps it whenever a generation's observe list moves off that list,
+	// so the Floor-, Bypass- and sync-only edits a settings row makes never retire it.
+	w.cfg.ObserveRunner = w.hooks
+	w.cfg.Observe = observe
 	// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
 	// failed, timed out or could not be spawned. It is the same seam the Runner reports the
 	// observe lane's failures through (Report above), so one `reactions:` file's trouble reads

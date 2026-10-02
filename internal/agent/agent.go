@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -168,9 +169,17 @@ type Agent struct {
 	// which makes Bypass and the Floor enable set one value a live swap carries. They stopped
 	// being independent facts the moment the ladder became derived from one of them, so a
 	// per-field lock could hand a reader a half-swapped generation — exactly what A8 exists to
-	// prevent. Generation.Observe is the RUNNER's and is never held here.
+	// prevent. Generation.Observe is held here as the list the observe Runner was last handed
+	// (cfg.ObserveRunner) — never armed, only compared against and reported.
 	genMu sync.RWMutex
-	gen   domain.Generation // live Floor enable set + Bypass + the user's sync lane; seeded from cfg.Floor/cfg.Bypass, swapped via SetReactions
+	gen   domain.Generation // live Floor enable set + Bypass + the user's sync lane + the observe list the Runner fires; seeded from cfg.Floor/cfg.Bypass/cfg.Observe, swapped via SetReactions
+
+	// swapMu serializes SetReactions whole. One swap is two applies — the engine half under genMu,
+	// then the Runner's Replace outside it — and two concurrent swaps interleaving between them
+	// would leave the engine on one generation and the Runner on the other, the half-swapped state
+	// ADR 0076 A8 exists to abolish. genMu alone cannot cover it: the Runner's Replace must not run
+	// under the lock every armed Reaction's Bypass read takes.
+	swapMu sync.Mutex
 
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
@@ -1422,15 +1431,24 @@ func (a *Agent) closeUndoGroup() {
 	}
 }
 
-// SetReactions installs one live Generation — the Floor enable set and Bypass — for the rest of
-// the session. It is the engine's ONE swap seam for both (ADR 0076 A8), and the only one: a
-// caller moving a single field reads Generation, edits its copy and hands the whole value back,
-// so nothing downstream can observe a state that is half one generation and half the next.
+// SetReactions installs one live Generation — the Floor enable set, Bypass, the sync lane and the
+// observe lane — for the rest of the session. It is the ONE swap seam for all of them (ADR 0076
+// A8), and the only one: a caller moving a single field reads Generation, edits its copy and hands
+// the whole value back, so nothing downstream can observe a state that is half one generation and
+// half the next.
 //
-// gen.Observe is VALIDATED here but never armed. The observe lane belongs to the Runner, and an
-// agent takes Floor, Bypass and the SYNC lane out of a generation (domain.Generation); the Driver
-// hands the SAME value to both, which is what keeps the two halves of one swap in step — and is why
-// a bad observe lane is refused here exactly as a bad sync lane is, installing nothing.
+// gen.Observe is VALIDATED here but never armed. The observe lane belongs to the Runner the Driver
+// built (Config.ObserveRunner), and this call is what swaps it: the engine half is installed first,
+// then the observe list is handed to the Runner's Replace — the two applies ORDERED, so the Runner
+// never fires a new list while the engine still runs the old Floor. The Runner is reached only when
+// the observe list actually MOVED against the one it was last handed (seeded from Config.Observe):
+// a Replace drains the Runner's previous generation and forgets the firings it was still
+// correlating, which is a real cost for a Floor-, Bypass- or sync-only edit that never touched the
+// lane. The list is recorded as handed only once Replace has COMMITTED, so a refused Replace (an
+// unresolvable `workspace:`) is returned with the engine half already installed — the session
+// keeps firing exactly what it was firing, and a later identical swap still tries. A nil Runner
+// skips the Replace and records the lane as handed. A bad observe lane is refused before either
+// half moves, exactly as a bad sync lane is, installing nothing.
 //
 // gen.Sync is the user's advise and gate list, and it is TAKEN — this is the seam that arms the
 // sync lane live. An entry scoped to another workspace is dropped on the way in (scopeSync), so
@@ -1466,9 +1484,12 @@ func (a *Agent) closeUndoGroup() {
 // unaffected either way — Bypass has never governed it.
 //
 // It is safe to call from another goroutine (the settings surface) while a Step runs, like
-// SetMode. A sub-agent spawned AFTER the swap inherits the new generation (newChildAgent reads
-// it at spawn); one already mid-flight keeps what it was spawned with.
+// SetMode; concurrent calls are serialized whole (swapMu). A sub-agent spawned AFTER the swap
+// inherits the new generation (newChildAgent reads it at spawn); one already mid-flight keeps what
+// it was spawned with.
 func (a *Agent) SetReactions(gen domain.Generation) error {
+	a.swapMu.Lock()
+	defer a.swapMu.Unlock()
 	if err := validateGeneration(gen); err != nil {
 		return err
 	}
@@ -1478,6 +1499,30 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 	}
 	gen.Sync = scoped
 	a.installGeneration(gen)
+	return a.swapObserve(gen.Observe)
+}
+
+// swapObserve is SetReactions' Runner half: it hands list to the observe Runner when it differs
+// from the list the Runner was last handed, and records it as handed only once Replace commits. The
+// comparison reaches every field the Runner builds a worker out of — the id, the Moments, the
+// workspace filter, the timeout, and the handler's argv or URL and headers — in one reach: the
+// handler is an interface over values carrying maps, which no comparison operator reaches. A nil
+// Runner has nothing to swap, so the lane is recorded as handed.
+func (a *Agent) swapObserve(list []domain.Reaction) error {
+	if runner := a.cfg.ObserveRunner; runner != nil {
+		a.genMu.RLock()
+		moved := !reflect.DeepEqual(a.gen.Observe, list)
+		a.genMu.RUnlock()
+		if !moved {
+			return nil
+		}
+		if err := runner.Replace(list); err != nil {
+			return err
+		}
+	}
+	a.genMu.Lock()
+	defer a.genMu.Unlock()
+	a.gen.Observe = slices.Clone(list)
 	return nil
 }
 
@@ -1523,8 +1568,9 @@ func (a *Agent) scopeSync(list []domain.Reaction) ([]domain.Reaction, error) {
 	return scope.ActiveAt(list, root)
 }
 
-// installGeneration is SetReactions' install half — the swap itself, under the generation lock,
-// with the ladder rebuilt when an enable-set input moved. It takes the Generation as ALREADY
+// installGeneration is SetReactions' engine half — the swap itself, under the generation lock,
+// with the ladder rebuilt when an enable-set input moved. It leaves the observe lane to
+// swapObserve, which records it only once the Runner has taken it. It takes the Generation as ALREADY
 // validated: SetReactions is the only production caller and validates first; a test that pins a
 // dispatcher guarantee against a shape the arming step refuses (an engine-origin Go handler on the
 // live lane, advise_test.go) arms through here directly, so the guarantee is pinned independently
@@ -1540,13 +1586,14 @@ func (a *Agent) installGeneration(gen domain.Generation) {
 }
 
 // Generation reports the live Generation this Agent is running — the Floor enable set, Bypass,
-// the notice switch and the sync lane as SetReactions last installed them, seeded at
-// construction from cfg.Floor, cfg.Bypass and cfg.ContextFillNotice with an empty Sync
-// (Config.Reactions is the OTHER route and is not folded in here). Observe is always empty: the
-// agent never holds the observe lane.
+// the notice switch and the sync lane as SetReactions last installed them, and the observe lane
+// as the Runner was last handed it, seeded at construction from cfg.Floor, cfg.Bypass,
+// cfg.ContextFillNotice and cfg.Observe with an empty Sync (Config.Reactions is the OTHER route
+// and is not folded in here).
 //
 // It is the read half of the read-edit-hand-back idiom SetReactions documents, so a caller moving
-// one field carries the sync lane through untouched.
+// one field carries both lanes through untouched — the observe lane included, which is what keeps
+// such an edit off the Runner.
 func (a *Agent) Generation() domain.Generation {
 	a.genMu.RLock()
 	defer a.genMu.RUnlock()

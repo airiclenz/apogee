@@ -224,6 +224,26 @@ type Config struct {
 	// install runs.
 	Reactions []Reaction
 
+	// ObserveRunner is the Driver-built Runner that fires the user's observe lane (ADR 0076 A8) —
+	// the other half of what one Generation moves. The Agent holds it so that ONE call swaps both
+	// halves: SetReactions arms Floor, Bypass and the sync lane, then hands the observe list to
+	// ObserveRunner.Replace — and only when the list actually moved, because a Replace retires the
+	// Runner's running generation. It is the same Runner a Driver decorates Events with; the
+	// Agent never emits through this field, only swaps it.
+	//
+	// nil (the default) holds no Runner: SetReactions still validates and reports the observe lane
+	// but swaps nothing, which is what the bench, a Firing and every test that composes a bare
+	// Config run.
+	ObserveRunner ObserveRunner
+
+	// Observe is the observe list ObserveRunner was built from — the CONSTRUCTION SEED of the live
+	// Generation's member of the same name (Generation.Observe), which SetReactions compares a new
+	// generation's list against, so an edit that leaves the observe rows alone never retires the
+	// Runner. It is validated at construction like a swapped-in observe lane and never armed by the
+	// Agent: the observe lane is the Runner's. Nil/empty with a Runner built over a non-empty list
+	// makes the first swap re-hand that list, which costs one Runner generation and nothing else.
+	Observe []Reaction
+
 	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable
 	// bodies; nil ⇒ no skills are wired and any attached ID is reported and dropped. It is an
 	// interface defined here (not the concrete internal/skills catalog) so the loop fulfils the

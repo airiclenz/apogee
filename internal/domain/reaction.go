@@ -603,12 +603,12 @@ type Generation struct {
 	// on under it.
 	Bypass bool
 	// Observe is the async-lane observe list the Runner fires. The AGENT validates it at the swap
-	// but never arms it: the observe lane is the Runner's, and an agent takes Floor, Bypass and the
-	// sync lane out of a generation.
+	// but never arms it: the observe lane is the Runner's, and the agent hands it on to the Runner
+	// it holds (Config.ObserveRunner) while it arms Floor, Bypass and the sync lane itself.
 	Observe []Reaction
 	// Sync is the user's advise and gate list — the lane the AGENT runs inside the loop, where a
 	// handler holds the Turn while it runs and its output reaches the model or the Approver. The
-	// RUNNER ignores it, exactly as the agent never arms Observe.
+	// RUNNER is never handed it, exactly as the agent never arms Observe.
 	Sync []Reaction
 	// ContextFillNotice switches the engine's context-fill notice on (ADR 0077 D1/D2): the one
 	// builtin of class advise, off by default and not a Floor guard, which is why it is a member of
@@ -616,6 +616,15 @@ type Generation struct {
 	// the agent rebuilds its builtin ladder when it moves, so the notice is absent from the ladder
 	// rather than self-skipping while it is off.
 	ContextFillNotice bool
+}
+
+// ObserveRunner is the observe lane's live-swap door: the one method of the Driver-built Runner
+// (apogee.ReactionRunner) the Agent drives, so a swap of the whole Generation reaches both halves
+// behind one call (Config.ObserveRunner, ADR 0076 A8). Replace retires the running list and starts
+// the new one, and refuses a list it cannot run — an unresolvable `workspace:` — leaving the
+// running one in place.
+type ObserveRunner interface {
+	Replace(list []Reaction) error
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what

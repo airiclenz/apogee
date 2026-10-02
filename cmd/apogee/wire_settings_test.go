@@ -3723,11 +3723,15 @@ func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 	}
 
 	live := newLiveSettings(config.Options{Reactions: boot})
-	// The REAL door, holder and all: the swap reaches the Runner through the engine that holds it
-	// (ADR 0076 A8), so what this drives is the composition root's own wiring rather than a second
-	// path into the same Runner.
+	// The REAL door, holder and all: the swap reaches the Runner through the Agent the holder binds,
+	// which holds it (ADR 0076 A8), so what this drives is the composition root's own wiring rather
+	// than a second path into the same Runner.
 	engine := newLateEngine(domain.ModePlan, false)
-	engine.seedReactions(runner, apogee.Generation{Observe: boot})
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.seedReactions(apogee.Generation{Observe: boot})
+	if err := bindOverRunner(t, engine, runner, boot); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
 	applier := fakeApplier(t)
 	applier.engine = engine
 	applier.live = live
@@ -3780,7 +3784,11 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 
 	live := newLiveSettings(config.Options{Reactions: boot})
 	engine := newLateEngine(domain.ModePlan, false)
-	engine.seedReactions(runner, apogee.Generation{Observe: boot})
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.seedReactions(apogee.Generation{Observe: boot})
+	if err := bindOverRunner(t, engine, runner, boot); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
 	applier := fakeApplier(t)
 	applier.engine = engine
 	applier.live = live
@@ -3834,15 +3842,15 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 	})
 	engine := newLateEngine(domain.ModePlan, false)
 	t.Cleanup(func() { _ = engine.Close() })
-	engine.seedReactions(runner, apogee.Generation{
+	engine.seedReactions(apogee.Generation{
 		Floor:   apogee.FloorConfig{DisableReadCache: true},
 		Bypass:  true,
 		Observe: boot,
 	})
-	// And BOUND, which the neighbours above have no reason to be: the seeded generation is replayed
-	// onto the Agent the bind constructs, so the session is running the same Floor and Bypass the
-	// `config.Options` above report — and Generation() has something to answer with afterwards.
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	// And BOUND to an Agent holding the Runner: the seeded generation is replayed onto the Agent the
+	// bind constructs, so the session is running the same Floor and Bypass the `config.Options`
+	// above report — and Generation() has something to answer with afterwards.
+	if err := bindOverRunner(t, engine, runner, boot); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 
@@ -3909,8 +3917,8 @@ func TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent(t *testing.T) {
 	live := newLiveSettings(config.Options{Reactions: boot})
 	engine := newLateEngine(domain.ModePlan, false)
 	t.Cleanup(func() { _ = engine.Close() })
-	engine.seedReactions(runner, apogee.Generation{Observe: boot})
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	engine.seedReactions(apogee.Generation{Observe: boot})
+	if err := bindOverRunner(t, engine, runner, boot); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 
@@ -3928,8 +3936,8 @@ func TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent(t *testing.T) {
 	if len(gen.Sync) != 1 || gen.Sync[0].ID != "warden" || gen.Sync[0].Class != domain.ClassGate {
 		t.Fatalf("Generation().Sync = %+v, want the one gate: entry the reload armed", gen.Sync)
 	}
-	if len(gen.Observe) != 0 {
-		t.Errorf("Generation().Observe = %+v, want empty — the agent never holds the observe lane", gen.Observe)
+	if len(gen.Observe) != 1 || gen.Observe[0].ID != "notify" {
+		t.Errorf("Generation().Observe = %+v, want the one observe entry the reload handed the Runner", gen.Observe)
 	}
 
 	// And the projection folds BOTH lanes back into the one key they were resolved from, so a Firing

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/reactions"
 )
 
 // syncGen is the Generation a Driver hands over when the user's `reactions:` file resolves to
@@ -111,7 +112,7 @@ func TestSetReactionsRefusesAMalformedGeneration(t *testing.T) {
 // with nothing to run. Generation.Validate alone passes each of these — the class is observe and no
 // id repeats — so the refusal is the arm's own. It wraps ErrInvalidReaction, names the entry, and
 // installs nothing. A well-formed observe lane is accepted, may share an id with the sync lane,
-// and is never armed here: Generation keeps reporting an empty Observe.
+// and is never armed here: Generation reports it as handed, beside the sync lane it shares an id with.
 func TestSetReactionsRefusesAMalformedObserveLane(t *testing.T) {
 	t.Parallel()
 
@@ -180,8 +181,8 @@ func TestSetReactionsRefusesAMalformedObserveLane(t *testing.T) {
 		mustSetReactions(t, a, accepted)
 
 		got := a.Generation()
-		if len(got.Observe) != 0 {
-			t.Errorf("after the swap Observe = %+v, want it empty: the agent never arms the observe lane", got.Observe)
+		if len(got.Observe) != 1 || got.Observe[0].ID != "warden" {
+			t.Errorf("after the swap Observe = %+v, want the observe lane as handed", got.Observe)
 		}
 		if len(got.Sync) != 1 || got.Sync[0].ID != "warden" {
 			t.Errorf("after the swap Sync = %+v, want warden armed", got.Sync)
@@ -414,5 +415,71 @@ func TestSetReactionsArgvGateNeverReachesTheSeamCascade(t *testing.T) {
 	}
 	if booked := gateFirings(sink, "warden"); len(booked) != 1 || booked[0].Action != "allow" {
 		t.Errorf("firings = %+v, want exactly one allow booked by the Approver stage", booked)
+	}
+}
+
+// observeExec is the observe Runner's Executor as a witness: it hands every fired Reaction's id to
+// fired, so a test reads which lane the Runner is firing without spawning anything.
+type observeExec struct {
+	fired chan string
+}
+
+func (e observeExec) Run(_ context.Context, r domain.Reaction, _ domain.SeamPayload) error {
+	e.fired <- r.ID
+	return nil
+}
+
+// The Agent holds the observe Runner the Driver built (Config.ObserveRunner), and its one swap
+// moves it: after SetReactions hands a new observe lane, a Turn boundary fires the new lane's entry
+// and never the one the Runner was built over — and Generation reports the lane the Runner now
+// fires, so the next read-edit-hand-back carries it through.
+func TestSetReactionsSwapsTheObserveRunnerOntoTheNewLane(t *testing.T) {
+	t.Parallel()
+
+	observer := func(id string) domain.Reaction {
+		return domain.Reaction{
+			ID:      id,
+			Origin:  domain.OriginUser,
+			Class:   domain.ClassObserve,
+			On:      []domain.Moment{domain.MomentTurnFinished},
+			Handler: domain.ArgvHandler{Argv: []string{"true"}},
+			Timeout: time.Second,
+		}
+	}
+	exec := observeExec{fired: make(chan string, 8)}
+	boot := []domain.Reaction{observer("boot")}
+	runner, err := reactions.New(boot, reactions.Options{Workspace: t.TempDir(), Exec: exec})
+	if err != nil {
+		t.Fatalf("reactions.New: %v", err)
+	}
+	cfg := baseConfig(&recordingSink{})
+	cfg.ObserveRunner = runner
+	cfg.Observe = boot
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	swapped := a.Generation()
+	swapped.Observe = []domain.Reaction{observer("swapped")}
+
+	mustSetReactions(t, a, swapped)
+	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := runner.Close(ctx); err != nil {
+		t.Fatalf("runner.Close: %v", err)
+	}
+
+	close(exec.fired)
+	var fired []string
+	for id := range exec.fired {
+		fired = append(fired, id)
+	}
+	if len(fired) != 1 || fired[0] != "swapped" {
+		t.Errorf("the Runner fired %v at the Turn boundary; want only the swapped-in lane [swapped]", fired)
+	}
+	if got := a.Generation().Observe; len(got) != 1 || got[0].ID != "swapped" {
+		t.Errorf("Generation().Observe = %+v; want the lane the Runner now fires", got)
 	}
 }

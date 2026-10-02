@@ -10,8 +10,6 @@ package main
 import (
 	"context"
 	"errors"
-	"reflect"
-	"slices"
 	"sync"
 
 	"github.com/airiclenz/apogee"
@@ -65,15 +63,6 @@ type lateEngine struct {
 	mode    apogee.Mode
 	confine bool
 
-	// runner is this session's Reaction Runner (wire_boot.go) — the other half of what one
-	// Generation moves: SetReactions applies the Floor gates and Bypass to the engine and the
-	// observe list to the Runner, so both halves of a swap happen behind one call (ADR 0076 A8).
-	// It is narrowed to the swap door rather than held as *reactions.Runner so the ORDER of the two
-	// applies is exercisable against a fake, the narrowing settingsEngine itself follows (wire.go).
-	// nil is a holder with no Runner at all — a test, or a root that built none — and a swap skips
-	// it the way every call below skips a nil Agent.
-	runner reactionSwapper
-
 	// effort is the session's Thinking-effort override (ADR 0050), held here for the reason the two
 	// above are: /effort runs before a server is chosen, and a level set while the picker was open
 	// must not be a level the engine never hears about. It needs no "was it moved" pointer like the
@@ -98,11 +87,6 @@ type lateEngine struct {
 	// were built from (seedReactions), and a bypass toggled before the bind cannot re-enable a
 	// guard the config file switched off.
 	pendingGeneration *apogee.Generation
-	// observe is the observe list the Runner is ALREADY firing — what a new generation's list is
-	// compared against, so a Floor-, Bypass- or sync-only edit never retires a Runner generation whose list
-	// did not move: a Replace drains the previous generation and forgets the firings it was still
-	// correlating, which is a real cost to pay for an edit that did not touch it.
-	observe []domain.Reaction
 	// pendingProfile is the same idea for the one IDLE-ONLY mutator that has to be remembered: a
 	// dialect swap needs an Agent to build its parsers, but a bind with no memory of the edit would
 	// install the profile the process started with (see SetProfile).
@@ -137,13 +121,6 @@ type lateEngine struct {
 	// no journal was ever handed here, so a bind leaves the Agent on construction's own in-memory
 	// funnel journal — ADR 0051 exactly, and a supported configuration (ADR 0074 decision 2).
 	pendingJournal *sessionJournal
-}
-
-// reactionSwapper is the Reaction Runner's live-swap door ([reactions.Runner.Replace]), narrowed to
-// the one method the engine holder drives. It is an interface for settingsEngine's reason (wire.go):
-// the concrete Runner exports Emit and Close beside it, and neither belongs to a settings apply.
-type reactionSwapper interface {
-	Replace([]domain.Reaction) error
 }
 
 // sessionJournal is one opened undo journal together with the note that says why it is the journal
@@ -187,25 +164,22 @@ func newLateEngine(mode apogee.Mode, confineToWorkspace bool) *lateEngine {
 	return &lateEngine{mode: mode, confine: confineToWorkspace}
 }
 
-// seedReactions hands the holder the two things a Generation moves that are resolved BEFORE it
-// exists: the Reaction Runner this session fires its observe list through (wire_boot.go), and the
-// generation both halves are already running — the Floor gates and Bypass the Config was
-// constructed with, the observe list the Runner was built from, and the sync lane the bind will arm
-// on the Agent it constructs. The composition root calls it once, right after the holder is made
-// (wire_live.go).
+// seedReactions hands the holder the generation the session is already running before any Agent
+// exists — the Floor gates and Bypass the Config was constructed with, the observe list the Runner
+// was built from (the Runner itself rides the Config, wire_boot.go), and the sync lane the bind
+// will arm on the Agent it constructs. The composition root calls it once, right after the holder
+// is made (wire_live.go).
 //
 // It is what makes a PARTIAL edit honest. A settings row that moves one field of the generation
 // hands the WHOLE value back (liveSettings.setBypass, setFloorGuard), so a holder never told
 // where the other fields stood would answer a bypass toggled
-// before the bind by re-enabling every Floor guard the config file switched off. And it is what
-// keeps a Floor-only edit off the Runner: the observe list recorded here is the one a new
-// generation's list is compared against.
-func (e *lateEngine) seedReactions(runner reactionSwapper, gen apogee.Generation) {
+// before the bind by re-enabling every Floor guard the config file switched off. And the bind's
+// replay of it keeps a Floor-only edit off the Runner: its observe list is the one the Agent was
+// constructed with (Config.Observe), so the Agent finds nothing to swap.
+func (e *lateEngine) seedReactions(gen apogee.Generation) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.runner = runner
 	e.pendingGeneration = &gen
-	e.observe = slices.Clone(gen.Observe)
 }
 
 // Bind constructs the Agent through construct and installs it as this session's engine. The
@@ -228,15 +202,17 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	agent.SetMode(e.mode)
 	agent.SetConfineToWorkspace(e.confine)
 	agent.SetEffortOverride(e.effort)
-	// The generation the settings surface last installed — the Floor enable set, Bypass and the sync
-	// lane in one value. Only the ENGINE half is replayed here: the Runner exists from boot,
-	// independent of the Agent's lifetime, so SetReactions swapped its list at the moment the edit
-	// happened — bound or not. It is also how the file's `advise:` and `gate:` entries FIRST reach a
+	// The generation the settings surface last installed — the Floor enable set, Bypass and both
+	// lanes in one value — replayed onto the Agent, which swaps both halves: the engine's and, when
+	// the observe list moved off the one the Runner was built from, the Runner's (Config.ObserveRunner).
+	// An edit made while unbound reaches the Runner HERE and no earlier, because the Agent is the one
+	// that holds it. It is also how the file's `advise:` and `gate:` entries FIRST reach a
 	// session's Agent: the composition root seeds them here (wire_live.go) and this replay arms them
 	// on the Agent the bind constructs. It is one of the two remembered values that can be REFUSED
 	// (the other is the profile below): a generation parked while unbound met no engine to arm it,
-	// so a sync entry the engine will not take — one named after a Floor guard, say — is refused
-	// HERE, on the pendingProfile terms: the Agent is released and the bind fails, naming the entry.
+	// so a sync entry the engine will not take — one named after a Floor guard, say — or an observe
+	// list the Runner will not take is refused HERE, on the pendingProfile terms: the Agent is
+	// released and the bind fails, naming the entry.
 	if gen := e.pendingGeneration; gen != nil {
 		if err := agent.SetReactions(*gen); err != nil {
 			_ = agent.Close()
@@ -536,54 +512,27 @@ func (e *lateEngine) SetPruneToolResults(enabled bool) {
 // SetReactions installs one Generation across both halves of the Reaction surface: the engine, which
 // runs the Floor enable set, Bypass and the user-origin SYNC lane — the advise and gate entries the
 // loop runs — and the Runner, which fires the user-origin observe list (ADR 0076 A8). It is the ONE
-// live-swap door, replacing the three idioms that preceded it, so nothing downstream can read a
-// half-swapped shape. Remembered while unbound for SetMode's reason — the engine half is replayed at
-// the bind, and the Runner half needs no replay because the Runner exists from boot.
+// live-swap door, so nothing downstream can read a half-swapped shape, and both halves are swapped
+// by the Agent behind it (Agent.SetReactions holds the Runner through Config.ObserveRunner): engine
+// first, then the Runner only when the observe list moved. Remembered while unbound for SetMode's
+// reason — the whole generation is replayed at the bind, which is where an unbound edit first
+// reaches the Runner.
 //
-// The two applies are ORDERED, engine then Runner, and the Runner is reached only when the OBSERVE
-// list actually moved: a Floor gate toggled in `/settings` must not retire a Runner generation,
-// which drains the old workers and forgets the firings they were still correlating. The sync lane
-// is weighed by exactly that rule and lands on the other side of it — the Runner never fires a sync
-// Reaction, so an edit that armed or dropped a `gate:` and left the observe rows alone reaches the
-// Agent and stops there, retiring nothing. The observe list is recorded as applied only once Replace
-// has COMMITTED, so a refused swap leaves the session firing exactly what it was firing and a later
-// identical apply still tries.
-//
-// The returned error is either half's refusal, and it is the sentence the settings row shows the
-// human. The ENGINE's comes first and ends the apply: a Generation the Agent will not arm (a sync
-// entry outside the lane's rules, or named after a builtin — Agent.SetReactions) is refused before
-// the Runner is reached and before anything is remembered, so it is never parked for the bind's
-// replay, and the Runner half is never swapped alone against an engine half that stayed put — a
-// session never runs the two halves on different generations (ADR 0076 A8). The Runner's is a
-// list it will not take (an unresolvable `workspace:`); by then the engine half has applied, so the
-// generation IS remembered and only the observe list waits for a retry.
+// The returned error is the Agent's refusal, and it is the sentence the settings row shows the
+// human. A refused generation is never remembered, so it is never parked for the bind's replay: a
+// Generation the Agent will not arm (a sync entry outside the lane's rules, or named after a
+// builtin) moved neither half, and one whose observe list the Runner would not take (an
+// unresolvable `workspace:`) left the Runner firing what it was firing — and a later identical
+// apply still tries, because the Agent records the list only once Replace commits.
 func (e *lateEngine) SetReactions(gen apogee.Generation) error {
 	e.mu.Lock()
-	agent, runner := e.agent, e.runner
-	if agent != nil {
-		if err := agent.SetReactions(gen); err != nil {
-			e.mu.Unlock()
+	defer e.mu.Unlock()
+	if e.agent != nil {
+		if err := e.agent.SetReactions(gen); err != nil {
 			return err
 		}
 	}
 	e.pendingGeneration = &gen
-	// Every field the Runner builds a worker out of — the id, the Moments, the workspace filter, the
-	// timeout, and the handler's argv or URL and headers — compared in one reach: the handler is an
-	// interface over values carrying maps, which no comparison operator reaches (delegation.go asks
-	// whether a resolved server entry moved the same way).
-	moved := !reflect.DeepEqual(e.observe, gen.Observe)
-	e.mu.Unlock()
-
-	if !moved || runner == nil {
-		return nil
-	}
-	if err := runner.Replace(gen.Observe); err != nil {
-		return err
-	}
-
-	e.mu.Lock()
-	e.observe = slices.Clone(gen.Observe)
-	e.mu.Unlock()
 	return nil
 }
 

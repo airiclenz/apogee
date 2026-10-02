@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -146,6 +147,14 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 		return nil, err
 	}
 	a.armed = armed
+	// The live Generation's last member: the observe list the Runner was built from (cfg.Observe),
+	// what the first swap's list is compared against (SetReactions). The seeded generation is then
+	// validated as a swapped-in one would be, so a bad list fails construction rather than standing
+	// as the lane Generation reports and every read-edit-hand-back swap would be refused over.
+	a.gen.Observe = slices.Clone(cfg.Observe)
+	if err := validateGeneration(a.gen); err != nil {
+		return nil, err
+	}
 
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go). A delegate is NOT

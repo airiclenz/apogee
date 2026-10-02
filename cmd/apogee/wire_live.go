@@ -225,11 +225,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// hint); the TUI is handed the display-and-identity projection of the same list, in the same order.
 	w.live = newLiveSettings(w.opts)
 
-	// The Reaction surface's two halves, handed to the holder that swaps them together: the Runner
-	// built at boot (wire_boot.go), and the generation both are already running — the Floor gates and
-	// Bypass this run's Config was constructed with, and the observe list the Runner was built from.
-	// From here on ONE apply moves both (ADR 0076 A8), and a partial edit knows where the fields it
-	// does not touch stand. The generation is read off the live holder rather than spelled from
+	// The generation the Reaction surface's two halves are already running, handed to the holder
+	// that swaps them together through the Agent (the Runner built at boot rides the Config,
+	// wire_boot.go): the Floor gates and Bypass this run's Config was constructed with, and the
+	// observe list the Runner was built from. From here on ONE apply moves both (ADR 0076 A8), and a
+	// partial edit knows where the fields it does not touch stand. The generation is read off the live holder rather than spelled from
 	// Config: the holder derives it from the same Options the Config was built from (generationOf),
 	// so the seed and every later apply are one projection.
 	//
@@ -239,7 +239,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// replays this generation onto it. That replay is the ONE route the sync lane takes into a
 	// session, which is why nothing writes Config.Reactions: a list written to both would arm every
 	// entry twice.
-	w.engine.seedReactions(w.hooks, w.live.generation())
+	w.engine.seedReactions(w.live.generation())
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
 	// quit) and backs the /sessions browser. It runs on the session.Live that owns id minting and

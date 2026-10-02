@@ -260,12 +260,14 @@ func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
 
 // recordingRunner is the Reaction Runner's swap door as a witness: it writes down every list it was
 // handed and what the ENGINE was holding at that instant, which is how the order of the two applies
-// is pinned without a Runner — or the goroutines a Runner drains on — behind it.
+// is pinned without a Runner — or the goroutines a Runner drains on — behind it. agent is the Agent
+// that holds it (bindOverRunner), read directly rather than through the holder, whose lock the
+// swap runs under.
 type recordingRunner struct {
-	engine *lateEngine
-	lists  [][]domain.Reaction
-	seen   []apogee.Generation
-	err    error
+	agent *apogee.Agent
+	lists [][]domain.Reaction
+	seen  []apogee.Generation
+	err   error
 }
 
 func (r *recordingRunner) Replace(list []domain.Reaction) error {
@@ -273,10 +275,27 @@ func (r *recordingRunner) Replace(list []domain.Reaction) error {
 		return r.err
 	}
 	r.lists = append(r.lists, list)
-	if agent := r.engine.bound(); agent != nil {
-		r.seen = append(r.seen, agent.Generation())
+	if r.agent != nil {
+		r.seen = append(r.seen, r.agent.Generation())
 	}
 	return nil
+}
+
+// bindOverRunner binds engine to an Agent that holds runner as its observe half, built over
+// observe — the two Config fields wire_boot.go fills (Config.ObserveRunner, Config.Observe). A
+// recordingRunner witness is pointed at that Agent before the bind's replay reaches it.
+func bindOverRunner(t *testing.T, engine *lateEngine, runner apogee.ObserveRunner, observe []domain.Reaction) error {
+	t.Helper()
+	return engine.Bind(func() (*apogee.Agent, error) {
+		cfg := validCfg(t)
+		cfg.ObserveRunner = runner
+		cfg.Observe = observe
+		agent, err := apogee.New(cfg)
+		if witness, ok := runner.(*recordingRunner); ok {
+			witness.agent = agent
+		}
+		return agent, err
+	})
 }
 
 // gateReaction is one armable user-origin gate row — the shape a `reactions:` entry's `gate:` key
@@ -314,9 +333,9 @@ func TestSetReactionsAppliesEngineThenRunner(t *testing.T) {
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
-	runner := &recordingRunner{engine: engine}
-	engine.seedReactions(runner, apogee.Generation{})
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	runner := &recordingRunner{}
+	engine.seedReactions(apogee.Generation{})
+	if err := bindOverRunner(t, engine, runner, nil); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -347,9 +366,9 @@ func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
 	armed := []domain.Reaction{observeReaction("notify")}
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
-	runner := &recordingRunner{engine: engine}
-	engine.seedReactions(runner, apogee.Generation{Observe: armed})
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	runner := &recordingRunner{}
+	engine.seedReactions(apogee.Generation{Observe: armed})
+	if err := bindOverRunner(t, engine, runner, armed); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -403,9 +422,8 @@ func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
 
 	// And the same skip is the RETAINED-BITS property read from the other side: a Floor-only swap
 	// off an armed generation must leave Bypass and the observe roster exactly where they stand.
-	// Observe is not carried by Agent.Generation(), so the roster is read where it actually lands —
-	// the Runner's Replace witness, which must record nothing further — and Bypass off the bound
-	// Agent, alongside the one Floor bit that did move.
+	// The roster is read where it actually lands — the Runner's Replace witness, which must record
+	// nothing further — and Bypass off the bound Agent, alongside the one Floor bit that did move.
 	t.Run("FloorSwapLeavesBypassAndObserveAlone", func(t *testing.T) {
 		swapsBefore := len(runner.lists)
 		roster := runner.lists[swapsBefore-1]
@@ -434,15 +452,16 @@ func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
 
 // The generation rides the remember-then-install contract the mode and the gates ride: a `/settings`
 // edit committed before a server is chosen must reach the Agent the moment one is built, or the
-// session runs the whole way on the seed its Config carried. The Runner half needs no bind — it
-// exists from boot — so the swap the same call makes has already happened.
+// session runs the whole way on the seed its Config carried. The Runner half rides it too: the
+// Agent holds the Runner, so an unbound edit reaches it at the bind's replay and not before — once,
+// engine half first.
 func TestLateEngineReplaysThePendingGeneration(t *testing.T) {
 	t.Parallel()
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
-	runner := &recordingRunner{engine: engine}
-	engine.seedReactions(runner, apogee.Generation{})
+	runner := &recordingRunner{}
+	engine.seedReactions(apogee.Generation{})
 
 	gen := apogee.Generation{
 		Floor:   apogee.FloorConfig{DisableToolCallRepair: true},
@@ -452,46 +471,55 @@ func TestLateEngineReplaysThePendingGeneration(t *testing.T) {
 	if err := engine.SetReactions(gen); err != nil {
 		t.Fatalf("SetReactions while unbound: %v", err)
 	}
-	if len(runner.lists) != 1 {
-		t.Fatalf("the Runner was swapped %d times before the bind; want one — it runs without an Agent", len(runner.lists))
+	if len(runner.lists) != 0 {
+		t.Fatalf("the Runner was swapped %d times before the bind; want none — the Agent holds it", len(runner.lists))
 	}
 	if engine.pendingGeneration == nil || engine.pendingGeneration.Floor != gen.Floor {
 		t.Fatalf("pendingGeneration = %+v; want %+v held for the bind", engine.pendingGeneration, gen)
 	}
 
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := bindOverRunner(t, engine, runner, nil); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
 	got := engine.bound().Generation()
-	if got.Floor != gen.Floor || !got.Bypass {
-		t.Errorf("the bound Agent's generation = %+v; want the Floor and Bypass held for the bind %+v", got, gen)
+	if got.Floor != gen.Floor || !got.Bypass || !reflect.DeepEqual(got.Observe, gen.Observe) {
+		t.Errorf("the bound Agent's generation = %+v; want the generation held for the bind %+v", got, gen)
 	}
-	if len(runner.lists) != 1 {
-		t.Errorf("the Runner was swapped %d times; want the one swap the edit itself made", len(runner.lists))
+	if len(runner.lists) != 1 || !reflect.DeepEqual(runner.lists[0], gen.Observe) {
+		t.Fatalf("the Runner was handed %+v; want the held observe list once, at the bind", runner.lists)
+	}
+	if runner.seen[0].Floor != gen.Floor || !runner.seen[0].Bypass {
+		t.Errorf("the engine held %+v when the Runner swapped; want the held generation already applied", runner.seen[0])
 	}
 }
 
-// A holder with no Runner takes a generation and applies its engine half: a Firing root builds one
-// without a Runner, and a swap must skip the half that is not there rather than dereference it — the
-// way every call here skips a nil Agent.
+// An Agent built with no Runner takes a generation and applies its engine half: a Firing root, a
+// bench or an embedder builds one without a Runner, and a swap must skip the half that is not there
+// rather than dereference it. The observe lane is still reported as handed, so a read-edit-hand-back
+// caller carries it through.
 func TestSetReactionsWithoutARunner(t *testing.T) {
 	t.Parallel()
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
 
 	gen := apogee.Generation{Bypass: true, Observe: []domain.Reaction{observeReaction("notify")}}
 	if err := engine.SetReactions(gen); err != nil {
 		t.Fatalf("SetReactions with no Runner: %v", err)
 	}
-	if engine.pendingGeneration == nil || !engine.pendingGeneration.Bypass {
-		t.Errorf("pendingGeneration = %+v; want the generation held for the bind", engine.pendingGeneration)
+
+	got := engine.bound().Generation()
+	if !got.Bypass || !reflect.DeepEqual(got.Observe, gen.Observe) {
+		t.Errorf("the bound Agent's generation = %+v; want Bypass on and the observe lane as handed", got)
 	}
 }
 
 // A Runner that refuses the list refuses the APPLY: the error is the settings row's sentence, and
-// the holder must not record a list the Runner is not firing — a later identical edit has to try
+// the Agent must not record a list the Runner is not firing — a later identical edit has to try
 // again rather than skip the swap it never made.
 func TestSetReactionsReportsTheRunnersRefusal(t *testing.T) {
 	t.Parallel()
@@ -499,8 +527,11 @@ func TestSetReactionsReportsTheRunnersRefusal(t *testing.T) {
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
 	refused := errors.New("reactions: workspace does not exist")
-	runner := &recordingRunner{engine: engine, err: refused}
-	engine.seedReactions(runner, apogee.Generation{})
+	runner := &recordingRunner{err: refused}
+	engine.seedReactions(apogee.Generation{})
+	if err := bindOverRunner(t, engine, runner, nil); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
 
 	gen := apogee.Generation{Observe: []domain.Reaction{observeReaction("notify")}}
 	if err := engine.SetReactions(gen); !errors.Is(err, refused) {
@@ -513,6 +544,9 @@ func TestSetReactionsReportsTheRunnersRefusal(t *testing.T) {
 	}
 	if len(runner.lists) != 1 {
 		t.Errorf("the Runner took %d lists; want the refused edit retried rather than skipped", len(runner.lists))
+	}
+	if got := engine.bound().Generation(); !reflect.DeepEqual(got.Observe, gen.Observe) {
+		t.Errorf("the bound Agent's observe lane = %+v; want the list the retried swap committed", got.Observe)
 	}
 }
 
@@ -527,10 +561,10 @@ func TestSetReactionsRefusedByTheEngineReachesNeitherHalf(t *testing.T) {
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
-	runner := &recordingRunner{engine: engine}
+	runner := &recordingRunner{}
 	seeded := apogee.Generation{Bypass: true}
-	engine.seedReactions(runner, seeded)
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	engine.seedReactions(seeded)
+	if err := bindOverRunner(t, engine, runner, nil); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -562,7 +596,7 @@ func TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm(t *testing.T
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
-	engine.seedReactions(nil, apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
+	engine.seedReactions(apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
 
 	err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) })
 

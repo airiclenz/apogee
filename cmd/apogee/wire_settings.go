@@ -1668,7 +1668,7 @@ func applyServerStats(a settingsApplier, key, value string) (string, error) {
 // values they had; the whole reason the write and the read are one locked act inside setFloorGuard.
 //
 // The refusal cannot arrive here in practice: a generation whose observe list did not move never
-// reaches the Runner (lateEngine.SetReactions), and the engine half validates a Generation whose
+// reaches the Runner (Agent.SetReactions), and the engine half validates a Generation whose
 // only moved field is a boolean — the sync lane beside it is the one it already armed. It is
 // returned rather than discarded because that is the seam's contract, and a row that swallowed a
 // refusal would be a row that lies about an edit the file already carries.

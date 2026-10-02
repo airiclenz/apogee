@@ -741,13 +741,18 @@ type Reaction = domain.Reaction
 // and the two user lanes, observe and sync — applied as ONE value, so nothing downstream reads a
 // half-swapped state.
 //
-// A Driver hands the SAME value to both halves of the engine, and each takes the lane that is its
-// own: Agent.SetReactions arms Floor, Bypass and Sync — the advise and gate entries the loop runs
-// inline — and validates but never arms Observe, which belongs to the observe Runner; a bad lane on
-// either side refuses the whole value. Moving one field means
+// A Driver hands it to Agent.SetReactions, which swaps both halves of the engine, each taking the
+// lane that is its own: the Agent arms Floor, Bypass and Sync — the advise and gate entries the loop
+// runs inline — and validates but never arms Observe, which it hands to the observe Runner the
+// Driver built (Config.ObserveRunner); a bad lane on either side refuses the whole value. Moving
+// one field means
 // reading Agent.Generation, editing the copy and handing the whole value back, so a swap never
 // silently drops the lane it was not about.
 type Generation = domain.Generation
+
+// ObserveRunner is the observe Runner's live-swap door — the one method of a ReactionRunner the
+// Agent drives when a Generation's observe list moves (Config.ObserveRunner).
+type ObserveRunner = domain.ObserveRunner
 
 // ----------------------------------------------------------------------------
 // Hook working values (internal/domain)
@@ -856,8 +861,9 @@ type ReactionPayload = domain.SeamPayload
 type RunnerOptions = reactions.Options
 
 // ReactionRunner is the observe-only EventSink decorator that fires the user's observe
-// Reactions. A Driver installs one as Config.Events, wrapping whatever sink it already had;
-// Emit never blocks the loop, and Close drains the workers within the grace its context allows.
+// Reactions. A Driver installs one as Config.Events, wrapping whatever sink it already had, and
+// hands the same Runner as Config.ObserveRunner so Agent.SetReactions swaps its list; Emit never
+// blocks the loop, and Close drains the workers within the grace its context allows.
 //
 // Nothing it runs reaches the model, the conversation or the Session record, and it can neither
 // veto nor delay the loop — which is what class observe means. A seam Reaction, by contrast,
