@@ -373,14 +373,14 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// answer with. No onID and no narrate either: a daemon stamps the id on no stream, and the
 	// record raise files under it is the account a supervisor opens.
 	//
-	// A `run: workflow:` entry runs its recipe as `apogee headless --recipe` does: the recipe rides
-	// firingInputs.recipe and its inputs text is the prompt raise is handed, read off the ENTRY —
+	// A `run: workflow:` entry runs its recipe as `apogee headless --recipe` does: the launch rides
+	// firingInputs.recipe, its id and inputs text read off the ENTRY, and raise is handed no prompt —
 	// the Firing's own Prompt is only the launch line the library was given as the entry's label
 	// (daemon.Entry.Spec). A Firing has no Asker, so an `ask` stage takes its declared default, and
 	// no background seat, so the workflow blocks the Firing to its end (ADR 0089 D1).
-	prompt, recipe := f.Prompt, ""
+	prompt, recipe := f.Prompt, (*domain.RecipeLaunch)(nil)
 	if workflow := entry.Run.Workflow; workflow.Recipe != "" {
-		prompt, recipe = workflow.Inputs, workflow.Recipe
+		prompt, recipe = "", &domain.RecipeLaunch{SkillID: workflow.Recipe, Text: workflow.Inputs}
 	}
 	res, notices, err := raise(ctx, firingInputs{
 		opts:     w.opts,

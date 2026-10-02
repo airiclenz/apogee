@@ -2854,3 +2854,37 @@ func TestOnceLaunchesALeadingRecipeReference(t *testing.T) {
 		t.Errorf("the launch attached the skill body:\n%s", got)
 	}
 }
+
+// TestOnceLaunchesTheSpecsRecipe pins Spec.Recipe: the launch's Text binds the recipe's inputs
+// with no Prompt beside it, its Background is ignored so the Workflow blocks the Firing to its
+// end, and the record's title reads the "/<id> <text>" line a session would have typed.
+func TestOnceLaunchesTheSpecsRecipe(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: "check alpha in src"}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_1", Name: tools.FinishToolName, Arguments: `{"status":"ok","summary":"alpha is fine"}`,
+		}}},
+		{Text: "reviewed"},
+	}})
+	spec := planSpec(up.URL, "")
+	spec.Recipe = &domain.RecipeLaunch{SkillID: "review", Text: "src", Background: true}
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.ScratchDir = t.TempDir()
+	spec.Config.Skills = firingRecipes{}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	if res.Workflow.ID == "" || res.Workflow.End != domain.WorkflowFinished {
+		t.Errorf("Result.Workflow = %+v; want the recipe's Workflow finished on the Firing", res.Workflow)
+	}
+	if got := up.LastMessage(2); !strings.HasPrefix(got, "/review src\n\n") || !strings.Contains(got, "#1 alpha — ok — alpha is fine") {
+		t.Errorf("the firing's message does not carry the launch line plus the result lines:\n%s", got)
+	}
+	if !strings.HasPrefix(res.Title, "/review src") {
+		t.Errorf("Result.Title = %q; want it derived from the launch line", res.Title)
+	}
+}

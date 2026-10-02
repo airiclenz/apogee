@@ -4382,16 +4382,19 @@ func TestHeadlessRecipeMissingRequiredInputNeverStarts(t *testing.T) {
 	}
 }
 
-// The recipe id and its text reach run.Spec through firingInputs: Recipe names the recipe, Prompt
-// is the argument, and with no argument Prompt is empty — no stdin read, no empty-prompt refusal.
+// The recipe launch reaches run.Spec through firingInputs: Recipe names the recipe and carries the
+// argument as its Text, Prompt stays empty, and with no argument the Text is empty too — no stdin
+// read, no empty-prompt refusal.
 func TestHeadlessRecipeFlowsToTheRunnerSpec(t *testing.T) {
 	t.Run("with text", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{Turns: 1, Workflow: run.WorkflowOutcome{ID: "wf-1", End: domain.WorkflowFinished}}}
 		if _, _, err := headlessRun(t, stub, "--recipe", "sweep", "  src  "); err != nil {
 			t.Fatalf("headless --recipe: %v", err)
 		}
-		if stub.spec.Recipe != "sweep" || stub.spec.Prompt != "src" {
-			t.Errorf("spec.Recipe = %q, spec.Prompt = %q; want sweep and the trimmed text", stub.spec.Recipe, stub.spec.Prompt)
+		want := domain.RecipeLaunch{SkillID: "sweep", Text: "src"}
+		if stub.spec.Recipe == nil || *stub.spec.Recipe != want || stub.spec.Prompt != "" {
+			t.Errorf("spec.Recipe = %+v, spec.Prompt = %q; want %+v (the trimmed text) and no prompt",
+				stub.spec.Recipe, stub.spec.Prompt, want)
 		}
 	})
 	t.Run("without text", func(t *testing.T) {
@@ -4410,8 +4413,9 @@ func TestHeadlessRecipeFlowsToTheRunnerSpec(t *testing.T) {
 		if err := cmd.ExecuteContext(context.Background()); err != nil {
 			t.Fatalf("headless --recipe with no text: %v", err)
 		}
-		if !stub.called || stub.spec.Recipe != "sweep" || stub.spec.Prompt != "" {
-			t.Errorf("called = %v, spec.Recipe = %q, spec.Prompt = %q; want the run with empty text",
+		want := domain.RecipeLaunch{SkillID: "sweep"}
+		if !stub.called || stub.spec.Recipe == nil || *stub.spec.Recipe != want || stub.spec.Prompt != "" {
+			t.Errorf("called = %v, spec.Recipe = %+v, spec.Prompt = %q; want the run with empty text",
 				stub.called, stub.spec.Recipe, stub.spec.Prompt)
 		}
 	})
@@ -4420,8 +4424,8 @@ func TestHeadlessRecipeFlowsToTheRunnerSpec(t *testing.T) {
 		if _, _, err := headlessRun(t, stub, "a prompt"); err != nil {
 			t.Fatalf("headless: %v", err)
 		}
-		if stub.spec.Recipe != "" {
-			t.Errorf("spec.Recipe = %q; a plain prompt launches no recipe", stub.spec.Recipe)
+		if stub.spec.Recipe != nil {
+			t.Errorf("spec.Recipe = %+v; a plain prompt launches no recipe", stub.spec.Recipe)
 		}
 	})
 }

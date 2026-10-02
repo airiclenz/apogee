@@ -37,18 +37,20 @@ type Spec struct {
 	// once the run is over. Everything else is used as given.
 	Config domain.Config
 
-	// Prompt is the single user message the Firing submits — or, with Recipe set, the text the
-	// recipe's inputs bind from (the line after "/<id>"), empty when the recipe needs none.
+	// Prompt is the single user message the Firing submits. It is unused with Recipe set — the
+	// launch carries its own text — and every Driver leaves it empty then.
 	Prompt string
 
-	// Recipe is the id of a recipe skill this Firing launches instead of submitting Prompt as a
-	// message (ADR 0087 D6): the Agent's own StartRecipe binds its inputs from Prompt and opens the
-	// Exchange, whose first Step runs the recipe as a blocking Workflow and hands the model the
-	// launch line plus the result lines. With no Asker (see the package doc) a required input
-	// Prompt leaves unbound fails the launch before anything is sent, and an `ask` stage takes its
-	// declared default, which its result line says. Empty ⇒ Prompt is an ordinary message, and a
-	// prompt that opens with a recipe's "/<id>" still launches it through the loop's own grammar.
-	Recipe string
+	// Recipe is the recipe launch this Firing makes instead of submitting Prompt as a message
+	// (ADR 0087 D6): the Agent's own StartRecipe binds the recipe's inputs from its Text (the line
+	// after "/<id>", empty when the recipe needs none) and opens the Exchange, whose first Step runs
+	// the recipe as a blocking Workflow and hands the model the launch line plus the result lines.
+	// Its Background is ignored: a Firing has no background seat (ADR 0089 D1), so the launch
+	// always blocks it. With no Asker (see the package doc) a required input Text leaves unbound
+	// fails the launch before anything is sent, and an `ask` stage takes its declared default,
+	// which its result line says. nil ⇒ Prompt is an ordinary message, and a prompt that opens
+	// with a recipe's "/<id>" still launches it through the loop's own grammar.
+	Recipe *domain.RecipeLaunch
 
 	// ScheduleID and ScheduleName are the Schedule identity stamped onto the saved record's
 	// browsable Meta (ADR 0033). Both empty ⇒ the record is an ordinary session, which is
@@ -382,7 +384,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		// The scrollback is seeded with the prompt about to be submitted: the engine reports no
 		// event for a submission, so the fold cannot learn the run's first line from the stream.
 		scrollback: newTranscriptFold(spec.line()),
-		isRecipe:   spec.Recipe != "",
+		isRecipe:   spec.Recipe != nil,
 	}
 	cfg := spec.Config
 	cfg.Approver = den
@@ -488,12 +490,14 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// it, the submit-failure exit included.
 	contextCost := a.ContextCost()
 
-	if spec.Recipe != "" {
+	if spec.Recipe != nil {
 		// The Driver named the recipe itself, so the launch is the Agent's own StartRecipe rather
 		// than a message spelled to look like one: an unknown id or an input the text cannot bind
 		// is refused HERE, before a byte is sent, where a spelled "/<id>" line would hand the
-		// refusal to the model as its opening message.
-		launch := domain.RecipeLaunch{SkillID: spec.Recipe, Text: spec.Prompt}
+		// refusal to the model as its opening message. A copy with Background cleared, because a
+		// Firing has no background seat and the caller's Spec is not this function's to edit.
+		launch := *spec.Recipe
+		launch.Background = false
 		if _, err := a.StartRecipe(ctx, launch); err != nil {
 			return Result{ContextFiles: contextFiles, ContextCost: contextCost},
 				fmt.Errorf("apogee: start the firing's recipe: %w", err)
@@ -642,10 +646,10 @@ func (s Spec) title(now time.Time) string {
 // "/<id> <text>" line the Agent's StartRecipe submits, so the record's title and its replayed
 // scrollback read the launch as a session that typed it would.
 func (s Spec) line() string {
-	if s.Recipe == "" {
+	if s.Recipe == nil {
 		return s.Prompt
 	}
-	return domain.RecipeLaunch{SkillID: s.Recipe, Text: s.Prompt}.Line()
+	return s.Recipe.Line()
 }
 
 // denier is a Firing's Approver: it refuses every gated action immediately and counts the

@@ -164,11 +164,12 @@ func TestDaemonFireRunsTheEntrysRecipe(t *testing.T) {
 	}
 
 	spec := harness.runner.spec
-	if spec.Recipe != "audit" {
-		t.Errorf("run.Spec.Recipe = %q; want the entry's recipe", spec.Recipe)
+	want := domain.RecipeLaunch{SkillID: "audit", Text: "internal/ depth=2"}
+	if spec.Recipe == nil || *spec.Recipe != want {
+		t.Errorf("run.Spec.Recipe = %+v; want the entry's recipe and inputs text %+v", spec.Recipe, want)
 	}
-	if spec.Prompt != "internal/ depth=2" {
-		t.Errorf("run.Spec.Prompt = %q; want the entry's inputs text, not the launch-line label", spec.Prompt)
+	if spec.Prompt != "" {
+		t.Errorf("run.Spec.Prompt = %q; want empty — the launch carries the inputs, not the launch-line label", spec.Prompt)
 	}
 }
 
@@ -257,8 +258,8 @@ func TestDaemonFireRunsAPromptEntryAsAMessage(t *testing.T) {
 
 	spec := harness.fire(t, entryFor(t, "audit", daemon.Action{Prompt: "/code-audit internal/tui"}))
 
-	if spec.Recipe != "" || spec.Prompt != "/code-audit internal/tui" {
-		t.Errorf("run.Spec = {Recipe: %q, Prompt: %q}; want no recipe and the entry's prompt", spec.Recipe, spec.Prompt)
+	if spec.Recipe != nil || spec.Prompt != "/code-audit internal/tui" {
+		t.Errorf("run.Spec = {Recipe: %+v, Prompt: %q}; want no recipe and the entry's prompt", spec.Recipe, spec.Prompt)
 	}
 }
 

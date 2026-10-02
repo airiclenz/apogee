@@ -727,10 +727,11 @@ func runHeadlessBody(
 	// recipe run is the exception — its argument is only the text the recipe's inputs bind from, so
 	// an absent one is empty text rather than a missing prompt, and stdin is never read for it: a
 	// required input left unbound is the launch's own refusal (run.Spec.Recipe).
-	prompt := ""
+	prompt, launch := "", (*domain.RecipeLaunch)(nil)
 	if recipe != "" {
+		launch = &domain.RecipeLaunch{SkillID: recipe}
 		if len(args) > 0 {
-			prompt = strings.TrimSpace(args[0])
+			launch.Text = strings.TrimSpace(args[0])
 		}
 	} else {
 		resolved, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
@@ -1030,7 +1031,7 @@ func runHeadlessBody(
 		roots:    roots,
 		confiner: confiner,
 		mode:     mode,
-		recipe:   recipe,
+		recipe:   launch,
 		report:   reportReaction,
 		runner:   deps.runner,
 		// The per-server stats recorder (ADR 0085): every upstream attempt this run makes is
@@ -1169,7 +1170,7 @@ func runHeadlessBody(
 	// otherwise take that for a completed run. Like the failure above it outranks a fault.
 	// The judgement is the one the daemon's scheduled recipe firings share (recipeWorkflowFailure,
 	// wire_firing.go); this Driver only says whose failure it is.
-	if err := recipeWorkflowFailure(recipe, res.Workflow); err != nil {
+	if err := recipeWorkflowFailure(launch, res.Workflow); err != nil {
 		err = fmt.Errorf("apogee headless: %w", err)
 		if res.SessionID != "" {
 			err = fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))

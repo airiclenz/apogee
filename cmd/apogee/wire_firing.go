@@ -61,10 +61,11 @@ type firingInputs struct {
 	model string
 	// mode is the mode the run executes in — plan or auto, the two an unattended run may use.
 	mode domain.Mode
-	// recipe is the id of the recipe skill this run launches (run.Spec.Recipe), the prompt raise
-	// is handed then being the text its inputs bind from. Set by `apogee headless --recipe` and by
-	// a daemon Firing of a `run: workflow:` entry; empty runs the prompt as an ordinary message.
-	recipe string
+	// recipe is the recipe launch this run makes (run.Spec.Recipe) — the recipe's id and the text
+	// its inputs bind from — in place of a prompt, so the prompt raise is handed is empty then. Set
+	// by `apogee headless --recipe` and by a daemon Firing of a `run: workflow:` entry; nil runs the
+	// prompt as an ordinary message.
+	recipe *domain.RecipeLaunch
 	// skills is the catalog the run resolves attached skill IDs through and mounts the read roots
 	// of; nil builds a fresh Provider from roots. A session passes its LIVE provider so a
 	// `use-project-skills` flip keeps following its Firings (design call 5); headless and the
@@ -896,10 +897,11 @@ func raise(
 // every Driver that runs a recipe applies — `apogee headless --recipe` exits 1 on it and the
 // daemon records a scheduled `run: workflow:` Firing as failed on it — so the error is returned
 // unprefixed and each Driver wraps it in its own clause.
-func recipeWorkflowFailure(recipe string, outcome run.WorkflowOutcome) error {
-	if recipe == "" {
+func recipeWorkflowFailure(launch *domain.RecipeLaunch, outcome run.WorkflowOutcome) error {
+	if launch == nil {
 		return nil
 	}
+	recipe := launch.SkillID
 	switch {
 	case outcome.ID == "":
 		return fmt.Errorf("recipe /%s did not run", recipe)

@@ -529,7 +529,10 @@ NOTES (2026-10-02): `Agent.StartRecipe` renders from the resolved `recipe.ID` (n
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestRecipe_StartRecipeSubmitsTheLaunch$|^TestRecipe_StartRecipeRefusals$|^TestRecipe_ALeadingReferenceLaunchesAndTheFirstRequestCarriesTheResultLines$|^TestRecipeStartedEventCarriesResume$|^TestCancelledRecipeLaunchKeepsItsOpening$|^TestLaunch_BackgroundAndResumeSharePlanAndRecipeWiring$' ./internal/agent/`
 **Commit:** `refactor(domain): render the recipe launch line in one place`
 
-## 17. Firings carry the recipe launch value (#17b)
+## 17. Firings carry the recipe launch value (#17b) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): `run.Spec.Recipe` and `firingInputs.recipe` are `*domain.RecipeLaunch` (nil = no recipe); `recipeWorkflowFailure` takes the launch. `Spec.Prompt` is now EMPTY for a recipe run — the launch carries the inputs text — so `TestHeadlessRecipeFlowsToTheRunnerSpec` and `TestDaemonFireRunsTheEntrysRecipe` now pin `Recipe == {id, text}` and `Prompt == ""`; `schedule.Spec.Prompt` (the label) is untouched.
+NOTES (2026-10-02): `run.Once` launches a copy of the Spec's launch with `Background` cleared (a Firing has no background seat, ADR 0089 D1), since the new value type can express a flag the old id+prompt pair could not; added `TestOnceLaunchesTheSpecsRecipe` (internal/run) pinning Spec.Recipe end to end, the ignored Background and the launch-line title. schedule_test.go, wire_firing_test.go and undo_test.go needed no change (they read no recipe field).
 
 **What:** Depends on items 10 and 16.
 **Goal:** `run.Spec`, `cmd/apogee/wire_firing.go` `firingInputs` and `daemonfire.go` carry a
