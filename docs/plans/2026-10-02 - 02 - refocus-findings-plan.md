@@ -591,7 +591,13 @@ internal/tools/manual_drift_test.go — TestReadmeStatesTheToolCounts; internal/
 Depends on items 1 and 6.
 **Commit:** `docs(manual): reconcile manual cross-references with the code`
 
-## 16. The manual reads as present-tense reference
+## 16. The manual reads as present-tense reference — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): rewritten — commands.md "always allow" scoping paragraph (dropped "let … pre-cleared … identity now" history) and `locate` "no longer returns" → "does not return"; configuration.md unknown-key check ("exactly as it always has" / "start-up now says so"), step-budget-notice exemption ("any more" / "is now part of"), stream-idle-timeout ("used to hold" → "would otherwise hold"), default-prompt wording ("now says … from the next binary on").
+
+NOTES (2026-10-02): kept acceptance-grep hits, all exempt — configuration.md:1548 is subAgentsFlagNotice's verbatim stderr; configuration.md:1587 is the retired-schema fold (migrateLegacyConfig); configuration.md:1924 is the refused top-level llama-launcher: upgrade note; commands.md:436 is a present-tense conditional.
+
+NOTES (2026-10-02): kept other historical wording as migration notes for keys configmigrate.go still folds or refuses — the "Keys apogee migrates for you" section (hooks:/mechanisms:/validated-sets: folds incl. "now carries … (was", "governs that behaviour now"; model-profile:/llama-launcher: refusals), configuration.md:102's pointer to the mechanisms: fold, and the sub-agents: flag offer ("Earlier builds…", "any more"); "applied now"/"applies now"/"right now" are the present moment; "POSIX only, for now … later change" is forward-looking, not an old-behaviour contrast.
 
 **What:**
 **Goal:** `docs/manual/configuration.md` and `docs/manual/commands.md` describe current behaviour only — no

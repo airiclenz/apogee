@@ -251,8 +251,8 @@ simply left alone, since neither key is read by anything.
 ## Keys apogee does not recognise
 
 A key the schema has no spelling for — a `spiner:` under `ui:`, an `auto-compct:` at the top — is
-not an error: the loader ignores it and runs on the default, exactly as it always has. Since a
-silently ignored key is indistinguishable from one you never wrote, **start-up now says so**, one
+not an error: the loader ignores it and runs on the default. Since a
+silently ignored key is indistinguishable from one you never wrote, **start-up says so**, one
 line per key, naming the file, the key as it sits in the tree and the line it is on:
 
 ```
@@ -266,7 +266,7 @@ keys the migration above folds or refuses, which are handled before this check r
 `sub-agents: true` line on a `servers:` entry, which start-up's own offer to move it (see
 [The servers you run models on](#the-servers-you-run-models-on)) is the place to act on; and a
 retired top-level `step-budget-notice:` line, which the starter template of an earlier build wrote
-into every home and which nothing reads any more (the notice it switched is now part of every
+into every home and which nothing reads (the notice it switched is part of every
 delegation's cap — see `delegate-max-steps:` further down this page). A file
 edited while a session is running gets the same line, in the transcript, at the save that introduced
 the key — once, not again on every later save or on apogee's own writes.
@@ -1046,7 +1046,7 @@ even when it carries text, and the delegating agent is told the cap was the caus
 truncated answer is never passed back as the delegated result.
 
 Every streamed reply is also **watched for silence**. A server that stops sending — before
-its first byte, or in the middle of a reply — used to hold your agent, or a sub-agent nobody
+its first byte, or in the middle of a reply — would otherwise hold your agent, or a sub-agent nobody
 watches, until Esc or `delegate-timeout:`; `stream-idle-timeout:` (a file-only key, a length
 of time like `10m` or `30s`) is the ceiling on that silence, at a default of **10m**. When
 it is reached apogee cuts the stream and re-sends the same request, under the same
@@ -2021,9 +2021,9 @@ the mode withholds — `terminal`, `run_tests`, `python_exec`, `web_fetch`, `web
 the other three rungs, which withhold nothing the prompt promises, carry no such line.
 The bullet is worded from the live Plan tool menu (its "writers into the session scratch
 dir" clause rides exactly when a scratch directory is set), so the announcement and the
-menu never disagree. The embedded default prompt now says "run the project's own tests,
+menu never disagree. The embedded default prompt says "run the project's own tests,
 build or linter *where the mode allows it*" — it is built into the binary, so every
-default-prompt install has that wording from the next binary on; a `system-prompt-text:`
+default-prompt install has that wording; a `system-prompt-text:`
 of your own is yours to qualify. Ahead of them is deliberate: nothing a repository ships
 can then precede the host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
 of it, and is not sent in the one posture where no system message goes out at all —

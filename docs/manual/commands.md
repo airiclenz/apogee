@@ -240,9 +240,9 @@ prompt or drag a selection out of the transcript behind it.
 **It is scoped to the call, not the tool.** apogee remembers the answer under the tool's name *plus a
 digest of that call's arguments*, so it authorises the call you actually read and nothing wider:
 allowing `npm test` leaves `npm run build` still asking. That is deliberate. Keying on the tool name
-alone let one answer stand for every later call of the same tool — an "always allow" on `terminal`
-pre-cleared every shell command for the rest of the session — so the arguments are part of the
-identity now, and the price is a prompt you will sometimes answer twice for what looks like one tool.
+alone would let one answer stand for every later call of the same tool — an "always allow" on `terminal`
+would pre-clear every shell command for the rest of the session — so the arguments are part of the
+identity, and the price is a prompt you will sometimes answer twice for what looks like one tool.
 
 **It is honoured across the whole sub-agent tree.** There is one such memory per agent tree, hanging
 off the approver a parent and all its delegates share, so an allow granted inside a sub-agent clears
@@ -315,7 +315,7 @@ latter, not the file's length. A `start_line` on its own is still open-ended and
 however large. Two ranges are refused rather than answered with nothing: an `end_line` before its
 `start_line` (`read_file: end_line (2) is before start_line (3)`) and a `start_line` past the
 file's last line (`read_file: start_line (500) is past the end of the file (120 lines)`). A
-`locate` with no range no longer returns the whole file beneath its `Located …` line: the content
+`locate` with no range does not return the whole file beneath its `Located …` line: the content
 is the ten lines around each hit, windows that overlap merged, and a lone `…` line between windows
 that do not meet — a term that occurs nowhere renders the bounded body as a plain read would. Those
 windows are bounded the same way: as many as fit the 400-line / 40 KiB cap come back, in file
