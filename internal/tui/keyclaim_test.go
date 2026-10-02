@@ -8,7 +8,9 @@ import "testing"
 // on purpose, and this list is what makes "on purpose" visible in a diff.
 //
 // It reads the names rather than calling the claims: every entry's claim is exercised by its own
-// pane's suite, and what this test is about is the sequence they are asked in.
+// pane's suite, and what this test is about is the sequence they are asked in. The pane rungs are
+// derived from each row's key rank (paneRank, panes.go) and named by the row, so a rank changed on a
+// row is a change this list sees.
 func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 	t.Parallel()
 	want := []string{
@@ -16,7 +18,7 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 		"settings pane",
 		"picker",
 		"workflows view",
-		"autocomplete overlay",
+		"autocomplete dropdown",
 		"usage report",
 		"inspector pane",
 		"thinking pane",

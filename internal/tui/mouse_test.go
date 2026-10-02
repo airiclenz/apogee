@@ -4914,8 +4914,9 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 // prompt slot and the dropdown — and NOT the slot's stacking order (the framePane order), which puts
 // the prompt first. The reports are asked before the modal half and the prompt after it because a
 // click on a lower report dismisses the one above it before it reaches it, and no pane is entered
-// twice: a pane asked twice would be dismissed by its own first answer. What each pane answers WITH
-// is its row of the pane table, which TestEveryFramePaneHasASpec pins as filled.
+// twice: a pane asked twice would be dismissed by its own first answer. The list is derived from each
+// row's pointer rank (paneRank, panes.go), so a rank changed on a row is a change this test sees. What
+// each pane answers WITH is its row of the pane table, which TestEveryFramePaneHasASpec pins as filled.
 func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
 	t.Parallel()
 	want := []framePane{paneSettings, paneUsage, paneInspector, paneThinking, paneAdvice, paneBrowser, panePicker, paneWorkflows, panePrompt, paneDropdown}

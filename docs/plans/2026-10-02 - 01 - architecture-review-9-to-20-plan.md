@@ -579,8 +579,11 @@ internal/agent/state.go — PendingInput, restore checks; internal/agent/state_t
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^TestRecipe_StartRecipeSubmitsTheLaunch$|^TestRecipe_StartRecipeRefusals$|^TestRecipe_ALeadingReferenceLaunchesAndTheFirstRequestCarriesTheResultLines$|^TestRecipe_AMidTextReferenceAttachesTheBody$|^TestRecipe_InterjectRefusesALaunch$|^TestRecipe_ADelegateLaunchesNothing$|^TestCancelledRecipeLaunchKeepsItsOpening$|^TestSnapshot_RestoresPendingInput$|^TestRestore_RefusesAForgedOrOversizedPendingInput$' ./internal/agent/` plus the round-trip tests this item adds
 **Commit:** `refactor(agent): hand the recipe launch to the step instead of re-parsing it`
 
-## 19. Pane rank lives on the pane row (#20a)
+## 19. Pane rank lives on the pane row (#20a) — ✅ DONE (2026-10-02)
 
+NOTES (2026-10-02): each paneSpec row carries `rank paneRank{key, pointer}`; panes.go's init() derives keyClaimOrder (key-ranked pane rungs, then model.go's new `transcriptClaimants` — run view, block cursor) and pointerPanes (pointer-ranked panes) via `panesRankedBy` / `keyClaimRungs`; `reportPaneRow` takes the rank as a third argument; `paneClaimant(p)` now reads name/gate/claim straight off the row (built in init, so no call-time closures and no literal name), which is what makes the dropdown rung read "autocomplete dropdown".
+NOTES (2026-10-02): the per-rung rationale comments of the old keyClaimOrder literal moved from model.go onto the matching rows of paneSpecs in panes.go, beside the rank they justify; pointerPanes keeps its order narrative on its own doc.
+NOTES (2026-10-02): consequential edit — mouse.go: dropped the stale "the row says what a pane does with a click or a notch, never which keys it claims (ADR 0053 D3)" sentence on pointerPanes, made false by the row now holding its ranks (it was already contradicted by the row's key func); ADR 0053 D3 itself is about list verdicts and needed no change.
 **What:** Depends on item 11.
 **Goal:** each pane's key-claim and pointer rank live on its `framePane` row; `keyClaimOrder` and
 `pointerPanes` derive from the rows; `model.go`'s pane label reads "autocomplete dropdown" as

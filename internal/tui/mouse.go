@@ -326,11 +326,12 @@ func (a clickArm) pin(pane framePane, selected int) (top int, pinned bool) {
 // pointerPanes is the click chain and the wheel chain in ONE order, the order the two gestures have
 // always been asked in — the CLICK-CHAIN order, which is NOT the slot's stacking order (the
 // framePane order, model.go) — so a row a notch would walk is a row a click can highlight, and a
-// pane added later is asked by both gestures the day it is entered here. What each pane DOES with a
-// click or a notch is its row of the pane table (paneSpecs, panes.go: the click and wheel funcs, in
-// the currencies [paneSpec] states); this list holds only WHEN it is asked, which is why it is a list
-// of panes and not of funcs. The key verdicts stay per pane as well (ADR 0053 D3): the row says what
-// a pane does with a click or a notch, never which keys it claims.
+// pane added later is asked by both gestures the day its row is given a pointer rank. What each pane
+// DOES with a click or a notch is its row of the pane table (paneSpecs, panes.go: the click and wheel
+// funcs, in the currencies [paneSpec] states), and WHEN it is asked is that row's pointer rank
+// ([paneRank]); this list is derived from those ranks in panes.go's init() ([panesRankedBy]) — never by
+// a declaration-time initializer, which would run before the table is filled and read zero rows — and
+// it is a list of panes, not of funcs.
 //
 // The order: the /settings pane is asked FIRST because it is the frame's one full-height pane, drawn
 // over the transcript for exactly its own rows. The four reports — /usage, /inspect, /thinking,
@@ -348,18 +349,7 @@ func (a clickArm) pin(pane framePane, selected int) (top int, pinned bool) {
 // Wherever two of these panes can never share a frame the order between them is arbitrary, because
 // only one rectangle can hold the pointer at a time; what is never arbitrary is that every pane is
 // asked before the footer, the prompt and the transcript below.
-var pointerPanes = []framePane{
-	paneSettings,
-	paneUsage,
-	paneInspector,
-	paneThinking,
-	paneAdvice,
-	paneBrowser,
-	panePicker,
-	paneWorkflows,
-	panePrompt,
-	paneDropdown,
-}
+var pointerPanes []framePane
 
 // settingsPointerClick is the /settings pane's click, the one its row of the pane table names
 // (panes.go): [Model.handleSettingsClick], plus the one thing

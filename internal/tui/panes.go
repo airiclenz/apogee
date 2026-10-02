@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"cmp"
+	"slices"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,16 +47,18 @@ const (
 // alone: the approval and the ask prompt are modal by STATE, and their keys are handleKey's own
 // switches. keyOpen is that rung's gate — whether the pane is up and entitled to be asked at all;
 // nil means "always ask", the pane's own claim then being the whole test, which a closed pane
-// answers false to anyway. Which rung the pane is — where it rises and falls — is keyClaimOrder's
-// decision, not the row's (ADR 0053 D3).
+// answers false to anyway.
 //
 // click is what [Model.handleMouseClick] asks of the pane, in that chain's three-part currency —
 // the Model, a tea.Cmd and whether the pane CLAIMED the click — and wheel is what
 // [Model.foldMouseWheel] asks, in the wheel's two-part one (no Cmd exists on that side: a notch moves
 // a highlight and hands back no work). Every click func takes the live m, which is what mutates, and
 // the pre-click frame pre, which every geometry question is put to (handleMouseClick's rule); the
-// walk composes pre once and hands the same value to every pane. Which order the two gestures ask
-// the panes in is [pointerPanes]' decision (mouse.go), never the row's.
+// walk composes pre once and hands the same value to every pane.
+//
+// rank is WHEN the pane is asked: its rung of [keyClaimOrder] and its place in [pointerPanes], the two
+// gesture chains. Both lists are derived from the rows' ranks in init(), so where a pane rises and
+// falls in either chain is stated on its row beside what it does there ([paneRank]).
 type paneSpec struct {
 	name    string                                                           // what the pane is called in a diagnostic
 	slot    paneSlot                                                         // which of the two slots stacks it
@@ -66,6 +70,18 @@ type paneSpec struct {
 	keyOpen func(Model) bool                                                 // the key claim's gate; nil = always ask
 	click   func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) // its answer to a left-click on the frame
 	wheel   func(Model, tea.MouseWheelMsg) (Model, bool)                     // its answer to a wheel notch on the frame
+	rank    paneRank                                                         // where the two gesture chains ask it
+}
+
+// paneRank is where one pane stands in the two gesture chains, 1 for the first rung. key is its rung
+// of the overlay precedence ([keyClaimOrder]) and 0 for the prompt alone, which has no rung — its keys
+// are handleKey's state switches. pointer is its place in the one order the click and the wheel ask the
+// panes in ([pointerPanes], whose doc states why the order is what it is), and every pane has one. The
+// ranks of one chain are distinct, so each chain is ONE order; TestKeyClaimOrderMatchesTheDocumentedPrecedence
+// and TestPointerPanesWalkInTheClickChainOrder pin the orders they derive.
+type paneRank struct {
+	key     int // rung of keyClaimOrder, 0 = none
+	pointer int // place in pointerPanes
 }
 
 // paneSpecs is the pane table: one row per framePane, indexed by it, so that "which panes are open"
@@ -78,10 +94,11 @@ type paneSpec struct {
 //
 // The index IS the order: framePane's constants are the order the panes give way in AND the order the
 // transcript-side slot stacks them in, top to bottom — one order, stated once on framePane (model.go).
-// The two gesture chains keep their own orders — the key precedence on keyClaimOrder, the click-chain
-// order on pointerPanes — because walking this table in index order would change which pane answers
-// first; the table holds what each pane DOES with a key, a click or a notch, and the ordered lists
-// hold when it is asked.
+// The two gesture chains keep their own orders — the key precedence, the click-chain order — because
+// walking this table in index order would change which pane answers first; each row carries its rank
+// in both ([paneRank]) beside what the pane DOES with a key, a click or a notch, and init() derives the
+// ordered lists ([keyClaimOrder], [pointerPanes]) from those ranks, so a pane's place in a chain is
+// stated once, on its row.
 //
 // It is a package value rather than a field (the Model is copied on every Update — ADR 0011 — and a
 // table of funcs is nothing a frame needs to carry) and it is filled in init() rather than by its
@@ -90,7 +107,8 @@ type paneSpec struct {
 // (render → renderReport → popupBudget → frameRowPlan → openPanes → paneSpecs). Anything that wants a
 // row must therefore read it at CALL time, through a closure — a package var that copied a row's
 // field at its own declaration would copy the zero value, since every init function runs after every
-// variable initializer.
+// variable initializer. That is why the two gesture chains are assigned at the end of the same init(),
+// once the rows they are derived from exist.
 var paneSpecs [paneKinds]paneSpec
 
 func init() {
@@ -108,6 +126,9 @@ func init() {
 			height: Model.promptHeight,
 			click:  promptPointerClick,
 			wheel:  Model.promptWheel,
+			// No key rung, for the reason above; its place in the pointer chain is the one pointerPanes
+			// states.
+			rank: paneRank{pointer: 9},
 		},
 		paneBrowser: {
 			// The /sessions browser takes the prompt's position in the slot because they never
@@ -122,6 +143,11 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state == stateIdle && m.sessionBrowser.open },
 			click:   Model.handleBrowserClick,
 			wheel:   Model.browserWheel,
+			// The top rung of the key precedence: a modal overlay (idle only), so while open it claims
+			// every keypress — selection, resume, delete-confirm, rename edit, and esc to close
+			// (sessions.go) — before the normal input routing, exactly as the autocomplete dropdown claims
+			// its keys first.
+			rank: paneRank{key: 1, pointer: 6},
 		},
 		panePicker: {
 			// The /model | /server picker shares that position on the same terms as the browser.
@@ -140,6 +166,10 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state.live() && m.picker.open },
 			click:   Model.handlePickerClick,
 			wheel:   Model.pickerWheel,
+			// The browser's simpler sibling, and it claims keys the same way: while it is open the
+			// selection, the accept and esc are all its own (picker.go) — in BOTH live states, for the
+			// reason keyOpen states. Its rung sits under the /settings pane's.
+			rank: paneRank{key: 3, pointer: 7},
 		},
 		paneWorkflows: {
 			// The /workflows view shares that position on the picker's terms: modal, and asked in
@@ -157,6 +187,11 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state.live() && m.workflowsPane.open },
 			click:   Model.handleWorkflowsClick,
 			wheel:   Model.workflowsWheel,
+			// The picker's sibling in the key precedence as well: modal while it is up, in both live
+			// states, for the reason keyOpen states (workflows.go). The two are never open together —
+			// each owns ⏎ for as long as it is up, so neither verb can be accepted over the other — so
+			// the order between them decides nothing.
+			rank: paneRank{key: 4, pointer: 8},
 		},
 		paneSettings: {
 			// The /settings pane is the frame's one FULL-HEIGHT pane (frameRowPlan): it is granted the
@@ -173,15 +208,52 @@ func init() {
 			keyOpen: Model.settingsOwnsInput,
 			click:   settingsPointerClick,
 			wheel:   Model.settingsWheel,
+			// Modal in the key precedence as the browser is, and for a stronger reason: as the frame's one
+			// full-height pane it hides the input box behind it, a box the human cannot read — a keystroke
+			// falling through to it would edit an invisible draft. Idle-only, like its verb (commandSpecs),
+			// and it swallows every key it does not act on (settings.go). It is asked FIRST of the pointer
+			// chain, for the reason pointerPanes states.
+			rank: paneRank{key: 2, pointer: 1},
 		},
 		// The four reports close the transcript-side slot, nearest the chrome, because they are the
 		// panes that CAN be up beside another: their verbs are whileRunning, so a report opens over an
 		// approval or ask prompt the run is blocked on — and stacking it under the prompt keeps the
 		// surface the human is answering in the position it has when no report is up.
-		paneUsage:     reportPaneRow("usage report", usageReport),
-		paneInspector: reportPaneRow("inspector pane", inspectReport),
-		paneThinking:  reportPaneRow("thinking pane", thinkingReport),
-		paneAdvice:    reportPaneRow("advice pane", adviceReport),
+		//
+		// In the key precedence the four sit under the dropdown and above the run view.
+		//
+		// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
+		// is not modal — it says something rather than asking, so the box behind it stays live and every
+		// other key goes where it always went — and its rung sits below the overlays above precisely
+		// because they ARE modal: a pane that owns the keyboard answers its own esc first. Below the
+		// dropdown for the same reason one rung down: a menu a keystroke opened is dismissed by the esc
+		// the human means for it.
+		//
+		// It must stay ABOVE the transcript's PgUp/PgDn interception in handleKey, which claims those two
+		// keys in every state: the pane is what the human is reading, and a page key that scrolled the
+		// conversation hidden BEHIND the report would move the one list they cannot see.
+		paneUsage: reportPaneRow("usage report", usageReport, paneRank{key: 6, pointer: 2}),
+		// The /inspect pane claims the same five keys, plus a ctrl+r of its own that flips its rendering,
+		// on the same terms (inspector.go): not modal, so every key it does not act on goes where it
+		// always went, and below the modal overlays because a pane that owns the keyboard answers its own
+		// esc first. It sits beside the report it is shaped after — the two are never open together in
+		// practice and their claims are disjoint while one of them is closed, so the order between THEM
+		// decides nothing.
+		paneInspector: reportPaneRow("inspector pane", inspectReport, paneRank{key: 7, pointer: 3}),
+		// The /thinking pane claims the report's five keys and no sixth — it has ONE rendering, so there
+		// is no ctrl+r here (thinkingpane.go) — on the same non-modal terms as the two panes above it:
+		// every key it does not act on goes where it always went, and it sits below the modal overlays
+		// because a pane that owns the keyboard answers its own esc first.
+		//
+		// It sits beside its two siblings, and ABOVE the run view on purpose: opened inside a view the
+		// pane shows that run's thinking, so the esc that closes it is the esc the human means for it,
+		// and the NEXT esc goes on up the view exactly as it would have with no pane open.
+		paneThinking: reportPaneRow("thinking pane", thinkingReport, paneRank{key: 8, pointer: 4}),
+		// The /advice pane claims the report's five keys and no sixth — one rendering, no ctrl+r
+		// (advicepane.go) — on the same non-modal terms as the three panes above it, and sits beside
+		// them for the same reason: a pane that owns the keyboard answers its own esc first, and the
+		// esc that closes a report opened inside a run view is the esc the human means for it.
+		paneAdvice: reportPaneRow("advice pane", adviceReport, paneRank{key: 9, pointer: 5}),
 		paneDropdown: {
 			// The command / @file / skill autocomplete is the input slot's own tenant, drawn flush over
 			// the box rather than over the transcript, and the one list that is not modal at all: any
@@ -200,8 +272,42 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state.live() && m.autocomplete.active },
 			click:   Model.handleDropdownClick,
 			wheel:   Model.dropdownWheel,
+			// While it is open it claims the navigation, accept and dismiss keys — enter and tab among
+			// them — under the four modal overlays' rungs and before the normal routing; any other key
+			// falls through to edit the input. It closes the pointer chain, for the reason pointerPanes
+			// states.
+			rank: paneRank{key: 5, pointer: 10},
 		},
 	}
+	keyClaimOrder = keyClaimRungs()
+	pointerPanes = panesRankedBy(func(r paneRank) int { return r.pointer })
+}
+
+// panesRankedBy is every pane whose rank under by is non-zero, lowest rank first: one gesture chain
+// read off the rows of paneSpecs. It reads the table, so it runs only once init() has filled it.
+func panesRankedBy(by func(paneRank) int) []framePane {
+	var ps []framePane
+	for p := framePane(0); p < paneKinds; p++ {
+		if by(paneSpecs[p].rank) > 0 {
+			ps = append(ps, p)
+		}
+	}
+	slices.SortStableFunc(ps, func(a, b framePane) int {
+		return cmp.Compare(by(paneSpecs[a].rank), by(paneSpecs[b].rank))
+	})
+	return ps
+}
+
+// keyClaimRungs is [keyClaimOrder] derived: the panes that have a key rung, in rank order, each read
+// off its row ([paneClaimant]), followed by the surfaces that are not panes ([transcriptClaimants]) —
+// the run view, then the block cursor.
+func keyClaimRungs() []keyClaimant {
+	panes := panesRankedBy(func(r paneRank) int { return r.key })
+	order := make([]keyClaimant, 0, len(panes)+len(transcriptClaimants))
+	for _, p := range panes {
+		order = append(order, paneClaimant(p))
+	}
+	return append(order, transcriptClaimants...)
 }
 
 // reportPaneRow is the row of one report pane: open, render, key, click and wheel all resolve through
@@ -210,8 +316,9 @@ func init() {
 // so its key claim is the soft one ([paneClaim] over [Model.reportKey]) with no gate: the claim
 // itself answers false while the report is closed. The click is [Model.handleReportClick] — inside
 // the box it is claimed and nothing happens, outside it the report is dismissed and the click goes on
-// — and the wheel is [Model.reportWheel], one row per notch while the pointer is over it.
-func reportPaneRow(name string, r reportKind) paneSpec {
+// — and the wheel is [Model.reportWheel], one row per notch while the pointer is over it. rank is the
+// kind's place in the two gesture chains, which the table states beside each report's row.
+func reportPaneRow(name string, r reportKind, rank paneRank) paneSpec {
 	return paneSpec{
 		name:   name,
 		slot:   slotTranscript,
@@ -226,28 +333,17 @@ func reportPaneRow(name string, r reportKind) paneSpec {
 		wheel: func(m Model, msg tea.MouseWheelMsg) (Model, bool) {
 			return m.reportWheel(r, msg)
 		},
+		rank: rank,
 	}
 }
 
-// paneClaimant is one pane's rung of [keyClaimOrder], read off its row of paneSpecs: the gate is the
-// row's keyOpen (nil there means "always ask") and the claim is the row's key. Both are closures that
-// index the table at CALL time rather than copies taken here — keyClaimOrder is a package var, and
-// every variable initializer runs before the init function that fills paneSpecs, so a value copied at
-// declaration would be the zero row. The name is a literal beside each rung for the same reason: the
-// precedence names TestKeyClaimOrderMatchesTheDocumentedPrecedence reads must be there before init()
-// has run, and the rung's name is the precedence documentation's word for the surface, which is not
-// always the pane table's (the "autocomplete overlay" rung reads the "autocomplete dropdown" row).
-func paneClaimant(p framePane, name string) keyClaimant {
-	return keyClaimant{
-		name: name,
-		open: func(m Model) bool {
-			gate := paneSpecs[p].keyOpen
-			return gate == nil || gate(m)
-		},
-		claim: func(m Model, msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-			return paneSpecs[p].key(m, msg)
-		},
-	}
+// paneClaimant is one pane's rung of [keyClaimOrder], read off its row of paneSpecs: the name is the
+// row's, the gate is the row's keyOpen (nil there means "always ask", as [keyClaimant.open] does) and
+// the claim is the row's key. It copies the row's fields, so it is called only once init() has filled
+// the table — which is where keyClaimOrder is built ([keyClaimRungs]).
+func paneClaimant(p framePane) keyClaimant {
+	row := paneSpecs[p]
+	return keyClaimant{name: row.name, open: row.keyOpen, claim: row.key}
 }
 
 // promptOpen reports whether the frame has a decision prompt up — the approval or the ask pane, each
