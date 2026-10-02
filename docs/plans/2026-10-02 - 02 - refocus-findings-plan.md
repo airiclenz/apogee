@@ -409,7 +409,11 @@ docs/adr/0034-*.md — headless deferral line; docs/plans/archived/2026-10-02 - 
 Depends on item 8.
 **Commit:** `docs(adr): mark the removed Mechanism layer in the ADRs that name it`
 
-## 10. Verify, then fix: ADR conflicts on /undo and WritablePaths
+## 10. Verify, then fix: ADR conflicts on /undo and WritablePaths — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): verdict /undo: the code reverts files only (internal/undo/doc.go; Agent.UndoRevert -> undo.Journal.Revert; tui confirmUndo). ADR 0074 and ADR 0086 D3 agree with it, so only ADR 0088 (it said "Rewinding a conversation is /undo's job") gets a note; 0074 and 0086 are unchanged.
+
+NOTES (2026-10-02): verdict WritablePaths: ADR 0049 §3's "the field still has no writer" is wrong for box.WritablePaths, because Config.ConfinementBox has folded the session ScratchDir into it since ADR 0056 D3, and the scratch dir is set by cmd/apogee wireSession/firingConfig. It is still right for Config.ConfineWritablePaths, which has no production setter and no internal/config key. The notes go on 0049, on 0056 (its Consequences name a "per-project WritablePaths" half) and on 0012 (its 2026-09-14 amendment (a) names a `confine-writable-paths` key that does not exist).
 
 **What:**
 **Goal:** ADRs 0088, 0074 and 0086 agree with the code on what `/undo` reverts (files only, or the conversation too);

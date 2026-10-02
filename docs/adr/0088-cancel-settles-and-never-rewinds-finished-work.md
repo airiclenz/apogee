@@ -26,6 +26,17 @@ be in apogee."
 **A cancel stops work and keeps everything that finished; it never rewinds.** Undoing a file change
 is git's job. Rewinding a conversation is `/undo`'s job, and `/undo` is unchanged.
 
+> **Note (2026-10-02, verified against code):** `/undo` does not rewind a conversation; it reverts
+> files only. `confirmUndo` (`internal/tui/undo.go`) calls `Agent.UndoRevert`
+> (`internal/agent/agent.go`), which is a generation check and `undo.Journal.Revert`: it restores the
+> pre-images and removals of the per-Exchange file journal and leaves the conversation as it is
+> (`internal/undo/doc.go`, package doc). ADR 0074 rejects a conversation-restoring checkpoint and
+> leaves that to the session record (`/sessions`, ADR 0022), and ADR 0086 D3's table says `/undo`
+> "reverts files, not the conversation". Both agree with the code. Read the sentence above as: a
+> cancel rewinds nothing. A human who wants an Exchange's file writes back uses `/undo`, which is
+> unchanged; anything beyond its reach is git's job, and a conversation is rewound through
+> `/sessions`.
+
 **D1 — The Turn in flight is settled, not rolled back.** If the cancelled Turn issued tool calls,
 its reply stays in the conversation and every call gets a result:
 - a finished call keeps its real result;

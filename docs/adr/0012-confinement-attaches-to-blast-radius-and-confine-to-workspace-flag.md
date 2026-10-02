@@ -423,6 +423,12 @@ entry is *not* a scratch dir and does not join; the middle rung and Auto are unt
 (*Superseded for one route by the [Amendment (2026-09-27)](#amendment-2026-09-27--plan-runs-a-recipes-script-stage-confined-to-its-workflow-folder)
 below: a Recipe's script stage, run confined to its own workflow folder.*)
 
+> **Note (2026-10-02, verified against code):** no `confine-writable-paths` key exists.
+> `internal/config` declares none, and `Config.ConfineWritablePaths` (`internal/domain/config.go`),
+> the field such a key would fill, is set by no production code. The clause above rules on a
+> per-project entry that cannot be configured yet. The one path in `box.WritablePaths` today is the
+> session scratch dir that `Config.ConfinementBox` (`internal/domain/confinement.go`) folds in.
+
 **(b) This is a LOOSEN — the second — and the core invariant still holds.** *"Never both
 unsupervised and unbounded"* is answered on the bounded half, at the same standing the first
 loosen (2026-09-06) and the Allow-Edits row already accept in place of OS confinement for Apogee's

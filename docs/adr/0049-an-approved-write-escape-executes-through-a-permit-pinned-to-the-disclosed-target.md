@@ -59,6 +59,16 @@ native tool less recreated the asymmetry decision 1 kills. The fence becomes one
 bounds writes — and the parked Windows box-local `%TEMP%` work lands onto a fence that already
 understands it. (The field still has no writer; the semantics are latent but tested.)
 
+> **Note (2026-10-02, verified against code):** the parenthetical above stopped holding on
+> 2026-08-22. Since ADR 0056 D3, `box.WritablePaths` has a production writer:
+> `Config.ConfinementBox` (`internal/domain/confinement.go`) folds the session `ScratchDir` into
+> it, and the shipped composition root sets that dir (`rootWiring.wireSession` in
+> `cmd/apogee/wire_live.go`, `firingConfig` in `cmd/apogee/wire_firing.go`). So this decision's
+> union semantics are live for the scratch dir, as ADR 0056 and ADR 0012's 2026-09-14 amendment
+> rely on. The other source of the field still has no writer. `Config.ConfineWritablePaths`
+> (`internal/domain/config.go`) is set by no production code, and `internal/config` declares no
+> key that fills it, so a per-project writable path remains latent.
+
 **4 — Approval is final: no hard-deny set above the Gate.** The dangerous-action floor
 (`~/.apogee`) keeps exactly its documented meaning — a Tier-2 *forced look*, never a boundary
 (`internal/security/doc.go`) — and the human's informed yes then runs the write, `~/.apogee`

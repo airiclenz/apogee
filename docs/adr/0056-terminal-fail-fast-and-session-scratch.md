@@ -251,6 +251,12 @@ reconciled; the platform signature set is where the spellings live from now on.
   records the box's writable set as workspace ∪ per-project `WritablePaths` ∪ the session
   scratch dir (plus the backend-level `/dev/null` exemption). ADR 0012's "EPERM" wording is
   reconciled in place.
+
+  > **Note (2026-10-02, verified against code):** of that writable set, only the scratch dir has a
+  > production writer. `Config.ConfinementBox` (`internal/domain/confinement.go`) appends it to
+  > `box.WritablePaths`. The per-project half, `Config.ConfineWritablePaths`
+  > (`internal/domain/config.go`), is set by no production code, and `internal/config` declares no
+  > key for it, so today the box's writable set is the workspace plus the session scratch dir.
 - The terminal result surface grows three model-facing signals: the stop label, the
   heuristic denial label, and the mutation warning. All are additive lines on existing
   results; no wire or Driver obligation changes (ADR 0031 holds — the scratch path rides the
