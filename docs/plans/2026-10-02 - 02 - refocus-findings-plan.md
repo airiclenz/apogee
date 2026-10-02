@@ -506,7 +506,13 @@ docs/adr/0004-auto-mode-requires-os-level-confinement.md — Status superseded b
 Depends on item 4.
 **Commit:** `docs(design): correct design-doc drift and index workflow-bench-experiment`
 
-## 13. Verify, then fix: CONTEXT.md contradictions
+## 13. Verify, then fix: CONTEXT.md contradictions — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): commit-body citations — dangerous guard: security.MergeDangerousRules (internal/security/rules.go) has no caller, so the guard is tighten-only and not user-configurable, the add/remove split being the ADR 0012 seam's rule (apogee-089); external edit: cmd/apogee/settingsrows.go externallyEdited (!Editable && !GlobalOnly) over config.KeyRegistry = six KindStructured rows (servers, system-prompt-models, system-prompt-layers, mcp-servers, reactions, model-profiles; unconfined-hosts is GlobalOnly) plus six file-only scalars (sub-agents-server, tools.enabled, workflow-retries, workflow-continuations, workflow-wake, present.command-on-model-documents); Driver: cmd/apogee/daemonfire.go composes the engine through run.Once.
+
+NOTES (2026-10-02): verified, no edit needed — CONTEXT.md's "ten renderer-owned ui.* keys" already matches domain.UIPrefs (ten fields) and the ten ui.* registry rows; the Driver entry already lists `apogee daemon` — the omission was in the Embeddable agent entry's consumer list, which now names it.
+
+NOTES (2026-10-02): settings-screen-layout.md's external-edit list was also wrong (eight keys; code opens twelve) — corrected alongside CONTEXT.md, as the item's Approach allows.
 
 **What:**
 **Goal:** `CONTEXT.md` states one direction for the dangerous guard (tighten-only vs add-or-remove), one nested-structure

@@ -38,7 +38,7 @@ retired predecessor structure).
 **Embeddable agent** (the public API):
 The public Go package other applications import to construct and run an Apogee agent
 in-process. Apogee ships as **both** a ready-to-use terminal tool (the `cmd/apogee` TUI +
-CLI — the headline product) **and** this reusable library: the TUI, the `apogee headless`
+CLI — the headline product) **and** this reusable library: the TUI, `apogee daemon`, the `apogee headless`
 CLI (one prompt run unattended over the shared core, beside
 [`apogee probe`](#probing-and-model-identity) on the subcommand surface), and the bench are all consumers of one
 public package over the same engine. The repo is the whole tool, not just the library. The public surface is guarded
@@ -1448,8 +1448,11 @@ which the registry rows themselves call.
 Editing is **hybrid**: simple keys are edited in the pane — a bool toggles, a 3-plus-option key
 opens a selection popup, a string or an int opens a real single-line field on its row (cursor keys
 and mouse), the inline system prompt a multi-line field (⏎ inserts a newline, ctrl+s commits) —
-while the six nested structures take an **external edit**: ⏎ opens the human's own editor at that
-key's line, and every changed key is applied through those same two homes (a changed `mcp-servers:`
+while every key the pane does not write, bar the confinement pair below, takes an **external edit** —
+the six nested structures (`servers`, `system-prompt-models`, `system-prompt-layers`, `mcp-servers`,
+`reactions`, `model-profiles`) and the file-only scalars beside them (`sub-agents-server`,
+`tools.enabled`, the three `workflow-*` keys, `present.command-on-model-documents`): ⏎ opens the
+human's own editor at that key's line, and every changed key is applied through those same two homes (a changed `mcp-servers:`
 **reconnects**, validate-then-commit: the new set is dialled first and the old sessions keep serving
 on failure; startup connect stays fatal). Which editor is the **editor ladder** — the `editor`
 config key, then `$VISUAL`, then `$EDITOR`, then the platform's **OS opener** (`open` / `xdg-open` /
@@ -1576,8 +1579,11 @@ level of its arguments, is skipped — an MCP tool declares none, so every argum
 nested values included, is inspected in full (ADR 0012 amendment 2026-09-26). `commit-secrets` is the one **content-derived** member: its evidence is what git
 would stage, precomputed by dispatch into a shadow index before the pure resolution runs (D6), never
 the call's arguments. It is **tighten-only** and trivially bypassable by anything determined,
-so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on; the global
-config may add *or* remove entries (it is the user's machine), a project config may only *add*.
+so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on, and **not
+user-configurable today**: no config key feeds it, so the shipped rules are the whole set. The
+add/remove split — a global config may add *or* remove rules by ID (it is the user's machine), a
+project config may only *add*, and only stricter — is the rule of the ADR 0012 merge seam
+(`security.MergeDangerousRules`), which no config key calls yet (apogee-089 would wire it).
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
 not — it guards against mistakes, not attackers).
 

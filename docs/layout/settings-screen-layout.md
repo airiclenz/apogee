@@ -167,9 +167,11 @@ A paste lands here with its lines intact, which is what this field is for.
 
 ### The external edit (`· ⏎ opens $EDITOR`)
 
-The fifth key class has no field at all: the keys no row writes — `servers`, `sub-agents-server`,
-`mcp-servers`, `system-prompt-models`, `system-prompt-layers`, `tools.enabled`, `reactions`,
-`model-profiles` — carry the `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file
+The fifth key class has no field at all: every key no row writes bar the confinement pair (which
+points at `/confine` instead) — the six nested structures `servers`, `system-prompt-models`,
+`system-prompt-layers`, `mcp-servers`, `reactions` and `model-profiles`, and the file-only scalars
+`sub-agents-server`, `tools.enabled`, `workflow-retries`, `workflow-continuations`, `workflow-wake` and
+`present.command-on-model-documents` — carry the `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file
 itself on that key's line where the editor takes a line argument.
 
 Which editor is a **four-rung ladder** (ADR 0041): the `editor` config key, then `$VISUAL`, then
