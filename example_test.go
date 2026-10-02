@@ -111,6 +111,8 @@ var (
 	_ apogee.EditRegion
 	_ apogee.EditRegions
 	_ apogee.SearchHits
+	_ apogee.DelegationOutcome
+	_ apogee.DelegationBound
 	_ apogee.ToolRegistry
 	_ apogee.ExternalEffects
 	_ apogee.Role
@@ -186,6 +188,11 @@ var (
 	_ = apogee.ModeAskBefore
 	_ = apogee.ModeAllowEdits
 	_ = apogee.ModeAuto
+
+	_ = apogee.DelegationUnbounded
+	_ = apogee.DelegationStepCap
+	_ = apogee.DelegationTokenBudget
+	_ = apogee.DelegationTimeLimit
 
 	_ = apogee.StatusTurnComplete
 	_ = apogee.StatusExchangeComplete

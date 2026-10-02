@@ -341,7 +341,7 @@ func failedSummary(text string) bool {
 }
 
 // succeededSummary reads a WORDING for the one verdict of success apogee paints: a delegation the
-// engine drove to its own boundary, whose slot delegationVerdict words `done` — alone, or with the
+// engine drove to its own boundary, whose slot delegationOutcomeVerdict words `done` — alone, or with the
 // steering cell a human's messages append to whichever verdict stands (delegationSteeredCell, ADR
 // 0063 D3).
 //
@@ -362,8 +362,8 @@ func succeededSummary(text string) bool {
 }
 
 // endedWithoutReportSummary reads a WORDING for the verdict a delegation that came back with nothing
-// to report wears — `ended without a report`, alone or with the steering cell (delegationVerdict,
-// delegationEndedWithoutReport). It is succeededSummary's sibling and matches the same way, on the
+// to report wears — `ended without a report`, alone or with the steering cell (delegationOutcomeVerdict,
+// domain.DelegationOutcome.HasNoReport). It is succeededSummary's sibling and matches the same way, on the
 // WHOLE phrase, so a report line that merely mentions the words is not this verdict.
 //
 // It is read by one seam alone, subAgentFinished, which withholds the done ✓ from such a run. It
@@ -379,7 +379,7 @@ func endedWithoutReportSummary(text string) bool {
 }
 
 // stoppedSummary reads a WORDING for the verdict a delegation the HUMAN stopped wears — `stopped by
-// you`, alone or with the steering cell (delegationVerdict, delegationStoppedByUser; ADR 0086 D4) —
+// you`, alone or with the steering cell (delegationOutcomeVerdict, domain.DelegationOutcome.IsStoppedByUser; ADR 0086 D4) —
 // matched like endedWithoutReportSummary, on the WHOLE phrase. Its one reader is subAgentFinished,
 // which withholds the done ✓: a stopped run did not do what it was sent for. It sets no field, so it
 // reads in the step cap's ordinary marker tone — neither the red of a failure nor the green of done

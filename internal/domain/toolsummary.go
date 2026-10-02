@@ -38,7 +38,7 @@ package domain
 // codec's own additive contract about its rendering; it is not a wire form for this type.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the seven below; the marker method is
+// alongside its prose Content. The variants are the eight below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -155,3 +155,45 @@ func (e EditRegions) Stat() DiffStat {
 type SearchHits struct{ Count int }
 
 func (SearchHits) isToolSummary() {}
+
+// DelegationBound names the engine bound a delegation was stopped at, when one was. The zero
+// value is DelegationUnbounded: the run ended some other way — on its own boundary, at the
+// human's stop, or on a fault.
+type DelegationBound int
+
+const (
+	// DelegationUnbounded is a delegation no engine bound stopped.
+	DelegationUnbounded DelegationBound = iota
+	// DelegationStepCap is a delegation stopped at its step cap.
+	DelegationStepCap
+	// DelegationTokenBudget is a delegation stopped at its token budget.
+	DelegationTokenBudget
+	// DelegationTimeLimit is a delegation stopped at its time limit.
+	DelegationTimeLimit
+)
+
+// DelegationOutcome is sub_agent's outcome: how the delegated run ended, as the facts the
+// engine already decided when it wrote the result's head and trailer lines for the parent
+// model. It rides every result the engine renders for a run it started — the success, the
+// capped and stopped partials, and the faulted error alike — so a host reads the ending off
+// the value instead of parsing it back out of those lines. A result for a delegation that never
+// ran (a refusal, a stop that reached it while still queued) carries none.
+//
+// At most one of Bound, IsStoppedByUser and HasNoReport is set, in that order of precedence
+// as the engine decides it: the human's stop outranks a bound, and only a run that reached
+// its own boundary with nothing to hand back has no report. All three are clear on a faulted
+// run, whose IsError says how it ended.
+type DelegationOutcome struct {
+	// Bound is the engine bound the run was stopped at; DelegationUnbounded when none was.
+	Bound DelegationBound
+	// IsStoppedByUser is a run the human stopped after it had started.
+	IsStoppedByUser bool
+	// HasNoReport is a run that reached its own boundary and handed back no report: a bare
+	// acknowledgement, or a closing text the shared classifier judges not a report.
+	HasNoReport bool
+	// SteeredMessages counts the messages the human sent into the run while it ran; 0 when
+	// it was not steered.
+	SteeredMessages int
+}
+
+func (DelegationOutcome) isToolSummary() {}

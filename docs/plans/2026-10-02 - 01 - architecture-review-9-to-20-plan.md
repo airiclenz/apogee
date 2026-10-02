@@ -90,7 +90,12 @@ docs/plans/archived/2026-09-30 - 01 - exec-host-guarded-client-budget-latch-plan
 - `grep -c 'Landed · plan' docs/reviews/architecture-review-2026-09-30.html` prints `8`
 **Commit:** `docs(reviews): mark architecture review candidates 1-8 landed`
 
-## 2. A delegation's outcome is typed (#9)
+## 2. A delegation's outcome is typed (#9) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the `detail` hook keeps its `func(content string)` shape for every other tool; sub_agent gets a new `toolPresenter.resultDetail func(domain.ToolResult) toolOutcome` hook that absorbProse runs whether or not the result carries a summary (the guard's "routed through the detail hook"), instead of changing the signature shared by ~34 entries. `failure` does take the ToolResult (subprocessFailure updated to match).
+NOTES (2026-10-02): the prose readers stay as the fallback (`delegationVerdict(content)`, `delegationDetail(content)`, now built on `proseDelegationOutcome`); `delegationBoundVerdict` takes a `domain.DelegationBound`, read back from a matched head through the new `delegationBoundNamed`. With a summary, the steered notice is taken off the body as the result's final line (`delegationSteering`), not by regex.
+NOTES (2026-10-02): new tests — TestSubAgent_NarratedClosingTextHasNoReport (agent); TestDelegationOutcomeOutranksTheProse, TestDelegationResultDetailReadsTheOutcome, TestDelegationFailureReadsTheOutcomesSteering, TestSummaryBearingDelegationRendersAsItsProse (tui). Summary assertions also added to the existing DelegatesAndReportsBack, FaultedDelegationReportsAsError, StepCapReturnsAPartialResultToTheParent, TokenBudgetEndsTheChildThroughTheWrapUp, TimeLimitEndsTheChildThroughTheWrapUp, ACancelledDelegateIsStoppedAndRetained, SteeredChildResultCarriesTheParentNotice and AcknowledgementIsNoReport tests.
+NOTES (2026-10-02): consequential edit — internal/tui/toolleader.go: made necessary by the live slot now being worded by delegationOutcomeVerdict (three doc comments named delegationVerdict / delegationEndedWithoutReport / delegationStoppedByUser as the wording source).
 
 **What:**
 **Goal:** every result `delegationResult` renders (`subagent.go`; success and `IsError`) carries a typed

@@ -32,9 +32,10 @@ func TestToolSummaryVariantsAreSealed(t *testing.T) {
 		ChangedFiles{},
 		SearchHits{},
 		EditRegions{},
+		DelegationOutcome{},
 	}
 
-	const want = 7
+	const want = 8
 	if len(variants) != want {
 		t.Fatalf("ToolSummary variants = %d, want %d", len(variants), want)
 	}

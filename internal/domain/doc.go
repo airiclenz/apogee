@@ -83,7 +83,7 @@
 // object answering one parameter twice with differing values.
 // tooledit.go is the tool stage's pair of reaction working values — ToolCallEdit and
 // ToolResultEdit, the revision-bearing wrappers the two tool-stage reactions reshape a pending
-// call and a returned result through. toolsummary.go is ToolSummary and its seven variants,
+// call and a returned result through. toolsummary.go is ToolSummary and its eight variants,
 // the structured half of an outcome, written for a host rather than for the model. cwdline.go
 // is CwdLinePrefix and StripCwdLine — the shape of the `cwd:` line a subprocess tool opens its
 // result with, and the one strip every host-side reader of that result shares, so a host reads

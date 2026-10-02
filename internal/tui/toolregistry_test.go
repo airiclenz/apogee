@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -380,9 +381,9 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 	t.Run("a faulted run keeps its cause", func(t *testing.T) {
 		t.Parallel()
 
-		word, output, ok := delegationFailure(envelopeFaultLine + note + envelopeSteeredOne)
+		word, output, ok := delegationFailure(failedDelegation(envelopeFaultLine + note + envelopeSteeredOne))
 
-		wantWord, _, _ := delegationFailure(envelopeFaultLine + envelopeSteeredOne)
+		wantWord, _, _ := delegationFailure(failedDelegation(envelopeFaultLine + envelopeSteeredOne))
 		if !ok {
 			t.Fatal("delegationFailure declined a steered fallen-back result")
 		}
@@ -417,7 +418,7 @@ func TestDelegationValidationFaultsReadThroughTheErrorSlot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			word, output, ok := delegationFailure(tc.head + "\nI read two files so far" + envelopeSteeredOne)
+			word, output, ok := delegationFailure(failedDelegation(tc.head + "\nI read two files so far" + envelopeSteeredOne))
 
 			if !ok {
 				t.Fatal("delegationFailure declined a steered validation fault")
@@ -508,6 +509,170 @@ func TestDelegationDetailNeverPromotesANonReport(t *testing.T) {
 			t.Errorf("summary = %+v, want the report promoted into the slot, quoted", out.Summary)
 		}
 	})
+}
+
+// failedDelegation is a delegation's error result known only by its prose — the shape a result
+// carrying no typed outcome reaches the failure hook in.
+func failedDelegation(content string) domain.ToolResult {
+	return domain.ToolResult{Content: content, IsError: true}
+}
+
+// A result carrying a typed domain.DelegationOutcome is worded from it and never from its prose: each
+// case pairs an outcome with text the prose reading would word differently, so the slot can only
+// read as the case wants if the summary won.
+func TestDelegationOutcomeOutranksTheProse(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		outcome domain.DelegationOutcome
+		content string
+		want    string
+	}{
+		{"a bound over another bound's head", domain.DelegationOutcome{Bound: domain.DelegationTokenBudget},
+			envelopeCapMarker + "\nI had read two files so far", "capped at its token budget"},
+		{"a time limit", domain.DelegationOutcome{Bound: domain.DelegationTimeLimit},
+			"Found 4 gaps\nin the suite", "capped at its time limit"},
+		{"a report over a narration", domain.DelegationOutcome{}, "Let me now read X.", delegationDoneVerdict},
+		{"no report over a real report", domain.DelegationOutcome{HasNoReport: true}, "Found 4 gaps\nin the suite", delegationNoReportVerdict},
+		{"the human's stop over a plain report", domain.DelegationOutcome{IsStoppedByUser: true}, "Found 4 gaps\nin the suite", delegationStoppedVerdict},
+		{"steering the prose does not state", domain.DelegationOutcome{SteeredMessages: 2}, "Found 4 gaps\nin the suite", delegationDoneVerdict + " · steered by 2 messages"},
+		{"no steering over a notice", domain.DelegationOutcome{}, "Found 4 gaps\nin the suite" + envelopeSteeredOne, delegationDoneVerdict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := delegationStat(domain.ToolResult{Content: tc.content, Summary: tc.outcome})
+
+			if !ok || got.text != tc.want {
+				t.Errorf("delegationStat(%+v, %q) = %+v, want %q", tc.outcome, tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// A summary-bearing delegation's report is laid out from the outcome it carries: a narration the
+// outcome calls a report is promoted into the slot, and a report the outcome calls no report is not.
+func TestDelegationResultDetailReadsTheOutcome(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a narration the outcome reports is promoted", func(t *testing.T) {
+		t.Parallel()
+
+		out := delegationResultDetail(domain.ToolResult{Content: "Let me now read X.", Summary: domain.DelegationOutcome{}})
+
+		if out.Summary.Text != "Let me now read X." || !out.Summary.quoted {
+			t.Errorf("summary = %+v, want the line promoted into the slot, quoted", out.Summary)
+		}
+	})
+
+	t.Run("a report the outcome calls no report is body", func(t *testing.T) {
+		t.Parallel()
+
+		out := delegationResultDetail(domain.ToolResult{Content: "all clear", Summary: domain.DelegationOutcome{HasNoReport: true}})
+
+		if out.Summary.Text != "" {
+			t.Errorf("summary = %q, want none — the verdict takes the slot", out.Summary.Text)
+		}
+		if lines := out.Details; len(lines) != 1 || lines[0].Text != "all clear" {
+			t.Errorf("details = %+v, want the text as the one body line", lines)
+		}
+	})
+
+	t.Run("a result with no outcome falls back to its prose", func(t *testing.T) {
+		t.Parallel()
+
+		out := delegationResultDetail(domain.ToolResult{Content: "Let me now read X."})
+
+		if out.Summary.Text != "" {
+			t.Errorf("summary = %q, want none — the prose reads a narration as no report", out.Summary.Text)
+		}
+	})
+}
+
+// A FAILED delegation's steering comes from the outcome it carries: the count is the outcome's, and
+// the notice the engine put on the final line is taken off the body whatever it reads; a result whose
+// outcome says it was not steered keeps its first line, notice or no notice.
+func TestDelegationFailureReadsTheOutcomesSteering(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a steered fault", func(t *testing.T) {
+		t.Parallel()
+
+		res := domain.ToolResult{
+			Content: envelopeFaultLine + "\nI read two files so far\n\n(the final line the engine wrote)",
+			IsError: true,
+			Summary: domain.DelegationOutcome{SteeredMessages: 3},
+		}
+
+		word, output, ok := delegationFailure(res)
+
+		if !ok || word != envelopeFaultLine+" · steered by 3 messages" || output != "I read two files so far" {
+			t.Errorf("delegationFailure = (%q, %q, %v), want the fault line with the steering cell over the child's text", word, output, ok)
+		}
+	})
+
+	t.Run("an unsteered fault declines", func(t *testing.T) {
+		t.Parallel()
+
+		res := domain.ToolResult{Content: envelopeFaultLine + envelopeSteeredOne, IsError: true, Summary: domain.DelegationOutcome{}}
+
+		if _, _, ok := delegationFailure(res); ok {
+			t.Error("delegationFailure read a steering count the outcome does not carry")
+		}
+	})
+
+	t.Run("a result with no outcome falls back to its prose", func(t *testing.T) {
+		t.Parallel()
+
+		word, _, ok := delegationFailure(failedDelegation(envelopeFaultLine + envelopeSteeredOne))
+
+		if !ok || word != envelopeFaultLine+" · steered by 1 message" {
+			t.Errorf("delegationFailure = (%q, %v), want the notice read off the prose", word, ok)
+		}
+	})
+}
+
+// A summary-bearing delegation result renders exactly as the same result without its summary did:
+// the outcome the engine attaches says what the prose says, so the card — the promoted report line,
+// the verdict, the body — is unchanged byte for byte. It also pins the routing: a result carrying a
+// summary skips the prose layers, and without sub_agent's resultDetail the report line would vanish.
+func TestSummaryBearingDelegationRendersAsItsProse(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		outcome domain.DelegationOutcome
+	}{
+		{"a one-line report", "all clear", domain.DelegationOutcome{}},
+		{"a long report", "Found 4 gaps\nin the suite\nand two more in the docs", domain.DelegationOutcome{}},
+		{"a capped run", envelopeCapMarker + "\n[engine summary]\nRead a.txt.\n\n[delegate's closing report]\nI read a.txt", domain.DelegationOutcome{Bound: domain.DelegationStepCap}},
+		{"a stopped run", delegationStoppedHead + "\n[engine summary]\nRead a.txt.", domain.DelegationOutcome{IsStoppedByUser: true}},
+		{"a narration", "Let me now read X.", domain.DelegationOutcome{HasNoReport: true}},
+		{"a steered report", "all clear" + envelopeSteeredOne, domain.DelegationOutcome{SteeredMessages: 1}},
+	}
+	th := newTheme(scheme.Default())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			render := func(res domain.ToolResult) string {
+				tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "sub_agent",
+					Arguments: []byte(`{"task":"survey the repo"}`)}, "", workspaceRoot{})
+				tv.enrichWithResult(res, workspaceRoot{})
+				return strings.Join(renderToolBlock(th, tv, 80, blockState{expanded: true}).lines, "\n")
+			}
+
+			typed := render(domain.ToolResult{CallID: "1", Content: tc.content, Summary: tc.outcome})
+			prose := render(domain.ToolResult{CallID: "1", Content: tc.content})
+
+			if typed != prose {
+				t.Errorf("summary-bearing card differs from its prose twin:\n--- typed ---\n%s\n--- prose ---\n%s", typed, prose)
+			}
+		})
+	}
 }
 
 // taskListRendered is the block internal/tasklist renders for the three-task fixture every task_list

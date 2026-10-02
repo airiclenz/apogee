@@ -590,6 +590,21 @@ type EditRegions = domain.EditRegions
 // SearchHits is web_search's summary: the number of structured results returned.
 type SearchHits = domain.SearchHits
 
+// DelegationOutcome is sub_agent's summary: the bound that stopped the delegated run, whether
+// the human stopped it, whether it ended without a report, and how many messages the human
+// steered into it.
+type DelegationOutcome = domain.DelegationOutcome
+
+// DelegationBound names the engine bound a delegation was stopped at, if any.
+type DelegationBound = domain.DelegationBound
+
+const (
+	DelegationUnbounded   = domain.DelegationUnbounded
+	DelegationStepCap     = domain.DelegationStepCap
+	DelegationTokenBudget = domain.DelegationTokenBudget
+	DelegationTimeLimit   = domain.DelegationTimeLimit
+)
+
 // ToolRegistry is the injectable set of available tools.
 type ToolRegistry = domain.ToolRegistry
 

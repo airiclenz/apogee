@@ -98,6 +98,9 @@ func TestSubAgent_DelegatesAndReportsBack(t *testing.T) {
 	if !strings.Contains(res.Content, "Go TUI agent") {
 		t.Errorf("sub_agent result = %q, want the child's final message", res.Content)
 	}
+	if want := (domain.DelegationOutcome{}); res.Summary != want {
+		t.Errorf("sub_agent result Summary = %#v, want the plain reported outcome %#v", res.Summary, want)
+	}
 }
 
 // TestSubAgent_EventsNestAtDepthOne proves the sub-agent's events re-emit into the parent's
@@ -998,6 +1001,9 @@ func TestSubAgent_FaultedDelegationReportsAsError(t *testing.T) {
 	if !strings.Contains(strings.ToLower(sub.Content), "fault") {
 		t.Errorf("sub_agent result = %q, want a message naming the child fault", sub.Content)
 	}
+	if want := (domain.DelegationOutcome{}); sub.Summary != want {
+		t.Errorf("sub_agent result Summary = %#v, want %#v — a fault is said by IsError alone", sub.Summary, want)
+	}
 	// The human still sees the cause: the child's own ErrorEvent reached the shared sink at Depth 1.
 	if !hasErrorContaining(sink.events, 1, "connection reset") {
 		t.Error("expected the child's Upstream fault to surface as an ErrorEvent at Depth 1")
@@ -1664,6 +1670,9 @@ func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 	if want := cappedResult(fmt.Sprintf(stepCapResultFormat, 3), childFoldSummary, childClosingReport); sub.Content != want {
 		t.Errorf("sub_agent result = %q, want %q — head, engine summary, closing report", sub.Content, want)
 	}
+	if want := (domain.DelegationOutcome{Bound: domain.DelegationStepCap}); sub.Summary != want {
+		t.Errorf("sub_agent result Summary = %#v, want %#v", sub.Summary, want)
+	}
 	// The fold request: tool-less, under the delegate-fold instruction, and answered before the
 	// wrap-up — so the summary is in hand whatever the wrap-up then does.
 	if fold := responder.requests[len(scripts)-3]; len(fold.Tools) != 0 || !requestSystemContains(fold, foldInstructionPhrase) {
@@ -2084,6 +2093,9 @@ func TestSubAgent_TokenBudgetEndsTheChildThroughTheWrapUp(t *testing.T) {
 	if want := cappedResult(fmt.Sprintf(tokenCapResultFormat, 20_000_000), childFoldSummary, childClosingReport); sub.Content != want {
 		t.Errorf("sub_agent result = %q, want %q — the token head, the engine summary, the wrap-up reply", sub.Content, want)
 	}
+	if want := (domain.DelegationOutcome{Bound: domain.DelegationTokenBudget}); sub.Summary != want {
+		t.Errorf("sub_agent result Summary = %#v, want %#v", sub.Summary, want)
+	}
 	wrapUp := responder.requests[len(responder.requests)-2]
 	if got := len(wrapUp.Tools); got != 0 {
 		t.Errorf("the wrap-up request carries %d tools, want 0", got)
@@ -2121,6 +2133,9 @@ func TestSubAgent_TimeLimitEndsTheChildThroughTheWrapUp(t *testing.T) {
 	}
 	if want := cappedResult(fmt.Sprintf(timeCapResultFormat, "2h0m"), childFoldSummary, childClosingReport); sub.Content != want {
 		t.Errorf("sub_agent result = %q, want %q — the time head, the engine summary, the wrap-up reply", sub.Content, want)
+	}
+	if want := (domain.DelegationOutcome{Bound: domain.DelegationTimeLimit}); sub.Summary != want {
+		t.Errorf("sub_agent result Summary = %#v, want %#v", sub.Summary, want)
 	}
 	wrapUp := responder.requests[len(responder.requests)-2]
 	if got := len(wrapUp.Tools); got != 0 {
@@ -2750,6 +2765,9 @@ func TestSubAgent_SteeredChildResultCarriesTheParentNotice(t *testing.T) {
 
 			if want := answer + "\n\n" + tc.want; res.Content != want {
 				t.Errorf("sub_agent result = %q, want %q", res.Content, want)
+			}
+			if want := (domain.DelegationOutcome{SteeredMessages: len(tc.remarks)}); res.Summary != want {
+				t.Errorf("sub_agent result Summary = %#v, want %#v", res.Summary, want)
 			}
 		})
 	}
@@ -3460,7 +3478,25 @@ func TestSubAgent_AcknowledgementIsNoReport(t *testing.T) {
 			if res.IsError || res.Content != tc.want {
 				t.Errorf("sub_agent result = %+v, want the non-error %q", res, tc.want)
 			}
+			if want := (domain.DelegationOutcome{HasNoReport: tc.want == noReportMarker}); res.Summary != want {
+				t.Errorf("sub_agent result Summary = %#v, want %#v", res.Summary, want)
+			}
 		})
+	}
+}
+
+// TestSubAgent_NarratedClosingTextHasNoReport pins the second half of the no-report reading on the
+// typed outcome: a closing text the shared classifier judges narration (floor.IsNonReport) is handed
+// to the parent as it stands, and the result's DelegationOutcome says it carries no report — the
+// same judgment the host's prose reading makes of the same text — steering counted beside it.
+func TestSubAgent_NarratedClosingTextHasNoReport(t *testing.T) {
+	const narration = "Let me now read X."
+
+	res := runSteeredDelegation(t, narration, "focus on the tests")
+
+	want := domain.DelegationOutcome{HasNoReport: true, SteeredMessages: 1}
+	if res.IsError || res.Summary != want {
+		t.Errorf("sub_agent result = %+v, want a non-error result with Summary %#v", res, want)
 	}
 }
 
@@ -4989,8 +5025,12 @@ func TestSubAgent_ACancelledDelegateIsStoppedAndRetained(t *testing.T) {
 		t.Errorf("the upstream saw %d calls, want 4 — the spawn, one Turn, the cancelled Turn, the fold", got)
 	}
 	want := stoppedResult(childFoldSummary, "reading file 0", nil, retainedSurveyName)
-	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.IsError || got.Content != want {
+	got, ok := subAgentResultFor(sink.events, "c1")
+	if !ok || got.IsError || got.Content != want {
 		t.Errorf("cancelled delegation result = %+v, want the non-error stopped result\n%s", got, want)
+	}
+	if wantSummary := (domain.DelegationOutcome{IsStoppedByUser: true}); got.Summary != wantSummary {
+		t.Errorf("cancelled delegation Summary = %#v, want %#v", got.Summary, wantSummary)
 	}
 	retained, ok := a.retained.lookup(retainedSurveyName)
 	if !ok || len(retained.rounds) != 1 || retained.rounds[0].report != summaryReport(childFoldSummary, "reading file 0") {

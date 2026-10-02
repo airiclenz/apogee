@@ -1215,7 +1215,7 @@ func countPhrase(text string) (n int, noun string, ok bool) {
 func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot) {
 	defer tv.finishDisplay(ws)
 	if result.IsError {
-		tv.absorbFailure(result.Content)
+		tv.absorbFailure(result)
 		return
 	}
 	p, known := toolRegistry[tv.name]
@@ -1279,14 +1279,15 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // started (delegationStoppedQueuedContent, ADR 0086 D4): its slot takes the stopped verdict in the
 // ordinary marker tone (stoppedSummary) rather than the red, and its text lays out as the same
 // failure body, so the head line entry.neverStarted reads stays where it looks.
-func (tv *toolView) absorbFailure(content string) {
+func (tv *toolView) absorbFailure(result domain.ToolResult) {
+	content := result.Content
 	if tv.headsRun() && delegationStoppedByUser(content) {
 		tv.Summary = namedSummary(detailLine{Text: delegationStoppedVerdict})
 		tv.Details = tv.Details.with(failureBody(content))
 		return
 	}
 	if p, known := toolRegistry[tv.name]; known && p.failure != nil {
-		if word, output, ok := p.failure(content); ok {
+		if word, output, ok := p.failure(result); ok {
 			tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + word})
 			tv.Details = tv.Details.with(outputBody(output))
 			return
@@ -1300,7 +1301,17 @@ func (tv *toolView) absorbFailure(content string) {
 // per-tool table, and still the only thing a tool with no typed outcome has. A result carrying a
 // domain.ToolSummary skips them: what its slot says is its stat hook's word, and all such a result
 // leaves here is the body its presenter reads off it (view_diff's diff, read_file's located lines).
+// The one layer that runs either way is a presenter's resultDetail, which reads the summary itself
+// to decide how the prose lays out (sub_agent's, delegationResultDetail): skipping it for a
+// summary-bearing result would lose the report line its slot promotes.
 func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolResult) {
+	if known && p.resultDetail != nil {
+		out := p.resultDetail(result)
+		tv.Summary = out.Summary
+		tv.stat = out.Stat
+		tv.Details = tv.Details.with(out.Details)
+		return
+	}
 	if result.Summary != nil {
 		if known && p.body != nil {
 			tv.Details = tv.Details.with(p.body(result))

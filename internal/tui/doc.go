@@ -809,7 +809,12 @@
 // toolsummary_pin_test.go executes for real every summary-bearing tool that needs nothing but a
 // temp workspace — nine of the eleven — and asserts the rendered line, the cross-package pin the
 // old regexes never had; the other two, git_status and git_show, want a real repository and are
-// pinned against one where they live (internal/tools/git_test.go).
+// pinned against one where they live (internal/tools/git_test.go). sub_agent reports a summary
+// too — domain.DelegationOutcome, how the run ended — and reads it in a resultDetail hook as well as
+// its stat, because the ending decides whether the report is promoted; it is pinned where the engine
+// attaches it (internal/agent's subagent tests) and through the cmd/apogee delegation runs, and the
+// delegation readers' prose regexes over the engine's head and trailer lines are only the floor for a
+// delegation result carrying none.
 //
 // The rest of the package, one line each, so this narration names every file in it: tui.go is the
 // seam boundary the binary sees ([Run], [Options], and the [Engine], [SkillCatalog] and

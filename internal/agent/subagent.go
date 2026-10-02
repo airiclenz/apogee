@@ -103,7 +103,8 @@ const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); parti
 // delegate runs under (Agent.tokenCap, Agent.timeCap): the same shape — a non-error head promising
 // a partial result — with the bound that tripped named in the parenthesis, so the parent learns
 // which knob its next delegation is up against. Package constants, pinned by test, because the TUI
-// reads the three heads by shape (delegationBoundHead) and the parent model reads them as the
+// reads the three heads by shape (delegationBoundHead) off a result carrying no typed outcome
+// (domain.DelegationOutcome, delegationSummary) and the parent model reads them as the
 // contract for the rest of the result. %d is the token budget applied; %s is the time limit,
 // spelled by boundDurationText.
 const (
@@ -114,7 +115,7 @@ const (
 // The NON-REPORT variants of the three heads above, written when floor.ClosingShapeOf judges the
 // capped child's closing text to be tool output or narration rather than a report (P2 of plan
 // 2026-09-18 - 00; owner call, 2026-09-18): the same `[delegate stopped at its <bound>;` prefix —
-// the TUI's delegationBoundHead anchors on it and reads the bound unchanged — but the rest of the
+// the TUI's prose fallback, delegationBoundHead, anchors on it and reads the bound unchanged — but the rest of the
 // line says there is NO closing report, names what the last reply reads as instead (the %s slot,
 // one of the floor.ClosingShape spellings) and points the parent at the engine summary as the
 // finding. The text is still forwarded whole beneath, under closingNarrationHead, because the
@@ -300,6 +301,18 @@ func (a *Agent) capHeadFormats() (reportFormat, nonReportFormat string, bound an
 	return stepCapResultFormat, stepCapNonReportFormat, a.stepCap
 }
 
+// delegationBound is the host-facing name of this bound (domain.DelegationBound), the one a capped
+// result's typed outcome reports beside the head line capHeadFormats picks for the same bound.
+func (b delegateBound) delegationBound() domain.DelegationBound {
+	switch b {
+	case boundTokens:
+		return domain.DelegationTokenBudget
+	case boundTime:
+		return domain.DelegationTimeLimit
+	}
+	return domain.DelegationStepCap
+}
+
 // subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
 // child's own fault sentence (turnLifecycle.lastFault) — the same line the human read at Depth+1 — so the
 // parent model reads the cause in the result itself instead of being sent to an error it cannot see.
@@ -333,7 +346,7 @@ const (
 	// writing the file its spawning call named; %s is Agent.outputPath, in the call's spelling.
 	missingOutputResultFormat = "sub-agent ended without writing %s; its last text follows:"
 	// missingOutputNoteFormat is the same fault on a CAPPED child, where the result keeps its
-	// non-error shape and the partial marker first (the TUI reads the head): the note is appended
+	// non-error shape and the partial marker first (the parent model reads the head): the note is appended
 	// in the SeatFallbackNote slot, a body note like the clamp line. %s is Agent.outputPath.
 	missingOutputNoteFormat = "[delegate ended without writing %s]"
 	// draftOutputNoteFormat is the converse on a FAULTED child: its spawn-named file IS there and
@@ -1483,6 +1496,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// would elide them with the middle. The head lines the TUI's recognisers read (stepCapResultFormat,
 	// subAgentFaultPrefix) are inside the kept head, so the cut never re-classifies a result.
 	result.Content = capDelegateResult(result.Content)
+	result.Summary = a.delegationSummary(res, result)
 
 	// What the human wrote to a STOPPED child that never reached it, first in the note slot, one
 	// head line and the message text each: the parent reads the fold as the child's work, and these
@@ -1553,6 +1567,31 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		result.Content += userSteeredTrailerSeparator + userSteeredTrailer(a.steered)
 	}
 	return result, dispatchDone
+}
+
+// delegationSummary is the typed half of a rendered delegation result (domain.DelegationOutcome):
+// the facts the head line and the user-steered trailer state to the parent model, taken from the
+// run itself rather than read back off those lines, so a host renders how the delegation ended
+// without parsing text written for the model. result is the outcome switch's result with the
+// absolute cap applied and no body note appended yet — the text the no-report reading judges is
+// then the child's closing text alone, exactly as a host's prose reading judges it once it has
+// taken the notes back off. The receiver is the CHILD, as in delegationResult.
+//
+// The cases follow delegationResult's switch: an error result names its own fault, the human's
+// stop outranks a bound, and only a completed non-error result can have no report.
+func (a *Agent) delegationSummary(res domain.StepResult, result domain.ToolResult) domain.DelegationOutcome {
+	summary := domain.DelegationOutcome{SteeredMessages: a.steered}
+	switch {
+	case result.IsError:
+	case a.stoppedByUser:
+		summary.IsStoppedByUser = true
+	case res.StepCapped:
+		summary.Bound = a.capHit.delegationBound()
+	default:
+		text := strings.TrimSpace(result.Content)
+		summary.HasNoReport = text == noReportMarker || floor.IsNonReport(result.Content)
+	}
+	return summary
 }
 
 // delegation is everything a delegate IS that its Config cannot say — the constructor input
