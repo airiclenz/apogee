@@ -114,8 +114,9 @@ func copyWord(t *testing.T, drv *tuitest.Driver, rec *osc52Recorder, word, where
 //
 // What it cannot reach is tmux: a multiplexer between apogee and the terminal is invisible to an
 // in-process test, so tmux dropping the application's OSC 52 under `set-clipboard external` (the
-// reason copyFlash also runs `tmux load-buffer -w`) is pinned one layer down, at loadTmuxBuffer's
-// gate and argv. Serial: it sets the environment.
+// reason copyFlash also runs `tmux load-buffer -w`) is pinned one layer down, at
+// present.Clipboard.WriteTmux's gate and argv (internal/present/clipboard_test.go). Serial: it sets
+// the environment.
 func TestE2ECopyWritesOSC52(t *testing.T) {
 	neutraliseCopyRoutes(t)
 	stub := stubllm.New(t, stubllm.Script{Model: "copy-model", Turns: []stubllm.Turn{
