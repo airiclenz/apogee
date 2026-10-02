@@ -4,7 +4,7 @@
   model that fits an agentic harness — the operator is trusted, the bytes they operate on are
   not, and neither is the model. Every item either stops unbounded work running without a gate,
   or stops the approval surface showing something other than what the executor will do.
-- **Date:** 2026-08-11 · **Status:** not started
+- **Date:** 2026-08-11 · **Status:** done — all 20 items landed 2026-08-12 (9d109c45 … b218a87c)
 - **Sized for:** ~200k-context host; one commit per item, items independently committable
 - **Skills:** `coding-standards`
 - **Authoritative sources** (an item that disagrees with these follows these):
@@ -152,7 +152,7 @@ which the audit itself identifies as the single biggest predictor of a finding b
 
 ---
 
-## 1. Record the audit triage
+## 1. Record the audit triage — ✅ DONE (2026-08-12)
 
 **What:** Write `docs/reviews/2026-08-11 - 01 - external-audit-triage.md` containing: the threat
 model quoted above; a table of the 14 ranked positions with a CONFIRMED / PARTIALLY-CONFIRMED /
@@ -173,7 +173,7 @@ acceptances did *not* dismiss.
 
 # Cluster A — Unconfined execution
 
-## 2. Refuse an `argv[0]` the model can write, at every exec site
+## 2. Refuse an `argv[0]` the model can write, at every exec site — ✅ DONE (2026-08-12)
 
 **What:** No exec site anywhere is checked against the writable confinement box —
 `box.WritablePaths` appears only in the OS backends that build the write fence
@@ -232,7 +232,7 @@ answer here and must not be reused).
 - A fixture workspace with `.venv/bin/python3` refuses with a message containing that path.
 **commit:** `fix(tools): refuse an argv0 resolved inside the writable box`
 
-## 3. `python_exec` — the workspace must not precede the stdlib on `sys.path`
+## 3. `python_exec` — the workspace must not precede the stdlib on `sys.path` — ✅ DONE (2026-08-12)
 
 **Depends on item 2** (shares `internal/tools/exec_common.go`'s env handling).
 
@@ -280,7 +280,7 @@ present, never pass by accident on a host where the mechanism was untested.
   not depend on which Python the CI host happens to ship.
 **commit:** `fix(tools): stop the workspace shadowing the Python stdlib in python_exec`
 
-## 4. Drop active-content formats from the OS opener; harden the served rung
+## 4. Drop active-content formats from the OS opener; harden the served rung — ✅ DONE (2026-08-12)
 
 **What:** `internal/present/opener.go:172` states an extension earns its place "only when its
 default handler DISPLAYS the file" — and the map at `:209-212` contains `.html`, `.htm`, `.xhtml`,
@@ -333,7 +333,7 @@ presence, plus `nosniff`.
   this check in NOTES, because a header-presence assertion would not catch it.
 **commit:** `fix(present): the opener allow-list admits no active-content formats`
 
-## 5. Resolve the opener's program absolutely
+## 5. Resolve the opener's program absolutely — ✅ DONE (2026-08-12)
 
 **Depends on item 2** (uses `refuseExecFromWritablePath`).
 
@@ -361,7 +361,7 @@ than launched; a test that absolute resolution failure degrades to the baseline 
 
 # Cluster B — Approval-pane integrity
 
-## 6. Flatten model-authored fields so they cannot paint rows
+## 6. Flatten model-authored fields so they cannot paint rows — ✅ DONE (2026-08-12)
 
 **What:** `internal/tui/approval.go:167-177` joins parts with `\n` and the popup paints one row per
 segment (`popup.go:1086`), while `stripEscapes` (`internal/tui/transcript.go:1317-1325`)
@@ -385,7 +385,7 @@ layout as a *feature*; restate those cases to distinguish value layout (kept) fr
 - The new tests fail when the flattening call is reverted (state the check in NOTES).
 **commit:** `fix(tui): flatten model-authored fields so they cannot paint approval rows`
 
-## 7. Cap values, keep the tail, and agree with the executor on duplicates
+## 7. Cap values, keep the tail, and agree with the executor on duplicates — ✅ DONE (2026-08-12)
 
 **Depends on item 6** (same render path).
 
@@ -414,7 +414,7 @@ a truncation test asserting the last line of an over-long value survives; extend
   both keys and the final line of the long value.
 **commit:** `fix(tui): per-value caps, tail-preserving elision, last-wins duplicate keys`
 
-## 8. Show the resolved path when it differs from the argument
+## 8. Show the resolved path when it differs from the argument — ✅ DONE (2026-08-12)
 
 **What:** apogee already computes the true write target (`internal/agent/dispatch.go:717-723`) but
 consumes it only as a bool for the gate decision (`resolution.go:320`, `:355`); `EvalRealPath`,
@@ -439,7 +439,7 @@ asserting no extra line is rendered when literal and resolved agree.
 
 # Cluster C — Untrusted-repo surfaces
 
-## 9. A skill id may not be a command line
+## 9. A skill id may not be a command line — ✅ DONE (2026-08-12)
 
 **What:** The shadow guard and the parser disagree about what a token is. `slashSuggestions`
 (`internal/tui/autocomplete.go:357`) drops a skill only when `commandByName` matches the **whole**
@@ -466,7 +466,7 @@ both, plus a case iterating `commandSpecs` asserting no skill id can out-parse a
 - A skill with id `confine off --save` fails to load, asserted by test.
 **commit:** `fix(skills,tui): reject whitespace in skill ids and align the shadow guard`
 
-## 10. Disclose a skill's source
+## 10. Disclose a skill's source — ✅ DONE (2026-08-12)
 
 **Depends on item 9.**
 
@@ -492,7 +492,7 @@ rather than silently clipped.
   on the `/` menu at 80 columns.
 **commit:** `feat(tui): disclose a skill's source on the menu and /skills`
 
-## 11. Contain the skill-loader anchor and bound its walk
+## 11. Contain the skill-loader anchor and bound its walk — ✅ DONE (2026-08-12)
 
 **What:** `loadDir` (`internal/skills/load.go:89`) calls `os.OpenRoot(dir)` on a path **inside the
 untrusted repo**, with no `Lstat` and no containment check. Go's `openRootNolog` does not pass
@@ -513,7 +513,7 @@ a walk-bound test asserting a deep or wide tree terminates.
 - A fixture with `.apogee/skills` symlinked to `/tmp` loads zero skills.
 **commit:** `fix(skills): contain the loader anchor and bound the walk`
 
-## 12. Move the skill reload off the render goroutine
+## 12. Move the skill reload off the render goroutine — ✅ DONE (2026-08-12)
 
 **Depends on item 11.**
 
@@ -530,7 +530,7 @@ menu still shows a freshly written skill in the same turn (the behaviour `TestSl
 - `go test -race ./internal/tui/...` passes, including the existing reload-on-open test.
 **commit:** `fix(tui): reload the skill catalog off the update goroutine`
 
-## 13. Symlink policy on the write and read paths
+## 13. Symlink policy on the write and read paths — ✅ DONE (2026-08-12)
 
 **Depends on item 8** (uses the `→ resolves to <X>` renderer).
 
@@ -558,7 +558,7 @@ target reaches the result string.
 - A fixture with `docs → .git` refuses `write_file docs/config`.
 **commit:** `fix(security): refuse symlink-crossing write parents, disclose symlinked reads`
 
-## 14. Protect `.git/` and `~/.apogee` on the dangerous-action floor
+## 14. Protect `.git/` and `~/.apogee` on the dangerous-action floor — ✅ DONE (2026-08-12)
 
 **What:** The floor names `.ssh`, `.aws`, `.netrc` and `.npmrc` but neither `.git/` nor apogee's
 own `~/.apogee` control plane — an asymmetry rather than a recall complaint, and the audit rates it
@@ -571,7 +571,7 @@ only; `MergeDangerousRules` semantics are untouched, so `TODO.md` L1 and L2 stay
 - `go test -race ./internal/security/...` passes.
 **commit:** `fix(security): add .git and the apogee control plane to the dangerous floor`
 
-## 15. Stop repo-supplied git hooks and filters from running
+## 15. Stop repo-supplied git hooks and filters from running — ✅ DONE (2026-08-12)
 
 **What:** `runGit` hardens the environment but nothing on disk. A repo-wide grep confirms no `-c`,
 no `GIT_CONFIG_NOSYSTEM`, no `--no-verify`, no `--no-textconv` and no `core.hooksPath` anywhere in
@@ -600,7 +600,7 @@ pass; none is covered by an existing item and none is named in **Out of scope**.
 belong to Cluster B's surface and 18–19 to Cluster A's, but they are numbered here so the
 existing items keep their numbers and their cross-references.
 
-## 16. Give allow-for-session a grain that bounds blast radius
+## 16. Give allow-for-session a grain that bounds blast radius — ✅ DONE (2026-08-12)
 
 **What:** `gateCacheKey` (`internal/agent/resolution.go:451-458`) returns bare `call.Tool` —
 arguments are never part of the key. So one "allow for session" on `terminal` pre-clears **every**
@@ -637,7 +637,7 @@ malformed argument blob yields the empty key and therefore re-prompts.
   the key for non-MCP classes.
 **commit:** `fix(agent): key allow-for-session on the arguments, not just the tool name`
 
-## 17. Strip bidi controls at the three seams that keep them
+## 17. Strip bidi controls at the three seams that keep them — ✅ DONE (2026-08-12)
 
 **Depends on item 6** (same render path; do this after the field flattening lands).
 
@@ -669,7 +669,7 @@ as narrow and a later blanket change breaks a test rather than emoji.
 - A tool argument containing U+202E renders in pane order, asserted by test.
 **commit:** `fix(tui,title,session): strip bidi controls at the seams that kept them`
 
-## 18. Reap the process group on a clean exit, and stop reporting a wedged drain as success
+## 18. Reap the process group on a clean exit, and stop reporting a wedged drain as success — ✅ DONE (2026-08-12)
 
 **What:** `cmd.Cancel` is the only thing that signals the process group, and it runs on ctx
 cancellation alone (`internal/tools/exec_pgroup_unix.go:37`, `exec_pgroup_other.go:51`). A normal
@@ -700,7 +700,7 @@ gone after a **clean** exit (today only the cancel path is covered); a case asse
   in NOTES).
 **commit:** `fix(tools): reap the process group on a clean exit and report a wedged drain`
 
-## 19. Give the Go toolchain its own environment, and disclose the package it vets
+## 19. Give the Go toolchain its own environment, and disclose the package it vets — ✅ DONE (2026-08-12)
 
 **What:** `runGoVet` (`internal/tools/diagnostics.go:199-208`) passes `env: safeGitEnv()` — git's
 allowlist (`git.go:55-59`) applied to the Go toolchain. `GOFLAGS`, `GOWORK`, `GOTOOLCHAIN`,
@@ -730,7 +730,7 @@ file's own name.
 
 ---
 
-## 20. Reconcile the security documentation
+## 20. Reconcile the security documentation — ✅ DONE (2026-08-12)
 
 **Depends on items 2, 4, 5, 13, 18, 19.**
 

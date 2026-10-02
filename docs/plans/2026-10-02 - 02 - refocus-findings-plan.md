@@ -623,7 +623,13 @@ internal/tools/manual_drift_test.go — TestManualListsEveryKnownToolName; inter
 Depends on item 15.
 **Commit:** `docs(manual): state configuration and commands in the present tense`
 
-## 17. Bookkeeping: architecture review status, hostile-bytes plan, .beads README
+## 17. Bookkeeping: architecture review status, hostile-bytes plan, .beads README — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): review #9–#17 and #20 verified against git log (eed6c3df #9; 7f67dfca/6a2c9368/1901a703 #10; bccfa53c #11; 565e589f #12; 4b8fd630/5d07b916/f8123ed9 #13; 56478501 #14; 0a0d6f79 #15; 97a647fb #16; b3df2cc6/bcf7d915/b5cfc459 #17; 75c04f57/2c318987/020d08f2/4235e23d/cce1fddc #20); residue notes: #11 LoopView.ParallelAgents stays, #12 12a only (FloorConfig's seven bools stay), #17 schedule.Spec.Prompt stays the label, #20 20c dropped; the #landed ledger (09-20 items) is left as is.
+
+NOTES (2026-10-02): hostile-bytes items 1–20 each matched by commit subject in git log (9d109c45 … b218a87c, all 2026-08-12; item 2 landed as ac383a10 under a reworded subject); Status set to done and every item heading marked ✅ DONE (2026-08-12).
+
+NOTES (2026-10-02): committing .beads/README.md stages a .beads path, so the pre-commit hook re-exports .beads/issues.jsonl and may leave it modified unstaged — that export is not part of this item.
 
 **What:**
 **Goal:** `docs/reviews/architecture-review-2026-09-30.html` shows #9–#17 as Landed, each matched to a done item of the
