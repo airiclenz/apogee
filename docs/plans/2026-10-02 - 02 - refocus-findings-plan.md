@@ -471,7 +471,13 @@ docs/adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md — §4 res
 Depends on items 6 and 10.
 **Commit:** `docs(design): narrow the permit door and correct stale confinement-contract claims`
 
-## 12. Verify, then fix: design-doc drift and the AGENTS.md design index
+## 12. Verify, then fix: design-doc drift and the AGENTS.md design index — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): reaction-core-greenfield.md keeps its §1/§9 pre-collapse citations (internal/hooks, internal/mechanisms, EnableMechanisms, MechanismFiredEvent, …: verified absent from the tree) and gains a dated historical note at the top plus a pointer at §9; the Acceptance's "or the doc carries a dated historical note" branch is the one taken.
+
+NOTES (2026-10-02): test-drivers.md — the "fourteen of the seventy-one" serial count (2026-09-13 sweep) was dropped rather than re-counted (a reliable serial count is not greppable); the current count is stated once as 133 TestE2E tests, and 36 / 121.7 s / 89.3 s stay labelled as the 2026-08-28 measurement. The "thirty-six driven tests" in the shard paragraph is a fan-out figure, not a test count, and is unchanged. Status "skeleton" became "Current" (plan archived as completed in 6a3b81f0).
+
+NOTES (2026-10-02): mcp-client.md — ADR 0004 dropped from Owner ADRs (0008 and 0012 remain); the quoted phase-3 plan line still says "ADRs 0004/0008", so a parenthetical after the quote notes 0004 is superseded by 0012.
 
 **What:**
 **Goal:** `docs/design/mcp-client.md` names a live owning ADR, not the superseded ADR 0004;

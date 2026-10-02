@@ -1,7 +1,6 @@
 # Apogee — MCP Client Shape (the P3.15 design note)
 
 **Date:** 2026-06-24 · **Status:** ✅ **Accepted** (the P3.15 design deliverable) · **Owner ADRs:**
-[ADR 0004](../adr/0004-auto-mode-requires-os-level-confinement.md) /
 [ADR 0008](../adr/0008-stateless-tools-and-non-forkable-external-effects.md) /
 [ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md) ·
 **Realised by:** P3.15 (`internal/mcp`, the `cmd/apogee` composition wiring).
@@ -11,7 +10,8 @@
 > records the *client* shape." There is **no new policy** to ratify here — the gating, the
 > statelessness, and the blast-radius classification all pre-exist. This note records the *client
 > shape* the existing policy is realised through, so it is a design note (like the
-> confinement-execution-contract), not a fresh ADR.
+> confinement-execution-contract), not a fresh ADR. (The quoted ADR 0004 has since been superseded
+> by ADR 0012, which now owns the confinement side.)
 
 ---
 

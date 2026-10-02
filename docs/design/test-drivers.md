@@ -1,7 +1,7 @@
 # Test drivers
 
-**Date:** 2026-08-27 · **Status:** 🚧 **skeleton** — each section is filled by the plan item named
-under its heading · **Owner ADR:**
+**Date:** 2026-08-27 · **Status:** ✅ **Current** — the kit is built (its plan was archived as completed)
+and this document is kept in step with it as the kit grows · **Owner ADR:**
 [ADR 0062](../adr/0062-test-drivers-are-drivers.md) ("test drivers are Drivers") ·
 **Realised by:** `docs/plans/archived/2026-08-27 - 02 - test-drivers-kit-plan.md`
 
@@ -620,11 +620,12 @@ a copy writes is the case (`e2e_copy_test.go`). The recorder is held on the sess
 after, because the launch waits for the first frame and a late recorder would miss it.
 
 `openerLookPath` (`cmd/apogee/wire_present.go`) is the same family of seam as `tuiScheduleClock`,
-`liveLauncherOps` and `configWatchTiming`: a package var that is nil in production, where
-`present.Opener` falls back to `exec.LookPath`. It exists because the Opener is built inside
+`liveLauncherOps` and `configWatchTiming`: a package var that is nil in production. It becomes
+`present.Opener.LookPath`, the resolver the Opener hands to `security.ResolveProgram`, which falls
+back to `exec.LookPath` when it is nil. It exists because the Opener is built inside
 `presentationRungs` and installed into the TOOL layer through `livePresentation.install`, so the
-launcher closure a driver enters through never sees it. A test points it at a script that appends
-its argv to a log — the ratified proxy for the desktop hand-off (T-19): what an OS handler does with
+launcher closure a driver enters through never sees it. A test swaps it for a resolver that answers
+with a script of its own, one that appends its argv to a log — the ratified proxy for the desktop hand-off (T-19): what an OS handler does with
 a file is not observable from a test process, but WHICH program apogee handed WHICH path to is, and
 that is the whole of rung 1's allow-list claim.
 
@@ -944,7 +945,7 @@ accepted proxies with no open work.
 | Network egress: proxy honoured, url-safety live, a stream nothing deadlines (T-18) | PTY only — the proxy variables reach a program only in the environment it STARTS with (`launchPTYWithEnv`); an in-test forward proxy with a route table onto loopback servers (`internal/tuitest/netfix.go`) is the instrument, and its access log is the evidence. The 2 MiB body cap is the one claim of this row that stays unit-covered (`internal/tools/network_funnel_test.go`): a driven run would have to carry two megabytes through the conversation to say the same thing | `TestE2EEgress`; `TestE2EEgressLongStreamIsNotDeadlined` | Traffic to a real remote host — nothing in the suite leaves loopback, so a `NO_PROXY` host dialling DIRECT has no hermetic form; what is asserted instead is that no loopback traffic, the model conversation included, ever went through the proxy |
 | MCP server behaviour (T-18) | an in-test streamable-http MCP server with one `echo` tool (`tuitest.MCPEcho`, the shape `internal/mcp`'s own fixture uses) reached at a proxied endpoint; a url-safety edit that closes the endpoint is read off the tool DISAPPEARING (the live connection follows the new host lists, so the server is dropped and its calls come back as an unknown tool), the reconnect that is then refused off nothing coming back, and the denied ENDPOINT off the raw pty stream of a launch that never reached a frame | `TestE2EEgress`; `TestE2EEgressDeniedMCPEndpointStopsTheLaunch` | What a third-party MCP server actually does with a call |
 | Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` | Felt flicker — the repaint ceiling is the accepted proxy |
-| Desktop hand-off (T-19) | a logging fake opener installed through the `openerLookPath` package var, which is what `present.Opener.LookPath` resolves to; assert argv and wording. The refused half is the log's ABSENCE of a launch | `TestE2EPresentOpensOnlyTheAllowedFormats`; `TestE2EPresentServesWithoutLeakingTheToken` | What a real desktop application does with the file |
+| Desktop hand-off (T-19) | a logging fake opener installed through the `openerLookPath` package var, which becomes `present.Opener.LookPath`, the resolver `security.ResolveProgram` calls; assert argv and wording. The refused half is the log's ABSENCE of a launch | `TestE2EPresentOpensOnlyTheAllowedFormats`; `TestE2EPresentServesWithoutLeakingTheToken` | What a real desktop application does with the file |
 | Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` | `brew upgrade` before the release it upgrades to exists |
 | Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check`; the same gate turns the two module-wide checks on the tree itself — `golangci-lint` under `.golangci.yml` (`make lint`) and `govulncheck` over the dependency graph (`make vulncheck`) | `make check` | A vulnerability the Go vulnerability database does not yet carry, and any defect the standard linter set does not model |
 | Landlock residual honesty on an older ABI (T-11) | the negative direction only — the `ubuntu-latest` check job asserts `probe` discloses no residual on a modern kernel | CI job `check` | The residual itself: it needs a 5.13–6.1 kernel, and GitHub offers no runner in that window (the `ubuntu-22.04` image runs the 6.8 HWE kernel) |
@@ -1003,10 +1004,12 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 
 ## Gates and budgets
 
-**Measured 2026-08-28, the final pass over the whole kit.**
-`go test -race -count=1 -run 'TestE2E' ./cmd/apogee/` — **36 tests, all PASS, 121.7 s** of package
-wall clock (**89.3 s** without `-race`). Roughly 120 s of that is test time; the rest is the one-off
-`go build` every run of the package now pays. Per file, under `-race`:
+**Measured 2026-08-28, the final pass over the whole kit.** These figures are that day's and were
+not re-measured: `go test -race -count=1 -run 'TestE2E' ./cmd/apogee/` — **36 tests** (2026-08-28),
+**all PASS, 121.7 s** of package wall clock (**89.3 s** without `-race`). Roughly 120 s of that is
+test time; the rest is the one-off `go build` every run of the package now pays. The set has grown
+since: the current count is **133** `TestE2E` tests (2026-10-02,
+`grep -h '^func TestE2E' cmd/apogee/*_test.go | wc -l`). Per file, under `-race`, on 2026-08-28:
 
 | File | s | File | s |
 | --- | --- | --- | --- |
@@ -1046,7 +1049,7 @@ shares — `tuitest.CheckLeaks` attributes goroutines to the test that started t
 `internal/tuitest/leak.go`), `assertNoAmbientApogeeConfig` only reads what `TestMain` cleared, and
 the config watcher's fast cadence is set once in `TestMain` rather than swapped per launch. What
 stays serial is exactly the set that reaches `t.Setenv` (the testing package panics on the pair)
-or swaps a package-var seam — fourteen of the seventy-one, through `guardHome`, `presentDesktop`,
+or swaps a package-var seam — the tests that reach `guardHome`, `presentDesktop`,
 `presentRemote`, `installFakeLauncher`, `useFakeScheduleClock` or a `t.Setenv` of their own — and
 the testing package runs those to completion before it releases the
 parallel ones, so a swapped seam is never read across tests; every swap is still restored through

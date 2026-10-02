@@ -131,7 +131,8 @@ model a tool-list slot.
   2026-08-25 → the Console family,
   [ADR 0059](../adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md)**
   (`console_open/send/read/close`, live host state, split along the classification line,
-  default-off/profile-enabled); implementation plan pending.
+  default-off/profile-enabled). **SHIPPED 2026-08-25** — `console_open`, `console_send`,
+  `console_read` and `console_close` live in `internal/tools/console_*.go` over `internal/console`.
 - **Git verbs — deferred candidates, not arms:** `git_add`/staging visibility and `git_blame`
   (Qwen3.8); `git_pull`/`git_push` (Qwen3.6-35B — its gating record is under arm (g) above).
   Each is a single unreplicated ask; one is added only when a second poll asks for it by name.

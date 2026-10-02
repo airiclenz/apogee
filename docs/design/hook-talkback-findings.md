@@ -1,5 +1,11 @@
 # Hook talk-back findings — can a user-configured reaction speak to the model?
 
+> **Overtaken by [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+> (2026-09-07).** This is a research record, kept for its reasoning. The question it poses was decided
+> in ADR 0076 the same day, and the Reaction core that ADR specifies has since shipped and replaced
+> the Hook and Mechanism surfaces this document describes. Where this record and ADR 0076 disagree,
+> the ADR is right. Its "next step is a grill" closing line is history: that grill happened.
+
 **Provenance:** recorded 2026-09-07 at the owner's request to *research* one question, raised after
 the Hooks feature shipped: should apogee's observe-only [Hook](../../CONTEXT.md) and its
 [Mechanism](../../CONTEXT.md) lab surface become one user-facing surface offering three modes —

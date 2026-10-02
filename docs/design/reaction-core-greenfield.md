@@ -14,6 +14,15 @@ Implementation plans: the three staged plans §9.4 links. · **Companion:**
 > kept on merit and the reason is given; where it is dropped, the reason is given too. The point is
 > to see whether apogee should refactor towards this shape.
 
+> **Historical note (2026-10-02).** The Reaction core this document designed has shipped (ADR 0076;
+> `internal/reactions`, `domain.ReactionFiredEvent`). The "today" it describes — §1 and the §9 seed
+> tables — is the `v0.20.10` tree of 2026-09-07, and many of the files and symbols it names no
+> longer exist: `internal/hooks`, `internal/mechanisms`, `internal/domain/mechanism.go`,
+> `internal/agent/hookrun.go`, `selfreg.go`, `internal/config/hooks.go`,
+> `configwrite_mechanism.go`, `MechanismFiredEvent`, `FloorGuardEvent` and `EnableMechanisms` were
+> deleted or replaced by the collapse. Read those citations as a record of the pre-collapse code,
+> not as a map of the current tree.
+
 ---
 
 ## 1. Today: one abstraction in three coats
@@ -260,7 +269,8 @@ handoff). Cheaper now, but it adds a fourth idiom on top of three and keeps ever
 ## 9. Seed material for the plan
 
 Recorded 2026-09-07 from a code survey of `v0.20.10` so the plan-writer starts from the map. Line
-numbers drift; names do not.
+numbers drift; names do not. (2026-10-02: the "Today" column and the install-site list are that
+pre-collapse survey — see the historical note at the top; most of those files are gone.)
 
 ### 9.1 What collapses into what
 
