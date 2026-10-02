@@ -118,7 +118,8 @@ func TestAnthropicCodecEncode(t *testing.T) {
 // TestAnthropicCodecEffort pins the effort mapping and the thinking rule together: the five
 // levels the Messages API has write output_config.effort — with carriesEffort reporting it — and
 // request `thinking: {"type":"adaptive"}`; every other effort writes no output_config and requests
-// `thinking: {"type":"disabled"}`.
+// `thinking: {"type":"disabled"}` on a model the no-effort table does not list (see
+// TestAnthropicCodecNoEffortShapePerModel for the ones it does).
 func TestAnthropicCodecEffort(t *testing.T) {
 	t.Parallel()
 
@@ -214,6 +215,87 @@ func TestAnthropicCodecEffortDropsSamplingUnderThinking(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAnthropicCodecNoEffortShapePerModel pins the no-effort shape table (ADR 0078 amendment
+// "the no-effort shape is per model"): below low, Opus 5.5, Fable 5.x and Mythos 5.x send no
+// `thinking` key and `output_config.effort: "low"`, Sonnet 5.5 sends `between_tools` and no
+// effort, and every other id keeps `disabled`; only `disabled` keeps the profile's sampling, and
+// low is adaptive on every id. carriesEffort is the REQUESTED effort on every id, so the
+// output_config the lowest shape writes on its own never earns a fault the effort hint.
+func TestAnthropicCodecNoEffortShapePerModel(t *testing.T) {
+	t.Parallel()
+
+	const (
+		disabled     = `{"type":"disabled"}`
+		betweenTools = `{"type":"between_tools"}`
+		adaptive     = `{"type":"adaptive"}`
+		low          = `{"effort":"low"}`
+	)
+	type shape struct {
+		thinking     string // "" ⇒ no thinking key
+		outputConfig string // "" ⇒ no output_config
+		sampled      bool
+	}
+	lowest := shape{outputConfig: low}
+	between := shape{thinking: betweenTools}
+	off := shape{thinking: disabled, sampled: true}
+	thinking := shape{thinking: adaptive, outputConfig: low}
+	models := []struct {
+		id       string
+		noEffort shape
+	}{
+		{id: "claude-opus-5-5", noEffort: lowest},
+		{id: "claude-fable-5-1", noEffort: lowest},
+		{id: "claude-mythos-5", noEffort: lowest},
+		{id: "Claude-Opus-5-5-20261001", noEffort: lowest},
+		{id: "claude-sonnet-5-5", noEffort: between},
+		{id: "claude-opus-4-8", noEffort: off},
+		{id: "minimax-m3", noEffort: off},
+	}
+	temp, topP, topK := 0.2, 0.9, 40
+	for _, m := range models {
+		for _, effort := range []Effort{"", EffortOff, EffortNone, EffortMinimal, EffortLow} {
+			want, wantCarries := m.noEffort, false
+			if effort == EffortLow {
+				want, wantCarries = thinking, true
+			}
+			t.Run(m.id+"/"+string(effort), func(t *testing.T) {
+				t.Parallel()
+				codec := &anthropicCodec{}
+				req := Request{
+					Model:          m.id,
+					Messages:       []Message{{Role: "user", Content: "x"}},
+					ThinkingEffort: effort,
+					Sampling:       Sampling{Temperature: &temp, TopP: &topP, TopK: &topK},
+				}
+
+				body, carries, err := codec.encode(req)
+
+				if err != nil {
+					t.Fatalf("encode: %v", err)
+				}
+				var got map[string]json.RawMessage
+				if err := json.Unmarshal(body, &got); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+				if string(got["thinking"]) != want.thinking {
+					t.Errorf("thinking = %s, want %q in %s", got["thinking"], want.thinking, body)
+				}
+				if string(got["output_config"]) != want.outputConfig {
+					t.Errorf("output_config = %s, want %q in %s", got["output_config"], want.outputConfig, body)
+				}
+				for _, key := range []string{"temperature", "top_p", "top_k"} {
+					if _, present := got[key]; present != want.sampled {
+						t.Errorf("%s present = %v, want %v in %s", key, present, want.sampled, body)
+					}
+				}
+				if carries != wantCarries {
+					t.Errorf("carriesEffort = %v, want %v", carries, wantCarries)
+				}
+			})
+		}
 	}
 }
 

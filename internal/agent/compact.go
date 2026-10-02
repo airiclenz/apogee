@@ -532,8 +532,8 @@ func (a *Agent) compactTranscriptChars() int {
 // server was sent.
 //
 // The cause is chosen on what THIS request actually asked for — its own ThinkingEffort — and never
-// on the dialect. compactCompleter's EffortOff override fires only where off means off (two
-// dialects and the anthropic wire), but a session whose profile pins `effort: off` carries
+// on the dialect. compactCompleter's EffortOff override fires only where off asks for the least
+// reasoning the server allows (two dialects and the anthropic wire), but a session whose profile pins `effort: off` carries
 // EffortOff under any dialect (internal/agent/wire.go's
 // resolvedEffort), and telling that session it never asked would be a lie. The engine cannot
 // inspect the server either, so neither cause diagnoses one: the asked half reports what was asked
@@ -543,8 +543,10 @@ const cappedSummaryErrFmt = "compaction summary hit its output cap (%d tokens) w
 
 // cappedSummaryAskedOffCause is the cause for a summary request that carried the off rung: the
 // intent went out and the server reasoned regardless. Why it did — a template that drops the key, a
-// model that cannot stop thinking — is beyond the engine, so the text says only what happened.
-const cappedSummaryAskedOffCause = "the summarizer asked for no reasoning and this server reasoned anyway"
+// model that cannot stop thinking — is beyond the engine, so the text says only what happened. It
+// says "as little as this server allows", not "none": on the anthropic models that refuse disabled
+// thinking the off rung goes out as adaptive thinking at effort low (ADR 0078).
+const cappedSummaryAskedOffCause = "the summarizer asked for as little reasoning as this server allows and it reasoned anyway"
 
 // cappedSummaryNotAskedCause is the cause for a summary request that carried no off rung at all —
 // a server compactCompleter leaves alone, with nothing pinning `effort: off`. Nothing was
@@ -568,8 +570,9 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // re-stream budget and doubling hold-off, so a momentary 502 during a summary no longer fails the
 // fold.
 //
-// The summary call asks for NO reasoning, whatever the session's effort resolves to. Compaction is
-// maintenance, not a Turn: the summarizer does a mechanical job under a bounded output cap
+// The summary call asks for NO reasoning — or, on a model with no off switch, the least it
+// allows — whatever the session's effort resolves to. Compaction is maintenance, not a Turn: the
+// summarizer does a mechanical job under a bounded output cap
 // (compactMaxTokens), and a thinking model that spends that whole cap on a reasoning pass comes
 // back with finish reason "length" and empty content — so the fold faults, and on a child agent
 // (which folds at every quiescent Turn boundary) it faults again at the next one, forever. That is
@@ -580,9 +583,11 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // only on a server whose chat template honours it.
 //
 // The override is gated on the SERVER's wire and dialect (a.cfg.Wire and a.effortDialect — both
-// are the server's, ADRs 0078 and 0060) being ones whose "off" rung actually means off: the
-// anthropic wire, where off requests `thinking: {"type":"disabled"}` and any named level requests
-// adaptive thinking (ADR 0078 amendment 2026-10-02); and, on the openai wire, llama.cpp's
+// are the server's, ADRs 0078 and 0060) being ones whose "off" rung actually means off, or as
+// near to off as the model goes: the anthropic wire, where off requests the model's no-effort shape — `thinking: {"type":"disabled"}`
+// on most models, `between_tools` on Sonnet 5.5, and on Opus 5.5, Fable 5.x and Mythos 5.x (which
+// have no off switch) adaptive thinking at effort low — and any named level requests adaptive
+// thinking (ADR 0078 amendments 2026-10-02); and, on the openai wire, llama.cpp's
 // chat_template_kwargs (what the incident server is detected as, through the /props probe) and
 // OpenRouter's reasoning object. Every other openai-wire dialect keeps resolvedEffort exactly as
 // today — no named dialect because a caller that asks for nothing must change nothing on the wire
@@ -705,9 +710,10 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 }
 
 // offMeansOff reports whether the server this Agent is bound to reads the off rung as "no
-// reasoning pass": the anthropic wire (off requests disabled thinking) whatever the dialect, or an
-// openai-wire server on the kwargs or reasoning dialect. See compactCompleter for why the other
-// dialects keep the session's resolved effort.
+// reasoning pass", or the least one its model allows: the anthropic wire (off requests the
+// model's no-effort shape) whatever the dialect, or an openai-wire server on the kwargs or
+// reasoning dialect. See compactCompleter for why the other dialects keep the session's resolved
+// effort.
 func (c compactCompleter) offMeansOff() bool {
 	if provider.WireFor(c.a.cfg.Wire) == provider.WireAnthropic {
 		return true

@@ -572,8 +572,9 @@ func TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer(t *testing.T
 }
 
 // TestCompactSummarizerAsksForNoThinkingOnTheAnthropicWire pins the override on the anthropic
-// wire, where the server names no effort dialect but off means off — it requests
-// `thinking: {"type":"disabled"}` (ADR 0078 amendment 2026-10-02). The assertion sits at the
+// wire, where the server names no effort dialect but off asks for the least thinking the model
+// allows — `thinking: {"type":"disabled"}` on most models, the model's own no-effort shape on the
+// rest (ADR 0078 amendments 2026-10-02). The assertion sits at the
 // provider seam: the summary request carries EffortOff although the profile resolves high, while
 // the next real Turn still carries high.
 func TestCompactSummarizerAsksForNoThinkingOnTheAnthropicWire(t *testing.T) {
@@ -603,6 +604,62 @@ func TestCompactSummarizerAsksForNoThinkingOnTheAnthropicWire(t *testing.T) {
 	}
 	if main.ThinkingEffort != provider.EffortHigh {
 		t.Errorf("main-turn request ThinkingEffort = %q, want %q", main.ThinkingEffort, provider.EffortHigh)
+	}
+}
+
+// TestCompactSummarizerOnOpus55SendsTheLowestEffortShape pins the summary request's wire body on
+// a model that refuses `thinking: {"type":"disabled"}` (ADR 0078 amendment "the no-effort shape is
+// per model"): on claude-opus-5-5 the off rung the summarizer carries goes out with no `thinking`
+// key and `output_config.effort: "low"`, while the next real Turn still carries high. It runs over
+// a real anthropic-wire Client on stubllm's transport, because the codec writes that body and the
+// Client names its own model on it.
+func TestCompactSummarizerOnOpus55SendsTheLowestEffortShape(t *testing.T) {
+	t.Parallel()
+
+	const model = "claude-opus-5-5"
+	server := stubllm.InProcess(t, stubllm.Script{Model: model, Turns: []stubllm.Turn{
+		summaryTurn("FOLDED"), {Text: "done", Repeat: true},
+	}})
+	client := provider.NewClient("http://stubllm", model,
+		provider.WithHTTPClient(&http.Client{Transport: server.Transport()}),
+		provider.WithMaxRetries(0),
+		provider.WithWire(provider.WireAnthropic),
+	)
+	up := &scriptedUpstream{Client: client, server: server}
+	cfg := baseConfig(&recordingSink{})
+	cfg.Model = model
+	cfg.Wire = string(provider.WireAnthropic)
+	cfg.Profile.Thinking.Effort = domain.EffortHigh
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	foldOnce(t, a, up, 1)
+	if err := a.Submit(domain.UserInput{Text: "carry on"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	summary := up.lastSummary()
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(summary.Body, &body); err != nil {
+		t.Fatalf("decode summary body: %v", err)
+	}
+	if thinking, present := body["thinking"]; present {
+		t.Errorf("summary request thinking = %s, want no thinking key", thinking)
+	}
+	if summary.Effort.OutputEffort != string(provider.EffortLow) {
+		t.Errorf("summary request output_config.effort = %q, want %q", summary.Effort.OutputEffort, provider.EffortLow)
+	}
+	mains := up.mains()
+	if len(mains) == 0 {
+		t.Fatal("no main-turn request logged")
+	}
+	if got := mains[len(mains)-1].Effort.OutputEffort; got != string(provider.EffortHigh) {
+		t.Errorf("main-turn output_config.effort = %q, want %q", got, provider.EffortHigh)
 	}
 }
 
@@ -760,7 +817,7 @@ func TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked(t *testing.T) {
 
 	const reasoning = "Restate the task, the files touched, and the open question before summarising."
 	const head = "compaction summary hit its output cap (4096 tokens) with no visible text to show for it"
-	const asked = " — the summarizer asked for no reasoning and this server reasoned anyway"
+	const asked = " — the summarizer asked for as little reasoning as this server allows and it reasoned anyway"
 	const notAsked = " — the cap went on a reasoning pass this server was never asked to skip"
 
 	cases := []struct {

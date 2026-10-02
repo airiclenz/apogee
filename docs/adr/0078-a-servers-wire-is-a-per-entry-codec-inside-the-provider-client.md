@@ -136,6 +136,9 @@ wire and only to the model that produced them, so the reason decision 4 gave is 
   `thinking: {"type": "adaptive"}` beside `output_config.effort`. When it resolves to `off`,
   `none` or `minimal`, or to nothing at all, the body requests `thinking: {"type": "disabled"}`
   explicitly, exactly as before, so a request with no effort is byte-identical to what v1 sent.
+  (*Superseded by the [Amendment (2026-10-02) — the no-effort shape is per model](#amendment-2026-10-02--the-no-effort-shape-is-per-model)
+  below: the no-effort half now depends on the model, and only models outside its table keep
+  `disabled`.*)
 - **Thinking blocks go back in the order received.** A reply can put a thinking block after its
   text or between its `tool_use` blocks (interleaved thinking, and the progress update that sits
   just before each tool call). The API takes the latest assistant turn back only with its thinking
@@ -146,9 +149,54 @@ wire and only to the model that produced them, so the reason decision 4 gave is 
 - **The compaction summary never requests thinking on this wire.** The summariser's request is
   forced to the off rung on an anthropic server, as it already was on the kwargs and reasoning
   dialects, so a thinking pass can never spend the summary's output cap.
+  (*Superseded for Opus 5.5, Fable 5.x and Mythos 5.x by the
+  [Amendment (2026-10-02) — the no-effort shape is per model](#amendment-2026-10-02--the-no-effort-shape-is-per-model)
+  below: on those models the off rung requests adaptive thinking at effort `low`, and on Sonnet
+  5.5 it requests `between_tools`.*)
 - **Thinking wins over sampling.** While the body requests adaptive thinking, it leaves out the
   request's `temperature`, `top_p` and `top_k`, because the API restricts them while thinking is on.
   With thinking disabled they are sent as before. This drop covers only the body the codec builds.
   A `request-extra:` block is merged after the codec and is never refused, so a `temperature` or
   `top_k` written there still reaches the wire and still conflicts with thinking at a resolved
   effort. Leave sampling knobs out of an anthropic entry's `request-extra:`.
+
+## Amendment (2026-10-02) — the no-effort shape is per model
+
+Supersedes the first bullet of the amendment above ("The thinking mode follows the resolved
+effort") for requests whose effort resolves to `off`, `none`, `minimal` or nothing, and its third
+bullet ("The compaction summary never requests thinking on this wire") for the models below. A
+named effort from `low` up is unchanged: `thinking: {"type": "adaptive"}` beside
+`output_config.effort`.
+
+`thinking: {"type": "disabled"}` is not a shape every current model accepts. Opus 5.5, Fable 5.x
+and Mythos 5.x answer it with a 400 and have no off switch at all; Sonnet 5.5 answers it with a
+400 but accepts `between_tools`. Because compaction summaries and the session-naming call both
+force the off rung, every compaction on those models failed (bead
+`apogee-anthropic-thinking-disabled-400`).
+
+- **The no-effort shape comes from a prefix table on the model id.** The codec matches the
+  request's model id, ignoring case, against a short table of id prefixes, and the longest match
+  wins:
+
+  | Model id starts with | Body for an effort below `low` |
+  |---|---|
+  | `claude-opus-5-5`, `claude-fable-5`, `claude-mythos-5` | no `thinking` key, and `output_config.effort: "low"` |
+  | `claude-sonnet-5-5` | `thinking: {"type": "between_tools"}`, and no effort |
+  | anything else | `thinking: {"type": "disabled"}`, and no effort, byte-identical to before |
+
+  On the first row "no effort" means the least thinking the model allows, not none.
+- **A new model needs a table row.** The table is a denylist in `internal/provider`, not a
+  capability apogee discovers: the Messages API advertises no tell. A future model that also
+  refuses `disabled` keeps getting `disabled`, and failing with a 400, until it has a row. An
+  allowlist would have broken every model apogee does not know, including proxies that rename
+  models.
+- **Only `disabled` keeps the profile's sampling.** The `between_tools` shape and the
+  no-key-plus-`low` shape both let the model think, so the body leaves out `temperature`, `top_p`
+  and `top_k` exactly as it does for adaptive thinking.
+- **The effort hint follows the requested effort, not the body.** The no-key-plus-`low` shape
+  writes `output_config` for a request that named no effort. A fault on such a request is still
+  reported as one that carried no effort, so it never gains the hint that blames an effort level.
+- **Compaction and naming get the same mapping.** Both force the off rung, and the codec maps it
+  per model like any other request. On Opus 5.5, Fable 5.x and Mythos 5.x the summariser therefore
+  runs with adaptive thinking at effort `low`. The capped-summary fault says the summariser
+  "asked for as little reasoning as this server allows" rather than "asked for no reasoning".

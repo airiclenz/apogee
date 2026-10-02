@@ -52,7 +52,15 @@ prefix; bwrap resolves only from fixed system directories; `internal/tui` produc
 - 17: guard folded
 - 18: guard folded
 
-## 1. Anthropic no-effort requests send each model a thinking shape it accepts
+## 1. Anthropic no-effort requests send each model a thinking shape it accepts — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): `cappedSummaryAskedOffCause` text reworded from "the summarizer asked for no reasoning and this server reasoned anyway" to "the summarizer asked for as little reasoning as this server allows and it reasoned anyway" (the plan marks the constant superseded for the omit+low ids); its assertion in compact_test.go follows.
+
+NOTES (2026-10-02): docs/manual/configuration.md's model-profiles effort paragraph ("`off` asks for no reasoning at all") also gained a qualifier for the anthropic models with no off switch, under the item's widened prose rule.
+
+NOTES (2026-10-02): added one case-variant id (`Claude-Opus-5-5-20261001`) to the wire table test beyond the plan's six ids, to pin case-insensitive prefix matching.
+
+NOTES (2026-10-02): the Acceptance `go test -race` runs were not executed by the implementer — the harness permission classifier refused `go test -race -count=1 ./internal/provider/`; targeted non-race runs of TestAnthropicCodec* and TestCompactSummarizer* passed, and the new compact test was confirmed to fail without the codec change.
 
 **What:**
 **Goal:** On the anthropic wire, a request whose effort is off, none, minimal or unset sends: for a model id starting

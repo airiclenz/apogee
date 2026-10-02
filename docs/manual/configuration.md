@@ -1109,8 +1109,10 @@ model-profiles:
 Leave the key out and **nothing at all** is sent, so the model's own default stands —
 which is exactly why you would set it: Qwen3.8's template reasons at its `xhigh` default
 unless told otherwise, which is a great deal of thinking for a one-line edit. `off` asks
-for no reasoning at all. The key is orthogonal to `style:` beside it, which only says how
-reasoning *arrives*; a value outside those eight is a startup error, and a server that
+for no reasoning at all, except on the `wire: anthropic` models that cannot switch thinking
+off, where it asks for the least the model allows (see
+[`request-extra:`](#extra-fields-in-every-request--request-extra)). The key is orthogonal
+to `style:` beside it, which only says how reasoning *arrives*; a value outside those eight is a startup error, and a server that
 rejects an effort it does not support fails the turn with a message naming this key.
 
 **Apogee works out for itself whether the model has a dial at all**, from what the
@@ -1630,13 +1632,24 @@ refused too. With no `request-extra:` the request is byte-for-byte what it was
 without the key.
 
 On a `wire: anthropic` server, a thinking effort from `low` up also turns the model's
-thinking on (`thinking: {"type": "adaptive"}`), and `off`, `none`, `minimal` or no effort
-at all turns it off. While thinking is on, apogee leaves `temperature`, `top_p` and
-`top_k` out of the body it builds, because the API restricts them with thinking on.
+thinking on (`thinking: {"type": "adaptive"}`). For `off`, `none`, `minimal` or no effort
+at all, apogee sends the least thinking the model accepts, chosen by the start of the
+model id:
+
+| Model id starts with | What `off` sends |
+|---|---|
+| `claude-opus-5-5`, `claude-fable-5`, `claude-mythos-5` | no `thinking` key and `output_config.effort: "low"`. These models have no off switch, so they still think a little |
+| `claude-sonnet-5-5` | `thinking: {"type": "between_tools"}` |
+| anything else | `thinking: {"type": "disabled"}` |
+
+A model that rejects `disabled` but is not in this table fails with a 400 until apogee
+learns its id. Unless thinking is `disabled`, apogee leaves `temperature`, `top_p` and
+`top_k` out of the body it builds, because the API restricts them while the model can think.
 `request-extra:` is merged after that and is not checked, so a `temperature` or `top_k`
 you put there is still sent and still conflicts with thinking: leave sampling knobs out
-of an anthropic entry's `request-extra:`. Compaction summaries never ask for thinking
-on this wire.
+of an anthropic entry's `request-extra:`. Compaction summaries and session naming always
+ask for `off`, so they get the same shape: no thinking on most models, and the least the
+model allows on the ones above.
 
 ### How fast each server answers — the picker summary
 

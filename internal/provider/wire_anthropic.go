@@ -17,15 +17,18 @@ import (
 //
 // Thinking follows the resolved effort: a named effort at or above low requests
 // `thinking: {"type":"adaptive"}` beside `output_config.effort`, and every other request —
-// off, none, minimal, or no effort at all — carries `thinking: {"type":"disabled"}` explicitly,
-// because the current models run adaptive thinking when the key is omitted. Thinking blocks are
-// signed and must be replayed verbatim: a reply's `thinking` and `redacted_thinking` blocks
-// surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock), each with the
-// place it held among the reply's text and tool_use blocks, and an assistant Message's
+// off, none, minimal, or no effort at all — sends the no-effort shape its model accepts
+// (anthropicNoEffortShapes): `thinking: {"type":"disabled"}` explicitly by default, because the
+// current models run adaptive thinking when the key is omitted; no `thinking` key and
+// `output_config.effort: "low"` for the models that refuse disabled and have no lower rung; and
+// `thinking: {"type":"between_tools"}` for the one that refuses disabled but takes that. Thinking
+// blocks are signed and must be replayed verbatim: a reply's `thinking` and `redacted_thinking`
+// blocks surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock), each with
+// the place it held among the reply's text and tool_use blocks, and an assistant Message's
 // ThinkingBlocks are written back at those places — the API takes an assistant turn back only in
-// the order it sent it (anthropicReasoningEntry). While thinking is requested the body drops the
+// the order it sent it (anthropicReasoningEntry). Unless thinking is disabled the body drops the
 // profile's sampling knobs (temperature, top_p, top_k), which the API constrains under thinking
-// (ADR 0078 amendment 2026-10-02).
+// (ADR 0078 amendments 2026-10-02).
 
 const (
 	// anthropicMessagesPath is the Messages endpoint every anthropic request is posted to.
@@ -35,12 +38,57 @@ const (
 	// anthropicDefaultMaxTokens is the `max_tokens` written when the request pins none —
 	// the field is mandatory on this wire, where chat-completions leaves it to the server.
 	anthropicDefaultMaxTokens = 4096
-	// anthropicThinkingDisabled is the thinking mode a request with no effort above minimal asks for.
+	// anthropicThinkingDisabled is the thinking mode a request with no effort above minimal asks
+	// for on every model anthropicNoEffortShapes does not list.
 	anthropicThinkingDisabled = "disabled"
 	// anthropicThinkingAdaptive is the thinking mode a request with a named effort (low..max)
 	// asks for: the model decides how much to think, steered by output_config.effort.
 	anthropicThinkingAdaptive = "adaptive"
+	// anthropicThinkingBetweenTools is the thinking mode a no-effort request asks for on a model
+	// that refuses disabled but accepts thinking confined to the gaps between tool calls.
+	anthropicThinkingBetweenTools = "between_tools"
 )
+
+// anthropicNoEffortShape is the thinking shape a request whose effort resolves below low sends.
+type anthropicNoEffortShape int
+
+const (
+	// anthropicNoEffortDisabled sends `thinking: {"type":"disabled"}` and no effort — the default.
+	anthropicNoEffortDisabled anthropicNoEffortShape = iota
+	// anthropicNoEffortLowest sends no `thinking` key and `output_config.effort: "low"`: the model
+	// refuses disabled, so the least it can be asked for is adaptive thinking at the lowest rung.
+	anthropicNoEffortLowest
+	// anthropicNoEffortBetweenTools sends `thinking: {"type":"between_tools"}` and no effort.
+	anthropicNoEffortBetweenTools
+)
+
+// anthropicNoEffortShapes lists the model-id prefixes whose no-effort request must not carry
+// `thinking: {"type":"disabled"}`, because those models answer it with a 400. Matching is a
+// case-insensitive prefix on the request's model and the longest matching prefix wins; an id no
+// row matches keeps the disabled default, so a new model that also refuses disabled needs a row
+// here (ratified 2026-10-02, ADR 0078).
+var anthropicNoEffortShapes = []struct {
+	prefix string
+	shape  anthropicNoEffortShape
+}{
+	{prefix: "claude-opus-5-5", shape: anthropicNoEffortLowest},
+	{prefix: "claude-fable-5", shape: anthropicNoEffortLowest},
+	{prefix: "claude-mythos-5", shape: anthropicNoEffortLowest},
+	{prefix: "claude-sonnet-5-5", shape: anthropicNoEffortBetweenTools},
+}
+
+// anthropicNoEffortShapeFor is the no-effort shape for model: the shape of the longest
+// anthropicNoEffortShapes prefix the id starts with, ignoring case, or the disabled default.
+func anthropicNoEffortShapeFor(model string) anthropicNoEffortShape {
+	id := strings.ToLower(model)
+	shape, matched := anthropicNoEffortDisabled, 0
+	for _, row := range anthropicNoEffortShapes {
+		if len(row.prefix) > matched && strings.HasPrefix(id, row.prefix) {
+			shape, matched = row.shape, len(row.prefix)
+		}
+	}
+	return shape
+}
 
 // anthropicCodec speaks the Anthropic Messages protocol on behalf of one Client. The Messages
 // path is fixed and the version header is a constant of the wire; the one thing it holds is
@@ -64,8 +112,11 @@ func (a *anthropicCodec) headers(apiKey string) map[string]string {
 	return h
 }
 
-// encode marshals the Messages body for req and reports whether it wrote an effort — the gate
-// on thinkingEffortHint, as chatRequest.carriesEffort is on the openai wire.
+// encode marshals the Messages body for req and reports whether the request carried an effort —
+// the gate on thinkingEffortHint, as chatRequest.carriesEffort is on the openai wire. The report
+// is the requested effort (anthropicEffort), never the body's output_config: the no-effort shape
+// of some models writes `output_config.effort: "low"` on its own, and a fault on a request that
+// named no effort must not be blamed on one.
 func (a *anthropicCodec) encode(req Request) ([]byte, bool, error) {
 	wire, err := a.buildBody(req)
 	if err != nil {
@@ -75,7 +126,8 @@ func (a *anthropicCodec) encode(req Request) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	return body, wire.OutputConfig != nil, nil
+	_, carriesEffort := anthropicEffort(req.ThinkingEffort)
+	return body, carriesEffort, nil
 }
 
 // decodeWhole decodes one non-streamed reply. An error body — `{type:"error",error:{…}}`, which
@@ -98,21 +150,28 @@ func (a *anthropicCodec) decodeWhole(body io.Reader) (RawResponse, *wireError, e
 // (see anthropicMessages), tools become `tools[]` with their schema under `input_schema`,
 // `max_tokens` is always present (anthropicDefaultMaxTokens when the request pins none),
 // and a named effort at or above low lands in `output_config.effort` and requests
-// `thinking: {"type":"adaptive"}`; off/none/minimal and an absent effort write no effort and
-// request `thinking: {"type":"disabled"}` (the Messages API has no rung below low). The sampling
-// knobs the wire knows are written only when set, and only while thinking is disabled — there is
-// no repeat penalty on this wire, so Sampling.RepeatPenalty is always dropped.
+// `thinking: {"type":"adaptive"}`; off/none/minimal and an absent effort send the model's
+// no-effort shape (anthropicNoEffortShapeFor — the Messages API has no rung below low). The
+// sampling knobs the wire knows are written only when set, and only while thinking is disabled —
+// there is no repeat penalty on this wire, so Sampling.RepeatPenalty is always dropped.
 func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
-	effort, requestsThinking := anthropicEffort(req.ThinkingEffort)
 	body := anthropicRequest{
 		Model:     req.Model,
 		Stream:    req.Stream,
 		MaxTokens: anthropicDefaultMaxTokens,
-		Thinking:  anthropicThinking{Type: anthropicThinkingDisabled},
 	}
-	if requestsThinking {
-		body.Thinking.Type = anthropicThinkingAdaptive
+	if effort, requestsThinking := anthropicEffort(req.ThinkingEffort); requestsThinking {
+		body.Thinking = &anthropicThinking{Type: anthropicThinkingAdaptive}
 		body.OutputConfig = &anthropicOutputConfig{Effort: effort}
+	} else {
+		switch anthropicNoEffortShapeFor(req.Model) {
+		case anthropicNoEffortLowest:
+			body.OutputConfig = &anthropicOutputConfig{Effort: string(EffortLow)}
+		case anthropicNoEffortBetweenTools:
+			body.Thinking = &anthropicThinking{Type: anthropicThinkingBetweenTools}
+		default:
+			body.Thinking = &anthropicThinking{Type: anthropicThinkingDisabled}
+		}
 	}
 
 	system, messages, err := anthropicMessages(req.Messages, len(req.Tools) > 0)
@@ -126,9 +185,10 @@ func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
 	if s.MaxTokens != nil {
 		body.MaxTokens = *s.MaxTokens
 	}
-	// The API refuses most sampling values while thinking is on, so a requested thinking pass
-	// wins over the profile's knobs (owner call, 2026-10-02) rather than failing the request.
-	if !requestsThinking {
+	// The API refuses most sampling values while thinking is on, so any shape but disabled — a
+	// requested thinking pass, or a no-effort shape that still lets the model think — wins over the
+	// profile's knobs (owner call, 2026-10-02) rather than failing the request.
+	if body.Thinking != nil && body.Thinking.Type == anthropicThinkingDisabled {
 		body.Temperature = s.Temperature
 		body.TopP = s.TopP
 		body.TopK = s.TopK
@@ -383,9 +443,9 @@ func anthropicToolCallText(tc ToolCall) string {
 	return fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments)
 }
 
-// anthropicRequest is the Messages request body. Sampling pointers, tools, system and
-// output_config are omitted when unset; model, messages, max_tokens, stream and thinking are
-// always present.
+// anthropicRequest is the Messages request body. Sampling pointers, tools, system, thinking and
+// output_config are omitted when unset; model, messages, max_tokens and stream are always
+// present, and thinking is absent only in the anthropicNoEffortLowest shape.
 type anthropicRequest struct {
 	Model        string                 `json:"model,omitempty"`
 	System       string                 `json:"system,omitempty"`
@@ -396,12 +456,13 @@ type anthropicRequest struct {
 	TopP         *float64               `json:"top_p,omitempty"`
 	TopK         *int                   `json:"top_k,omitempty"`
 	Tools        []anthropicTool        `json:"tools,omitempty"`
-	Thinking     anthropicThinking      `json:"thinking"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 // anthropicThinking is the `thinking` object: {"type":"adaptive"} when an effort resolves,
-// {"type":"disabled"} otherwise.
+// otherwise the model's no-effort type — {"type":"disabled"} by default, {"type":"between_tools"}
+// where anthropicNoEffortShapes says so.
 type anthropicThinking struct {
 	Type string `json:"type"`
 }
