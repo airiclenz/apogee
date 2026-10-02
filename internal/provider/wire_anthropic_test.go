@@ -365,11 +365,20 @@ func TestOpenAICodecIgnoresThinkingBlocks(t *testing.T) {
 // upstream in the order the reply had its blocks, whole or streamed: a thinking block after the
 // text, a progress block between two tool_use blocks, and one trailing the last call keep their
 // places, because the API refuses a latest turn whose thinking blocks were rearranged and treats
-// any reordered block as an edit that invalidates later thinking (anthropicReasoningEntry).
+// any reordered block as an edit that invalidates later thinking (anthropicReasoningEntry). Text
+// split by a thinking block or a tool call goes back as the text blocks it came in, each in its
+// own place (anthropicReplyLayout).
 func TestAnthropicReplyReplaysInTheOrderReceived(t *testing.T) {
 	t.Parallel()
-	const content = `[{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"checking"},{"type":"thinking","thinking":"","signature":"czE="},{"type":"tool_use","id":"tc_1","name":"ls","input":{}},{"type":"redacted_thinking","data":"RU5D"},{"type":"tool_use","id":"tc_2","name":"ls","input":{"p":"."}},{"type":"thinking","thinking":"","signature":"czM="}]`
-	const stream = `data: {"type":"message_start","message":{"model":"claude-x"}}
+	cases := []struct {
+		name    string
+		content string
+		stream  string // "" streams content block by block (anthropicSSEOf)
+	}{
+		{
+			name:    "thinking around text and between calls",
+			content: `[{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"checking"},{"type":"thinking","thinking":"","signature":"czE="},{"type":"tool_use","id":"tc_1","name":"ls","input":{}},{"type":"redacted_thinking","data":"RU5D"},{"type":"tool_use","id":"tc_2","name":"ls","input":{"p":"."}},{"type":"thinking","thinking":"","signature":"czM="}]`,
+			stream: `data: {"type":"message_start","message":{"model":"claude-x"}}
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
 data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"czA="}}
 data: {"type":"content_block_stop","index":0}
@@ -391,56 +400,155 @@ data: {"type":"content_block_delta","index":6,"delta":{"type":"signature_delta",
 data: {"type":"content_block_stop","index":6}
 data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
 data: {"type":"message_stop"}
-`
-	codec := &anthropicCodec{}
-	whole, wireErr, err := codec.decodeWhole(strings.NewReader(`{"type":"message","content":` + content + `,"stop_reason":"tool_use"}`))
-	if err != nil || wireErr != nil {
-		t.Fatalf("decodeWhole: %v %v", err, wireErr)
+`,
+		},
+		{
+			name:    "text, thinking, text",
+			content: `[{"type":"text","text":"café "},{"type":"thinking","thinking":"weigh it","signature":"czA="},{"type":"text","text":"✓ done"}]`,
+		},
+		{
+			name:    "thinking, text, tool_use, text",
+			content: `[{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"listing"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}},{"type":"text","text":"then reading"}]`,
+		},
+		{
+			name:    "text, redacted_thinking, text, tool_use",
+			content: `[{"type":"text","text":"first"},{"type":"redacted_thinking","data":"RU5D"},{"type":"text","text":"second"},{"type":"tool_use","id":"tc_1","name":"ls","input":{"p":"."}}]`,
+		},
 	}
-	streamed := Message{Role: "assistant"}
-	for _, d := range parseAnthropicSSE(t, stream) {
-		switch d.Kind {
-		case DeltaContent:
-			streamed.Content += d.Content
-		case DeltaThinkingBlock:
-			streamed.ThinkingBlocks = append(streamed.ThinkingBlocks, d.ThinkingBlock)
-		case DeltaToolCall:
-			streamed.ToolCalls = append(streamed.ToolCalls, *d.ToolCall)
-		}
-	}
-	replies := map[string]Message{
-		"whole":    {Role: "assistant", Content: whole.Content, ToolCalls: whole.ToolCalls, ThinkingBlocks: whole.ThinkingBlocks},
-		"streamed": streamed,
-	}
-
-	for name, reply := range replies {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			req := Request{Model: "m", Tools: []ToolSpec{{Name: "ls", Parameters: []byte(`{"type":"object"}`)}}, Messages: []Message{
-				{Role: "user", Content: "go"},
-				reply,
-				{Role: "tool", Content: "a", ToolCallID: "tc_1"},
-				{Role: "tool", Content: "b", ToolCallID: "tc_2"},
-			}}
+			stream := tc.stream
+			if stream == "" {
+				stream = anthropicSSEOf(t, tc.content)
+			}
+			whole := decodeWholeReply(t, tc.content)
+			replies := map[string]Message{"whole": whole, "streamed": streamedReply(t, stream)}
 
-			body, _, err := (&anthropicCodec{}).encode(req)
-
-			if err != nil {
-				t.Fatalf("encode: %v", err)
-			}
-			var sent struct {
-				Messages []struct {
-					Content json.RawMessage `json:"content"`
-				} `json:"messages"`
-			}
-			if err := json.Unmarshal(body, &sent); err != nil || len(sent.Messages) != 3 {
-				t.Fatalf("body %s: %v", body, err)
-			}
-			if got := string(sent.Messages[1].Content); got != content {
-				t.Errorf("assistant turn sent back\n got: %s\nwant: %s", got, content)
+			for surface, reply := range replies {
+				if got := sentAssistantTurn(t, reply); got != tc.content {
+					t.Errorf("%s: assistant turn sent back\n got: %s\nwant: %s", surface, got, tc.content)
+				}
 			}
 		})
 	}
+}
+
+// TestAnthropicReplyLayoutFallsBackToPlaces pins that a carried layout which no longer fits its
+// message — Content edited after decode, or a layout of the wrong shape — is ignored rather than
+// trusted: the message encodes at the slot places, exactly as an entry saved before layouts
+// existed (a place, no layout) always did, with no panic and no text cut inside a rune.
+func TestAnthropicReplyLayoutFallsBackToPlaces(t *testing.T) {
+	t.Parallel()
+	const thinkingBlock = `{"type":"thinking","thinking":"","signature":"czA="}`
+	const placed = `{"after_text":true,"block":` + thinkingBlock + `}`
+	call := []ToolCall{{ID: "tc_1", Function: FunctionCall{Name: "ls", Arguments: `{}`}}}
+	cases := []struct {
+		name    string
+		content string
+		calls   []ToolCall
+		layout  string
+		want    string
+	}{
+		{name: "a place and no layout", content: "ab", want: `[{"type":"text","text":"ab"},` + thinkingBlock + `]`},
+		{name: "a cut past the end", content: "ab", layout: `{"reply_layout":[1,-1,5]}`, want: `[{"type":"text","text":"ab"},` + thinkingBlock + `]`},
+		{name: "bytes left over", content: "abc", layout: `{"reply_layout":[1,-1,1]}`, want: `[{"type":"text","text":"abc"},` + thinkingBlock + `]`},
+		{name: "a cut inside a rune", content: "é!", layout: `{"reply_layout":[1,-1,2]}`, want: `[{"type":"text","text":"é!"},` + thinkingBlock + `]`},
+		{name: "a call the message lacks", content: "ab", layout: `{"reply_layout":[1,-1,-2,1]}`, want: `[{"type":"text","text":"ab"},` + thinkingBlock + `]`},
+		{name: "a call the layout lacks", content: "ab", calls: call, layout: `{"reply_layout":[1,-1,1]}`, want: `[{"type":"text","text":"ab"},` + thinkingBlock + `,{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`},
+		{name: "a second reasoning block", content: "ab", layout: `{"reply_layout":[1,-1,-1,1]}`, want: `[{"type":"text","text":"ab"},` + thinkingBlock + `]`},
+		{name: "an unknown member", content: "ab", layout: `{"reply_layout":[1,-1,0,1]}`, want: `[{"type":"text","text":"ab"},` + thinkingBlock + `]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			entries := []json.RawMessage{json.RawMessage(placed)}
+			if tc.layout != "" {
+				entries = append(entries, json.RawMessage(tc.layout))
+			}
+			reply := Message{Role: "assistant", Content: tc.content, ToolCalls: tc.calls, ThinkingBlocks: entries}
+
+			got := sentAssistantTurn(t, reply)
+
+			if got != tc.want {
+				t.Errorf("assistant turn\n got: %s\nwant: %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnthropicReplyWithoutThinkingCarriesNoLayout pins that a reply with no thinking block —
+// even one whose text sits in several blocks or after a tool call — carries no entry at all, whole
+// or streamed, so its message and its encoding are what they always were.
+func TestAnthropicReplyWithoutThinkingCarriesNoLayout(t *testing.T) {
+	t.Parallel()
+	const content = `[{"type":"text","text":"a"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}},{"type":"text","text":"b"},{"type":"text","text":"c"}]`
+
+	replies := map[string]Message{
+		"whole":    decodeWholeReply(t, content),
+		"streamed": streamedReply(t, anthropicSSEOf(t, content)),
+	}
+
+	for surface, reply := range replies {
+		if reply.Content != "abc" || len(reply.ToolCalls) != 1 || reply.ThinkingBlocks != nil {
+			t.Errorf("%s: reply = %+v, want text abc, one call, no thinking entries", surface, reply)
+		}
+	}
+}
+
+// decodeWholeReply decodes a whole Messages reply with content as its content array into the
+// assistant Message a consumer builds from it.
+func decodeWholeReply(t *testing.T, content string) Message {
+	t.Helper()
+	body := `{"type":"message","content":` + content + `,"stop_reason":"end_turn"}`
+	whole, wireErr, err := (&anthropicCodec{}).decodeWhole(strings.NewReader(body))
+	if err != nil || wireErr != nil {
+		t.Fatalf("decodeWhole: %v %v", err, wireErr)
+	}
+	return Message{Role: "assistant", Content: whole.Content, ToolCalls: whole.ToolCalls, ThinkingBlocks: whole.ThinkingBlocks}
+}
+
+// streamedReply folds a Messages event stream into the assistant Message a consumer builds from
+// its deltas.
+func streamedReply(t *testing.T, stream string) Message {
+	t.Helper()
+	reply := Message{Role: "assistant"}
+	for _, d := range parseAnthropicSSE(t, stream) {
+		switch d.Kind {
+		case DeltaContent:
+			reply.Content += d.Content
+		case DeltaThinkingBlock:
+			reply.ThinkingBlocks = append(reply.ThinkingBlocks, d.ThinkingBlock)
+		case DeltaToolCall:
+			reply.ToolCalls = append(reply.ToolCalls, *d.ToolCall)
+		}
+	}
+	return reply
+}
+
+// sentAssistantTurn encodes reply as the assistant turn of a tool-bearing request — after a user
+// turn, before one tool result per call — and returns the content array it went upstream as.
+func sentAssistantTurn(t *testing.T, reply Message) string {
+	t.Helper()
+	msgs := []Message{{Role: "user", Content: "go"}, reply}
+	for _, call := range reply.ToolCalls {
+		msgs = append(msgs, Message{Role: "tool", Content: "ok", ToolCallID: call.ID})
+	}
+	req := Request{Model: "m", Tools: []ToolSpec{{Name: "ls", Parameters: []byte(`{"type":"object"}`)}}, Messages: msgs}
+
+	body, _, err := (&anthropicCodec{}).encode(req)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var sent struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil || len(sent.Messages) < 2 {
+		t.Fatalf("body %s: %v", body, err)
+	}
+	return string(sent.Messages[1].Content)
 }
 
 // TestAnthropicCodecHeadersAndPath pins the endpoint and the key spelling: x-api-key only when

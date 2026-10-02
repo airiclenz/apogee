@@ -49,8 +49,9 @@ const (
 	DeltaAttempt DeltaKind = "attempt"
 	// DeltaThinkingBlock carries one finished reasoning block of the reply, opaque and verbatim
 	// (Delta.ThinkingBlock): the anthropic wire yields one as each `thinking` or
-	// `redacted_thinking` block closes, after the DeltaThinking fragments of its text. It is not
-	// terminal; the openai wire never yields it.
+	// `redacted_thinking` block closes, after the DeltaThinking fragments of its text, and one
+	// more carrying the reply's layout at the reply's end when the codec needs it to rebuild the
+	// reply. It is not terminal; the openai wire never yields it.
 	DeltaThinkingBlock DeltaKind = "thinking_block"
 )
 

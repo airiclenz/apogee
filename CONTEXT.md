@@ -781,8 +781,9 @@ visible content and preserves them as reasoning in history; it never sends that 
 Upstream. The one exception is the anthropic wire's **signed** reasoning blocks (`thinking` with its
 `signature`, `redacted_thinking` with its `data`): Apogee keeps them opaque and verbatim on the
 committed assistant message, each with its place among the reply's text and tool calls, so they
-survive a session save/resume, and replays them in the order the reply had them, only on the
-anthropic wire and only to the model that produced them — anywhere else they are dropped silently.
+survive a session save/resume, and replays them — and the reply's text blocks — in the order and
+places the reply had them, only on the anthropic wire and only to the model that produced them —
+anywhere else they are dropped silently.
 Harmony is a *content-stripping* concern only — a harmony model's tool calls arrive **native**
 (the Upstream parses harmony server-side), so there is no harmony tool-call text parser.
 _Avoid_: "chain-of-thought" (a prompting technique, not the wire channel), "commentary" (that is

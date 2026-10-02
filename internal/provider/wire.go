@@ -18,7 +18,8 @@ type Message struct {
 	// ThinkingBlocks is assistant-only: the reasoning blocks the reply that produced this message
 	// carried, each one opaque entry as RawResponse.ThinkingBlocks holds it. The anthropic codec
 	// writes them back, in order, at the places the reply had them among the message's text and
-	// tool_use blocks; the openai codec never reads them.
+	// tool_use blocks, splitting the text back into the reply's text blocks when an entry recorded
+	// their layout; the openai codec never reads them.
 	ThinkingBlocks []json.RawMessage
 }
 
@@ -184,7 +185,9 @@ type RawResponse struct {
 	// ThinkingBlocks are the reply's reasoning blocks as the wire carried them — on the anthropic
 	// wire every `thinking` block (its text and `signature`) and `redacted_thinking` block (its
 	// `data`), one JSON entry each, in reply order: the block itself, or the block beside its place
-	// among the reply's text and tool_use blocks when something preceded it. They are opaque to
+	// among the reply's text and tool_use blocks when something preceded it, and after them one
+	// entry holding no block but the reply's layout when its text blocks need it to go back in
+	// their places. They are opaque to
 	// everything above the codec: a signed block must go back upstream unaltered and in the order
 	// it came, or the server refuses it, so nothing reads into them, and Thinking stays the
 	// readable text. Nil on the openai wire, which has no such blocks.

@@ -105,7 +105,15 @@ stubllm's Transport: the summary request's `Request.Body` has no `"thinking"` ke
 **Closes:** apogee-anthropic-thinking-disabled-400
 **Commit:** `fix(provider): send each anthropic model a no-effort thinking shape it accepts`
 
-## 2. Anthropic replay keeps a reply's text blocks in their original places
+## 2. Anthropic replay keeps a reply's text blocks in their original places — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the layout rides as one extra seam entry `{"reply_layout":[...]}` after the reply's reasoning entries (positive member = text block byte length, -1 reasoning block, -2 tool_use), not as offsets on each reasoning entry: the stream only knows the text after its last reasoning block at message end, so the entry is yielded from finish(), before the tool calls. It is emitted only when the slot places cannot rebuild the reply (more than one text block, or text after a tool call); every other reply keeps its base entries byte for byte.
+
+NOTES (2026-10-02): guard — the encoder uses the layout only when the members sum to len(Content), every cut is on a rune boundary, and the tool_use and reasoning counts match the message; otherwise base slot placement. A no-tools request whose message has calls (the calls are folded into text) always uses base placement. A stream that ends with a reasoning block still open yields no layout entry.
+
+NOTES (2026-10-02): consequential edit — internal/provider/stream.go: made necessary by the extra layout entry DeltaThinkingBlock now carries (DeltaThinkingBlock doc comment)
+
+NOTES (2026-10-02): consequential edit — internal/provider/wire.go: made necessary by the layout entry on RawResponse.ThinkingBlocks / Message.ThinkingBlocks (field doc comments)
 
 **What:**
 **Goal:** An assistant reply carrying at least one `thinking` or `redacted_thinking` block round-trips decode (whole

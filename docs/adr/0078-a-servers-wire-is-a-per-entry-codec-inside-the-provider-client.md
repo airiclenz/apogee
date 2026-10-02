@@ -146,6 +146,12 @@ wire and only to the model that produced them, so the reason decision 4 gave is 
   block is an edit that invalidates every later one (a 400). So each carried block keeps its place
   — whether text and how many tool calls preceded it — and the encoder puts it back there rather
   than ahead of the message's other blocks. A block that led its reply is carried bare, as before.
+  The reply's text blocks keep their original places too: the message's content is every text
+  block joined, so a reply whose text sat in more than one block or after a tool call also carries
+  its whole block layout (each text block's length, and where its thinking blocks and tool calls
+  sat), and the encoder splits the content back into those text blocks. A layout that no longer
+  fits the message — content edited after the reply, a count that differs — is ignored, and the
+  blocks go back at their places as above.
 - **The compaction summary never requests thinking on this wire.** The summariser's request is
   forced to the off rung on an anthropic server, as it already was on the kwargs and reasoning
   dialects, so a thinking pass can never spend the summary's output cap.

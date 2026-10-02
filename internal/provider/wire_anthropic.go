@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 // This file is the Anthropic Messages codec — the wireCodec a server entry with
@@ -24,9 +25,11 @@ import (
 // `thinking: {"type":"between_tools"}` for the one that refuses disabled but takes that. Thinking
 // blocks are signed and must be replayed verbatim: a reply's `thinking` and `redacted_thinking`
 // blocks surface opaque and verbatim (RawResponse.ThinkingBlocks, DeltaThinkingBlock), each with
-// the place it held among the reply's text and tool_use blocks, and an assistant Message's
-// ThinkingBlocks are written back at those places — the API takes an assistant turn back only in
-// the order it sent it (anthropicReasoningEntry). Unless thinking is disabled the body drops the
+// the place it held among the reply's text and tool_use blocks — plus the reply's whole layout
+// when its text sat in more than one block or after a tool call — and an assistant Message's
+// ThinkingBlocks are written back at those places, its text split back into the reply's own text
+// blocks — the API takes an assistant turn back only in the order it sent it
+// (anthropicReasoningEntry, anthropicReplyLayout). Unless thinking is disabled the body drops the
 // profile's sampling knobs (temperature, top_p, top_k), which the API constrains under thinking
 // (ADR 0078 amendments 2026-10-02).
 
@@ -297,11 +300,18 @@ func textBlocks(content string) []anthropicBlock {
 // assistantBlocks renders an assistant message: its text, then one tool_use block per call whose
 // `input` is the call's argument string re-marshalled as an object — an argument string that is
 // not valid JSON is an encode error naming the call, since the wire cannot carry it — with its
-// thinking blocks put back among them where the reply had them (placeReasoning). Without tools
-// the calls are appended to the text instead (see anthropicMessages), so a thinking block that
-// followed a call follows the text.
+// thinking blocks put back among them where the reply had them. When the carried entries hold the
+// reply's layout and it still fits the message, the text is split back into the reply's own text
+// blocks and every block goes back in its original place (anthropicReplyLayout.blocks); otherwise
+// the text is one block ahead of the calls and each thinking block goes to its slot
+// (placeReasoning). Without tools the calls are appended to the text instead (see
+// anthropicMessages), so a thinking block that followed a call follows the text.
 func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
-	if !hasTools {
+	entries, layout, err := decodeReasoningEntries(m.ThinkingBlocks)
+	if err != nil {
+		return nil, err
+	}
+	if !hasTools && len(m.ToolCalls) > 0 {
 		text := m.Content
 		for _, tc := range m.ToolCalls {
 			if text != "" {
@@ -309,48 +319,43 @@ func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
 			}
 			text += anthropicToolCallText(tc)
 		}
-		return placeReasoning(m.ThinkingBlocks, textBlocks(text))
+		return placeReasoning(entries, textBlocks(text)), nil
 	}
 
-	blocks := textBlocks(m.Content)
+	calls := make([]anthropicBlock, 0, len(m.ToolCalls))
 	for _, tc := range m.ToolCalls {
 		input, err := anthropicToolInput(tc)
 		if err != nil {
 			return nil, err
 		}
-		blocks = append(blocks, anthropicBlock{
+		calls = append(calls, anthropicBlock{
 			Type:  "tool_use",
 			ID:    tc.ID,
 			Name:  tc.Function.Name,
 			Input: input,
 		})
 	}
-	return placeReasoning(m.ThinkingBlocks, blocks)
+	if blocks, ok := layout.blocks(m.Content, calls, entries); ok {
+		return blocks, nil
+	}
+	return placeReasoning(entries, append(textBlocks(m.Content), calls...)), nil
 }
 
 // placeReasoning interleaves the carried reasoning entries into rest — the message's text block,
 // if any, then its tool_use blocks — each at the slot its place names (anthropicReasoningEntry),
-// in carried order; a slot past the end of rest is the end. An empty entry carries no block and is
-// skipped; an entry that is not JSON is an encode error, so it never reaches the wire.
-func placeReasoning(entries []json.RawMessage, rest []anthropicBlock) ([]anthropicBlock, error) {
+// in carried order; a slot past the end of rest is the end.
+func placeReasoning(entries []anthropicReasoningEntry, rest []anthropicBlock) []anthropicBlock {
 	leadingText := len(rest) > 0 && rest[0].Type == "text"
 	blocks := make([]anthropicBlock, 0, len(entries)+len(rest))
 	next := 0 // rest[:next] is written
-	for _, raw := range entries {
-		if len(raw) == 0 {
-			continue
-		}
-		entry, err := decodeReasoningEntry(raw)
-		if err != nil {
-			return nil, err
-		}
+	for _, entry := range entries {
 		if slot := min(entry.slot(leadingText), len(rest)); slot > next {
 			blocks = append(blocks, rest[next:slot]...)
 			next = slot
 		}
 		blocks = append(blocks, anthropicBlock{raw: entry.Block})
 	}
-	return append(blocks, rest[next:]...), nil
+	return append(blocks, rest[next:]...)
 }
 
 // anthropicReasoningEntry is how one reasoning block rides the seam (RawResponse.ThinkingBlocks,
@@ -368,10 +373,16 @@ func placeReasoning(entries []json.RawMessage, rest []anthropicBlock) ([]anthrop
 // blocks"). A reply can put a thinking block after text or between tool_use blocks — a progress
 // update sits immediately before the tool call it introduces — so leading every block is not the
 // order received.
+//
+// A place cannot say where text went once the reply had text in more than one block, or text
+// after a tool call: Content is every text block joined. Such a reply carries one more entry after
+// its reasoning blocks, holding no block but the reply's whole layout under Layout
+// (anthropicReplyLayout), which the encoder prefers while it still fits the message.
 type anthropicReasoningEntry struct {
 	AfterText  bool            `json:"after_text,omitempty"`
 	AfterCalls int             `json:"after_calls,omitempty"`
 	Block      json.RawMessage `json:"block"`
+	Layout     []int           `json:"reply_layout,omitempty"`
 }
 
 // reasoningEntry is the seam entry for a reasoning block at a place: the block itself when
@@ -395,17 +406,42 @@ func reasoningEntry(block json.RawMessage, afterText bool, afterCalls int) json.
 	return b.Bytes()
 }
 
-// decodeReasoningEntry reads one seam entry back: a wrapped block with its place, or a bare wire
-// block — no `block` member — at the zero place.
+// decodeReasoningEntry reads one seam entry back: a wrapped block with its place, a layout entry
+// (Layout set, no Block), or a bare wire block — neither a `block` nor a `reply_layout` member —
+// at the zero place.
 func decodeReasoningEntry(raw json.RawMessage) (anthropicReasoningEntry, error) {
 	var entry anthropicReasoningEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return anthropicReasoningEntry{}, fmt.Errorf("apogee: carried thinking block: %w", err)
 	}
-	if entry.Block == nil {
+	if entry.Block == nil && entry.Layout == nil {
 		return anthropicReasoningEntry{Block: raw}, nil
 	}
 	return entry, nil
+}
+
+// decodeReasoningEntries reads a message's carried entries back: the reasoning blocks in carried
+// order, and the reply's layout when an entry recorded one (the last one wins). An empty entry
+// carries no block and is skipped; an entry that is not JSON is an encode error, so it never
+// reaches the wire.
+func decodeReasoningEntries(raws []json.RawMessage) ([]anthropicReasoningEntry, anthropicReplyLayout, error) {
+	var layout anthropicReplyLayout
+	entries := make([]anthropicReasoningEntry, 0, len(raws))
+	for _, raw := range raws {
+		if len(raw) == 0 {
+			continue
+		}
+		entry, err := decodeReasoningEntry(raw)
+		if err != nil {
+			return nil, anthropicReplyLayout{}, err
+		}
+		if entry.Block == nil {
+			layout = anthropicReplyLayout{members: entry.Layout}
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, layout, nil
 }
 
 // slot is the number of the message's rendered text and tool_use blocks the entry goes after.
@@ -416,6 +452,117 @@ func (e anthropicReasoningEntry) slot(leadingText bool) int {
 		return e.AfterCalls + 1
 	}
 	return e.AfterCalls
+}
+
+// The members of a reply layout that are not text: every other member is a text block's length.
+const (
+	// anthropicLayoutReasoning stands for a thinking or redacted_thinking block.
+	anthropicLayoutReasoning = -1
+	// anthropicLayoutToolUse stands for a tool_use block.
+	anthropicLayoutToolUse = -2
+)
+
+// anthropicReplyLayout is a reply's blocks in the order received, as the `reply_layout` entry
+// carries them: a positive member is a text block of that many bytes of Content, and
+// anthropicLayoutReasoning and anthropicLayoutToolUse stand for the next reasoning block and the
+// next tool call. Both decoders build one (text, block) and carry it only when the slot places
+// cannot rebuild the reply (entry); the encoder rebuilds the reply's blocks from it (blocks).
+type anthropicReplyLayout struct {
+	members []int
+	// textOpen reports that the last member is a text block still taking bytes: the one at
+	// block index textIndex.
+	textOpen  bool
+	textIndex int
+}
+
+// text records n bytes of text from the text block at block index index: more of the text block
+// the last member counts, or a new one. Empty text records nothing, as an empty block is dropped.
+func (l *anthropicReplyLayout) text(index, n int) {
+	if n == 0 {
+		return
+	}
+	if l.textOpen && l.textIndex == index {
+		l.members[len(l.members)-1] += n
+		return
+	}
+	l.members = append(l.members, n)
+	l.textOpen, l.textIndex = true, index
+}
+
+// block records a reasoning or tool_use block (anthropicLayoutReasoning, anthropicLayoutToolUse).
+func (l *anthropicReplyLayout) block(member int) {
+	l.members = append(l.members, member)
+	l.textOpen = false
+}
+
+// entry is the layout entry the reply carries after its reasoning blocks, or nil when it needs
+// none: a reply with no reasoning block carries no entry at all, and one whose text is a single
+// block ahead of every tool call is rebuilt exactly by the slot places, so it stays as it was.
+func (l *anthropicReplyLayout) entry() json.RawMessage {
+	hasReasoning, needed, texts, calls := false, false, 0, 0
+	for _, member := range l.members {
+		switch member {
+		case anthropicLayoutReasoning:
+			hasReasoning = true
+		case anthropicLayoutToolUse:
+			calls++
+		default:
+			texts++
+			needed = needed || texts > 1 || calls > 0
+		}
+	}
+	if !hasReasoning || !needed {
+		return nil
+	}
+	raw, err := json.Marshal(struct {
+		Layout []int `json:"reply_layout"`
+	}{l.members})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// blocks rebuilds a message's blocks in the layout's order: text blocks cut from content, the
+// calls' tool_use blocks and the reasoning entries' blocks each in turn. It reports false — and
+// the caller falls back to the slot places — when there is no layout or it no longer fits the
+// message: Content can be edited after decode (a salvaged call, a stripped span), so a cut that
+// overruns content, lands inside a rune or leaves bytes over, a member of no known kind, or a
+// count of calls or reasoning blocks that differs from the message's, is no layout at all.
+func (l anthropicReplyLayout) blocks(
+	content string,
+	calls []anthropicBlock,
+	entries []anthropicReasoningEntry,
+) ([]anthropicBlock, bool) {
+	if len(l.members) == 0 {
+		return nil, false
+	}
+	blocks := make([]anthropicBlock, 0, len(l.members))
+	offset, call, reasoning := 0, 0, 0
+	for _, member := range l.members {
+		switch {
+		case member == anthropicLayoutReasoning && reasoning < len(entries):
+			blocks = append(blocks, anthropicBlock{raw: entries[reasoning].Block})
+			reasoning++
+		case member == anthropicLayoutToolUse && call < len(calls):
+			blocks = append(blocks, calls[call])
+			call++
+		case member > 0 && member <= len(content)-offset && runeBoundary(content, offset+member):
+			blocks = append(blocks, anthropicBlock{Type: "text", Text: content[offset : offset+member]})
+			offset += member
+		default:
+			return nil, false
+		}
+	}
+	if offset != len(content) || call != len(calls) || reasoning != len(entries) {
+		return nil, false
+	}
+	return blocks, true
+}
+
+// runeBoundary reports whether cutting s at byte offset at splits no rune.
+func runeBoundary(s string, at int) bool {
+	return at == len(s) || utf8.RuneStart(s[at])
 }
 
 // anthropicToolInput re-marshals a call's raw argument string as the object `input` carries:
@@ -596,26 +743,34 @@ func (u anthropicUsage) usage() Usage {
 // toRawResponse assembles the seam RawResponse: text blocks concatenate into Content, thinking
 // blocks into Thinking, every thinking and redacted_thinking block is kept verbatim on
 // ThinkingBlocks in reply order with its place among the text and tool_use blocks
-// (anthropicReasoningEntry), each tool_use block is one ToolCall with its input re-stringified as
-// the argument string, and the stop reason is mapped onto the chat-completions vocabulary the
-// loop reads (anthropicFinishReason).
+// (anthropicReasoningEntry) — followed by the reply's layout entry when the places alone cannot
+// rebuild it (anthropicReplyLayout) — each tool_use block is one ToolCall with its input
+// re-stringified as the argument string, and the stop reason is mapped onto the chat-completions
+// vocabulary the loop reads (anthropicFinishReason).
 func (r anthropicResponse) toRawResponse() RawResponse {
 	out := RawResponse{Model: r.Model, FinishReason: anthropicFinishReason(r.StopReason)}
-	for _, b := range r.Content {
+	var layout anthropicReplyLayout
+	for i, b := range r.Content {
 		switch b.Type {
 		case "text":
 			out.Content += b.Text
+			layout.text(i, len(b.Text))
 		case anthropicBlockThinking, anthropicBlockRedactedThinking:
 			out.Thinking += b.Thinking
 			out.ThinkingBlocks = append(out.ThinkingBlocks,
 				reasoningEntry(b.raw, out.Content != "", len(out.ToolCalls)))
+			layout.block(anthropicLayoutReasoning)
 		case anthropicBlockToolUse:
 			out.ToolCalls = append(out.ToolCalls, ToolCall{
 				ID:       b.ID,
 				Type:     "function",
 				Function: FunctionCall{Name: b.Name, Arguments: anthropicToolArguments(b.Input)},
 			})
+			layout.block(anthropicLayoutToolUse)
 		}
+	}
+	if entry := layout.entry(); entry != nil {
+		out.ThinkingBlocks = append(out.ThinkingBlocks, entry)
 	}
 	if r.Usage != nil {
 		out.Usage = r.Usage.usage()

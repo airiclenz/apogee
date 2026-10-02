@@ -58,8 +58,9 @@ const sseDataPrefix = "data: "
 // parseSSE reads the Messages event stream line by line and yields Deltas: text_delta as
 // content, thinking_delta as thinking, every thinking and redacted_thinking block — its text,
 // signature or data — as one verbatim DeltaThinkingBlock when the block closes, carrying the
-// place it opened at among the reply's text and tool_use blocks (anthropicReasoningEntry),
-// tool_use blocks accumulated in openToolCalls by block index across their input_json_delta
+// place it opened at among the reply's text and tool_use blocks (anthropicReasoningEntry), and
+// after them the reply's layout entry when its text sat in more than one block or after a tool
+// call (anthropicReplyLayout), tool_use blocks accumulated in openToolCalls by block index across their input_json_delta
 // fragments and emitted together immediately before the terminal Done, the stop reason mapped
 // onto the loop's finish vocabulary (anthropicFinishReason), and usage assembled from
 // message_start's input side and message_delta's output side. A payload that fails to decode is skipped and counted, exactly
@@ -114,6 +115,9 @@ type anthropicStream struct {
 	// place a reasoning block is carried with (openReasoning).
 	textSeen  bool
 	callsSeen int
+	// layout is the reply's blocks in the order they opened, yielded as the reply's layout entry
+	// at its end when the places alone cannot rebuild it (anthropicReplyLayout).
+	layout anthropicReplyLayout
 	// usage is the accounting so far: input tokens from message_start, output tokens from
 	// message_delta; nil until either arrives.
 	usage *anthropicUsage
@@ -181,6 +185,7 @@ func (s *anthropicStream) startBlock(ev anthropicEvent) (ended bool) {
 	switch ev.ContentBlock.Type {
 	case anthropicBlockToolUse:
 		s.callsSeen++
+		s.layout.block(anthropicLayoutToolUse)
 		frag := sseToolCall{ID: ev.ContentBlock.ID, Index: ev.Index}
 		frag.Function.Name = ev.ContentBlock.Name
 		return s.foldCall(frag)
@@ -200,6 +205,7 @@ func (s *anthropicStream) openReasoning(ev anthropicEvent) (ended bool) {
 		return false
 	}
 	block := &anthropicReasoningBlock{afterText: s.textSeen, afterCalls: s.callsSeen}
+	s.layout.block(anthropicLayoutReasoning)
 	if ev.ContentBlock.Type == anthropicBlockRedactedThinking {
 		block.redacted = ev.ContentBlock.raw
 		if s.charge(len(block.redacted)) {
@@ -227,6 +233,7 @@ func (s *anthropicStream) deltaBlock(ev anthropicEvent) (ended bool) {
 		if ev.Delta.Text != "" {
 			s.textSeen = true
 		}
+		s.layout.text(blockIndex(ev.Index), len(ev.Delta.Text))
 		return s.text(Delta{Kind: DeltaContent, Content: ev.Delta.Text}, len(ev.Delta.Text))
 	case anthropicDeltaThinking:
 		if block := s.reasoningAt(ev.Index); block != nil {
@@ -244,6 +251,14 @@ func (s *anthropicStream) deltaBlock(ev anthropicEvent) (ended bool) {
 		return s.foldCall(frag)
 	}
 	return false
+}
+
+// blockIndex is the block index an event names, or -1 when it names none.
+func blockIndex(index *int) int {
+	if index == nil {
+		return -1
+	}
+	return *index
 }
 
 // reasoningAt is the reasoning block open at index, or nil when none is.
@@ -270,6 +285,21 @@ func (s *anthropicStream) stopBlock(ev anthropicEvent) (ended bool) {
 	}
 	entry := reasoningEntry(raw, block.afterText, block.afterCalls)
 	return !s.yield(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
+}
+
+// yieldLayout yields the reply's layout entry, as one more DeltaThinkingBlock after its reasoning
+// blocks, when the reply needs one (anthropicReplyLayout.entry), and reports whether the consumer
+// still listens. A reasoning block still open at the end is dropped, so the layout that counts it
+// would describe a reply the consumer never received: it is not yielded, and the places stand.
+func (s *anthropicStream) yieldLayout() bool {
+	if len(s.reasoning) > 0 {
+		return true
+	}
+	entry := s.layout.entry()
+	if entry == nil {
+		return true
+	}
+	return s.yield(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
 }
 
 // text yields one content or thinking fragment of n bytes under maxReplyTextBytes (charge).
@@ -358,7 +388,8 @@ func (s *anthropicStream) fail(ev anthropicEvent, data string) (ended bool) {
 }
 
 // finish ends the stream on its success path — message_stop, or the server closing without
-// one: every accumulated tool call, then the terminal Done. A stream that yielded no text, no
+// one: the reply's layout entry when it needs one (yieldLayout), every accumulated tool call,
+// then the terminal Done. A stream that yielded no text, no
 // tool call, and skipped at least one chunk carried nothing the consumer could commit and is
 // faulted on the count instead, as on the openai wire. A tool_use block that streamed no
 // input at all is the empty object, as anthropicToolArguments makes it on the whole-reply
@@ -370,6 +401,9 @@ func (s *anthropicStream) finish() {
 			Err:             fmt.Sprintf(malformedOnlyErrFmt, s.malformed),
 			MalformedChunks: s.malformed,
 		})
+		return
+	}
+	if !s.yieldLayout() {
 		return
 	}
 	for _, e := range s.open.entries {

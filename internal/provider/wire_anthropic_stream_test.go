@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -86,6 +87,99 @@ func parseAnthropicSSE(t *testing.T, body string) []Delta {
 		return true
 	})
 	return deltas
+}
+
+// anthropicSSEOf is the event stream that carries a reply whose content array is content, one
+// block after another: a text block as one text_delta, a thinking block as its thinking_delta and
+// signature_delta, a redacted_thinking block whole on its start event, and a tool_use block as its
+// start event plus, for a non-empty input, one input_json_delta.
+func anthropicSSEOf(t *testing.T, content string) string {
+	t.Helper()
+	var raws []json.RawMessage
+	if err := json.Unmarshal([]byte(content), &raws); err != nil {
+		t.Fatalf("content %s: %v", content, err)
+	}
+	var b strings.Builder
+	b.WriteString(`data: {"type":"message_start","message":{"model":"claude-x"}}` + "\n")
+	event := func(format string, args ...any) {
+		fmt.Fprintf(&b, "data: "+format+"\n", args...)
+	}
+	for i, raw := range raws {
+		var block struct {
+			Type, Text, Thinking, Signature, ID, Name string
+			Input                                     json.RawMessage
+		}
+		if err := json.Unmarshal(raw, &block); err != nil {
+			t.Fatalf("block %s: %v", raw, err)
+		}
+		switch block.Type {
+		case "text":
+			event(`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, i)
+			event(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":%q}}`, i, block.Text)
+		case "thinking":
+			event(`{"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`, i)
+			event(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":%q}}`, i, block.Thinking)
+			event(`{"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":%q}}`, i, block.Signature)
+		case "redacted_thinking":
+			event(`{"type":"content_block_start","index":%d,"content_block":%s}`, i, raw)
+		case "tool_use":
+			event(`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":%q,"name":%q,"input":{}}}`, i, block.ID, block.Name)
+			if input := string(block.Input); input != "" && input != "{}" {
+				event(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%q}}`, i, input)
+			}
+		}
+		event(`{"type":"content_block_stop","index":%d}`, i)
+	}
+	event(`{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`)
+	event(`{"type":"message_stop"}`)
+	return b.String()
+}
+
+// TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks pins where a streamed reply's layout
+// entry goes: one more DeltaThinkingBlock after the reply's reasoning blocks and before its
+// calls, when its text sat in more than one block; and none at all when a reasoning block never
+// closed, since that block is dropped and a layout counting it would describe another reply.
+func TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks(t *testing.T) {
+	t.Parallel()
+	const split = `[{"type":"text","text":"a"},{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"b"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`
+	unclosed := strings.Replace(anthropicSSEOf(t, split), `data: {"type":"message_delta"`,
+		`data: {"type":"content_block_start","index":4,"content_block":{"type":"thinking","thinking":""}}`+"\n"+`data: {"type":"message_delta"`, 1)
+	cases := []struct {
+		name   string
+		stream string
+		want   []string
+	}{
+		{name: "closed", stream: anthropicSSEOf(t, split), want: []string{
+			`{"after_text":true,"block":{"type":"thinking","thinking":"","signature":"czA="}}`,
+			`{"reply_layout":[1,-1,1,-2]}`,
+		}},
+		{name: "a block left open", stream: unclosed, want: []string{
+			`{"after_text":true,"block":{"type":"thinking","thinking":"","signature":"czA="}}`,
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+			sawCall := false
+			for _, d := range parseAnthropicSSE(t, tc.stream) {
+				switch d.Kind {
+				case DeltaThinkingBlock:
+					if sawCall {
+						t.Errorf("thinking entry %s after a tool call", d.ThinkingBlock)
+					}
+					got = append(got, string(d.ThinkingBlock))
+				case DeltaToolCall:
+					sawCall = true
+				}
+			}
+
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("thinking entries\n got: %q\nwant: %q", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestAnthropicParseSSE_TextAndInterleavedToolCalls pins the whole event vocabulary on one
