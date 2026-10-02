@@ -512,7 +512,10 @@ internal/agent/guardrails_test.go — TestGuardrails_AuditRecordsCallDecisionRes
 - `grep -rniE "audit ring|audit log|AuditLog|AuditRecord|fresh audit" --include=*.go --include=*.md internal CONTEXT.md docs/adr | grep -v 0013-` prints nothing
 **Commit:** `refactor(security): drop the audit ring for the event-stream trail`
 
-## 16. One renderer for the recipe launch line (#17a)
+## 16. One renderer for the recipe launch line (#17a) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): `RecipeLaunch.Line()` trims Text (the run/agent rule), so `WorkflowAction.Launch` now trims Inputs too; bytes are unchanged for every parsed entry because the schedules-file normaliser already trims Inputs (internal/daemon/file.go `entry.Run.Workflow.Inputs = strings.TrimSpace(...)`), and Launch keeps its "" for an empty Recipe.
+NOTES (2026-10-02): `Agent.StartRecipe` renders from the resolved `recipe.ID` (not `launch.SkillID`), exactly as before; internal/run/run.go drops its now-unused `strings` import.
 
 **What:**
 **Goal:** `domain.RecipeLaunch.Line()` is the only producer of the `/<id> <inputs>` line;

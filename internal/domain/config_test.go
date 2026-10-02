@@ -357,3 +357,27 @@ func TestResolvedSkillBlock(t *testing.T) {
 		t.Errorf("Expand without Dir = %q, want the token left literal", got)
 	}
 }
+
+// TestRecipeLaunchLine proves the one renderer of a recipe's launch line: "/<id>" alone when the
+// text holds nothing but whitespace, else "/<id> " and the text trimmed.
+func TestRecipeLaunchLine(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name   string
+		launch domain.RecipeLaunch
+		want   string
+	}{
+		{name: "without inputs", launch: domain.RecipeLaunch{SkillID: "audit"}, want: "/audit"},
+		{name: "whitespace-only inputs", launch: domain.RecipeLaunch{SkillID: "audit", Text: " \t\n"}, want: "/audit"},
+		{name: "with inputs", launch: domain.RecipeLaunch{SkillID: "audit", Text: "internal/ depth=2"}, want: "/audit internal/ depth=2"},
+		{name: "inputs trimmed", launch: domain.RecipeLaunch{SkillID: "audit", Text: "  internal/ depth=2\n"}, want: "/audit internal/ depth=2"},
+		{name: "background does not change the line", launch: domain.RecipeLaunch{SkillID: "audit", Text: "x", Background: true}, want: "/audit x"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			if got := testCase.launch.Line(); got != testCase.want {
+				t.Errorf("Line() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}

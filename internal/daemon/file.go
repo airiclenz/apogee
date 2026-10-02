@@ -104,10 +104,7 @@ func (w WorkflowAction) Launch() string {
 	if w.Recipe == "" {
 		return ""
 	}
-	if w.Inputs == "" {
-		return "/" + w.Recipe
-	}
-	return "/" + w.Recipe + " " + w.Inputs
+	return domain.RecipeLaunch{SkillID: w.Recipe, Text: w.Inputs}.Line()
 }
 
 // ServerFacts is everything validation needs to know about one `servers:` entry. Deliberately not

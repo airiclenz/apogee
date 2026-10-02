@@ -123,10 +123,7 @@ func (a *Agent) StartRecipe(ctx context.Context, launch RecipeLaunch) (string, e
 	if err != nil {
 		return "", err
 	}
-	line := "/" + recipe.ID
-	if text := strings.TrimSpace(launch.Text); text != "" {
-		line += " " + text
-	}
+	line := RecipeLaunch{SkillID: recipe.ID, Text: launch.Text}.Line()
 	return "", a.Submit(domain.UserInput{Text: line, SkillIDs: []string{recipe.ID}, RecipeInputs: inputs})
 }
 

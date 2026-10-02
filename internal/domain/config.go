@@ -1067,6 +1067,18 @@ type RecipeLaunch struct {
 	Background bool
 }
 
+// Line is the user line this launch stands for: "/<id>" and, when Text holds anything but
+// whitespace, a space and Text trimmed — the line a session's user types to run the recipe. It is
+// the one renderer of that line: StartRecipe submits it, a Firing's record is titled by it
+// (run.Spec) and a schedules-file workflow is labelled by it (daemon.WorkflowAction.Launch).
+func (l RecipeLaunch) Line() string {
+	line := "/" + l.SkillID
+	if text := strings.TrimSpace(l.Text); text != "" {
+		line += " " + text
+	}
+	return line
+}
+
 // SkillResolver maps attached skill IDs to their injectable form. It is implemented by the
 // skills catalog (internal/skills) and injected via Config.Skills; the interface lives in
 // domain so the loop can fulfil the UserInput.SkillIDs seam without importing the skills

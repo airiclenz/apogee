@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -646,11 +645,7 @@ func (s Spec) line() string {
 	if s.Recipe == "" {
 		return s.Prompt
 	}
-	line := "/" + s.Recipe
-	if text := strings.TrimSpace(s.Prompt); text != "" {
-		line += " " + text
-	}
-	return line
+	return domain.RecipeLaunch{SkillID: s.Recipe, Text: s.Prompt}.Line()
 }
 
 // denier is a Firing's Approver: it refuses every gated action immediately and counts the
