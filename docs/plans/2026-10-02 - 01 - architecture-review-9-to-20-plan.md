@@ -456,7 +456,12 @@ internal/tools/exec_host.go — execHost, defaultExecHost; internal/tools/exec_h
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/subprocess/ && GOMEMLIMIT=2GiB go test -race -count=1 -run Exec ./internal/tools/`
 **Commit:** `refactor(subprocess): inject the process teardown constructor`
 
-## 14. The process wait delay is a default, not a global
+## 14. The process wait delay is a default, not a global — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): re-derived from the assumption that mcp.Host's command is built in internal/mcp/client.go — buildStdioTransport (internal/mcp/transport.go) builds the Cmd and teardown, so the Host.WaitDelay assignment and its doc sentence live there; client.go carries the field and its withStdioDefaults resolution.
+NOTES (2026-10-02): consequential edit — internal/platform/doc.go: made necessary by ProcessWaitDelay becoming an overridable const default (file-map sentence).
+NOTES (2026-10-02): teardown_unix.go, teardown_windows.go and namespace_linux.go need no edit — they read ProcessWaitDelay, which compiles unchanged as a const.
+NOTES (2026-10-02): TestRunSubprocessReportsAWedgedDrain now runs t.Parallel() (its only shared state is gone); TestClose_BoundsTheDrainOfAWedgedStdioServer stays serial because assertNoGoroutineIn scans every goroutine in the binary — comment says so.
 
 **What:** Depends on item 13.
 **Goal:** `platform.ProcessWaitDelay` is a const default; `SubprocessSpec` and `mcp.Host` carry a

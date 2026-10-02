@@ -466,22 +466,19 @@ func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
 }
 
 // TestClose_BoundsTheDrainOfAWedgedStdioServer proves the drain bound the teardown seam advertises
-// (platform.ProcessWaitDelay) now reaches an MCP stdio server: the Cmd is built on a session-scoped
+// (Host.WaitDelay, platform.ProcessWaitDelay by default) now reaches an MCP stdio server: the Cmd is built on a session-scoped
 // cancellable context that Close cancels once apogee's shutdown ladder is spent, so cmd.Cancel and
 // cmd.WaitDelay fire instead of sitting inert on a context.Background Cmd nothing ever cancels.
 // The fixture refuses the whole polite ladder — stdin close ignored, SIGTERM ignored, stdout held
-// open — and Close must still return inside that ladder's own bound plus ProcessWaitDelay (both
-// shrunk to milliseconds here), leaving no goroutine parked in cmd.Wait behind it.
+// open — and Close must still return inside that ladder's own bound plus the drain bound (both
+// shrunk to milliseconds here, on the Host), leaving no goroutine parked in cmd.Wait behind it.
 func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fixture wedges itself by ignoring a POSIX SIGTERM; the Windows half of the seam is verified on the owner's box")
 	}
-	// ProcessWaitDelay is a package var, so this test must not run in parallel with another that
-	// reads it; the ladder's rung wait rides on the Host instead.
-	waitDelay := platform.ProcessWaitDelay
-	platform.ProcessWaitDelay = 200 * time.Millisecond
-	t.Cleanup(func() { platform.ProcessWaitDelay = waitDelay })
-	host := Host{TerminateDuration: 100 * time.Millisecond}
+	// Not parallel: assertNoGoroutineIn below scans every goroutine in the test binary, so a
+	// sibling's own cmd.Wait would read as this server's. Both bounds ride on the Host.
+	host := Host{TerminateDuration: 100 * time.Millisecond, WaitDelay: 200 * time.Millisecond}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -497,7 +494,7 @@ func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
 	// Everything the wedge can legitimately cost: the ladder's two waits (stdin close, then
 	// SIGTERM) before the SIGKILL, then the cancelled context's own bounded drain — plus slack for
 	// a loaded machine. Anything past that is the unbounded wait this wiring removes.
-	bound := 2*host.TerminateDuration + platform.ProcessWaitDelay + 2*time.Second
+	bound := 2*host.TerminateDuration + host.WaitDelay + 2*time.Second
 	closed := make(chan error, 1)
 	go func() { closed <- c.Close() }()
 	select {

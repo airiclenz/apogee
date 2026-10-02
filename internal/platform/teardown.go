@@ -92,9 +92,11 @@ type ProcessTeardown interface {
 // on a Cmd whose context is eventually cancelled — the execution tools' subprocesses, cancelled
 // with the run, and an MCP stdio server, whose Cmd carries a session-scoped cancellable context
 // that mcp.Client.Close cancels once apogee's own stdio shutdown ladder is spent (internal/mcp's
-// stdinLadder.Close). It is a var rather than a const so a test can shrink it and exercise the
-// drain-wedged path in milliseconds; production never reassigns it.
-var ProcessWaitDelay = 5 * time.Second
+// stdinLadder.Close). It is the DEFAULT, not a setting: a caller that wants another bound sets its
+// own cmd.WaitDelay after the teardown is built — subprocess.SubprocessSpec.WaitDelay and
+// mcp.Host.WaitDelay carry one (zero means this), and userexec sets its own WaitGrace — so a test
+// shrinks the field on the value it builds rather than a global every other test also reads.
+const ProcessWaitDelay = 5 * time.Second
 
 // NoTeardown is the inert ProcessTeardown: every hook is a no-op. POSIX embeds it
 // (teardown_unix.go) because the process group is established by the kernel at fork, so that

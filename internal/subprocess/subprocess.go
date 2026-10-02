@@ -99,6 +99,12 @@ type SubprocessSpec struct {
 	// caller leaves it at; a test sets it to hand out a fake platform.ProcessTeardown and observe
 	// the release lifecycle on every OS, without a package var other tests also read.
 	NewTeardown func(*exec.Cmd) platform.ProcessTeardown
+	// WaitDelay bounds the post-exit drain: how long Wait keeps copying output after the
+	// process has exited (or been killed) while something it left running still holds the
+	// pipe. Zero — or any non-positive value — means platform.ProcessWaitDelay, which every
+	// production caller leaves it at; a test shrinks it to reach the drain-wedged path in
+	// milliseconds without reassigning a value other tests also read.
+	WaitDelay time.Duration
 }
 
 // SubprocessResult is the captured outcome of one subprocess execution.
@@ -120,7 +126,7 @@ type SubprocessResult struct {
 	// TimedOut reports that the run was cut short by its own timeout (vs the model's ctx).
 	TimedOut bool
 	// DrainWedged reports that the process had exited but something it left running was still
-	// holding the output pipe when platform.ProcessWaitDelay expired, so exec cut the drain
+	// holding the output pipe when the spec's WaitDelay expired, so exec cut the drain
 	// short and killed what was left. The captured output may be missing its tail, and the run
 	// is not a success however cleanly the leader itself exited.
 	DrainWedged bool
@@ -272,6 +278,12 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		newTeardown = platform.NewProcessTeardown
 	}
 	teardown := newTeardown(cmd)
+	// After the teardown, which set the platform default: the spec's own bound wins.
+	waitDelay := spec.WaitDelay
+	if waitDelay <= 0 {
+		waitDelay = platform.ProcessWaitDelay
+	}
+	cmd.WaitDelay = waitDelay
 	// The teardown owns an OS resource from the moment it is built (the Windows Job Object
 	// handle), so this function owns releasing it: the confine refusal below and a cmd.Start()
 	// failure both return without ever reaching Wait, and neither may leak the handle. release

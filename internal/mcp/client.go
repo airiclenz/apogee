@@ -104,6 +104,11 @@ type Host struct {
 	// each rung (stdin close → SIGTERM → SIGKILL) before escalating. Zero — or any non-positive
 	// value — means defaultStdioTerminateDuration.
 	TerminateDuration time.Duration
+	// WaitDelay bounds the post-exit drain of a stdio server's Cmd once Close has cancelled its
+	// context: how long Wait keeps copying after the process is gone while something it left
+	// running still holds a pipe. Zero — or any non-positive value — means
+	// platform.ProcessWaitDelay.
+	WaitDelay time.Duration
 }
 
 // withStdioDefaults returns h with every unset stdio facility resolved to the real one, so a
@@ -117,6 +122,9 @@ func (h Host) withStdioDefaults() Host {
 	}
 	if h.TerminateDuration <= 0 {
 		h.TerminateDuration = defaultStdioTerminateDuration
+	}
+	if h.WaitDelay <= 0 {
+		h.WaitDelay = platform.ProcessWaitDelay
 	}
 	return h
 }
@@ -315,7 +323,7 @@ func (c *Client) Tools() []domain.Tool {
 // chance to exit cleanly and flush, but reaches the LEADER alone: anything it spawned outlives it.
 // Cancelling the Cmd's context once that ladder has been spent is what arms cmd.Cancel and
 // cmd.WaitDelay (buildStdioTransport), so a server that outlived the shutdown is killed as a group
-// and the drain that follows is bounded (platform.ProcessWaitDelay) rather than leaving the
+// and the drain that follows is bounded (Host.WaitDelay) rather than leaving the
 // ladder's cmd.Wait blocked for good. The
 // teardown's Reap then kills the group (POSIX) or terminates the Job Object (Windows), which is the
 // only thing that reaches those descendants, and Release drops the handle the teardown has owned

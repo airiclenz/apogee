@@ -100,8 +100,9 @@
 // planTreeKill and the treeKillAction it returns, the ProcessTeardown seam (Contain, Reap,
 // Release) a spawner drives around Wait, NoTeardown as the inert base a backend embeds,
 // RunWithTeardown (the Start/Wait split a Job Object assignment needs, reaping on every exit and
-// not only a cancelled one), and ProcessWaitDelay, the bounded post-exit drain both backends set
-// as cmd.WaitDelay. teardown_unix.go realises the container as a POSIX process group — Setpgid, a
+// not only a cancelled one), and ProcessWaitDelay, the default post-exit drain bound both
+// backends set as cmd.WaitDelay (a caller overrides it on its own cmd after the teardown is
+// built). teardown_unix.go realises the container as a POSIX process group — Setpgid, a
 // negative-PID kill on cancel, the same kill again on a clean exit — which holds every descendant
 // that has not deliberately left it; one that calls setsid escapes the kill and survives the call,
 // unsupervised but still inside any confinement write-fence (an accepted residual, not an

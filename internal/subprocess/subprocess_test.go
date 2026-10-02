@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // fakeConfiner is a caps-injected Confiner for the core's own tests. It records each Confine
@@ -154,24 +153,22 @@ func TestConfinementHandoff(t *testing.T) {
 }
 
 // TestRunSubprocessReportsAWedgedDrain pins the second half of the same finding: when something
-// the command left running still holds the output pipe, exec cuts the drain off at
-// platform.ProcessWaitDelay and returns exec.ErrWaitDelay — which is not an *exec.ExitError, so
+// the command left running still holds the output pipe, exec cuts the drain off at the spec's
+// WaitDelay and returns exec.ErrWaitDelay — which is not an *exec.ExitError, so
 // the exit code falls through to the leader's own status. The leader exited 0, so the call used
 // to render as a green tick with a silently truncated tail.
 func TestRunSubprocessReportsAWedgedDrain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell; the exit-code mapping it pins is platform-independent")
 	}
-	// platform.ProcessWaitDelay is a package var, so this test cannot run in parallel;
-	// shrinking it is what keeps a five-second drain out of the suite.
-	prev := platform.ProcessWaitDelay
-	platform.ProcessWaitDelay = 250 * time.Millisecond
-	t.Cleanup(func() { platform.ProcessWaitDelay = prev })
+	t.Parallel()
 
 	// The sleep INHERITS the captured pipes and outlives the shell, so the output copy cannot
 	// finish: Wait blocks until the delay expires. The sleep is short enough that a failed
-	// reap cannot leave a process around for long.
-	res, err := RunSubprocess(context.Background(), SubprocessSpec{Argv: []string{"/bin/sh", "-c", `sleep 10 &`}})
+	// reap cannot leave a process around for long. The spec's own WaitDelay is what keeps the
+	// platform's five-second drain out of the suite.
+	spec := SubprocessSpec{Argv: []string{"/bin/sh", "-c", `sleep 10 &`}, WaitDelay: 250 * time.Millisecond}
+	res, err := RunSubprocess(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("RunSubprocess err = %v, want nil (a wedged drain is a result, not a Go error)", err)
 	}

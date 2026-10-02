@@ -145,8 +145,8 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // The returned ProcessTeardown holds the launched process's whole tree — a POSIX process group, a
 // Windows Job Object — so Client.Close reaps every descendant the server spawned rather than only
 // the leader apogee's own shutdown ladder (stdinLadder.Close) signals. The Cmd carries a
-// CANCELLABLE context, returned beside it, because platform.NewProcessTeardown wires both
-// cmd.Cancel (the process-group kill) and cmd.WaitDelay (the post-exit drain bound) — and
+// CANCELLABLE context, returned beside it, because platform.NewProcessTeardown wires cmd.Cancel
+// (the process-group kill) and this function sets cmd.WaitDelay (the post-exit drain bound) — and
 // exec.Cmd.Start refuses a non-nil Cancel on a Cmd built without a context. Neither fires while
 // that context is live, so the cancel is what makes them real: Client.Close runs it once the
 // ladder has returned, bounding a server that outlived it rather than leaving the ladder's
@@ -191,6 +191,8 @@ func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcp
 	// before there is a process to assign to it. The transport carries it too, because Connect is
 	// where the process starts and so where it must join its container.
 	td := host.NewTeardown(cmd)
+	// After the teardown, which set the platform default: the host's own drain bound wins.
+	cmd.WaitDelay = host.WaitDelay
 	return &stdioTransport{cmd: cmd, td: td, terminateDuration: host.TerminateDuration}, cmd, td, cancel, nil
 }
 
