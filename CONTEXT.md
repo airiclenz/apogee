@@ -188,7 +188,8 @@ the model reaches it through a **`sub_agent` tool** that dispatch treats as a **
 point** (not a leaf — never confined/gated as a unit; each *child* call gets the per-call
 disposition one level down), the orchestrator threads mode/approver/confiner/tool-subset
 verbatim-or-stricter, the sub-agent's **live guard state is isolated** (a fresh
-circuit-breaker + audit log — `Guards.ForSubAgent`) over a **shared, read-only
+circuit-breaker — `Guards.ForSubAgent`; its audit events reach the parent's sink by depth and
+spawn ids) over a **shared, read-only
 dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded by the
 `delegate-max-depth` key (`Config.Delegation.MaxDepth`), default **1**: the top-level agent
 delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
@@ -1541,8 +1542,9 @@ is what a proxied transport actually dials), tool-argument-guard (incl. the **Da
 floor, the `http_request` header filter, a leading-`-` guard on git ref args, and **network
 failure-message redaction** — every network tool's failure message names only the bare host, never
 the key-bearing request URL), circuit-breaker, and a
-**bounded audit log surfaced on the `EventSink`** (`domain.AuditEvent`, so the trail is observable —
-a sub-agent's records reach the parent observer at `Depth>0`, not lost with the discarded child).
+**audit trail that is the `EventSink` itself** (one `domain.AuditEvent` per call decision, so the
+trail is observable — a sub-agent's events reach the parent observer at `Depth>0`, not lost with the
+discarded child).
 The human-in-the-loop model — distinct from Confinement (OS-level) and from the bench's Sandbox.
 _Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a bench term
 for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for

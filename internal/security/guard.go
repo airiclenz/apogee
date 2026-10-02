@@ -7,18 +7,19 @@ import "github.com/airiclenz/apogee/internal/domain"
 // ----------------------------------------------------------------------------
 
 // Guards bundles the always-on, mode-independent guardrails the tool executor consults
-// for every tool call, in every mode: the dangerous-action floor, the circuit-breaker,
-// and the audit log (D6). Path-safety and url-safety are tool-local guards (the file and
-// network tools call them directly), so they are not part of this executor bundle — this
-// is the set the dispatcher itself runs around each call.
+// for every tool call, in every mode: the dangerous-action floor and the circuit-breaker
+// (D6). Path-safety and url-safety are tool-local guards (the file and network tools call
+// them directly), so they are not part of this executor bundle — this is the set the
+// dispatcher itself runs around each call. The audit trail is not held here: the executor
+// emits each call's AuditDecision onto the EventSink as a domain.AuditEvent, and that event
+// stream is the trail.
 //
-// LIVE STATE. Breaker and Audit hold MUTABLE pointer-backed state (the breaker's failure
-// streaks, the audit ring). A Guards value-copy therefore ALIASES that live state through
-// the shared pointers — copying the struct does NOT copy the breaker or the log. Dangerous,
-// by contrast, is read-only after construction (Inspect/Rules only), so sharing its pointer
-// is safe and intended. The split matters when handing Guards to a sub-agent: a verbatim
-// copy would make the sub-agent and parent share one breaker and one audit trail. Use
-// ForSubAgent to ISOLATE the live state (fresh breaker + fresh audit) while keeping the
+// LIVE STATE. Breaker holds MUTABLE pointer-backed state (its failure streaks). A Guards
+// value-copy therefore ALIASES that live state through the shared pointer — copying the
+// struct does NOT copy the breaker. Dangerous, by contrast, is read-only after construction
+// (Inspect/Rules only), so sharing its pointer is safe and intended. The split matters when
+// handing Guards to a sub-agent: a verbatim copy would make the sub-agent and parent share one
+// breaker. Use ForSubAgent to ISOLATE the live state (a fresh breaker) while keeping the
 // dangerous-action floor SHARED read-only — the floor a sub-agent must never be able to
 // re-derive or loosen (ADR 0013).
 //
@@ -31,40 +32,52 @@ type Guards struct {
 	Dangerous *DangerousActionGuard
 	// Breaker halts a runaway identical-failing-call loop. nil ⇒ no circuit-breaking.
 	Breaker *CircuitBreaker
-	// Audit is the append-only tool-call log. nil ⇒ no auditing.
-	Audit *AuditLog
 }
 
 // NewDefaultGuards returns the production guardrail bundle: the default dangerous-action
-// ruleset, a default-threshold circuit-breaker, and a fresh audit log. The executor wires
-// this when the host does not supply its own.
+// ruleset and a default-threshold circuit-breaker. The executor wires this when the host
+// does not supply its own.
 func NewDefaultGuards() Guards {
 	return Guards{
 		Dangerous: DefaultDangerousActionGuard(),
 		Breaker:   NewCircuitBreaker(DefaultCircuitBreakerThreshold),
-		Audit:     NewAuditLog(),
 	}
 }
 
 // ForSubAgent returns a Guards for a delegated sub-agent that ISOLATES the live state but
-// SHARES the dangerous-action floor read-only (ADR 0013). The breaker and the audit log are
-// fresh (a sub-agent's runaway tool-loop trips its own breaker, not the parent's, and its
-// audit trail is its own), so the two loops cannot interfere through the aliased pointers a
-// verbatim copy would share. The Dangerous guard is shared by POINTER: it is read-only after
-// construction (Inspect/Rules expose no mutator), so a sub-agent inherits the exact same
-// floor and has NO seam to re-derive, replace, or loosen it — the floor cannot be lowered one
-// level down. A nil Breaker/Audit on the parent stays nil (isolation of "no guard" is still
-// "no guard"); the breaker keeps the parent's configured threshold.
+// SHARES the dangerous-action floor read-only (ADR 0013). The breaker is fresh (a
+// sub-agent's runaway tool-loop trips its own breaker, not the parent's), so the two loops
+// cannot interfere through the aliased pointer a verbatim copy would share. The Dangerous
+// guard is shared by POINTER: it is read-only after construction (Inspect/Rules expose no
+// mutator), so a sub-agent inherits the exact same floor and has NO seam to re-derive,
+// replace, or loosen it — the floor cannot be lowered one level down. A nil Breaker on the
+// parent stays nil (isolation of "no guard" is still "no guard"); the breaker keeps the
+// parent's configured threshold.
 func (g Guards) ForSubAgent() Guards {
 	sub := Guards{Dangerous: g.Dangerous} // shared read-only floor
 	if g.Breaker != nil {
 		sub.Breaker = NewCircuitBreaker(g.Breaker.Threshold())
 	}
-	if g.Audit != nil {
-		sub.Audit = NewAuditLog()
-	}
 	return sub
 }
+
+// AuditDecision is the guardrail/dispatch decision the executor reports for a tool call on
+// its domain.AuditEvent, so the event-stream trail shows not just what ran but how it was
+// gated.
+type AuditDecision string
+
+const (
+	// AuditAllowed: the call cleared the guardrails and ran (gating, if any, is recorded
+	// separately by the dispatch disposition — the breaker/dangerous-action floor let it
+	// through).
+	AuditAllowed AuditDecision = "allowed"
+	// AuditDangerousRefused: the dangerous-action guard hard-refused the call (Tier 1).
+	AuditDangerousRefused AuditDecision = "dangerous-refused"
+	// AuditDangerousForceApproval: the dangerous-action guard forced approval (Tier 2).
+	AuditDangerousForceApproval AuditDecision = "dangerous-force-approval"
+	// AuditCircuitTripped: the circuit-breaker short-circuited the call (runaway loop).
+	AuditCircuitTripped AuditDecision = "circuit-tripped"
+)
 
 // GuardOutcome is what PreExecute tells the executor to do with a call before the mode
 // disposition runs. The guardrails are tighten-only (ADR 0012): an outcome can only make
@@ -130,23 +143,11 @@ func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool, exemptPaths [
 }
 
 // RecordExecution updates the post-execution guardrails after a call ran: it feeds the
-// circuit-breaker the call's failure outcome (returning true on the trip edge so the
-// executor surfaces a single ErrorEvent) and appends an audit record. decision is the
-// audit decision for the call (typically AuditAllowed for an executed call).
-func (g Guards) RecordExecution(call domain.ToolCall, decision AuditDecision, reason string, result domain.ToolResult) (tripped bool) {
-	if g.Breaker != nil {
-		tripped = g.Breaker.Record(call, result.IsError)
+// circuit-breaker the call's failure outcome, returning true on the trip edge so the
+// executor surfaces a single ErrorEvent.
+func (g Guards) RecordExecution(call domain.ToolCall, result domain.ToolResult) (tripped bool) {
+	if g.Breaker == nil {
+		return false
 	}
-	if g.Audit != nil {
-		g.Audit.RecordCall(call, decision, reason, result)
-	}
-	return tripped
-}
-
-// RecordBlocked appends an audit record for a call the guardrails refused or diverted
-// before execution (so the trail captures blocked calls, not just executed ones).
-func (g Guards) RecordBlocked(call domain.ToolCall, decision AuditDecision, reason string, result domain.ToolResult) {
-	if g.Audit != nil {
-		g.Audit.RecordCall(call, decision, reason, result)
-	}
+	return g.Breaker.Record(call, result.IsError)
 }

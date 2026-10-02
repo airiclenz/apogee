@@ -1173,7 +1173,7 @@ func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, cal
 			denial += " — " + verdict.hint
 		}
 		result := errorToolResult(call.ID, denial)
-		a.recordBlocked(turn, call, verdict.auditDecision, verdict.auditReason, result)
+		a.emitAudit(turn, call, verdict.auditDecision, verdict.auditReason, result)
 		return result, dispatchDone
 	}
 	if verdict.confineOnAllow {
@@ -1215,7 +1215,7 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 		// No Approver: the subprocess could not be confined and no human could authorise the
 		// unconfined run.
 		result := errorToolResult(call.ID, fb.reason)
-		a.recordBlocked(turn, call, fb.auditDecision, fb.auditReason, result)
+		a.emitAudit(turn, call, fb.auditDecision, fb.auditReason, result)
 		return result, dispatchDone
 	}
 
@@ -1225,7 +1225,7 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 	}
 	if !allowed {
 		result := errorToolResult(call.ID, confineDemoteRefuseReason)
-		a.recordBlocked(turn, call, fb.auditDecision, fb.auditReason, result)
+		a.emitAudit(turn, call, fb.auditDecision, fb.auditReason, result)
 		return result, dispatchDone
 	}
 	// Approval granted: re-run with NO confinement handle installed (the call already failed to
@@ -1241,7 +1241,7 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 func (a *Agent) executeRefuse(turn int, call domain.ToolCall, verdict resolution) domain.ToolResult {
 	result := errorToolResult(call.ID, verdict.reason)
 	if verdict.auditDecision != "" {
-		a.recordBlocked(turn, call, verdict.auditDecision, verdict.auditReason, result)
+		a.emitAudit(turn, call, verdict.auditDecision, verdict.auditReason, result)
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: verdict.reason})
 	}
 	return result
@@ -1930,7 +1930,7 @@ func errorToolResult(callID, message string) domain.ToolResult {
 	return domain.ToolResult{CallID: callID, Content: message, IsError: true}
 }
 
-// recordExecutedTrip records an executed call's audit + circuit-breaker outcome and surfaces the
+// recordExecutedTrip records an executed call's audit event + circuit-breaker outcome and surfaces the
 // single ErrorEvent on the breaker's trip edge (so a runaway identical-failure loop is halted,
 // not crashed). It is the shared post-execution tail of a Run and a Confine verdict.
 func (a *Agent) recordExecutedTrip(turn int, call domain.ToolCall, verdict resolution, result domain.ToolResult) {
@@ -1944,29 +1944,21 @@ func (a *Agent) recordExecutedTrip(turn int, call domain.ToolCall, verdict resol
 	}
 }
 
-// recordExecuted appends the executed call's audit record (feeding the circuit-breaker) AND
-// emits an AuditEvent so the trail is observable, not only held in the in-process ring
-// (security-review M1). It returns whether the breaker tripped on this call. A sub-agent
-// records through its own guards but emits through the SAME EventSink at Depth > 0, so a
+// recordExecuted feeds the circuit-breaker an executed call's outcome AND emits its
+// AuditEvent (security-review M1). It returns whether the breaker tripped on this call. A
+// sub-agent feeds its own breaker but emits through the SAME EventSink at Depth > 0, so a
 // delegated call's audit reaches the parent's observer instead of vanishing with the child.
 func (a *Agent) recordExecuted(turn int, call domain.ToolCall, decision security.AuditDecision, reason string, result domain.ToolResult) (tripped bool) {
-	tripped = a.guards.RecordExecution(call, decision, reason, result)
+	tripped = a.guards.RecordExecution(call, result)
 	a.emitAudit(turn, call, decision, reason, result)
 	return tripped
 }
 
-// recordBlocked appends a blocked/diverted call's audit record AND emits the matching
-// AuditEvent (security-review M1), so a refused/denied call is observable, not silently
-// dropped into a ring no observer reads.
-func (a *Agent) recordBlocked(turn int, call domain.ToolCall, decision security.AuditDecision, reason string, result domain.ToolResult) {
-	a.guards.RecordBlocked(call, decision, reason, result)
-	a.emitAudit(turn, call, decision, reason, result)
-}
-
-// emitAudit surfaces one audit record to the EventSink as a domain.AuditEvent (M1). It is
-// the single bridge from the security audit record onto the observable event stream; the
-// agent layer constructs the domain-only event so domain keeps its no-upward-dependency
-// property (ADR 0010).
+// emitAudit surfaces one call's audit decision to the EventSink as a domain.AuditEvent
+// (M1) — for an executed call through recordExecuted, and directly for a call the guardrails
+// refused or a gate denied, so a blocked call is observable rather than dropped. The event
+// stream IS the audit trail; nothing else holds it. The agent layer constructs the
+// domain-only event so domain keeps its no-upward-dependency property (ADR 0010).
 func (a *Agent) emitAudit(turn int, call domain.ToolCall, decision security.AuditDecision, reason string, result domain.ToolResult) {
 	a.cfg.Events.Emit(domain.AuditEvent{
 		EventBase: a.base(turn),

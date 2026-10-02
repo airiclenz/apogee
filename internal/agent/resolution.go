@@ -204,7 +204,7 @@ type resolution struct {
 	fallback *resolution
 
 	// auditDecision and auditReason are what the executor records for this verdict, so its
-	// recordExecuted / recordBlocked calls stay byte-identical (D8). An EMPTY auditDecision
+	// recordExecuted / emitAudit calls stay byte-identical (D8). An EMPTY auditDecision
 	// means the verdict is NOT audit-recorded — today's quirk for the unknown-tool and
 	// Plan-mode-write refusals (a guard refusal, a gate deny, and every executed call ARE
 	// recorded, with the guard's pass-through decision).

@@ -53,7 +53,7 @@ func TestGuards_PreExecute_TrippedBreakerRefuses(t *testing.T) {
 	// Drive the breaker to its trip via RecordExecution with failing results.
 	failed := domain.ToolResult{IsError: true}
 	for i := 0; i < DefaultCircuitBreakerThreshold; i++ {
-		g.RecordExecution(call, AuditAllowed, "", failed)
+		g.RecordExecution(call, failed)
 	}
 	pc := g.PreExecute(call, nil, nil)
 	if pc.Outcome != GuardRefuse || pc.Audit != AuditCircuitTripped {
@@ -61,7 +61,7 @@ func TestGuards_PreExecute_TrippedBreakerRefuses(t *testing.T) {
 	}
 }
 
-func TestGuards_RecordExecution_TripEdgeAndAudit(t *testing.T) {
+func TestGuards_RecordExecution_TripEdge(t *testing.T) {
 	t.Parallel()
 	g := NewDefaultGuards()
 	call := guardCall("terminal", "exit 1")
@@ -69,13 +69,10 @@ func TestGuards_RecordExecution_TripEdgeAndAudit(t *testing.T) {
 
 	var tripped bool
 	for i := 0; i < DefaultCircuitBreakerThreshold; i++ {
-		tripped = g.RecordExecution(call, AuditAllowed, "", failed)
+		tripped = g.RecordExecution(call, failed)
 	}
 	if !tripped {
 		t.Fatal("RecordExecution never reported the trip edge")
-	}
-	if g.Audit.Len() != DefaultCircuitBreakerThreshold {
-		t.Fatalf("audit recorded %d, want %d", g.Audit.Len(), DefaultCircuitBreakerThreshold)
 	}
 }
 
@@ -94,7 +91,7 @@ func TestGuards_ForSubAgent_BreakerIsolated(t *testing.T) {
 	call := guardCall("terminal", "exit 1")
 	failed := domain.ToolResult{IsError: true}
 	for i := 0; i < DefaultCircuitBreakerThreshold; i++ {
-		sub.RecordExecution(call, AuditAllowed, "", failed)
+		sub.RecordExecution(call, failed)
 	}
 	if sub.PreExecute(call, nil, nil).Outcome != GuardRefuse {
 		t.Fatal("sub-agent breaker did not trip after threshold failures")
@@ -106,25 +103,6 @@ func TestGuards_ForSubAgent_BreakerIsolated(t *testing.T) {
 	// The breaker keeps the parent's configured threshold.
 	if sub.Breaker.Threshold() != parent.Breaker.Threshold() {
 		t.Errorf("sub-agent breaker threshold = %d, want %d", sub.Breaker.Threshold(), parent.Breaker.Threshold())
-	}
-}
-
-// TestGuards_ForSubAgent_AuditIsolated proves the sub-agent's audit trail is its own — a
-// record appended by the sub-agent is not seen in the parent's log.
-func TestGuards_ForSubAgent_AuditIsolated(t *testing.T) {
-	t.Parallel()
-	parent := NewDefaultGuards()
-	sub := parent.ForSubAgent()
-
-	if sub.Audit == parent.Audit {
-		t.Fatal("ForSubAgent shares the parent's *AuditLog pointer; it must be fresh")
-	}
-	sub.RecordExecution(guardCall("terminal", "go build"), AuditAllowed, "", domain.ToolResult{})
-	if sub.Audit.Len() != 1 {
-		t.Fatalf("sub audit len = %d, want 1", sub.Audit.Len())
-	}
-	if parent.Audit.Len() != 0 {
-		t.Fatalf("parent audit len = %d, want 0 (sub-agent activity leaked into the parent log)", parent.Audit.Len())
 	}
 }
 
@@ -159,7 +137,7 @@ func TestGuards_ForSubAgent_NilFieldsStayNil(t *testing.T) {
 	t.Parallel()
 	var parent Guards // every field nil
 	sub := parent.ForSubAgent()
-	if sub.Dangerous != nil || sub.Breaker != nil || sub.Audit != nil {
+	if sub.Dangerous != nil || sub.Breaker != nil {
 		t.Fatalf("ForSubAgent of a zero Guards = %+v, want all-nil (inert stays inert)", sub)
 	}
 }
@@ -171,11 +149,10 @@ func TestGuards_ZeroValueIsInert(t *testing.T) {
 	if pc.Outcome != GuardProceed {
 		t.Fatalf("zero Guards outcome = %v, want GuardProceed (inert)", pc.Outcome)
 	}
-	// RecordExecution / RecordBlocked must not panic on a zero value.
-	if g.RecordExecution(guardCall("terminal", "x"), AuditAllowed, "", domain.ToolResult{}) {
+	// RecordExecution must not panic on a zero value.
+	if g.RecordExecution(guardCall("terminal", "x"), domain.ToolResult{}) {
 		t.Error("zero Guards reported a trip")
 	}
-	g.RecordBlocked(guardCall("terminal", "x"), AuditDangerousRefused, "r", domain.ToolResult{})
 }
 
 // TestGuards_PreExecute_ExemptScratchDirProceeds pins the executor-facing half of the ADR 0049

@@ -481,7 +481,13 @@ internal/mcp/transport.go — buildStdioTransport; internal/mcp/client.go — Ho
 - `go test -race -count=1 ./internal/platform/ ./internal/subprocess/ ./internal/mcp/`
 **Commit:** `refactor(platform): make the process wait delay a default callers override`
 
-## 15. The audit ring goes; the event stream is the trail (#16)
+## 15. The audit ring goes; the event stream is the trail (#16) — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): Guards.RecordBlocked is deleted (it only fed the ring) and RecordExecution narrows to (call, result) since decision/reason only reached the ring; dispatch.go's recordBlocked, then a one-line alias of emitAudit, is deleted and its four callers call emitAudit directly.
+NOTES (2026-10-02): consequential edit — internal/agent/resolution.go: made necessary by deleting recordBlocked (the auditDecision field comment named it).
+NOTES (2026-10-02): TestGuardrails_AuditRecordsCallDecisionResult renamed TestGuardrails_AuditEventCarriesCallDecision — the Acceptance grep is case-insensitive and matched "AuditRecord" in the old name; the Acceptance -run list should name the new test.
+NOTES (2026-10-02): security tests TestGuards_ForSubAgent_AuditIsolated deleted and TestGuards_RecordExecution_TripEdgeAndAudit renamed TestGuards_RecordExecution_TripEdge (its ring-length half dropped); TestAuditEvent_SubAgentRecordReachesParentObserver now asserts the spawning call id (EventBase.CallID) instead of the child ring length.
+NOTES (2026-10-02): scripts/test-timings.seed still lists the deleted/renamed test names; it is a harvested shard-timings fallback refreshed by `make test-timings-seed`, so stale rows are harmless and were left.
 
 **What:**
 **Goal:** `security.AuditLog` and `Guards.Audit` no longer exist; `Guards` holds the floor and

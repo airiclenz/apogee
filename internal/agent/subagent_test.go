@@ -900,8 +900,8 @@ func TestSubAgent_DangerousFloorSharedReadOnly(t *testing.T) {
 	if childGuards.Dangerous != a.guards.Dangerous {
 		t.Error("the sub-agent's dangerous floor must be the SAME (shared, read-only) guard as the parent's")
 	}
-	if childGuards.Breaker == a.guards.Breaker || childGuards.Audit == a.guards.Audit {
-		t.Error("the sub-agent's live guard state (breaker/audit) must be fresh, not aliased")
+	if childGuards.Breaker == a.guards.Breaker {
+		t.Error("the sub-agent's live guard state (breaker) must be fresh, not aliased")
 	}
 }
 

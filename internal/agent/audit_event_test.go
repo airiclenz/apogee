@@ -19,9 +19,9 @@ func auditEvents(events []domain.Event) []domain.AuditEvent {
 }
 
 // TestAuditEvent_EmittedForExecutedCall is the M1 regression: an executed tool call's
-// audit record is surfaced to the EventSink as a domain.AuditEvent, so the trail is
-// OBSERVABLE rather than held only in the in-process ring no observer reads. Before the
-// fix nothing threaded a.guards.Audit to any observer.
+// audit decision is surfaced to the EventSink as a domain.AuditEvent, so the trail is
+// OBSERVABLE: the event stream is the only audit trail, and before the M1 fix no observer
+// saw a call's decision at all.
 func TestAuditEvent_EmittedForExecutedCall(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "the answer"})
@@ -51,7 +51,7 @@ func TestAuditEvent_EmittedForExecutedCall(t *testing.T) {
 func TestAuditEvent_EmittedForRefusedCall(t *testing.T) {
 	sink := &recordingSink{}
 	// A read-only tool with dangerous args trips the Tier-1 dangerous-action floor before
-	// execution, exercising the recordBlocked path.
+	// execution, exercising the blocked-call path.
 	cfg := configWithTools(sink, fakeTool{name: "shell", readOnly: true, result: "x"})
 	cfg.Mode = domain.ModeAskBefore
 
@@ -67,9 +67,9 @@ func TestAuditEvent_EmittedForRefusedCall(t *testing.T) {
 }
 
 // TestAuditEvent_SubAgentRecordReachesParentObserver is the M1 sub-agent half: a sub-agent
-// records into its OWN (isolated) audit ring, but because it emits through the parent's
-// EventSink at Depth > 0, its audit record reaches the same observer instead of vanishing
-// when the child Agent is discarded. The depth on the event distinguishes it.
+// emits through the parent's EventSink at Depth > 0, so its audit event reaches the same
+// observer instead of vanishing when the child Agent is discarded. The depth and the
+// spawning call id on the event attribute it to the child.
 func TestAuditEvent_SubAgentRecordReachesParentObserver(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "child-answer"})
@@ -86,7 +86,7 @@ func TestAuditEvent_SubAgentRecordReachesParentObserver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	// The child shares the parent's EventSink and records through its own guards.
+	// The child shares the parent's EventSink and feeds its own breaker.
 	child.recordExecuted(0, domain.ToolCall{ID: "s1", Tool: "lookup"}, security.AuditAllowed, "",
 		domain.ToolResult{CallID: "s1", Content: "child-answer"})
 
@@ -100,9 +100,8 @@ func TestAuditEvent_SubAgentRecordReachesParentObserver(t *testing.T) {
 	if audits[0].CallID != "s1" {
 		t.Errorf("AuditEvent.CallID = %q, want s1", audits[0].CallID)
 	}
-	// And the child's own ring is non-empty (isolated from the parent's), proving the
-	// record was genuinely produced one level down.
-	if child.guards.Audit.Len() != 1 {
-		t.Errorf("child audit ring len = %d, want 1", child.guards.Audit.Len())
+	// The spawning call id proves the event was genuinely produced one level down.
+	if audits[0].EventBase.CallID != "call_sub" {
+		t.Errorf("AuditEvent.EventBase.CallID = %q, want call_sub (the spawning call)", audits[0].EventBase.CallID)
 	}
 }

@@ -1338,7 +1338,7 @@ func TestDispatch_ApproverErrorRefuses(t *testing.T) {
 			approver := &fakeApprover{decision: domain.ApprovalAllow, err: errors.New("prompt closed")}
 			cfg.Approver = approver
 
-			ag := driveToolCall(t, cfg, sink, "c1", tt.tool, `{}`)
+			driveToolCall(t, cfg, sink, "c1", tt.tool, `{}`)
 
 			if approver.calls != 1 {
 				t.Fatalf("Approver consulted %d times, want 1 (this class must gate in Auto/confine=true)", approver.calls)
@@ -1358,15 +1358,15 @@ func TestDispatch_ApproverErrorRefuses(t *testing.T) {
 			if !errorEventContaining(sink.events, "approver: prompt closed") {
 				t.Error("no ErrorEvent carried the Approver's failure")
 			}
-			// Fail-closed is only half the promise: the refusal is audit-recorded as a
-			// BLOCKED call, not dropped.
-			recs := ag.guards.Audit.Records()
-			if len(recs) != 1 {
-				t.Fatalf("audit records = %d, want 1 (the blocked call)", len(recs))
+			// Fail-closed is only half the promise: the refusal reaches the event stream as an
+			// AuditEvent for the BLOCKED call, not dropped. Its refusal text is the ToolResult
+			// asserted above (the AuditEvent carries no result text).
+			audits := auditEvents(sink.events)
+			if len(audits) != 1 {
+				t.Fatalf("AuditEvent count = %d, want 1 (the blocked call)", len(audits))
 			}
-			if r := recs[0]; r.Tool != tt.tool || r.CallID != "c1" || !r.IsError ||
-				!strings.Contains(r.Result, "denied by approver") {
-				t.Errorf("audit record = %+v, want the blocked call's refusal", r)
+			if ae := audits[0]; ae.Tool != tt.tool || ae.CallID != "c1" || !ae.IsError {
+				t.Errorf("AuditEvent = %+v, want the blocked call's refusal", ae)
 			}
 		})
 	}

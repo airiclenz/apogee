@@ -273,30 +273,35 @@ func TestGuardrails_CircuitBreakerTrips(t *testing.T) {
 	if !tripped {
 		t.Fatal("circuit-breaker never surfaced an ErrorEvent after identical failing calls")
 	}
-	// The audit log recorded every call (executed and breaker-blocked alike).
-	if got := a.guards.Audit.Len(); got < calls {
-		t.Errorf("audit log has %d records, want at least %d", got, calls)
+	// The event stream carries an AuditEvent for every call (executed and breaker-blocked alike).
+	if got := len(auditEvents(sink.events)); got < calls {
+		t.Errorf("AuditEvent count = %d, want at least %d", got, calls)
 	}
 }
 
-// TestGuardrails_AuditRecordsCallDecisionResult proves the audit log records a normal
-// allowed call's decision and result.
-func TestGuardrails_AuditRecordsCallDecisionResult(t *testing.T) {
+// TestGuardrails_AuditEventCarriesCallDecision proves a normal allowed call's decision
+// reaches the recording sink as an AuditEvent, and its result as the ToolResult event (the
+// AuditEvent carries no result text).
+func TestGuardrails_AuditEventCarriesCallDecision(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "the answer"})
 	cfg.Mode = domain.ModeAskBefore
 
-	a := driveToolCall(t, cfg, sink, "c1", "lookup", `{"q":"x"}`)
+	driveToolCall(t, cfg, sink, "c1", "lookup", `{"q":"x"}`)
 
-	recs := a.guards.Audit.Records()
-	if len(recs) != 1 {
-		t.Fatalf("audit records = %d, want 1", len(recs))
+	audits := auditEvents(sink.events)
+	if len(audits) != 1 {
+		t.Fatalf("AuditEvent count = %d, want 1", len(audits))
 	}
-	r := recs[0]
-	if r.Tool != "lookup" || r.CallID != "c1" || r.Decision != security.AuditAllowed {
-		t.Errorf("audit record = %+v, want lookup/c1/allowed", r)
+	ae := audits[0]
+	if ae.Tool != "lookup" || ae.CallID != "c1" || ae.Decision != string(security.AuditAllowed) || ae.IsError {
+		t.Errorf("AuditEvent = %+v, want lookup/c1/allowed, not an error", ae)
 	}
-	if r.IsError || r.Result != "the answer" {
-		t.Errorf("audit record result = %+v, want the tool's success content", r)
+	res, ok := lastToolResult(sink.events)
+	if !ok {
+		t.Fatal("no ToolResult recorded")
+	}
+	if res.IsError || res.Content != "the answer" {
+		t.Errorf("ToolResult = %+v, want the tool's success content", res)
 	}
 }

@@ -579,17 +579,17 @@ type UsageEvent struct {
 	ServedModel  string
 }
 
-// AuditEvent surfaces one append-only audit record — a tool call, the guardrail
-// decision it cleared/was blocked by, and whether its result errored — to the
-// EventSink as it is recorded, so the audit trail is OBSERVABLE (and snapshot- or
-// log-shippable) rather than living only in a volatile in-process ring no observer
-// reads (security-review M1). Because a sub-agent emits through the parent's EventSink
-// at Depth > 0, a delegated call's audit record reaches the same observer at its nesting
-// depth instead of vanishing with the discarded child Agent.
+// AuditEvent surfaces one audit entry — a tool call, the guardrail decision it
+// cleared/was blocked by, and whether its result errored — to the EventSink as the
+// executor decides it (security-review M1). The event stream IS the audit trail: no
+// in-process copy is kept, so an observer (or a snapshot or log shipper) is where the
+// trail lives. Because a sub-agent emits through the parent's EventSink at Depth > 0, a
+// delegated call's audit entry reaches the same observer at its nesting depth instead of
+// vanishing with the discarded child Agent.
 //
-// The payload mirrors security.AuditRecord but is expressed in domain-only types: the
-// agent layer (which imports both domain and security) constructs it, so domain keeps
-// its no-upward-dependency property (ADR 0010). Decision is the audit decision as a
+// The payload carries security.AuditDecision in domain-only types: the agent layer
+// (which imports both domain and security) constructs it, so domain keeps its
+// no-upward-dependency property (ADR 0010). Decision is the audit decision as a
 // string (e.g. "allowed", "dangerous-refused", "circuit-tripped").
 type AuditEvent struct {
 	EventBase

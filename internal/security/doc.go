@@ -64,11 +64,11 @@
 //     nothing stay fully inspected.
 //   - The circuit-breaker (CircuitBreaker): halts a runaway loop of identical failing
 //     calls, surfacing an ErrorEvent rather than spinning.
-//   - The audit record (AuditLog): an append-only call / decision / result trail.
+//   - The audit decision (AuditDecision): how a call was gated. The executor emits it on
+//     a domain.AuditEvent, and the event stream is the call / decision trail.
 //
-// Guards bundles the executor-facing always-on set (dangerous-action + breaker +
-// audit) the tool executor threads around every call so all tools — and a sub-agent
-// (D2) — inherit them. The package imports internal/domain, the standard library and
+// Guards bundles the executor-facing always-on set (dangerous-action + breaker) the tool
+// executor threads around every call so all tools — and a sub-agent (D2) — inherit them. The package imports internal/domain, the standard library and
 // exactly one third-party module — golang.org/x/net/idna, the IDNA mapping urlsafety.go's
 // NormalizeURL applies so the guard's verdict names the host net/http will actually
 // dial. ADR 0010's direction rule is untouched: this package is imported BY
@@ -77,8 +77,8 @@
 // # The files, one line each
 //
 // The executor bundle. guard.go is Guards itself — the always-on set the tool executor threads
-// around every call (PreExecute, RecordExecution, RecordBlocked) — plus ForSubAgent, the split
-// that hands a sub-agent its own breaker and its own audit trail while keeping the
+// around every call (PreExecute, RecordExecution) and the AuditDecision vocabulary its verdicts
+// carry — plus ForSubAgent, the split that hands a sub-agent its own breaker while keeping the
 // dangerous-action floor shared and read-only, which is the floor it must not be able to
 // re-derive (ADR 0013).
 //
@@ -107,11 +107,8 @@
 // commit-secrets rule dispatch raises to TierForceApproval on a git_commit that would carry
 // any of it (ADR 0080). Pure by contract: dispatch precomputes the diff and the paths (D6).
 //
-// The runaway halt and the trail. circuitbreaker.go trips after DefaultCircuitBreakerThreshold
-// consecutive identical FAILING calls, keyed by a (tool, arguments) signature that any success
-// clears. audit.go is the append-only call / decision / result record: the AuditDecision
-// vocabulary, the capped ring that counts what it drops rather than silently forgetting, and the
-// result truncation that keeps one record bounded.
+// The runaway halt. circuitbreaker.go trips after DefaultCircuitBreakerThreshold consecutive
+// identical FAILING calls, keyed by a (tool, arguments) signature that any success clears.
 //
 // The filesystem boundary, split check-from-use because the gap between them is the race.
 // pathsafety.go is the CHECK — ResolveInRoot (symlink-aware, traversal-rejecting, validating a

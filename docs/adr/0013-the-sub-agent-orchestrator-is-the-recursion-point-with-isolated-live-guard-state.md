@@ -83,6 +83,8 @@ conversation and no parent pending input (the ADR 0008 statelessness boundary).
 - **Fresh `CircuitBreaker`** (same threshold) and **fresh `AuditLog`** — the sub-agent's
   runaway loop trips *its own* breaker, not the parent's, and its audit trail is its own. The
   two loops cannot interfere through aliased pointers.
+  *(Amended 2026-10-02 — see the last Amendment below: the `AuditLog` is gone; the fresh breaker
+  stands, and a sub-agent's audit trail is told apart by depth and spawn ids on the event stream.)*
 - **Shared `*DangerousActionGuard` by pointer.** The floor is read-only after construction
   (the guard exposes only `Inspect`/`Rules`, no mutator), so sharing the pointer is safe and
   intended: the sub-agent inherits the **exact** floor and has **no seam to re-derive, replace,
@@ -390,3 +392,21 @@ calls fans out with them at depth 0, and the retention map is guarded for exactl
 > is still a fresh atomic child Run re-spawned from what the engine kept, never ADR 0007's suspended
 > slot, and §5 is unmoved — the heading's child reads "capped, faulted, stopped or named" from this
 > date.
+
+## Amendment (2026-10-02) — the audit ring is gone; sub-agent audit isolation is by depth and spawn ids
+
+Plan `2026-10-02 - 01` item 15 (architecture review #16) deletes `security.AuditLog`, the bounded
+in-process ring, and with it `Guards.Audit`. No reader consumed the ring: since security-review M1
+every call's decision has been emitted on the `EventSink` as a `domain.AuditEvent`, and that event
+stream is now the only audit trail. `Guards` holds the dangerous-action floor and the
+circuit-breaker; `AuditDecision` and its constants stay, moved to `guard.go`, as the vocabulary the
+`AuditEvent` carries.
+
+§3's "fresh `AuditLog`" therefore no longer holds, and the share-vs-isolate question it answered
+for the trail is answered differently: a sub-agent does not get an audit trail of its own. It
+emits through the parent's `EventSink`, and its events are told apart by **depth** (`Depth > 0`)
+and by **spawn ids** (`EventBase.CallID`, the `sub_agent` call that spawned the emitting agent,
+beside the audited call's own `AuditEvent.CallID`). Interference cannot arise — an event stream is
+append-only and the parent's breaker is not fed by it. `ForSubAgent` still hands the child a fresh
+breaker over the shared read-only floor; the rest of §3, and the Consequences' "fresh audit", read
+"fresh breaker" from this date.
