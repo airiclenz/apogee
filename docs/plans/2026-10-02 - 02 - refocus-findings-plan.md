@@ -220,7 +220,17 @@ raw entry bytes); existing stubllm tests unchanged.
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/stubllm/`
 **Commit:** `test(stubllm): script signed thinking blocks on the anthropic route`
 
-## 5. Replayed signed thinking passes the prefix-digest guard
+## 5. Replayed signed thinking passes the prefix-digest guard — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the per-call channel is one `sentRequest` struct (`carriesEffort`, `prefixDigest`) that `wireCodec.encode` returns and `decodeWhole`/`parseSSE` take, in place of the old `carriesEffort bool` return and `carried bool` parameter. It is never a Client or codec field.
+
+NOTES (2026-10-02): the preserved-thinking set lives in the no-effort table, as ADR 0092 says. The table's rows are now a named `anthropicModelRow` with a `preservesThinking` column, and two rows were added, `claude-fable-5-1` and `claude-mythos-5-1`, carrying the same no-effort shape as their `claude-fable-5`/`claude-mythos-5` parents. No-effort behaviour is unchanged.
+
+NOTES (2026-10-02): the guard drops a message's reasoning entries all together or not at all. When it drops them, the reply's layout is kept minus its reasoning members, so the text still goes back in its original text blocks ("the rest of the message unchanged", ADR 0092 decision 3). The digest is SHA-256 over the system+tools head and per-message sums. The newest message's sum is never cached because a following tool result may still fold into it.
+
+NOTES (2026-10-02): agent test (b) uses tasklist_test.go's `write_tasks` fake (taskWriter), not the real `task_list` tool. The fake writes the list through the same context path `task_list` uses. As a precondition the test checks that the system text really changed. Test (d) builds the base-shaped (undigested) entry with `scriptedDeltas` and resumes onto stubllm.
+
+NOTES (2026-10-02): added TestAnthropicReplayGuardDropsOnlyTheRepliesAfterAChange, which is beyond the plan's list. It shows the guard drops per reply: a rewritten tool result drops only the later reply's thinking, not the earlier one's.
 
 **What:**
 **Goal:** As ADR 0092 records: on the anthropic wire, a request replays an earlier reply's thinking blocks only when

@@ -209,18 +209,31 @@ type wireCodec interface {
 	// headers are the request headers that carry the API key — none when the key is empty.
 	headers(apiKey string) map[string]string
 	// encode renders a Request (its Model already resolved by the Client) onto the request
-	// body and reports whether that body expressed a thinking effort, the gate on
-	// thinkingEffortHint.
-	encode(req Request) (body []byte, carriesEffort bool, err error)
-	// decodeWhole decodes one non-streamed 200 body. A reply that framed a failure in-band
-	// comes back as the *wireError with a zero RawResponse; a body that cannot be decoded is
-	// the bare error, which the Client wraps.
-	decodeWhole(body io.Reader) (RawResponse, *wireError, error)
-	// parseSSE reads one streamed 200 body and yields Deltas until it ends, however it ends.
-	// carried reports that the request expressed a thinking effort (see encode). toolFragment,
-	// when non-nil, runs as each tool-call fragment arrives — calls are held until the stream
-	// ends, so it is the only signal of when one was generated; it never changes what is yielded.
-	parseSSE(body io.Reader, carried bool, toolFragment func(), yield func(Delta) bool)
+	// body and reports what its decoders must know of it (sentRequest).
+	encode(req Request) (body []byte, sent sentRequest, err error)
+	// decodeWhole decodes one non-streamed 200 body, the reply to the request encode reported
+	// as sent. A reply that framed a failure in-band comes back as the *wireError with a zero
+	// RawResponse; a body that cannot be decoded is the bare error, which the Client wraps.
+	decodeWhole(body io.Reader, sent sentRequest) (RawResponse, *wireError, error)
+	// parseSSE reads one streamed 200 body, the reply to the request encode reported as sent,
+	// and yields Deltas until it ends, however it ends. toolFragment, when non-nil, runs as each
+	// tool-call fragment arrives — calls are held until the stream ends, so it is the only signal
+	// of when one was generated; it never changes what is yielded.
+	parseSSE(body io.Reader, sent sentRequest, toolFragment func(), yield func(Delta) bool)
+}
+
+// sentRequest is what a codec's encode reports about the one request it rendered, handed back to
+// the same codec's decoders on the same call. It travels per request and is never kept on the
+// Client or the codec: a borrowed parent Client streams for its children at the same time, so
+// shared state would let one request's facts reach another's reply (ADR 0092).
+type sentRequest struct {
+	// carriesEffort reports that the body expressed a thinking effort — the gate on
+	// thinkingEffortHint for the reply's fault.
+	carriesEffort bool
+	// prefixDigest is the digest of the prefix the reply is produced on, which the anthropic
+	// decoders stamp into the reply's reasoning entries on a preserved-thinking model
+	// (anthropicReplayGuard); "" on every other model and wire, and nothing is stamped.
+	prefixDigest string
 }
 
 // Option configures a Client (functional-options pattern — most fields have a sane
@@ -452,7 +465,7 @@ func (c *Client) Close() error {
 // decode rather than exhausting memory.
 func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) {
 	req.Stream = false
-	body, carriedEffort, err := c.encode(req)
+	body, sent, err := c.encode(req)
 	if err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: marshal request: %w", err)
 	}
@@ -465,43 +478,45 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return RawResponse{}, c.statusError(resp, carriedEffort)
+		return RawResponse{}, c.statusError(resp, sent.carriesEffort)
 	}
 
-	reply, werr, err := c.codec.decodeWhole(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	reply, werr, err := c.codec.decodeWhole(io.LimitReader(resp.Body, maxResponseBodyBytes), sent)
 	if err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: decode response: %w", err)
 	}
 	if werr != nil {
 		// A failure the server framed inside an HTTP 200 — the empty-reply masquerade the codec
 		// refuses to map onto a zero RawResponse — is rendered exactly like a status would be.
-		return RawResponse{}, c.inBandError(*werr, carriedEffort)
+		return RawResponse{}, c.inBandError(*werr, sent.carriesEffort)
 	}
 	return reply, nil
 }
 
 // encode renders req onto the selected wire. The configured model wins over the Request's
 // on every wire — SetModel rebinds it under a running session — so it is resolved here, once,
-// before the codec sees the request. The bool reports whether the body expressed a thinking
-// effort; it gates thinkingEffortHint on the reply's fault, and it is the codec's verdict even
-// when request-extra touched the effort members. The request-extra patch, when one is
-// installed, is merged over the codec's bytes here — before send and so before the observer.
-func (c *Client) encode(req Request) (body []byte, carriedEffort bool, err error) {
+// before the codec sees the request. The sentRequest is the codec's report for the reply's
+// decoder: whether the body expressed a thinking effort — it gates thinkingEffortHint on the
+// reply's fault, and it is the codec's verdict even when request-extra touched the effort
+// members — and the prefix digest, which request-extra fields never enter (ADR 0092). The
+// request-extra patch, when one is installed, is merged over the codec's bytes here — before
+// send and so before the observer.
+func (c *Client) encode(req Request) (body []byte, sent sentRequest, err error) {
 	if model := c.activeModel(); model != "" {
 		req.Model = model
 	}
 	if c.requestExtraErr != nil {
-		return nil, false, c.requestExtraErr
+		return nil, sentRequest{}, c.requestExtraErr
 	}
-	body, carriedEffort, err = c.codec.encode(req)
+	body, sent, err = c.codec.encode(req)
 	if err != nil || c.requestExtra == nil {
-		return body, carriedEffort, err
+		return body, sent, err
 	}
 	merged, err := c.requestExtra.apply(body)
 	if err != nil {
-		return nil, false, fmt.Errorf("request-extra: %w", err)
+		return nil, sentRequest{}, fmt.Errorf("request-extra: %w", err)
 	}
-	return merged, carriedEffort, nil
+	return merged, sent, nil
 }
 
 // send issues the POST with bounded retries and returns the live response together with

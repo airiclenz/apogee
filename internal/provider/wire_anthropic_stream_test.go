@@ -77,12 +77,18 @@ var anthropicToolStreamDeltas = []Delta{
 }
 
 // parseAnthropicSSE drains the anthropic parser over one scripted body, through a Client so the
-// in-band renderer has its owner.
+// in-band renderer has its owner, as the reply to a request that reported nothing.
 func parseAnthropicSSE(t *testing.T, body string) []Delta {
+	t.Helper()
+	return parseAnthropicSSESent(t, body, sentRequest{})
+}
+
+// parseAnthropicSSESent is parseAnthropicSSE for the reply to the request sent reports.
+func parseAnthropicSSESent(t *testing.T, body string, sent sentRequest) []Delta {
 	t.Helper()
 	client := NewClient("http://unused.invalid", "m", WithWire(WireAnthropic))
 	var deltas []Delta
-	client.codec.parseSSE(strings.NewReader(body), false, nil, func(d Delta) bool {
+	client.codec.parseSSE(strings.NewReader(body), sent, nil, func(d Delta) bool {
 		deltas = append(deltas, d)
 		return true
 	})
@@ -138,7 +144,8 @@ func anthropicSSEOf(t *testing.T, content string) string {
 // TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks pins where a streamed reply's layout
 // entry goes: one more DeltaThinkingBlock after the reply's reasoning blocks and before its
 // calls, when its text sat in more than one block; and none at all when a reasoning block never
-// closed, since that block is dropped and a layout counting it would describe another reply.
+// closed, since that block is dropped and a layout counting it would describe another reply. A
+// request's prefix digest rides each reasoning entry, never the layout entry.
 func TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks(t *testing.T) {
 	t.Parallel()
 	const split = `[{"type":"text","text":"a"},{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"b"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`
@@ -147,6 +154,7 @@ func TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks(t *testing.T) {
 	cases := []struct {
 		name   string
 		stream string
+		digest string
 		want   []string
 	}{
 		{name: "closed", stream: anthropicSSEOf(t, split), want: []string{
@@ -156,6 +164,10 @@ func TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks(t *testing.T) {
 		{name: "a block left open", stream: unclosed, want: []string{
 			`{"after_text":true,"block":{"type":"thinking","thinking":"","signature":"czA="}}`,
 		}},
+		{name: "a prefix digest", stream: anthropicSSEOf(t, split), digest: "d1", want: []string{
+			`{"after_text":true,"prefix_digest":"d1","block":{"type":"thinking","thinking":"","signature":"czA="}}`,
+			`{"reply_layout":[1,-1,1,-2]}`,
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -163,7 +175,7 @@ func TestAnthropicParseSSE_LayoutFollowsTheReasoningBlocks(t *testing.T) {
 
 			var got []string
 			sawCall := false
-			for _, d := range parseAnthropicSSE(t, tc.stream) {
+			for _, d := range parseAnthropicSSESent(t, tc.stream, sentRequest{prefixDigest: tc.digest}) {
 				switch d.Kind {
 				case DeltaThinkingBlock:
 					if sawCall {
@@ -424,7 +436,7 @@ func TestAnthropicParseSSE_ConsumerBreakStopsTheRead(t *testing.T) {
 
 	client := NewClient("http://unused.invalid", "m", WithWire(WireAnthropic))
 	var seen []Delta
-	client.codec.parseSSE(strings.NewReader(anthropicToolStreamSSE), false, nil, func(d Delta) bool {
+	client.codec.parseSSE(strings.NewReader(anthropicToolStreamSSE), sentRequest{}, nil, func(d Delta) bool {
 		seen = append(seen, d)
 		return false
 	})

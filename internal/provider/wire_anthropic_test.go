@@ -145,7 +145,7 @@ func TestAnthropicCodecEffort(t *testing.T) {
 			codec := &anthropicCodec{}
 			req := Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}, ThinkingEffort: tc.effort}
 
-			body, carries, err := codec.encode(req)
+			body, sent, err := codec.encode(req)
 
 			if err != nil {
 				t.Fatalf("encode: %v", err)
@@ -160,8 +160,8 @@ func TestAnthropicCodecEffort(t *testing.T) {
 			if got.Thinking["type"] != tc.wantThinking {
 				t.Errorf("thinking = %v, want type %s", got.Thinking, tc.wantThinking)
 			}
-			if carries != (tc.wantEffort != "") {
-				t.Errorf("carriesEffort = %v, want %v", carries, tc.wantEffort != "")
+			if sent.carriesEffort != (tc.wantEffort != "") {
+				t.Errorf("carriesEffort = %v, want %v", sent.carriesEffort, tc.wantEffort != "")
 			}
 			switch {
 			case tc.wantEffort == "" && got.OutputConfig != nil:
@@ -271,7 +271,7 @@ func TestAnthropicCodecNoEffortShapePerModel(t *testing.T) {
 					Sampling:       Sampling{Temperature: &temp, TopP: &topP, TopK: &topK},
 				}
 
-				body, carries, err := codec.encode(req)
+				body, sent, err := codec.encode(req)
 
 				if err != nil {
 					t.Fatalf("encode: %v", err)
@@ -291,8 +291,8 @@ func TestAnthropicCodecNoEffortShapePerModel(t *testing.T) {
 						t.Errorf("%s present = %v, want %v in %s", key, present, want.sampled, body)
 					}
 				}
-				if carries != wantCarries {
-					t.Errorf("carriesEffort = %v, want %v", carries, wantCarries)
+				if sent.carriesEffort != wantCarries {
+					t.Errorf("carriesEffort = %v, want %v", sent.carriesEffort, wantCarries)
 				}
 			})
 		}
@@ -367,7 +367,9 @@ func TestOpenAICodecIgnoresThinkingBlocks(t *testing.T) {
 // places, because the API refuses a latest turn whose thinking blocks were rearranged and treats
 // any reordered block as an edit that invalidates later thinking (anthropicReasoningEntry). Text
 // split by a thinking block or a tool call goes back as the text blocks it came in, each in its
-// own place (anthropicReplyLayout).
+// own place (anthropicReplyLayout). It holds on a model outside the preserved-thinking set, whose
+// entries carry no digest, and on one inside it, whose entries carry the digest of the unchanged
+// prefix they replay over (anthropicReplayGuard).
 func TestAnthropicReplyReplaysInTheOrderReceived(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -415,22 +417,27 @@ data: {"type":"message_stop"}
 			content: `[{"type":"text","text":"first"},{"type":"redacted_thinking","data":"RU5D"},{"type":"text","text":"second"},{"type":"tool_use","id":"tc_1","name":"ls","input":{"p":"."}}]`,
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			stream := tc.stream
-			if stream == "" {
-				stream = anthropicSSEOf(t, tc.content)
-			}
-			whole := decodeWholeReply(t, tc.content)
-			replies := map[string]Message{"whole": whole, "streamed": streamedReply(t, stream)}
-
-			for surface, reply := range replies {
-				if got := sentAssistantTurn(t, reply); got != tc.content {
-					t.Errorf("%s: assistant turn sent back\n got: %s\nwant: %s", surface, got, tc.content)
+	for _, model := range []string{"m", "claude-opus-5-5"} {
+		for _, tc := range cases {
+			t.Run(model+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				stream := tc.stream
+				if stream == "" {
+					stream = anthropicSSEOf(t, tc.content)
 				}
-			}
-		})
+				sent := sentBeforeAssistantTurn(t, model)
+				replies := map[string]Message{
+					"whole":    decodeWholeReply(t, tc.content, sent),
+					"streamed": streamedReply(t, stream, sent),
+				}
+
+				for surface, reply := range replies {
+					if got := sentAssistantTurn(t, model, reply); got != tc.content {
+						t.Errorf("%s: assistant turn sent back\n got: %s\nwant: %s", surface, got, tc.content)
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -468,7 +475,7 @@ func TestAnthropicReplyLayoutFallsBackToPlaces(t *testing.T) {
 			}
 			reply := Message{Role: "assistant", Content: tc.content, ToolCalls: tc.calls, ThinkingBlocks: entries}
 
-			got := sentAssistantTurn(t, reply)
+			got := sentAssistantTurn(t, "m", reply)
 
 			if got != tc.want {
 				t.Errorf("assistant turn\n got: %s\nwant: %s", got, tc.want)
@@ -485,8 +492,8 @@ func TestAnthropicReplyWithoutThinkingCarriesNoLayout(t *testing.T) {
 	const content = `[{"type":"text","text":"a"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}},{"type":"text","text":"b"},{"type":"text","text":"c"}]`
 
 	replies := map[string]Message{
-		"whole":    decodeWholeReply(t, content),
-		"streamed": streamedReply(t, anthropicSSEOf(t, content)),
+		"whole":    decodeWholeReply(t, content, sentRequest{}),
+		"streamed": streamedReply(t, anthropicSSEOf(t, content), sentRequest{}),
 	}
 
 	for surface, reply := range replies {
@@ -496,24 +503,142 @@ func TestAnthropicReplyWithoutThinkingCarriesNoLayout(t *testing.T) {
 	}
 }
 
-// decodeWholeReply decodes a whole Messages reply with content as its content array into the
-// assistant Message a consumer builds from it.
-func decodeWholeReply(t *testing.T, content string) Message {
+// TestAnthropicReplayGuard pins ADR 0092 at the codec, whole and streamed: on a preserved-thinking
+// model a reply's thinking goes back only over the prefix it was produced on — a changed system
+// text, or an entry saved without a digest, sends the rest of the turn without it — while a model
+// outside the set replays across a changed prefix exactly as before the guard.
+func TestAnthropicReplayGuard(t *testing.T) {
+	t.Parallel()
+	const reply = `[{"type":"text","text":"listing"},{"type":"thinking","thinking":"","signature":"czA="},{"type":"text","text":"now"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`
+	const withoutThinking = `[{"type":"text","text":"listing"},{"type":"text","text":"now"},{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`
+	cases := []struct {
+		name       string
+		model      string
+		nextSystem string
+		undigested bool // the entries as a session saved them before digests existed
+		want       string
+	}{
+		{name: "digest matches", model: "claude-opus-5-5", nextSystem: "be brief", want: reply},
+		{name: "matched case-insensitively", model: "Claude-Sonnet-5-5-20261001", nextSystem: "be brief", want: reply},
+		{name: "system changed", model: "claude-opus-5-5", nextSystem: "be thorough", want: withoutThinking},
+		{name: "no digest", model: "claude-fable-5-1", nextSystem: "be brief", undigested: true, want: withoutThinking},
+		{name: "older model, system changed", model: "claude-opus-4-8", nextSystem: "be thorough", want: reply},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			produced := turnBeforeAssistant(tc.model)
+			produced.Messages = append([]Message{{Role: "system", Content: "be brief"}}, produced.Messages...)
+			_, sent, err := (&anthropicCodec{}).encode(produced)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			if tc.undigested {
+				sent = sentRequest{}
+			}
+			replies := map[string]Message{
+				"whole":    decodeWholeReply(t, reply, sent),
+				"streamed": streamedReply(t, anthropicSSEOf(t, reply), sent),
+			}
+
+			for surface, message := range replies {
+				next := turnBeforeAssistant(tc.model)
+				next.Messages = append([]Message{{Role: "system", Content: tc.nextSystem}}, next.Messages...)
+				next.Messages = append(next.Messages, message, Message{Role: "tool", Content: "ok", ToolCallID: "tc_1"})
+				if got := encodedTurn(t, next, 1); got != tc.want {
+					t.Errorf("%s: assistant turn\n got: %s\nwant: %s", surface, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestAnthropicReplayGuardDropsOnlyTheRepliesAfterAChange pins that the guard judges each reply
+// by its own prefix: a tool result rewritten after the first reply (as capping or pruning does)
+// drops the second reply's thinking, while the first reply, whose prefix holds, keeps its own.
+func TestAnthropicReplayGuardDropsOnlyTheRepliesAfterAChange(t *testing.T) {
+	t.Parallel()
+	const content = `[{"type":"thinking","thinking":"","signature":"czA="},{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`
+	const withoutThinking = `[{"type":"tool_use","id":"tc_1","name":"ls","input":{}}]`
+	first := turnBeforeAssistant("claude-opus-5-5")
+	firstReply := decodeWholeReply(t, content, encodedSent(t, first))
+	second := first
+	second.Messages = append(append([]Message(nil), first.Messages...),
+		firstReply, Message{Role: "tool", Content: "ok", ToolCallID: "tc_1"})
+	secondReply := decodeWholeReply(t, content, encodedSent(t, second))
+	third := second
+	third.Messages = append(append([]Message(nil), second.Messages...),
+		secondReply, Message{Role: "tool", Content: "ok", ToolCallID: "tc_1"})
+	third.Messages[2].Content = "[result elided]"
+
+	got := []string{encodedTurn(t, third, 1), encodedTurn(t, third, 3)}
+
+	if want := []string{content, withoutThinking}; got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("assistant turns\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestAnthropicReplyOutsideThePreservedSetCarriesNoDigest pins that a model outside the
+// preserved-thinking set encodes no digest, so its reply's leading thinking block rides as the bare
+// wire block it always did.
+func TestAnthropicReplyOutsideThePreservedSetCarriesNoDigest(t *testing.T) {
+	t.Parallel()
+	const block = `{"type":"thinking","thinking":"","signature":"czA="}`
+
+	sent := sentBeforeAssistantTurn(t, "claude-opus-4-8")
+	reply := decodeWholeReply(t, `[`+block+`,{"type":"text","text":"done"}]`, sent)
+
+	if sent.prefixDigest != "" || len(reply.ThinkingBlocks) != 1 || string(reply.ThinkingBlocks[0]) != block {
+		t.Errorf("digest %q, entries %q; want no digest and the bare block", sent.prefixDigest, reply.ThinkingBlocks)
+	}
+}
+
+// encodedSent is the codec's report on req.
+func encodedSent(t *testing.T, req Request) sentRequest {
+	t.Helper()
+	_, sent, err := (&anthropicCodec{}).encode(req)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	return sent
+}
+
+// encodedTurn encodes req and returns the content array of its wire message at index.
+func encodedTurn(t *testing.T, req Request, index int) string {
+	t.Helper()
+	body, _, err := (&anthropicCodec{}).encode(req)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var sent struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil || len(sent.Messages) <= index {
+		t.Fatalf("body %s: %v", body, err)
+	}
+	return string(sent.Messages[index].Content)
+}
+
+// decodeWholeReply decodes a whole Messages reply with content as its content array, the reply to
+// the request sent reports, into the assistant Message a consumer builds from it.
+func decodeWholeReply(t *testing.T, content string, sent sentRequest) Message {
 	t.Helper()
 	body := `{"type":"message","content":` + content + `,"stop_reason":"end_turn"}`
-	whole, wireErr, err := (&anthropicCodec{}).decodeWhole(strings.NewReader(body))
+	whole, wireErr, err := (&anthropicCodec{}).decodeWhole(strings.NewReader(body), sent)
 	if err != nil || wireErr != nil {
 		t.Fatalf("decodeWhole: %v %v", err, wireErr)
 	}
 	return Message{Role: "assistant", Content: whole.Content, ToolCalls: whole.ToolCalls, ThinkingBlocks: whole.ThinkingBlocks}
 }
 
-// streamedReply folds a Messages event stream into the assistant Message a consumer builds from
-// its deltas.
-func streamedReply(t *testing.T, stream string) Message {
+// streamedReply folds a Messages event stream, the reply to the request sent reports, into the
+// assistant Message a consumer builds from its deltas.
+func streamedReply(t *testing.T, stream string, sent sentRequest) Message {
 	t.Helper()
 	reply := Message{Role: "assistant"}
-	for _, d := range parseAnthropicSSE(t, stream) {
+	for _, d := range parseAnthropicSSESent(t, stream, sent) {
 		switch d.Kind {
 		case DeltaContent:
 			reply.Content += d.Content
@@ -526,29 +651,39 @@ func streamedReply(t *testing.T, stream string) Message {
 	return reply
 }
 
-// sentAssistantTurn encodes reply as the assistant turn of a tool-bearing request — after a user
-// turn, before one tool result per call — and returns the content array it went upstream as.
-func sentAssistantTurn(t *testing.T, reply Message) string {
+// sentAssistantTurn encodes reply as the assistant turn of a tool-bearing request naming model —
+// after a user turn, before one tool result per call — and returns the content array it went
+// upstream as. The prefix before the reply is exactly the request sentBeforeAssistantTurn encodes.
+func sentAssistantTurn(t *testing.T, model string, reply Message) string {
 	t.Helper()
-	msgs := []Message{{Role: "user", Content: "go"}, reply}
+	req := turnBeforeAssistant(model)
+	req.Messages = append(req.Messages, reply)
 	for _, call := range reply.ToolCalls {
-		msgs = append(msgs, Message{Role: "tool", Content: "ok", ToolCallID: call.ID})
+		req.Messages = append(req.Messages, Message{Role: "tool", Content: "ok", ToolCallID: call.ID})
 	}
-	req := Request{Model: "m", Tools: []ToolSpec{{Name: "ls", Parameters: []byte(`{"type":"object"}`)}}, Messages: msgs}
 
-	body, _, err := (&anthropicCodec{}).encode(req)
+	return encodedTurn(t, req, 1)
+}
+
+// turnBeforeAssistant is the tool-bearing request naming model whose reply sentAssistantTurn sends
+// back: one user turn.
+func turnBeforeAssistant(model string) Request {
+	return Request{
+		Model:    model,
+		Tools:    []ToolSpec{{Name: "ls", Parameters: []byte(`{"type":"object"}`)}},
+		Messages: []Message{{Role: "user", Content: "go"}},
+	}
+}
+
+// sentBeforeAssistantTurn is the codec's report on turnBeforeAssistant(model): the request a
+// reply that sentAssistantTurn sends back was produced on.
+func sentBeforeAssistantTurn(t *testing.T, model string) sentRequest {
+	t.Helper()
+	_, sent, err := (&anthropicCodec{}).encode(turnBeforeAssistant(model))
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	var sent struct {
-		Messages []struct {
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(body, &sent); err != nil || len(sent.Messages) < 2 {
-		t.Fatalf("body %s: %v", body, err)
-	}
-	return string(sent.Messages[1].Content)
+	return sent
 }
 
 // TestAnthropicCodecHeadersAndPath pins the endpoint and the key spelling: x-api-key only when
@@ -623,7 +758,7 @@ func TestAnthropicCodecDecodeWhole(t *testing.T) {
 			t.Parallel()
 			codec := &anthropicCodec{}
 
-			got, werr, err := codec.decodeWhole(strings.NewReader(tc.body))
+			got, werr, err := codec.decodeWhole(strings.NewReader(tc.body), sentRequest{})
 
 			if err != nil || werr != nil {
 				t.Fatalf("decodeWhole: err=%v werr=%v", err, werr)
@@ -642,7 +777,7 @@ func TestAnthropicCodecDecodeWholeErrorBody(t *testing.T) {
 	codec := &anthropicCodec{}
 	body := `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`
 
-	got, werr, err := codec.decodeWhole(strings.NewReader(body))
+	got, werr, err := codec.decodeWhole(strings.NewReader(body), sentRequest{})
 
 	if err != nil {
 		t.Fatalf("decodeWhole: %v", err)

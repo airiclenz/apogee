@@ -58,18 +58,18 @@ const sseDataPrefix = "data: "
 // parseSSE reads the Messages event stream line by line and yields Deltas: text_delta as
 // content, thinking_delta as thinking, every thinking and redacted_thinking block — its text,
 // signature or data — as one verbatim DeltaThinkingBlock when the block closes, carrying the
-// place it opened at among the reply's text and tool_use blocks (anthropicReasoningEntry), and
-// after them the reply's layout entry when its text sat in more than one block or after a tool
-// call (anthropicReplyLayout), tool_use blocks accumulated in openToolCalls by block index across their input_json_delta
+// place it opened at among the reply's text and tool_use blocks and the sent request's prefix
+// digest, when it has one (anthropicReasoningEntry), and after them the reply's layout entry
+// when its text sat in more than one block or after a tool call (anthropicReplyLayout), tool_use blocks accumulated in openToolCalls by block index across their input_json_delta
 // fragments and emitted together immediately before the terminal Done, the stop reason mapped
 // onto the loop's finish vocabulary (anthropicFinishReason), and usage assembled from
 // message_start's input side and message_delta's output side. A payload that fails to decode is skipped and counted, exactly
 // as on the openai wire, and an unknown event or delta type is ignored, so a new event the API
-// adds cannot fault a stream. carriedEffort is the request's, for the in-band error delta;
-// toolFragment, when non-nil, runs on every tool_use start and input_json_delta as it arrives
+// adds cannot fault a stream. sent is the request's report: its carriesEffort for the in-band
+// error delta, its prefixDigest for the reasoning entries; toolFragment, when non-nil, runs on every tool_use start and input_json_delta as it arrives
 // (openToolCalls). Returning false from yield (consumer broke) stops cleanly.
-func (a *anthropicCodec) parseSSE(body io.Reader, carriedEffort bool, toolFragment func(), yield func(Delta) bool) {
-	s := &anthropicStream{codec: a, carriedEffort: carriedEffort, yield: yield}
+func (a *anthropicCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment func(), yield func(Delta) bool) {
+	s := &anthropicStream{codec: a, carriedEffort: sent.carriesEffort, prefixDigest: sent.prefixDigest, yield: yield}
 	s.open.onFragment = toolFragment
 	scanner := newSSEScanner(body)
 	for scanner.Scan() {
@@ -103,7 +103,10 @@ func (a *anthropicCodec) parseSSE(body io.Reader, carriedEffort bool, toolFragme
 type anthropicStream struct {
 	codec         *anthropicCodec
 	carriedEffort bool
-	yield         func(Delta) bool
+	// prefixDigest is the sent request's prefix digest, stamped into every reasoning entry the
+	// reply yields; "" stamps nothing (sentRequest).
+	prefixDigest string
+	yield        func(Delta) bool
 	// open holds every tool_use block under accumulation, addressed by its block index.
 	open openToolCalls
 	// reasoning holds every thinking or redacted_thinking block under accumulation, addressed by
@@ -270,8 +273,8 @@ func (s *anthropicStream) reasoningAt(index *int) *anthropicReasoningBlock {
 }
 
 // stopBlock closes the block at the event's index: a reasoning block open there is yielded as
-// one DeltaThinkingBlock, with its place, and forgotten; any other block's close carries nothing the
-// accumulator needs.
+// one DeltaThinkingBlock, with its place and the request's prefix digest, and forgotten; any
+// other block's close carries nothing the accumulator needs.
 func (s *anthropicStream) stopBlock(ev anthropicEvent) (ended bool) {
 	block := s.reasoningAt(ev.Index)
 	if block == nil {
@@ -283,7 +286,7 @@ func (s *anthropicStream) stopBlock(ev anthropicEvent) (ended bool) {
 		s.yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: encode thinking block: %v", err)})
 		return true
 	}
-	entry := reasoningEntry(raw, block.afterText, block.afterCalls)
+	entry := reasoningEntry(raw, block.afterText, block.afterCalls, s.prefixDigest)
 	return !s.yield(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
 }
 

@@ -121,7 +121,7 @@ type Delta struct {
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
-		body, carriedEffort, err := c.encode(req)
+		body, sent, err := c.encode(req)
 		if err != nil {
 			yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: marshal request: %v", err)})
 			return
@@ -177,7 +177,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
-			fault := c.statusDelta(resp, carriedEffort)
+			fault := c.statusDelta(resp, sent.carriesEffort)
 			if !rec.end(statusOutcome(fault, resp.StatusCode)) {
 				return
 			}
@@ -209,7 +209,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			stream = io.TeeReader(stream, &raw)
 			defer func() { c.observeWire(WireResponse, c.streamCapture(raw.Bytes())) }()
 		}
-		c.codec.parseSSE(stream, carriedEffort, rec.toolFragment(), rec.wrap(yield))
+		c.codec.parseSSE(stream, sent, rec.toolFragment(), rec.wrap(yield))
 	}
 }
 

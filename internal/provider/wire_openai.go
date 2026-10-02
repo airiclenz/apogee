@@ -36,22 +36,24 @@ func (o *openaiCodec) headers(apiKey string) map[string]string {
 }
 
 // encode marshals the chat-completions body for req and reports whether it expressed a
-// thinking effort in any dialect (see chatRequest.carriesEffort).
-func (o *openaiCodec) encode(req Request) ([]byte, bool, error) {
+// thinking effort in any dialect (see chatRequest.carriesEffort). This wire replays no signed
+// thinking, so the report carries no prefix digest.
+func (o *openaiCodec) encode(req Request) ([]byte, sentRequest, error) {
 	wire := o.buildBody(req)
 	body, err := json.Marshal(wire)
 	if err != nil {
-		return nil, false, err
+		return nil, sentRequest{}, err
 	}
-	return body, wire.carriesEffort(), nil
+	return body, sentRequest{carriesEffort: wire.carriesEffort()}, nil
 }
 
 // decodeWhole decodes one non-streamed reply. A body whose error member is set comes back
 // as that member with a zero RawResponse — an aggregator can answer HTTP 200 and put the
 // provider's failure in the body, and it must not fall through to toRawResponse, which maps
 // such a reply's zero choices to a silent zero RawResponse. A body that fails to decode
-// returns the bare decode error for the Client to wrap.
-func (o *openaiCodec) decodeWhole(body io.Reader) (RawResponse, *wireError, error) {
+// returns the bare decode error for the Client to wrap. Nothing of the sent request shapes the
+// decode on this wire.
+func (o *openaiCodec) decodeWhole(body io.Reader, _ sentRequest) (RawResponse, *wireError, error) {
 	var decoded chatCompletionResponse
 	if err := json.NewDecoder(body).Decode(&decoded); err != nil {
 		return RawResponse{}, nil, err
@@ -209,12 +211,12 @@ func formatMessage(m Message, hasTools bool) chatMessage {
 // tool-call arguments, caps the total content plus reasoning text at maxReplyTextBytes, and
 // emits a terminal Done with the last finish reason and any usage chunk — a port of the
 // oracle's parseSSEStream. Returning false from yield (consumer broke) stops cleanly.
-// carriedEffort is carried through from the request Stream built — the in-band error
+// sent.carriesEffort is carried through from the request Stream built — the in-band error
 // delta needs it, and this is the only seam between that request and the error it explains.
 // toolFragment, when non-nil, runs on every tool-call fragment as it arrives (openToolCalls).
 // Wire capture is not this parser's business: Client.Stream tees the body before it
 // arrives here, so the parser reads exactly what it would read unobserved.
-func (o *openaiCodec) parseSSE(body io.Reader, carriedEffort bool, toolFragment func(), yield func(Delta) bool) {
+func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment func(), yield func(Delta) bool) {
 	scanner := newSSEScanner(body)
 
 	open := openToolCalls{onFragment: toolFragment}
@@ -280,7 +282,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, carriedEffort bool, toolFragment 
 			// path ends at the implicit Done and commits a silent empty reply. Every tool call
 			// accumulated so far is dropped with it — none has been emitted, because calls are
 			// held until the stream ends: the reply is faulted, not partly usable.
-			fault := o.client.inBandErrorDelta(*chunk.Error, data, carriedEffort)
+			fault := o.client.inBandErrorDelta(*chunk.Error, data, sent.carriesEffort)
 			fault.MalformedChunks = malformed
 			yield(fault)
 			return

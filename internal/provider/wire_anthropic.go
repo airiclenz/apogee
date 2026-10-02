@@ -2,6 +2,8 @@ package provider
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +31,11 @@ import (
 // when its text sat in more than one block or after a tool call — and an assistant Message's
 // ThinkingBlocks are written back at those places, its text split back into the reply's own text
 // blocks — the API takes an assistant turn back only in the order it sent it
-// (anthropicReasoningEntry, anthropicReplyLayout). Unless thinking is disabled the body drops the
+// (anthropicReasoningEntry, anthropicReplyLayout). On a preserved-thinking model a reply's entries
+// also carry the digest of the prefix the reply was produced on, and they are written back only
+// while the prefix before the message still digests the same; otherwise its reasoning blocks are
+// left off and the rest of the message goes as it was (anthropicReplayGuard, ADR 0092). Unless
+// thinking is disabled the body drops the
 // profile's sampling knobs (temperature, top_p, top_k), which the API constrains under thinking
 // (ADR 0078 amendments 2026-10-02).
 
@@ -65,32 +71,54 @@ const (
 	anthropicNoEffortBetweenTools
 )
 
-// anthropicNoEffortShapes lists the model-id prefixes whose no-effort request must not carry
-// `thinking: {"type":"disabled"}`, because those models answer it with a 400. Matching is a
-// case-insensitive prefix on the request's model and the longest matching prefix wins; an id no
-// row matches keeps the disabled default, so a new model that also refuses disabled needs a row
-// here (ratified 2026-10-02, ADR 0078).
-var anthropicNoEffortShapes = []struct {
+// anthropicModelRow is one anthropicNoEffortShapes row: what the codec must know of the models
+// whose ids start with prefix.
+type anthropicModelRow struct {
 	prefix string
 	shape  anthropicNoEffortShape
-}{
-	{prefix: "claude-opus-5-5", shape: anthropicNoEffortLowest},
-	{prefix: "claude-fable-5", shape: anthropicNoEffortLowest},
-	{prefix: "claude-mythos-5", shape: anthropicNoEffortLowest},
-	{prefix: "claude-sonnet-5-5", shape: anthropicNoEffortBetweenTools},
+	// preservesThinking marks the preserved-thinking set: models that check a replayed thinking
+	// block's signature against the prefix it was produced on, so their replay is guarded
+	// (anthropicReplayGuard, ADR 0092).
+	preservesThinking bool
 }
 
-// anthropicNoEffortShapeFor is the no-effort shape for model: the shape of the longest
-// anthropicNoEffortShapes prefix the id starts with, ignoring case, or the disabled default.
-func anthropicNoEffortShapeFor(model string) anthropicNoEffortShape {
+// anthropicNoEffortShapes lists the model-id prefixes the codec treats apart from the default: the
+// ones whose no-effort request must not carry `thinking: {"type":"disabled"}`, because those
+// models answer it with a 400, and the preserved-thinking set. Matching is a case-insensitive
+// prefix on the request's model and the longest matching prefix wins; an id no row matches keeps
+// the disabled default and replays unguarded, so a new model that also refuses disabled or
+// preserves thinking needs a row here (ratified 2026-10-02, ADR 0078, ADR 0092).
+var anthropicNoEffortShapes = []anthropicModelRow{
+	{prefix: "claude-opus-5-5", shape: anthropicNoEffortLowest, preservesThinking: true},
+	{prefix: "claude-fable-5", shape: anthropicNoEffortLowest},
+	{prefix: "claude-fable-5-1", shape: anthropicNoEffortLowest, preservesThinking: true},
+	{prefix: "claude-mythos-5", shape: anthropicNoEffortLowest},
+	{prefix: "claude-mythos-5-1", shape: anthropicNoEffortLowest, preservesThinking: true},
+	{prefix: "claude-sonnet-5-5", shape: anthropicNoEffortBetweenTools, preservesThinking: true},
+}
+
+// anthropicModelRowFor is the row of the longest anthropicNoEffortShapes prefix model starts
+// with, ignoring case, or the zero row — the disabled default, unguarded — when none matches.
+func anthropicModelRowFor(model string) anthropicModelRow {
 	id := strings.ToLower(model)
-	shape, matched := anthropicNoEffortDisabled, 0
+	found := anthropicModelRow{shape: anthropicNoEffortDisabled}
 	for _, row := range anthropicNoEffortShapes {
-		if len(row.prefix) > matched && strings.HasPrefix(id, row.prefix) {
-			shape, matched = row.shape, len(row.prefix)
+		if len(row.prefix) > len(found.prefix) && strings.HasPrefix(id, row.prefix) {
+			found = row
 		}
 	}
-	return shape
+	return found
+}
+
+// anthropicNoEffortShapeFor is the no-effort shape for model (anthropicModelRowFor).
+func anthropicNoEffortShapeFor(model string) anthropicNoEffortShape {
+	return anthropicModelRowFor(model).shape
+}
+
+// anthropicPreservesThinking reports whether model is in the preserved-thinking set
+// (anthropicModelRowFor), the models whose replayed thinking the prefix digest guards.
+func anthropicPreservesThinking(model string) bool {
+	return anthropicModelRowFor(model).preservesThinking
 }
 
 // anthropicCodec speaks the Anthropic Messages protocol on behalf of one Client. The Messages
@@ -116,28 +144,30 @@ func (a *anthropicCodec) headers(apiKey string) map[string]string {
 }
 
 // encode marshals the Messages body for req and reports whether the request carried an effort —
-// the gate on thinkingEffortHint, as chatRequest.carriesEffort is on the openai wire. The report
-// is the requested effort (anthropicEffort), never the body's output_config: the no-effort shape
-// of some models writes `output_config.effort: "low"` on its own, and a fault on a request that
-// named no effort must not be blamed on one.
-func (a *anthropicCodec) encode(req Request) ([]byte, bool, error) {
-	wire, err := a.buildBody(req)
+// the gate on thinkingEffortHint, as chatRequest.carriesEffort is on the openai wire — and, on a
+// preserved-thinking model, the digest of the whole prefix the reply will be produced on, for the
+// decoders to stamp into its reasoning entries (anthropicReplayGuard). The effort report is the
+// requested effort (anthropicEffort), never the body's output_config: the no-effort shape of some
+// models writes `output_config.effort: "low"` on its own, and a fault on a request that named no
+// effort must not be blamed on one.
+func (a *anthropicCodec) encode(req Request) ([]byte, sentRequest, error) {
+	wire, digest, err := a.buildBody(req)
 	if err != nil {
-		return nil, false, err
+		return nil, sentRequest{}, err
 	}
 	body, err := json.Marshal(wire)
 	if err != nil {
-		return nil, false, err
+		return nil, sentRequest{}, err
 	}
 	_, carriesEffort := anthropicEffort(req.ThinkingEffort)
-	return body, carriesEffort, nil
+	return body, sentRequest{carriesEffort: carriesEffort, prefixDigest: digest}, nil
 }
 
 // decodeWhole decodes one non-streamed reply. An error body — `{type:"error",error:{…}}`, which
 // the API can also frame on an HTTP 200 behind an aggregator — comes back as the wireError with
 // a zero RawResponse, never as an empty reply; a body that fails to decode returns the bare
-// decode error for the Client to wrap.
-func (a *anthropicCodec) decodeWhole(body io.Reader) (RawResponse, *wireError, error) {
+// decode error for the Client to wrap. The reply's reasoning entries carry sent's prefix digest.
+func (a *anthropicCodec) decodeWhole(body io.Reader, sent sentRequest) (RawResponse, *wireError, error) {
 	var decoded anthropicResponse
 	if err := json.NewDecoder(body).Decode(&decoded); err != nil {
 		return RawResponse{}, nil, err
@@ -145,7 +175,7 @@ func (a *anthropicCodec) decodeWhole(body io.Reader) (RawResponse, *wireError, e
 	if decoded.Error != nil {
 		return RawResponse{}, decoded.Error.wireError(), nil
 	}
-	return decoded.toRawResponse(), nil, nil
+	return decoded.toRawResponse(sent.prefixDigest), nil, nil
 }
 
 // buildBody projects a Request onto the Messages body: every system message folds into the
@@ -156,8 +186,11 @@ func (a *anthropicCodec) decodeWhole(body io.Reader) (RawResponse, *wireError, e
 // `thinking: {"type":"adaptive"}`; off/none/minimal and an absent effort send the model's
 // no-effort shape (anthropicNoEffortShapeFor — the Messages API has no rung below low). The
 // sampling knobs the wire knows are written only when set, and only while thinking is disabled —
-// there is no repeat penalty on this wire, so Sampling.RepeatPenalty is always dropped.
-func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
+// there is no repeat penalty on this wire, so Sampling.RepeatPenalty is always dropped. On a
+// preserved-thinking model it also returns the digest of the body's whole prefix — system, tools
+// and every message — and guards each assistant message's replay (anthropicReplayGuard); on any
+// other model the digest is "".
+func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, string, error) {
 	body := anthropicRequest{
 		Model:     req.Model,
 		Stream:    req.Stream,
@@ -177,12 +210,35 @@ func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
 		}
 	}
 
-	system, messages, err := anthropicMessages(req.Messages, len(req.Tools) > 0)
-	if err != nil {
-		return anthropicRequest{}, err
+	if len(req.Tools) > 0 {
+		body.Tools = make([]anthropicTool, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			body.Tools = append(body.Tools, anthropicTool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.Parameters,
+			})
+		}
 	}
-	body.System = system
+	body.System = anthropicSystem(req.Messages)
+
+	// The guard digests the system text and tools above, so both are final before any message.
+	var guard *anthropicReplayGuard
+	if anthropicPreservesThinking(req.Model) {
+		var err error
+		if guard, err = newAnthropicReplayGuard(body.System, body.Tools); err != nil {
+			return anthropicRequest{}, "", err
+		}
+	}
+	messages, err := anthropicMessages(req.Messages, len(req.Tools) > 0, guard)
+	if err != nil {
+		return anthropicRequest{}, "", err
+	}
 	body.Messages = messages
+	whole, err := guard.prefix(messages)
+	if err != nil {
+		return anthropicRequest{}, "", err
+	}
 
 	s := req.Sampling
 	if s.MaxTokens != nil {
@@ -196,18 +252,7 @@ func (a *anthropicCodec) buildBody(req Request) (anthropicRequest, error) {
 		body.TopP = s.TopP
 		body.TopK = s.TopK
 	}
-
-	if len(req.Tools) > 0 {
-		body.Tools = make([]anthropicTool, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			body.Tools = append(body.Tools, anthropicTool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: t.Parameters,
-			})
-		}
-	}
-	return body, nil
+	return body, whole.digest, nil
 }
 
 // anthropicEffort maps a seam Effort onto the `output_config.effort` vocabulary: the five
@@ -238,25 +283,37 @@ func anthropicEffortSupport() EffortSupport {
 	}
 }
 
-// anthropicMessages renders the seam messages onto the wire: system messages are lifted out
-// into the returned system text; a run of consecutive tool-result messages folds into ONE user
-// message of tool_result blocks (the API wants every result of a parallel call in a single
-// turn); an assistant message carries a text block for its content and one tool_use block per
-// call, with the thinking blocks it carries verbatim at their places (Message.ThinkingBlocks,
-// assistantBlocks). A message that ends up with no block at all — an assistant turn with neither
-// text, calls nor thinking — is dropped: the API refuses an empty content array.
+// anthropicSystem is the top-level system text: every system message, blank-line joined, in order.
+func anthropicSystem(msgs []Message) string {
+	var systems []string
+	for _, m := range msgs {
+		if m.Role == "system" {
+			systems = append(systems, m.Content)
+		}
+	}
+	return strings.Join(systems, "\n\n")
+}
+
+// anthropicMessages renders the seam messages onto the wire: system messages are skipped — they
+// fold into the top-level system text (anthropicSystem); a run of consecutive tool-result messages
+// folds into ONE user message of tool_result blocks (the API wants every result of a parallel call
+// in a single turn); an assistant message carries a text block for its content and one tool_use
+// block per call, with the thinking blocks it carries verbatim at their places
+// (Message.ThinkingBlocks, assistantBlocks) when guard admits them over the messages rendered
+// before it — a nil guard admits every one. A message that ends up with no block at all — an
+// assistant turn with neither text, calls nor thinking — is dropped: the API refuses an empty
+// content array.
 //
 // Without tools the wire refuses tool_use and tool_result blocks outright (a 400 naming the
 // missing `tools[]`), so a tool history sent with none — the compaction summariser does exactly
 // that — is folded to prose: a tool result becomes plain user text and an assistant call is
 // rendered as text (anthropicToolCallText), never as a block.
-func anthropicMessages(msgs []Message, hasTools bool) (string, []anthropicMessage, error) {
-	var systems []string
+func anthropicMessages(msgs []Message, hasTools bool, guard *anthropicReplayGuard) ([]anthropicMessage, error) {
 	out := make([]anthropicMessage, 0, len(msgs))
 	for _, m := range msgs {
 		switch m.Role {
 		case "system":
-			systems = append(systems, m.Content)
+			continue
 		case "tool":
 			if !hasTools {
 				out = appendMessage(out, "user", textBlocks(m.Content))
@@ -269,16 +326,20 @@ func anthropicMessages(msgs []Message, hasTools bool) (string, []anthropicMessag
 			}
 			out = append(out, anthropicMessage{Role: "user", Content: []anthropicBlock{block}, isToolResults: true})
 		case "assistant":
-			blocks, err := assistantBlocks(m, hasTools)
+			prefix, err := guard.prefix(out)
 			if err != nil {
-				return "", nil, err
+				return nil, err
+			}
+			blocks, err := assistantBlocks(m, hasTools, prefix)
+			if err != nil {
+				return nil, err
 			}
 			out = appendMessage(out, "assistant", blocks)
 		default:
 			out = appendMessage(out, "user", textBlocks(m.Content))
 		}
 	}
-	return strings.Join(systems, "\n\n"), out, nil
+	return out, nil
 }
 
 // appendMessage appends one message of blocks to out, dropping a message that has none.
@@ -305,11 +366,15 @@ func textBlocks(content string) []anthropicBlock {
 // blocks and every block goes back in its original place (anthropicReplyLayout.blocks); otherwise
 // the text is one block ahead of the calls and each thinking block goes to its slot
 // (placeReasoning). Without tools the calls are appended to the text instead (see
-// anthropicMessages), so a thinking block that followed a call follows the text.
-func assistantBlocks(m Message, hasTools bool) ([]anthropicBlock, error) {
+// anthropicMessages), so a thinking block that followed a call follows the text. When prefix does
+// not admit the entries, the message goes without its reasoning blocks, the rest of it as it was.
+func assistantBlocks(m Message, hasTools bool, prefix anthropicReplayPrefix) ([]anthropicBlock, error) {
 	entries, layout, err := decodeReasoningEntries(m.ThinkingBlocks)
 	if err != nil {
 		return nil, err
+	}
+	if !prefix.admits(entries) {
+		entries, layout = nil, layout.withoutReasoning()
 	}
 	if !hasTools && len(m.ToolCalls) > 0 {
 		text := m.Content
@@ -359,11 +424,13 @@ func placeReasoning(entries []anthropicReasoningEntry, rest []anthropicBlock) []
 }
 
 // anthropicReasoningEntry is how one reasoning block rides the seam (RawResponse.ThinkingBlocks,
-// DeltaThinkingBlock, Message.ThinkingBlocks) when something came before it in its reply: the
-// wire block verbatim under Block, and its place — whether a text block with text preceded it
-// and how many tool_use blocks did. A block that led its reply rides as the bare wire block, so
-// the common case is the block itself, and so is every entry a session saved before places were
-// recorded; a bare block reads as the zero place.
+// DeltaThinkingBlock, Message.ThinkingBlocks) when something came before it in its reply or its
+// reply was produced on a preserved-thinking model: the wire block verbatim under Block, its
+// place — whether a text block with text preceded it and how many tool_use blocks did — and
+// under Digest the digest of the prefix the reply was produced on (anthropicReplayGuard). A block
+// that led its reply on any other model rides as the bare wire block, so the common case there is
+// the block itself, and so is every entry a session saved before places or digests were recorded;
+// a bare block reads as the zero place with no digest.
 //
 // The place exists because the API takes an assistant turn back only as it sent it: "every block
 // type, in the order received", and a serializer that "reorders blocks edits the prefix for every
@@ -381,15 +448,18 @@ func placeReasoning(entries []anthropicReasoningEntry, rest []anthropicBlock) []
 type anthropicReasoningEntry struct {
 	AfterText  bool            `json:"after_text,omitempty"`
 	AfterCalls int             `json:"after_calls,omitempty"`
+	Digest     string          `json:"prefix_digest,omitempty"`
 	Block      json.RawMessage `json:"block"`
 	Layout     []int           `json:"reply_layout,omitempty"`
 }
 
-// reasoningEntry is the seam entry for a reasoning block at a place: the block itself when
-// nothing preceded it, else the block wrapped with its place. block is one JSON object — a decoded
-// block's bytes or a streamed block's encoding — and is spliced in as it is, never re-encoded.
-func reasoningEntry(block json.RawMessage, afterText bool, afterCalls int) json.RawMessage {
-	if !afterText && afterCalls == 0 {
+// reasoningEntry is the seam entry for a reasoning block at a place, from a reply produced on a
+// prefix with digest: the block itself when nothing preceded it and there is no digest, else the
+// block wrapped with its place and digest. block is one JSON object — a decoded block's bytes or a
+// streamed block's encoding — and is spliced in as it is, never re-encoded; digest is hex, so it
+// needs no escaping.
+func reasoningEntry(block json.RawMessage, afterText bool, afterCalls int, digest string) json.RawMessage {
+	if !afterText && afterCalls == 0 && digest == "" {
 		return block
 	}
 	var b bytes.Buffer
@@ -400,15 +470,18 @@ func reasoningEntry(block json.RawMessage, afterText bool, afterCalls int) json.
 	if afterCalls > 0 {
 		fmt.Fprintf(&b, `"after_calls":%d,`, afterCalls)
 	}
+	if digest != "" {
+		fmt.Fprintf(&b, `"prefix_digest":%q,`, digest)
+	}
 	b.WriteString(`"block":`)
 	b.Write(block)
 	b.WriteByte('}')
 	return b.Bytes()
 }
 
-// decodeReasoningEntry reads one seam entry back: a wrapped block with its place, a layout entry
-// (Layout set, no Block), or a bare wire block — neither a `block` nor a `reply_layout` member —
-// at the zero place.
+// decodeReasoningEntry reads one seam entry back: a wrapped block with its place and digest, a
+// layout entry (Layout set, no Block), or a bare wire block — neither a `block` nor a
+// `reply_layout` member — at the zero place with no digest.
 func decodeReasoningEntry(raw json.RawMessage) (anthropicReasoningEntry, error) {
 	var entry anthropicReasoningEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
@@ -495,6 +568,21 @@ func (l *anthropicReplyLayout) block(member int) {
 	l.textOpen = false
 }
 
+// withoutReasoning is the layout of the reply with its reasoning blocks left off — what the
+// encoder rebuilds when the replay guard drops them: the text blocks and calls, each in its place.
+func (l anthropicReplyLayout) withoutReasoning() anthropicReplyLayout {
+	if len(l.members) == 0 {
+		return anthropicReplyLayout{}
+	}
+	members := make([]int, 0, len(l.members))
+	for _, member := range l.members {
+		if member != anthropicLayoutReasoning {
+			members = append(members, member)
+		}
+	}
+	return anthropicReplyLayout{members: members}
+}
+
 // entry is the layout entry the reply carries after its reasoning blocks, or nil when it needs
 // none: a reply with no reasoning block carries no entry at all, and one whose text is a single
 // block ahead of every tool call is rebuilt exactly by the slot places, so it stays as it was.
@@ -558,6 +646,83 @@ func (l anthropicReplyLayout) blocks(
 		return nil, false
 	}
 	return blocks, true
+}
+
+// anthropicReplayGuard digests, for one request on a preserved-thinking model, the prefix before
+// each assistant message as the codec encodes it: the top-level system text, the tools, and every
+// wire message before that one — the set a thinking block's signature binds (ADR 0092). A
+// message's reasoning blocks replay only when the digest its entries carry, stamped from the
+// request that produced the reply, equals the digest of the prefix encoded so far. Earlier
+// assistant messages are part of that prefix as they were actually encoded, so once one reply's
+// blocks drop, every later reply's prefix differs and those drop too — the server would refuse
+// them anyway. A guard lives for one buildBody and is never shared; a nil guard (any other model)
+// admits every entry and digests nothing.
+type anthropicReplayGuard struct {
+	// head is the sum of the system text and the tools.
+	head [sha256.Size]byte
+	// settled holds the sums of the leading messages nothing can change any more: every message
+	// but the newest, which a following tool result may still join (anthropicMessages).
+	settled [][sha256.Size]byte
+}
+
+// newAnthropicReplayGuard is the guard of a request whose system text and tools are these.
+func newAnthropicReplayGuard(system string, tools []anthropicTool) (*anthropicReplayGuard, error) {
+	head, err := json.Marshal(struct {
+		System string          `json:"system"`
+		Tools  []anthropicTool `json:"tools"`
+	}{system, tools})
+	if err != nil {
+		return nil, fmt.Errorf("apogee: digest request prefix: %w", err)
+	}
+	return &anthropicReplayGuard{head: sha256.Sum256(head)}, nil
+}
+
+// prefix is the replay prefix before a message that follows out: the digest of the system text,
+// the tools and out, as hex. A nil guard returns the unguarded prefix.
+func (g *anthropicReplayGuard) prefix(out []anthropicMessage) (anthropicReplayPrefix, error) {
+	if g == nil {
+		return anthropicReplayPrefix{}, nil
+	}
+	h := sha256.New()
+	h.Write(g.head[:])
+	for i := range out {
+		if i < len(g.settled) {
+			h.Write(g.settled[i][:])
+			continue
+		}
+		encoded, err := json.Marshal(out[i])
+		if err != nil {
+			return anthropicReplayPrefix{}, fmt.Errorf("apogee: digest request prefix: %w", err)
+		}
+		sum := sha256.Sum256(encoded)
+		if i < len(out)-1 {
+			g.settled = append(g.settled, sum)
+		}
+		h.Write(sum[:])
+	}
+	return anthropicReplayPrefix{guarded: true, digest: hex.EncodeToString(h.Sum(nil))}, nil
+}
+
+// anthropicReplayPrefix is what an assistant message's reasoning entries must match to replay:
+// nothing when unguarded, else the digest of the prefix encoded before the message.
+type anthropicReplayPrefix struct {
+	guarded bool
+	digest  string
+}
+
+// admits reports whether a message's reasoning entries replay over this prefix: always when
+// unguarded, else only when every one carries this digest — an entry saved without one cannot show
+// its prefix still holds, and the entries of one reply go back together or not at all.
+func (p anthropicReplayPrefix) admits(entries []anthropicReasoningEntry) bool {
+	if !p.guarded {
+		return true
+	}
+	for _, entry := range entries {
+		if entry.Digest == "" || entry.Digest != p.digest {
+			return false
+		}
+	}
+	return true
 }
 
 // runeBoundary reports whether cutting s at byte offset at splits no rune.
@@ -742,12 +907,13 @@ func (u anthropicUsage) usage() Usage {
 
 // toRawResponse assembles the seam RawResponse: text blocks concatenate into Content, thinking
 // blocks into Thinking, every thinking and redacted_thinking block is kept verbatim on
-// ThinkingBlocks in reply order with its place among the text and tool_use blocks
-// (anthropicReasoningEntry) — followed by the reply's layout entry when the places alone cannot
+// ThinkingBlocks in reply order with its place among the text and tool_use blocks and the
+// digest of the prefix the reply was produced on, when there is one (anthropicReasoningEntry) —
+// followed by the reply's layout entry when the places alone cannot
 // rebuild it (anthropicReplyLayout) — each tool_use block is one ToolCall with its input
 // re-stringified as the argument string, and the stop reason is mapped onto the chat-completions
 // vocabulary the loop reads (anthropicFinishReason).
-func (r anthropicResponse) toRawResponse() RawResponse {
+func (r anthropicResponse) toRawResponse(digest string) RawResponse {
 	out := RawResponse{Model: r.Model, FinishReason: anthropicFinishReason(r.StopReason)}
 	var layout anthropicReplyLayout
 	for i, b := range r.Content {
@@ -758,7 +924,7 @@ func (r anthropicResponse) toRawResponse() RawResponse {
 		case anthropicBlockThinking, anthropicBlockRedactedThinking:
 			out.Thinking += b.Thinking
 			out.ThinkingBlocks = append(out.ThinkingBlocks,
-				reasoningEntry(b.raw, out.Content != "", len(out.ToolCalls)))
+				reasoningEntry(b.raw, out.Content != "", len(out.ToolCalls), digest))
 			layout.block(anthropicLayoutReasoning)
 		case anthropicBlockToolUse:
 			out.ToolCalls = append(out.ToolCalls, ToolCall{
