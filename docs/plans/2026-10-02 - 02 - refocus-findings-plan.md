@@ -433,7 +433,13 @@ docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md — decision par
 Depends on item 9.
 **Commit:** `docs(adr): reconcile the /undo and WritablePaths claims with the code`
 
-## 11. Confinement contract: narrow the permit row, then fix its stale claims
+## 11. Confinement contract: narrow the permit row, then fix its stale claims — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): ADR 0081 left unchanged — its §4 2026-09-22 residual amendment (`connect(2) AF_UNIX`) already agrees with contract §5 and `namespace_linux.go`'s Capabilities; nothing to fix there.
+
+NOTES (2026-10-02): §3.3's stale "P3.7 adds" bullet (find-replace now landed) folded into the corrected 7-carrier bullet; the still-future `patch`/apply-edit and read-only `diff` clause kept as its own bullet.
+
+NOTES (2026-10-02): also fixed §2.6's "box must include the toolchain's cache/temp dirs" (same §7 contradiction) and §6.1's "P3.2 lands it" (the plan's named confinetest stale-claims candidate) in the same file.
 
 **What:**
 **Goal:** The §11 `subprocessPermitCtxKey` row says the permit door covers hooks and `advise:` / `gate:` reactions only,

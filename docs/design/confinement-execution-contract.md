@@ -142,8 +142,9 @@ and runs the cmd; the **backend** wraps it.
 
 ### 2.3 Backend obligations
 
-Both backends implement the same `Confine`, build-tagged per OS *(Linux has two since 2026-09-17 —
-landlock, then the namespace backend below — selected in that order, §2.6)*; every other OS keeps `denyConfiner`
+Every backend implements the same `Confine`, build-tagged per OS — four today: seatbelt on macOS,
+landlock and the namespace backend on Linux *(two since 2026-09-17, selected in that order, §2.6)*, and
+the restricted token on Windows (§9); every other OS keeps `denyConfiner`
 (which now reports `AutoEligible()==false` and is never handed a cmd to confine, because the disposition
 gates the subprocess surface when caps are insufficient).
 
@@ -316,8 +317,8 @@ descendant can do to leave it (the residual below).
     2026-08-12, item 18: a process the command deliberately left running does **not** outlive the
     call, on either OS — subject, on POSIX, to the setsid residual stated above).
 
-The tool never needs to know *how* the command was wrapped, and the two backends' observable behaviour
-is the same: the container contract abstracts both. The run is governed by the **cmd's own context**
+The tool never needs to know *how* the command was wrapped, and every backend's observable behaviour
+is the same: the container contract abstracts them all. The run is governed by the **cmd's own context**
 (built with `exec.CommandContext`); the `ctx` passed to `Confine` covers only the (synchronous,
 non-blocking) preparation and is not the run's lifetime.
 
@@ -346,8 +347,9 @@ returned carrying both reasons in `Capabilities().Unavailable`. The order lives 
 constructed lazily because its probe forks `bwrap`.)* *(Amended 2026-07-22, §9: Windows is no longer "elsewhere" — it selects
 the token backend at or above build 17763, and `denyConfiner` only below that floor.)*
 The `ConfinementBox` is built from the injected
-`WorkspaceDir` plus the per-project `WritablePaths`/`NetworkAllow` from config (see §7 — the box must
-include the toolchain's cache/temp dirs or `go test`/`pip` fail under confinement). The `main` entry
+`WorkspaceDir` plus the per-project `WritablePaths`/`NetworkAllow` from config (see §7 — the
+toolchain's cache/temp dirs must be writable inside the box or `go test`/`pip` fail under confinement;
+since 2026-09-15 they are redirected into the session scratch dir the box already holds). The `main` entry
 point dispatches the `__confined-exec` sentinel before Cobra (§2.3).
 
 ---
@@ -441,10 +443,13 @@ package edge and no cycle (`tools` imports only `domain`).
 
 ### 3.3 Who carries it
 
-- **Today (4 built-ins):** only `write_file` is a writer (`read_file`/`list_dir`/`grep` are
-  `ReadOnly()`), so `write_file` is the lone marker-carrier once P3.7 adds the marker.
-- **P3.7 adds:** find-replace (single + multi), `patch`/apply-edit — all carry it. `diff` and `open-file`
-  are read-only and do **not** (they need no disposition help; Plan already runs them).
+- **Today (7 carriers):** `write_file`, `single_find_and_replace`, `multi_find_and_replace`,
+  `edit_existing_file`, `copy_file`, `move_file` and `delete_file` — every built-in that writes
+  through apogee's own path-safety funnel. The read side (`read_file`, `list_dir`, `grep`, …) is
+  `ReadOnly()` and carries nothing. *(Corrected 2026-10-02: this bullet still described the P3.1-era
+  set of four built-ins, with `write_file` the lone writer.)*
+- **A future writer** — a `patch`/apply-edit tool — carries it too; a read-only tool such as `diff`
+  does **not** (it needs no disposition help; Plan already runs it).
 - **Never carried by:** `terminal`, `python-exec`, `git` (subprocess surface — OS-confined in Auto, not
   marker-bounded); `web-fetch`/`http-request`/MCP (`ExternalEffectTool`); `sub_agent` (the recursion
   point — D2, carries no disposition marker); any third-party tool (structurally cannot).
@@ -975,8 +980,8 @@ unaffected.** P3.1 pins the harness so the backend tests differ only in which `C
 ### 6.1 Shape
 
 ```go
-// internal/platform/confinetest/confinetest.go  (test-support package; P3.2 lands it,
-// P3.3 reuses it). It builds confined *exec.Cmd values via the backend under test and
+// internal/platform/confinetest/confinetest.go  (test-support package; P3.2 landed it,
+// P3.3 and every later backend reuse it). It builds confined *exec.Cmd values via the backend under test and
 // asserts OS denial — so "confined" means the same thing on landlock and seatbelt.
 package confinetest
 
@@ -1146,13 +1151,14 @@ A workspace-only box **breaks real toolchains**, and discovering that during P3.
 here so the box builder (P3.4) and the execution tools (P3.8) account for it up front:
 
 - **`go build`/`go test`** write to the build cache (`$GOCACHE`, default `~/.cache/go-build`) and
-  `$GOTMPDIR`/`$TMPDIR`. These must be in `box.WritablePaths` or every confined Go command fails.
+  `$GOTMPDIR`/`$TMPDIR`. These must be writable inside the box or every confined Go command fails.
 - **`pip`/`npm`/`cargo`** write to their caches (`~/.cache/pip`, `~/.npm`, `~/.cargo`) and to `$TMPDIR`.
   The network being open (ADR 0012) is necessary but not sufficient — the cache dirs must be writable.
 - **`git`** writes to `$TMPDIR` and reads global config; a commit writes only inside the repo (in-box).
 
-Recommendation: P3.4 seeds `WritablePaths` with the detected toolchain cache + temp dirs by default
-(probed, not hard-coded), and config may extend it per project. This is a box-*construction* concern, not
+Recommendation *(superseded 2026-09-15 — the note below; never built)*: P3.4 seeds `WritablePaths`
+with the detected toolchain cache + temp dirs by default (probed, not hard-coded), and config may
+extend it per project. This is a box-*construction* concern, not
 a `Confiner` concern — the `Confine` contract (§2) is unaffected; it confines to whatever box it is
 handed.
 
@@ -1167,9 +1173,9 @@ handed.
 > agent nowhere safe for scratch work, so its improvisations landed in the workspace (the 2026-08-22
 > incident's hazard inversion); the `{{scratch}}` prompt placeholder names the dir to the model.
 
-> **Implemented 2026-09-15 (plan `2026-09-14 - 02`, item 2).** The recommendation above — a
-> box widened with the *host's* detected cache and temp dirs — was never implemented, and is now
-> closed the other way round: the caches are moved into the box instead of the box being widened
+> **Implemented 2026-09-15 (plan `2026-09-14 - 02`, item 2) — the other way round.** The
+> recommendation above — a box widened with the *host's* detected cache and temp dirs — was
+> superseded rather than built: the caches are moved into the box instead of the box being widened
 > to them. `ConfinementBox` carries `ScratchDir` by name, and every **confined** spawn seeds
 > `TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR` = `<scratch>/tmp`, `GOCACHE` = `<scratch>/go-build` and
 > `XDG_CACHE_HOME` = `<scratch>/cache` (directories created before the spawn) through ONE shared
@@ -1428,13 +1434,15 @@ that cost: `autofix`'s formatter inherited `os.Environ()` — `APOGEE_API_KEY` i
 process-group / Job-Object teardown, no output cap and no timeout clamp. The permit had closed the
 authorisation hole while every *other* execution guard stayed on the tool side of the fence.
 
-A hook now spawns through `tools.RunHookSubprocess` (`internal/tools/exec_common.go`), the single
+A hook was to spawn through `tools.RunHookSubprocess` (`internal/tools/exec_common.go`), the single
 exported door onto `subprocess.RunSubprocess`, the same shared core every execution tool launches
-through (via its `execHost`'s `run`); the sync
-lane's executor, `(*Agent).runSyncArgv` (`internal/agent/syncexec.go`), is its second caller,
-spawning every `advise:` and `gate:` command through the same door under §10.4's permit, with the
-seam document on stdin and the class default deadline (advise 10s, gate 5s) or the entry's own
-`timeout:`. The funnel
+through (via its `execHost`'s `run`). *(Corrected 2026-10-02: no hook spawns through it today — the
+formatter hook went with the Mechanism catalogue, ADR 0071.)* Its one production caller is the sync
+lane's executor, `(*Agent).runSyncArgv` (`internal/agent/syncexec.go`), spawning every `advise:` and
+`gate:` command through the door under §10.4's permit, with the seam document on stdin and the class
+default deadline (advise 10s, gate 5s) or the entry's own `timeout:`. An observe-lane `run:` command
+does **not** use this door: it spawns through `internal/userexec` `Run` with no permit and outside
+confinement (`internal/reactions/command.go`; the manual's *Outside confinement*). The funnel
 itself stays unexported: the door takes only what a hook names (ctx, argv, dir, secretEnv, timeout,
 stdin) and returns the child's stdout alone, so a caller consuming the output as a payload — the
 formatter reads the reformatted file off stdout — never gets a diagnostic spliced into it.
@@ -1469,7 +1477,7 @@ the package that declares its `With…`/`…From…` pair, so only that pair can
 | Key (declaring file) | Installer | Reader | Lifetime |
 |---|---|---|---|
 | `confinementCtxKey` (`internal/domain/confinement.go`) | `WithConfinement`, from `executeTool` on a Confine verdict (`box != nil`), `executeRun` on a `confineChildren` Run, and `syncPermitCtx` when confine-to-workspace is on. `WithoutConfinement` shadows it with nil for dispatch's own bookkeeping context (`floorCtx`) | `ConfinementFromContext`: `subprocess.ConfinementHandoff` (confines the cmd), `gitexec`'s and `tools`' `confinementBox` (the exec and read fence's box), `tools.RunHookSubprocess` (argv[0] resolution) | One tool execution, or one sync-reaction command |
-| `subprocessPermitCtxKey` (`internal/domain/confinement.go`) | `WithSubprocessPermit`, from `syncPermitCtx` only (§10.4), called by `runSyncArgv` | `SubprocessPermitFromContext`: `tools.RunHookSubprocess`, the one door a reaction spawns through (§10.5) | One sync-reaction command. Absent is refusal (§10.2) |
+| `subprocessPermitCtxKey` (`internal/domain/confinement.go`) | `WithSubprocessPermit`, from `syncPermitCtx` only (§10.4), called by `runSyncArgv` | `SubprocessPermitFromContext`: `tools.RunHookSubprocess`, the door the sync lane's argv `advise:` / `gate:` reactions spawn through (§10.5). No hook spawns through it, and an observe-lane `run:` command spawns through `internal/userexec` `Run` with no permit and outside confinement | One sync-reaction command. Absent is refusal (§10.2) |
 | `writeEscapePermitCtxKey` (`internal/domain/confinement.go`) | `WithWriteEscapePermit`, from `writeEscapeCtx` in `executeRun`, the one minting point (ADR 0049) | `WriteEscapePermitFrom`: `tools.writeScopeOf`, the shared write funnel | One tool execution. An empty `Real` revokes an outer grant |
 | `subAgentDepthCtxKey` (`internal/domain/ask.go`) | `WithSubAgentDepth`, from `executeTool`, on every call | `SubAgentDepthFromContext`: `ask_user`, `present_document` | One tool execution. A nested delegation overwrites its parent's value; 0 is the top-level agent |
 | `spawnCallIDCtxKey` (`internal/domain/ask.go`) | `WithSpawnCallID`, from `executeTool`, on every call | `SpawnCallIDFromContext`: `present_document` | One tool execution. `""` is the top-level agent |
