@@ -443,7 +443,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// has always sent.
 	effortDialect := provider.EffortDialectFor(in.entry.EffortDialect)
 	if effortDialect == provider.EffortDialectNone {
-		effortDialect = beat.EffortSupport.Dialect
+		effortDialect = providerEffortDialect(beat.EffortSupport.Dialect)
 	}
 
 	// This run's own scratch dir, named after the record it will be saved under (wire.go): the

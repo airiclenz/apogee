@@ -13,7 +13,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
@@ -513,7 +512,7 @@ type ServerHost interface {
 	// reports as its level vocabulary and its default stays here, in [heartbeatState]. The zero
 	// value is "this server advertises no dial", which keeps the historical `chat_template_kwargs`
 	// shape and so reproduces the request bytes that predate the dialect seam.
-	Rebind(model string, contextWindow int, effortDialect provider.EffortDialect) (RebindResult, error)
+	Rebind(model string, contextWindow int, effortDialect domain.EffortDialect) (RebindResult, error)
 
 	// List names the upstream servers this session can be switched to — the `/server` picker's
 	// rows and the `/settings` server row's popup, in the order the binary assembled them: every

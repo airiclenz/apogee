@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -82,9 +81,9 @@ var openAIEfforts = []domain.ThinkingEffort{
 //
 // The "auto" row is NOT here: it is not a level at all but the absence of one (effortRows appends
 // it), and everything above resolves the same way for the rows, the accept and any test that asks.
-func effortLevels(support provider.EffortSupport) []domain.ThinkingEffort {
+func effortLevels(support domain.EffortSupport) []domain.ThinkingEffort {
 	if len(support.Efforts) == 0 {
-		if support.Dialect == provider.EffortDialectOpenAI {
+		if support.Dialect == domain.EffortDialectOpenAI {
 			return openAIEfforts
 		}
 		return canonicalEfforts
@@ -101,7 +100,7 @@ func effortLevels(support provider.EffortSupport) []domain.ThinkingEffort {
 // since a level names itself and "auto" could be read as a level the model offers. The levels are
 // escape-stripped like every other popup cell that came off the wire (pickerOfferingRows' contract):
 // a reported vocabulary is the SERVER's text.
-func effortRows(support provider.EffortSupport) []popupRow {
+func effortRows(support domain.EffortSupport) []popupRow {
 	levels := effortLevels(support)
 	rows := make([]popupRow, 0, len(levels)+1)
 	for _, level := range levels {

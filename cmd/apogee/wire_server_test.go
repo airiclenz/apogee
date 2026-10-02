@@ -1552,7 +1552,7 @@ func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
 			}
 			// And the first beat cannot undo it: the rebind that observation drives re-resolves the
 			// pin off the same latch, so a server advertising 131,072 does not displace it.
-			result, err := rec.opts.Server.Rebind("fake", 131072, provider.EffortDialectNone)
+			result, err := rec.opts.Server.Rebind("fake", 131072, domain.EffortDialectNone)
 			if err != nil {
 				t.Fatalf("Rebind: %v", err)
 			}

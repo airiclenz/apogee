@@ -13,7 +13,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -110,14 +109,14 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 // dialledEffort is a bound model that reports a dial and nothing else about it — the llama.cpp
 // /props sighting, whose chat template proves the dial exists and names no vocabulary, which is what
 // makes the picker fall back to the canonical four.
-func dialledEffort() provider.EffortSupport {
-	return provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
+func dialledEffort() domain.EffortSupport {
+	return domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs}
 }
 
 // openEffortPicker drives "/effort" through the real key path against a model with the given dial and
 // hands back the Model it left, so a test asserts on the pane a human would be looking at rather than
 // on a picker some helper opened behind the verb's back.
-func openEffortPicker(t *testing.T, eng *fakeEngine, support provider.EffortSupport) Model {
+func openEffortPicker(t *testing.T, eng *fakeEngine, support domain.EffortSupport) Model {
 	t.Helper()
 	m := newTestModelEng(t, eng, testOpts)
 	m.hb.effort = support
@@ -156,7 +155,7 @@ func TestEffortCommandOpensThePicker(t *testing.T) {
 func TestEffortWithoutADialAnswersWithOneNote(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{effortProfile: domain.EffortLow}
-	m := openEffortPicker(t, eng, provider.EffortSupport{})
+	m := openEffortPicker(t, eng, domain.EffortSupport{})
 
 	if m.picker.open {
 		t.Errorf("picker kind %v opened over a model with no dial", m.picker.kind)
@@ -175,15 +174,15 @@ func TestEffortWithoutADialAnswersWithOneNote(t *testing.T) {
 // layers named, because a level means one thing as an override and another as a profile setting.
 func TestEffortPickerAcceptDrivesTheEngineDoor(t *testing.T) {
 	t.Parallel()
-	reported := provider.EffortSupport{
+	reported := domain.EffortSupport{
 		Supported: true,
-		Dialect:   provider.EffortDialectReasoning,
+		Dialect:   domain.EffortDialectReasoning,
 		Efforts:   []string{"none", "low", "high"},
 		Default:   "low",
 	}
 	cases := []struct {
 		name     string
-		support  provider.EffortSupport
+		support  domain.EffortSupport
 		profile  domain.ThinkingEffort
 		override domain.ThinkingEffort // what the session already carried before the pick
 		down     int                   // ↓ presses before ⏎
@@ -598,7 +597,7 @@ func TestSlashMenuHidesEffortWithoutADial(t *testing.T) {
 
 	for _, supported := range []bool{false, true} {
 		m := newTestModel(t)
-		m.hb.effort = provider.EffortSupport{Supported: supported, Dialect: provider.EffortDialectKwargs}
+		m.hb.effort = domain.EffortSupport{Supported: supported, Dialect: domain.EffortDialectKwargs}
 
 		var got []string
 		for _, it := range m.slashSuggestions("eff", "") {

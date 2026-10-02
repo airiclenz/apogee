@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
@@ -424,7 +425,7 @@ func TestSubAgentBeatCarriesTheForcedDialect(t *testing.T) {
 	if !observed.Reachable {
 		t.Fatalf("sub-agent beat was unreachable: %s", observed.Failure)
 	}
-	want := provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
+	want := domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs}
 	if !reflect.DeepEqual(observed.EffortSupport, want) {
 		t.Errorf("sub-agent beat saw effort %+v; want the entry's forced %+v", observed.EffortSupport, want)
 	}

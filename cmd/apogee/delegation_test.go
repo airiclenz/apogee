@@ -264,7 +264,7 @@ func TestResolveDelegationTargetTakesTheBeatsEffortDialect(t *testing.T) {
 	observed := heartbeat.Beat{
 		Reachable:     true,
 		ActiveModel:   "loaded-model",
-		EffortSupport: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectReasoning},
+		EffortSupport: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectReasoning},
 	}
 
 	if got := resolveDelegationTarget(entry, "", observed, nil).EffortDialect; got != provider.EffortDialectReasoning {
@@ -272,7 +272,7 @@ func TestResolveDelegationTargetTakesTheBeatsEffortDialect(t *testing.T) {
 	}
 
 	tellLess := observed
-	tellLess.EffortSupport = provider.EffortSupport{}
+	tellLess.EffortSupport = domain.EffortSupport{}
 	if got := resolveDelegationTarget(entry, "", tellLess, nil).EffortDialect; got != provider.EffortDialectNone {
 		t.Errorf("dialect with neither = %q; want the zero that names none", got)
 	}
@@ -1492,7 +1492,7 @@ func TestDelegationSaysNothingWhenTheTargetNamesADialect(t *testing.T) {
 	// The beat a Monitor dialled with the entry's forced dialect reports (bindingOfEntry).
 	wiring := testDelegationWiring(entry, heartbeat.Beat{
 		Reachable: true, ActiveModel: "cheap-7b",
-		EffortSupport: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+		EffortSupport: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs},
 	}, &delegationSpy{}, notices)
 
 	wiring.observe(context.Background())()

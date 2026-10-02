@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -200,9 +201,37 @@ func (h serverHost) Beat(ctx context.Context) heartbeat.Beat { return h.w.beat(c
 // Rebind re-resolves the per-model bindings for an observed change — the composition root's half of
 // ADR 0024's split, run on the Update goroutine at the quiescent boundary the renderer picked. The
 // effort wire dialect rides past it untouched: it is the renderer's observation, not this root's
-// resolution (ADR 0060).
-func (h serverHost) Rebind(model string, contextWindow int, effortDialect provider.EffortDialect) (tui.RebindResult, error) {
-	return h.w.rebind(model, contextWindow, effortDialect)
+// resolution (ADR 0060). The renderer states it in the domain's words and the root's rebind in the
+// provider's, so it crosses here through providerEffortDialect.
+func (h serverHost) Rebind(model string, contextWindow int, effortDialect domain.EffortDialect) (tui.RebindResult, error) {
+	return h.w.rebind(model, contextWindow, providerEffortDialect(effortDialect))
+}
+
+// providerEffortDialect maps the domain's spelling of an effort wire dialect — the one a heartbeat
+// Beat and the renderer carry — onto the provider's, which the engine's rebind and a delegation or
+// Firing target are built in. It is TOTAL: anything outside the named dialects maps to the zero
+// provider.EffortDialectNone, the historical wire shape, so no unrecognised spelling reaches the wire.
+func providerEffortDialect(d domain.EffortDialect) provider.EffortDialect {
+	switch d {
+	case domain.EffortDialectKwargs, domain.EffortDialectReasoning,
+		domain.EffortDialectOpenAI, domain.EffortDialectOff:
+		return provider.EffortDialect(d)
+	default:
+		return provider.EffortDialectNone
+	}
+}
+
+// domainEffortDialect is providerEffortDialect's inverse: it re-states a provider dialect the root
+// holds (liveSettings.observedDialect) in the domain's spelling a Beat carries. It is TOTAL for the
+// same reason, mapping anything unnamed to the zero domain.EffortDialectNone.
+func domainEffortDialect(d provider.EffortDialect) domain.EffortDialect {
+	switch d {
+	case provider.EffortDialectKwargs, provider.EffortDialectReasoning,
+		provider.EffortDialectOpenAI, provider.EffortDialectOff:
+		return domain.EffortDialect(d)
+	default:
+		return domain.EffortDialectNone
+	}
 }
 
 // List projects the switchable servers from the HOLDER on every ask rather than from a snapshot, so

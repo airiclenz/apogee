@@ -68,9 +68,9 @@ func TestDial_MonitorCarriesTheForcedDialect(t *testing.T) {
 	if !beat.Reachable {
 		t.Fatalf("the forced binding's beat was unreachable: %s", beat.Failure)
 	}
-	if got := beat.EffortSupport; !got.Supported || got.Dialect != provider.EffortDialectReasoning {
+	if got := beat.EffortSupport; !got.Supported || got.Dialect != domain.EffortDialectReasoning {
 		t.Errorf("the forced binding's beat saw effort %+v; want supported on %q",
-			got, provider.EffortDialectReasoning)
+			got, domain.EffortDialectReasoning)
 	}
 
 	unforced := forced

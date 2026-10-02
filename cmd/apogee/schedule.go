@@ -188,7 +188,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 				Answered:      !offline,
 				Failure:       failure,
 				TotalSlots:    w.width(),
-				EffortSupport: provider.EffortSupport{Dialect: w.live.observedDialect()},
+				EffortSupport: domain.EffortSupport{Dialect: domainEffortDialect(w.live.observedDialect())},
 			}
 		},
 		report: w.notifyHook,

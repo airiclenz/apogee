@@ -320,8 +320,8 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 	opts.Model, opts.ContextWindow = "", 0 // the cold start: nothing configured, nothing discovered
 	seams := serverSeams(&opts)
 	seams.beat = heartbeat.NewMonitor(srv.URL, "", "").Beat
-	seams.rebind = func(model string, window int, dialect provider.EffortDialect) (RebindResult, error) {
-		if err := eng.Rebind(agent.RebindSpec{Model: model, MaxContextTokens: window, EffortDialect: dialect}); err != nil {
+	seams.rebind = func(model string, window int, dialect domain.EffortDialect) (RebindResult, error) {
+		if err := eng.Rebind(agent.RebindSpec{Model: model, MaxContextTokens: window, EffortDialect: provider.EffortDialect(dialect)}); err != nil {
 			return RebindResult{}, err
 		}
 		return RebindResult{Model: model, ContextWindow: window}, nil

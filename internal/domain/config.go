@@ -927,6 +927,30 @@ func (d EffortDialect) Valid() bool {
 	}
 }
 
+// EffortSupport is what discovery saw about one model's thinking-effort dial (ADR 0060): whether
+// the dial exists, which wire dialect reaches it, and the vocabulary and default the server stated.
+// It mirrors provider.EffortSupport on this side of the boundary, exactly as EffortDialect mirrors
+// provider.EffortDialect: the provider package holds no domain import (ADR 0010), so the heartbeat
+// converts the observation once and every reader past it — the TUI's /effort menu, footer and
+// picker rows, and the composition root — reads this spelling.
+//
+// The zero value is both "no dial" and "no tell to read", and changes no behaviour.
+type EffortSupport struct {
+	// Supported reports that the dial is usable on this model. Everything below is meaningless
+	// when it is false.
+	Supported bool
+	// Dialect is the wire shape that reaches the dial on this server.
+	Dialect EffortDialect
+	// Efforts is the level set the server reported, in the server's own spelling, and nil when the
+	// source states none — a caller that needs a list falls back to the canonical levels itself.
+	Efforts []string
+	// Default is the level the server said it uses when a request names none, "" when it states none.
+	Default string
+	// Mandatory reports that this model's reasoning cannot be turned off. Like Efforts and Default it
+	// is a reported fact, meaningless when Supported is false.
+	Mandatory bool
+}
+
 // Mode is the autonomy level governing whether tool calls need human approval
 // (CONTEXT: Agent mode). It is orthogonal to Config.Bypass.
 type Mode string

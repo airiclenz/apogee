@@ -111,7 +111,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		Reachable:     true,
 		Answered:      true,
 		TotalSlots:    9,
-		EffortSupport: apiprovider.EffortSupport{Dialect: apiprovider.EffortDialectOpenAI},
+		EffortSupport: domain.EffortSupport{Dialect: domain.EffortDialectOpenAI},
 	}}
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:     opts,

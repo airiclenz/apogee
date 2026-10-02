@@ -11,7 +11,6 @@ import (
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -60,7 +59,7 @@ type heartbeatState struct {
 	// when the model or the window does and never on its own — it is what a rebind driven with no
 	// beat of its own is built from: a `/model` pick re-states the binding, and re-stating it with a
 	// zero dialect would silently un-dial a session the heartbeat had already dialled.
-	observedDialect provider.EffortDialect
+	observedDialect domain.EffortDialect
 	// effort is what the last landed beat reported about the ACTIVE model's thinking-effort dial
 	// (ADR 0060): whether one exists at all, the wire dialect that reaches it on this server, the
 	// level vocabulary the model named for itself and the level it defaults to. It is HOST state —
@@ -69,7 +68,7 @@ type heartbeatState struct {
 	// through [Model.effortSupport] rather than here. It is a plain struct holding plain values and
 	// one slice of them, so it copies with the Model (ADR 0011); the zero value is "no dial", which
 	// is also what a beat that could not read the server leaves in place.
-	effort provider.EffortSupport
+	effort domain.EffortSupport
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
 	// lands while a worker owns the engine, while a launcher verb owns the server it talks to, or
 	// while a /bg launch is reading the Agent off the loop. It is applied by [Model.releaseEngine],
@@ -101,7 +100,7 @@ type rebindIntent struct {
 	// historical `chat_template_kwargs` shape and so reproduces the request bytes that predate the
 	// dialect seam; it is a plain value, so the value-copied Model carries it exactly as the two
 	// fields above.
-	dialect provider.EffortDialect
+	dialect domain.EffortDialect
 	// effort is what the observation said about the dial of the model this intent binds INTO — the
 	// beat's own EffortSupport, or the picked entry's for a `/model` pick, which has no beat of its
 	// own. It is the set [effortExcluded] judges a live session override against, carried on the
@@ -116,7 +115,7 @@ type rebindIntent struct {
 	// The dialect above is the engine's half of the same observation; this half never crosses into
 	// the engine — the clear is host policy (ADR 0060 D9). It holds plain values and one slice of
 	// them, so it copies with the Model exactly as [heartbeatState.effort] does (ADR 0011).
-	effort provider.EffortSupport
+	effort domain.EffortSupport
 	// quietSeed records that this change was observed at FIRST CONTACT — no beat had ever landed
 	// and none had ever failed. It is an observation FACT, captured before the fold erases the
 	// evidence, rather than presentation state; [rebindNote] is what decides the wording it buys.
@@ -163,7 +162,7 @@ func (m Model) appliesRebinds() bool { return m.serverActs().CanRebind }
 // (ADR 0060) — the one seam the host-side readers ask, so the menu, the footer, the picker and the
 // clear-on-switch all answer from the same observation rather than reaching into the state
 // themselves. Before any beat lands it is the zero value: no dial, which is the quiet answer.
-func (m Model) effortSupport() provider.EffortSupport { return m.hb.effort }
+func (m Model) effortSupport() domain.EffortSupport { return m.hb.effort }
 
 // heartbeatLive reports whether gen belongs to the current tick chain of a WIRED monitor — the
 // guard both heartbeat Msgs pass through. An unwired Model (gen 0) folds nothing, so a stray beat
@@ -431,7 +430,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 // The comparison is against the SERVER's own spelling, taken as it stands the way the picker takes
 // its rows (effortLevels): a level this build has no constant for is still the level that server
 // asked to be called by.
-func effortExcluded(support provider.EffortSupport, override domain.ThinkingEffort) bool {
+func effortExcluded(support domain.EffortSupport, override domain.ThinkingEffort) bool {
 	if override == "" || len(support.Efforts) == 0 {
 		return false
 	}

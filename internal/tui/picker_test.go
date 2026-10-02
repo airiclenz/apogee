@@ -14,7 +14,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
 
@@ -325,10 +324,10 @@ func TestModelCommandArgumentForm(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // reasoningSupport is one model's advertised thinking-effort answer: the reasoning dialect and the
-// level vocabulary that model named for itself (provider.EffortSupport).
-func reasoningSupport(levels ...string) provider.EffortSupport {
-	return provider.EffortSupport{
-		Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: levels,
+// level vocabulary that model named for itself (domain.EffortSupport).
+func reasoningSupport(levels ...string) domain.EffortSupport {
+	return domain.EffortSupport{
+		Supported: true, Dialect: domain.EffortDialectReasoning, Efforts: levels,
 	}
 }
 
@@ -343,8 +342,8 @@ func TestModelPickJudgesTheOverrideAgainstThePickedModel(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		active       provider.EffortSupport // what the model the session is LEAVING advertises
-		picked       provider.EffortSupport // what the model being picked advertises
+		active       domain.EffortSupport // what the model the session is LEAVING advertises
+		picked       domain.EffortSupport // what the model being picked advertises
 		wantOverride domain.ThinkingEffort
 		wantCleared  bool
 	}{
@@ -363,7 +362,7 @@ func TestModelPickJudgesTheOverrideAgainstThePickedModel(t *testing.T) {
 		{
 			name:         "the target reports no set — kept, and the next beat judges it",
 			active:       reasoningSupport("low", "medium"),
-			picked:       provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			picked:       domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs},
 			wantOverride: domain.EffortHigh,
 		},
 	}
@@ -735,7 +734,7 @@ type fakeServerHost struct {
 	bind     func(name string) (ServerSwitchResult, error)
 	record   func(name string) (bool, error)
 	beat     func(context.Context) heartbeat.Beat
-	rebind   func(model string, window int, dialect provider.EffortDialect) (RebindResult, error)
+	rebind   func(model string, window int, dialect domain.EffortDialect) (RebindResult, error)
 }
 
 // Acts reports exactly the members this fake was wired with, so one nil func is one per-member
@@ -758,7 +757,7 @@ func (h *fakeServerHost) Beat(ctx context.Context) heartbeat.Beat {
 }
 
 // Rebind answers with an error when nothing was wired; CanRebind is false then, so nothing asks it.
-func (h *fakeServerHost) Rebind(model string, window int, dialect provider.EffortDialect) (RebindResult, error) {
+func (h *fakeServerHost) Rebind(model string, window int, dialect domain.EffortDialect) (RebindResult, error) {
 	if h.rebind == nil {
 		return RebindResult{}, errors.New("this host does not rebind")
 	}
@@ -1992,9 +1991,9 @@ func pickerKindCases() []pickerKindCase {
 			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
 				t.Helper()
 				eng := &fakeEngine{}
-				m := openEffortPicker(t, eng, provider.EffortSupport{
+				m := openEffortPicker(t, eng, domain.EffortSupport{
 					Supported: true,
-					Dialect:   provider.EffortDialectReasoning,
+					Dialect:   domain.EffortDialectReasoning,
 					Efforts:   []string{"low", "medium", "high"},
 				})
 				return m, func(t *testing.T, _ Model) {
@@ -2615,14 +2614,14 @@ func TestEffortPickerRowsFollowTheReportedVocabulary(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		support provider.EffortSupport
+		support domain.EffortSupport
 		want    []string
 	}{
 		{
 			name: "a reported set is offered as reported, in the server's own order",
-			support: provider.EffortSupport{
+			support: domain.EffortSupport{
 				Supported: true,
-				Dialect:   provider.EffortDialectReasoning,
+				Dialect:   domain.EffortDialectReasoning,
 				Efforts:   []string{"none", "low", "medium", "high", "xhigh"},
 				Default:   "medium",
 			},
@@ -2630,12 +2629,12 @@ func TestEffortPickerRowsFollowTheReportedVocabulary(t *testing.T) {
 		},
 		{
 			name:    "a template sighting names no levels, so the canonical four stand",
-			support: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			support: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs},
 			want:    []string{"off", "low", "medium", "high", "auto"},
 		},
 		{
 			name:    "the openai dialect trades off for minimal",
-			support: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectOpenAI},
+			support: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectOpenAI},
 			want:    []string{"minimal", "low", "medium", "high", "auto"},
 		},
 	}
@@ -2659,7 +2658,7 @@ func TestEffortPickerRowsFollowTheReportedVocabulary(t *testing.T) {
 func TestEffortPickerPaneNamesTheDialAndChooses(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	m.hb.effort = provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
+	m.hb.effort = domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs}
 	m.picker = picker{open: true, kind: pickerEffort}
 
 	if got, want := len(m.pickerRows()), len(canonicalEfforts)+1; got != want {

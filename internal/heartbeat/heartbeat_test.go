@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -103,7 +104,7 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 	tests := []struct {
 		name      string
 		discovery stubllm.Discovery
-		want      provider.EffortSupport
+		want      domain.EffortSupport
 	}{
 		{
 			name: "a chat template naming the dial rides the beat as the kwargs dialect",
@@ -111,7 +112,7 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 				Models: plainModels,
 				Props:  &stubllm.Props{NCtx: 16384, ChatTemplate: "{% if reasoning_effort %}...{% endif %}"},
 			},
-			want: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			want: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs},
 		},
 		{
 			name: "an advertised reasoning object rides the beat with its set and default",
@@ -121,9 +122,9 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 					Reasoning: &stubllm.ModelReasoning{SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high"},
 				}},
 			},
-			want: provider.EffortSupport{
+			want: domain.EffortSupport{
 				Supported: true,
-				Dialect:   provider.EffortDialectReasoning,
+				Dialect:   domain.EffortDialectReasoning,
 				Efforts:   []string{"low", "high"},
 				Default:   "high",
 			},
@@ -134,7 +135,7 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 				Models: plainModels,
 				Props:  &stubllm.Props{NCtx: 16384},
 			},
-			want: provider.EffortSupport{},
+			want: domain.EffortSupport{},
 		},
 	}
 
@@ -151,6 +152,61 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 				t.Errorf("EffortSupport = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// The beat speaks the domain's spelling of the dial so its readers never import the provider
+// package, and the one conversion that makes that true must carry every field across: a field it
+// dropped would read as "the server said nothing" downstream. Each dialect is pinned to its domain
+// twin, an unknown spelling lands on the zero dialect (the conversion is total), and the reported
+// vocabulary is copied rather than shared with the discovery result.
+func TestEffortSupportOfConvertsEveryField(t *testing.T) {
+	t.Parallel()
+
+	efforts := []string{"low", "high"}
+	got := effortSupportOf(provider.EffortSupport{
+		Supported: true,
+		Dialect:   provider.EffortDialectReasoning,
+		Efforts:   efforts,
+		Default:   "high",
+		Mandatory: true,
+	})
+	want := domain.EffortSupport{
+		Supported: true,
+		Dialect:   domain.EffortDialectReasoning,
+		Efforts:   []string{"low", "high"},
+		Default:   "high",
+		Mandatory: true,
+	}
+	if got.Supported != want.Supported || got.Dialect != want.Dialect || got.Default != want.Default ||
+		got.Mandatory != want.Mandatory || !slices.Equal(got.Efforts, want.Efforts) {
+		t.Errorf("effortSupportOf = %+v, want %+v", got, want)
+	}
+	efforts[0] = "mutated"
+	if got.Efforts[0] != "low" {
+		t.Errorf("Efforts shares the discovery result's backing array: got %q after mutating the source", got.Efforts[0])
+	}
+
+	if zero := effortSupportOf(provider.EffortSupport{}); zero.Supported || zero.Dialect != domain.EffortDialectNone ||
+		zero.Efforts != nil || zero.Default != "" || zero.Mandatory {
+		t.Errorf("effortSupportOf(zero) = %+v, want the zero value", zero)
+	}
+
+	dialects := []struct {
+		from provider.EffortDialect
+		want domain.EffortDialect
+	}{
+		{provider.EffortDialectNone, domain.EffortDialectNone},
+		{provider.EffortDialectKwargs, domain.EffortDialectKwargs},
+		{provider.EffortDialectReasoning, domain.EffortDialectReasoning},
+		{provider.EffortDialectOpenAI, domain.EffortDialectOpenAI},
+		{provider.EffortDialectOff, domain.EffortDialectOff},
+		{provider.EffortDialect("unheard-of"), domain.EffortDialectNone},
+	}
+	for _, d := range dialects {
+		if got := effortDialectOf(d.from); got != d.want {
+			t.Errorf("effortDialectOf(%q) = %q, want %q", d.from, got, d.want)
+		}
 	}
 }
 
@@ -306,7 +362,7 @@ func TestNewMonitorPassesProviderOptionsToDiscovery(t *testing.T) {
 		Beat(context.Background())
 
 	got := beat.EffortSupport
-	if !got.Supported || got.Dialect != provider.EffortDialectOpenAI {
+	if !got.Supported || got.Dialect != domain.EffortDialectOpenAI {
 		t.Errorf("EffortSupport = %+v, want the forced openai dialect, supported", got)
 	}
 }

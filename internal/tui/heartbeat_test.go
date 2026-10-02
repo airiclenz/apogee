@@ -14,7 +14,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -93,10 +92,10 @@ type fakeRebind struct {
 type rebindCall struct {
 	model   string
 	window  int
-	dialect provider.EffortDialect
+	dialect domain.EffortDialect
 }
 
-func (f *fakeRebind) rebind(model string, window int, dialect provider.EffortDialect) (RebindResult, error) {
+func (f *fakeRebind) rebind(model string, window int, dialect domain.EffortDialect) (RebindResult, error) {
 	f.calls = append(f.calls, rebindCall{model: model, window: window, dialect: dialect})
 	if f.answer != nil {
 		return f.answer(model, window)
@@ -645,20 +644,20 @@ func TestBeatFoldsEffortSupportIntoState(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		effort provider.EffortSupport
+		effort domain.EffortSupport
 	}{
 		{
 			name: "a reported vocabulary and default are carried whole",
-			effort: provider.EffortSupport{
+			effort: domain.EffortSupport{
 				Supported: true,
-				Dialect:   provider.EffortDialectReasoning,
+				Dialect:   domain.EffortDialectReasoning,
 				Efforts:   []string{"low", "medium", "high"},
 				Default:   "medium",
 			},
 		},
 		{
 			name:   "a dialled server that names no vocabulary",
-			effort: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			effort: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs},
 		},
 		{
 			name: "no tell at all is the zero value",
@@ -700,10 +699,10 @@ func TestBeatCarriesTheEffortDialectIntoTheRebind(t *testing.T) {
 	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
 
 	dialled := upBeat("served-model", 16384)
-	dialled.EffortSupport = provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectReasoning}
+	dialled.EffortSupport = domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectReasoning}
 	m = foldBeatMsg(t, m, dialled)
 
-	want := []rebindCall{{model: "served-model", window: 16384, dialect: provider.EffortDialectReasoning}}
+	want := []rebindCall{{model: "served-model", window: 16384, dialect: domain.EffortDialectReasoning}}
 	if !reflect.DeepEqual(rb.calls, want) {
 		t.Fatalf("rebind calls = %+v, want %+v — the dialect the beat observed is what the binary binds", rb.calls, want)
 	}
@@ -713,7 +712,7 @@ func TestBeatCarriesTheEffortDialectIntoTheRebind(t *testing.T) {
 	if _, ok := picked.(Model); !ok {
 		t.Fatalf("bindPickedModel returned %T, want a Model", picked)
 	}
-	if len(rb.calls) != 2 || rb.calls[1].dialect != provider.EffortDialectReasoning {
+	if len(rb.calls) != 2 || rb.calls[1].dialect != domain.EffortDialectReasoning {
 		t.Errorf("rebind calls = %+v, want the pick re-stating the observed dialect", rb.calls)
 	}
 }
@@ -732,43 +731,43 @@ func TestSwitchClearsAnExcludedEffortOverride(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		support      provider.EffortSupport
+		support      domain.EffortSupport
 		profile      domain.ThinkingEffort // the bound profile's own `thinking.effort:`, "" when it states none
 		wantOverride domain.ThinkingEffort
 		wantNote     string
 	}{
 		{
 			name: "a reported set without the override clears it",
-			support: provider.EffortSupport{
-				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "medium"},
+			support: domain.EffortSupport{
+				Supported: true, Dialect: domain.EffortDialectReasoning, Efforts: []string{"low", "medium"},
 			},
 			wantNote: `effort override "high" is not offered by new-model — cleared; back to auto`,
 		},
 		{
 			name: "a profile level under the cleared override is what the note names",
-			support: provider.EffortSupport{
-				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "medium"},
+			support: domain.EffortSupport{
+				Supported: true, Dialect: domain.EffortDialectReasoning, Efforts: []string{"low", "medium"},
 			},
 			profile:  domain.EffortMedium,
 			wantNote: `effort override "high" is not offered by new-model — cleared; back to medium`,
 		},
 		{
 			name: "with no profile level the server's own default is the fallback",
-			support: provider.EffortSupport{
-				Supported: true, Dialect: provider.EffortDialectReasoning,
+			support: domain.EffortSupport{
+				Supported: true, Dialect: domain.EffortDialectReasoning,
 				Efforts: []string{"low", "medium"}, Default: "low",
 			},
 			wantNote: `effort override "high" is not offered by new-model — cleared; back to low`,
 		},
 		{
 			name:         "a model that reports no set keeps it",
-			support:      provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			support:      domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectKwargs},
 			wantOverride: domain.EffortHigh,
 		},
 		{
 			name: "a reported set containing the override keeps it silently",
-			support: provider.EffortSupport{
-				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "high"},
+			support: domain.EffortSupport{
+				Supported: true, Dialect: domain.EffortDialectReasoning, Efforts: []string{"low", "high"},
 			},
 			wantOverride: domain.EffortHigh,
 		},
@@ -818,25 +817,25 @@ func TestSwitchNotesAModelThatCannotDisableReasoning(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		support  provider.EffortSupport
+		support  domain.EffortSupport
 		wantNote bool
 	}{
 		{
 			name: "a model that reports a mandatory dial is announced",
-			support: provider.EffortSupport{
-				Supported: true, Dialect: provider.EffortDialectReasoning, Mandatory: true,
+			support: domain.EffortSupport{
+				Supported: true, Dialect: domain.EffortDialectReasoning, Mandatory: true,
 			},
 			wantNote: true,
 		},
 		{
 			name: "a dial that can be turned off is silent",
-			support: provider.EffortSupport{
-				Supported: true, Dialect: provider.EffortDialectReasoning,
+			support: domain.EffortSupport{
+				Supported: true, Dialect: domain.EffortDialectReasoning,
 			},
 		},
 		{
 			name:    "Mandatory under an unsupported dial is meaningless and silent",
-			support: provider.EffortSupport{Mandatory: true},
+			support: domain.EffortSupport{Mandatory: true},
 		},
 		{
 			name: "a beat that reports nothing is silent",
@@ -877,8 +876,8 @@ func TestSwitchEmitsBothEffortNotesInAStableOrder(t *testing.T) {
 	m.eng.SetEffortOverride(domain.EffortHigh)
 
 	switched := upBeat("new-model", 32768)
-	switched.EffortSupport = provider.EffortSupport{
-		Supported: true, Dialect: provider.EffortDialectReasoning,
+	switched.EffortSupport = domain.EffortSupport{
+		Supported: true, Dialect: domain.EffortDialectReasoning,
 		Efforts: []string{"low", "medium"}, Mandatory: true,
 	}
 	m = foldBeatMsg(t, m, switched)

@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -284,7 +284,7 @@ func TestSlashMenuKeepsScanOrderWithinOneRankTier(t *testing.T) {
 	// The bound model reports a dial, so the one gated row (/effort) is offered and the menu lists
 	// the table whole — this test is about ORDER, not about which rows the moment withholds
 	// (TestCommandSuggestionsHideEffortWithoutADial owns that).
-	m.hb.effort = provider.EffortSupport{Supported: true}
+	m.hb.effort = domain.EffortSupport{Supported: true}
 	m.input.SetValue("/")
 	ac := m.computeAutocomplete(m.caretByteOffset())
 

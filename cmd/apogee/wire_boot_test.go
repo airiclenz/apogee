@@ -19,7 +19,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -130,7 +129,7 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 			if !serverActsOf(rec.opts).CanRebind {
 				t.Fatal("tui.ServerActs.CanRebind is false; the composition root did not wire the rebind closure")
 			}
-			result, err := rec.opts.Server.Rebind("fake", tt.observed, provider.EffortDialectNone)
+			result, err := rec.opts.Server.Rebind("fake", tt.observed, domain.EffortDialectNone)
 			if err != nil {
 				t.Fatalf("Rebind: %v", err)
 			}

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -99,14 +98,14 @@ func TestFooterShowsTheEffortSegmentOnlyWhenDialled(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		effort  provider.EffortSupport
+		effort  domain.EffortSupport
 		wantRun string
 	}{
 		{
 			name: "a dialled model states its resolved effort between model and workdir",
-			effort: provider.EffortSupport{
+			effort: domain.EffortSupport{
 				Supported: true,
-				Dialect:   provider.EffortDialectReasoning,
+				Dialect:   domain.EffortDialectReasoning,
 				Efforts:   []string{"low", "medium", "high"},
 				Default:   "medium",
 			},

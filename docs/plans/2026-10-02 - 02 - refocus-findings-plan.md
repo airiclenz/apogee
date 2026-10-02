@@ -317,7 +317,11 @@ probe prints.
 **Closes:** apogee-bwrap-direnv-path
 **Commit:** `fix(platform): resolve bwrap only from fixed system directories`
 
-## 7. The TUI reads effort capabilities through internal/domain
+## 7. The TUI reads effort capabilities through internal/domain — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): the cmd/apogee domain↔provider dialect helpers are `providerEffortDialect` / `domainEffortDialect`, placed in cmd/apogee/wire_server.go beside `serverHost.Rebind` (the plan named no file for them); the heartbeat's one conversion is `effortSupportOf` (+ total `effortDialectOf`), which copies `Efforts` so a Beat shares no backing array with the discovery result.
+
+NOTES (2026-10-02): internal/tui/e2e_test.go keeps a test-only `internal/provider` import: its `seams.rebind` stand-in for the composition root now receives `domain.EffortDialect` and casts it into `agent.RebindSpec.EffortDialect` (a provider type), as `serverHost.Rebind` does in production; cmd/apogee/wire_boot_test.go lost its now-unused provider import.
 
 **What:**
 **Goal:** No non-test `.go` file in `internal/tui` imports `internal/provider`. `domain.EffortSupport` (stdlib-only,

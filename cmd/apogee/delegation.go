@@ -868,7 +868,7 @@ func resolveDelegationTarget(
 	// again here would be a second copy of one rule. With neither a forced dialect nor a tell the
 	// zero says this target names none — a routed child then keeps the session's own shape
 	// (subagent.go), which is what dialectAdvice tells the human about.
-	dialect := observed.EffortSupport.Dialect
+	dialect := providerEffortDialect(observed.EffortSupport.Dialect)
 	// The entry's dial facts: its endpoint; the key the beat above just authenticated with,
 	// resolved from the entry's key source by the caller — the child talks to the same server, with
 	// the same credential, and cannot be handed a source it would have to run again for itself; the

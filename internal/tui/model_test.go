@@ -22,7 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -7568,7 +7567,7 @@ func TestFooterContentStripsEscapes(t *testing.T) {
 	opts.HostAlias = "host\x1b]8;;x\x07"
 
 	m := step(t, newModel(context.Background(), &fakeEngine{}, opts, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.hb.effort = provider.EffortSupport{Supported: true, Default: "\x1b]8;;x\x07medium"}
+	m.hb.effort = domain.EffortSupport{Supported: true, Default: "\x1b]8;;x\x07medium"}
 
 	// The line's own styling is CSI, which ansiPattern takes out; an OSC introducer is not, so what
 	// survives that strip is exactly what a producer smuggled through.
@@ -7657,9 +7656,9 @@ func footerFactsModel(t *testing.T) Model {
 
 	m := newTestModelEng(t, &fakeEngine{effortProfile: domain.EffortHigh, confine: true}, opts)
 	beat := upBeat("test-model", 32768)
-	beat.EffortSupport = provider.EffortSupport{
+	beat.EffortSupport = domain.EffortSupport{
 		Supported: true,
-		Dialect:   provider.EffortDialectReasoning,
+		Dialect:   domain.EffortDialectReasoning,
 		Efforts:   []string{"low", "medium", "high"},
 		Default:   "medium",
 	}

@@ -20,7 +20,9 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"slices"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -50,8 +52,9 @@ type ModelSummary struct {
 	// (provider.DiscoveredModel.EffortSupport), and the zero value when it said nothing. It rides
 	// the offering rather than only the beat's active model because a host acting on a `/model`
 	// pick decides against the model it is picking INTO — the session effort override a target
-	// rules out is cleared at the pick, without waiting a beat to be told (ADR 0060 D8).
-	EffortSupport provider.EffortSupport
+	// rules out is cleared at the pick, without waiting a beat to be told (ADR 0060 D8). It is
+	// spelled in the domain's words (effortSupportOf), so a reader never needs the provider package.
+	EffortSupport domain.EffortSupport
 }
 
 // Beat is one observation of the Upstream. It is never accompanied by an error: an
@@ -103,8 +106,9 @@ type Beat struct {
 	// launch — a rebind, or an operator swapping the model under a running server, moves it — so it
 	// is re-observed every Interval on the beat that already lands, never probed for on its own.
 	// Only the host acts on it (the /effort menu entry, the footer segment and the picker's rows);
-	// the zero value is both "no dial" and "no tell to read", and changes no behaviour.
-	EffortSupport provider.EffortSupport
+	// the zero value is both "no dial" and "no tell to read", and changes no behaviour. It is
+	// spelled in the domain's words (effortSupportOf), so a reader never needs the provider package.
+	EffortSupport domain.EffortSupport
 	// AvailableModels is every advertised model, in the order the server listed them.
 	AvailableModels []ModelSummary
 	// Resolution grades HOW discovery reached ActiveModel — advertised verbatim, matched on the
@@ -196,7 +200,7 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		ActiveModel:     info.ActiveModel,
 		ContextWindow:   info.ContextWindow,
 		TotalSlots:      info.TotalSlots,
-		EffortSupport:   info.EffortSupport,
+		EffortSupport:   effortSupportOf(info.EffortSupport),
 		Resolution:      info.Resolution,
 		AvailableModels: make([]ModelSummary, 0, len(info.AvailableModels)),
 	}
@@ -205,10 +209,37 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 			ID:            model.ID,
 			DisplayName:   model.DisplayName,
 			ContextWindow: model.ContextWindow,
-			EffortSupport: model.EffortSupport,
+			EffortSupport: effortSupportOf(model.EffortSupport),
 		})
 	}
 	return beat
+}
+
+// effortSupportOf converts discovery's view of an effort dial into the domain's spelling — the one
+// place a Beat's provider observation crosses into domain.EffortSupport (ADR 0010: provider holds no
+// domain import, so the conversion lives on this side). Every field carries across unchanged; the
+// reported vocabulary is copied, so the beat shares no backing array with the discovery result.
+func effortSupportOf(support provider.EffortSupport) domain.EffortSupport {
+	return domain.EffortSupport{
+		Supported: support.Supported,
+		Dialect:   effortDialectOf(support.Dialect),
+		Efforts:   slices.Clone(support.Efforts),
+		Default:   support.Default,
+		Mandatory: support.Mandatory,
+	}
+}
+
+// effortDialectOf maps a provider effort dialect onto the domain's vocabulary. It is TOTAL: anything
+// outside the named dialects maps to the zero domain.EffortDialectNone, so the value it yields is
+// always one domain.EffortDialect.Valid recognises.
+func effortDialectOf(dialect provider.EffortDialect) domain.EffortDialect {
+	switch dialect {
+	case provider.EffortDialectKwargs, provider.EffortDialectReasoning,
+		provider.EffortDialectOpenAI, provider.EffortDialectOff:
+		return domain.EffortDialect(dialect)
+	default:
+		return domain.EffortDialectNone
+	}
 }
 
 // beatFailure words a failed discovery for Beat.Failure. A host name that did not resolve is named

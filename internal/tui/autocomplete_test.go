@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -183,7 +182,7 @@ func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
 		m := withStagedRows(modelWithOverlayRoomAt(t, 80, c.height, Options{Workspace: "/ws/a"}), c.staged)
 		// A bound model with a thinking-effort dial, so the menu offers the table WHOLE: /effort is
 		// the one row a dial-less binding withholds (commandSpec.gatedByEffort).
-		m.hb.effort = provider.EffortSupport{Supported: true}
+		m.hb.effort = domain.EffortSupport{Supported: true}
 		m.input.SetValue("/") // the whole verb table: more rows than these windows can seat
 		m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 		if len(m.autocomplete.items) != len(commandSpecs) {
