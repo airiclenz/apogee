@@ -51,9 +51,9 @@ import (
 // PinnedDialControl is the same bound with ONE address carved out of it: the addresses a
 // caller-named host resolves to at build time are permitted, everything else is judged by the
 // floor. It serves a connection whose destination is a HOST decision rather than a model's
-// (the configured MCP endpoint — see ADR 0012's Amendment (2026-07-26)), and it is deliberately
-// pinned rather than blanket-disabled, so a rebind or a redirect to a DIFFERENT private address
-// on that same connection is still refused.
+// (a configured MCP endpoint, or a webhook Reaction's `url:` — see ADR 0012's Amendment
+// (2026-07-26)), and it is deliberately pinned rather than blanket-disabled, so a rebind or a
+// redirect to a DIFFERENT private address on that same connection is still refused.
 
 // ErrSSRFBlocked is returned when an address is denied by the SSRF floor (a resolved IP
 // in a blocked range). It wraps ErrURLBlocked so a single errors.Is(err, ErrURLBlocked)
@@ -274,14 +274,15 @@ func (g URLGuard) SafeDialControl() func(network, address string, c syscall.RawC
 // egress proxy that carries it. A configured MCP endpoint is named in the user's own config file
 // and is never model-supplied, so the floor — the anti-MODEL control — is the wrong bound over it
 // (ADR 0012, Amendment 2026-07-26); the user asking for http://192.168.64.1:7331/mcp means that
-// address and nothing else. An operator's HTTP(S)_PROXY is the same class of decision: when a
-// proxy applies, the transport dials the PROXY rather than the destination, so the proxy's own
-// addresses are what has to be permitted for the connection to happen at all — while the guard's
-// pre-flight still judges the destination by string and resolved IP, so a private destination is
-// refused before anything leaves. Pinning is what keeps both exemptions honest: only the named
-// hosts' OWN resolved addresses are exempt, so a redirect, an SSE endpoint event, or a DNS rebind
-// pointing the transport at a DIFFERENT private address is still refused by the floor. Every
-// model-driven path with no such decision behind it keeps the blanket SafeDialControl.
+// address and nothing else, and a webhook Reaction's `url:` is the same kind of address. An
+// operator's HTTP(S)_PROXY is the same class of decision: when a proxy applies, the transport
+// dials the PROXY rather than the destination, so the proxy's own addresses are what has to be
+// permitted for the connection to happen at all — while the guard's pre-flight still judges the
+// destination by string and resolved IP, so a private destination is refused before anything
+// leaves. Pinning is what keeps both exemptions honest: only the named hosts' OWN resolved
+// addresses are exempt, so a redirect, an SSE endpoint event, or a DNS rebind pointing the
+// transport at a DIFFERENT private address is still refused by the floor. Every model-driven path
+// with no such decision behind it keeps the blanket SafeDialControl.
 //
 // Each host is resolved ONCE, here, through the guard's resolver (ctx bounds the lookups), and
 // the UNION is the permitted set — fixed before any connection is made, so nothing the transport
@@ -352,5 +353,6 @@ func containsIP(list []net.IP, ip net.IP) bool {
 
 // floorEnabled reports whether the SSRF floor is active for this guard. The floor is ON by
 // default (the zero URLGuard has it on); only an explicit DisableIPFloor turns it off (for a
-// test or a deliberately-unfenced embedder), and it can never be turned off by config merge.
+// test, a deliberately-unfenced embedder, or the MCP-endpoint and webhook pre-flights), and it
+// can never be turned off by config merge.
 func (g URLGuard) floorEnabled() bool { return !g.disableFloor }

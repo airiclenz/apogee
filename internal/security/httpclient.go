@@ -15,14 +15,14 @@ import (
 // The guarded HTTP client — one recipe for "a client for this vetted destination"
 // ----------------------------------------------------------------------------
 //
-// Every outbound HTTP connection the host makes on a model's or a server config's behalf is
-// built here, from the point the destination has passed its pre-flight on: resolve the
-// operator's egress proxy for the destination, choose the dial-time control the resulting
-// connection needs, and assemble one fixed transport that never follows a redirect. The
-// pre-flight itself stays with each adapter — it is where the adapter's own refusal wording and
-// its own budget live — but the half that decides what the transport may DIAL lives once, so
-// no adapter can drop the dial-time control, swap the transport numbers or follow a redirect
-// by accident.
+// Every outbound HTTP connection the host makes on a model's behalf, to a configured MCP server,
+// or to a webhook Reaction's `url:` is built here, from the point the destination has passed its
+// pre-flight on: resolve the operator's egress proxy for the destination, choose the dial-time
+// control the resulting connection needs, and assemble one fixed transport that never follows a
+// redirect. The pre-flight itself stays with each adapter — it is where the adapter's own refusal
+// wording and its own budget live — but the half that decides what the transport may DIAL lives
+// once, so no adapter can drop the dial-time control, swap the transport numbers or follow a
+// redirect by accident.
 
 // Transport numbers every guarded client shares. They are the values both adapters' builders
 // carried before the recipe moved here, unchanged.

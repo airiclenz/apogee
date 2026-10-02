@@ -290,7 +290,10 @@ receiver still gets its POST, and the connection is pinned to that endpoint's ow
 addresses. A redirect is **never followed**: a 3xx comes back as itself and is reported as
 `HTTP <code>` — a failed post — so neither the body nor your `headers-env:` secrets ever reach a
 host you did not name. A webhook that redirects must be configured at the URL it redirects to.
-Webhooks read the lists once, at startup: an edit to `url-safety:` reaches them at the next start.
+A running session's own webhooks keep the lists it started with: an edit to `url-safety:` reaches
+them at the next start. A `/schedule` firing raised after the edit composes its webhooks from the
+settings the session is running then, so it follows the edit; `apogee headless` and
+`apogee daemon` read the lists once, at start, like the rest of `config.yaml`.
 
 ## Advising the model
 

@@ -1,8 +1,8 @@
 package agent
 
 // The SYNC lane's out-of-process executor (syncexec.go). These tests drive runSyncArgv directly
-// rather than through a seam: the seams that call it (the advise slot, the gate stage) arrive in
-// later items, and what is pinned here is the executor's own contract — the permit row, the class
+// rather than through a seam: the seams that call it (the advise slot, the gate stage) have tests
+// of their own, and what is pinned here is the executor's own contract — the permit row, the class
 // deadline, the payload document and what a failure is reported as. The webhook pair at the end is
 // the exception: it drives runSyncWebhook through the gate stage (gate_test.go's helpers), because
 // what it pins is what the gate makes of a post the url-safety guard refused or did not follow.

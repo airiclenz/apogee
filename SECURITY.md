@@ -30,8 +30,9 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
   bind the web tools and MCP endpoints; redirects are never followed. A webhook reaction
   (`run:`, `advise:` and `gate:` alike) obeys the same allow and deny lists and never follows a
   redirect, but — like an MCP endpoint, an address you wrote yourself — skips the private-range
-  floor, so a loopback or LAN endpoint still works; webhooks pick up a `url-safety:` edit at the
-  next start. An SSRF past them is in scope.
+  floor, so a loopback or LAN endpoint still works; a running session's own webhooks pick up a
+  `url-safety:` edit at its next start, while a `/schedule` firing raised after the edit already
+  uses the new lists. An SSRF past them is in scope.
 - **Secrets** — API keys are stripped from the environment of every tool subprocess and
   every `advise:` or `gate:` reaction command, and the variables your `api-key-env:` and
   `headers-env:` entries name are redacted from their output. Two exceptions inherit

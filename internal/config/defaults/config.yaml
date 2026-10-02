@@ -515,6 +515,13 @@ context-files:
 # resolved-IP floor — that address is one you configured yourself (see above), not one the model
 # chose — and the connection is pinned to that endpoint's own resolved addresses instead.
 #
+# A webhook Reaction's url: (run:, advise: and gate: alike) is the second exemption, on the same
+# terms: these two lists still refuse a host they close before anything is dialled, but the floor
+# is off for it and the post is pinned to that endpoint's own addresses, so a loopback or LAN
+# receiver still gets it. A redirect is never followed. Unlike the tools and the MCP servers, a
+# running session's own webhooks keep the lists it started with, so an edit reaches them at the
+# next start; a /schedule firing raised after the edit composes its webhooks from the new lists.
+#
 # url-safety:
 #   allow-hosts: [docs.example.com, api.github.com]
 #   deny-hosts: [ads.example.com]

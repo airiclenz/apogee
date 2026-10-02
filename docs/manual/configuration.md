@@ -382,9 +382,10 @@ mid-turn is reported on the row and re-committing retries it. The connected MCP 
 same edit: an `sse` or `streamable-http` endpoint your new lists close is disconnected there and
 then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
 your servers keep their connections, and an edit that closes no configured endpoint leaves every
-one of them untouched. Webhook Reactions are the exception: they read the lists once, at startup,
-so an edit reaches them at the next start. The block is file-only (no flag, no
-environment variable) and global: it applies to every model this config runs.
+one of them untouched. Webhook Reactions are the exception: a running session's own webhooks keep
+the lists it started with, so an edit reaches them at the next start — while a `/schedule` firing
+raised after the edit composes its webhooks from the new lists, as it does its tools. The block is
+file-only (no flag, no environment variable) and global: it applies to every model this config runs.
 
 ## Where `web_search` looks — `web-search-endpoint:`
 

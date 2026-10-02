@@ -43,10 +43,11 @@ type URLGuard struct {
 	// caller seeds it.
 	DenyHosts []string
 
-	// disableFloor turns the default-on SSRF floor off — only for a test or a deliberately
-	// unfenced embedder. It is unexported and set only via DisableIPFloor, so a config
-	// merge can never dissolve the floor (tighten-only, mirroring the dangerous-rule
-	// semantics): config can ADD denials, never remove the floor (ssrf.go).
+	// disableFloor turns the default-on SSRF floor off — for a test, a deliberately unfenced
+	// embedder, or the pre-flight of an operator-named endpoint (an MCP server's, a webhook's;
+	// see DisableIPFloor). It is unexported and set only via DisableIPFloor, so a config merge
+	// can never dissolve the floor (tighten-only, mirroring the dangerous-rule semantics):
+	// config can ADD denials, never remove the floor (ssrf.go).
 	disableFloor bool
 	// resolver injects host→IP resolution for the SSRF floor so the tests stay hermetic
 	// (no real DNS). nil ⇒ the real net resolver (defaultIPResolver). It is unexported and
@@ -97,18 +98,21 @@ func normalizeHostPatterns(list []string) []string {
 
 // DisableIPFloor returns a copy of g with the default-on SSRF floor turned off. It is the
 // ONLY way to disable the floor (the floor is on for the zero value and survives any config
-// merge), used by a test or a deliberately-unfenced embedder. A config layer cannot reach
-// this — it is a code-level opt-out, not a configuration key.
+// merge), used by a test, a deliberately-unfenced embedder, or one of the two production
+// pre-flights below. A config layer cannot reach this — it is a code-level opt-out, not a
+// configuration key.
 //
 // Two production paths take it deliberately, each at ONE call: internal/mcp checks a configured
 // server endpoint through a floor-disabled copy, because a `mcp-servers:` endpoint is the
 // user's own config-file address and is never model-supplied, so the anti-model floor is the
 // wrong control over it (ADR 0012, Amendment (2026-07-26)); internal/webhook checks a webhook
 // Reaction's `url:` the same way, for the same reason — it is the operator's own address,
-// never the model's. Each copy is used for that one scheme/host check and threaded nowhere:
-// the connection itself dials under the destination pin (PinnedDialControl, via GuardedClient's
-// DialPinDestination), which permits that endpoint's own addresses and keeps the floor over
-// every other one.
+// never the model's — on every lane that posts one (the observe lane's internal/reactions and
+// the sync lane's advise and gate seams in internal/agent, both through webhook.Post). Each
+// copy is used for that one scheme/host check and threaded nowhere: the connection itself dials
+// under the destination pin (PinnedDialControl, via GuardedClient's DialPinDestination), which
+// permits that endpoint's own addresses and keeps the floor over every other one, and never
+// follows a redirect.
 func (g URLGuard) DisableIPFloor() URLGuard {
 	g.disableFloor = true
 	return g

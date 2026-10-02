@@ -343,7 +343,10 @@ type Config struct {
 	// injected Config.Tools is the host's own assembly and is taken exactly as given (ADR 0001).
 	// The sync lane's webhooks read them whatever the tool set: runSyncWebhook builds its guard
 	// from these fields, injected Config.Tools or not — with the SSRF floor off, as for a
-	// configured MCP endpoint, because a webhook URL is the operator's own (ADR 0012).
+	// configured MCP endpoint, because a webhook URL is the operator's own (ADR 0012). They are
+	// read off the Config the Agent was built with: SwapTools moves the network tools onto another
+	// guard but never these fields, so the sync lane's webhooks keep the lists the Agent was
+	// constructed under.
 	URLAllowHosts []string
 	URLDenyHosts  []string
 
