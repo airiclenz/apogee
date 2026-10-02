@@ -727,6 +727,9 @@ type Response struct {
 	finishReason FinishReason
 	view         LoopView
 	revision     int // bumped by each mutator — the acted-fire probe (R4), read via Revision
+
+	thinkingModel  string            // the model the producing request named; "" when thinkingBlocks is empty
+	thinkingBlocks []json.RawMessage // the reply's opaque reasoning blocks (SetThinkingBlocks)
 }
 
 // NewResponse builds the post-response working value from the parsed reply (engine
@@ -762,6 +765,29 @@ func (r *Response) FinishReason() FinishReason { return r.finishReason }
 // Thinking is the harmony/thinking channel content when the model and parser expose
 // it (ok == false when there is none).
 func (r *Response) Thinking() (text string, ok bool) { return r.thinking, r.thinking != "" }
+
+// ThinkingBlocks reports the reply's opaque reasoning blocks — on the anthropic wire every signed
+// `thinking` and `redacted_thinking` block, one JSON object each, verbatim and in reply order —
+// together with the model the request that produced them named. Both are empty when the reply
+// carried none (every openai-wire reply). Nothing above the provider reads into a block: a signed
+// block goes back upstream byte-for-byte or the server refuses it, and Thinking stays the readable
+// text. The slice is a copy; the blocks it holds are shared and must not be mutated.
+func (r *Response) ThinkingBlocks() (model string, blocks []json.RawMessage) {
+	return r.thinkingModel, append([]json.RawMessage(nil), r.thinkingBlocks...)
+}
+
+// SetThinkingBlocks attaches the reply's opaque reasoning blocks and the model the producing
+// request named — the engine seam the loop sets as it assembles the Response, so the committed
+// assistant message can carry them into history and the next request to that same model can
+// replay them. Empty blocks clear both. It copies the slice and bumps Revision like every mutator.
+func (r *Response) SetThinkingBlocks(model string, blocks []json.RawMessage) {
+	if len(blocks) == 0 {
+		r.thinkingModel, r.thinkingBlocks = "", nil
+	} else {
+		r.thinkingModel, r.thinkingBlocks = model, append([]json.RawMessage(nil), blocks...)
+	}
+	r.revision++
+}
 
 // SetText replaces the assistant text — the intercept path.
 func (r *Response) SetText(s string) {

@@ -380,7 +380,12 @@ signed `thinking` block and a `redacted_thinking` `data` block; a decodeWhole ca
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/provider/`
 **Commit:** `feat(provider): carry anthropic thinking blocks and signatures verbatim`
 
-## 11. Signed thinking persists and replays
+## 11. Signed thinking persists and replays — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): domain.Response's pair carries the requested model with the blocks (`SetThinkingBlocks(model, blocks)` / `ThinkingBlocks() (model, blocks)`), so assistantMessage keeps its signature; the model comes from the provider.Request collectCompletion streamed (`completion.requested`, i.e. st.Model at request time); Extra key `thinking_blocks`, value `{"model":…,"blocks":[…]}`; SetThinkingBlocks bumps Revision like every mutator (set before the post-response fire, so the acted-fire probe never sees it).
+NOTES (2026-10-02): consequential edit — internal/agent/collect_test.go: made necessary by the new DeltaThinkingBlock fold (TestCollectCompletionFoldsEveryDeltaKind enumerates every Delta kind the collector folds; gained a signed-blocks case and blocks/requested assertions).
+NOTES (2026-10-02): a replay gate miss (other model, other wire, an undecodable stored value) drops the blocks silently by design; no event or log, per the ratified "dropped silently elsewhere" call.
+NOTES (2026-10-02): whole `./internal/agent/` passed without -race; the race run was the Acceptance's anchored -run per the Pi 5 machine rule.
 
 **What:** Recast at the regression check (2026-10-02). Depends on item 10.
 **Goal:** an anthropic assistant turn's thinking blocks persist on the committed message (they

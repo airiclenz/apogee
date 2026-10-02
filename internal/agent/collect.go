@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -27,6 +28,9 @@ type completion struct {
 	overflow  bool            // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
 	retryable bool            // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable in-band, or a mid-stream EOF / net timeout): re-sending the same request can succeed
 	errMsg    string          // the terminal fault message when failed
+
+	thinkingBlocks []json.RawMessage // the reply's opaque reasoning blocks (DeltaThinkingBlock), in wire order
+	requested      string            // the model the request named — the one thinkingBlocks are bound to
 }
 
 // collectCompletion is the ONE consumer of the provider's Delta stream: it streams req over the
@@ -47,8 +51,12 @@ type completion struct {
 // transient-class verdict (Delta.Retryable) rides out on retryable, because re-streaming is the
 // caller's call — only the caller owns the Turn, the fold and the events. An overflow never carries
 // it: a prompt too long stays too long.
+//
+// Each DeltaThinkingBlock (the anthropic wire's signed reasoning blocks) is kept opaque, in wire
+// order, beside the model req named: a block replays only to the model that produced it, so the
+// completion records which one that was.
 func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, observe func(provider.Delta)) completion {
-	var out completion
+	out := completion{requested: req.Model}
 	var content, thinking strings.Builder
 	for delta := range a.upstream.Stream(ctx, req) {
 		if observe != nil {
@@ -61,6 +69,10 @@ func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, obs
 			// The native reasoning channel is already separated by the server, so every chunk is
 			// reasoning verbatim — no strip, no prefix bookkeeping.
 			thinking.WriteString(delta.Thinking)
+		case provider.DeltaThinkingBlock:
+			if len(delta.ThinkingBlock) > 0 {
+				out.thinkingBlocks = append(out.thinkingBlocks, delta.ThinkingBlock)
+			}
 		case provider.DeltaToolCall:
 			if delta.ToolCall != nil {
 				out.toolCalls = append(out.toolCalls, *delta.ToolCall)

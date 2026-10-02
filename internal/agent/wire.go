@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -9,7 +11,8 @@ import (
 // toProviderRequest drains the post-hook req onto the provider seam's wire shape — the
 // translation boundary between the loop's domain state and the domain-free provider.Request
 // (ADR 0010). It carries messages (with tool calls + tool-call IDs, load-bearing for a
-// multi-Turn tool exchange), the tool menu, the sampling a pre-request hook shaped, and the
+// multi-Turn tool exchange, and an assistant message's signed reasoning blocks under the replay
+// rule — replayedThinking), the tool menu, the sampling a pre-request hook shaped, and the
 // resolved Thinking effort (resolvedEffort — override ▸ profile ▸ nothing) in the wire dialect the
 // bound SERVER reads it in (a.effortDialect, committed by Rebind — ADR 0060); the provider wire has
 // no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
@@ -35,10 +38,11 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	messages := make([]provider.Message, 0, len(msgs))
 	for _, m := range msgs {
 		messages = append(messages, provider.Message{
-			Role:       string(m.Role),
-			Content:    m.Content,
-			ToolCalls:  toProviderToolCalls(m.ToolCalls),
-			ToolCallID: m.ToolCallID,
+			Role:           string(m.Role),
+			Content:        m.Content,
+			ToolCalls:      toProviderToolCalls(m.ToolCalls),
+			ToolCallID:     m.ToolCallID,
+			ThinkingBlocks: a.replayedThinking(m, st.Model),
 		})
 	}
 
@@ -50,6 +54,41 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 		ThinkingEffort: toProviderEffort(a.resolvedEffort()),
 		EffortDialect:  a.effortDialect,
 	}
+}
+
+// thinkingBlocksExtra is the Extra key a committed assistant message keeps the reply's signed
+// reasoning blocks under (assistantMessage), beside reasoning_content; its value is a
+// signedThinking. Like every Extra it rides the session snapshot as a top-level sibling.
+const thinkingBlocksExtra = "thinking_blocks"
+
+// signedThinking is the value stored under thinkingBlocksExtra: the reply's opaque reasoning
+// blocks, verbatim and in reply order, and the model the request that produced them named — the
+// one model a replay may go to.
+type signedThinking struct {
+	Model  string            `json:"model"`
+	Blocks []json.RawMessage `json:"blocks"`
+}
+
+// replayedThinking returns the signed reasoning blocks m carries for a request naming model, under
+// the replay rule: only on the anthropic wire (a.cfg.Wire, "" folding to openai), and only when
+// model is the very model that produced them — a signature is bound to its model, so another
+// model would refuse the block, and the openai wire has no carrier for it. Anything else — no
+// blocks, a non-assistant message, another model or wire, a value that does not decode — returns
+// nil: the blocks stay in history and are dropped from the request silently, which is the rule,
+// not a fault to surface.
+func (a *Agent) replayedThinking(m domain.Message, model string) []json.RawMessage {
+	if m.Role != domain.RoleAssistant || provider.WireFor(a.cfg.Wire) != provider.WireAnthropic {
+		return nil
+	}
+	raw, ok := m.Extra(thinkingBlocksExtra)
+	if !ok {
+		return nil
+	}
+	var stored signedThinking
+	if err := json.Unmarshal(raw, &stored); err != nil || stored.Model != model {
+		return nil
+	}
+	return stored.Blocks
 }
 
 // resolvedEffort resolves the Thinking effort THIS request asks for, in the one order ADR 0050

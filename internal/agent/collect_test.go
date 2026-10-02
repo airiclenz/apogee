@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"iter"
+	"reflect"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -23,7 +25,8 @@ func (s scriptedDeltas) Stream(context.Context, provider.Request) iter.Seq[provi
 }
 
 // TestCollectCompletionFoldsEveryDeltaKind pins what the one Delta collector returns for each
-// shape a stream can take — content, the two reasoning channels, tool calls, the terminal Done
+// shape a stream can take — content, the two reasoning channels, the opaque signed reasoning
+// blocks bound to the requested model, tool calls, the terminal Done
 // with its accounting and served model, and the three fault classes — and that every Delta reached
 // the observer in wire order before the fold. The delimited-profile row is the strip: the inline
 // span leaves the content and joins the Upstream-split channel behind it (joinThinking), so no
@@ -51,6 +54,20 @@ func TestCollectCompletionFoldsEveryDeltaKind(t *testing.T) {
 				{Kind: provider.DeltaDone, FinishReason: "stop", Usage: &usage, Model: "served-model"},
 			},
 			want: completion{content: "hello", thinking: "plan", finish: domain.FinishStop, usage: &usage, served: "served-model"},
+		},
+		{
+			name: "signed reasoning blocks are kept opaque in wire order beside the requested model",
+			deltas: scriptedDeltas{
+				{Kind: provider.DeltaThinking, Thinking: "plan"},
+				{Kind: provider.DeltaThinkingBlock, ThinkingBlock: json.RawMessage(`{"type":"thinking","thinking":"plan","signature":"s"}`)},
+				{Kind: provider.DeltaThinkingBlock, ThinkingBlock: json.RawMessage(`{"type":"redacted_thinking","data":"d"}`)},
+				{Kind: provider.DeltaContent, Content: "ok"},
+				{Kind: provider.DeltaDone, FinishReason: "stop"},
+			},
+			want: completion{content: "ok", thinking: "plan", finish: domain.FinishStop, requested: "claude-x", thinkingBlocks: []json.RawMessage{
+				json.RawMessage(`{"type":"thinking","thinking":"plan","signature":"s"}`),
+				json.RawMessage(`{"type":"redacted_thinking","data":"d"}`),
+			}},
 		},
 		{
 			name: "tool calls are kept in order and a nil call is skipped",
@@ -106,7 +123,7 @@ func TestCollectCompletionFoldsEveryDeltaKind(t *testing.T) {
 			}
 			var seen []provider.DeltaKind
 
-			got := a.collectCompletion(context.Background(), provider.Request{}, func(d provider.Delta) {
+			got := a.collectCompletion(context.Background(), provider.Request{Model: "claude-x"}, func(d provider.Delta) {
 				seen = append(seen, d.Kind)
 			})
 
@@ -114,6 +131,12 @@ func TestCollectCompletionFoldsEveryDeltaKind(t *testing.T) {
 				got.served != tc.want.served || got.failed != tc.want.failed || got.overflow != tc.want.overflow ||
 				got.retryable != tc.want.retryable || got.errMsg != tc.want.errMsg {
 				t.Errorf("completion = %+v, want %+v", got, tc.want)
+			}
+			if len(got.thinkingBlocks) > 0 && got.requested != tc.want.requested {
+				t.Errorf("requested = %q, want %q (the model the blocks are bound to)", got.requested, tc.want.requested)
+			}
+			if !reflect.DeepEqual(got.thinkingBlocks, tc.want.thinkingBlocks) {
+				t.Errorf("thinkingBlocks = %s, want %s", got.thinkingBlocks, tc.want.thinkingBlocks)
 			}
 			if (got.usage == nil) != (tc.want.usage == nil) || (got.usage != nil && *got.usage != *tc.want.usage) {
 				t.Errorf("usage = %v, want %v", got.usage, tc.want.usage)

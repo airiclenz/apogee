@@ -6,6 +6,7 @@ package agent
 // Exchange rather than restarting it. A future-version snapshot is rejected.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -151,6 +153,46 @@ func TestSnapshot_PreservesReasoningContent(t *testing.T) {
 		t.Fatalf("resumeAgent: %v", err)
 	}
 	assertReasoning(t, &b.conv)
+}
+
+// TestSnapshot_RoundTripsSignedThinking proves an anthropic reply's signed reasoning blocks are
+// committed on the assistant message, survive snapshot/resume verbatim, and replay from the resumed
+// history on the next request to the model that produced them.
+func TestSnapshot_RoundTripsSignedThinking(t *testing.T) {
+	block := json.RawMessage(`{"type":"thinking","thinking":"plan","signature":"sig-abc"}`)
+	cfg := baseConfig(&recordingSink{})
+	cfg.Wire = "anthropic"
+	a, err := newAgent(cfg, scriptedDeltas{
+		{Kind: provider.DeltaThinking, Thinking: "plan"},
+		{Kind: provider.DeltaThinkingBlock, ThinkingBlock: block},
+		{Kind: provider.DeltaContent, Content: "the answer"},
+		{Kind: provider.DeltaDone, FinishReason: "stop"},
+	})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "q"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	b, err := resumeAgent(cfg, snap, echoResponder(t, "x"))
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+
+	msgs := b.conv.Messages()
+	got := b.toProviderRequest(domain.NewRequest(testModel, msgs, nil, domain.Budget{}, 0))
+	last := got.Messages[len(got.Messages)-1]
+	if last.Role != "assistant" || len(last.ThinkingBlocks) != 1 || !bytes.Equal(last.ThinkingBlocks[0], block) {
+		t.Errorf("resumed assistant message replays %s (role %q), want exactly %s", last.ThinkingBlocks, last.Role, block)
+	}
 }
 
 // TestSnapshot_RoundTripsASettledExchange is where "the saved record keeps the finished Turns"

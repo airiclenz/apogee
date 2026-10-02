@@ -775,7 +775,8 @@ func (a *Agent) emptyReplyFault(resp *domain.Response, retriedAt int) string {
 // committed text and assigning it a deterministic Turn-derived ID (so snapshot/resume and tests
 // stay stable, unlike the oracle's wall-clock ID). The model's reasoning (the Upstream-split
 // channel — `reasoning_content` or its `reasoning` alias — joined with any stripped inline
-// channel) rides on the Response so assistantMessage can preserve it in history. For a native,
+// channel) rides on the Response so assistantMessage can preserve it in history, and so do the
+// reply's opaque signed reasoning blocks with the model they are bound to. For a native,
 // no-inline-thinking profile the stripper and text parser are no-ops, so visible == the wire
 // content and calls == nativeCalls — byte-identical to the pre-profile path.
 func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep completion, nativeCalls []domain.ToolCall) *domain.Response {
@@ -793,7 +794,11 @@ func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep completion,
 		}
 	}
 
-	return domain.NewResponse(visible, rep.thinking, calls, rep.finish, view)
+	resp := domain.NewResponse(visible, rep.thinking, calls, rep.finish, view)
+	if len(rep.thinkingBlocks) > 0 {
+		resp.SetThinkingBlocks(rep.requested, rep.thinkingBlocks)
+	}
+	return resp
 }
 
 // dispatchableCalls drops the native tool calls the loop cannot run — an entry missing the tool
@@ -1043,14 +1048,22 @@ func parseToolCalls(raw []provider.ToolCall) ([]domain.ToolCall, error) {
 
 // assistantMessage builds the committed assistant message from the reviewed response. It
 // preserves the model's reasoning channel as reasoning_content in the message's Extra so it
-// survives snapshot/resume — the channel is recorded in history, not re-sent upstream (the
-// provider seam drops Extra). calls is nil for a final no-tool message and the parsed tool
-// calls otherwise.
+// survives snapshot/resume — that readable channel is recorded in history, never re-sent
+// upstream. The reply's opaque signed reasoning blocks, when it carried any (the anthropic wire),
+// are preserved the same way under thinkingBlocksExtra together with the model the request named;
+// unlike reasoning_content they DO go back upstream, but only to that same model on the anthropic
+// wire (toProviderRequest, replayedThinking). calls is nil for a final no-tool message and the
+// parsed tool calls otherwise.
 func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Message {
 	msg := domain.Message{Role: domain.RoleAssistant, Content: resp.Text(), ToolCalls: calls}
 	if think, ok := resp.Thinking(); ok {
 		if raw, err := json.Marshal(think); err == nil {
 			msg = msg.WithExtra("reasoning_content", raw)
+		}
+	}
+	if model, blocks := resp.ThinkingBlocks(); len(blocks) > 0 {
+		if raw, err := json.Marshal(signedThinking{Model: model, Blocks: blocks}); err == nil {
+			msg = msg.WithExtra(thinkingBlocksExtra, raw)
 		}
 	}
 	return msg

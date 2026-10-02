@@ -158,3 +158,57 @@ func effortTestRequest() *domain.Request {
 	msgs := []domain.Message{{Role: domain.RoleUser, Content: "the ask"}}
 	return domain.NewRequest("test-model", msgs, nil, domain.Budget{}, 0)
 }
+
+// TestProviderRequestReplaysSignedThinkingOnlyToItsModel pins the replay rule for an assistant
+// message's signed reasoning blocks: they go back upstream verbatim only on the anthropic wire and
+// only when the request names the model that produced them; for any other model, and on the
+// openai wire (named or folded from ""), they are dropped from the request silently.
+func TestProviderRequestReplaysSignedThinkingOnlyToItsModel(t *testing.T) {
+	t.Parallel()
+
+	blocks := []json.RawMessage{
+		json.RawMessage(`{"type":"thinking","thinking":"","signature":"sig-1"}`),
+		json.RawMessage(`{"type":"redacted_thinking","data":"opaque"}`),
+	}
+	resp := domain.NewResponse("the answer", "", nil, domain.FinishStop, nil)
+	resp.SetThinkingBlocks("claude-a", blocks)
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "the ask"},
+		assistantMessage(resp, nil),
+		{Role: domain.RoleUser, Content: "next"},
+	}
+
+	cases := []struct {
+		name   string
+		wire   string
+		model  string
+		replay bool
+	}{
+		{name: "replayed to the same model on the anthropic wire", wire: "anthropic", model: "claude-a", replay: true},
+		{name: "dropped for another model on the anthropic wire", wire: "anthropic", model: "claude-b"},
+		{name: "dropped on the openai wire", wire: "openai", model: "claude-a"},
+		{name: "dropped on the unnamed wire, which folds to openai", wire: "", model: "claude-a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := &Agent{cfg: domain.Config{Model: tc.model, Wire: tc.wire}}
+			req := domain.NewRequest(tc.model, msgs, nil, domain.Budget{}, 0)
+
+			got := a.toProviderRequest(req)
+
+			var want []json.RawMessage
+			if tc.replay {
+				want = blocks
+			}
+			if !reflect.DeepEqual(got.Messages[1].ThinkingBlocks, want) {
+				t.Errorf("assistant ThinkingBlocks = %s, want %s", got.Messages[1].ThinkingBlocks, want)
+			}
+			for _, i := range []int{0, 2} {
+				if got.Messages[i].ThinkingBlocks != nil {
+					t.Errorf("user message %d carries ThinkingBlocks %s, want none", i, got.Messages[i].ThinkingBlocks)
+				}
+			}
+		})
+	}
+}
