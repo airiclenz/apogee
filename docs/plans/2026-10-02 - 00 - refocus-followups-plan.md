@@ -265,7 +265,9 @@ docs/manual/configuration.md — "Keys apogee migrates for you", "The terminal U
 - `grep -c "240 characters" docs/manual/reactions.md` prints `0`
 **Commit:** `docs(manual): correct daemon exit status, rune caps, key counts and race-test notes`
 
-## 7. ADR amendments for verified-stale lines
+## 7. ADR amendments for verified-stale lines — ✅ DONE (2026-10-02)
+
+NOTES (2026-10-02): ADR 0063 carries both a Status clause (ADR 0088 supersedes the restated "a cancel still rolls the whole Turn back") and an inline "(Amended 2026-10-02: …)" note at that sentence, per the item's regression guard.
 
 **What:**
 **Goal:** these ADRs carry an inline `(Amended 2026-10-02: …)` note (or a Status clause) stating

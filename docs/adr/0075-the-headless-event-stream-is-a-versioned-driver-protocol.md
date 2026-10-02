@@ -148,6 +148,9 @@ ids, which a consumer must do anyway; the exchange boundary is already observabl
 > never sent to a model, the ids on the wire are never rewritten, and the Driver-stamped `time`,
 > `seq` and `session` of decision 7 are untouched. No Exchange identity is added. Addressing a
 > running child (`InterjectChild`, ADR 0063 D1) still goes by the spawning call id.
+> (Amended 2026-10-02: no longer — per [ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md)
+> D5, a child is addressed by its run id: `InterjectChild` and the other sub-run verbs take the
+> `run_id`, and a sub-run's events go by it.)
 
 **9. Lossless and ordered; it blocks rather than drops.** Writes happen inside `Emit`, through a
 `bufio.Writer` flushed per line; the engine already serializes emission (`serialEventSink`,

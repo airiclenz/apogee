@@ -33,7 +33,10 @@ the enable direction the promoted use case needs. The vocabulary mirrors the glo
 A tool registration can mark itself default-off: present in the build, absent from the menu
 until a profile `enabled:` or the global `tools.enabled:` lifts it. The global counterpart
 exists so "I want this tool everywhere" never forces a catch-all pattern entry. No current tool
-ships default-off — the state ships empty, for the first tool that wants it.
+ships default-off — the state ships empty, for the first tool that wants it. (Amended 2026-10-02:
+six tools now ship default-off — `console_open`, `console_send`, `console_read` and
+`console_close` (ADR 0059), `fan_out` (ADR 0087 D8) and `workflow` — each reporting it through
+`domain.DefaultOffTool`.)
 
 **4 — Precedence is a specificity ladder: profile > global > build default.** The most specific
 word wins, so a profile `enabled:` re-enables a globally disabled tool (the ratifying use case:

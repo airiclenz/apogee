@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; the restated "a cancel still rolls the whole Turn back" (ADR 0013 D5) superseded by ADR 0088
 ---
 
 # Sub-agent runs are user-addressable views
@@ -70,7 +70,9 @@ top-level contract of ADR 0025 stands untouched: a top-level `Run` drains nothin
 interjection event, and an embedder who wants mid-Exchange delivery at top level still drives `Step`
 itself. The child is different for one reason only — nobody else can drive its Steps. ADR 0013 D5 is
 unchanged in every other respect: the parent's Turn is still atomic, a cancel still rolls the whole
-Turn back, and nothing about a child newly persists.
+Turn back, and nothing about a child newly persists. (Amended 2026-10-02: a cancel no longer rolls
+the Turn back — [ADR 0088](0088-cancel-settles-and-never-rewinds-finished-work.md) supersedes
+ADR 0013 §5(b): a cancel settles, and the Turns that finished before the stop stay.)
 
 > **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D5).** A child is addressed by its engine-minted
 > **run id** (ADR 0039's 2026-09-24 amendment), not its spawn call-ID, which may repeat across one

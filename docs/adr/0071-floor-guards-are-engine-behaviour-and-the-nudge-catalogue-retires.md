@@ -242,7 +242,10 @@ dispatching the call the model meant is strictly more than that.
 
 **It differs from the promoted six in one respect, and Decision 1's ordering rule is extended for
 it.** Each of the six answers a failed Turn with a correction, so among them the first to fire wins
-and the rest do not run. Salvage does not correct a response — it **completes** one — so it runs
+and the rest do not run. (Amended 2026-10-02: four of the six do — `tool-use-enforcer`,
+`empty-response-recovery`, `tool-call-repair` and `tool-loop-breaker`, the "four correcting
+guards" below. `read-cache` intercepts a redundant re-read and `tool-result-cap` caps a tool result;
+neither answers a failed Turn.) Salvage does not correct a response — it **completes** one — so it runs
 **first in the post-response chain and does not short-circuit**: it returns no retry, and the four
 correcting guards below it then judge the response the model *meant*, rather than answering a Turn
 that only looked empty or narrating. A firing surfaces as an ordinary `FloorGuardEvent` keyed by

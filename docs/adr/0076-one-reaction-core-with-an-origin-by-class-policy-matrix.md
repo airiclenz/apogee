@@ -335,7 +335,9 @@ its one-time load notice: the file is fixed, not aliased.
 (`run: ["notify-send", "done"]`, decision 10's shown form), a mapping is a webhook
 (`run: {url:, headers:, headers-env:}`) — so class lives on one key and the common one-line notifier
 stays one line. `advise:` and `gate:` are **rejected at load** in stage 2 with "not yet shipped";
-they arrive in stage 3.
+they arrive in stage 3. (Amended 2026-10-02: stage 3 has shipped — `advise:` and `gate:` are live
+action keys, each taking the same argv-or-webhook shapes as `run:`, and neither is rejected at
+load.)
 
 **A8. One generation swap covers bypass too.** A generation is *the reactions that will fire*: the
 builtin enable set resolved from the seven Floor booleans, the user entries from `reactions:`, and

@@ -84,6 +84,12 @@ Three layers:
    (package `apogee_test`) that names the full public surface — fails the build if an alias is
    forgotten.
 
+   (Amended 2026-10-02: the root now also imports `internal/config`, `internal/eventjson`,
+   `internal/profiles`, `internal/reactions` and `internal/workflow` beside `domain` and `agent` —
+   each only for aliases and forwarders (`DefaultSystemPrompt`, the shipped-profile lookup, the
+   recipe and workflow-plan types, `RunnerOptions`/`ReactionRunner`). It still holds no engine
+   logic.)
+
 **Canonical placement (the lowest-layer rule):** a type lives at the lowest layer that can
 define it without importing upward; the root re-exports the public ones.
 - `Agent` (the engine handle) + its methods (`Step` / `Run` / `Submit` / `Snapshot` /
