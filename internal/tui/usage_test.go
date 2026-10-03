@@ -511,6 +511,40 @@ func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {
 	}
 }
 
+// TestUsageRestoredDelegateKeepsItsCost pins the priced half of a delegate's accounting across a
+// save and reopen: the run head's cost and its priced and unpriced call counts travel with the record
+// (ADR 0093 decision 5), so a resumed session's delegate sum states the same amount the live one did
+// rather than reopening as unpriced.
+func TestUsageRestoredDelegateKeepsItsCost(t *testing.T) {
+	t.Parallel()
+
+	child := childTotals
+	child.CostMicros = 12_345
+	child.PricedCalls = 1
+	child.UnpricedCalls = 1
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	tr.applyUsage(childUsage("s1", 1, child.TotalTokens, child), 32768, "")
+	subAgentReport(tr, "s1", "tests read", 0)
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+
+	m := usageModel(t, mainTotals, 8192)
+	m.transcript.entries = entries
+
+	if got := m.delegateUsageTotal(); got != child {
+		t.Errorf("restored delegate usage = %+v, want %+v — the cost and the call split came back with the record", got, child)
+	}
+}
+
 // TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading pins what the record's delegate sum is
 // for. A resumed session carries the sum its record stored, and that is the reading until a run head
 // reports one of its own — the heads REPLACE it rather than adding to it, or a resumed session whose
@@ -701,6 +735,15 @@ func workflowRunUsage(base domain.EventBase, calls, prompt, completion int) doma
 	}
 }
 
+// pricedRunUsage is e with its cumulative reading priced: costMicros spent over pricedCalls of its
+// calls, the rest counted as unpriced — what the engine stamps when the run's server has a `price:`.
+func pricedRunUsage(e domain.UsageEvent, costMicros int64, pricedCalls int) domain.UsageEvent {
+	e.Cumulative.CostMicros = costMicros
+	e.Cumulative.PricedCalls = pricedCalls
+	e.Cumulative.UnpricedCalls = e.Cumulative.Calls - pricedCalls
+	return e
+}
+
 // workflowRow is the /usage row of a delegate named name that spent totals and reported no fill —
 // the row a Workflow gets.
 func workflowRow(name string, totals domain.Usage) popupRow {
@@ -749,16 +792,20 @@ func TestBackgroundWorkflowSpendReachesUsageAndTheRecord(t *testing.T) {
 	m.usage = mainTotals
 	nested := domain.EventBase{Depth: 2, Turn: 1, CallID: "c1", RunID: "bg.3"}
 
+	// bg.2 ran on a server with no `price:`, so its call is counted as unpriced and adds no cost.
 	m = foldEvents(t, m,
 		bgPhase(domain.WorkflowStarted),
-		workflowRunUsage(bgChildBase("bg.1"), 1, 1000, 100),
-		workflowRunUsage(bgChildBase("bg.2"), 1, 800, 80),
+		pricedRunUsage(workflowRunUsage(bgChildBase("bg.1"), 1, 1000, 100), 1_000, 1),
+		pricedRunUsage(workflowRunUsage(bgChildBase("bg.2"), 1, 800, 80), 0, 0),
 		domain.ToolCallEvent{EventBase: bgChildBase("bg.2"), Call: domain.ToolCall{ID: "c1", Tool: "sub_agent"}, SpawnRunID: "bg.3"},
-		workflowRunUsage(nested, 1, 400, 40),
-		workflowRunUsage(bgChildBase("bg.1"), 2, 2500, 300), // restates bg.1's running sum
+		pricedRunUsage(workflowRunUsage(nested, 1, 400, 40), 500, 1),
+		pricedRunUsage(workflowRunUsage(bgChildBase("bg.1"), 2, 2500, 300), 2_500, 2), // restates bg.1's running sum
 	)
 
-	spent := domain.Usage{Calls: 4, PromptTokens: 3700, CompletionTokens: 420, TotalTokens: 4120}
+	spent := domain.Usage{
+		Calls: 4, PromptTokens: 3700, CompletionTokens: 420, TotalTokens: 4120,
+		CostMicros: 3_000, PricedCalls: 3, UnpricedCalls: 1,
+	}
 	if m.usage != mainTotals {
 		t.Errorf("main totals = %+v, want %+v untouched — a background run's reading is not the main agent's", m.usage, mainTotals)
 	}

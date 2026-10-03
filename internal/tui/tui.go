@@ -1120,6 +1120,12 @@ type Options struct {
 	// Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
+	// Currency is the configured `currency:` label (ADR 0093 decision 1) — the free label every
+	// priced amount the renderer shows is printed in, as written. The binary resolves it (absent ⇒
+	// config.DefaultCurrency); the renderer never defaults it and only prints it beside an amount
+	// ([domain.FormatCost]). It is launch-time only: `currency:` is a file-only key.
+	Currency string
+
 	// UI is the resolved `ui:` block, carried WHOLE: the status-line spinner and its colour loop,
 	// the scroll bar, the palette's name, the quiet threshold, the Inspector's arming, the
 	// skill-suggestion band and the two transcript folds ([domain.UIPrefs]). It arrives from the

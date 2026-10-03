@@ -176,6 +176,9 @@ func toWireEntry(e *entry, kind string) session.Entry {
 		UsageCachedPromptTokens: e.usage.CachedPromptTokens,
 		UsageCompletionTokens:   e.usage.CompletionTokens,
 		UsageTotalTokens:        e.usage.TotalTokens,
+		UsageCostMicros:         e.usage.CostMicros,
+		UsagePricedCalls:        e.usage.PricedCalls,
+		UsageUnpricedCalls:      e.usage.UnpricedCalls,
 
 		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
@@ -381,6 +384,9 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 			CachedPromptTokens: w.UsageCachedPromptTokens,
 			CompletionTokens:   w.UsageCompletionTokens,
 			TotalTokens:        w.UsageTotalTokens,
+			CostMicros:         w.UsageCostMicros,
+			PricedCalls:        w.UsagePricedCalls,
+			UnpricedCalls:      w.UsageUnpricedCalls,
 		},
 	}
 	// The offsets were measured against the text as SENT, and the text above has just been

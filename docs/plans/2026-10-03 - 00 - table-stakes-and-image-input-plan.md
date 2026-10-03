@@ -133,7 +133,11 @@ cmd/apogee/upstream.go — sessionMover.move; cmd/apogee/delegation.go — resol
 **Commit:** `feat(agent): price each provider call at the bound server`
 Depends on item 3.
 
-## 5. TUI usage plumbing
+## 5. TUI usage plumbing — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): session.Entry's three new members are named UsageCostMicros / UsagePricedCalls / UsageUnpricedCalls (JSON usageCostMicros / usagePricedCalls / usageUnpricedCalls, omitempty), following the Usage* prefix of the existing members; a record written before pricing decodes as unpriced and uncounted.
+NOTES (2026-10-03): usageSince is kept as the named helper and now returns latest.Minus(base); the restored-delegate cost test is TestUsageRestoredDelegateKeepsItsCost, and TestBackgroundWorkflowSpendReachesUsageAndTheRecord now folds priced and unpriced readings (new pricedRunUsage helper) and asserts CostMicros/PricedCalls/UnpricedCalls through the live model, the save and the reopen.
+NOTES (2026-10-03): cmd/apogee/wire_options_test.go is a new file holding TestRunRootWiresTheConfiguredCurrency, built on the same wiring harness as TestRunRootWiresTheAutoTitleHookToTheNamer with `currency: EUR` (a non-default label, so the default cannot pass it). Each new test was confirmed to fail with the production change reverted.
 
 **What:** Recast at the regression check (2026-10-03).
 **Goal:** the TUI keeps `CostMicros`, `PricedCalls` and `UnpricedCalls` wherever it carries usage: per-head usage survives save and resume, a background workflow's spend keeps its cost, and the TUI holds the configured currency label.

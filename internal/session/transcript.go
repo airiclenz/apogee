@@ -164,12 +164,18 @@ type Entry struct {
 	// The cumulative token accounting a sub-agent run's head wears: what the delegate spent over
 	// the whole run, as of its last report. UsageCachedPromptTokens travels between the prompt count
 	// and the completion count because that is what it is — the share of THOSE prompt tokens the
-	// server answered from its own cache, not a spend beside them.
+	// server answered from its own cache, not a spend beside them. UsageCostMicros is the run's
+	// priced amount in millionths of the record's currency (Meta.Currency, ADR 0093 decision 5), and
+	// UsagePricedCalls / UsageUnpricedCalls split UsageCalls by whether the server had a `price:`;
+	// all three are absent on a record written before pricing, which reads as unpriced and uncounted.
 	UsageCalls              int         `json:"usageCalls,omitempty"`
 	UsagePromptTokens       int         `json:"usagePromptTokens,omitempty"`
 	UsageCachedPromptTokens int         `json:"usageCachedPromptTokens,omitempty"`
 	UsageCompletionTokens   int         `json:"usageCompletionTokens,omitempty"`
 	UsageTotalTokens        int         `json:"usageTotalTokens,omitempty"`
+	UsageCostMicros         int64       `json:"usageCostMicros,omitempty"`
+	UsagePricedCalls        int         `json:"usagePricedCalls,omitempty"`
+	UsageUnpricedCalls      int         `json:"usageUnpricedCalls,omitempty"`
 	SkillSpans              []SkillSpan `json:"skillSpans,omitempty"`
 	Tool                    *ToolView   `json:"tool,omitempty"`
 	Presented               *Presented  `json:"presented,omitempty"`

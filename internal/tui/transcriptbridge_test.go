@@ -1382,6 +1382,9 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			"CtxUsed", "CtxLimit", "CtxModel",
 			"UsageCalls", "UsagePromptTokens", "UsageCachedPromptTokens", "UsageCompletionTokens",
 			"UsageTotalTokens",
+			// The priced half of the same accounting (ADR 0093 decision 5): the run's cost and its
+			// calls split by whether their server had a `price:`.
+			"UsageCostMicros", "UsagePricedCalls", "UsageUnpricedCalls",
 			"SkillSpans", "Tool", "Presented",
 			// Item: a Workflow item's run head's place in its Workflow (enterable-workflow-stages
 			// plan, item 4).

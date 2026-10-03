@@ -274,15 +274,10 @@ func (s runSpend) total() domain.Usage {
 }
 
 // usageSince is what was spent after base was read, when latest is the later reading of the same
-// running sums: counter by counter, latest less base.
+// running sums: counter by counter, latest less base — cost and the priced/unpriced call counts
+// included, because domain.Usage.Minus owns the field list.
 func usageSince(latest, base domain.Usage) domain.Usage {
-	return domain.Usage{
-		Calls:              latest.Calls - base.Calls,
-		PromptTokens:       latest.PromptTokens - base.PromptTokens,
-		CachedPromptTokens: latest.CachedPromptTokens - base.CachedPromptTokens,
-		CompletionTokens:   latest.CompletionTokens - base.CompletionTokens,
-		TotalTokens:        latest.TotalTokens - base.TotalTokens,
-	}
+	return latest.Minus(base)
 }
 
 // usageAgentName is what the pane calls a delegate: the short name its call was given, else the

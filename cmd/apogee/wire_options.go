@@ -80,6 +80,9 @@ func (w *rootWiring) options() tui.Options {
 		ConfigHome:    w.roots.config,
 		ContextWindow: w.live.window(),
 		HostAlias:     w.opts.HostAlias,
+		// The `currency:` label every priced amount on screen is printed in (ADR 0093 decision 1),
+		// resolved by ApplyConfig so the renderer only prints it.
+		Currency: w.opts.Currency,
 		// The whole Upstream seam as one named capability (ADR 0054, wire_server.go): the servers
 		// this session can move to, the two verbs that move or first bind it, the recording each
 		// move makes for the next session, and the two ADR 0024 acts that keep the display live —
