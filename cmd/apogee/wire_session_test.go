@@ -461,6 +461,127 @@ func TestResumeCarriesParentIDIntoLaterSaves(t *testing.T) {
 	}
 }
 
+// pricedEURRecord is a stored session whose amount was priced under EUR, and unpricedEURRecord one
+// that names EUR but never priced a call — the two sides of the session-label rule.
+func pricedEURRecord() session.Record {
+	return session.Record{Meta: session.Meta{
+		ID: "20261004T120000Z-eeee", Title: "priced in euro", Currency: "EUR",
+		Usage: session.Usage{Calls: 2, CostMicros: 40_000, PricedCalls: 2},
+	}}
+}
+
+func unpricedEURRecord() session.Record {
+	return session.Record{Meta: session.Meta{
+		ID: "20261004T130000Z-ffff", Title: "never priced", Currency: "EUR",
+		Usage: session.Usage{Calls: 2, UnpricedCalls: 2},
+	}}
+}
+
+// savedCurrency saves once through host and returns the label the record landed with.
+func savedCurrency(t *testing.T, store *session.Store, host *sessionHost) string {
+	t.Helper()
+	if err := host.Save(apogee.Session{}, nil, "t", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	rec, err := store.Load(host.ActiveID())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return rec.Meta.Currency
+}
+
+// A session keeps the label its record priced a call under on every later Save, whether it came
+// back through --resume (newSessionHost) or /sessions (Activate) — a USD host never relabels a
+// EUR amount — while a record with nothing priced adopts the configured label (ADR 0093,
+// amendment 2026-10-04).
+func TestResumedSessionKeepsItsPricedCurrency(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		record session.Record
+		want   string
+	}{
+		{"a priced EUR record stays EUR", pricedEURRecord(), "EUR"},
+		{"an unpriced EUR record adopts USD", unpricedEURRecord(), "USD"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name+" on resume", func(t *testing.T) {
+			t.Parallel()
+			store := session.NewStore(t.TempDir())
+			rec := tc.record
+			host := newSessionHost(store, "/ws", "m", &rec, "", nil, "", nil)
+			host.currency = "USD"
+			defer host.Close()
+
+			got := savedCurrency(t, store, host)
+
+			if got != tc.want {
+				t.Errorf("Currency after a resumed Save = %q; want %q", got, tc.want)
+			}
+		})
+		t.Run(tc.name+" on Activate", func(t *testing.T) {
+			t.Parallel()
+			store := session.NewStore(t.TempDir())
+			if err := store.Save(tc.record); err != nil {
+				t.Fatalf("seed the record: %v", err)
+			}
+			host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+			host.currency = "USD"
+			defer host.Close()
+
+			host.Activate(tc.record.Meta)
+			got := savedCurrency(t, store, host)
+
+			if got != tc.want {
+				t.Errorf("Currency after an activated Save = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Rotate leaves the resumed session's label behind with the rest of its identity: the fresh session
+// the next Save mints is priced under the configured label.
+func TestRotateReturnsToTheConfiguredCurrency(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	rec := pricedEURRecord()
+	host := newSessionHost(store, "/ws", "m", &rec, "", nil, "", nil)
+	host.currency = "USD"
+	defer host.Close()
+
+	host.Rotate()
+	got := savedCurrency(t, store, host)
+
+	if got != "USD" {
+		t.Errorf("Currency after Rotate = %q; want the configured USD", got)
+	}
+}
+
+// The replay payload carries the label the resumed session counts under — the effective one the
+// host's Saves write — not the record's raw label.
+func TestResumedSessionPayloadCarriesTheEffectiveCurrency(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		record session.Record
+		want   string
+	}{
+		{"a priced EUR record stays EUR", pricedEURRecord(), "EUR"},
+		{"an unpriced EUR record adopts USD", unpricedEURRecord(), "USD"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rs := resumedSession(&tc.record, "USD", false)
+
+			if rs == nil || rs.Currency != tc.want {
+				t.Errorf("resumedSession currency = %+v; want %q", rs, tc.want)
+			}
+		})
+	}
+}
+
 // Rotate closes the forked child with everything else about its identity: the session the next
 // Save mints is not a fork, so it carries no ParentID.
 func TestRotateClearsParentID(t *testing.T) {
@@ -510,7 +631,7 @@ func TestResolveResumeLegacyPath(t *testing.T) {
 	if len(rec.Transcript) != 0 {
 		t.Errorf("legacy Transcript = %s; want empty (no scrollback recorded)", rec.Transcript)
 	}
-	if rs := resumedSession(rec, false); rs == nil || len(rs.Transcript) != 0 {
+	if rs := resumedSession(rec, "", false); rs == nil || len(rs.Transcript) != 0 {
 		t.Errorf("resumedSession(legacy) = %+v; want a non-nil payload with an empty transcript", rs)
 	}
 }
@@ -679,7 +800,7 @@ func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
 	if rec.Meta.Model != "model-x" {
 		t.Errorf("stored model = %q; want the bound profile model-x — the served set does not displace it", rec.Meta.Model)
 	}
-	rs := resumedSession(&rec, false)
+	rs := resumedSession(&rec, "", false)
 	if rs == nil || rs.Usage != main || rs.DelegateUsage != delegates {
 		t.Errorf("resumedSession = %+v; want both accountings carried into the replay payload", rs)
 	}
@@ -699,7 +820,7 @@ func TestResolveResumeFreshStart(t *testing.T) {
 	if rec != nil {
 		t.Errorf("resolveResume with neither flag = %+v; want nil", rec)
 	}
-	if got := resumedSession(nil, false); got != nil {
+	if got := resumedSession(nil, "", false); got != nil {
 		t.Errorf("resumedSession(nil) = %+v; want nil (a fresh start replays nothing)", got)
 	}
 }

@@ -95,6 +95,19 @@ func (u Usage) Minus(base Usage) Usage {
 	}
 }
 
+// Unpriced is u with its priced Spend (money) withdrawn: CostMicros is zero and every priced call
+// is counted as unpriced, while the call count and the token counters stand. It is how a reading
+// priced under one currency label is carried into a session that shows another (ADR 0093,
+// amendment 2026-10-04): the calls still happened and their tokens still count, but an amount is
+// never shown under a label other than its own, so the reading adds calls to the session's
+// unpriced share rather than money to its amount.
+func (u Usage) Unpriced() Usage {
+	u.UnpricedCalls += u.PricedCalls
+	u.PricedCalls = 0
+	u.CostMicros = 0
+	return u
+}
+
 // Adopt takes reading as u's new value when the reading counted a call, and leaves u alone
 // when it did not: the latest reading wins, because a cumulative figure RESTATES the agent's
 // running counters rather than adding to them, and a reading that counted nothing is the

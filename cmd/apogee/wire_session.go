@@ -8,6 +8,7 @@ package main
 // TUI's recall seam itself (wire_options.go).
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -39,8 +40,9 @@ import (
 type sessionHost struct {
 	store     *session.Store
 	workspace string
-	// currency is the configured `currency:` label every Save writes onto Meta.Currency beside the
-	// usage it labels (ADR 0093 decision 6). The composition root sets it once, before the first
+	// currency is the configured `currency:` label a Save writes onto Meta.Currency beside the
+	// usage it labels (ADR 0093 decision 6) whenever the active session has no label of its own
+	// (sessionLabel). The composition root sets it once, after construction and before the first
 	// Save; "" (tests, a host built without one) writes no label.
 	currency string
 	// now stamps Save's CreatedAt and UpdatedAt and a Fork's moment, and is the clock Live mints ids
@@ -77,6 +79,14 @@ type sessionHost struct {
 	// rebind closure keeps the record's metadata describing what the conversation actually ran
 	// against. Guarded because that closure runs on the Update goroutine while Save runs on a Cmd.
 	model string
+	// sessionLabel is the active session's OWN currency label — what session.Meta.EffectiveCurrency
+	// keeps of a resumed or activated record (its label, once it carries a priced call), "" for a
+	// fresh session or a record with nothing priced — which Save writes in place of the configured
+	// currency, so a session priced under one label is never relabelled by a later Save (ADR 0093,
+	// amendment 2026-10-04). Only the record's own half is held here because the configured label
+	// arrives after construction; Save resolves the two. Set by newSessionHost and Activate, cleared
+	// by Rotate, and guarded for the reason model is.
+	sessionLabel string
 }
 
 // sessionHost satisfies the persistence seam the TUI drives.
@@ -100,6 +110,9 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 	h := &sessionHost{store: store, workspace: workspace, model: model, now: time.Now,
 		scratchRoot: scratchRoot, scratchMoved: scratchMoved,
 		snapshotsRoot: snapshotsRoot, journalMoved: journalMoved}
+	if resumed != nil {
+		h.sessionLabel = resumed.Meta.EffectiveCurrency("")
+	}
 	h.live = session.NewLive(store, func() time.Time { return h.now() }, resumed,
 		h.followScratch, h.followJournal)
 	return h
@@ -118,7 +131,9 @@ func (h *sessionHost) Close() { h.live.Close() }
 // exactly as they arrive — the main agent's and its delegates' — because the record keeps the halves
 // of a session's spend apart (session.Meta), and servedModels — the ids the upstream actually
 // answered with, which the renderer folds off the readings — is stored beside the bound Model
-// rather than in place of it, so the record says both what was asked for and what answered.
+// rather than in place of it, so the record says both what was asked for and what answered. The
+// currency label is the session's own when a resumed or activated record brought a priced one
+// (sessionLabel), else the configured label (ADR 0093, amendment 2026-10-04).
 //
 // The first Save is the record's birth: Live.Begin adopts the pre-minted id with title and this
 // Save's moment as its Title and CreatedAt, and takes its live-instance hold; every later Save of the
@@ -140,6 +155,7 @@ func (h *sessionHost) Save(
 	}
 	h.mu.Lock()
 	model := h.model
+	currency := cmp.Or(h.sessionLabel, h.currency)
 	h.mu.Unlock()
 
 	return h.store.Save(session.Record{
@@ -155,7 +171,7 @@ func (h *sessionHost) Save(
 			CtxUsed:       ctxUsed,
 			Usage:         usage,
 			DelegateUsage: delegateUsage,
-			Currency:      h.currency,
+			Currency:      currency,
 			ServedModels:  servedModels,
 		},
 		Transcript: transcript,
@@ -179,8 +195,14 @@ func (h *sessionHost) SetModel(model string) {
 // (pushed to the engine via scratchMoved) and re-open its undo journal, before the new session's
 // first tool call. It is idempotent on an already-inactive host (each call simply re-mints). The
 // closed session's live-instance hold goes with it, and so does a hold Load parked that no Activate
-// adopted; the fresh id holds nothing until its first Save.
-func (h *sessionHost) Rotate() { h.live.Rotate() }
+// adopted; the fresh id holds nothing until its first Save. The closed session's currency label
+// goes too: the fresh session saves under the configured label.
+func (h *sessionHost) Rotate() {
+	h.mu.Lock()
+	h.sessionLabel = ""
+	h.mu.Unlock()
+	h.live.Rotate()
+}
 
 // List returns every stored session's browsable metadata, newest first (the store's ordering).
 func (h *sessionHost) List() ([]session.Meta, error) { return h.store.List() }
@@ -213,8 +235,13 @@ func (h *sessionHost) Load(id string) (session.Record, error) {
 // moves the live-instance hold with it (adopting the one Load parked), then its followers move the
 // scratch dir — the resumed session's own dir (re)exists and is what the engine fences the next
 // tool call to — and the undo journal, so `/undo` reaches the exchanges of the session the human
-// just came back to rather than those of the one they left (ADR 0074 decision 10).
+// just came back to rather than those of the one they left (ADR 0074 decision 10). meta's own
+// currency label comes along on session.Meta.EffectiveCurrency's terms, so the resumed session's
+// later Saves keep the label its priced amount was written under (ADR 0093, amendment 2026-10-04).
 func (h *sessionHost) Activate(meta session.Meta) {
+	h.mu.Lock()
+	h.sessionLabel = meta.EffectiveCurrency("")
+	h.mu.Unlock()
 	// Activate reports nothing (tui.SessionHost), so a hold Live could not take is left for the next
 	// Save to re-attempt and report: the Save is what would write over the other instance's record,
 	// and it refuses before writing. The followers below have already moved by then — a refused hold
@@ -447,8 +474,10 @@ func probeHold(store *session.Store, id string) error {
 // a fresh start. The renderer decodes the opaque transcript blob itself; the binary only carries it
 // across with the title, context fill, and message count the resume note and gauge need, plus
 // inExchange — the resumed Agent's open-Exchange state (agent.InExchange()) — so newModel can append
-// the interrupted note when the session died mid-task.
-func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
+// the interrupted note when the session died mid-task. currency is the configured `currency:`
+// label; the payload carries the session's EFFECTIVE label (session.Meta.EffectiveCurrency) — the
+// one the host's later Saves write — rather than the record's raw one.
+func resumedSession(rec *session.Record, currency string, inExchange bool) *tui.ResumedSession {
 	if rec == nil {
 		return nil
 	}
@@ -459,6 +488,7 @@ func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
 		Usage:         rec.Meta.Usage,
 		DelegateUsage: rec.Meta.DelegateUsage,
 		ServedModels:  rec.Meta.ServedModels,
+		Currency:      rec.Meta.EffectiveCurrency(currency),
 		UserMsgs:      rec.Meta.UserMsgs,
 		InExchange:    inExchange,
 	}

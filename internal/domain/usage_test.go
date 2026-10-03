@@ -159,6 +159,47 @@ func TestMinusIsTheInverseOfSum(t *testing.T) {
 	}
 }
 
+// TestUnpricedWithdrawsTheAmount pins the relabel-free carry: the amount drops to zero and every
+// priced call joins the unpriced ones, while the call count and every token counter stand — the
+// calls happened, only their money is not shown under another label.
+func TestUnpricedWithdrawsTheAmount(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		reading Usage
+		want    Usage
+	}{
+		{"the zero reading stays zero", Usage{}, Usage{}},
+		{
+			"priced calls fold into unpriced and the amount goes",
+			Usage{
+				Calls: 5, PromptTokens: 4000, CachedPromptTokens: 700, CompletionTokens: 250, TotalTokens: 4250,
+				CostMicros: 10_500, PricedCalls: 3, UnpricedCalls: 2,
+			},
+			Usage{
+				Calls: 5, PromptTokens: 4000, CachedPromptTokens: 700, CompletionTokens: 250, TotalTokens: 4250,
+				UnpricedCalls: 5,
+			},
+		},
+		{
+			"an already unpriced reading is unchanged",
+			Usage{Calls: 2, PromptTokens: 100, TotalTokens: 120, UnpricedCalls: 2},
+			Usage{Calls: 2, PromptTokens: 100, TotalTokens: 120, UnpricedCalls: 2},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.reading.Unpriced()
+
+			if got != tc.want {
+				t.Errorf("%+v.Unpriced() = %+v, want %+v", tc.reading, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestPriceOfPricesEachShareAtItsRate pins one call's amount in millionths of the currency unit:
 // the uncached prompt at Input, the cached share at CachedInput, the completion at Output (each
 // per 1M tokens), a cached share above the prompt floored rather than priced negative, and the

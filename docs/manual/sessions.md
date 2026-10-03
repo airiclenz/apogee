@@ -101,7 +101,11 @@ still remembers.
   appends what the session cost after the tokens — `· 1M · 0.42 USD`, in the
   currency label the record was saved under, led by `≥ ` when part of the session
   ran unpriced. A session with no priced call, including one saved before pricing
-  existed, shows tokens only.
+  existed, shows tokens only. A session keeps the label it first priced a call
+  under: resume a session priced in `EUR` while `currency: USD` is configured
+  and it is still saved as `EUR`, so its amount is never relabelled. A session
+  with nothing priced yet takes the configured label, and `/clear` or `/new`
+  starts the next session under it.
 - A record also keeps **which models actually answered** — every distinct id the
   server put on a reply, in the order first seen, a sub-agent's or a workflow's
   included — beside the profile the session was bound to, because the two can

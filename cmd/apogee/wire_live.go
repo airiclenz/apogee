@@ -259,7 +259,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.host = newSessionHost(w.store, w.roots.workspace, w.opts.Model, w.resumed,
 		w.roots.scratch, w.engine.SetScratchDir,
 		w.roots.snapshots, func(id string) { w.openSessionJournal(ctx, id) })
-	// The configured `currency:` label, which every Save writes beside the session's usage (ADR 0093).
+	// The configured `currency:` label, which a Save writes beside the session's usage unless a resumed
+	// record brought a priced label of its own (sessionHost.sessionLabel, ADR 0093).
 	w.host.currency = w.opts.Currency
 	w.cfg.ScratchDir = w.host.SessionScratchDir()
 	// And the same dir as the read root the read tools reach it back through — read LIVE off the

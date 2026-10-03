@@ -251,7 +251,7 @@ func (w *rootWiring) options() tui.Options {
 		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
 		// appends the interrupted note and /continue picks the work back up. A pre-bound start has
 		// no Agent to ask, and answers false: nothing is open until something is bound.
-		Resumed: resumedSession(w.resumed, w.engine.InExchange()),
+		Resumed: resumedSession(w.resumed, w.opts.Currency, w.engine.InExchange()),
 	}
 }
 

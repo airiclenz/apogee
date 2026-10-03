@@ -1694,3 +1694,35 @@ func TestStoreHoldRejectsUnsafeID(t *testing.T) {
 		t.Errorf("a traversal id reached outside the store (stat err = %v)", err)
 	}
 }
+
+// TestMetaEffectiveCurrencyKeepsAPricedLabel pins the one session-label rule (ADR 0093, amendment
+// 2026-10-04): a record that carries a priced call — its own or a delegate's — and names a label
+// keeps that label; a record with no priced call, or no label, adopts the configured one.
+func TestMetaEffectiveCurrencyKeepsAPricedLabel(t *testing.T) {
+	t.Parallel()
+	priced := Usage{Calls: 2, CostMicros: 4_000, PricedCalls: 2}
+	unpriced := Usage{Calls: 2, UnpricedCalls: 2}
+	tests := []struct {
+		name       string
+		meta       Meta
+		configured string
+		want       string
+	}{
+		{"priced with a label keeps it", Meta{Usage: priced, Currency: "EUR"}, "USD", "EUR"},
+		{"a priced delegate keeps it too", Meta{DelegateUsage: priced, Currency: "EUR"}, "USD", "EUR"},
+		{"unpriced with a label adopts the configured", Meta{Usage: unpriced, Currency: "EUR"}, "USD", "USD"},
+		{"priced with no label adopts the configured", Meta{Usage: priced}, "USD", "USD"},
+		{"no configured label asks for the record's alone", Meta{Usage: unpriced, Currency: "EUR"}, "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.meta.EffectiveCurrency(tc.configured)
+
+			if got != tc.want {
+				t.Errorf("EffectiveCurrency(%q) = %q, want %q", tc.configured, got, tc.want)
+			}
+		})
+	}
+}

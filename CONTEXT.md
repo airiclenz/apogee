@@ -2025,7 +2025,9 @@ priced after the fact, so a server switch or a `price:` edit never reprices earl
 amount is kept as whole millionths of the currency unit (`CostMicros`, `int64`), with the priced and
 unpriced call counts beside it. A call on an unpriced server adds its tokens and nothing to the
 amount, and a surface shows an amount that covers only some of the calls as partial. A session
-record stores the amount with the currency label in force when it was written. An amount is never
+record stores the amount with the label it was priced under: the configured label when its first
+priced call was saved, and that same label on every later save, a resumed session included. A
+record with no priced call, or no label, takes the configured label. An amount is never
 shown under another label, and amounts with different labels are never summed. It is shown on the
 `/usage` pane, the footer, the `/sessions` spend cell and headless output. See
 [ADR 0093](docs/adr/0093-usage-is-priced-per-call-at-the-bound-server.md).

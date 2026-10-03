@@ -169,12 +169,15 @@ type Meta struct {
 	// deliberately rather than mistaking one for it. Like Usage it is compatible in
 	// both directions: an older record decodes to the zero Usage, an older build ignores the key.
 	DelegateUsage Usage `json:"delegateUsage,omitzero"`
-	// Currency is the label the CostMicros in Usage and DelegateUsage were priced in — the root
-	// `currency:` in force when its writer saved (ADR 0093 decision 6) — so an amount is only
-	// ever shown under its own label and never summed with one written under another. Changing
-	// `currency:` later relabels nothing already written. On the same tolerant terms as Usage: no
-	// RecordVersion bump, omitted when empty, and a record written before it existed decodes to ""
-	// with no priced call behind its usage, which reads as unpriced, never as zero spend.
+	// Currency is the label the CostMicros in Usage and DelegateUsage were priced in (ADR 0093
+	// decision 6) — so an amount is only ever shown under its own label and never summed with one
+	// written under another. A session keeps the label its record first priced a call under:
+	// every later Save writes EffectiveCurrency's answer, which is this label once the record
+	// carries a priced call, and the root `currency:` in force only while it carries none (ADR
+	// 0093, amendment 2026-10-04), so changing `currency:` later relabels nothing already priced,
+	// a resumed session included. On the same tolerant terms as Usage: no RecordVersion bump,
+	// omitted when empty, and a record written before it existed decodes to "" with no priced
+	// call behind its usage, which reads as unpriced, never as zero spend.
 	Currency string `json:"currency,omitempty"`
 	// ServedModels is every distinct model id the upstream ANSWERED with over this session, in the
 	// order first seen — the reply's own `model` field, as its writer folded it off each UsageEvent
@@ -185,6 +188,19 @@ type Meta struct {
 	// no model and on every record written before the field existed, which decodes to nil on the
 	// same tolerant terms as Usage above: no RecordVersion bump, an older build ignores the key.
 	ServedModels []string `json:"servedModels,omitempty"`
+}
+
+// EffectiveCurrency is the label the session m describes counts its amount under from here on
+// (ADR 0093, amendment 2026-10-04): m's own Currency when m carries a priced call — in Usage or
+// DelegateUsage — and names a label, so a priced amount is never relabelled by a later Save; the
+// configured label otherwise, since a record with nothing priced has no amount a label could
+// misstate. configured is the root `currency:` in force; "" asks for the record's own label alone,
+// answering "" when the record has none worth keeping.
+func (m Meta) EffectiveCurrency(configured string) string {
+	if m.Currency != "" && m.Usage.PricedCalls+m.DelegateUsage.PricedCalls > 0 {
+		return m.Currency
+	}
+	return configured
 }
 
 // Usage is one agent's cumulative token accounting over a session: how many completions it

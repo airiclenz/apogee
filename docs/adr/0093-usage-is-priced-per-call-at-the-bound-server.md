@@ -116,3 +116,25 @@ currency label it was written in.**
 - The amount appears on the `/usage` pane, the footer, the `/sessions` spend cell, and headless
   JSON and text output. Each shows the label and marks a partial amount.
 - CONTEXT.md defines **Price** and **Spend (money)** beside **Context cost**.
+
+## Amendment (2026-10-04) — a resumed session keeps its own label
+
+Decision 6 says a record stores its amount next to "the label in force when it was written", and the
+session host read that literally: every save wrote the configured `currency:`. A session priced in
+`EUR` and resumed under `currency: USD` was therefore saved with its `EUR` amount labelled `USD`, the
+relabelling decision 6 forbids.
+
+The rule is now one function, `session.Meta.EffectiveCurrency`:
+
+- A record that carries a priced call (its own or a delegate's) and names a label keeps that label.
+  Every later save of that session writes it, whether the session came back through `--resume`,
+  `--continue` or `/sessions`.
+- A record with no priced call, or no label, adopts the configured label. It has no amount a label
+  could misstate.
+- `/clear` and `/new` start a fresh session, which saves under the configured label.
+
+Calls the resumed session makes later are priced at their server in the configured currency, so
+they cannot join an amount kept under the record's label. They count as unpriced in that session
+(`domain.Usage.Unpriced`): their tokens and calls are kept, their money is not shown, and the
+session's amount reads as partial. The resumed session's effective label reaches the TUI with the
+replay payload (`tui.ResumedSession.Currency`).

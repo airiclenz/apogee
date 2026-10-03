@@ -200,7 +200,12 @@ NOTES (2026-10-04): consequential edit — docs/manual/commands.md: made necessa
 - `go test -count=1 ./internal/session/`
 **Commit:** `fix(session): persist the sent-image mark`
 
-## 9. Keep a resumed session's currency label on save
+## 9. Keep a resumed session's currency label on save — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): re-derived from the assumption that the `resumedSession` builder in wire_session.go can fill `ResumedSession.Currency` with the effective label on its own — it needs the configured label, so it gains a `currency` parameter and its one production call site in `cmd/apogee/wire_options.go` (`Options.Resumed`) passes `w.opts.Currency`; the three test call sites pass "".
+NOTES (2026-10-04): consequential edit — cmd/apogee/wire_live.go: made necessary by the host writing the record's own label over the configured one (the comment on `w.host.currency` said every Save writes the configured label).
+NOTES (2026-10-04): no CLOSES entry — the item fixes only the host half of `apogee-resume-currency-relabel`; item 10 (TUI half) owns closing the bead.
+NOTES (2026-10-04): `domain.Usage.Unpriced()` has no production caller yet; item 10 is its consumer (the TUI counting later calls unpriced), as the ADR 0093 amendment records.
 
 **What:** Fixes `apogee-resume-currency-relabel` (host half): `sessionHost.Save` always writes the configured currency, relabelling a resumed record's amount — against ADR 0093 decision 6.
 **Regression guard.** the "effective session label" rule (record carries a priced call AND a non-empty label → the record's label, else the configured label) lives in exactly one function in internal/session (a method on `session.Meta`, e.g. `EffectiveCurrency(configured string) string`, in internal/session/store.go or wherever `Meta` is declared), with a unit test there; item 9 adds it and the host (`newSessionHost`, `Activate`) calls it — add that file and its test to item 9's Files. The configured label reaches the host only after construction (`w.host.currency = w.opts.Currency`, `cmd/apogee/wire_live.go:259-263`), so the host keeps only the record's own label and resolves `sessionLabel || h.currency` inside `Save`; `Rotate` clears it. Supersedes the `Meta.Currency` doc (`internal/session/store.go:172-174`, "the root `currency:` in force when its writer saved") and `CONTEXT.md:2028`; both are rewritten to the new rule.
