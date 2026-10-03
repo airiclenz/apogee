@@ -136,6 +136,15 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   before any connect, so a host that builds its `ServerConfig`s directly meets the same rule. The
   `headers-env:` names join the host's secret-env scrub (`config.MCPHeaderEnvNames`), fixed at
   startup.
+- **An HTTP server's configured headers ride every request, beneath the origin pin**
+  (2026-10-03). `vetEndpoint` resolves the set once per transport build — so on every connect and
+  reconnect — with `resolveHeaders`: `Headers` as written, then each `HeadersEnv` variable read
+  with `os.LookupEnv`, in sorted name order. An unset variable fails the connect naming the server,
+  the header and the variable, never a value or the endpoint. `headerTransport` clones each
+  request and sets the headers on it; it is composed inside `vetEndpoint`'s one `WrapTransport`
+  closure above `boundedBodyTransport`, both beneath security's `OriginPinTransport`, so a header
+  (an auth token above all) only ever reaches the configured origin — an SSE `endpoint` event
+  naming another origin is refused before a header could leave.
 - **Every tool call is bounded by a 5-minute deadline** (2026-09-29). `serverTool.Execute` derives
   its call context from the caller's with `mcpCallTimeout` (5 minutes, a fixed package value, no
   config key), so a silent or wedged server can never hold the agent past it. The caller's own

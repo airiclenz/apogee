@@ -224,7 +224,12 @@ internal/config/reactions.go — ReactionEnvNames, webhookFromMapping; internal/
 **Acceptance:** `go test -count=1 ./internal/config/` ; `go test -count=1 -run 'MCP|Secret' ./cmd/apogee/`
 **Commit:** `feat(config): headers and headers-env on HTTP MCP servers`
 
-## 9. MCP headers ride the HTTP transports
+## 9. MCP headers ride the HTTP transports — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): env resolution is not shared with webhook.Headers — its shape does not match (it takes a domain.WebhookHandler and also sets Content-Type and User-Agent, both reserved names on the MCP side), so mcp has its own resolveHeaders (same sorted order, os.LookupEnv, and the same "the environment variable %s is not set" wording, prefixed `mcp: server %q:`).
+NOTES (2026-10-03): headers are resolved in vetEndpoint after the url-safety pre-flight and before GuardedClient, so an unset variable fails the connect before any DNS lookup or request; headerTransport sits above boundedBodyTransport inside the one existing WrapTransport closure, both beneath OriginPinTransport; no layer is added when neither map is set.
+NOTES (2026-10-03): consequential edit — docs/manual/configuration.md: made necessary by the connect-time env read (reconnect picks up a new value; an unset variable fails the connect)
+NOTES (2026-10-03): consequential edit — docs/design/mcp-client.md: made necessary by the new headerTransport layer and resolveHeaders in vetEndpoint
 
 **What:**
 **Goal:** every request apogee sends to an sse or streamable-http MCP server carries the configured headers; a missing env var fails the connect with an error naming server, header and variable, never a value.

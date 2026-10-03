@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -428,12 +429,19 @@ func buildStreamableTransport(ctx context.Context, host Host, cfg ServerConfig, 
 // SSE transport resolves a server's `endpoint` event with no origin check, and the pin is what
 // keeps that event from moving the POST channel anywhere the operator's allow/deny decision was
 // never made. Beneath the pin, boundedBodyTransport holds every response body to the message
-// bound.
+// bound, and headerTransport sets the configured Headers / HeadersEnv on every request — beneath
+// the pin, so a header (an auth token above all) only ever reaches the configured origin.
+// HeadersEnv is read here, so each connect and reconnect sends the variable's current value; an
+// unset variable fails the connect.
 //
 // Every refusal names the server — the settings row's reconnect note has no other source for it —
-// and none names a proxy value or its credentials.
+// and none names a proxy value or its credentials, nor a header value.
 func vetEndpoint(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
 	u, err := checkEndpoint(ctx, cfg, guard)
+	if err != nil {
+		return "", nil, err
+	}
+	header, err := resolveHeaders(cfg)
 	if err != nil {
 		return "", nil, err
 	}
@@ -443,7 +451,11 @@ func vetEndpoint(ctx context.Context, host Host, cfg ServerConfig, guard securit
 		OriginRefusal: fmt.Errorf("mcp: server %q: %w: a request left the configured endpoint's origin",
 			cfg.Name, security.ErrURLBlocked),
 		WrapTransport: func(next http.RoundTripper) http.RoundTripper {
-			return &boundedBodyTransport{next: next}
+			var layered http.RoundTripper = &boundedBodyTransport{next: next}
+			if len(header) > 0 {
+				layered = &headerTransport{next: layered, header: header}
+			}
+			return layered
 		},
 	})
 	if err != nil {
@@ -524,6 +536,49 @@ func newEndpointRedactor(cfg ServerConfig) *security.OriginRedactor {
 		return nil
 	}
 	return security.NewOriginRedactor(cfg.Endpoint)
+}
+
+// resolveHeaders builds the header set an HTTP-transported server's requests carry: Headers as
+// written, then each HeadersEnv entry read from the environment now. Names are taken in sorted
+// order, so the same config always names the same missing variable. An unset variable is an
+// error naming the server, the header and the variable — never a value, and never the endpoint.
+// A config with neither map yields nil.
+func resolveHeaders(cfg ServerConfig) (http.Header, error) {
+	if len(cfg.Headers) == 0 && len(cfg.HeadersEnv) == 0 {
+		return nil, nil
+	}
+	header := make(http.Header, len(cfg.Headers)+len(cfg.HeadersEnv))
+	for _, name := range slices.Sorted(maps.Keys(cfg.Headers)) {
+		header.Set(name, cfg.Headers[name])
+	}
+	for _, name := range slices.Sorted(maps.Keys(cfg.HeadersEnv)) {
+		envName := cfg.HeadersEnv[name]
+		value, ok := os.LookupEnv(envName)
+		if !ok {
+			return nil, fmt.Errorf("mcp: server %q: header %s: the environment variable %s is not set",
+				cfg.Name, name, envName)
+		}
+		header.Set(name, value)
+	}
+	return header, nil
+}
+
+// headerTransport is the RoundTripper beneath the origin pin that sets the configured headers on
+// every request. It clones the request first — a RoundTripper must not modify the request it is
+// handed — and Set replaces any value already there, though ValidateHeaders keeps every name
+// the transport or the SDK sets itself out of the set.
+type headerTransport struct {
+	next   http.RoundTripper
+	header http.Header
+}
+
+// RoundTrip forwards a clone of req carrying the configured headers.
+func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	out := req.Clone(req.Context())
+	for name, values := range t.header {
+		out.Header[name] = slices.Clone(values)
+	}
+	return t.next.RoundTrip(out)
 }
 
 // boundedBodyTransport is the RoundTripper beneath the origin pin: it hands every

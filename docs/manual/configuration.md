@@ -499,7 +499,10 @@ mcp-servers:
       Authorization: DOCS_MCP_TOKEN   # the variable's NAME, not the token
 ```
 
-Both are sent on every request to that server's endpoint, and nowhere else. An entry is refused at
+Both are sent on every request to that server's endpoint, and nowhere else. A `headers-env:`
+variable is read each time apogee connects to the server, so a reconnect picks up a new value; when
+the variable is not set, that connect fails with an error naming the server, the header and the
+variable — never a value. An entry is refused at
 startup, naming it and the header (never a value), when a header name is not a valid HTTP header
 name; when it is one the transport or the protocol sets itself — `Host`, `Content-Length`,
 `Content-Type`, `Accept`, `Connection`, `Transfer-Encoding`, `Last-Event-ID` and every `Mcp-*`

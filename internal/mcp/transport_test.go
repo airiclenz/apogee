@@ -954,3 +954,194 @@ func TestConnect_SSESameOriginEndpointEventConnects(t *testing.T) {
 		t.Errorf("Execute = %+v; want the pong result", res)
 	}
 }
+
+// headerRecorder wraps an MCP handler and records, per request, the JSON-RPC method its body
+// names (empty for the SSE stream's GET) and whether every wanted header arrived with its value.
+type headerRecorder struct {
+	next   http.Handler
+	want   map[string]string
+	seen   atomic.Int64
+	missed atomic.Int64
+	init   atomic.Bool
+	call   atomic.Bool
+}
+
+func (h *headerRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	h.seen.Add(1)
+	for name, value := range h.want {
+		if r.Header.Get(name) != value {
+			h.missed.Add(1)
+		}
+	}
+	if bytes.Contains(body, []byte(`"method":"initialize"`)) {
+		h.init.Store(true)
+	}
+	if bytes.Contains(body, []byte(`"method":"tools/call"`)) {
+		h.call.Store(true)
+	}
+	h.next.ServeHTTP(w, r)
+}
+
+// TestConnect_ConfiguredHeadersRideEveryRequest pins that an sse or streamable-http server meets
+// the configured Headers and HeadersEnv on every request — the initialize handshake and a later
+// tool call among them. Not parallel: t.Setenv.
+func TestConnect_ConfiguredHeadersRideEveryRequest(t *testing.T) {
+	t.Setenv("APOGEE_TEST_MCP_HEADER_TOKEN", "Bearer s3cret")
+	want := map[string]string{"X-Tenant": "acme", "Authorization": "Bearer s3cret"}
+
+	tests := []struct {
+		name      string
+		transport Transport
+		handler   func(func(*http.Request) *mcpsdk.Server) http.Handler
+		path      string
+	}{
+		{
+			name:      "streamable-http",
+			transport: TransportStreamableHTTP,
+			handler: func(get func(*http.Request) *mcpsdk.Server) http.Handler {
+				return mcpsdk.NewStreamableHTTPHandler(get, nil)
+			},
+			path: "/mcp",
+		},
+		{
+			name:      "sse",
+			transport: TransportSSE,
+			handler: func(get func(*http.Request) *mcpsdk.Server) http.Handler {
+				return mcpsdk.NewSSEHandler(get, nil)
+			},
+			path: "/sse",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "hdr", Version: "v0.0.1"}, nil)
+			server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+				func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+					return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}}}, nil
+				})
+			recorder := &headerRecorder{
+				next: tt.handler(func(*http.Request) *mcpsdk.Server { return server }),
+				want: want,
+			}
+			srv := httptest.NewServer(recorder)
+			defer func() {
+				srv.CloseClientConnections()
+				srv.Close()
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			c, err := Connect(ctx, []ServerConfig{{
+				Name:       "remote",
+				Transport:  tt.transport,
+				Endpoint:   srv.URL + tt.path,
+				Headers:    map[string]string{"X-Tenant": "acme"},
+				HeadersEnv: map[string]string{"Authorization": "APOGEE_TEST_MCP_HEADER_TOKEN"},
+			}}, security.URLGuard{}, t.TempDir())
+			if err != nil {
+				t.Fatalf("Connect: %v", err)
+			}
+			defer func() { _ = c.Close() }()
+			var ping domain.Tool
+			for _, tool := range c.Tools() {
+				if tool.Name() == "remote__ping" {
+					ping = tool
+				}
+			}
+			if ping == nil {
+				t.Fatal("remote__ping was not surfaced")
+			}
+
+			res, err := ping.Execute(ctx, domain.ToolCall{ID: "call-1", Tool: "remote__ping"})
+
+			if err != nil || res.IsError {
+				t.Fatalf("Execute = %+v, %v; want the pong result", res, err)
+			}
+			if !recorder.init.Load() || !recorder.call.Load() {
+				t.Fatalf("server saw initialize=%v tools/call=%v; want both", recorder.init.Load(), recorder.call.Load())
+			}
+			if missed := recorder.missed.Load(); missed != 0 {
+				t.Errorf("%d header(s) missing or wrong across %d request(s); want every request to carry %v",
+					missed, recorder.seen.Load(), want)
+			}
+		})
+	}
+}
+
+// TestConnect_AnUnsetHeaderVariableFailsTheConnect pins that a HeadersEnv entry naming an unset
+// variable fails the connect before any request leaves, with an error naming the server, the
+// header and the variable — and neither a configured header value nor the endpoint's path or query.
+func TestConnect_AnUnsetHeaderVariableFailsTheConnect(t *testing.T) {
+	t.Parallel()
+	var reached atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		c, err := Connect(ctx, []ServerConfig{{
+			Name:       "remote",
+			Transport:  transport,
+			Endpoint:   srv.URL + "/mcp?token=SECRET",
+			Headers:    map[string]string{"X-Tenant": "LITERALVALUE"},
+			HeadersEnv: map[string]string{"Authorization": "APOGEE_TEST_MCP_HEADER_NEVER_SET"},
+		}}, security.URLGuard{}, t.TempDir())
+		cancel()
+
+		if err == nil {
+			_ = c.Close()
+			t.Fatalf("%s: Connect with an unset header variable succeeded; want an error", transport)
+		}
+		msg := err.Error()
+		for _, want := range []string{`"remote"`, "Authorization", "APOGEE_TEST_MCP_HEADER_NEVER_SET"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%s: Connect error = %q; want it to contain %q", transport, msg, want)
+			}
+		}
+		for _, leak := range []string{"LITERALVALUE", "SECRET", "/mcp"} {
+			if strings.Contains(msg, leak) {
+				t.Errorf("%s: Connect error = %q; want it free of %q", transport, msg, leak)
+			}
+		}
+	}
+	if got := reached.Load(); got != 0 {
+		t.Errorf("the server saw %d request(s); want 0", got)
+	}
+}
+
+// TestHeaderTransport_ClonesTheRequest pins that the header layer never writes into the request
+// it was handed — the RoundTripper contract — while the request it forwards carries the headers.
+func TestHeaderTransport_ClonesTheRequest(t *testing.T) {
+	t.Parallel()
+	var forwarded *http.Request
+	next := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		forwarded = req
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+	})
+	header := http.Header{}
+	header.Set("X-Tenant", "acme")
+	rt := &headerTransport{next: next, header: header}
+	req := httptest.NewRequest(http.MethodPost, "http://mcp.example.com/mcp", nil)
+
+	resp, err := rt.RoundTrip(req)
+
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	_ = resp.Body.Close()
+	if got := forwarded.Header.Get("X-Tenant"); got != "acme" {
+		t.Errorf("forwarded X-Tenant = %q; want %q", got, "acme")
+	}
+	if got := req.Header.Get("X-Tenant"); got != "" {
+		t.Errorf("caller's request X-Tenant = %q; want it untouched", got)
+	}
+}
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
