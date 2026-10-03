@@ -47,9 +47,10 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // one.
 //
 // It refuses with domain.ErrNoOpenExchange when no Exchange is in flight (the caller wants
-// Submit), with an empty-interjection error when in carries no text, references, or
-// skills, and with errRecipeInterjection when in would launch a recipe (recipe.go). On any
-// refusal the conversation is untouched.
+// Submit), with an empty-interjection error when in carries no text, references, skills or
+// images, with errRecipeInterjection when in would launch a recipe (recipe.go), and with the
+// image refusal Submit gives when in carries images the bound server cannot take
+// (checkInputImages). On any refusal the conversation is untouched.
 //
 // Fates: an interjection is committed history, so it survives a cancelled Turn (the
 // rollback boundary is armed after this window — turn.go) and rides snapshot/resume with
@@ -68,13 +69,16 @@ func (a *Agent) Interject(ctx context.Context, in domain.UserInput) error {
 	if !a.turns.inExchange {
 		return domain.ErrNoOpenExchange
 	}
-	if in.Text == "" && len(in.FileRefs) == 0 && len(in.SkillIDs) == 0 {
+	if in.Text == "" && len(in.FileRefs) == 0 && len(in.SkillIDs) == 0 && len(in.Images) == 0 {
 		return errEmptyInterjection
 	}
 	// A recipe launch opens an Exchange of its own around the Workflow it runs (recipe.go), so it
 	// cannot join one already running; the human sends it once the agent is idle.
 	if _, launches := a.recipeLaunch(in); launches {
 		return errRecipeInterjection
+	}
+	if err := a.checkInputImages(in); err != nil {
+		return err
 	}
 
 	// The same composition step()'s pending-input consumption uses (composeUserMessage, loop.go)

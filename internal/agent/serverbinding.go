@@ -54,6 +54,10 @@ type serverBinding struct {
 	// not a dial fact — it never reaches the wire — but a fact about the server a call goes to, so
 	// it moves wherever the dial facts move and every recorded call is priced at the server it hit.
 	Price *domain.ServerPrice
+	// Vision is the server's `vision:` opt-in (domain.Config.Vision): like Price not a dial fact but
+	// a fact about the server, so it moves with the dial facts. A model change never states it —
+	// RebindSpec's fields are always present, so carrying it there would reset it on every rebind.
+	Vision *bool
 }
 
 // applyTo projects the binding onto cfg and returns the result: every present field replaces the
@@ -110,6 +114,9 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 	if b.Price != nil {
 		cfg.Price = *b.Price
 	}
+	if b.Vision != nil {
+		cfg.Vision = *b.Vision
+	}
 	return cfg
 }
 
@@ -117,8 +124,8 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 // MaxContextTokens, Profile — and the server's EffortDialect are always present, applied as the
 // spec states them, the zero included (see each field's contract in rebind.go); the two optional
 // bounds and the price pass through as the pointers they already are, so a spec silent about one
-// leaves it exactly where the bind or the move that set it put it. The dial facts, the seat's words
-// and the working window are never a model change's to state, so they stay absent.
+// leaves it exactly where the bind or the move that set it put it. The dial facts, the seat's words,
+// the working window and the vision opt-in are never a model change's to state, so they stay absent.
 func (s RebindSpec) binding() serverBinding {
 	return serverBinding{
 		Model:                   &s.Model,
@@ -135,7 +142,8 @@ func (s RebindSpec) binding() serverBinding {
 // binding states a server switch as a serverBinding: the dial facts — the request-extra
 // passthrough among them, "" included, so a move to an entry that names none clears the retired
 // one's — the price (unpriced included, so a move off a priced server never bills the new one at
-// the retired rate) and the seat's human words are present, and so are all four token bounds — applied as the spec states them, the zeroes included,
+// the retired rate), the vision opt-in (false included, so a move off a vision server never sends
+// the new one an image) and the seat's human words are present, and so are all four token bounds — applied as the spec states them, the zeroes included,
 // because an absent pin is a fact about the new server rather than a licence to keep the retired
 // one's number (see each field's contract in rebind.go). Model is present as `""`: a switch UNBINDS
 // the model rather than guessing what the new server serves (ADR 0024), and that unbinding is a
@@ -151,6 +159,7 @@ func (s UpstreamSpec) binding() serverBinding {
 		ServerDescription:       &s.ServerDescription,
 		RequestExtra:            &s.RequestExtra,
 		Price:                   &s.Price,
+		Vision:                  &s.Vision,
 		Model:                   &unbound,
 		MaxContextTokens:        &s.MaxContextTokens,
 		WorkingWindow:           &s.WorkingWindow,
@@ -162,7 +171,8 @@ func (s UpstreamSpec) binding() serverBinding {
 // binding states a routed delegation's target as a serverBinding, with every field's contract from
 // delegationtarget.go read as presence: the dial facts (the request-extra passthrough among them,
 // "" included, so a child routed to an entry that names none never keeps the parent's), the
-// target's price (unpriced included, for the passthrough's reason), the target's entry name as
+// target's price (unpriced included, for the passthrough's reason), its vision opt-in (false
+// included, for the same reason), the target's entry name as
 // ServerName, Model, WorkingWindow, MaxOutputTokens and Profile are always
 // present (their zeroes ARE the target's answer); ContextWindow is present only
 // when positive, since a target that names no window leaves the parent's standing rather than
@@ -182,6 +192,7 @@ func (t *DelegationTarget) binding() serverBinding {
 		ServerName:      &t.ServerName,
 		RequestExtra:    &t.RequestExtra,
 		Price:           &t.Price,
+		Vision:          &t.Vision,
 		Model:           &t.Model,
 		WorkingWindow:   &t.WorkingWindow,
 		MaxOutputTokens: &t.MaxOutputTokens,

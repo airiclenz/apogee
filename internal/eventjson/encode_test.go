@@ -227,13 +227,15 @@ func TestEncodeJSONGolden(t *testing.T) {
 					Text:     "check the manual too",
 					FileRefs: []string{"docs/manual/headless.md"},
 					SkillIDs: []string{"coding-standards"},
+					Images:   []domain.Image{{Name: "shot.png", MediaType: "image/png", Data: []byte("\x89PNG-bytes")}},
 				},
 				Landed: true,
 			},
 			wantKind: "child_interjection",
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
 			wantData: `{"input":{"text":"check the manual too",` +
-				`"file_refs":["docs/manual/headless.md"],"skill_ids":["coding-standards"]},` +
+				`"file_refs":["docs/manual/headless.md"],"skill_ids":["coding-standards"],` +
+				`"images":[{"name":"shot.png","media_type":"image/png","size":10}]},` +
 				`"landed":true,"reason":""}`,
 		},
 		{
@@ -245,7 +247,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "child_interjection",
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
-			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null},"landed":false,"reason":"capped"}`,
+			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null,"images":null},"landed":false,"reason":"capped"}`,
 		},
 		{
 			name: "child_interjection undelivered to a stopped child",
@@ -256,7 +258,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "child_interjection",
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
-			wantData: `{"input":{"text":"also check the vendor directory","file_refs":null,"skill_ids":null},"landed":false,"reason":"stopped"}`,
+			wantData: `{"input":{"text":"also check the vendor directory","file_refs":null,"skill_ids":null,"images":null},"landed":false,"reason":"stopped"}`,
 		},
 		{
 			name: "approval decided",

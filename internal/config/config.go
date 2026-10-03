@@ -1379,6 +1379,11 @@ type UnconfinedHost struct {
 // rates a call's usage is priced at, so a server without one is simply not costed. It is a value
 // struct for RequestExtra's reason — ServerEntry is compared with `!=` — and see Price for how a
 // rate the file left out is told apart from a rate of 0.
+//
+// Vision is the entry's opt-in to image input (`vision: true`): only a server that states it is
+// ever sent an image. Without it, a new image is refused before any request goes out, and an image
+// already in the history goes to that server as an `[image omitted: <name>]` line instead. It is
+// never detected — a server's `/props` does not say whether the model it serves reads images.
 type ServerEntry struct {
 	Name            string       `yaml:"name"`
 	Endpoint        string       `yaml:"endpoint"`
@@ -1400,6 +1405,7 @@ type ServerEntry struct {
 	Wire            string       `yaml:"wire,omitempty"`
 	RequestExtra    RequestExtra `yaml:"request-extra,omitempty"`
 	Price           Price        `yaml:"price,omitempty"`
+	Vision          bool         `yaml:"vision,omitempty"`
 }
 
 // RequestExtra is a server entry's `request-extra:` mapping as the rest of apogee holds it: the

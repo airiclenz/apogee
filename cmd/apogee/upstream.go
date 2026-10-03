@@ -90,6 +90,10 @@ type upstreamBinding struct {
 	// of the binding carries the price of the server it dials (dial.go). A value, so the binding
 	// stays comparable.
 	Price domain.ServerPrice
+	// Vision is the entry's `vision:` opt-in to image input (domain.Config.Vision). Like Price it is
+	// not a dial fact — nothing dialled from the binding reads it — and it rides here so every engine
+	// projection carries whether the server it dials accepts images.
+	Vision bool
 }
 
 // newUpstreamHolder builds the holder EMPTY: no Monitor, no binding, nothing to observe. The

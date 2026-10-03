@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -1361,11 +1363,19 @@ func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
 // thousand-page document to produce it costs the Turn its time and memory for bytes that are
 // dropped on arrival. The walk also stops on the step's ctx, so a cancelled Turn does not finish
 // extracting a document nobody will read.
-func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bound int) string {
+//
+// A ref whose BYTES are a PNG, JPEG, GIF or WebP image (imageMediaType — again the content, never
+// the name) becomes an image part instead of a block: it is returned beside the text, named by the
+// ref as written, and nothing is added to the text for it. It is skipped through refIgnored when the
+// bound server does not accept images (Config.Vision) or when it breaks a cap (imageCapError) —
+// attached is the bytes the message already carries before the refs (UserInput.Images), so the
+// per-message cap counts them too.
+func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bound, attached int) (string, []domain.Image) {
 	if len(refs) == 0 {
-		return ""
+		return "", nil
 	}
 	var b strings.Builder
+	var images []domain.Image
 	// TWICE the clamp's char budget, so a document elided to the head/tail shape has real content
 	// at both ends rather than a head the extractor stopped in the middle of.
 	extractBytes := 2 * int(float64(bound)*a.budget().CharsPerToken)
@@ -1373,6 +1383,15 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 		data, err := a.readFileRef(ref)
 		if err != nil {
 			a.refIgnored(turn, ref, err.Error())
+			continue
+		}
+		if mediaType := imageMediaType(data); mediaType != "" {
+			if reason := a.refImageRefusal(ref, len(data), attached); reason != "" {
+				a.refIgnored(turn, ref, reason)
+				continue
+			}
+			images = append(images, domain.Image{Name: ref, MediaType: mediaType, Data: data})
+			attached += len(data)
 			continue
 		}
 		content, annotation := string(data), ""
@@ -1386,7 +1405,87 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 		}
 		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, a.clampRef(turn, "@"+ref, content, bound))
 	}
-	return b.String()
+	return b.String(), images
+}
+
+// visionRefusalFormat is the refusal an image meets on a server whose entry does not opt into image
+// input (Config.Vision), naming the server and the key that would let it through.
+const visionRefusalFormat = "server %q does not accept images: set vision: true on its servers: entry"
+
+// imageSignatures are the leading bytes of the four image formats an @ref or an attached image may
+// carry, with the media type each is sent as. WebP is a RIFF container, so its signature is checked
+// at two offsets (imageMediaType).
+var imageSignatures = []struct {
+	prefix    string
+	mediaType string
+}{
+	{"\x89PNG\r\n\x1a\n", "image/png"},
+	{"\xff\xd8\xff", "image/jpeg"},
+	{"GIF87a", "image/gif"},
+	{"GIF89a", "image/gif"},
+}
+
+// imageMediaType reports the media type of data when its leading bytes are a PNG, JPEG, GIF or WebP
+// signature, and "" for anything else — the sniff an @ref takes before the PDF and text paths, so a
+// text file named shot.png stays text and a screenshot saved without an extension is still an image.
+func imageMediaType(data []byte) string {
+	for _, sig := range imageSignatures {
+		if bytes.HasPrefix(data, []byte(sig.prefix)) {
+			return sig.mediaType
+		}
+	}
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return "image/webp"
+	}
+	return ""
+}
+
+// imageCapError refuses an image of size bytes named name that breaks one of the domain caps: over
+// domain.MaxImageBytes on its own, or past domain.MaxMessageImageBytes once added to the attached
+// bytes the message already carries. nil when it fits both.
+func imageCapError(name string, size, attached int) error {
+	if size > domain.MaxImageBytes {
+		return fmt.Errorf("image %q is %d bytes, over the %d-byte cap on one image", name, size, domain.MaxImageBytes)
+	}
+	if attached+size > domain.MaxMessageImageBytes {
+		return fmt.Errorf("image %q brings this message's images to %d bytes, over the %d-byte cap on one message",
+			name, attached+size, domain.MaxMessageImageBytes)
+	}
+	return nil
+}
+
+// refImageRefusal is why an @ref image of size bytes cannot ride the message — the bound server
+// does not accept images, or the image breaks a cap — or "" when it can. The reason reaches the
+// human through refIgnored, never as a refusal of the message (composeUserMessage).
+func (a *Agent) refImageRefusal(ref string, size, attached int) string {
+	if !a.cfg.Vision {
+		return fmt.Sprintf(visionRefusalFormat, a.cfg.ServerName)
+	}
+	if err := imageCapError(ref, size, attached); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// checkInputImages refuses a UserInput whose attached images (UserInput.Images) cannot be sent: any
+// image at all when the bound server does not accept them (Config.Vision), or one that breaks a cap.
+// It is the gate Submit and Interject share, so the refusal comes before any request and the
+// conversation is untouched. An input with no images always passes.
+func (a *Agent) checkInputImages(in domain.UserInput) error {
+	if len(in.Images) == 0 {
+		return nil
+	}
+	if !a.cfg.Vision {
+		return fmt.Errorf(visionRefusalFormat, a.cfg.ServerName)
+	}
+	attached := 0
+	for _, img := range in.Images {
+		if err := imageCapError(img.Name, len(img.Data), attached); err != nil {
+			return err
+		}
+		attached += len(img.Data)
+	}
+	return nil
 }
 
 // refIgnored reports an @file reference that produced no block — unreadable bytes, or a
@@ -1509,7 +1608,9 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 }
 
 // composeUserMessage builds the ONE user message a submitted or interjected input lands as, in
-// the fixed block order attached-skill blocks → @file-ref blocks → the human's text. Skills are
+// the fixed block order attached-skill blocks → @file-ref blocks → the human's text, with the
+// input's attached images (UserInput.Images) followed by its @ref images as the message's image
+// parts. Skills are
 // per-turn instructions, so prepending them scopes them to this one message (the right
 // semantics; it avoids a skill leaking into every later turn as a system-prompt edit). One
 // structural bound for the whole message (refBound), computed from BOTH reference counts and
@@ -1533,10 +1634,15 @@ func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.User
 	}
 	bound := a.refBound(len(skillIDs) + len(in.FileRefs))
 	skillBlocks := a.resolveSkillRefs(turn, skillIDs, bound)
-	refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
+	refs, refImages := a.resolveFileRefs(ctx, turn, in.FileRefs, bound, imageBytes(in.Images))
+	var images []domain.Image
+	if len(in.Images)+len(refImages) > 0 {
+		images = append(slices.Clone(in.Images), refImages...)
+	}
 	return domain.Message{
 		Role:        domain.RoleUser,
 		Content:     skillBlocks + refs + in.Text + launched,
+		Images:      images,
 		Interjected: interjected,
 	}
 }

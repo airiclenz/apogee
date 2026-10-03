@@ -1423,8 +1423,9 @@ which lets apogee start, switch and stop that server itself — [below](#local-s
 `bypass` is optional too, and says what *delegations to* that entry run as
 rather than how the server itself behaves — further down this section — and so
 is `request-extra`, fields added to every request body sent to that server
-([below](#extra-fields-in-every-request--request-extra)), and `price`, what that
-server charges per million tokens ([below](#pricing--price-and-currency)).
+([below](#extra-fields-in-every-request--request-extra)), `price`, what that
+server charges per million tokens ([below](#pricing--price-and-currency)), and
+`vision`, whether the model there reads images ([below](#images--vision)).
 
 **A `.local` endpoint works in every build.** An `endpoint` may name a host by its
 mDNS `.local` name — `http://Apollo-II.local:1111` — and the release binaries reach it
@@ -1737,6 +1738,36 @@ apogee refuses to start when a value is wrong:
 
 Both keys are config-file only. `/settings` shows `currency:` but does not edit it,
 because changing the label alone would change what every rate means.
+
+### Images — `vision:`
+
+apogee sends images only to a server whose entry says it accepts them, with
+`vision: true`. apogee cannot find this out by asking the server, so you set it on
+each entry whose model reads images:
+
+```yaml
+servers:
+  - name: claude
+    endpoint: https://api.anthropic.com
+    api-key-env: ANTHROPIC_API_KEY
+    wire: anthropic
+    vision: true
+  - name: workstation     # no vision: — images are refused here
+    endpoint: http://192.168.64.1:1111
+```
+
+You attach an image with an `@` reference to a PNG, JPEG, GIF or WebP file
+([file references](commands.md)). An image you attach on a server without
+`vision: true` is not sent: apogee says
+`server "workstation" does not accept images: set vision: true on its servers: entry`.
+An image is refused if it is over 5 MiB, or if it would bring the images in one
+message past 5 MiB together; the message names the file and the limit.
+
+Images already in the conversation stay there when you move to a server without
+`vision: true` with `/server`. That server is sent the line
+`[image omitted: <name>]` in place of each one, and a later move back to a server
+with `vision: true` sends the images again. A sub-agent routed to another server
+follows that server's `vision:`.
 
 ### How fast each server answers — the picker summary
 

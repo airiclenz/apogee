@@ -488,11 +488,20 @@ type approvalRequest struct {
 	Scope          string          `json:"scope"`
 }
 
-// userInput mirrors domain.UserInput — the message a human addressed to a running sub-agent.
+// userInput mirrors domain.UserInput — the message a human addressed to a running sub-agent. Its
+// images are listed by name, media type and size only: an image's bytes never reach the stream.
 type userInput struct {
-	Text     string   `json:"text"`
-	FileRefs []string `json:"file_refs"`
-	SkillIDs []string `json:"skill_ids"`
+	Text     string       `json:"text"`
+	FileRefs []string     `json:"file_refs"`
+	SkillIDs []string     `json:"skill_ids"`
+	Images   []inputImage `json:"images"`
+}
+
+// inputImage mirrors one domain.Image of a userInput without its Data: Size is the byte count.
+type inputImage struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Size      int    `json:"size"`
 }
 
 // toolCallOf converts a domain.ToolCall to its wire mirror.
@@ -524,7 +533,20 @@ func approvalRequestOf(req domain.ApprovalRequest) approvalRequest {
 
 // userInputOf converts a domain.UserInput to its wire mirror.
 func userInputOf(in domain.UserInput) userInput {
-	return userInput{Text: in.Text, FileRefs: in.FileRefs, SkillIDs: in.SkillIDs}
+	return userInput{Text: in.Text, FileRefs: in.FileRefs, SkillIDs: in.SkillIDs, Images: inputImagesOf(in.Images)}
+}
+
+// inputImagesOf lists images by name, media type and size, nil for none — the member then encodes
+// as null, as file_refs and skill_ids do.
+func inputImagesOf(images []domain.Image) []inputImage {
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]inputImage, 0, len(images))
+	for _, img := range images {
+		out = append(out, inputImage{Name: img.Name, MediaType: img.MediaType, Size: len(img.Data)})
+	}
+	return out
 }
 
 // firedOrEmpty returns fired, or an empty non-nil slice when it holds nothing, so the member

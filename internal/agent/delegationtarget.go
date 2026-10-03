@@ -64,6 +64,10 @@ type DelegationTarget struct {
 	// borrows the parent's rate (decision 4). An unrouted child inherits the parent's Config, and
 	// with it the parent's price, because it calls the parent's server.
 	Price domain.ServerPrice
+	// Vision is the flagged entry's `vision:` opt-in (domain.Config.Vision): the TARGET's own value,
+	// false included, for the price's reason — a routed child is sent images only when the server it
+	// dials accepts them. An unrouted child inherits the parent's, because it calls the parent's server.
+	Vision bool
 	// Model is the model id a routed child sends on the wire — the entry's `model:` pin, else the
 	// model its heartbeat observed bound there. Required for the same reason Endpoint is: a
 	// delegation that cannot name a model is not a usable target, it is the fallback.

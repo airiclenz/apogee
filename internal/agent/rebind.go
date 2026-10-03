@@ -292,6 +292,11 @@ type UpstreamSpec struct {
 	// repriced. The zero ⇒ the entry states no price — applied, not skipped, so a move off a priced
 	// server counts the new one's calls as unpriced rather than billing them at the retired rate.
 	Price domain.ServerPrice
+	// Vision is the new server's `vision:` opt-in to image input (domain.Config.Vision). It rides
+	// the switch for the price's reason — whether a server reads images is a fact about the server —
+	// and false is applied, not skipped, so a move off a vision server never sends the new one an
+	// image: history's images go out as their omission text and a new one is refused.
+	Vision bool
 	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
 	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
 	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named

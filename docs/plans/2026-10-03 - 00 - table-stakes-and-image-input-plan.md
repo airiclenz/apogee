@@ -282,7 +282,15 @@ internal/provider/wire_anthropic.go — anthropicMessages, anthropicBlock; inter
 **Commit:** `feat(provider): encode image parts on both wire dialects`
 Depends on item 10.
 
-## 12. `vision:` key and image `@ref`s
+## 12. `vision:` key and image `@ref`s — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): re-derived from the assumption that the delegation target's fields live in the Files list — DelegationTarget is declared in internal/agent/delegationtarget.go, which gains `Vision` beside `Price`.
+NOTES (2026-10-03): cmd/apogee/wire_server.go, delegation.go and wire_firing.go are on the Files line but unchanged: all three reach the server's fields through dial.go's binding (bindingOfEntry → fillDial / upstreamSpec / delegationTarget), so `Vision` on upstreamBinding carries the key to the bind, a `/server` move, a Firing and a routed delegation. bindingOfTarget and bindingOfConfig carry it too, as they carry Price.
+NOTES (2026-10-03): cmd/apogee/dial_test.go is not on the Files line; its existing projection tests now set and check Vision, pinning the cmd-side half of "a move carries the flag".
+NOTES (2026-10-03): `vision:` is not on RebindSpec (per the regression guard), so a live `vision:` edit in config.yaml takes effect at the next `/server` move or restart, not on the running session — unlike `price:`.
+NOTES (2026-10-03): an image @ref adds no text block to the message (the compaction transcript's `[image: <name>]` and the wire part carry it), and it still counts toward refBound's per-reference share of the text bound, which is a slightly conservative split for the text refs beside it.
+NOTES (2026-10-03): the magic-byte sniff (imageMediaType) lives in internal/agent/loop.go; item 13's TUI cannot import internal/agent, so it needs its own sniff or a move of this one to a shared package.
+NOTES (2026-10-03): the headless `images` member lists `{name, media_type, size}` per image and encodes as null when the input has none, matching its `file_refs` / `skill_ids` siblings. The refusal texts are `image "<name>" is N bytes, over the M-byte cap on one image` and `image "<name>" brings this message's images to N bytes, over the M-byte cap on one message`. An image-only interjection is not empty.
 
 **What:**
 **Goal:** per-server `vision: true` is a documented key; an `@ref` naming a PNG, JPEG, GIF or WebP file becomes an image part (detected by magic bytes, not extension); images (from `@ref` or `UserInput.Images`) sent to a server without `vision: true` are refused before any request with `server %q does not accept images: set vision: true on its servers: entry`; an image over the caps is refused naming the file and the cap.

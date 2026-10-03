@@ -23,7 +23,8 @@ package main
 // Neither the Client nor the Monitor reads it — it never reaches the wire — but it is a fact about
 // the server a call goes to, so it rides the binding to every engine projection (fillDial,
 // upstreamSpec, delegationTarget) and the bind, a `/server` move and a routed delegation each carry
-// the price of the server they dial.
+// the price of the server they dial. The entry's `vision:` opt-in rides beside it for the same
+// reason: whether a server accepts images is a fact about the server, never sent on the wire.
 
 import (
 	"github.com/airiclenz/apogee"
@@ -46,6 +47,7 @@ func bindingOfEntry(entry config.ServerEntry, apiKey string) upstreamBinding {
 		RequestExtra:  string(entry.RequestExtra),
 		EffortDialect: entry.EffortDialect,
 		Price:         priceOfEntry(entry.Price),
+		Vision:        entry.Vision,
 	}
 }
 
@@ -78,6 +80,7 @@ func bindingOfTarget(target *apogee.DelegationTarget) upstreamBinding {
 		Wire:         target.Wire,
 		RequestExtra: target.RequestExtra,
 		Price:        target.Price,
+		Vision:       target.Vision,
 	}
 }
 
@@ -92,6 +95,7 @@ func bindingOfConfig(cfg apogee.Config) upstreamBinding {
 		Wire:         cfg.Wire,
 		RequestExtra: cfg.RequestExtra,
 		Price:        cfg.Price,
+		Vision:       cfg.Vision,
 	}
 }
 
@@ -116,7 +120,7 @@ func (b upstreamBinding) Monitor() *heartbeat.Monitor {
 }
 
 // fillDial sets cfg's dial fields from the binding — the endpoint, the key, the wire and the
-// request-extra passthrough — and the server's price beside them, and nothing else. Model stays the caller's (a bind pins the entry's
+// request-extra passthrough — and the server's price and vision opt-in beside them, and nothing else. Model stays the caller's (a bind pins the entry's
 // own, a Firing the one its spec resolved), and so does EffortDialect: the Config carries the
 // RANKED dialect, which the caller resolves against an observation, never the forced spelling.
 func (b upstreamBinding) fillDial(cfg *apogee.Config) {
@@ -125,10 +129,11 @@ func (b upstreamBinding) fillDial(cfg *apogee.Config) {
 	cfg.Wire = b.Wire
 	cfg.RequestExtra = b.RequestExtra
 	cfg.Price = b.Price
+	cfg.Vision = b.Vision
 }
 
 // upstreamSpec is the switch a `/server` move hands the engine, carrying the binding's dial fields
-// and the price only. The caller sets the arrived-at server's name, description and its window, working-window,
+// and the price and vision opt-in only. The caller sets the arrived-at server's name, description and its window, working-window,
 // reply-cap and reserve; a move carries no model at all — the first beat on the new server binds
 // one.
 func (b upstreamBinding) upstreamSpec() apogee.UpstreamSpec {
@@ -138,10 +143,11 @@ func (b upstreamBinding) upstreamSpec() apogee.UpstreamSpec {
 		Wire:         b.Wire,
 		RequestExtra: b.RequestExtra,
 		Price:        b.Price,
+		Vision:       b.Vision,
 	}
 }
 
-// delegationTarget is a Delegation target carrying the binding's dial fields and the price only — the dial a
+// delegationTarget is a Delegation target carrying the binding's dial fields, the price and the vision opt-in only — the dial a
 // routed child is built on. The caller sets the server's name, the model it resolved, the window
 // and the rest; EffortDialect is the beat's ranked one (resolveDelegationTarget), never the forced
 // spelling the binding holds for its Monitor.
@@ -152,6 +158,7 @@ func (b upstreamBinding) delegationTarget() apogee.DelegationTarget {
 		Wire:         b.Wire,
 		RequestExtra: b.RequestExtra,
 		Price:        b.Price,
+		Vision:       b.Vision,
 	}
 }
 

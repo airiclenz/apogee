@@ -119,11 +119,11 @@ func TestDial_BindingsOfEachSource(t *testing.T) {
 			name: "entry",
 			got: bindingOfEntry(config.ServerEntry{
 				Endpoint: "http://box:8080", Model: "pinned", Wire: "anthropic",
-				RequestExtra: `{"witness":"entry"}`, EffortDialect: "kwargs",
+				RequestExtra: `{"witness":"entry"}`, EffortDialect: "kwargs", Vision: true,
 			}, dialKey),
 			want: upstreamBinding{
 				Endpoint: "http://box:8080", Model: "pinned", APIKey: dialKey, Wire: "anthropic",
-				RequestExtra: `{"witness":"entry"}`, EffortDialect: "kwargs",
+				RequestExtra: `{"witness":"entry"}`, EffortDialect: "kwargs", Vision: true,
 			},
 		},
 		{
@@ -164,7 +164,7 @@ func TestDial_BindingsOfEachSource(t *testing.T) {
 func projectedBinding() upstreamBinding {
 	return upstreamBinding{
 		Endpoint: "http://box:8080", Model: "entry-pin", APIKey: dialKey, Wire: "anthropic",
-		RequestExtra: `{"witness":"dial"}`, EffortDialect: "kwargs",
+		RequestExtra: `{"witness":"dial"}`, EffortDialect: "kwargs", Vision: true,
 	}
 }
 
@@ -177,9 +177,9 @@ func TestDial_FillDialSetsTheDialFieldsOnly(t *testing.T) {
 	projectedBinding().fillDial(&cfg)
 
 	if cfg.Endpoint != "http://box:8080" || cfg.APIKey != dialKey || cfg.Wire != "anthropic" ||
-		cfg.RequestExtra != `{"witness":"dial"}` {
-		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q; want the binding's",
-			cfg.Endpoint, cfg.APIKey, cfg.Wire, cfg.RequestExtra)
+		cfg.RequestExtra != `{"witness":"dial"}` || !cfg.Vision {
+		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q vision %v; want the binding's",
+			cfg.Endpoint, cfg.APIKey, cfg.Wire, cfg.RequestExtra, cfg.Vision)
 	}
 	if cfg.Model != "caller-model" || cfg.ServerName != "seat" {
 		t.Errorf("fillDial changed caller fields: model %q server name %q; want caller-model, seat", cfg.Model, cfg.ServerName)
@@ -197,6 +197,7 @@ func TestDial_UpstreamSpecCarriesTheDialFields(t *testing.T) {
 
 	want := apogee.UpstreamSpec{
 		Endpoint: "http://box:8080", APIKey: dialKey, Wire: "anthropic", RequestExtra: `{"witness":"dial"}`,
+		Vision: true,
 	}
 	if spec != want {
 		t.Errorf("upstreamSpec = %+v; want %+v", spec, want)
@@ -211,9 +212,9 @@ func TestDial_DelegationTargetCarriesTheDialFields(t *testing.T) {
 	target := projectedBinding().delegationTarget()
 
 	if target.Endpoint != "http://box:8080" || target.APIKey != dialKey || target.Wire != "anthropic" ||
-		target.RequestExtra != `{"witness":"dial"}` {
-		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q; want the binding's",
-			target.Endpoint, target.APIKey, target.Wire, target.RequestExtra)
+		target.RequestExtra != `{"witness":"dial"}` || !target.Vision {
+		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q vision %v; want the binding's",
+			target.Endpoint, target.APIKey, target.Wire, target.RequestExtra, target.Vision)
 	}
 	if target.Model != "" || target.ServerName != "" || target.EffortDialect != "" {
 		t.Errorf("model %q server name %q effort dialect %q; want all three left to the caller",

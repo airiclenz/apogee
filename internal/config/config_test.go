@@ -2980,6 +2980,37 @@ server: absent
 	}
 }
 
+// TestServerEntryVisionLoads pins the `vision:` key: an entry that states `vision: true` opts into
+// image input, and one that leaves the key out — or states false — does not.
+func TestServerEntryVisionLoads(t *testing.T) {
+	t.Parallel()
+	configYAML := `servers:
+  - name: eyes
+    endpoint: https://api.anthropic.com
+    wire: anthropic
+    vision: true
+  - name: blind
+    endpoint: http://192.168.64.1:1111
+    vision: false
+  - name: absent
+    endpoint: http://192.168.64.1:2222
+server: absent
+`
+	home := testConfigHome(t, configYAML)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	want := []ServerEntry{
+		{Name: "eyes", Endpoint: "https://api.anthropic.com", Wire: "anthropic", Vision: true},
+		{Name: "blind", Endpoint: "http://192.168.64.1:1111"},
+		{Name: "absent", Endpoint: "http://192.168.64.1:2222"},
+	}
+	if !reflect.DeepEqual(opts.Servers, want) {
+		t.Errorf("opts.servers = %#v; want %#v", opts.Servers, want)
+	}
+}
+
 // The share a session STARTS with is the selected entry's own, flattened exactly as its
 // `context-window:` pin is and for that pin's reason: the number belongs to the entry, so the
 // composition root resolves it over the top-level key at the bind rather than a beat later. An entry

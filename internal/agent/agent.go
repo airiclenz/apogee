@@ -864,9 +864,15 @@ func (a *Agent) closeOwnedUpstream(up provider.Responder) error {
 // requires Config.Model, so a host may run ahead of its Upstream discovery and bind the model
 // later through Rebind (ADR 0024) — this is the gate that keeps a model-less request off the
 // wire until it does.
+//
+// An input carrying images (UserInput.Images) is refused here, before any request, when the bound
+// server does not accept them (Config.Vision) or when an image breaks a cap (checkInputImages).
 func (a *Agent) Submit(in domain.UserInput) error {
 	if a.cfg.Model == "" {
 		return errNoModelBound
+	}
+	if err := a.checkInputImages(in); err != nil {
+		return err
 	}
 	return a.turns.submit(in)
 }

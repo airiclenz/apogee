@@ -478,3 +478,269 @@ func TestAReplyWhoseOnlyNativeCallLacksAnIDFaults(t *testing.T) {
 		t.Errorf("conversation len = %d, want 1", got)
 	}
 }
+
+// pngBytes is a PNG signature followed by filler: enough for the magic-byte sniff (imageMediaType),
+// which is all the engine reads of an image before it rides the message.
+const pngBytes = "\x89PNG\r\n\x1a\nfiller"
+
+// imageAgent builds a scripted Agent on a server named "box" whose workspace is dir, with the
+// server's vision opt-in as given, plus the sink that captured its events.
+func imageAgent(t *testing.T, dir string, vision bool) (*Agent, *recordingSink) {
+	t.Helper()
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.WorkspaceDir = dir
+	cfg.ServerName = "box"
+	cfg.Vision = vision
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a, sink
+}
+
+// submitAndStep submits in and drives the opening Turn, returning the committed user message.
+func submitAndStep(t *testing.T, a *Agent, in domain.UserInput) domain.Message {
+	t.Helper()
+	if err := a.Submit(in); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	return a.conv.At(0)
+}
+
+// TestFileRefImage_BecomesAnImagePart: on a vision server an @ref whose bytes are an image rides the
+// message as an image part named by the ref — the media type read from the magic bytes, so a JPEG
+// saved without an extension and a WebP both arrive typed — and adds nothing to the text.
+func TestFileRefImage_BecomesAnImagePart(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "shot.png", pngBytes)
+	writeWorkspaceFile(t, dir, "capture", "\xff\xd8\xff\xe0jpeg")
+	writeWorkspaceFile(t, dir, "art.webp", "RIFF\x10\x00\x00\x00WEBPVP8 ")
+	writeWorkspaceFile(t, dir, "anim.gif", "GIF89a....")
+
+	a, sink := imageAgent(t, dir, true)
+	got := submitAndStep(t, a, domain.UserInput{Text: "look", FileRefs: []string{"shot.png", "capture", "art.webp", "anim.gif"}})
+
+	if got.Content != "look" {
+		t.Errorf("content = %q, want just the text (an image ref adds no block)", got.Content)
+	}
+	want := []struct{ name, mediaType string }{
+		{"shot.png", "image/png"}, {"capture", "image/jpeg"}, {"art.webp", "image/webp"}, {"anim.gif", "image/gif"},
+	}
+	if len(got.Images) != len(want) {
+		t.Fatalf("message carries %d images, want %d: %+v", len(got.Images), len(want), got.Images)
+	}
+	for i, w := range want {
+		if got.Images[i].Name != w.name || got.Images[i].MediaType != w.mediaType {
+			t.Errorf("image %d = %s (%s), want %s (%s)", i, got.Images[i].Name, got.Images[i].MediaType, w.name, w.mediaType)
+		}
+	}
+	if string(got.Images[0].Data) != pngBytes {
+		t.Errorf("image bytes = %q, want the file as read", got.Images[0].Data)
+	}
+	if hasEvent[domain.ErrorEvent](sink.events) {
+		t.Error("an image ref on a vision server emitted an ErrorEvent")
+	}
+}
+
+// TestFileRefImage_TextNamedPNGStaysText: the sniff reads bytes, not names — a text file called
+// notes.png is injected as text and carries no image part.
+func TestFileRefImage_TextNamedPNGStaysText(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "notes.png", "PLAIN TEXT MARKER")
+
+	a, _ := imageAgent(t, dir, true)
+	got := submitAndStep(t, a, domain.UserInput{Text: "read it", FileRefs: []string{"notes.png"}})
+
+	if !strings.Contains(got.Content, "Referenced file `notes.png`:\n") || !strings.Contains(got.Content, "PLAIN TEXT MARKER") {
+		t.Errorf("a text file named .png was not injected as text:\n%s", got.Content)
+	}
+	if len(got.Images) != 0 {
+		t.Errorf("a text file named .png became %d image parts", len(got.Images))
+	}
+}
+
+// TestFileRefImage_NonVisionServerIgnoresIt: on a server without `vision: true` an image @ref is not
+// a refusal of the message (composeUserMessage) — it is skipped through refIgnored with the vision
+// refusal as its reason, and the Turn goes ahead with the text.
+func TestFileRefImage_NonVisionServerIgnoresIt(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "shot.png", pngBytes)
+
+	a, sink := imageAgent(t, dir, false)
+	got := submitAndStep(t, a, domain.UserInput{Text: "look", FileRefs: []string{"shot.png"}})
+
+	const want = `@shot.png could not be resolved and was ignored: ` +
+		`server "box" does not accept images: set vision: true on its servers: entry`
+	if !errorEventContaining(sink.events, want) {
+		t.Errorf("no ErrorEvent reading %q; events: %+v", want, sink.events)
+	}
+	if got.Content != "look" || len(got.Images) != 0 {
+		t.Errorf("message = %q with %d images, want just the text", got.Content, len(got.Images))
+	}
+}
+
+// TestFileRefImage_OverTheCapsIsIgnored: an image @ref over the per-image cap, or one that would push
+// the message's images past the per-message cap (counting the attached UserInput.Images), is skipped
+// with a reason naming the file and the cap.
+func TestFileRefImage_OverTheCapsIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "huge.png", pngBytes+strings.Repeat("x", domain.MaxImageBytes))
+	writeWorkspaceFile(t, dir, "half.png", pngBytes+strings.Repeat("x", domain.MaxMessageImageBytes/2))
+
+	a, sink := imageAgent(t, dir, true)
+	attached := domain.Image{Name: "pasted.png", MediaType: "image/png",
+		Data: []byte(pngBytes + strings.Repeat("y", domain.MaxMessageImageBytes/2))}
+	got := submitAndStep(t, a, domain.UserInput{Text: "look", FileRefs: []string{"huge.png", "half.png"},
+		Images: []domain.Image{attached}})
+
+	perImage := fmt.Sprintf(`@huge.png could not be resolved and was ignored: image "huge.png" is %d bytes, over the %d-byte cap on one image`,
+		len(pngBytes)+domain.MaxImageBytes, domain.MaxImageBytes)
+	if !errorEventContaining(sink.events, perImage) {
+		t.Errorf("no ErrorEvent reading %q", perImage)
+	}
+	perMessage := fmt.Sprintf(`@half.png could not be resolved and was ignored: image "half.png" brings this message's images to %d bytes, over the %d-byte cap on one message`,
+		2*len(pngBytes)+domain.MaxMessageImageBytes, domain.MaxMessageImageBytes)
+	if !errorEventContaining(sink.events, perMessage) {
+		t.Errorf("no ErrorEvent reading %q", perMessage)
+	}
+	if len(got.Images) != 1 || got.Images[0].Name != "pasted.png" {
+		t.Errorf("message images = %+v, want only the attached pasted.png", got.Images)
+	}
+}
+
+// TestSubmitImage_RidesTheMessage: images attached to a UserInput on a vision server land on the
+// committed message, ahead of any @ref image.
+func TestSubmitImage_RidesTheMessage(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "shot.png", pngBytes)
+
+	a, _ := imageAgent(t, dir, true)
+	attached := domain.Image{Name: "pasted.png", MediaType: "image/png", Data: []byte(pngBytes)}
+	got := submitAndStep(t, a, domain.UserInput{Text: "look", FileRefs: []string{"shot.png"}, Images: []domain.Image{attached}})
+
+	if len(got.Images) != 2 || got.Images[0].Name != "pasted.png" || got.Images[1].Name != "shot.png" {
+		t.Errorf("message images = %+v, want pasted.png then shot.png", got.Images)
+	}
+}
+
+// TestSubmitImage_RefusedBeforeAnyRequest: Submit refuses attached images the bound server cannot
+// take — any image on a server without `vision: true`, or one over a cap — and queues nothing.
+func TestSubmitImage_RefusedBeforeAnyRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		vision  bool
+		images  []domain.Image
+		wantErr string
+	}{
+		{
+			name:    "non-vision server",
+			images:  []domain.Image{{Name: "pasted.png", MediaType: "image/png", Data: []byte(pngBytes)}},
+			wantErr: `server "box" does not accept images: set vision: true on its servers: entry`,
+		},
+		{
+			name:   "over the per-image cap",
+			vision: true,
+			images: []domain.Image{{Name: "big.png", MediaType: "image/png", Data: make([]byte, domain.MaxImageBytes+1)}},
+			wantErr: fmt.Sprintf(`image "big.png" is %d bytes, over the %d-byte cap on one image`,
+				domain.MaxImageBytes+1, domain.MaxImageBytes),
+		},
+		{
+			name:   "over the per-message cap",
+			vision: true,
+			images: []domain.Image{
+				{Name: "a.png", MediaType: "image/png", Data: make([]byte, domain.MaxMessageImageBytes/2+1)},
+				{Name: "b.png", MediaType: "image/png", Data: make([]byte, domain.MaxMessageImageBytes/2+1)},
+			},
+			wantErr: fmt.Sprintf(`image "b.png" brings this message's images to %d bytes, over the %d-byte cap on one message`,
+				domain.MaxMessageImageBytes+2, domain.MaxMessageImageBytes),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := imageAgent(t, t.TempDir(), tc.vision)
+
+			err := a.Submit(domain.UserInput{Text: "look", Images: tc.images})
+
+			if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("Submit error = %v, want %q", err, tc.wantErr)
+			}
+			if a.turns.pendingInput != nil {
+				t.Error("a refused Submit left input pending")
+			}
+		})
+	}
+}
+
+// TestInterjectImage_RefusedOnANonVisionServer: Interject gives Submit's refusal for attached images
+// on a server without `vision: true`, and the conversation is untouched; on a vision server an
+// image-only interjection is not empty and lands.
+func TestInterjectImage_RefusedOnANonVisionServer(t *testing.T) {
+	image := domain.Image{Name: "pasted.png", MediaType: "image/png", Data: []byte(pngBytes)}
+
+	cfg := interjectConfig(&recordingSink{})
+	cfg.ServerName = "box"
+	a, _ := interjectAgentAtBoundary(t, cfg)
+	before := a.conv.Len()
+	err := a.Interject(context.Background(), domain.UserInput{Text: "see this", Images: []domain.Image{image}})
+	const want = `server "box" does not accept images: set vision: true on its servers: entry`
+	if err == nil || err.Error() != want {
+		t.Fatalf("Interject error = %v, want %q", err, want)
+	}
+	if a.conv.Len() != before {
+		t.Errorf("a refused interjection changed the conversation: %d messages, want %d", a.conv.Len(), before)
+	}
+
+	cfg = interjectConfig(&recordingSink{})
+	cfg.Vision = true
+	a, _ = interjectAgentAtBoundary(t, cfg)
+	if err := a.Interject(context.Background(), domain.UserInput{Images: []domain.Image{image}}); err != nil {
+		t.Fatalf("image-only Interject on a vision server: %v", err)
+	}
+	if got := a.conv.At(a.conv.Len() - 1); len(got.Images) != 1 || !got.Interjected {
+		t.Errorf("interjected message = %+v, want one image, marked interjected", got)
+	}
+}
+
+// TestImageVisionRidesTheServerBinding: the vision opt-in moves with the server — a `/server` switch
+// to an entry without it turns it off and a model rebind leaves it where the switch put it, and a
+// routed delegation takes the target's while an unrouted one inherits the parent's.
+func TestImageVisionRidesTheServerBinding(t *testing.T) {
+	const second = "http://second.local:2222"
+	dialer := dialerAnswering(func(string) provider.Responder { return echoResponder(t, "ok") })
+	cfg := baseConfig(&recordingSink{})
+	cfg.Vision = true
+	a, err := New(cfg, WithDialer(dialer.dial))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: second}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+	if a.cfg.Vision {
+		t.Error("a switch to an entry without vision kept the retired server's opt-in")
+	}
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: second, Vision: true}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+	if err := a.Rebind(RebindSpec{Model: testModel}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+	if !a.cfg.Vision {
+		t.Error("a model rebind reset the server's vision opt-in")
+	}
+
+	parent := routingParent(t)
+	if child := spawn(t, parent); child.cfg.Vision {
+		t.Error("an unrouted child of a non-vision parent has vision")
+	}
+	target := routedTarget()
+	target.Vision = true
+	parent.SetDelegationTarget(target)
+	if child := spawn(t, parent); !child.cfg.Vision {
+		t.Error("a child routed to a vision target did not take the target's opt-in")
+	}
+}
