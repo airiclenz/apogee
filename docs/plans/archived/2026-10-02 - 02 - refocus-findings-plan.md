@@ -4,7 +4,7 @@
 prefix; bwrap resolves only from fixed system directories; `internal/tui` production code no longer imports
 `internal/provider`; the verified and suspected doc drift from the 2026-10-02 refocus is checked against code and fixed.
 **Date:** 2026-10-02
-**Status:** unexecuted
+**Status:** done — all 18 items done (2026-10-02)
 **sized for:** ~200k-context host
 **base:** fbf02a1a
 **Sources:**
