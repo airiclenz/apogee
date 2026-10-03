@@ -1395,7 +1395,13 @@ across [Turns](#turns-and-stepping) through `console_open` / `console_send` / `c
 [Session](#identity-and-shape) state** (like the [Undo journal](#turns-and-stepping)): it lives
 until closed, `/new`, a session restore, or engine exit; a snapshot, fork, or resume inherits
 **none**; a delegation's end closes the ones it opened. `open` and `send` carry the Subprocess marker and each
-`send` takes its own **Resolution**; `read` and `close` sit on the read-only floor. Ships
+`send` takes its own **Resolution**; `read` and `close` sit on the read-only floor. The program runs
+under a pseudo-terminal on POSIX and under a **ConPTY** pseudoconsole on Windows (Windows 10 1809 or
+later), there via `cmd /c` inside a kill-on-close Job Object, with Enter sent as a carriage return
+(`internal/console`, `platform.StartPseudoConsole`). A Windows Console cannot be fenced yet, so
+Auto fails closed there: `console_open` is demoted to Approval. On every host a `send` under a
+confinement box to a Console that was not opened confined is demoted to Approval too, each send
+on its own. Ships
 **default-off**, profile-enabled (ADR 0057) — the first tool to use that state. See
 [ADR 0059](docs/adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md).
 _Avoid_: "terminal session" / "PTY session" (the mechanism, and "session" is the saved record),
@@ -1615,7 +1621,17 @@ the configured endpoint's own addresses** — the endpoint is exempt from the re
 (you named it in your own config; the floor is the anti-*model* control), while any *other* private
 address that connection is pointed at is still refused, redirects are not followed and the
 connection goes out through the configured egress proxy when one applies (ADR 0012,
-Amendment 2026-07-26); a stdio server is a trusted local launch (no URL check), its calls still gate. **Resume reconnects
+Amendment 2026-07-26); a stdio server is a trusted local launch (no URL check), its calls still gate.
+An http(s) server's entry may add request headers sent on every request — the server's own auth
+scheme, a tenant id: `headers:` maps a header name to a literal value, and `headers-env:` maps one
+to the **name** of an environment variable holding the value, so a token never sits in the config
+file (and that variable is withheld from the subprocess tools' environment, beside the API-key
+ones). Validation refuses a name that is not an HTTP token, one the transport or the MCP protocol
+sets itself (`Host`, `Content-Length`, `Content-Type`, `Accept`, `Connection`,
+`Transfer-Encoding`, `Last-Event-ID`, every `Mcp-*`), one name configured twice, in either key or
+across both (names are case-insensitive), a literal value carrying CR, LF or NUL, and a blank variable name; the refusal
+names the key and the header, never a value. A stdio entry that sets either key draws a note — it
+has no HTTP request to carry them. **Resume reconnects
 fresh** — no server-side state is restored (ADR 0008). The *client shape* is
 [docs/design/mcp-client.md](docs/design/mcp-client.md); the *gating* is ADR 0004/0008/0012.
 _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).
@@ -1718,12 +1734,14 @@ key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment
 `advise:`), and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
-**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** applies
-in one act to the agent (which takes Floor, Bypass, Sync and the
-**[Context-fill notice](#reactions-and-moments)** switch) and to the runner (which takes Observe), so
-nothing downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass` and `SetFloor`;
-the runner keeps `Replace` as the observe half's swap primitive, now
-called only from the Driver's `SetReactions`
+**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** hands
+to the agent in one `SetReactions` call. `Agent.SetReactions` swaps both halves itself: it
+validates the whole Generation (a refused one moves neither half), installs the engine half
+(Floor, Bypass, Sync and the **[Context-fill notice](#reactions-and-moments)** switch), and then,
+when a runner is configured (`Config.ObserveRunner`) and the observe list moved, hands the runner
+its half (Observe) — so nothing downstream reads a half-swapped state. It is the single idiom that
+replaced `SetBypass` and `SetFloor`; the runner keeps `Replace` as the observe half's swap
+primitive, called only from `Agent.SetReactions`
 ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D4, A8). The
 key's earlier name was `hooks:`, and a file still carrying it is **folded** into `reactions:` once,
 at start-up: backed up first, re-rendered from its parsed entries, and reported in a note naming
@@ -2071,6 +2089,24 @@ A clip is told to the user as a **note** (`domain.RefClippedEvent` — `@<name> 
 tokens — read_file ranges for the rest`, or naming the share when a small window's share bound
 instead), never as the missing-reference error: the message went ahead.
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
+
+**Image input** (`vision:`):
+An image a user message carries to the model as an image part (`domain.Image` — name, media type,
+the bytes as read), not as text. It arrives two ways: a **File reference** whose BYTES are a PNG,
+JPEG, GIF or WebP image (judged by content, never by name), or a TUI attachment — `⌃v` with an image
+on the clipboard, or a paste that is exactly an image file's path — which waits as a **pending
+image** on the `attached: <name> (<size>)` line above the prompt and goes out with the next idle
+send. Only a server whose `servers:` entry sets **`vision: true`** is ever sent one: the key is a
+per-server opt-in, never detected (a server's `/props` does not say whether its model reads
+images). On a server without it a new image is refused before any request goes out
+(`server "<name>" does not accept images: set vision: true on its servers: entry`), and an image
+already in the history — a resumed session, a switch to another server — goes out as an
+`[image omitted: <name>]` line instead while the history keeps it. One image, and a message's
+images together, are capped at 5 MiB (`MaxImageBytes`, `MaxMessageImageBytes`). The session
+snapshot keeps the bytes on the message; the sent user block shows an `attached:` row, which the
+transcript record keeps as names and sizes only.
+_Avoid_: "upload" (nothing is uploaded anywhere but in the request), "multimodal" (only images are
+input), "vision model" for the key (it states what the server accepts, not what the model is).
 
 **Skill**:
 A reusable block of instructions the user *invokes* from a message — a folder holding a `SKILL.md`

@@ -253,7 +253,10 @@ NOTES (2026-10-04): the manual's git control-plane path list moved from a dash a
 **Acceptance:** `grep -c "block device" docs/manual/configuration.md CONTEXT.md` shows ≥1 for each.
 **Commit:** `docs: list every tier-1 refusal of the dangerous-action guard`
 
-## 12. Bring the CONTEXT.md glossary up to date
+## 12. Bring the CONTEXT.md glossary up to date — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the Console entry's new backend sentences also state the shipped unconfined-send gate (item 2: a send under a box to a Console not opened confined is demoted to Approval on every host), so the ConPTY fail-closed wording does not read as Windows-only.
+NOTES (2026-10-04): image input is a new **Image input** (`vision:`) entry placed after **File reference** in "Context and history"; MCP `headers:`/`headers-env:` extend the **MCP client** entry; ConPTY extends **Console**.
 
 **What:** CONTEXT.md's `reactions:` Generation paragraph says the runner's `Replace` is called only from the Driver's `SetReactions`; `Agent.SetReactions` now installs the Generation and swaps the Observe runner itself. The glossary also lacks image input / per-server `vision:`, MCP `headers:` / `headers-env:`, and Windows ConPTY under **Console**.
 **Regression guard.** `grep -c "headers-env" CONTEXT.md` already passes at base (the reactions webhook shape, `CONTEXT.md:1704-1714`); the Acceptance check is scoped to the MCP client entry: `awk '/^\*\*MCP client\*\*/,/^_Avoid_/' CONTEXT.md | grep -c headers-env` ≥ 1.
