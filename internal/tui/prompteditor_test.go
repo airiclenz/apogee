@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -675,5 +676,76 @@ func TestAttachImageEnforcesTheMessageCap(t *testing.T) {
 	}
 	if len(e.images) != 1 {
 		t.Errorf("images = %d, want the first kept alone", len(e.images))
+	}
+}
+
+// withPendingImage attaches one image to m and lays the frame out again at its window, the way the
+// Update tail does after a real attach, so the box's rows count the attach line.
+func withPendingImage(t *testing.T, m Model) Model {
+	t.Helper()
+	if err := m.attachImage(domain.Image{Name: "shot.png", MediaType: "image/png", Data: pngBytes}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	return step(t, m, tea.WindowSizeMsg{Width: m.width, Height: m.height})
+}
+
+// The attach line is not part of the frame's floor, so a pending image never makes the composed
+// frame taller than the terminal: at the eight-row floor the box keeps its one content row and the
+// line gives way, and from the first row the floor can spare it is drawn again.
+func TestAttachLineKeepsTheFrameInsideTheTerminal(t *testing.T) {
+	t.Parallel()
+	for _, height := range []int{frameFloorRows, frameFloorRows + 1, 10, smallestOverlayWindow, 24} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			t.Parallel()
+			m := withPendingImage(t, modelWithOverlayRoomAt(t, 80, height, testOpts))
+
+			plainFrame := plain(m.View())
+			if rows := len(strings.Split(m.View().Content, "\n")); rows != height {
+				t.Fatalf("composed frame is %d rows on a %d-row terminal, want exactly %d:\n%s",
+					rows, height, height, plainFrame)
+			}
+			if got := m.input.Height(); got < minInputRows {
+				t.Errorf("input box is %d rows, want at least %d", got, minInputRows)
+			}
+			drawn := strings.Contains(plainFrame, "attached: shot.png")
+			if want := height > frameFloorRows; drawn != want {
+				t.Errorf("attach line drawn = %v at %d rows, want %v:\n%s", drawn, height, want, plainFrame)
+			}
+			if len(m.images) != 1 {
+				t.Errorf("images = %d, want the image still pending whether or not its line is drawn", len(m.images))
+			}
+		})
+	}
+}
+
+// A pending image never pushes a decision surface off the frame: at the shortest window a pane is
+// drawn in, the attach line gives way to the approval prompt's four rows the way the draft's extra
+// rows do (draftRowsCeiling), and comes back on the first row past them.
+func TestAttachLineGivesWayToTheApprovalPrompt(t *testing.T) {
+	t.Parallel()
+	for _, height := range []int{smallestOverlayWindow, smallestOverlayWindow + 1, 24} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			t.Parallel()
+			m := withPendingImage(t, modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"}))
+			startStubWorker(t, &m)
+			m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{
+				Tool:      "write_file",
+				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+				CacheKey:  ordinaryGateKey,
+			}})
+
+			plainFrame := plain(m.View())
+			if rows := len(strings.Split(m.View().Content, "\n")); rows != height {
+				t.Fatalf("composed frame is %d rows on a %d-row terminal, want exactly %d:\n%s",
+					rows, height, height, plainFrame)
+			}
+			if m.frameOverlays().block(panePrompt) == "" {
+				t.Fatalf("the frame seated no prompt pane while its keys are live:\n%s", plainFrame)
+			}
+			drawn := strings.Contains(plainFrame, "attached: shot.png")
+			if want := height > smallestOverlayWindow; drawn != want {
+				t.Errorf("attach line drawn = %v at %d rows, want %v:\n%s", drawn, height, want, plainFrame)
+			}
+		})
 	}
 }

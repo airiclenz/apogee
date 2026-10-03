@@ -242,6 +242,14 @@ capped at whatever leaves the frame inside the terminal, whether or not a prompt
 on a 12-row terminal, one row on an 8-row one. The session area is what pays for those rows,
 exactly as it pays for a pane's — it is first in the order and it goes to nothing.
 
+**The pending-image line gives way on the same terms as the draft's extra rows.** While an image is
+attached for the next message, an `attached: <name> (<size>)` line sits directly above the box and
+is paid for out of the box's rows. It is not part of the frame's floor, so where the floor leaves no
+row for it — at eight rows and below — it is not drawn, and while the approval or ask prompt is up it
+gives way to that pane's four rows too, so an attached image never pushes the frame past the
+terminal or a decision surface off it. The images stay pending; only the line that names them is
+not drawn, and it comes back with the rows.
+
 **A capped box is a window onto the draft, and it says how much of it is out of sight.** The box
 scrolls to keep the line the caret is on in view, and the draft ITSELF is never cut: it is what the
 human typed, not prose apogee derived, and it is the one kind of content in the frame that cannot

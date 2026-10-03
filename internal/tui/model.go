@@ -2717,24 +2717,40 @@ func (m Model) inputBoxRows() int {
 	return m.input.Height() + inputBorderRows + m.pendingImageRows()
 }
 
-// pendingImageRows is the rows the pending-image line takes: one while any image is attached,
-// none otherwise.
+// pendingImageRows is the rows the pending-image line takes: one while any image is attached and
+// the frame can pay for it, none otherwise.
+//
+// The line is not part of the frame's floor (frameFloorRows) — the box, its one content row and
+// the footer are — so it gives way where the floor leaves no row for it, exactly as the draft's
+// extra rows do (draftRowsCeiling): at the eight-row floor and below it, a pending image would
+// otherwise put the frame one row past the terminal's last line. While the approval or ask prompt
+// is up the line also gives way to that pane's four rows, as the draft's extra rows do, so an
+// attached image never pushes a decision surface off the frame. The images themselves stay
+// pending; only the line that names them is not drawn, and it comes back with the rows.
 func (m Model) pendingImageRows() int {
 	if len(m.images) == 0 {
+		return 0
+	}
+	spare := m.height - frameFixedRows - inputBorderRows - minInputRows
+	if m.openPanes().has(panePrompt) {
+		spare -= popupChrome
+	}
+	if spare < 1 {
 		return 0
 	}
 	return 1
 }
 
 // pendingImageRow renders the pending-image line — "attached: <name> (<size>)" joined by " · " —
-// as one band-styled row the window's width, or "" when nothing is attached. It sits directly
-// above the input box (View), the staged band's own style, because it is the same kind of thing:
-// what the next message will carry beside the text being typed.
+// as one band-styled row the window's width, or "" when nothing is attached or the frame cannot
+// pay for the line (pendingImageRows). It sits directly above the input box (View), the staged
+// band's own style, because it is the same kind of thing: what the next message will carry beside
+// the text being typed.
 func (m Model) pendingImageRow() string {
-	line := m.pendingImageLine()
-	if line == "" {
-		return ""
+	if m.pendingImageRows() == 0 {
+		return "" // nothing attached, or the frame cannot pay for the line (pendingImageRows)
 	}
+	line := m.pendingImageLine()
 	return m.queuedRow(line)
 }
 
