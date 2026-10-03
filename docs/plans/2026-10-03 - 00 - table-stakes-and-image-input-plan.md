@@ -60,7 +60,7 @@
 - 16 (round 3): guard folded (decision) — send demotion gated to the host whose console open cannot confine (Windows), POSIX Ask-opened Console still sends under a box; Console.Confined covered in internal/console/registry_test.go; docs-guard grep and `GOOS=windows go test -c ./internal/agent/` in Acceptance; supersedes ADR 0059 §2 for Windows only
 - 17 (round 3): recast (decision) — files a third bead for the pre-existing POSIX console_send gap (ADR 0059 §2, item 16); Acceptance greps open beads for `console_send`
 
-## 1. ADR 0093 — priced usage, plus CONTEXT.md terms
+## 1. ADR 0093 — priced usage, plus CONTEXT.md terms — ✅ DONE (2026-10-03)
 
 **What:**
 **Goal:** `docs/adr/0093-*.md` records the pricing decisions and `CONTEXT.md` defines **Price** and **Spend (money)** as terms distinct from **Context cost**.
