@@ -391,6 +391,9 @@ func (m *Model) resetSessionView() {
 	// The models that answered fall with the tallies they qualify: they were the closed session's
 	// answerers, and its record took them with the same saveAtIdle above.
 	m.servedModels = nil
+	// The label a resumed record's amount counted under falls with that amount: the fresh session
+	// prices its calls in the configured `currency:` again (Model.currency).
+	m.sessionCurrency = ""
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
 	// A bound reset queues a Rotate above, which opens a fresh Session record, and a fresh record
 	// names itself; a pre-bound one had no session to rotate. Either way: unlatch the naming call,

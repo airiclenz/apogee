@@ -807,6 +807,163 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// A resumed session under its own currency label (Model.sessionCurrency)
+// ----------------------------------------------------------------------------
+
+// eurRecordUsage is a stored record's main-agent accounting priced in EUR: 0.42 over its two calls.
+var eurRecordUsage = session.Usage{
+	Calls: 2, PromptTokens: 9000, CompletionTokens: 500, TotalTokens: 9500,
+	CostMicros: 420_000, PricedCalls: 2,
+}
+
+// labelledResumeModel builds a model configured for USD and opened by --resume on a record carrying
+// eurRecordUsage, the binary having resolved its label to label (ResumedSession.Currency).
+func labelledResumeModel(t *testing.T, label string) Model {
+	t.Helper()
+	return newModel(context.Background(), &fakeEngine{}, Options{
+		Resumed:  &ResumedSession{Title: "priced elsewhere", Usage: eurRecordUsage, Currency: label},
+		Currency: "USD",
+		UI:       testUIPrefs,
+	}, nil)
+}
+
+// pricedMainUsage is one main-agent reading of a single call the engine priced at 0.30 in the
+// configured currency.
+func pricedMainUsage() domain.UsageEvent {
+	return pricedRunUsage(mainUsage(700, 40, 740, 700, 40, 740, 1), 300_000, 1)
+}
+
+// assertSpend fails the test unless the footer's spend segment and the /usage main row's cost cell
+// both read want.
+func assertSpend(t *testing.T, m Model, want, why string) {
+	t.Helper()
+	const costCell = 5 // agent, calls, prompt, completion, total, cost, ctx
+
+	if got := m.footerLeftText().spend; got != want {
+		t.Errorf("footer spend = %q, want %q — %s", got, want, why)
+	}
+	m.usagePane = usagePane{open: true}
+	rows := m.usageRows()
+	if len(rows) < 2 || len(rows[1]) <= costCell {
+		t.Fatalf("usage rows = %q, want a main row with a cost cell", rows)
+	}
+	if got := rows[1][costCell]; got != want {
+		t.Errorf("/usage main cost = %q, want %q — %s", got, want, why)
+	}
+}
+
+// TestResumedSessionCountsUnderItsOwnLabel pins the renderer's half of ADR 0093's amendment
+// (2026-10-04): a session resumed under a label other than the configured one shows its amount in
+// its own label on the footer and in /usage, a call made after the resume adds its tokens and an
+// unpriced count but no cost — the engine priced it in the configured currency — and a /clear
+// returns the fresh session to the configured label.
+func TestResumedSessionCountsUnderItsOwnLabel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the footer and /usage name the record's label", func(t *testing.T) {
+		t.Parallel()
+
+		m := labelledResumeModel(t, "EUR")
+
+		assertSpend(t, m, "0.42 EUR", "the record's amount keeps the label it was written in")
+	})
+
+	t.Run("a later priced reading adds tokens and an unpriced count but no cost", func(t *testing.T) {
+		t.Parallel()
+		m := labelledResumeModel(t, "EUR")
+
+		m = m.foldEvent(pricedMainUsage())
+
+		want := domain.Sum(domain.Usage(eurRecordUsage), domain.Usage{
+			Calls: 1, PromptTokens: 700, CompletionTokens: 40, TotalTokens: 740, UnpricedCalls: 1,
+		})
+		if m.usage != want {
+			t.Errorf("totals = %+v, want %+v — a USD-priced call cannot join an EUR amount", m.usage, want)
+		}
+		assertSpend(t, m, "≥ 0.42 EUR", "the amount now covers only some of the session's calls")
+	})
+
+	t.Run("a background workflow's reading adds no cost either", func(t *testing.T) {
+		t.Parallel()
+		m := labelledResumeModel(t, "EUR")
+
+		m = foldEvents(t, m,
+			bgPhase(domain.WorkflowStarted),
+			pricedRunUsage(workflowRunUsage(bgChildBase("bg.1"), 1, 1000, 100), 120_000, 1),
+		)
+
+		got := m.delegateUsageTotal()
+		if got.CostMicros != 0 || got.PricedCalls != 0 || got.UnpricedCalls != 1 {
+			t.Errorf("workflow spend = %+v, want one unpriced call and no cost", got)
+		}
+	})
+
+	t.Run("a resume under the configured label prices as before", func(t *testing.T) {
+		t.Parallel()
+		m := labelledResumeModel(t, "USD")
+
+		m = m.foldEvent(pricedMainUsage())
+
+		assertSpend(t, m, "0.72 USD", "the record and the configuration agree, so the call's cost is added")
+	})
+
+	t.Run("/clear restores the configured label", func(t *testing.T) {
+		t.Parallel()
+		m := labelledResumeModel(t, "EUR")
+
+		m.input.SetValue("/clear")
+		m = step(t, m, keyEnter())
+		m = m.foldEvent(pricedMainUsage())
+
+		assertSpend(t, m, "0.30 USD", "the fresh session prices its calls in the configured currency")
+	})
+
+	t.Run("a label carrying an escape paints stripped", func(t *testing.T) {
+		t.Parallel()
+
+		m := labelledResumeModel(t, "\x1b[31mEUR\x1b[0m")
+
+		assertSpend(t, m, "0.42 EUR", "the record's label is disk input and reaches the frame stripped")
+	})
+}
+
+// TestSessionsResumeSeatsTheRecordsLabel pins the /sessions half of the same rule: the browser's
+// restore resolves the label through the one session.Meta rule the host saves by — a priced record
+// keeps its own, a record with nothing priced follows the configured label.
+func TestSessionsResumeSeatsTheRecordsLabel(t *testing.T) {
+	t.Parallel()
+
+	restore := func(t *testing.T, usage session.Usage) Model {
+		t.Helper()
+		opts := testOpts
+		opts.Currency = "USD"
+		m := newTestModelEng(t, &fakeEngine{}, opts)
+		return step(t, m, sessionLoadedMsg{rec: session.Record{
+			Meta:    session.Meta{ID: "sess-1", Title: "prior work", Usage: usage, Currency: "EUR"},
+			Session: domain.Session{Version: domain.SessionVersion},
+		}})
+	}
+
+	t.Run("a priced record keeps its label and counts later calls unpriced", func(t *testing.T) {
+		t.Parallel()
+		m := restore(t, eurRecordUsage)
+
+		m = m.foldEvent(pricedMainUsage())
+
+		assertSpend(t, m, "≥ 0.42 EUR", "the record's amount stands in its own label, the new call unpriced")
+	})
+
+	t.Run("an unpriced record adopts the configured label", func(t *testing.T) {
+		t.Parallel()
+		m := restore(t, session.Usage{Calls: 2, PromptTokens: 9000, TotalTokens: 9000, UnpricedCalls: 2})
+
+		m = m.foldEvent(pricedMainUsage())
+
+		assertSpend(t, m, "≥ 0.30 USD", "a record with no amount to keep prices in the configured currency")
+	})
+}
+
+// ----------------------------------------------------------------------------
 // A Workflow's spend — its item runs and the runs they spawned (delegateUsageHeads)
 // ----------------------------------------------------------------------------
 

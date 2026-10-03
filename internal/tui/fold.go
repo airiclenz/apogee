@@ -38,6 +38,7 @@ const throughputWindowFloor = 250 * time.Millisecond
 // advice board, the wire and attempt rings, then the transcript, then the activity phrase. It mutates the local copy and returns
 // it, like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
 func (m Model) foldEvent(e domain.Event) Model {
+	e = m.countedUsage(e) // a resumed session under its own label counts later calls unpriced
 	m = m.foldStats(e)
 	// Order-free, and placed here rather than woven into the dependency below because it has none:
 	// the thinking board reads nothing the other folds establish, and nothing but the /thinking

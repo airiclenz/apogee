@@ -668,6 +668,10 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// the base does: the host rebuilds Meta from what the renderer hands it on every save, so a set
 	// not carried in here would be dropped by the reopened session's first save.
 	m.servedModels = slices.Clone(msg.rec.Meta.ServedModels)
+	// …and so does the label its amount counts under, by the one rule the host's later saves follow
+	// (session.Meta.EffectiveCurrency): asked for the record's own label alone, so a record with no
+	// priced amount to keep answers "" and the view reads the configured label live.
+	m.sessionCurrency = stripEscapes(msg.rec.Meta.EffectiveCurrency(""))
 	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	return cmd // the queued Activate, when this fold's schedule found the queue idle

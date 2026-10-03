@@ -221,7 +221,10 @@ NOTES (2026-10-04): `domain.Usage.Unpriced()` has no production caller yet; item
 - `go test -count=1 -run 'Currency' ./internal/session/`
 **Commit:** `fix(session): keep a resumed session's currency label`
 
-## 10. Show and count a resumed session under its own label
+## 10. Show and count a resumed session under its own label — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): internal/tui/transcript.go (listed in Files) needed no change — the UsageEvent's Cumulative is rewritten once at the top of `Model.foldEvent` (via the new `Model.countedUsage`), so `transcript.applyUsage` reads the unpriced reading with its signature unchanged; workflow.go likewise only gained the same rewrite in `foldBackgroundEvent`, its money reaching /usage through `usageColumns.currency`.
+NOTES (2026-10-04): the override is held as `Model.sessionCurrency` ("" reads `opts.Currency` live via `Model.currency()`); `resumeLoaded` seats `Meta.EffectiveCurrency("")` so an unpriced record leaves it empty; `replayResumed` seats `ResumedSession.Currency`; both strip escapes; `resetSessionView` clears it. Only the Cumulative reading is rewritten — the per-call `CostMicros`/`Priced` fields, which the TUI does not read, are left as the engine stamped them.
 
 **What:** Fixes `apogee-resume-currency-relabel` (TUI half): the footer and `/usage` label restored amounts with the configured currency and add newly priced calls on top.
 **Regression guard.** the TUI never re-derives the label rule — it takes the label item 9 delivers (`ResumedSession.Currency`) or, for an in-session resume in `resumeLoaded`, calls the same `session.Meta` method. The Model holds only the resumed record's label as an override ("" means read `m.opts.Currency` live — tests set it after construction); `stripEscapes` the label where `replayResumed` and `resumeLoaded` seat it. Keep `applyUsage`'s signature: rewrite the `UsageEvent`'s `Cumulative` once in `Model.foldEvent` and in `foldBackgroundEvent` (`workflow.go:336`) before the folds read it. The reset on /clear is `Model.resetSessionView` in `internal/tui/commandrun.go`. Supersedes `docs/manual/commands.md:33` ("the amount in your `currency:` label"), which is rewritten for a resumed session.

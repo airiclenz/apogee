@@ -334,6 +334,7 @@ func (v backgroundWorkflow) finishLine(e domain.WorkflowPhaseEvent) string {
 // joins the session's set exactly as foldStats folds it ahead of its depth guard; nothing else of
 // the reading reaches the gauge or the main agent's totals.
 func (m Model) foldBackgroundEvent(e domain.Event) Model {
+	e = m.countedUsage(e) // the same reading foldEvent counts: unpriced under a resumed label
 	m = m.foldWire(e)
 	m = m.foldAttempt(e)
 	switch e := e.(type) {

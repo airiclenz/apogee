@@ -516,6 +516,16 @@ type Model struct {
 	// a view from a record: the engine never sees one.
 	usageBase domain.Usage
 
+	// sessionCurrency is the resumed record's own currency label (ADR 0093, amendment 2026-10-04):
+	// the label its priced amount was written in, which outlives a `currency:` changed since. It is
+	// an OVERRIDE only — "" reads the configured label live ([Model.currency]) — seated by either
+	// resume path from the label the binary or session.Meta resolved (replayResumed, resumeLoaded),
+	// escape-stripped there because it is disk input, and dropped on /clear (resetSessionView).
+	// While it names a label other than the configured one, every later reading counts its calls
+	// as unpriced ([Model.countedUsage]): their cost was reckoned in the configured currency, and
+	// adding it to an amount in another would misstate both.
+	sessionCurrency string
+
 	// servedModels is every distinct model id the upstream has answered with in this session, in
 	// the order first seen — the ServedModel each UsageEvent carries, at EVERY depth (a routed
 	// delegation's own model, ADR 0045, is one the session was answered by), folded as a set
@@ -918,6 +928,7 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	m.usage = m.usageBase                           // the engine counts from zero; the fold adds its reading on top
 	m.delegateUsage = domain.Usage(r.DelegateUsage) // …and the delegate half beside it, until a head reports
 	m.servedModels = slices.Clone(r.ServedModels)   // …and the models that answered it, so the first save keeps them
+	m.sessionCurrency = stripEscapes(r.Currency)    // …and the label its amount counts under, record-authored text
 	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
 }
 
@@ -3737,7 +3748,7 @@ func (m Model) footerLeftText() footerInput {
 		host:    stripEscapes(hostDisplay(m.opts)),
 		model:   footerRun(m.upstreamSegments()...),
 		workdir: m.workdir,
-		spend:   spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.opts.Currency),
+		spend:   spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency()),
 	}
 	override, profile := m.eng.ThinkingEffort()
 	support := m.effortSupport()

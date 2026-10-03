@@ -119,8 +119,34 @@ func (m Model) usageColumns(delegates domain.Usage) usageColumns {
 	return usageColumns{
 		cached:   m.usage.CachedPromptTokens > 0 || delegates.CachedPromptTokens > 0,
 		priced:   m.usage.PricedCalls > 0 || delegates.PricedCalls > 0,
-		currency: m.opts.Currency,
+		currency: m.currency(),
 	}
+}
+
+// currency is the label this session's amount is spelled in: the resumed record's own when one was
+// seated (sessionCurrency), the configured `currency:` otherwise — read live, so a fresh or cleared
+// session always follows the configuration.
+func (m Model) currency() string {
+	if m.sessionCurrency != "" {
+		return m.sessionCurrency
+	}
+	return m.opts.Currency
+}
+
+// countedUsage is e as this session counts it: a UsageEvent's cumulative reading with every priced
+// call folded into the unpriced count and no cost (domain.Usage.Unpriced) while the session counts
+// under a label other than the configured one, and e untouched otherwise. The engine priced those
+// calls in the configured currency, so their cost cannot join an amount written in the record's
+// (ADR 0093, amendment 2026-10-04); their tokens and calls still count. Both event folds rewrite
+// the event once, before any fold reads it (Model.foldEvent, Model.foldBackgroundEvent), so the
+// main agent's totals, a delegate's head and a workflow's runs all take the same reading.
+func (m Model) countedUsage(e domain.Event) domain.Event {
+	usage, ok := e.(domain.UsageEvent)
+	if !ok || m.currency() == m.opts.Currency {
+		return e
+	}
+	usage.Cumulative = usage.Cumulative.Unpriced()
+	return usage
 }
 
 // usageHeaderCells are the column labels, in the order ratified for this pane (plan
