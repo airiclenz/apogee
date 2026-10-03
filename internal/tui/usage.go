@@ -92,19 +92,56 @@ const (
 	usageAgentFallback = "sub-agent"
 )
 
+// usageUnpricedCell is the cost cell of a row whose calls were all unpriced (their server had no
+// `price:`): a dash rather than an empty cell, because an empty cell on this pane means "nothing
+// to count", and these calls were counted — only never priced (ADR 0093 decision 4).
+const usageUnpricedCell = "—"
+
+// spendPartialMark leads an amount that covers only some of the calls behind it — the rest ran on
+// a server with no `price:` — so the figure reads as the floor it is rather than as the whole
+// Spend (money) (ADR 0093 decision 4).
+const spendPartialMark = "≥ "
+
+// usageColumns is the pane's one verdict on its two optional columns, taken once for the whole
+// report (Model.usageColumns) so every row answers to the same header and the columns stay
+// square: cached when some agent reported a cache share, priced when some call was priced. It
+// carries the currency label the cost cells are spelled in beside them.
+type usageColumns struct {
+	cached   bool
+	priced   bool
+	currency string
+}
+
+// usageColumns takes the pane's column verdict from the main agent's totals and delegates, the
+// delegate sum the caller already holds (delegateUsageTotal), so the walk over the transcript is
+// taken once per report.
+func (m Model) usageColumns(delegates domain.Usage) usageColumns {
+	return usageColumns{
+		cached:   m.usage.CachedPromptTokens > 0 || delegates.CachedPromptTokens > 0,
+		priced:   m.usage.PricedCalls > 0 || delegates.PricedCalls > 0,
+		currency: m.opts.Currency,
+	}
+}
+
 // usageHeaderCells are the column labels, in the order ratified for this pane (plan
 // "2026-08-11 - 02", design call 4). They are a row of the spec rather than body prose so the
 // popup module's own column machinery aligns them over the cells they name.
 //
-// The cached column is drawn only when some agent reported a cache share, and every row on the
-// pane answers to that one verdict so the columns stay square (usageRows). A pane that always
-// carried it would head a column of blanks on the servers that report no breakdown at all — which
-// is nearly all of them — and a reader would scan that column for a number no server ever said.
-func usageHeaderCells(cached bool) popupRow {
-	if cached {
-		return popupRow{"agent", "calls", "prompt", "cached", "completion", "total", "ctx"}
+// The cached column is drawn only when some agent reported a cache share, and the cost column only
+// when some call was priced; every row on the pane answers to that one verdict so the columns stay
+// square (usageRows). A pane that always carried them would head a column of blanks on the servers
+// that report no breakdown or carry no `price:` at all — which is nearly all of them — and a reader
+// would scan that column for a number nobody ever said.
+func usageHeaderCells(cols usageColumns) popupRow {
+	row := popupRow{"agent", "calls", "prompt"}
+	if cols.cached {
+		row = append(row, "cached")
 	}
-	return popupRow{"agent", "calls", "prompt", "completion", "total", "ctx"}
+	row = append(row, "completion", "total")
+	if cols.priced {
+		row = append(row, "cost")
+	}
+	return append(row, "ctx")
 }
 
 // runUsageCommand drives the /usage verb: it opens the pane and does nothing else. Synchronous like
@@ -164,16 +201,16 @@ func usageRowKinds(rows int) []popupRowKind {
 // cells under the totals would read as one.
 func (m Model) usageRows() []popupRow {
 	delegates := m.delegateUsageTotal()
-	// One verdict for the whole pane: a cached cell on one row and none on the next would put two
-	// different column counts under one header (usageHeaderCells).
-	cached := m.usage.CachedPromptTokens > 0 || delegates.CachedPromptTokens > 0
-	subs := m.usageSubAgentRows(cached)
+	// One verdict for the whole pane: a cached or cost cell on one row and none on the next would
+	// put two different column counts under one header (usageHeaderCells).
+	cols := m.usageColumns(delegates)
+	subs := m.usageSubAgentRows(cols)
 	if m.usage.Calls <= 0 && delegates.Calls <= 0 {
 		return nil
 	}
 	rows := make([]popupRow, 0, len(subs)+3)
-	rows = append(rows, usageHeaderCells(cached))
-	rows = append(rows, usageRow(usageMainLabel, m.usage, m.ctxUsed, m.opts.ContextWindow, cached))
+	rows = append(rows, usageHeaderCells(cols))
+	rows = append(rows, usageRow(usageMainLabel, m.usage, m.ctxUsed, m.opts.ContextWindow, cols))
 	rows = append(rows, subs...)
 	if delegates.Calls <= 0 {
 		return rows
@@ -185,18 +222,18 @@ func (m Model) usageRows() []popupRow {
 	// outlived its blocks is summed here with no row of its own to point at (delegateUsageTotal),
 	// which is the honest reading: the tokens were spent by this session, and the runs that spent
 	// them are no longer on the pane to be asked.
-	return append(rows, usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, cached))
+	return append(rows, usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, cols))
 }
 
 // usageSubAgentRows composes one row per delegate that reported a count: the sub-agents in
 // transcript order — the order their blocks stand in, so a reader matches a row to the run above it
 // by position — then one row per Workflow, named for it (delegateUsageHeads).
-func (m Model) usageSubAgentRows(cached bool) []popupRow {
+func (m Model) usageSubAgentRows(cols usageColumns) []popupRow {
 	heads := m.delegateUsageHeads()
 	rows := make([]popupRow, 0, len(heads))
 	for _, head := range heads {
 		name, _ := clipCells(m.th, usageIndent+usageAgentName(head), usageNameCells)
-		rows = append(rows, usageRow(name, head.usage, head.ctxUsed, head.ctxLimit, cached))
+		rows = append(rows, usageRow(name, head.usage, head.ctxUsed, head.ctxLimit, cols))
 	}
 	return rows
 }
@@ -298,8 +335,9 @@ func usageAgentName(head entry) string {
 // carried, with the fill it last reported. Counts go through [format.Tokens] — the coarse form the
 // status gauge and a run's own reading are already spelled in — so the three readings on screen are
 // read in one language, and a zero leaves its cell empty rather than printing a 0 the column would
-// have to be scanned past.
-func usageRow(name string, totals domain.Usage, used, limit int, cached bool) popupRow {
+// have to be scanned past. cols is the pane's column verdict (usageColumns), which every row
+// answers to.
+func usageRow(name string, totals domain.Usage, used, limit int, cols usageColumns) popupRow {
 	calls := ""
 	if totals.Calls > 0 {
 		calls = strconv.Itoa(totals.Calls)
@@ -313,14 +351,46 @@ func usageRow(name string, totals domain.Usage, used, limit int, cached bool) po
 	// what it is: the share of those very tokens the server answered from its cache, not a spend
 	// beside them. An agent that reported none while another did leaves it empty, on the same rule
 	// every other zero on the row follows.
-	if cached {
+	if cols.cached {
 		row = append(row, format.Tokens(totals.CachedPromptTokens))
 	}
-	return append(row,
+	row = append(row,
 		format.Tokens(totals.CompletionTokens),
 		format.Tokens(totals.TotalTokens),
-		usageFillCell(used, limit),
 	)
+	if cols.priced {
+		row = append(row, usageCostCell(totals, cols.currency))
+	}
+	return append(row, usageFillCell(used, limit))
+}
+
+// usageCostCell spells a row's Spend (money) (spendText): the amount where some of its calls were
+// priced, the dash where none was, and an empty cell where the row counted no call at all — the
+// main agent of a session only its delegates have spent in, on the rule every other zero follows.
+func usageCostCell(totals domain.Usage, currency string) string {
+	if totals.Calls <= 0 {
+		return ""
+	}
+	if spend := spendText(totals, currency); spend != "" {
+		return spend
+	}
+	return usageUnpricedCell
+}
+
+// spendText is the Spend (money) a reading states, spelled the one way every TUI surface shows it
+// (the /usage cost cells and the footer's spend segment): the amount and its currency label
+// (domain.FormatCost), led by spendPartialMark where some of the calls behind it were unpriced. It
+// is empty where no call was priced at all, which is the caller's signal that there is no amount
+// to show — never a zero, because an unpriced call is not a free one (ADR 0093 decision 4).
+func spendText(totals domain.Usage, currency string) string {
+	if totals.PricedCalls <= 0 {
+		return ""
+	}
+	amount := domain.FormatCost(totals.CostMicros, currency)
+	if totals.UnpricedCalls > 0 {
+		return spendPartialMark + amount
+	}
+	return amount
 }
 
 // usageFillCell spells a context reading as the percentage the gauge labels its bar with, clamped

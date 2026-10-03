@@ -26,15 +26,15 @@
 // headers, ┝/┕ tool-detail branches, depth indenting, and the [userBlock] ranges the sticky
 // header rides on so the owning prompt sticks to the top while a reply streams). The
 // transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
-// auto-growing black field, and the chrome is a braille status line plus a footer bar — five plain
-// segments in reading order (host alias ✦ model ✦ effort ✦ workdir, plus an `✦ offline` marker
-// while the upstream is unreachable), then the mode behind its own symbol ("◐ ask before",
-// [modeMarker]) — the workspace written with the home directory as `~`,
-// [workdirDisplay], resolved once at construction. The row is composed TO the window by ONE
-// priority fit ([footerFit], footerfit.go): the effort word is given up first, then the workdir,
-// then the host, while the model, the offline marker and the mode marker are what the row never
-// gives up — the model truncating before it goes, and the marker dropping only where it cannot
-// seat whole. The live token gauge (reserved at P2.7) is now
+// auto-growing black field, and the chrome is a braille status line plus a footer bar — six plain
+// segments in reading order (host alias ✦ model ✦ effort ✦ workdir, the session's spend once a
+// call was priced, plus an `✦ offline` marker while the upstream is unreachable), then the mode
+// behind its own symbol ("◐ ask before", [modeMarker]) — the workspace written with the home
+// directory as `~`, [workdirDisplay], resolved once at construction. The row is composed TO the
+// window by ONE priority fit ([footerFit], footerfit.go): the spend is given up first, then the
+// effort word, then the workdir, then the host, while the model, the offline marker and the mode
+// marker are what the row never gives up — the model truncating before it goes, and the marker
+// dropping only where it cannot seat whole. The live token gauge (reserved at P2.7) is now
 // wired: the post-v1 track folds each top-level UsageEvent's total into the status-line
 // context-fill gauge, measured against the discovered context window ([Model.contextGauge] /
 // [Model.statusRight]) — which is why the window is stated THERE and no longer in the footer, since

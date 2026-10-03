@@ -234,7 +234,8 @@ The full tour is in [the manual](docs/manual/README.md).
   your `advise:` reactions told it, by Turn, **`/inspect`** (once `ui.inspector` is on)
   shows every request and response, readable by default and raw on `ctrl+r`, and
   **`/usage`** shows what the session cost — the main agent and each sub-agent, cache
-  hits included.
+  hits included, and the money spent in your currency once a server has a `price:`
+  (the footer keeps the running total).
 - **Colour schemes** as single YAML files, switchable live, with your own beside the
   built-in `dark` and `light`.
 

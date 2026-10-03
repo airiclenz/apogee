@@ -132,7 +132,7 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 		if len(rows) != 2 {
 			t.Fatalf("rows = %q, want the header and the main agent alone", rows)
 		}
-		if got, want := rows[0], usageHeaderCells(false); !equalRow(got, want) {
+		if got, want := rows[0], usageHeaderCells(usageColumns{}); !equalRow(got, want) {
 			t.Errorf("first row = %q, want the column header %q", got, want)
 		}
 		want := popupRow{usageMainLabel, "3", format.Tokens(20000), format.Tokens(1500), format.Tokens(21500), "25%"}
@@ -226,7 +226,7 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 	pane := strip(m.renderReport(usageReport))
 
 	for _, want := range []string{usageTitle, usageHint, usageMainLabel, usageSessionLabel,
-		"survey the tests", usageHeaderCells(false)[1], format.Tokens(21500)} {
+		"survey the tests", usageHeaderCells(usageColumns{})[1], format.Tokens(21500)} {
 		if !strings.Contains(pane, want) {
 			t.Errorf("the pane does not show %q:\n%s", want, pane)
 		}
@@ -431,11 +431,11 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 
 		rows := usageModel(t, mainTotals, 8192).usageRows()
 
-		if got := rows[0]; !equalRow(got, usageHeaderCells(false)) {
-			t.Errorf("header = %q, want the columns without a cached one %q", got, usageHeaderCells(false))
+		if got := rows[0]; !equalRow(got, usageHeaderCells(usageColumns{})) {
+			t.Errorf("header = %q, want the columns without a cached one %q", got, usageHeaderCells(usageColumns{}))
 		}
-		if got := len(rows[1]); got != len(usageHeaderCells(false)) {
-			t.Errorf("main row has %d cells, want %d — one per column", got, len(usageHeaderCells(false)))
+		if got := len(rows[1]); got != len(usageHeaderCells(usageColumns{})) {
+			t.Errorf("main row has %d cells, want %d — one per column", got, len(usageHeaderCells(usageColumns{})))
 		}
 	})
 
@@ -448,8 +448,8 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 		m = delegate(t, m, "s1", "survey the tests", childTotals, 0)
 		rows := m.usageRows()
 
-		if got := rows[0]; !equalRow(got, usageHeaderCells(true)) {
-			t.Fatalf("header = %q, want the cached column %q", got, usageHeaderCells(true))
+		if got := rows[0]; !equalRow(got, usageHeaderCells(usageColumns{cached: true})) {
+			t.Fatalf("header = %q, want the cached column %q", got, usageHeaderCells(usageColumns{cached: true}))
 		}
 		if got, want := rows[1][3], format.Tokens(12000); got != want {
 			t.Errorf("main cached cell = %q, want %q", got, want)
@@ -459,6 +459,92 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 		}
 		if got, want := rows[3][3], format.Tokens(12000); got != want {
 			t.Errorf("session cached cell = %q, want %q — the one share reported, summed", got, want)
+		}
+	})
+}
+
+// TestUsageCostColumnIsDrawnOnlyWhereACallWasPriced pins the pane's money (ADR 0093): no cost
+// column while no call was priced — an unpriced call is counted, not priced at zero — and once one
+// was, a cost cell on every row: the amount in the configured label, a dash on a row whose calls
+// were all unpriced, and a `≥ ` on a total that covers only some of its calls.
+func TestUsageCostColumnIsDrawnOnlyWhereACallWasPriced(t *testing.T) {
+	t.Parallel()
+
+	const costCell = 5 // agent, calls, prompt, completion, total, cost, ctx
+	pricedMain := mainTotals
+	pricedMain.CostMicros, pricedMain.PricedCalls = 420_000, mainTotals.Calls
+	unpricedChild := childTotals
+	unpricedChild.UnpricedCalls = childTotals.Calls
+	pricedChild := childTotals
+	pricedChild.CostMicros, pricedChild.PricedCalls = 1_000_000, childTotals.Calls
+
+	t.Run("no call was priced", func(t *testing.T) {
+		t.Parallel()
+
+		unpricedMain := mainTotals
+		unpricedMain.UnpricedCalls = mainTotals.Calls
+		m := usageModel(t, unpricedMain, 8192)
+		m.opts.Currency = "EUR"
+		m = delegate(t, m, "s1", "survey the tests", unpricedChild, 0)
+		rows := m.usageRows()
+
+		if got, want := rows[0], usageHeaderCells(usageColumns{}); !equalRow(got, want) {
+			t.Errorf("header = %q, want no cost column %q", got, want)
+		}
+	})
+
+	t.Run("a priced main agent beside an unpriced delegate", func(t *testing.T) {
+		t.Parallel()
+
+		m := usageModel(t, pricedMain, 8192)
+		m.opts.Currency = "EUR"
+		m = delegate(t, m, "s1", "survey the tests", unpricedChild, 0)
+		rows := m.usageRows()
+
+		if got, want := rows[0], usageHeaderCells(usageColumns{priced: true}); !equalRow(got, want) {
+			t.Fatalf("header = %q, want the cost column %q", got, want)
+		}
+		for _, tc := range []struct {
+			row  int
+			want string
+			why  string
+		}{
+			{1, "0.42 EUR", "the main agent's amount in the configured label"},
+			{2, "—", "the delegate's calls were counted but never priced"},
+			{3, "≥ 0.42 EUR", "the session total covers only some of its calls"},
+		} {
+			if got := rows[tc.row][costCell]; got != tc.want {
+				t.Errorf("row %d cost = %q, want %q — %s", tc.row, got, tc.want, tc.why)
+			}
+		}
+	})
+
+	t.Run("every call priced", func(t *testing.T) {
+		t.Parallel()
+
+		m := usageModel(t, pricedMain, 8192)
+		m.opts.Currency = "EUR"
+		m = delegate(t, m, "s1", "survey the tests", pricedChild, 0)
+		rows := m.usageRows()
+
+		if got, want := rows[3][costCell], "1.42 EUR"; got != want {
+			t.Errorf("session cost = %q, want %q — a whole amount carries no partial mark", got, want)
+		}
+	})
+
+	t.Run("a main agent that spent nothing leaves its cell empty", func(t *testing.T) {
+		t.Parallel()
+
+		m := usageModel(t, domain.Usage{}, 0)
+		m.opts.Currency = "EUR"
+		m = delegate(t, m, "s1", "survey the tests", pricedChild, 0)
+		rows := m.usageRows()
+
+		if got := rows[1][costCell]; got != "" {
+			t.Errorf("main cost = %q, want no cell — the main agent made no call to price", got)
+		}
+		if got, want := rows[2][costCell], "1.00 EUR"; got != want {
+			t.Errorf("delegate cost = %q, want %q", got, want)
 		}
 	})
 }
@@ -496,10 +582,10 @@ func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("rows = %q, want the header, the main agent, the restored delegate and the session", rows)
 	}
-	if got, want := rows[0], usageHeaderCells(true); !equalRow(got, want) {
+	if got, want := rows[0], usageHeaderCells(usageColumns{cached: true}); !equalRow(got, want) {
 		t.Fatalf("header = %q, want the cached column %q — the restored share is what opens it", got, want)
 	}
-	subs := m.usageSubAgentRows(true)
+	subs := m.usageSubAgentRows(usageColumns{cached: true})
 	if len(subs) != 1 {
 		t.Fatalf("subAgent rows = %q, want the one restored delegate", subs)
 	}
@@ -680,7 +766,7 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		if len(rows) != 2 {
 			t.Fatalf("rows = %q, want the header and the main agent alone", rows)
 		}
-		if got, want := rows[1], usageRow(usageMainLabel, want, m.ctxUsed, m.opts.ContextWindow, false); !equalRow(got, want) {
+		if got, want := rows[1], usageRow(usageMainLabel, want, m.ctxUsed, m.opts.ContextWindow, usageColumns{}); !equalRow(got, want) {
 			t.Errorf("the main row = %q, want %q — the pane reads the reply alone", got, want)
 		}
 		payload, ok := m.snapshotPayload(domain.Session{})
@@ -745,9 +831,9 @@ func pricedRunUsage(e domain.UsageEvent, costMicros int64, pricedCalls int) doma
 }
 
 // workflowRow is the /usage row of a delegate named name that spent totals and reported no fill —
-// the row a Workflow gets.
-func workflowRow(name string, totals domain.Usage) popupRow {
-	return usageRow(usageIndent+name, totals, 0, 0, false)
+// the row a Workflow gets — under the pane's column verdict cols.
+func workflowRow(cols usageColumns, name string, totals domain.Usage) popupRow {
+	return usageRow(usageIndent+name, totals, 0, 0, cols)
 }
 
 // fanOutCall is the blocking fan_out call f1, whose Workflow's item runs are bracketed under it.
@@ -769,7 +855,7 @@ func assertDelegateRows(t *testing.T, m Model, delegates domain.Usage, want ...p
 			t.Errorf("delegate row %d = %q, want %q", i, got, row)
 		}
 	}
-	session := usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, false)
+	session := usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, m.usageColumns(delegates))
 	if got := rows[len(rows)-1]; !equalRow(got, session) {
 		t.Errorf("session row = %q, want %q — the delegates added to the main agent once", got, session)
 	}
@@ -806,13 +892,14 @@ func TestBackgroundWorkflowSpendReachesUsageAndTheRecord(t *testing.T) {
 		Calls: 4, PromptTokens: 3700, CompletionTokens: 420, TotalTokens: 4120,
 		CostMicros: 3_000, PricedCalls: 3, UnpricedCalls: 1,
 	}
+	priced := usageColumns{priced: true} // the pane draws its cost column once a call was priced
 	if m.usage != mainTotals {
 		t.Errorf("main totals = %+v, want %+v untouched — a background run's reading is not the main agent's", m.usage, mainTotals)
 	}
-	assertDelegateRows(t, m, spent, workflowRow(bgWorkflowName, spent))
+	assertDelegateRows(t, m, spent, workflowRow(priced, bgWorkflowName, spent))
 
 	m = foldEvents(t, m, bgItemOK(), bgPhase(domain.WorkflowFinished))
-	assertDelegateRows(t, m, spent, workflowRow(bgWorkflowName, spent))
+	assertDelegateRows(t, m, spent, workflowRow(priced, bgWorkflowName, spent))
 
 	payload, ok := m.snapshotPayload(domain.Session{})
 	if !ok {
@@ -824,7 +911,7 @@ func TestBackgroundWorkflowSpendReachesUsageAndTheRecord(t *testing.T) {
 		},
 		UI: testUIPrefs,
 	}, nil)
-	assertDelegateRows(t, reopened, spent, workflowRow(bgWorkflowName, spent))
+	assertDelegateRows(t, reopened, spent, workflowRow(priced, bgWorkflowName, spent))
 }
 
 // A foreground Workflow's item runs fold into the block that started it — a blocking fan_out's card
@@ -866,7 +953,7 @@ func TestForegroundWorkflowSpendReachesUsage(t *testing.T) {
 			if m.usage != mainTotals {
 				t.Errorf("main totals = %+v, want %+v untouched", m.usage, mainTotals)
 			}
-			assertDelegateRows(t, m, tc.want, workflowRow(tc.label, tc.want))
+			assertDelegateRows(t, m, tc.want, workflowRow(usageColumns{}, tc.label, tc.want))
 		})
 	}
 }
@@ -889,7 +976,7 @@ func TestSeatedWorkflowItemsReportOneWorkflowRow(t *testing.T) {
 	}
 
 	want := domain.Usage{Calls: 2, PromptTokens: 3000, CompletionTokens: 300, TotalTokens: 3300}
-	assertDelegateRows(t, m, want, workflowRow("check {item}", want))
+	assertDelegateRows(t, m, want, workflowRow(usageColumns{}, "check {item}", want))
 	if head := m.transcript.entries[workflowItemHeadAt(m.transcript.entries, "run.2")]; head.ctxUsed != 2200 {
 		t.Errorf("beta's item head fill = %d, want its run's own 2200", head.ctxUsed)
 	}
@@ -918,8 +1005,8 @@ func TestWorkflowItemsSubAgentCountsOnceUnderItsOwnHead(t *testing.T) {
 	item := domain.Usage{Calls: 1, PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100}
 	sub := domain.Usage{Calls: 1, PromptTokens: 400, CompletionTokens: 40, TotalTokens: 440}
 	assertDelegateRows(t, m, domain.Sum(item, sub),
-		usageRow(usageIndent+"dig deeper", sub, 440, m.opts.ContextWindow, false),
-		workflowRow("check {item}", item),
+		usageRow(usageIndent+"dig deeper", sub, 440, m.opts.ContextWindow, usageColumns{}),
+		workflowRow(usageColumns{}, "check {item}", item),
 	)
 }
 

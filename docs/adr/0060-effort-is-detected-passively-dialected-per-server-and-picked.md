@@ -99,8 +99,9 @@ facts it belongs to, before the local workdir. The word shown is what the **next
 actually carry**: session override ▸ profile `thinking.effort:` ▸ the server-reported
 `default_effort` ▸ the word `auto` (a `/props` hit, where the default is unknowable). The word
 sits in the footer's LEFT run with the upstream facts it belongs to, and that is also where a narrow
-window spends first: the row is composed TO the width in priority order — the effort word given up
-first, then the workdir, then the host — while the model, the `✦ offline` marker and the mode marker
+window spends first: the row is composed TO the width in priority order — the session's spend given
+up first where a call was priced (amendment 2026-10-03 below), then the effort word, then the
+workdir, then the host — while the model, the `✦ offline` marker and the mode marker
 are what the row never gives up, the marker dropping only where it cannot seat whole, because a
 clipped mode word would name a blast radius the session is not in.
 
@@ -116,6 +117,14 @@ workdir (2) and the host (1); the mode marker is priority 0 and survives every r
 floor. So narrowness now does what the 2026-08-28 note said it did not, and for the effort segment
 alone the two exits — nothing named it, or the row could not afford it — look the same on screen.
 What the word SAYS, and that it is present exactly when `/effort` is, are untouched.)*
+
+*(Amended 2026-10-03, superseding "the effort word is priority 3 and is the FIRST thing a narrow
+row gives up" in the amendment above — ADR 0093 adds a spend segment, the session's **Spend
+(money)** after the workdir, present only once a call was priced. It is priority 4 and is now the
+first thing a narrow row gives up, whole and with its separator; the effort word stays priority 3
+and is the first of the outward-in facts to go, before the workdir (2) and the host (1). In a
+session that priced no call there is no spend segment, and the effort word is still the first
+thing the row gives up.)*
 
 **7 — `/effort` is a popup picker; the text grammar is removed.** Bare `/effort` opens a
 fixed-choice popup ([ADR 0053](0053-popup-surfaces-embed-one-list-surface.md), the

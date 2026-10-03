@@ -1724,6 +1724,17 @@ a server's alias (ADR 0036 decision 1) — falling back to the endpoint's own ho
 `--endpoint` start that has no name, and any segment nothing has named is dropped with its
 separator.
 
+**The spend.** Once any call of the session has been priced (a `servers:` entry with a `price:`,
+ADR 0093), the run gains one more segment after the workdir: the session's **Spend (money)** in the
+configured `currency:` label — `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ ~/Repos/apogee ✦
+0.42 USD`. It is the WHOLE session's amount — the main agent's, every sub-agent's and every
+Workflow's, background ones included — the same sum the `/usage` pane's `session` row states, so
+the two never name different amounts. Where some of those calls ran on a server with no `price:`,
+the amount is the floor it is and reads `≥ 0.42 USD`. A session that priced no call shows no
+segment at all, never a `0.00`: an unpriced call is not a free one. It sits last because it is a
+running tally rather than a fact about where the session points, and it is priority 4 — the FIRST
+thing a narrow row gives up, before the effort word, since the `/usage` pane states it in full.
+
 **The effort word.** The thinking-effort segment sits with the upstream facts and before the
 workdir, because how hard the model is asked to think is a property of the model answering, not of
 where the session is pointed. It states the level the NEXT request will actually carry, resolved
@@ -1772,10 +1783,11 @@ missing, the content between two `│` bars, and a `╰──╯` rule under it 
 **status line's** posture instead, one row below the box rather than one row above it: the two-column
 `bodyIndent` lead, one unbroken black field to the window's full width, and the mode marker ending
 `bodyIndent` short of the edge — the same column the gauge ends in (above). A narrow window does not
-give up an end: the row is composed TO the width, spending it in the order the row is read for — the
-effort word goes first, then the workdir, then the host. What is left is what the row never gives
-up: the model, the `✦ offline` marker and the mode marker, and those three only give way to each
-other — the model truncates with an `…` before it goes at all, then `offline` goes. The marker drops
+give up an end: the row is composed TO the width. The session's spend goes first (below, "The
+spend"), and then the row spends its columns in the order it is read for — the effort word, then
+the workdir, then the host. What is left is what the row never gives up: the model, the
+`✦ offline` marker and the mode marker, and those three only give way to each other — the model
+truncates with an `…` before it goes at all, then `offline` goes. The marker drops
 only where it cannot seat whole between its two margins, and only THERE does the row keep the older
 shape, the left info truncated to the window: a clipped mode word would name a blast radius the
 session is not in, so the marker is stated whole or not at all.
@@ -2013,15 +2025,19 @@ stands right now — and a fill says nothing about the tokens a long run burned 
 away, nor anything at all about a delegate whose window closed when its run ended. Both readings are
 on the screen for the same session and they are different questions.
 
-**Six columns, one row per agent — seven where a cache share was reported.** `agent · calls ·
-prompt · completion · total · ctx`, under a header row painted a weight above the rows so the labels
+**Six columns, one row per agent — one more where a cache share was reported, one more where a
+call was priced.** `agent · calls · prompt · completion · total · ctx`, under a header row painted a weight above the rows so the labels
 are found without being read. A `cached` column joins them directly after `prompt` — the count it
 qualifies, since it is a share of those very tokens rather than a spend beside them — and it is
 drawn only when some agent on the pane reported one.
 Servers that report no cache breakdown at all are still the majority, and a header over a column of
 blanks would send the reader looking for a number nobody said; the verdict is taken once for the
 whole pane, so an agent that reported no share leaves an empty cell under a column its neighbour
-filled rather than shortening its row out of the columns beside it. `main` comes
+filled rather than shortening its row out of the columns beside it. A `cost` column joins after
+`total` on the same rule, drawn only once some call was priced (a `servers:` entry with a `price:`,
+ADR 0093): each row's **Spend (money)** in the configured `currency:` label, a `—` on a row whose
+calls were all unpriced — counted, never priced at zero — and a `≥ ` before an amount that covers
+only some of its calls, which is where the `session` row of a mixed session lands. `main` comes
 first, then each delegate **in transcript order** — indented under it, named by the delegation's own
 name or, unnamed, the first line of its task, clipped where it is longer than the column — and last
 a `session` row, the agents above it added up. The counts are spelled in the coarse form the gauge

@@ -152,7 +152,11 @@ internal/tui/usage.go — usageSince, runSpend.with; internal/tui/usage_test.go 
 **Commit:** `feat(tui): carry priced usage through the transcript and background workflows`
 Depends on item 4.
 
-## 5a. TUI — cost in `/usage` and the footer
+## 5a. TUI — cost in `/usage` and the footer — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): internal/tui/fold.go is unchanged — Model.foldStats already adopts the whole cumulative reading (cost and call split included) since item 5, and the footer reads domain.Sum(m.usage, m.delegateUsageTotal()) in Model.footerLeftText as the regression guard directs, so there was nothing to fold.
+NOTES (2026-10-03): usageRow / usageHeaderCells / usageSubAgentRows now take a usageColumns verdict (cached, priced, currency) from Model.usageColumns instead of `cached bool`; the test call sites in usage_test.go and subagentblock_test.go were updated, and workflowRow takes the columns as its first argument.
+NOTES (2026-10-03): the `≥ ` partial mark applies to any row whose calls were partly priced, not only the session total (an agent that switched between a priced and an unpriced server is partial too); the spend segment sits last in the footer's left run, after the workdir; the /usage cost column sits after `total`, before `ctx`. One helper, spendText, spells the amount for both surfaces.
 
 **What:** Recast at the regression check (2026-10-03).
 **Goal:** `/usage` shows a cost column and total when any call was priced, and the footer shows the running session cost; neither appears in a session with no priced call.

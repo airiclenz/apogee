@@ -2273,7 +2273,7 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		m = delegate(t, m, "s2", "build the docs", childTotals, 0)
 		rename(&m.transcript, "s1", name)
 
-		rows := m.usageSubAgentRows(false)
+		rows := m.usageSubAgentRows(usageColumns{})
 		if len(rows) != 2 {
 			t.Fatalf("delegate rows = %q, want the two that spent", rows)
 		}

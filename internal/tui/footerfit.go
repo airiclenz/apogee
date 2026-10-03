@@ -4,8 +4,8 @@ import "strings"
 
 // The footer's fit — one composer, spending the window in the order the row is read for
 //
-// The footer states five facts about the session and one about the mode it runs in, and on a wide
-// window it says all six. On a narrow one it cannot, and the question this file answers is which
+// The footer states six facts about the session and one about the mode it runs in, and on a wide
+// window it says all seven. On a narrow one it cannot, and the question this file answers is which
 // of them the row gives up first.
 //
 // The old answer was "the mode marker": the moment the left run and the marker did not both fit,
@@ -14,12 +14,14 @@ import "strings"
 // it is worst precisely where it matters, since a narrow window is not a rare state. The marker is
 // now what the row never gives up.
 //
-// The fit is a LADDER over priorities, and the row spends its columns outward-in, the same reading
-// order the segments are laid out in: the effort word goes first (priority 3 — how hard the model
-// is asked to think), then the workdir (2), then the host (1). What is left is priority 0: the
-// model, the `✦ offline` marker and the mode marker, and those three only give way to each other —
-// the model truncates, then goes, then offline goes, and only where the mode marker cannot seat
-// whole between its two margins does the row fall back to the old shape.
+// The fit is a LADDER over priorities. The session's spend goes first (priority 4 — the Spend
+// (money) the session has run up, a running tally the /usage pane states in full), and then the
+// row spends its columns outward-in, the same reading order the segments are laid out in: the
+// effort word (priority 3 — how hard the model is asked to think), then the workdir (2), then the
+// host (1). What is left is priority 0: the model, the `✦ offline` marker and the mode marker, and
+// those three only give way to each other — the model truncates, then goes, then offline goes, and
+// only where the mode marker cannot seat whole between its two margins does the row fall back to
+// the old shape.
 //
 // The whole layout comes out of ONE call. The footer has two readers of its arithmetic — the
 // painter and the pointer that addresses the marker's cells ([Model.handleFooterModeClick]) — and
@@ -29,7 +31,7 @@ import "strings"
 // grapheme, and the marker is right-anchored, so that column lands on the mode word.
 
 // footerInput is everything the fit needs, and all of it is plain text: no styles, no escape
-// sequences, no arithmetic already done. The five segment strings are the facts the left run is
+// sequences, no arithmetic already done. The six segment strings are the facts the left run is
 // composed from, in reading order, each one empty where nothing has named it; mode is the
 // already-worded mode marker (its symbol, its word, and in Auto the blast radius that word runs
 // with), which the fit treats as ONE atom and never splits.
@@ -41,6 +43,7 @@ type footerInput struct {
 	model   string
 	effort  string
 	workdir string
+	spend   string
 	offline string
 
 	mode string
@@ -74,19 +77,20 @@ type footerLayout struct {
 //
 // "Fits" is the painter's own test, unchanged: at least one blank column between the left run and
 // the marker, so the two ends never touch. The rungs, in order, stopping at the first that fits:
-// the full run; the run without the effort word; without the workdir; without the host; the model
-// truncated to what is left; the model gone; offline gone. The last rung is the marker alone
-// between its two margins, and there the blank column is not asked for — with no left run there is
-// nothing for it to separate the marker from.
+// the full run; the run without the spend; without the effort word; without the workdir; without
+// the host; the model truncated to what is left; the model gone; offline gone. The last rung is the
+// marker alone between its two margins, and there the blank column is not asked for — with no left
+// run there is nothing for it to separate the marker from.
 func footerFit(in footerInput) footerLayout {
 	// The priority drops, richest first. A rung whose dropped segment was already absent composes
-	// the same run as the one above it and fails the same way, so an absent effort word simply
-	// hands the next rung the workdir — nothing has to know which segments are named.
+	// the same run as the one above it and fails the same way, so an absent spend or effort word
+	// simply hands the next rung on — nothing has to know which segments are named.
 	for _, segments := range [][]string{
-		{in.host, in.model, in.effort, in.workdir}, // everything the session knows
-		{in.host, in.model, in.workdir},            // priority 3: the effort word
-		{in.host, in.model},                        // priority 2: the workdir
-		{in.model},                                 // priority 1: the host
+		{in.host, in.model, in.effort, in.workdir, in.spend}, // everything the session knows
+		{in.host, in.model, in.effort, in.workdir},           // priority 4: the spend
+		{in.host, in.model, in.workdir},                      // priority 3: the effort word
+		{in.host, in.model},                                  // priority 2: the workdir
+		{in.model},                                           // priority 1: the host
 	} {
 		if layout, ok := in.seat(footerRun(segments...)); ok {
 			return layout
@@ -155,7 +159,7 @@ func (in footerInput) offlineRun(info string) string {
 // own styled run and its error tone rather than being folded into the info run to be truncated
 // with it.
 func (in footerInput) floor() footerLayout {
-	info := footerRun(in.host, in.model, in.effort, in.workdir)
+	info := footerRun(in.host, in.model, in.effort, in.workdir, in.spend)
 	offline := in.offlineRun(info)
 	budget := max(0, in.width-in.margin)
 	info = in.measure.Truncate(info, budget, "…")

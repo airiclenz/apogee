@@ -71,8 +71,9 @@ func TestModelShiftTabCyclesMode(t *testing.T) {
 // The footer's one job on a narrow window is to keep saying which blast radius the session runs in,
 // and the old shape had it exactly backwards: the marker dropped WHOLE the moment both ends did not
 // fit, so the fact that matters most was the first to go. The row now spends its columns in the
-// order it is read for — the effort word first, then the workdir, then the host — and the marker
-// stays whole at every width in this sweep, Auto's blast-radius word beside it.
+// order it is read for — in this session, which priced no call and so shows no spend, the effort
+// word first, then the workdir, then the host — and the marker stays whole at every width in this
+// sweep, Auto's blast-radius word beside it.
 //
 // The left run is asserted VERBATIM at each width, not merely searched: a segment that leaves takes
 // its separator with it, so no rung of the ladder may open or close on a dangling ✦.
@@ -107,6 +108,85 @@ func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
 			}
 		})
 	}
+}
+
+// footerLeftRun is the footer's left run as a human reads it at width w: the painted row with its
+// styling and the right-anchored Auto marker taken off.
+func footerLeftRun(t *testing.T, m Model, w int) string {
+	t.Helper()
+
+	marker := footerModeText(modeMarker(domain.ModeAuto), confinedWord)
+	flat := ansiPattern.ReplaceAllString(m.footerContent(w), "")
+	if !strings.HasSuffix(flat, marker+bodyIndent) {
+		t.Fatalf("footer = %q, want it to end %q", flat, marker+bodyIndent)
+	}
+	return strings.TrimSpace(strings.TrimSuffix(flat, marker+bodyIndent))
+}
+
+// TestFooterStatesTheSessionSpend pins the footer's spend segment (ADR 0093): absent while no call
+// was priced, the WHOLE session's amount once one was — the main agent's, a sub-agent's and a
+// background workflow's added up, the same sum the /usage session row states — marked partial
+// where some of those calls were unpriced, and the first segment a narrowing row gives up, ahead
+// of the effort word.
+func TestFooterStatesTheSessionSpend(t *testing.T) {
+	t.Parallel()
+
+	const (
+		facts     = "test-host ✦ test-model ✦ high ✦ /ws/proj"
+		withSpend = facts + " ✦ ≥ 0.42 EUR"
+	)
+	priced := func(t *testing.T) Model {
+		t.Helper()
+
+		m := footerFactsModel(t)
+		m.opts.Currency = "EUR"
+		m.usage = domain.Usage{Calls: 1, PromptTokens: 900, TotalTokens: 900, CostMicros: 100_000, PricedCalls: 1}
+		// The sub-agent ran one call on a priced server and one on a server with no `price:`.
+		m = delegate(t, m, "s1", "survey the tests", domain.Usage{
+			Calls: 2, PromptTokens: 800, TotalTokens: 800, CostMicros: 200_000, PricedCalls: 1, UnpricedCalls: 1,
+		}, 0)
+		return foldEvents(t, m,
+			bgPhase(domain.WorkflowStarted),
+			pricedRunUsage(workflowRunUsage(bgChildBase("bg.1"), 1, 1000, 100), 120_000, 1),
+		)
+	}
+
+	t.Run("no priced call shows no segment", func(t *testing.T) {
+		t.Parallel()
+
+		m := footerFactsModel(t)
+		m.opts.Currency = "EUR"
+		m.usage = domain.Usage{Calls: 3, PromptTokens: 900, TotalTokens: 900, UnpricedCalls: 3}
+
+		if got := footerLeftRun(t, m, 120); got != facts {
+			t.Errorf("footer's left run = %q, want %q — an unpriced session names no amount", got, facts)
+		}
+	})
+
+	t.Run("the whole session's spend, marked partial", func(t *testing.T) {
+		t.Parallel()
+
+		if got := footerLeftRun(t, priced(t), 120); got != withSpend {
+			t.Errorf("footer's left run = %q, want %q — main, sub-agent and background workflow added up", got, withSpend)
+		}
+	})
+
+	t.Run("the spend goes before the effort word", func(t *testing.T) {
+		t.Parallel()
+
+		m := priced(t)
+		for w := 120; w > 0; w-- {
+			got := footerLeftRun(t, m, w)
+			if got == withSpend {
+				continue
+			}
+			if got != facts {
+				t.Errorf("footer's left run at width %d = %q, want %q — the spend is the first segment to go", w, got, facts)
+			}
+			return
+		}
+		t.Fatal("the footer never narrowed past its full run")
+	})
 }
 
 // TestModeColorDistinct proves each autonomy mode maps to its own footer-marker colour, so the

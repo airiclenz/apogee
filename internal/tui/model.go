@@ -3555,17 +3555,18 @@ func (m Model) footerView() string {
 // rendered under one style, which would let the mode's colour reset bleed the black field. The host falls back to the endpoint when no alias is
 // configured, and every segment nothing has named is dropped with its separator (nonEmpty).
 //
-// The workdir closes the run rather than opening it because the line reads outward-in — the server
-// this session talks to, the model it talks to there, how hard that model is asked to think, and
-// last the local directory it is pointed at, the one fact of the four that no upstream state can
-// change.
+// The workdir closes the outward-in facts rather than opening them because the line reads
+// outward-in — the server this session talks to, the model it talks to there, how hard that model
+// is asked to think, and last the local directory it is pointed at, the one fact of the four that
+// no upstream state can change. Once a call has been priced the session's spend follows them
+// ([Model.footerLeftText]): a running tally, not a fact about where the session points.
 //
 // A narrow window does not give up an end: the row is composed TO the width by [footerFit]
-// (footerfit.go), which spends it in priority order — the effort word first, then the workdir, then
-// the host — and keeps the model, the offline marker and the mode marker. Only at the FLOOR, where
-// the marker cannot seat whole between its two margins, does the left info truncate with an
-// ellipsis and the mode marker drop WHOLE, because a clipped mode word would name a blast radius
-// the session is not in.
+// (footerfit.go), which spends it in priority order — the spend first, then the effort word, then
+// the workdir, then the host — and keeps the model, the offline marker and the mode marker. Only
+// at the FLOOR, where the marker cannot seat whole between its two margins, does the left info
+// truncate with an ellipsis and the mode marker drop WHOLE, because a clipped mode word would name
+// a blast radius the session is not in.
 //
 // The line is one of the view's escape-strip SEAMS (doc.go): the model id and the effort default
 // are the SERVER's text and the host is config text, and the footer strips all three on their
@@ -3648,8 +3649,8 @@ func (m Model) footerRow(w int) footerLayout {
 }
 
 // footerLeftText composes the footer's left half as PLAIN, UNJOINED segments: the outward-in facts
-// (host, model, effort, workdir) and the bare word for the state a send is refused in, each one
-// empty where nothing has named it. They stay apart because the fit spends them one at a time — a
+// (host, model, effort, workdir), the session's spend, and the bare word for the state a send is
+// refused in, each one empty where nothing has named it. They stay apart because the fit spends them one at a time — a
 // run joined here could only be truncated as a whole, where the ladder drops entire segments WITH
 // their separators ([footerFit]) — and the join itself now happens there.
 //
@@ -3662,11 +3663,18 @@ func (m Model) footerRow(w int) footerLayout {
 // The model slot is the WHOLE of [Model.upstreamSegments] joined, never its first element: that
 // slice's stated promise is that a stand-in word may yet be more than one, and its callers never
 // index it.
+//
+// The spend is the WHOLE session's Spend (money) — the main agent's totals with every delegate's
+// and every Workflow's, background ones included (delegateUsageTotal), the same sum the /usage
+// pane's session row states — so the footer and the pane never name two amounts for one session.
+// It is present only once some call was priced (spendText): a session on servers with no `price:`
+// shows no segment at all rather than a zero no server charged.
 func (m Model) footerLeftText() footerInput {
 	in := footerInput{
 		host:    stripEscapes(hostDisplay(m.opts)),
 		model:   footerRun(m.upstreamSegments()...),
 		workdir: m.workdir,
+		spend:   spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.opts.Currency),
 	}
 	override, profile := m.eng.ThinkingEffort()
 	support := m.effortSupport()

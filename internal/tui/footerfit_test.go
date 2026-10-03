@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The footer's five facts and its marker, as one narrow window after another takes them away.
+// The footer's six facts and its marker, as one narrow window after another takes them away.
 // The literals are deliberately spelled out rather than composed from the code under test: the
 // drop ORDER is the contract, and a test that built its own expectation with the same joiner
 // would agree with a wrong order as happily as with the right one.
@@ -14,16 +14,18 @@ const (
 	footerTestModel   = "gpt-oss-20b"
 	footerTestEffort  = "high"
 	footerTestWorkdir = "~/apogee"
+	footerTestSpend   = "≥ 0.42 EUR"
 	footerTestMode    = "⏵⏵ auto · confined"
 
-	footerRunFull       = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee"
+	footerRunFull       = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee ✦ ≥ 0.42 EUR"
+	footerRunNoSpend    = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee"
 	footerRunNoEffort   = "apollo ✦ gpt-oss-20b ✦ ~/apogee"
 	footerRunNoWorkdir  = "apollo ✦ gpt-oss-20b"
 	footerRunModelOnly  = "gpt-oss-20b"
 	footerOfflineJoined = " ✦ offline"
 )
 
-// footerFitCase is the full five-segment footer every case below narrows, offline included so the
+// footerFitCase is the full six-segment footer every case below narrows, offline included so the
 // ladder is exercised with the one segment it may never drop before the model.
 func footerFitCase() footerInput {
 	measure := newWidthAuthority()
@@ -32,6 +34,7 @@ func footerFitCase() footerInput {
 		model:   footerTestModel,
 		effort:  footerTestEffort,
 		workdir: footerTestWorkdir,
+		spend:   footerTestSpend,
 		offline: offlineLabel,
 		mode:    footerTestMode,
 		margin:  measure.Width(bodyIndent),
@@ -51,8 +54,8 @@ func footerSeatWidth(t *testing.T, in footerInput, info, offline string) int {
 
 // TestFooterFitDropsSegmentsInPriorityOrder is the ladder itself: at the narrowest window each
 // rung still seats in, the row says exactly that rung — and one column below it, a further segment
-// has gone. The order is the order the row is read for, outward-in: the effort word first, then
-// the workdir, then the host.
+// has gone. The spend goes first, and then the order is the order the row is read for, outward-in:
+// the effort word, then the workdir, then the host.
 func TestFooterFitDropsSegmentsInPriorityOrder(t *testing.T) {
 	t.Parallel()
 
@@ -62,7 +65,8 @@ func TestFooterFitDropsSegmentsInPriorityOrder(t *testing.T) {
 		info string
 	}{
 		{"everything the session knows", footerRunFull},
-		{"the effort word goes first", footerRunNoEffort},
+		{"the spend goes first", footerRunNoSpend},
+		{"then the effort word", footerRunNoEffort},
 		{"then the workdir", footerRunNoWorkdir},
 		{"then the host", footerRunModelOnly},
 	}
@@ -228,12 +232,14 @@ func TestFooterFitSeatsTheMarkerAtEveryWidthThatHoldsIt(t *testing.T) {
 }
 
 // TestFooterFitSkipsASegmentNothingNamed proves the ladder is stated over priorities rather than
-// over positions: a session whose server reports no effort dial has nothing to drop at priority 3,
-// so the first segment the narrowing row gives up is the workdir.
+// over positions: a session with no priced call and a server that reports no effort dial has
+// nothing to drop at priorities 4 and 3, so the first segment the narrowing row gives up is the
+// workdir.
 func TestFooterFitSkipsASegmentNothingNamed(t *testing.T) {
 	t.Parallel()
 
 	in := footerFitCase()
+	in.spend = ""
 	in.effort = ""
 
 	const runNoEffort = "apollo ✦ gpt-oss-20b ✦ ~/apogee"
@@ -251,12 +257,12 @@ func TestFooterFitSkipsASegmentNothingNamed(t *testing.T) {
 
 // TestFooterFitKeepsOfflineThroughEveryLadderDrop pins offline's priority: the state a send is
 // refused in outranks every fact about where the session points, so it is still on the row when
-// the host, the workdir and the effort word have all gone.
+// the spend, the host, the workdir and the effort word have all gone.
 func TestFooterFitKeepsOfflineThroughEveryLadderDrop(t *testing.T) {
 	t.Parallel()
 
 	in := footerFitCase()
-	for _, info := range []string{footerRunFull, footerRunNoEffort, footerRunNoWorkdir, footerRunModelOnly} {
+	for _, info := range []string{footerRunFull, footerRunNoSpend, footerRunNoEffort, footerRunNoWorkdir, footerRunModelOnly} {
 		at := in
 		at.width = footerSeatWidth(t, in, info, footerOfflineJoined)
 		if got := footerFit(at); got.offline != footerOfflineJoined {
