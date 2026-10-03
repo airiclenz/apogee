@@ -450,8 +450,9 @@ package edge and no cycle (`tools` imports only `domain`).
   set of four built-ins, with `write_file` the lone writer.)*
 - **A future writer** — a `patch`/apply-edit tool — carries it too; a read-only tool such as `diff`
   does **not** (it needs no disposition help; Plan already runs it).
-- **Never carried by:** `terminal`, `python-exec`, `git` (subprocess surface — OS-confined in Auto, not
-  marker-bounded); `web-fetch`/`http-request`/MCP (`ExternalEffectTool`); `sub_agent` (the recursion
+- **Never carried by:** `terminal`, `python_exec`, the `git_*` tools (subprocess surface — OS-confined
+  in Auto, not marker-bounded; the hardened git read set takes the RO-subproc row instead);
+  `web_fetch`/`http_request`/MCP (`ExternalEffectTool`); `sub_agent` (the recursion
   point — D2, carries no disposition marker); any third-party tool (structurally cannot).
 
 **A marker-carrier's own subprocess child gets the box (2026-08-26).** The marker says the tool's
@@ -718,7 +719,7 @@ obtainable only inside `internal/tools` and is minted for the hardened git read 
 the 2026-09-06 trio `git_status`/`git_log`/`git_diff_range`, joined 2026-09-15 by `git_show` on the
 same minting conditions); **WS-write** =
 `workspaceScopedWriter` (§3); **subproc** =
-shell/exec subprocess tool (`terminal`/`python-exec`/`git`); **net** = `ExternalEffectTool` of kind
+shell/exec subprocess tool (`terminal`/`python_exec`/`git_branch`/`git_commit`); **net** = `ExternalEffectTool` of kind
 `network` carrying the `urlFilteredNetworker` marker (Apogee's own — the marker is obtainable only by
 embedding `internal/tools`' network funnel, so it cannot exist without the `URLGuard`); **3p-net** =
 kind `network` **without** that marker (a third-party network tool whose URLs Apogee cannot vouch
@@ -739,7 +740,7 @@ target lies outside the session scratch dir, and the refusal names the dir — t
 | **WS-write**, target **out** of workspace | refuse | gate | gate | **gate** | run |
 | **subproc** (caps sufficient) | refuse² | gate | gate | **confine** | run |
 | **subproc** (caps **insufficient**) | refuse² | gate | gate | **gate** ("confine if you can, gate if you can't") | run |
-| **net** (`web-fetch`/`http-request`) | refuse¹ | gate | gate | **run** (url-safety filtered) | run |
+| **net** (`web_fetch`/`http_request`) | refuse¹ | gate | gate | **run** (url-safety filtered) | run |
 | **3p-net** (no url-filter marker) | refuse¹ | gate | gate | **gate** (URLs unfiltered) | run |
 | **mcp** | refuse¹ | gate | gate | **gate** (server-grain allow-for-session) | run |
 | **3p-write** (can't vouch for scoping) | refuse | gate | gate | **gate** | run |
@@ -765,7 +766,7 @@ escapes the dangerous-action floor.
 Reading the load-bearing column (**Auto · `confine=true`**, the default): a subprocess escape is
 **OS-blocked**; an Apogee in-workspace write is **path-safety-bounded** (no Confine, no prompt); an
 out-of-workspace Apogee write **asks** (Apogee can inspect the path, so it can — unlike a subprocess);
-`web-fetch` **auto-runs** url-filtered (the network is open; a subprocess could `curl` the same host, and
+`web_fetch` **auto-runs** url-filtered (the network is open; a subprocess could `curl` the same host, and
 the native tool is the *safer* path) while a network tool that does **not** route through the funnel
 **asks** (its URLs are unfiltered — the network analogue of the 3p-write row); **MCP asks**
 (unfenceable server — the per-tool teeth, intact).
@@ -1145,6 +1146,27 @@ obligations rather than tacked on here.)*
 passes #1–#5 and `ProbeNetwork` passes #7/#8; `sandbox-exec`-absent ⇒ `Capabilities()=={false,false}` ⇒
 the disposition gates the subprocess surface (Auto not refused, ADR 0012); cross-build green
 (`darwin`-tagged).
+
+> **Amended 2026-10-03 (the checklists follow the 14-row battery).** The row lists above were written
+> against the P3.1-era battery and never picked up row #8 or rows #11–#14 (§6.2's amendments). Every
+> backend's driver hands the **same** `confinetest.Probe` and `confinetest.ProbeNetwork` the whole
+> battery, so a backend is done only when each row its host can run passes; a row skips only on its
+> own stated condition (§6.2's Backend column), never by omission from a checklist:
+>
+> - **`Probe`** runs #1–#6, #11, #12 and #14. #11 and #14 skip under `cmd.exe`; #12 skips where
+>   coreutils `truncate` is absent and is keyed on the backend's own `Residuals` (deny with the bytes
+>   intact, or succeed when `truncate(2)` is disclosed).
+> - **`ProbeNetwork`** runs #7, #8 and #13, and skips whole where `NetworkEgress == false`; #13 also
+>   needs `bash` and is keyed on `Residuals` (`connect(2) UDP`).
+> - **P3.2 (landlock):** `Probe` passes #1–#6, #11, #12 and #14, #12 against the kernel's ABI
+>   (`TestLandlockResidualsMatchHostABI`); `ProbeNetwork` passes #7, #8 and #13 at ABI ≥ 4 (≥ 6.7)
+>   and skips below, and `APOGEE_REQUIRE_LANDLOCK_NET=1` turns that skip into a failure on a runner
+>   known to carry ABI ≥ 4.
+> - **Linux namespace:** as its checklist above, plus #14.
+> - **P3.3 (seatbelt):** `Probe` passes #1–#6, #11 and #14 (#12 where `truncate` is installed);
+>   `ProbeNetwork` passes #7, #8 and #13.
+> - **Windows token (§9.4):** #1–#6 natively plus #9/#10; #11–#14 skip (`cmd.exe`, and
+>   `NetworkEgress == false` for the network arm).
 
 ---
 

@@ -6,7 +6,7 @@ D8 (`fan_out` ships off; the flagship experiment) /
 [ADR 0089](../adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md)
 D1 (the background switch and `workflow` are shown only to model classes the bench has approved) /
 [ADR 0009](../adr/0009-the-ab-decision-rule.md) (the decision rule) ·
-**Realised by:** `docs/plans/2026-09-27 - 00 - engine-run-workflows-plan.md` (the design; the
+**Realised by:** `docs/plans/archived/2026-09-27 - 00 - engine-run-workflows-plan.md` (the design; the
 engine and facade it measures)
 
 > **How to read this file.** It states *which* experiments gate turning the model's workflow tools

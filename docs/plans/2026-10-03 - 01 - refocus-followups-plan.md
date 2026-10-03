@@ -271,7 +271,10 @@ NOTES (2026-10-04): image input is a new **Image input** (`vision:`) entry place
 - `grep -c "vision:" CONTEXT.md` ≥ 1; `awk '/^\*\*MCP client\*\*/,/^_Avoid_/' CONTEXT.md | grep -c headers-env` ≥ 1; `grep -c "ConPTY" CONTEXT.md` ≥ 1
 **Commit:** `docs(context): update reaction generation, add images, MCP headers, ConPTY`
 
-## 13. Fix stale design and layout docs
+## 13. Fix stale design and layout docs — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the contract's `internal/mechanisms` mentions already sat only inside dated amendment blocks (two `> **Amended …**` blockquotes and §10), so none were edited; the old tool spellings were fixed in §3.3, the §4 class legend, the disposition table and the reading paragraph (`git` became the `git_*` tools in §3.3 and `git_branch`/`git_commit` in the subproc legend, since the git read set is RO-subproc); `git` meaning the system binary (§7, the 2026-08-30 amendment) stays.
+NOTES (2026-10-04): layout.md's tok/s readout is a plain bold-lead paragraph in "The status line's spinner" rather than a dated amendment blockquote — it describes shipped behaviour the file never covered, not a change to a recorded design.
 
 **What:** Mechanical drift: old tool spellings and the deleted `internal/mechanisms` in the confinement contract, and its §6.3 checklists predating escape tests #8 and #11–#14; a half-corrected naming reference in `mcp-client.md`; two live docs citing pre-archive plan paths; `layout.md` never describes the status line's `· N tok/s` readout.
 **Regression guard.** `grep -n "tok/s" layout.md` already matches at base (the `/sub-agents-server` pane, `layout.md:2407-2413`); the check is scoped: `awk '/^## The status line.s spinner/,/^## The footer/' layout.md | grep -c "tok/s"` ≥ 1. The contract's dated amendment sections §9–§11 count as dated amendment blocks and are not rewritten; `grep -n "internal/mechanisms"` on the contract may print only lines inside `> **Amended …**` blockquotes or §9–§11 (at base: 556, 579, 1339).

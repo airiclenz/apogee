@@ -1619,6 +1619,16 @@ it is doing — and the states waiting on a human (an open question, an approval
 silence there being the human's own. It is also the first thing the left slot gives up when the row
 is tight, dropped whole rather than truncated.
 
+**How fast it is generating.** While a Turn runs, the phrase ends in a `· N tok/s` readout in the
+status bar's own colour — `⣻ responding · 12s · 38 tok/s` (`throughputSuffix`). N is the last
+completion's server-reported completion-token count over the window from that Turn's first output
+event, reasoning or visible token, to the usage report that closes it, rounded to a whole number;
+it stands until the next completion replaces it. Below one token per second it renders nothing, and
+so does an unmeasured completion — a window shorter than a quarter of a second reads as no reading
+at all rather than a clamped or invented number — so the row never shows `0 tok/s`. The readout is
+part of the phrase, not a slot of its own: the states waiting on a human, the error and idle never
+carry it, and a row too tight for the whole phrase truncates it from the right with the rest.
+
 ---
 
 ## The status line's right slot

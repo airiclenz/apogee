@@ -34,7 +34,7 @@ The rules both menus follow on screen — height, pointer, chrome — are `layou
 > seating the caret in the input box or starting a transcript selection, because the prompt below an
 > ask question stays live and the transcript behind an approval is where its context is read.
 
-> Amended 2026-09-27 by `docs/plans/2026-09-26 - 00 - code-audit-fixes-plan.md` item 19: the ask
+> Amended 2026-09-27 by `docs/plans/archived/2026-09-26 - 00 - code-audit-fixes-plan.md` item 19: the ask
 > question **arms like the approval prompt**, on the one latch the two prompts share. Its `⏎` — and
 > the second click that sends a choice — is dead from the moment the question is folded in until the
 > terminal has answered the drain marker asked from behind the prompt's frame (or the two-second

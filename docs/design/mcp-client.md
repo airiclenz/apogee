@@ -170,7 +170,7 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
   Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` (§2),
   and server names must be non-empty and unique (the name
-  prefixes each surfaced tool's registry key as `mcp__…` — actually `<name>__<tool>`, see §4).
+  prefixes each surfaced tool's registry key as `<name>__<tool>` — see the Tool naming bullet below).
 - **Host** is what a connect takes from the process rather than from config: `Host.Proxy` resolves
   the egress proxy the HTTP transports honour, nil meaning `http.ProxyFromEnvironment`; `Host.Shell`
   scopes a stdio server's `env-allowlist` environment (nil: `platform.Current()`);
