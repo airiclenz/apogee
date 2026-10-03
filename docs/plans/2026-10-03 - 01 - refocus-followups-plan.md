@@ -44,7 +44,9 @@
 - 15: guard folded (Note placement after item 14's; 0079 Acceptance via test-drivers.md); yields to internal/agent/subagent.go:1955-1957 (ADR 0005's tool-subset rule stands)
 - 2 (re-check): guard folded (CHANGELOG grep dropped from Acceptance, checked at closeout; dispatch test fake is a Subprocess() tool with no Approver, not unconfinableClaimTool; tools tests assert the POSIX and Windows error texts; open comment/doc rule with sweep grep; demote ErrorEvent stays generic and fires per gated POSIX send); supersedes ADR 0059 Bounds "Amended 2026-10-03" bullet and docs/manual/configuration.md:2547-2549
 
-## 1. Reconcile the bead register and the archived plan's status
+## 1. Reconcile the bead register and the archived plan's status — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): export.auto did not rewrite .beads/issues.jsonl after the three-id `bd update` (AGENTS.md batch-write lag), so it was re-exported with `bd export -o .beads/issues.jsonl`; the diff is exactly the rw6, zwvj and 6ef3 rows, and `.beads/interactions.jsonl` is unchanged, so it is off FILES. The ifrv import changed the DB only (the committed row was already the closed one). Committer: the pre-commit hook re-exports after the index snapshot — if `.beads/issues.jsonl` shows modified after the commit, re-stage it and `git commit --amend --no-edit`.
 
 **What:**
 **Goal:** `bd export` and `.beads/issues.jsonl` agree row for row; `apogee-ifrv` is closed with its original close time, reason and note; `apogee-rw6` is titled "MCP OAuth for HTTP MCP servers"; `apogee-rw6`, `apogee-zwvj`, `apogee-6ef3` carry spec-id `docs/plans/archived/2026-10-03 - 00 - table-stakes-and-image-input-plan.md`; that archived plan's header reads `**Status:** done — all 18 items done (2026-10-03)`.

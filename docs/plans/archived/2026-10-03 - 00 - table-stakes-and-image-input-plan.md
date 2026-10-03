@@ -2,7 +2,7 @@
 
 **Goal:** Ship four of the five open `apogee-rw6` table-stakes rows (priced usage in a user-chosen currency, a structured compaction summary, custom headers for HTTP MCP servers, a ConPTY backend for the Console family on Windows) and image input (`apogee-bmj`): image parts on both wire dialects, `@ref` images, clipboard paste and pasted-path attach in the TUI.
 **Date:** 2026-10-03
-**Status:** unexecuted
+**Status:** done — all 18 items done (2026-10-03)
 **sized for:** ~200k-context host
 **base:** 7f1f94cb
 **Closes:** none at plan level (`apogee-rw6` keeps its MCP OAuth row; item 17 updates it)
