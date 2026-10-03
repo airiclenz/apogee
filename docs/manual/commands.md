@@ -90,6 +90,19 @@ and the rest of your message goes ahead. An image over 5 MiB, or one that would 
 the message's images past 5 MiB together, is left out the same way, with the file and
 the limit named.
 
+You can also attach an image without typing its name. `⌃v` reads an image off the
+clipboard when it holds one (through `wl-paste` or `xclip` on Linux, `pngpaste` on macOS,
+PowerShell under WSL) and pastes the clipboard's text when it does not; a clipboard image is
+named `clipboard-1.png`, `clipboard-2.png`, and so on. Pasting text that is exactly the path
+of an image file — what dropping a file onto most terminals does — attaches that file instead
+of typing its path, on a server with `vision: true`; on any other server the path is typed as
+before. Attached images wait on one line above the prompt box
+(`attached: shot.png (412.0 KiB) · clipboard-1.png (88.3 KiB)`) and go out with the next
+message you send — on their own, if the box is empty. A message queued while the model works
+does not take them; they wait for the next send at idle. An image over the limits above is
+refused in the status line, and a clipboard image on a server without `vision: true` is
+refused there too.
+
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works, and a queued message does not wait for sub-agents that have not started yet:
 those are skipped, the model is told so, and your message lands once the running ones finish.
@@ -97,7 +110,8 @@ A command that needs a quiet engine queues the same way — `⏎` on `/clear` mi
 `queued command: /clear` row above the box, below any queued messages, and the queued commands
 run in the order you typed them the moment the model is idle, **before** any queued message is
 sent, so a `/clear` typed ahead of a message clears first. `⌫` on an empty box takes the newest
-row back into the editor — a queued command first, then a queued message. Cancelling the run does
+row back into the editor — a queued command first, then a queued message — and with nothing
+queued it drops the newest attached image. Cancelling the run does
 not drop a queued command: it runs at that idle, while queued messages are held for your next
 `⏎` — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
 prompts you have already sent in this workspace, `esc` twice cancels a run, `⌃c` quits.

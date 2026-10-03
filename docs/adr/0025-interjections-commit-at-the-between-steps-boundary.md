@@ -163,7 +163,8 @@ overlooked.
 *everything*, including what was waiting to go out. After a cancel or a loop error the staged rows
 stay put under a one-time note (`N queued messages held — ⏎ sends them`); the next `⏎` — even on an
 empty box — sends them, and Backspace on an empty box pops the newest back into the editor,
-editable. A natural completion (`exchangeDoneMsg`, and `compactDoneMsg`, which is a completion too)
+editable (with nothing queued it drops the newest pending image instead — amended 2026-10-03,
+below). A natural completion (`exchangeDoneMsg`, and `compactDoneMsg`, which is a completion too)
 auto-sends what is left, because the human pressed `⏎` on those rows and has no reason to expect a
 second keypress is needed. A deferred quit beats a flush outright.
 
@@ -221,7 +222,8 @@ idle-only, because offering a command that would be refused misleads.
 > any held or staged message is sent, so a queued `/clear` clears before a queued message lands. A
 > verb that opens a worker of its own (`/compact`, `/continue`) stops the drain, and what is left
 > waits for that worker's own terminal fold. Backspace on an empty box pops the newest queued command
-> back into the editor first (it is nearest the box), then the newest staged message; the reporting
+> back into the editor first (it is nearest the box), then the newest staged message, and only with
+> nothing queued drops the newest pending image (amended 2026-10-03, below); the reporting
 > verbs still run on the spot; a line that could not run even at idle (a parse error) is answered by
 > its usage note at once rather than deferred. The queue is the host's own bookkeeping — the engine
 > learns nothing of a queued command until it runs (ADR 0031) — and it is session-ephemeral like the
@@ -400,3 +402,13 @@ approval pane does with the two keys beside them. It is a menu (`docs/layout/use
 and ⏎ **resolves the highlighted row** rather than dismissing anything — Enter-dismiss is the errored
 state's alone. Everything the menu does not claim, PgUp/PgDn included, still falls through to
 `scrollViewport`, so the prompt stays as soft-modal as this decision left it.
+
+---
+
+**Amended 2026-10-03 — pending images sit below the queue.** An image attached in the TUI (ctrl+v
+off the clipboard, or a bracketed paste that is exactly an image file's path) waits on one line
+above the box until the next idle send carries it as `UserInput.Images`. It is not a staged row:
+an interjection or a child message is staged text-only and leaves the images pending, and a flush
+of held rows carries them only when it is the ⏎ that sends the box. Backspace on an empty box keeps
+the order decision 7 and the 2026-09-14 amendment set — the newest queued command, then the newest
+staged message — and only with nothing queued drops the newest pending image.

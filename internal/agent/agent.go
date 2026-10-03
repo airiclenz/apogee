@@ -1236,6 +1236,14 @@ func (a *Agent) SetMode(m domain.Mode) {
 	a.modeMu.Unlock()
 }
 
+// Vision reports whether the bound server accepts image input (Config.Vision) — what a host asks
+// before it attaches an image to the next message, so an attach the engine would refuse is never
+// made. The flag moves only with a server switch, which runs at a quiescent boundary on the same
+// goroutine that asks, so the read needs no lock.
+func (a *Agent) Vision() bool {
+	return a.cfg.Vision
+}
+
 // ConfineToWorkspace reports whether Auto's blast radius is currently fenced to the workspace
 // (ADR 0012). It reads the live flag under the lock, so a concurrent SetConfineToWorkspace
 // (/confine from the UI) is observed safely from the worker goroutine.

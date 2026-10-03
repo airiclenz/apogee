@@ -1172,6 +1172,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// same post-edit refresh a keypress does (prompteditor.go).
 		return m.foldPaste(msg)
 
+	case clipboardImageMsg:
+		// The ctrl+v probe's answer: an image to attach, or the textarea's own text paste
+		// (clipboard.go).
+		return m.foldClipboardImage(msg)
+
 	case ctrlCResetMsg:
 		// The Ctrl+C quit window elapsed without a second press: disarm the gesture so the
 		// "press ctrl+c again to quit" hint clears (handleKey's ctrl+c case). A tick scheduled
@@ -1955,14 +1960,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.input.Value() == "" && msg.String() == "backspace" {
 			// Backspace on an empty input un-does the last thing staged: it lifts the band's row
 			// nearest the box back into it — the newest queued command, and with none queued the
-			// newest queued interjection. Nothing else is staged beside the text any more — a
-			// skill is a /token IN it, deleted like any other word.
+			// newest queued interjection — and with no row queued at all it drops the newest pending
+			// image. A skill is not staged beside the text — it is a /token IN it, deleted like any
+			// other word.
 			if popped, ok := m.popDeferredCommand(); ok {
 				return popped, nil
 			}
 			if popped, reload, ok := m.popInterjection(); ok {
 				return popped, reload
 			}
+			// With nothing queued, the newest pending image goes — the attach line above the box is
+			// the last staged thing nearest it.
+			if m.dropLastImage() {
+				return m, nil
+			}
+		}
+		// ctrl+v asks the clipboard for an image before it pastes text: the probe runs off the
+		// Update loop and its answer either attaches the image or hands back to the textarea's own
+		// paste (foldClipboardImage).
+		if msg.String() == "ctrl+v" {
+			return m, clipboardImageCmd(m.opts.Workspace)
 		}
 		// ↑/↓ walk this workspace's recorded prompts while the box is empty or holds an untouched
 		// recalled entry (recall.go). It sits immediately before the fall-through because that is the
@@ -2058,10 +2075,10 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// line stays in the box until the held rows are sent or taken back.
 		return m.refuseRecipe(recipeHeldNote(parsed.recipe))
 	}
-	// Nothing to send only when there is neither text NOR a held row. A message that is only a skill
-	// token ("/grill-me") HAS text — the token itself — so it sends, which is the owner's edge
-	// default: "just run the skill".
-	if parsed.text == "" && !held {
+	// Nothing to send only when there is neither text NOR a held row NOR a pending image. A message
+	// that is only a skill token ("/grill-me") HAS text — the token itself — so it sends, which is
+	// the owner's edge default: "just run the skill"; one that is only an image sends the image.
+	if parsed.text == "" && !held && len(parsed.images) == 0 {
 		return m, nil
 	}
 	if m.prebound() {
@@ -2108,6 +2125,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// is what keeps the derived Exchange opening trivially correct: exactly one of them opens
 		// the Exchange, whether the human sent one message or five.
 		in, spans = m.joinedInterjections(parsed)
+		in.Images = parsed.images // the held rows stay text-only; the images are the box's own
 		m.pendingInterjections = nil
 	}
 	// The band's advice has been given: every skill it was naming is spent for the session
@@ -2116,6 +2134,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	// is the line both send shapes reach: the plain message and the ⏎ that flushes the held queue.
 	m.spendSkillHints()
 	m.promptEditor.reset()         // empties the textarea, closes the overlay, clears the skill region
+	m.images = nil                 // the pending images ride this send (in.Images): the line above the box goes
 	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
 	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
 	m.transcript.addUser(in.Text, spans)
@@ -2691,9 +2710,32 @@ func settleFrame(msg tea.Msg, next tea.Model) tea.Model {
 }
 
 // inputBoxRows is the screen rows the input box occupies: its content rows and the two border rows
-// of the rounded frame it closes itself (╭─╮ above, ╰─╯ below).
+// of the rounded frame it closes itself (╭─╮ above, ╰─╯ below), plus the pending-image line drawn
+// directly above it while an image is attached ([Model.pendingImageRow]) — that line belongs to the
+// box, so it is paid for out of the same budget and every reader of the box's rows counts it.
 func (m Model) inputBoxRows() int {
-	return m.input.Height() + inputBorderRows
+	return m.input.Height() + inputBorderRows + m.pendingImageRows()
+}
+
+// pendingImageRows is the rows the pending-image line takes: one while any image is attached,
+// none otherwise.
+func (m Model) pendingImageRows() int {
+	if len(m.images) == 0 {
+		return 0
+	}
+	return 1
+}
+
+// pendingImageRow renders the pending-image line — "attached: <name> (<size>)" joined by " · " —
+// as one band-styled row the window's width, or "" when nothing is attached. It sits directly
+// above the input box (View), the staged band's own style, because it is the same kind of thing:
+// what the next message will carry beside the text being typed.
+func (m Model) pendingImageRow() string {
+	line := m.pendingImageLine()
+	if line == "" {
+		return ""
+	}
+	return m.queuedRow(line)
 }
 
 // transcriptBudget is the FRAME's row budget for the transcript block: the window less the fixed
@@ -2765,11 +2807,12 @@ func (m *Model) inputRows() int {
 // they are open (handleKey), and the dropdown is a completion of the very draft it would be
 // shrinking. They still fit, because the frame bound above is not about panes at all.
 func (m Model) draftRowsCeiling() int {
-	ceiling := m.height - frameFixedRows - inputBorderRows
+	box := inputBorderRows + m.pendingImageRows() // what the box spends besides the draft's own rows
+	ceiling := m.height - frameFixedRows - box
 	if m.openPanes().has(panePrompt) {
 		// The prompt needs popupChrome of the transcript's budget to be seated at all (frameRowPlan),
 		// so the rows the draft may keep are what is left after it.
-		ceiling = min(ceiling, m.height-frameFixedRows-popupChrome-inputBorderRows)
+		ceiling = min(ceiling, m.height-frameFixedRows-popupChrome-box)
 	}
 	return max(minInputRows, ceiling)
 }
@@ -3211,7 +3254,11 @@ func (m Model) View() tea.View {
 	// walk above filled, so the geometry the pointer asks of [Model.frameSpans] is composed by this
 	// very pair of calls rather than by a second arithmetic that agrees with it today.
 	rows, spans.panes[paneDropdown] = stackInputSlot(rows, ov, belowSlot+topRuleHeight+statusHeight)
-	// Then the input box, the footer, and the ▁ hairline closing the screen under it.
+	// Then the pending-image line while an image is attached (inputBoxRows pays for it), the input
+	// box, the footer, and the ▁ hairline closing the screen under it.
+	if row := m.pendingImageRow(); row != "" {
+		rows = append(rows, row)
+	}
 	rows = append(rows, m.inputView(), m.footerView(), m.bottomRule())
 
 	v := tea.NewView(m.joinFrame(rows))

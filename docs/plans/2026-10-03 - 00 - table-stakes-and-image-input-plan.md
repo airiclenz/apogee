@@ -304,7 +304,17 @@ internal/agent/agent.go — Submit; internal/eventjson/encode.go — userInput
 **Commit:** `feat(agent): image @refs and the per-server vision key`
 Depends on item 11.
 
-## 13. TUI — clipboard image paste, pasted image paths, pending-image line
+## 13. TUI — clipboard image paste, pasted image paths, pending-image line — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): re-derived from the assumption that the TUI can tell whether the bound server has `vision: true` — nothing on the tui.Engine seam carried it, so internal/agent/agent.go gains `Agent.Vision()`, cmd/apogee/wire_engine.go gains `lateEngine.Vision()` (false while unbound; pinned by TestLateEngineVisionFollowsTheBoundServer in cmd/apogee/wire_engine_test.go), and the TUI asks it through an optional `visionReporter` type assertion (internal/tui/clipboard.go) rather than widening tui.Engine and every test double.
+NOTES (2026-10-03): the vision gate also covers ctrl+v: a clipboard image on a server without `vision: true` is not attached — the status line flashes "this server does not accept images: set vision: true on its servers: entry" — because the engine would refuse the whole message it rode and the worker would drop it.
+NOTES (2026-10-03): the PNG/JPEG/GIF/WebP magic-byte sniff is restated in internal/tui/clipboard.go (imageMediaType), since internal/tui cannot import internal/agent (ADR 0010); the cap refusal wording matches the engine's own.
+NOTES (2026-10-03): present.Clipboard.ReadImage walks on to the next reader when one fails or writes nothing (WriteSystem stops at the first resolved program), so WSL's xclip-without-a-display still reaches PowerShell; PowerShell writes base64 (raw bytes do not survive its pipeline) and ReadImage decodes it; reads are capped at 16 MiB (ErrClipboardImageTooLarge).
+NOTES (2026-10-03): the pending images live on promptEditor beside the draft but outside it — reset() leaves them, so they stay pending through an interjection, a child message and a /command; only the idle submit that sends them clears them, and an auto-flush of held rows after a natural completion does not carry them. The attach line is its own band-styled row directly above the box, counted in inputBoxRows and draftRowsCeiling so the frame budget stays exact. Sizes read in B / KiB / MiB, matching the manual's "5 MiB".
+NOTES (2026-10-03): a pasted path is matched after trimming whitespace and one pair of matching quotes, with a relative path read against the workspace and `~/` against the home directory.
+NOTES (2026-10-03): consequential edit — internal/tui/doc.go: made necessary by clipboard.go now holding the ctrl+v image read beside the copy routes
+NOTES (2026-10-03): consequential edit — internal/present/doc.go: made necessary by Clipboard gaining the image read (ReadImage) under the same exec fence
+NOTES (2026-10-03): CONTEXT.md's second grep hit (the queued-command line, "Backspace on an empty box pops it back first") stays as written — it is still true; only the held-queue line gained the image clause.
 
 **What:**
 **Goal:** ctrl+v attaches a clipboard image when the clipboard holds one and pastes text otherwise; a bracketed paste that is exactly the path of an existing image file attaches that file instead of inserting text; pending images show on one line above the prompt (`attached: <name> (<size>)` joined by ` · `) and travel as `UserInput.Images` on the next submit; Backspace on an empty draft drops the last pending image.

@@ -147,6 +147,31 @@ func TestLateEngineBindKeepsTheFarWidthOfThePendingTarget(t *testing.T) {
 	}
 }
 
+// Vision answers the bound server's `vision:` flag through the Agent, and no while unbound: the
+// renderer asks it before it attaches a pasted image, and an unbound session has nowhere to send one.
+func TestLateEngineVisionFollowsTheBoundServer(t *testing.T) {
+	t.Parallel()
+
+	for _, vision := range []bool{false, true} {
+		engine := newLateEngine(domain.ModeAskBefore, true)
+		t.Cleanup(func() { _ = engine.Close() })
+		if engine.Vision() {
+			t.Fatal("Vision() = true unbound; want false")
+		}
+
+		if err := engine.Bind(func() (*apogee.Agent, error) {
+			cfg := validCfg(t)
+			cfg.Vision = vision
+			return apogee.New(cfg)
+		}); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		if got := engine.Vision(); got != vision {
+			t.Errorf("Vision() bound on vision=%v = %v", vision, got)
+		}
+	}
+}
+
 // TestLateEngineReplaysThePruneGateAtTheBind pins the newest anytime-safe mutator on the holder's
 // remember-then-install contract: a `prune-tool-results` edit made while the settings pane is open
 // and no server is chosen must reach the Agent the moment one is built, or the session runs the

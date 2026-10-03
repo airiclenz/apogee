@@ -3,8 +3,9 @@
 // auto-opens a deliverable on a user's own desktop, and the capability-token doc server
 // that makes one reachable from the user's machine when Apogee runs remotely — and, beside the
 // ladder, the clipboard writes a copy makes through the host's own programs (Clipboard: the
-// system clipboard helper and tmux's paste buffer), the other host-side launches that run with no
-// approval and no confinement box.
+// system clipboard helper and tmux's paste buffer) and the clipboard image read a ctrl+v makes
+// (Clipboard.ReadImage), the other host-side launches that run with no approval and no
+// confinement box.
 //
 // It is mechanism, not policy. The delegate the tool routes through is domain.Presenter;
 // the ladder itself — rung 0 (the transcript baseline, always) first, then the highest
@@ -23,7 +24,8 @@
 // internal/security, for the two fences it owns: the path-safety guard fences every read the doc
 // server does (a served document is re-opened through security.SafeOpen on every request, so a
 // workspace path swapped for an escaping symlink after the grant is refused rather than followed),
-// and the exec fence (security.ResolveProgram) refuses an OS opener, a clipboard helper or a tmux
+// and the exec fence (security.ResolveProgram) refuses an OS opener, a clipboard helper (writer or
+// image reader) or a tmux
 // whose own program resolves inside the workspace — the same rule every exec site in
 // internal/tools applies, since a program launched with no approval must not be one the model
 // could plant. Under ADR 0010 it may

@@ -2,7 +2,10 @@ package tui
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -189,7 +192,9 @@ func (m Model) runInspectCommand() (tea.Model, tea.Cmd) {
 //
 // The payload crosses stripEscapes on the way in — it is the least trusted string in the program,
 // being bytes an upstream server sent — so no ESC byte from the wire can reach the terminal
-// through this pane, on the same terms the transcript takes model text on (transcript.go).
+// through this pane, on the same terms the transcript takes model text on (transcript.go). An
+// image's base64 bytes are elided on the way in too (elideImageData): the ring keeps
+// "[image: <media_type>, <N> bytes]" in their place.
 //
 // The slice is REBUILT rather than appended into, the settingEdits idiom: the Model is copied by
 // value on every Update (ADR 0011), and a ring that shared a backing array with a copy of itself
@@ -199,7 +204,7 @@ func (m Model) foldWire(e domain.Event) Model {
 	if !ok {
 		return m
 	}
-	payload := stripEscapes(we.Payload)
+	payload := elideImageData(stripEscapes(we.Payload))
 	lines, hidden := wirePayloadLines(payload)
 	readable, readableHidden := wireReadableLines(we.Direction, payload)
 	keep := m.wire
@@ -220,6 +225,40 @@ func (m Model) foldWire(e domain.Event) Model {
 		readableHidden: readableHidden,
 	})
 	return m
+}
+
+// The two shapes an image's bytes take in a request body (internal/provider): the OpenAI dialect's
+// image_url part, a base64 data URL; and the Anthropic dialect's base64 source, whose data member
+// follows its media_type. Each captures the media type and the base64 run.
+var (
+	imageDataURLPattern = regexp.MustCompile(`"data:(image/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]*)"`)
+	imageSourcePattern  = regexp.MustCompile(`("media_type"\s*:\s*"(image/[A-Za-z0-9.+-]+)"\s*,\s*"data"\s*:\s*)"([A-Za-z0-9+/=]*)"`)
+)
+
+// elideImageData replaces every image's base64 bytes in a wire payload with
+// "[image: <media_type>, <N> bytes]", N the decoded size, before the payload is formatted: a
+// megabyte of base64 is not something a human reads, and it would be the whole of what the ring
+// keeps of the request (maxWireRecordLines). Only the JSON string value is replaced, so the body
+// stays the JSON it was and pretty-prints as before.
+func elideImageData(payload string) string {
+	if !strings.Contains(payload, ";base64,") && !strings.Contains(payload, `"media_type"`) {
+		return payload
+	}
+	payload = imageDataURLPattern.ReplaceAllStringFunc(payload, func(match string) string {
+		parts := imageDataURLPattern.FindStringSubmatch(match)
+		return `"` + imagePlaceholder(parts[1], parts[2]) + `"`
+	})
+	return imageSourcePattern.ReplaceAllStringFunc(payload, func(match string) string {
+		parts := imageSourcePattern.FindStringSubmatch(match)
+		return parts[1] + `"` + imagePlaceholder(parts[2], parts[3]) + `"`
+	})
+}
+
+// imagePlaceholder is the text an elided image reads as: its media type and the size its base64
+// run decodes to.
+func imagePlaceholder(mediaType, encoded string) string {
+	size := base64.StdEncoding.DecodedLen(len(encoded)) - strings.Count(encoded, "=")
+	return fmt.Sprintf("[image: %s, %d bytes]", mediaType, max(0, size))
 }
 
 // wirePayloadLines formats one payload for the ring: every line of it pretty-printed where it is

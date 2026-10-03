@@ -645,6 +645,16 @@ func (e *lateEngine) Mode() apogee.Mode {
 	return e.mode
 }
 
+// Vision reports whether the bound server accepts image input (Agent.Vision), and false while the
+// session is unbound — there is no server yet to send an image to. The renderer asks it before it
+// attaches a pasted image.
+func (e *lateEngine) Vision() bool {
+	e.mu.Lock()
+	agent := e.agent
+	e.mu.Unlock()
+	return agent != nil && agent.Vision()
+}
+
 // ConfineToWorkspace reports the blast radius the next tool call will read: the Agent's own once
 // there is one, and until then the value a bind would install.
 func (e *lateEngine) ConfineToWorkspace() bool {

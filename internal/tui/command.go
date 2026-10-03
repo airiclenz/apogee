@@ -54,6 +54,11 @@ const (
 // Workflow rather than attaching its body (ADR 0087 D6). That id is taken out of skillIDs — its
 // body is never attached — and travels as the launch the engine keys on instead
 // ([parsedInput.userInput]).
+//
+// images is set on a kindMessage only, and only by [promptEditor.submitParse]: the pending images
+// attached beside the box (ctrl+v, a pasted image path), which are not text and so no parse of the
+// line can find. The idle send carries them ([parsedInput.userInput]); the staging paths build
+// their own text-only input and leave them pending.
 type parsedInput struct {
 	kind       inputKind
 	command    string
@@ -66,6 +71,7 @@ type parsedInput struct {
 	skillIDs   []string
 	skillSpans []skillSpan
 	recipe     string
+	images     []domain.Image
 }
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
@@ -398,13 +404,14 @@ func (p parsedInput) withRecipe(isRecipe func(string) bool) parsedInput {
 // userInput is the message line as the engine is handed it. A recipe line is spelled the way the
 // engine keys a launch on (domain.UserInput): the recipe's id FIRST in SkillIDs and the text opening
 // with its "/<id>", which the parse keeps in place — so the Driver says "launch" without a field of
-// its own, and the other skills the line names still ride behind it.
+// its own, and the other skills the line names still ride behind it. The pending images ride as
+// Images.
 func (p parsedInput) userInput() domain.UserInput {
 	ids := p.skillIDs
 	if p.recipe != "" {
 		ids = append([]string{p.recipe}, p.skillIDs...)
 	}
-	return domain.UserInput{Text: p.text, FileRefs: p.fileRefs, SkillIDs: ids}
+	return domain.UserInput{Text: p.text, FileRefs: p.fileRefs, SkillIDs: ids, Images: p.images}
 }
 
 // soleUnknownSlash reports the lone "/word" of an input that is nothing but that word and names

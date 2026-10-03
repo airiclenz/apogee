@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/base64"
 	"runtime"
 	"slices"
 	"strconv"
@@ -118,6 +119,34 @@ func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
 	m.inspector.raw = true
 	if pane := strip(m.renderReport(inspectReport)); !strings.Contains(pane, `"model"`) {
 		t.Errorf("the raw pane does not show the request body:\n%s", pane)
+	}
+}
+
+// TestInspectorElidesImageData pins what the ring keeps of an image in a request body, on both
+// wire dialects: "[image: <media_type>, <N> bytes]" in place of the base64, N the decoded size, and
+// never the base64 itself — in the raw lines or the readable ones.
+func TestInspectorElidesImageData(t *testing.T) {
+	t.Parallel()
+	encoded := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfive"))
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"openai data URL", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + encoded + `"}}]}]}`},
+		{"anthropic base64 source", `{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + encoded + `"}}]}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, tc.payload, 1, 0))
+
+			joined := strings.Join(m.wire[0].lines, "\n") + strings.Join(m.wire[0].readable, "\n")
+			if strings.Contains(joined, encoded) {
+				t.Errorf("the base64 survived into the ring:\n%s", joined)
+			}
+			if raw := strings.Join(m.wire[0].lines, "\n"); !strings.Contains(raw, `"[image: image/png, 12 bytes]"`) {
+				t.Errorf("the raw lines do not name the image:\n%s", raw)
+			}
+		})
 	}
 }
 

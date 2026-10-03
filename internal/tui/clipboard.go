@@ -1,12 +1,17 @@
 package tui
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"runtime"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/present"
 )
 
@@ -91,4 +96,111 @@ func tmuxClipboardCmd(workspace, text string) tea.Cmd {
 		_ = write(workspace, text)
 		return nil
 	}
+}
+
+// The image paste: ctrl+v in the prompt asks the clipboard for an IMAGE first (present.Clipboard.ReadImage, through
+// the same exec fence as the copy routes) and pastes its text only when there is none: the image
+// probe is a Cmd, so the program it runs never blocks the Update loop, and its answer
+// (clipboardImageMsg) either attaches the image as a pending one or hands the key back to the
+// textarea's own clipboard paste (textarea.Paste), exactly what ctrl+v did before.
+
+// readClipboardImage reads an image off the host clipboard, resolving the reader program against
+// workspace (hostClipboard). A package-level variable for writeSystemClipboard's reason: a test
+// substitutes a fake, since a real clipboard is the one thing a unit test cannot have. It is read
+// when the Cmd is built (clipboardImageCmd), never when it runs.
+var readClipboardImage = func(workspace string) ([]byte, error) {
+	return hostClipboard(workspace).ReadImage()
+}
+
+// clipboardImageMsg is what the ctrl+v probe found: the bytes a clipboard reader wrote, or the
+// error it ended on (present.ErrNoClipboardImage when the clipboard holds no image).
+type clipboardImageMsg struct {
+	data []byte
+	err  error
+}
+
+// clipboardImageCmd returns the Cmd that probes the clipboard for an image on a ctrl+v. The seam
+// is read here, when the key builds the Cmd, for systemClipboardCmd's reason.
+func clipboardImageCmd(workspace string) tea.Cmd {
+	read := readClipboardImage
+	return func() tea.Msg {
+		data, err := read(workspace)
+		return clipboardImageMsg{data: data, err: err}
+	}
+}
+
+// foldClipboardImage settles a ctrl+v. Bytes that sniff as an image are attached as the next
+// clipboard-<n>.png pending image — unless the bound server does not accept images, which is
+// said in the status line instead, since the engine would refuse the message they rode. Anything
+// else — no reader, no image, bytes that are not an image — falls back to the textarea's own text
+// paste. A box that stopped being editable while the probe ran takes neither. A reader the exec
+// fence refused, or an image past the read bound, is said in the status line and pastes nothing.
+func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
+	if !m.inputEditable() {
+		return m, nil
+	}
+	if msg.err != nil && !errors.Is(msg.err, present.ErrNoClipboardImage) {
+		return m, m.showFlash(fmt.Sprintf("clipboard image not read: %v", msg.err))
+	}
+	mediaType := imageMediaType(msg.data)
+	if msg.err != nil || mediaType == "" {
+		return m, textarea.Paste
+	}
+	if !m.serverAcceptsImages() {
+		return m, m.showFlash(noVisionNote)
+	}
+	img := domain.Image{Name: m.nextClipboardName(), MediaType: mediaType, Data: msg.data}
+	if err := m.attachImage(img); err != nil {
+		return m, m.showFlash(err.Error())
+	}
+	return m, nil
+}
+
+// noVisionNote is the flash a clipboard image meets on a server that does not accept images.
+const noVisionNote = "this server does not accept images: set vision: true on its servers: entry"
+
+// visionReporter is the engine's optional answer to whether the bound server accepts image input
+// (agent.Agent.Vision, through the composition root's holder). It is asked by assertion rather
+// than added to [Engine] because only the image attach needs it.
+type visionReporter interface {
+	Vision() bool
+}
+
+// serverAcceptsImages reports whether an image attached now could be sent: the engine says its
+// bound server has `vision: true`. An engine that cannot say — none bound, a test double — is
+// answered no, so nothing is attached that the send would refuse.
+func (m Model) serverAcceptsImages() bool {
+	v, ok := m.eng.(visionReporter)
+	return ok && v.Vision()
+}
+
+// imageSniffBytes is how many leading bytes imageMediaType needs: WebP's RIFF....WEBP header.
+const imageSniffBytes = 12
+
+// imageSignatures are the leading bytes of the image formats an attached image may carry, with
+// the media type each is sent as — the engine's own @ref sniff (internal/agent, imageSignatures),
+// restated because this package cannot import the engine (ADR 0010). WebP is a RIFF container,
+// so its signature is checked at two offsets (imageMediaType).
+var imageSignatures = []struct {
+	prefix    string
+	mediaType string
+}{
+	{"\x89PNG\r\n\x1a\n", "image/png"},
+	{"\xff\xd8\xff", "image/jpeg"},
+	{"GIF87a", "image/gif"},
+	{"GIF89a", "image/gif"},
+}
+
+// imageMediaType reports the media type of data when its leading bytes are a PNG, JPEG, GIF or
+// WebP signature, and "" for anything else.
+func imageMediaType(data []byte) string {
+	for _, sig := range imageSignatures {
+		if bytes.HasPrefix(data, []byte(sig.prefix)) {
+			return sig.mediaType
+		}
+	}
+	if len(data) >= imageSniffBytes && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return "image/webp"
+	}
+	return ""
 }

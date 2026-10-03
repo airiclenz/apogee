@@ -1040,7 +1040,9 @@ boundary keeps seeing the whole task as shared context. It reaches the model aft
 results already in the tail (legal OpenAI chat; strict Gemma-class templates are a model-profile
 concern, ADR 0025). A message typed while the model works is **staged** (queued for the next
 boundary), and a queue left standing by Esc or a loop error is **held** (nothing auto-sends after
-a stop; the next ⏎ sends it, Backspace on an empty box pops the newest back into the editor).
+a stop; the next ⏎ sends it, Backspace on an empty box pops the newest back into the editor, and
+with nothing queued drops the newest pending image — an image attached for the next idle send, which
+a staged message never takes).
 A staged message also **pre-empts** the **Sub-agents** of a running delegation group that have
 not started yet: the engine reads the staging as a predicate (`Config.InterjectionPending`, the
 host's mailbox answering yes/no) the instant it is about to start one, skips it with an explicit

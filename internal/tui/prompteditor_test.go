@@ -1,14 +1,18 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -385,4 +389,291 @@ func TestPasteIsSettledByTheTail(t *testing.T) {
 		t.Fatalf("precondition: box height %d after a four-row paste, want more than %d", m.input.Height(), before)
 	}
 	assertSettled(t, m)
+}
+
+// visionEngine is a fakeEngine on a server with `vision: true`: the optional visionReporter answer
+// the image attach asks for. A bare fakeEngine answers nothing, which reads as no vision.
+type visionEngine struct {
+	*fakeEngine
+}
+
+// Vision reports the bound server as accepting images.
+func (visionEngine) Vision() bool { return true }
+
+// pngBytes is a PNG signature followed by filler — enough for the sniff, which reads the leading
+// bytes only.
+var pngBytes = []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("x", 2040))
+
+// visionModel builds an idle model on a vision server whose workspace holds shot.png (a PNG) and
+// notes.png (text under an image name), returning the model, its engine and the workspace.
+func visionModel(t *testing.T) (Model, *fakeEngine, string) {
+	t.Helper()
+	workspace := t.TempDir()
+	writeFixture(t, filepath.Join(workspace, "shot.png"), pngBytes)
+	writeFixture(t, filepath.Join(workspace, "notes.png"), []byte("just some text\n"))
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	opts := testOpts
+	opts.Workspace = workspace
+	return newTestModelEng(t, visionEngine{eng}, opts), eng, workspace
+}
+
+// writeFixture writes data to path.
+func writeFixture(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// A bracketed paste that is exactly an image file's path attaches the file on a vision server —
+// absolute, relative to the workspace, or quoted as a drag-and-drop writes it — and types nothing;
+// the attach line above the box names it and its size.
+func TestPasteImagePathAttachesOnAVisionServer(t *testing.T) {
+	t.Parallel()
+	for _, content := range []string{"ABS", "shot.png", "'ABS'", "  ABS\n"} {
+		t.Run(content, func(t *testing.T) {
+			t.Parallel()
+			m, _, workspace := visionModel(t)
+			content = strings.ReplaceAll(content, "ABS", filepath.Join(workspace, "shot.png"))
+
+			m = step(t, m, tea.PasteMsg{Content: content})
+
+			if got := m.input.Value(); got != "" {
+				t.Errorf("box = %q, want nothing typed — the path attached", got)
+			}
+			if len(m.images) != 1 || m.images[0].Name != "shot.png" || m.images[0].MediaType != "image/png" {
+				t.Fatalf("images = %+v, want shot.png as image/png", m.images)
+			}
+			if !reflect.DeepEqual(m.images[0].Data, pngBytes) {
+				t.Errorf("attached %d bytes, want the file's %d", len(m.images[0].Data), len(pngBytes))
+			}
+			if view := plain(m.View()); !strings.Contains(view, "attached: shot.png (2.0 KiB)") {
+				t.Errorf("no attach line above the box:\n%s", view)
+			}
+			assertSettled(t, m)
+		})
+	}
+}
+
+// The same paste on a server without `vision: true` types the path, as it did before images
+// existed; so does a path whose file is not an image whatever its name, and a path to nothing.
+func TestPasteNonAttachablePathInsertsText(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	writeFixture(t, filepath.Join(workspace, "shot.png"), pngBytes)
+	writeFixture(t, filepath.Join(workspace, "notes.png"), []byte("just some text\n"))
+	opts := testOpts
+	opts.Workspace = workspace
+
+	for _, tc := range []struct {
+		name    string
+		eng     Engine
+		content string
+	}{
+		{"non-vision server", &fakeEngine{}, "shot.png"},
+		{"text named .png", visionEngine{&fakeEngine{}}, "notes.png"},
+		{"missing file", visionEngine{&fakeEngine{}}, "gone.png"},
+		{"two paths", visionEngine{&fakeEngine{}}, "shot.png shot.png"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModelEng(t, tc.eng, opts)
+
+			m = step(t, m, tea.PasteMsg{Content: tc.content})
+
+			if got := m.input.Value(); got != tc.content {
+				t.Errorf("box = %q, want the pasted text %q", got, tc.content)
+			}
+			if len(m.images) != 0 {
+				t.Errorf("images = %+v, want none attached", m.images)
+			}
+		})
+	}
+}
+
+// A pasted image path whose file breaks the one-image cap is refused in the status line with the
+// engine's own wording, and neither attaches nor types anything.
+func TestPasteImagePathOverTheCapIsRefused(t *testing.T) {
+	t.Parallel()
+	m, _, workspace := visionModel(t)
+	big := append(append([]byte{}, pngBytes...), make([]byte, domain.MaxImageBytes)...)
+	writeFixture(t, filepath.Join(workspace, "big.png"), big)
+
+	m = step(t, m, tea.PasteMsg{Content: "big.png"})
+
+	if len(m.images) != 0 || m.input.Value() != "" {
+		t.Errorf("images = %d, box = %q; want neither", len(m.images), m.input.Value())
+	}
+	if !strings.Contains(m.flash, `image "big.png" is`) || !strings.Contains(m.flash, "cap on one image") {
+		t.Errorf("flash = %q, want the one-image cap refusal", m.flash)
+	}
+}
+
+// ctrl+v asks the clipboard for an image first: an image is attached as clipboard-<n>.png, counted
+// per session, and nothing is typed.
+func TestPasteCtrlVAttachesAClipboardImage(t *testing.T) {
+	m, _, _ := visionModel(t)
+	stubClipboardImage(t, pngBytes, nil)
+
+	for _, want := range []string{"clipboard-1.png", "clipboard-2.png"} {
+		next, cmd := stepCmd(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+		if cmd == nil {
+			t.Fatal("ctrl+v returned no Cmd, want the clipboard probe")
+		}
+		m = step(t, next, cmd())
+		if got := m.images[len(m.images)-1].Name; got != want {
+			t.Errorf("attached as %q, want %q", got, want)
+		}
+	}
+	if len(m.images) != 2 || m.input.Value() != "" {
+		t.Errorf("images = %d, box = %q; want two images and nothing typed", len(m.images), m.input.Value())
+	}
+}
+
+// With no image on the clipboard — or bytes that are not one — ctrl+v hands back to the
+// textarea's own text paste, exactly what the key did before images existed.
+func TestPasteCtrlVFallsBackToText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+		err  error
+	}{
+		{"no image", nil, present.ErrNoClipboardImage},
+		{"not an image", []byte("plain text"), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _ := visionModel(t)
+			stubClipboardImage(t, tc.data, tc.err)
+
+			next, cmd := stepCmd(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+			m, cmd = stepCmd(t, next, cmd())
+
+			if reflect.ValueOf(cmd).Pointer() != reflect.ValueOf(textarea.Paste).Pointer() {
+				t.Errorf("fallback Cmd is not textarea.Paste")
+			}
+			if len(m.images) != 0 {
+				t.Errorf("images = %+v, want none", m.images)
+			}
+		})
+	}
+}
+
+// A clipboard image on a server without `vision: true` is not attached: the status line says why,
+// since the engine would refuse the message it rode.
+func TestPasteCtrlVImageOnANonVisionServerIsRefused(t *testing.T) {
+	m := newTestModel(t)
+
+	m = step(t, m, clipboardImageMsg{data: pngBytes})
+
+	if len(m.images) != 0 {
+		t.Errorf("images = %+v, want none on a non-vision server", m.images)
+	}
+	if m.flash != noVisionNote {
+		t.Errorf("flash = %q, want %q", m.flash, noVisionNote)
+	}
+}
+
+// stubClipboardImage substitutes the clipboard-image seam for the test's length. Tests that use it
+// are not parallel: the seam is package state.
+func stubClipboardImage(t *testing.T, data []byte, err error) {
+	t.Helper()
+	saved := readClipboardImage
+	readClipboardImage = func(string) ([]byte, error) { return data, err }
+	t.Cleanup(func() { readClipboardImage = saved })
+}
+
+// Backspace on an empty box keeps its order: the newest queued command, then the newest staged
+// message, and only with nothing queued the newest pending image.
+func TestAttachedImageDropsAfterTheQueuedRows(t *testing.T) {
+	t.Parallel()
+	m, _ := queuedRun(t, "a message", "/clear")
+	for _, name := range []string{"one.png", "two.png"} {
+		if err := m.attachImage(domain.Image{Name: name, MediaType: "image/png", Data: pngBytes}); err != nil {
+			t.Fatalf("attach %s: %v", name, err)
+		}
+	}
+	backspace := tea.KeyPressMsg{Code: tea.KeyBackspace}
+
+	m = step(t, m, backspace)
+	if got := m.input.Value(); got != "/clear" || len(m.images) != 2 {
+		t.Fatalf("first ⌫: box = %q, images = %d; want the queued command back and both images", got, len(m.images))
+	}
+	m.input.Reset()
+	m = step(t, m, backspace)
+	if got := m.input.Value(); got != "a message" || len(m.images) != 2 {
+		t.Fatalf("second ⌫: box = %q, images = %d; want the staged message back and both images", got, len(m.images))
+	}
+	m.input.Reset()
+	m = step(t, m, backspace)
+	if len(m.images) != 1 || m.images[0].Name != "one.png" {
+		t.Fatalf("third ⌫: images = %+v; want the newest dropped", m.images)
+	}
+}
+
+// Pending images stay pending through an interjection: the staged row is text-only, and the
+// attach line still stands for the next idle send.
+func TestAttachedImagesStayPendingThroughAnInterjection(t *testing.T) {
+	t.Parallel()
+	m, _ := queuedRun(t)
+	if err := m.attachImage(domain.Image{Name: "one.png", MediaType: "image/png", Data: pngBytes}); err != nil {
+		t.Fatal(err)
+	}
+
+	m = stageRow(t, m, "look at this")
+
+	if n := len(m.pendingInterjections); n != 1 || len(m.pendingInterjections[0].input.Images) != 0 {
+		t.Fatalf("staged rows = %+v; want one text-only row", m.pendingInterjections)
+	}
+	if len(m.images) != 1 {
+		t.Errorf("images = %d after the interjection, want the image still pending", len(m.images))
+	}
+}
+
+// An image-only submit sends — the empty-send gate counts a pending image — and the send carries
+// the images, beside any text, and clears the attach line.
+func TestAttachedImagesRideTheSubmitAndClearTheLine(t *testing.T) {
+	t.Parallel()
+	for _, text := range []string{"", "what is this?"} {
+		t.Run("text="+text, func(t *testing.T) {
+			t.Parallel()
+			m, eng, _ := visionModel(t)
+			m = step(t, m, tea.PasteMsg{Content: "shot.png"})
+			m.input.SetValue(text)
+
+			m, cmd := stepCmd(t, m, keyEnter())
+
+			if m.state != stateRunning {
+				t.Fatalf("state = %v, want running — the message was sent", m.state)
+			}
+			if len(m.images) != 0 || strings.Contains(plain(m.View()), "attached:") {
+				t.Errorf("images = %d after the send, want the attach line gone", len(m.images))
+			}
+			drainCmd(t, m, cmd)
+			if len(eng.submitted) != 1 {
+				t.Fatalf("submitted = %d inputs, want 1", len(eng.submitted))
+			}
+			in := eng.submitted[0]
+			if in.Text != text || len(in.Images) != 1 || in.Images[0].Name != "shot.png" {
+				t.Errorf("submitted = %q with %d images, want %q with shot.png", in.Text, len(in.Images), text)
+			}
+		})
+	}
+}
+
+// The attach refuses an image past the per-message cap beside what is already pending, and leaves
+// the pending set as it was.
+func TestAttachImageEnforcesTheMessageCap(t *testing.T) {
+	t.Parallel()
+	var e promptEditor
+	half := make([]byte, domain.MaxMessageImageBytes/2+1)
+	if err := e.attachImage(domain.Image{Name: "a.png", Data: half}); err != nil {
+		t.Fatalf("first attach: %v", err)
+	}
+	err := e.attachImage(domain.Image{Name: "b.png", Data: half})
+	if err == nil || !strings.Contains(err.Error(), "cap on one message") {
+		t.Errorf("second attach = %v, want the one-message cap refusal", err)
+	}
+	if len(e.images) != 1 {
+		t.Errorf("images = %d, want the first kept alone", len(e.images))
+	}
 }

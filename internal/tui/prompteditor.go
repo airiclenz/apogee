@@ -3,6 +3,10 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -95,6 +99,19 @@ type promptEditor struct {
 	// "shift+enter" either way — a chord the terminal never delivers costs nothing to leave bound,
 	// and unbinding it would break the terminals that do.
 	keyDisambiguation bool
+
+	// images are the image parts attached for the NEXT message — by ctrl+v off the clipboard or by
+	// a bracketed paste that is exactly an image file's path — shown on the one line above the box
+	// ([Model.pendingImageRow]) and sent as UserInput.Images by the next idle submit. They are NOT
+	// part of the draft: reset() leaves them, so they stay pending through an interjection, a child
+	// message or a /command, and only the submit that sends them clears them. Replaced, never
+	// mutated in place (attachImage clips before it appends), so a value-copied Model never shares
+	// a slot with another (ADR 0011).
+	images []domain.Image
+
+	// clipboardSeq numbers the clipboard images this session attached, so each is named
+	// clipboard-<n>.png and two pastes never read as one image twice.
+	clipboardSeq int
 }
 
 // The prompt's two placeholders — what the empty box invites, which is not the same thing while a
@@ -217,8 +234,142 @@ func newPromptEditor(shape tea.CursorShape, surface color.Color) promptEditor {
 // known is the catalog predicate parseInput resolves skill tokens against. The editor does not own
 // the catalog (it owns nothing but the box — the partial-lift rule above), so the Model passes its
 // own [Model.knownSkillID] in rather than this type growing a copy of Model state.
+//
+// The pending images ride the parse ([parsedInput.images]) so the send that commits them reads them
+// from the same value as the text; the staging paths, which stay text-only, ignore them.
 func (e promptEditor) submitParse(known func(string) bool) parsedInput {
-	return parseInput(e.input.Value(), known)
+	parsed := parseInput(e.input.Value(), known)
+	if parsed.kind == kindMessage {
+		parsed.images = e.images
+	}
+	return parsed
+}
+
+// attachImage adds img to the pending images, or refuses it — leaving the pending set as it was —
+// when it breaks one of the domain caps: over domain.MaxImageBytes on its own, or past
+// domain.MaxMessageImageBytes beside what is already pending. The wording is the engine's own
+// refusal of an over-cap image, so the two producers say the same thing.
+func (e *promptEditor) attachImage(img domain.Image) error {
+	attached := 0
+	for _, pending := range e.images {
+		attached += len(pending.Data)
+	}
+	size := len(img.Data)
+	if size > domain.MaxImageBytes {
+		return fmt.Errorf("image %q is %d bytes, over the %d-byte cap on one image", img.Name, size, domain.MaxImageBytes)
+	}
+	if attached+size > domain.MaxMessageImageBytes {
+		return fmt.Errorf("image %q brings this message's images to %d bytes, over the %d-byte cap on one message",
+			img.Name, attached+size, domain.MaxMessageImageBytes)
+	}
+	e.images = append(slices.Clip(e.images), img)
+	return nil
+}
+
+// dropLastImage removes the newest pending image and reports whether there was one — Backspace's
+// last answer on an empty box, after the queued rows (handleKey).
+func (e *promptEditor) dropLastImage() bool {
+	n := len(e.images)
+	if n == 0 {
+		return false
+	}
+	e.images = slices.Clip(e.images[:n-1])
+	if len(e.images) == 0 {
+		e.images = nil
+	}
+	return true
+}
+
+// nextClipboardName is the name the next clipboard image is attached under: clipboard-<n>.png,
+// counted per session.
+func (e *promptEditor) nextClipboardName() string {
+	e.clipboardSeq++
+	return fmt.Sprintf("clipboard-%d.png", e.clipboardSeq)
+}
+
+// pendingImageLine is the pending images as the line above the box shows them —
+// "attached: <name> (<size>)" joined by " · " — or "" when none is pending.
+func (e promptEditor) pendingImageLine() string {
+	if len(e.images) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(e.images))
+	for _, img := range e.images {
+		parts = append(parts, img.Name+" ("+imageSize(len(img.Data))+")")
+	}
+	return "attached: " + strings.Join(parts, " · ")
+}
+
+// imageSize is n bytes the way the pending-image line reads it: bytes below a KiB, else KiB or
+// MiB to one decimal.
+func imageSize(n int) string {
+	const kib, mib = 1024, 1024 * 1024
+	switch {
+	case n < kib:
+		return fmt.Sprintf("%d B", n)
+	case n < mib:
+		return fmt.Sprintf("%.1f KiB", float64(n)/kib)
+	default:
+		return fmt.Sprintf("%.1f MiB", float64(n)/mib)
+	}
+}
+
+// pastedImagePath reports the image file a bracketed paste names when the paste is EXACTLY one
+// path — surrounding whitespace and one pair of matching quotes aside, the shapes a terminal's
+// drag-and-drop writes — of an existing regular file whose leading bytes are an image signature
+// (imageMediaType). A relative path is read against workspace and a leading "~/" against the home
+// directory. ok is false for anything else, and the paste then inserts its text as it always has.
+func pastedImagePath(content, workspace string) (path, mediaType string, ok bool) {
+	candidate := strings.TrimSpace(content)
+	if candidate == "" || strings.ContainsAny(candidate, "\n\r") {
+		return "", "", false
+	}
+	if len(candidate) >= 2 && (candidate[0] == '\'' || candidate[0] == '"') && candidate[len(candidate)-1] == candidate[0] {
+		candidate = candidate[1 : len(candidate)-1]
+	}
+	if rest, found := strings.CutPrefix(candidate, "~/"); found {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", "", false
+		}
+		candidate = filepath.Join(home, rest)
+	}
+	if !filepath.IsAbs(candidate) {
+		if workspace == "" {
+			return "", "", false
+		}
+		candidate = filepath.Join(workspace, candidate)
+	}
+	info, err := os.Stat(candidate)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", "", false
+	}
+	head, err := readHead(candidate, imageSniffBytes)
+	if err != nil {
+		return "", "", false
+	}
+	mediaType = imageMediaType(head)
+	if mediaType == "" {
+		return "", "", false
+	}
+	return candidate, mediaType, true
+}
+
+// readHead reads at most n leading bytes of the file at path.
+func readHead(path string, n int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	buf := make([]byte, n)
+	read, err := f.Read(buf)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	return buf[:read], nil
 }
 
 // idleLegend is the idle invitation as it stands for THIS terminal: the ⇧⏎ form once key
@@ -336,6 +487,9 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if !m.inputEditable() {
 		return m, nil
 	}
+	if next, cmd, attached := m.attachPastedImage(msg.Content); attached {
+		return next, cmd
+	}
 	m.sel = fieldSel{} // the value is about to change; drop the selection before its coords go stale
 	m.dropRecall()     // a paste is an edit: the recalled entry is now the human's own draft
 	m.fitWrapMemo()    // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
@@ -347,6 +501,36 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, reload)          // a "/" menu the paste opened owes a catalog re-scan, off the loop
 	}
 	return m, cmd
+}
+
+// attachPastedImage claims a bracketed paste that is exactly the path of an image file
+// (pastedImagePath) while the bound server accepts images ([Model.serverAcceptsImages]): the file
+// is read and attached as a pending image named by its base name instead of the path being typed
+// into the box. A server without `vision: true` gets the text, as before images existed, and so
+// does any paste that is not one image path. A file that breaks a cap, or that cannot be read, is
+// refused with a status-line flash and nothing is typed — the paste was claimed as an image.
+func (m Model) attachPastedImage(content string) (Model, tea.Cmd, bool) {
+	if !m.serverAcceptsImages() {
+		return m, nil, false
+	}
+	path, mediaType, ok := pastedImagePath(content, m.opts.Workspace)
+	if !ok {
+		return m, nil, false
+	}
+	name := filepath.Base(path)
+	info, err := os.Stat(path)
+	if err == nil && info.Size() > domain.MaxImageBytes {
+		err = fmt.Errorf("image %q is %d bytes, over the %d-byte cap on one image", name, info.Size(), domain.MaxImageBytes)
+		return m, m.showFlash(err.Error()), true
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return m, m.showFlash(fmt.Sprintf("image %q could not be read: %v", name, err)), true
+	}
+	if err := m.attachImage(domain.Image{Name: name, MediaType: mediaType, Data: data}); err != nil {
+		return m, m.showFlash(err.Error()), true
+	}
+	return m, nil, true
 }
 
 // foldWidgetMsg routes a Msg no arm of [Model.Update] names to the focused input widget, so it
