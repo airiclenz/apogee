@@ -180,22 +180,24 @@ const imageSniffBytes = 12
 // imageSignatures are the leading bytes of the image formats an attached image may carry, with
 // the media type each is sent as — the engine's own @ref sniff (internal/agent, imageSignatures),
 // restated because this package cannot import the engine (ADR 0010). WebP is a RIFF container,
-// so its signature is checked at two offsets (imageMediaType).
+// so its signature is checked at two offsets (imageMediaType). The prefixes are byte slices,
+// not string literals: the PNG and JPEG magic is invalid UTF-8, which a literal would carry into
+// the source (cmd/demorig's TestRasterResolvesEveryTUIRune reads every TUI literal as text).
 var imageSignatures = []struct {
-	prefix    string
+	prefix    []byte
 	mediaType string
 }{
-	{"\x89PNG\r\n\x1a\n", "image/png"},
-	{"\xff\xd8\xff", "image/jpeg"},
-	{"GIF87a", "image/gif"},
-	{"GIF89a", "image/gif"},
+	{[]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, "image/png"},
+	{[]byte{0xff, 0xd8, 0xff}, "image/jpeg"},
+	{[]byte("GIF87a"), "image/gif"},
+	{[]byte("GIF89a"), "image/gif"},
 }
 
 // imageMediaType reports the media type of data when its leading bytes are a PNG, JPEG, GIF or
 // WebP signature, and "" for anything else.
 func imageMediaType(data []byte) string {
 	for _, sig := range imageSignatures {
-		if bytes.HasPrefix(data, []byte(sig.prefix)) {
+		if bytes.HasPrefix(data, sig.prefix) {
 			return sig.mediaType
 		}
 	}
