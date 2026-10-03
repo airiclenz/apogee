@@ -1,6 +1,7 @@
 ---
 Status: accepted; decision 6's editor ladder and diff-on-exit trigger superseded by ADR 0041, its key list by ADR 0076
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Every settings edit applies to the running session
 

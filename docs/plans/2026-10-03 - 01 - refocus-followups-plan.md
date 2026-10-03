@@ -297,7 +297,13 @@ NOTES (2026-10-04): layout.md's tok/s readout is a plain bold-lead paragraph in 
 - `grep -n "internal/mechanisms" docs/design/confinement-execution-contract.md` lists only lines inside `> **Amended …**` blockquotes or §9–§11
 **Commit:** `docs: fix stale contract, MCP naming, plan paths and status-line layout`
 
-## 14. Note the retired Mechanism layer on remaining ADRs
+## 14. Note the retired Mechanism layer on remaining ADRs — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): exclusion — generic lowercase "mechanism" only, not the retired layer: 0012, 0013, 0019, 0020, 0038, 0040, 0049, 0079, 0080, 0081
+NOTES (2026-10-04): exclusion — 0031, 0032, 0051: the term appears only in ADR 0002/0006 link slugs plus generic lowercase uses
+NOTES (2026-10-04): exclusion — 0076: the replacing ADR itself
+NOTES (2026-10-04): exclusion — 0087: generic lowercase "a mechanism", in a sentence already stating ADR 0071 retired it
+NOTES (2026-10-04): wholly or partly superseded Mechanism ADRs (0002, 0003, 0006, 0009, 0010, 0014, 0015, 0016, 0070, 0071, 0073) and "Nothing here is a Mechanism" ADRs (0062, 0063, 0090, 0091) also got the Note, since they name the retired layer; it sits directly after the front matter, ahead of any existing supersession blockquote, separated by a blank line
 
 **What:** Accepted ADRs still using the retired "Mechanism" vocabulary without the 2026-10-02 Note (e.g. 0008, 0011, 0017, 0022, 0039, 0042, 0046, 0050, 0052, 0056, 0062, 0066, 0067, 0068, 0069).
 **Goal:** Every ADR under `docs/adr/` that mentions Mechanism/`mechanisms:` carries the top `> Note (…): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it…` line; bodies unchanged. Rule: `grep -lis "mechanism" docs/adr/*.md | xargs grep -L "Mechanism layer this ADR refers to was removed"` lists only ADRs where the term is not the retired layer (0076 itself, and any naming a different "mechanism") — the implementer records each such exclusion in a NOTES line.

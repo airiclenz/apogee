@@ -1,6 +1,7 @@
 ---
 Status: accepted; the restated "a cancel still rolls the whole Turn back" (ADR 0013 D5) superseded by ADR 0088
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Sub-agent runs are user-addressable views
 

@@ -1,6 +1,7 @@
 ---
 Status: accepted; decision 3's `configwatch.go` placement overtaken by `internal/filewatch`
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Files split by concern, and the config cluster gets a package
 

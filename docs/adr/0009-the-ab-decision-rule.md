@@ -1,6 +1,7 @@
 ---
 Status: accepted; superseded for structural behaviour (Floor guards) by ADR 0071
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The A/B decision rule for Mechanism validation
 

@@ -1,6 +1,7 @@
 ---
 Status: superseded by ADR 0076
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Mechanisms are a constraint-declared registry, not a fixed pipeline
 

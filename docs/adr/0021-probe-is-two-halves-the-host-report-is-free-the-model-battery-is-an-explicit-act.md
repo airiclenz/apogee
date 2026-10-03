@@ -1,6 +1,7 @@
 ---
 Status: accepted; §4's Validated-set promotion superseded by ADR 0076 A9
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # `apogee probe` is two halves: the host report is free, the model battery is an explicit act
 

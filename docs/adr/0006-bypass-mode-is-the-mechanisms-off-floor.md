@@ -1,6 +1,7 @@
 ---
 Status: accepted; the Mechanism mechanics (Capability switch, inert Library) superseded by ADR 0076 decision 9
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Bypass mode is the honest "Mechanisms-off" floor
 

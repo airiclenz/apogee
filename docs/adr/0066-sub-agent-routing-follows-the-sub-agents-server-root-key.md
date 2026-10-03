@@ -2,6 +2,7 @@
 Status: accepted
 Amends: ADR 0045 (decisions 1-2)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Sub-agent routing follows the `sub-agents-server` root key
 

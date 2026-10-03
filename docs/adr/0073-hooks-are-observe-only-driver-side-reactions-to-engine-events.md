@@ -1,6 +1,7 @@
 ---
 Status: accepted; decisions 2, 4, 5 and 7 and the veto and lint rejections superseded by ADR 0076
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Hooks are observe-only, Driver-side reactions to engine events
 

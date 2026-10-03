@@ -1,6 +1,7 @@
 ---
 Status: accepted
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The headless Event lines are a versioned Driver protocol over the engine's Event stream
 

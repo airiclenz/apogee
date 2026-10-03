@@ -2,6 +2,7 @@
 Status: superseded by ADR 0071 (the two off-ramps became Floor guards, on by default) and ADR 0076 (the Mechanism layer it amended is deleted)
 Amends: ADR 0006 (Bypass floor), ADR 0015 ("EnableMechanisms is the one enable path" — the empty-list engine floor is the one exception, stated below), ADR 0016 (manual-control rule unchanged), ADR 0045 §2 (a present `mechanisms:` map still replaces whole, above the floor)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Off-ramp Mechanisms ship on by default
 

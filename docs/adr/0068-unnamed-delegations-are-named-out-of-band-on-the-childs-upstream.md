@@ -2,6 +2,7 @@
 Status: accepted
 Amends: ADR 0022 (addendum — the naming call's "emits no events" claim gains a sibling that emits one)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Unnamed delegations are named out of band, on the child's own Upstream
 

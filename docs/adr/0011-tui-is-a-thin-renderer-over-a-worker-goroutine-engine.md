@@ -1,6 +1,7 @@
 ---
 Status: accepted
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The TUI is a thin event-driven renderer over a worker-goroutine engine
 

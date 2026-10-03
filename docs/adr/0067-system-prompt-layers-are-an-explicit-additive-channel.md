@@ -2,6 +2,7 @@
 Status: accepted
 Amends: ADR 0023 (decision 1's key count)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # `system-prompt-layers` are an explicit additive channel
 

@@ -1,6 +1,7 @@
 ---
 Status: accepted; the Mechanism types, `NewMechanismRegistry` and `internal/mechanisms` superseded by ADR 0076
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Package layout: a domain core, an engine, and a thin root facade
 

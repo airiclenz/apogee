@@ -2,6 +2,7 @@
 Status: accepted; decision 6's "no beat-driven text" superseded in part by ADR 0039 (2026-09-20 note)
 Amends: ADR 0045 (Deferred: model-chosen routing), ADR 0066 (decision 7), ADR 0039 (decision 3 — mixed-seat width)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The top-level model picks the delegation seat
 

@@ -1,6 +1,7 @@
 ---
 Status: superseded by ADR 0071
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Guided decomposition steers the primary call and serializes delegation through the recursion point
 

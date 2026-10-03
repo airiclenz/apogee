@@ -1,6 +1,7 @@
 ---
 Status: superseded by ADR 0076 (amendment A9, 2026-09-08)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Curation is per-model: Validated sets keyed by the model fingerprint
 

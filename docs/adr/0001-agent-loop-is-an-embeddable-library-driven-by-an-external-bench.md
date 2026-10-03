@@ -1,6 +1,7 @@
 ---
 Status: accepted; the 2026-06-25 "v1.0.0 tagged, semver begins" amendment overtaken by the 2026-07-23 restart at v0.x
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The agent loop is an embeddable library, driven by an external bench
 

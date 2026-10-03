@@ -2,6 +2,7 @@
 Status: accepted
 Amends: ADR 0063 (D4 — a level of the view stack may be a workflow stage, which is not a run), and reverses the engine-run workflows plan's item 43 rule that the workflow block "paints one way and never collapses" and that "a head with many runs has no run view"
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Workflow stages are enterable views
 

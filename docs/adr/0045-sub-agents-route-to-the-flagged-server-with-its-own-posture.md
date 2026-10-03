@@ -1,6 +1,7 @@
 ---
 Status: accepted; decisions 1-2 (the `sub-agents: true` flag and flagged-only posture) superseded by ADR 0066, the entry's `mechanisms:` key by ADR 0076
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Sub-agents route to the flagged server, with its own posture
 

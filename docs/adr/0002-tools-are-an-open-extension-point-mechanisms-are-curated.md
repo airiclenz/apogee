@@ -1,6 +1,7 @@
 ---
 Status: accepted; the Mechanism-catalogue half superseded by ADR 0076
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Tools are an open extension point; the Mechanism catalogue is curated
 

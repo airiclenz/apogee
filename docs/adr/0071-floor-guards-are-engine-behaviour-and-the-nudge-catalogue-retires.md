@@ -3,6 +3,7 @@ Status: accepted; decision 4, rejected alternative B and the `FloorGuardEvent` c
 Supersedes: ADR 0009 for structural behaviour; ADR 0070 Option C
 Amends: ADR 0006, ADR 0014, ADR 0015 D1, ADR 0016 (2026-08-29 amendment)
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # Floor guards are engine behaviour; the nudge catalogue retires
 

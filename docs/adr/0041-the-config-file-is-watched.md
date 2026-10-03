@@ -1,6 +1,7 @@
 ---
 Status: accepted; decision 1's top-level `llama-launcher` sibling retired by ADR 0029's 2026-08-07 amendment
 ---
+> Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
 # The config file is watched
 
