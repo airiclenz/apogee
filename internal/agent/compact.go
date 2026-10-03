@@ -673,6 +673,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	if usage := summary.usage; usage != nil {
 		event := c.a.usage.record(
 			c.a.base(c.a.turns.index), c.a.cfg.Model, summary.served, c.a.cfg.Context.MaxContextTokens,
+			c.a.cfg.Price,
 			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedPromptTokens,
 		)
 		event.Maintenance = true

@@ -11,6 +11,8 @@ package main
 // about the frames both surfaces painted.
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -204,18 +206,88 @@ func TestE2EClearResetsUsage(t *testing.T) {
 	}
 	fresh, closed := metas[0], metas[1] // List sorts UpdatedAt descending
 	wantFresh := session.Usage{Calls: 1, PromptTokens: coldPrompt6, CompletionTokens: coldCompletion6,
-		TotalTokens: coldPrompt6 + coldCompletion6}
+		TotalTokens: coldPrompt6 + coldCompletion6, UnpricedCalls: 1}
 	if fresh.Usage != wantFresh {
 		t.Errorf("the fresh session's META usage = %+v, want its one reply's own %+v", fresh.Usage, wantFresh)
 	}
 	wantClosed := session.Usage{Calls: 2, PromptTokens: coldPrompt6 + warmPrompt6,
 		CompletionTokens:   coldCompletion6 + warmCompletion6,
 		TotalTokens:        coldPrompt6 + warmPrompt6 + coldCompletion6 + warmCompletion6,
-		CachedPromptTokens: warmCached6}
+		CachedPromptTokens: warmCached6,
+		UnpricedCalls:      2}
 	if closed.Usage != wantClosed {
 		t.Errorf("the closed session's META usage = %+v, want the two calls it spent %+v — the flush ran "+
 			"before the reset", closed.Usage, wantClosed)
 	}
+}
+
+// TestE2EPriceEditOnTheBoundEntryPricesTheNextCall pins ADR 0093 through the running session: the
+// startup bind carries the bound entry's `price:` into the engine, so the first call is priced at
+// it; a `price:` edited on that entry while the session runs is applied live (ADR 0037, Amendment
+// 2026-08-24) through the rebind the re-read list drives, so the next call is priced at the new rate
+// while the first is never repriced; and every save writes the configured `currency:` label beside
+// the amount.
+func TestE2EPriceEditOnTheBoundEntryPricesTheNextCall(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "cached-usage"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	home := t.TempDir()
+	writePricedConfig(t, home, stub, 1, 2)
+	sess := launchTUIOn(t, drv, stub, home, "")
+	store := session.NewStore(filepath.Join(home, "sessions"))
+
+	submit(drv, coldPrompt)
+	drv.WaitText("The workspace holds one file")
+	drv.WaitFor(func() bool { return recordedCalls(t, store) == 1 },
+		tuitest.Awaiting("the first priced call to reach the session store"))
+
+	writePricedConfig(t, home, stub, 3, 4)
+	drv.WaitText(appliedNote)
+	submit(drv, coldPrompt)
+	drv.WaitFor(func() bool { return recordedCalls(t, store) == 2 },
+		tuitest.Awaiting("the call after the price edit to reach the session store"))
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+
+	metas, err := store.List()
+	if err != nil {
+		t.Fatalf("list the session store: %v", err)
+	}
+	// The first call at the launch price, the second at the edited one: 900 × 1 + 40 × 2 = 980 and
+	// 900 × 3 + 40 × 4 = 2860 millionths.
+	const wantCost = 980 + 2860
+	got := metas[0].Usage
+	if got.CostMicros != wantCost || got.PricedCalls != 2 || got.UnpricedCalls != 0 {
+		t.Errorf("META usage = {cost %d, priced %d, unpriced %d}, want {%d, 2, 0} — each call at the price "+
+			"in force when it was recorded", got.CostMicros, got.PricedCalls, got.UnpricedCalls, wantCost)
+	}
+	if metas[0].Currency != "EUR" {
+		t.Errorf("META currency = %q, want the configured %q", metas[0].Currency, "EUR")
+	}
+}
+
+// writePricedConfig writes home's config.yaml: one server entry at stub, priced at input and output
+// per 1M tokens, bound at startup, with the EUR currency label.
+func writePricedConfig(t *testing.T, home string, stub *stubllm.Server, input, output int) {
+	t.Helper()
+	body := fmt.Sprintf("servers:\n  - name: probe-target\n    endpoint: %s\n    model: %s\n"+
+		"    price:\n      input: %d\n      output: %d\nserver: probe-target\ncurrency: EUR\n",
+		stub.URL, stub.Model, input, output)
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+}
+
+// recordedCalls is how many calls the newest session record's META usage counts, 0 before any save.
+func recordedCalls(t *testing.T, store *session.Store) int {
+	t.Helper()
+	metas, err := store.List()
+	if err != nil || len(metas) == 0 {
+		return 0
+	}
+	return metas[0].Usage.Calls
 }
 
 // TestE2EUsageHidesTheCachedColumnWithoutABreakdown is T-06 step 10, the negative half: against a

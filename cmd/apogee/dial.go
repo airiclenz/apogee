@@ -18,10 +18,17 @@ package main
 // observation. The Monitor carries the key, the wire and the forced `effort-dialect:`, because
 // that verdict overrules what discovery detects; it never carries request-extra, because a
 // discovery probe sends no body to merge it into.
+//
+// One field of the binding is not a dial fact at all: the entry's `price:` (ADR 0093 decision 3).
+// Neither the Client nor the Monitor reads it — it never reaches the wire — but it is a fact about
+// the server a call goes to, so it rides the binding to every engine projection (fillDial,
+// upstreamSpec, delegationTarget) and the bind, a `/server` move and a routed delegation each carry
+// the price of the server they dial.
 
 import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -38,6 +45,25 @@ func bindingOfEntry(entry config.ServerEntry, apiKey string) upstreamBinding {
 		Wire:          entry.Wire,
 		RequestExtra:  string(entry.RequestExtra),
 		EffortDialect: entry.EffortDialect,
+		Price:         priceOfEntry(entry.Price),
+	}
+}
+
+// priceOfEntry is an entry's `price:` as the engine prices a call by (ADR 0093 decision 2): the
+// three rates per 1M tokens, with `cached-input:` resolved to the input rate when the entry leaves
+// it out (config.Price.CachedInputRate), and whether the entry states a price at all. An entry with
+// no `price:` is the unpriced zero.
+func priceOfEntry(price config.Price) domain.ServerPrice {
+	if !price.IsStated() {
+		return domain.ServerPrice{}
+	}
+	return domain.ServerPrice{
+		Rate: domain.Price{
+			Input:       price.Input,
+			Output:      price.Output,
+			CachedInput: price.CachedInputRate(),
+		},
+		IsStated: true,
 	}
 }
 
@@ -51,6 +77,7 @@ func bindingOfTarget(target *apogee.DelegationTarget) upstreamBinding {
 		APIKey:       target.APIKey,
 		Wire:         target.Wire,
 		RequestExtra: target.RequestExtra,
+		Price:        target.Price,
 	}
 }
 
@@ -64,6 +91,7 @@ func bindingOfConfig(cfg apogee.Config) upstreamBinding {
 		APIKey:       cfg.APIKey,
 		Wire:         cfg.Wire,
 		RequestExtra: cfg.RequestExtra,
+		Price:        cfg.Price,
 	}
 }
 
@@ -88,7 +116,7 @@ func (b upstreamBinding) Monitor() *heartbeat.Monitor {
 }
 
 // fillDial sets cfg's dial fields from the binding — the endpoint, the key, the wire and the
-// request-extra passthrough — and nothing else. Model stays the caller's (a bind pins the entry's
+// request-extra passthrough — and the server's price beside them, and nothing else. Model stays the caller's (a bind pins the entry's
 // own, a Firing the one its spec resolved), and so does EffortDialect: the Config carries the
 // RANKED dialect, which the caller resolves against an observation, never the forced spelling.
 func (b upstreamBinding) fillDial(cfg *apogee.Config) {
@@ -96,10 +124,11 @@ func (b upstreamBinding) fillDial(cfg *apogee.Config) {
 	cfg.APIKey = b.APIKey
 	cfg.Wire = b.Wire
 	cfg.RequestExtra = b.RequestExtra
+	cfg.Price = b.Price
 }
 
 // upstreamSpec is the switch a `/server` move hands the engine, carrying the binding's dial fields
-// only. The caller sets the arrived-at server's name, description and its window, working-window,
+// and the price only. The caller sets the arrived-at server's name, description and its window, working-window,
 // reply-cap and reserve; a move carries no model at all — the first beat on the new server binds
 // one.
 func (b upstreamBinding) upstreamSpec() apogee.UpstreamSpec {
@@ -108,10 +137,11 @@ func (b upstreamBinding) upstreamSpec() apogee.UpstreamSpec {
 		APIKey:       b.APIKey,
 		Wire:         b.Wire,
 		RequestExtra: b.RequestExtra,
+		Price:        b.Price,
 	}
 }
 
-// delegationTarget is a Delegation target carrying the binding's dial fields only — the dial a
+// delegationTarget is a Delegation target carrying the binding's dial fields and the price only — the dial a
 // routed child is built on. The caller sets the server's name, the model it resolved, the window
 // and the rest; EffortDialect is the beat's ranked one (resolveDelegationTarget), never the forced
 // spelling the binding holds for its Monitor.
@@ -121,6 +151,7 @@ func (b upstreamBinding) delegationTarget() apogee.DelegationTarget {
 		APIKey:       b.APIKey,
 		Wire:         b.Wire,
 		RequestExtra: b.RequestExtra,
+		Price:        b.Price,
 	}
 }
 

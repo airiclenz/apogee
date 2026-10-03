@@ -574,6 +574,14 @@ type UsageEvent struct {
 	// — and informational on the fill field's.
 	Cumulative Usage
 
+	// CostMicros is THIS call's priced amount in millionths of the currency unit, and Priced says
+	// whether it was priced at all (ADR 0093 decisions 3 and 4): the emitting Agent priced it once,
+	// when it recorded the call, at the Price of the server it was bound to (Config.Price). An
+	// unpriced call carries 0 and false — counted as unpriced in Cumulative, never as free. Like the
+	// fill fields above it is the call's own figure; Cumulative carries the running sums.
+	CostMicros int64
+	Priced     bool
+
 	Maintenance  bool
 	DelegateFold bool
 	ServedModel  string

@@ -1112,7 +1112,7 @@ func TestOnceReportsEachSubAgentsContextFill(t *testing.T) {
 	// travels along because the assertion is on the WHOLE entry.
 	want := SubAgentUsage{
 		Used: 12000, Limit: window, Task: taskLine,
-		Usage: Usage{Calls: 1, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000},
+		Usage: Usage{Calls: 1, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000, UnpricedCalls: 1},
 	}
 	if res.SubAgents[0] != want {
 		t.Errorf("Result.SubAgents[0] = %+v, want %+v", res.SubAgents[0], want)
@@ -1794,7 +1794,7 @@ func TestOnceReportsWhatTheFiringSpent(t *testing.T) {
 		t.Fatalf("Once: %v", err)
 	}
 
-	wantUsage := Usage{Calls: 2, PromptTokens: 1400, CompletionTokens: 200, TotalTokens: 1600}
+	wantUsage := Usage{Calls: 2, PromptTokens: 1400, CompletionTokens: 200, TotalTokens: 1600, UnpricedCalls: 2}
 	if res.Usage != wantUsage {
 		t.Errorf("Result.Usage = %+v, want %+v — the firing's two calls, and only those", res.Usage, wantUsage)
 	}
@@ -1864,12 +1864,12 @@ func TestOnceRecordsWhatTheFiringAndItsDelegatesSpent(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	wantOwn := session.Usage{Calls: 3, PromptTokens: 2300, CompletionTokens: 300, TotalTokens: 2600}
+	wantOwn := session.Usage{Calls: 3, PromptTokens: 2300, CompletionTokens: 300, TotalTokens: 2600, UnpricedCalls: 3}
 	if rec.Meta.Usage != wantOwn {
 		t.Errorf("Meta.Usage = %+v, want %+v — the firing's own three calls, and only those",
 			rec.Meta.Usage, wantOwn)
 	}
-	wantDelegated := session.Usage{Calls: 2, PromptTokens: 8000, CompletionTokens: 80, TotalTokens: 8080}
+	wantDelegated := session.Usage{Calls: 2, PromptTokens: 8000, CompletionTokens: 80, TotalTokens: 8080, UnpricedCalls: 2}
 	if rec.Meta.DelegateUsage != wantDelegated {
 		t.Errorf("Meta.DelegateUsage = %+v, want %+v — the SUM over both delegated runs",
 			rec.Meta.DelegateUsage, wantDelegated)
@@ -2042,7 +2042,7 @@ func TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	wantOwn := session.Usage{Calls: 1, PromptTokens: 600, CompletionTokens: 100, TotalTokens: 700}
+	wantOwn := session.Usage{Calls: 1, PromptTokens: 600, CompletionTokens: 100, TotalTokens: 700, UnpricedCalls: 1}
 	if rec.Meta.Usage != wantOwn {
 		t.Errorf("Meta.Usage = %+v, want %+v", rec.Meta.Usage, wantOwn)
 	}
@@ -2058,6 +2058,47 @@ func TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated(t *testing.T) {
 	if strings.Contains(string(raw), "delegateUsage") {
 		t.Errorf("the record carries a delegateUsage key at zero; omitzero must keep the "+
 			"old JSON shape:\n%s", raw)
+	}
+}
+
+// TestOncePricesTheFiringAndRecordsItsCurrency pins ADR 0093 decisions 3 and 6 for an unattended
+// run: a Firing on a priced server prices each call at that server (Config.Price), and the record
+// writes the configured currency label (Spec.Currency) onto Meta.Currency beside the amount it
+// labels, so the amount is never read under another label.
+func TestOncePricesTheFiringAndRecordsItsCurrency(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{Text: "the build is green", Usage: &stubllm.Usage{Prompt: 600, Completion: 100}},
+	}})
+	store := session.NewStore(t.TempDir())
+	spec := planSpec(up.URL, "check the build")
+	spec.Store = store
+	spec.Currency = "EUR"
+	spec.Config.Price = domain.ServerPrice{
+		Rate:     domain.Price{Input: 2, Output: 10, CachedInput: 2},
+		IsStated: true,
+	}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	rec, err := store.Load(res.SessionID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// 600 prompt × 2 + 100 completion × 10 millionths.
+	wantOwn := session.Usage{
+		Calls: 1, PromptTokens: 600, CompletionTokens: 100, TotalTokens: 700,
+		CostMicros: 2200, PricedCalls: 1,
+	}
+	if rec.Meta.Usage != wantOwn {
+		t.Errorf("Meta.Usage = %+v, want %+v", rec.Meta.Usage, wantOwn)
+	}
+	if rec.Meta.Currency != "EUR" {
+		t.Errorf("Meta.Currency = %q, want the configured %q", rec.Meta.Currency, "EUR")
 	}
 }
 

@@ -80,6 +80,12 @@ type Spec struct {
 	// read chronologically under its name, else the first-prompt heuristic.
 	Title string
 
+	// Currency is the configured `currency:` label (ADR 0093 decision 6) the saved record's usage is
+	// priced in: it is written onto Meta.Currency beside Meta.Usage, so an amount is never read under
+	// a label other than the one it was written in. Empty ⇒ the record carries no label, which a
+	// bench or any caller that configures no price can leave.
+	Currency string
+
 	// Now is the clock behind the derived title and the record's timestamps; nil ⇒
 	// time.Now. It exists so a test pins both without touching the machine clock — the
 	// injectable-clock shape session.Store and the TUI's session host already use.
@@ -562,6 +568,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 			CtxUsed:       tap.fill(),
 			Usage:         sessionUsage(tap.totals()),
 			DelegateUsage: delegateTotals(tap.subAgentRuns()),
+			Currency:      spec.Currency,
 		},
 		Session: snap,
 		// The run's own scrollback, so an unattended record REPLAYS in /sessions rather than

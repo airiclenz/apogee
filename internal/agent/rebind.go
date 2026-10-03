@@ -126,17 +126,28 @@ type RebindSpec struct {
 	// the engine: the level vocabulary a server reports, and the level it defaults to, stay
 	// host-side.
 	EffortDialect provider.EffortDialect
+	// Price is the bound `servers:` entry's `price:` (ADR 0093 decision 3), the FOURTH field here
+	// that is not a per-MODEL fact. It rides this spec for the two bounds' reason: a `price:` edited
+	// on the entry the session is on is an ADR 0037 edit (Amendment 2026-08-24) with no engine
+	// setter of its own, so the re-resolution the caller is already driving is the door it reaches
+	// the engine through — and from that commit on, every recorded call is priced at the new rate,
+	// none already recorded is repriced.
+	//
+	// A POINTER on the ceiling's contract: nil ⇒ this spec says NOTHING about the price and the one
+	// in force stands; a non-nil value is applied as written, the unpriced zero included — an edit
+	// that DROPS the entry's `price:` leaves later calls unpriced, never billed at the old rate.
+	Price *domain.ServerPrice
 }
 
 // Rebind swaps the Agent's per-model bindings at a quiescent boundary — the wire model, the
 // system-prompt template, the context window the Budget, Compaction and Pruning measure against,
 // and the profile with the tool roster its third axis spells (ADR 0057)
 // — and rebinds the provider client's wire model with them. It is the
-// engine half of the heartbeat's observed model change (ADR 0024). A spec may carry three facts that
+// engine half of the heartbeat's observed model change (ADR 0024). A spec may carry four facts that
 // are NOT per-model — the reply ceiling (ADR 0046), the share of the window reserved for that reply,
-// and the wire dialect the server reads a thinking-effort intent in (ADR 0060) — for the reason
-// their fields state: none of the three has a setter of its own, so a live edit of them reaches the
-// engine through this same atomic commit.
+// the wire dialect the server reads a thinking-effort intent in (ADR 0060) and the server's price
+// (ADR 0093) — for the reason their fields state: none of the four has a setter of its own, so a
+// live edit of them reaches the engine through this same atomic commit.
 //
 // Idle-only, like ClearContext and RestoreSession: it refuses mid-Exchange (ErrInputPending), and
 // the host applies a change observed mid-Exchange at the terminal boundary instead. That
@@ -150,10 +161,10 @@ type RebindSpec struct {
 // conversation, exactly as it was.
 //
 // What stands: the conversation and Turn counters, the autonomy mode, session approvals and the
-// confinement flag — and the reply ceiling and its reserve share too, unless
-// the spec names them: those bounds describe the SERVER, so a spec silent about one (a nil
-// MaxOutputTokens or ResponseReserveFraction) leaves it exactly where the bind or the move that set
-// it put it. A tool set the HOST owns stands as well, injected or swapped in: the engine composes
+// confinement flag — and the reply ceiling, its reserve share and the price too, unless
+// the spec names them: those describe the SERVER, so a spec silent about one (a nil
+// MaxOutputTokens, ResponseReserveFraction or Price) leaves it exactly where the bind or the move
+// that set it put it. A tool set the HOST owns stands as well, injected or swapped in: the engine composes
 // no roster under it (applyRoster).
 // What MOVES with the model, since ADR 0044: the profile and its parse-seam collaborators — and,
 // since ADR 0057, the tool ROSTER the profile's third axis spells. The
@@ -275,6 +286,12 @@ type UpstreamSpec struct {
 	// rides the switch for the wire's reason: it is a fact about the server being dialled. "" ⇒
 	// the entry names none — applied, not skipped, so the retired server's keys never reach this one.
 	RequestExtra string
+	// Price is the new server's `price:` (ADR 0093 decision 3). It rides the switch for the
+	// passthrough's reason: what a call costs is a fact about the server it goes to, so every call
+	// recorded after the switch is priced at the arrived-at entry's rate and none before it is
+	// repriced. The zero ⇒ the entry states no price — applied, not skipped, so a move off a priced
+	// server counts the new one's calls as unpriced rather than billing them at the retired rate.
+	Price domain.ServerPrice
 	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
 	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
 	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named
@@ -336,7 +353,9 @@ type UpstreamSpec struct {
 // and Compaction measure against, the room inside it the session works in, and the ceiling the loop
 // states on the wire for one reply — and the share of that window the new server holds back for the
 // reply. All four are applied as the spec states them, the zeroes included, because an absent pin is a fact about the new server rather
-// than a licence to keep the old server's number (see the spec's fields).
+// than a licence to keep the old server's number (see the spec's fields). The new entry's price
+// moves on the same terms (ADR 0093): the calls recorded from here on are priced at it, an
+// unpriced entry's counted as unpriced.
 // What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
 // described a model this session no longer speaks to) and the compaction saturation latch (it was
 // judged against a window that is no longer bound).

@@ -625,6 +625,11 @@ type usageTally struct {
 	total      int
 	cached     int
 	calls      int
+	// costMicros, priced and unpriced are the Spend (money) behind the same readings (ADR 0093):
+	// the sum of every priced call's amount and the split of calls into priced and unpriced.
+	costMicros int64
+	priced     int
+	unpriced   int
 }
 
 // record folds one completed upstream call's server-reported usage into the running totals and
@@ -646,12 +651,31 @@ type usageTally struct {
 // carried (provider.Delta.Model) — the model the server answered with, "" when it named none — and
 // it is stamped beside model rather than in place of it because the two disagreeing is a fact a
 // record should keep, not paper over.
-func (t *usageTally) record(base domain.EventBase, model, served string, window, prompt, completion, total, cached int) domain.UsageEvent {
+//
+// price is the emitting Agent's bound server price (Config.Price), and it is where every call
+// apogee makes is priced (ADR 0093 decision 3): once, here, at the server the call went to, so a
+// `/server` switch, a routed child or a `price:` edit moves the price of LATER calls and never
+// reprices a recorded one. An unpriced server's call counts as unpriced and adds nothing to the
+// amount (decision 4).
+func (t *usageTally) record(
+	base domain.EventBase,
+	model, served string,
+	window int,
+	price domain.ServerPrice,
+	prompt, completion, total, cached int,
+) domain.UsageEvent {
 	t.prompt += prompt
 	t.completion += completion
 	t.total += total
 	t.cached += cached
 	t.calls++
+	cost, priced := price.Of(prompt, cached, completion)
+	if priced {
+		t.costMicros += cost
+		t.priced++
+	} else {
+		t.unpriced++
+	}
 	return domain.UsageEvent{
 		EventBase:          base,
 		PromptTokens:       prompt,
@@ -667,7 +691,12 @@ func (t *usageTally) record(base domain.EventBase, model, served string, window,
 			CachedPromptTokens: t.cached,
 			CompletionTokens:   t.completion,
 			TotalTokens:        t.total,
+			CostMicros:         t.costMicros,
+			PricedCalls:        t.priced,
+			UnpricedCalls:      t.unpriced,
 		},
+		CostMicros: cost,
+		Priced:     priced,
 	}
 }
 

@@ -108,7 +108,18 @@ internal/tui/usage.go — usageSince; internal/tui/model.go — usageBase/delega
 **Commit:** `feat(domain): usage carries priced cost and call counts`
 Depends on item 2.
 
-## 4. Engine prices every call at the bound server
+## 4. Engine prices every call at the bound server — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): the bound price is one value type, `domain.ServerPrice{Rate Price; IsStated bool}` (with `Of` returning the amount and whether it was priced), carried as `domain.Config.Price` and as one pointer field on serverBinding — the plan's "a value plus a set flag" in a single comparable type.
+NOTES (2026-10-03): `domain.UsageEvent` gains `CostMicros int64` and `Priced bool` — the per-call amount is named `CostMicros` (not `Cost`) to match `domain.Usage.CostMicros`'s unit-bearing name.
+NOTES (2026-10-03): the price rides `upstreamBinding` (priceOfEntry in dial.go) into fillDial, upstreamSpec and delegationTarget, so the startup bind, a scheduled Firing, a `/server` move and a routed delegation all carry it; `UpstreamSpec.Price` and `DelegationTarget.Price` are always applied (the unpriced zero included), `RebindSpec.Price` is a pointer (nil keeps the price in force).
+NOTES (2026-10-03): re-derived from "the rebind closure lives in wire_settings.go": the closure that builds the live RebindSpec is `rootWiring.rebind` in cmd/apogee/wire_verbs.go; it now restates the bound entry's price (`liveSettings.price()`) on every spec, and `setServers` reports a moved `price:` so a live edit drives that rebind.
+NOTES (2026-10-03): consequential edit — internal/agent/loop.go: made necessary by the new `price` parameter on usageTally.record (the Turn call site passes a.cfg.Price).
+NOTES (2026-10-03): consequential edit — internal/agent/compact.go: made necessary by the new `price` parameter on usageTally.record (the compaction call site passes the owning Agent's cfg.Price; no second pricing path).
+NOTES (2026-10-03): consequential edit — internal/agent/routedspawn_test.go: made necessary by the new `price` parameter on usageTally.record (the `reading` helper passes a.cfg.Price).
+NOTES (2026-10-03): consequential edit — cmd/apogee/wire_live.go: made necessary by sessionHost's new `currency` field (the composition root sets it from opts.Currency right after newSessionHost, avoiding a constructor argument across ~20 test call sites).
+NOTES (2026-10-03): TestOnceReportsEachSubAgentsContextFill (internal/run) also held an exact Usage want and was updated with UnpricedCalls beside the four tests the plan named.
+NOTES (2026-10-03): `currency:` is a file-only, non-editable key, so the TUI save's label is fixed at startup; a watcher re-read that changes only the label is not picked up by the running session's saves.
 
 **What:**
 **Goal:** every recorded provider call (turns, compaction and other maintenance calls, delegate folds, routed sub-agents) adds its cost to the running `Cumulative` usage at the price of the server it went to, or counts as unpriced.

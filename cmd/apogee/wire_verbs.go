@@ -49,6 +49,12 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 	// is the honest answer for a server that advertises no dial — it keeps the historical
 	// `chat_template_kwargs` shape, reproducing the request bytes that predate the dialect seam.
 	spec.EffortDialect = effortDialect
+	// The bound entry's `price:` (ADR 0093), restated on every spec for the reply ceiling's reason:
+	// it has no engine setter of its own, so a `price:` edited on the entry the session is on reaches
+	// the engine through this same rebind (setServers reports the move that drives it), and every
+	// call recorded after the commit is priced at the new rate.
+	price := w.live.price()
+	spec.Price = &price
 	// The model a session runs is now the id the human configured even when the server never
 	// advertised it (provider's trusted-hint resolution), so the binding that lands on such an id
 	// says so — once, here, where the beat that resolved it and the window it actually bound are

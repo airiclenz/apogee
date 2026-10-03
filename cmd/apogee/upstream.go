@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -83,6 +84,12 @@ type upstreamBinding struct {
 	// dialect is a verdict over what discovery detected, and the ranked dialect a request is
 	// encoded in is the caller's, resolved against an observation.
 	EffortDialect string
+	// Price is the entry's `price:` as the engine prices a call by (priceOfEntry, ADR 0093), the
+	// unpriced zero for an entry that states none. It is the binding's one field that is not a dial
+	// fact — nothing dialled from the binding reads it — and it rides here so every engine projection
+	// of the binding carries the price of the server it dials (dial.go). A value, so the binding
+	// stays comparable.
+	Price domain.ServerPrice
 }
 
 // newUpstreamHolder builds the holder EMPTY: no Monitor, no binding, nothing to observe. The
@@ -296,7 +303,8 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// engine's replacement client dials it the way this entry's Monitor does; a wire is a fact about
 	// the server, and it moves with the endpoint for the key's reason — and its `request-extra:`
 	// passthrough (ADR 0085), "" included: the replacement client merges THIS server's keys and
-	// never the retired one's.
+	// never the retired one's. Its `price:` rides the same binding (ADR 0093), the unpriced zero
+	// included, so the calls after the move are priced at the server they now go to.
 	dial := bindingOfEntry(entry, apiKey)
 	spec := dial.upstreamSpec()
 	// The arrived-at server in the HUMAN's words, so the orientation block names the session seat by

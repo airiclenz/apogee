@@ -489,7 +489,9 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // what answers without it: the top-level key for the window, the engine's own derivation for the cap.
 //
 // It reports whether that re-derivation MOVED any of the three bounds this session is held to — the
-// RESOLVED answers, compared across the install rather than the entry's own fields. That is what the
+// RESOLVED answers, compared across the install rather than the entry's own fields — or the bound
+// entry's `price:`, which a rebind carries too (apogee.RebindSpec.Price, ADR 0093) and which has no
+// other door into the running engine. That is what the
 // caller's ride turns on (applySettingFor's `servers` case): a latch nobody re-reads describes the
 // session only from the next rebind onwards, so an edit that moves one has to drive one, and an edit
 // that moves none must not. Resolved-not-raw is what makes "moves none" honest for the window:
@@ -505,7 +507,7 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	window, outputCap := config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow), s.entryCap
-	reserve := s.entryReserve
+	reserve, price := s.entryReserve, s.entry.Price
 	s.now.Servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
@@ -529,7 +531,19 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 		}
 	}
 	return config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow) != window ||
-		s.entryCap != outputCap || s.entryReserve != reserve
+		s.entryCap != outputCap || s.entryReserve != reserve || s.entry.Price != price
+}
+
+// price reports the BOUND entry's `price:` as the engine prices a call by (priceOfEntry, ADR 0093):
+// the entry the session is on as the list stands now — followEntry latches it at a move and
+// setServers re-derives it from a re-read list — so the rebind closure restates it on every spec
+// and a `price:` edited on the bound entry prices the very next recorded call (ADR 0037, Amendment
+// 2026-08-24). The unpriced zero for an entry that states none, and for a pre-bound start that has
+// latched no entry yet.
+func (s *liveSettings) price() domain.ServerPrice {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return priceOfEntry(s.entry.Price)
 }
 
 // modelProfileEntries reports the `model-profiles:` user tier as it stands now. It is the read the
@@ -1806,8 +1820,8 @@ func (a settingsApplier) reloadSystemPrompt() error {
 // reasoning, and the reason the migration notice is dropped here too.
 //
 // It reports whether the re-read moved either token bound the BOUND entry resolves to — its window
-// or its reply ceiling (setServers' own answer) — which is what tells the caller a rebind has to ride
-// this apply. A refusal reports false with the error: nothing was installed, so nothing moved.
+// or its reply ceiling — or that entry's share or price (setServers' own answer), which is what tells
+// the caller a rebind has to ride this apply. A refusal reports false with the error: nothing was installed, so nothing moved.
 func (a settingsApplier) reloadServers() (bool, error) {
 	file, err := a.fileConfig()
 	if err != nil {

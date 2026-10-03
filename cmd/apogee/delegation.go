@@ -875,7 +875,9 @@ func resolveDelegationTarget(
 	// protocol that server speaks — the entry's `wire:` key as written (ADR 0078), the same value
 	// the beat above was dialled under, so a routed child dials with it and never with the session
 	// server's; and its `request-extra:` passthrough (ADR 0085), carried as written — "" included,
-	// so a child routed to an entry that names none never sends the session server's keys.
+	// so a child routed to an entry that names none never sends the session server's keys. The
+	// entry's `price:` rides the same binding (ADR 0093), the unpriced zero included, so a routed
+	// child's calls are priced at the server it dials and never at the session server's rate.
 	target := bindingOfEntry(entry, apiKey).delegationTarget()
 	// The entry's name, so the routed child's Config names the server it actually dials.
 	target.ServerName = entry.Name

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -267,5 +268,240 @@ func TestCompactionUsageRidesFlaggedMaintenanceEvent(t *testing.T) {
 		c.CompletionTokens != 75 || c.TotalTokens != 625 {
 		t.Errorf("post-fold cumulative = {calls %d, %d %d %d}, want {calls 4, 550 75 625} — continuing from the fold's totals",
 			c.Calls, c.PromptTokens, c.CompletionTokens, c.TotalTokens)
+	}
+}
+
+// pricedAt is a stated server price with the given per-1M rates — the shape priceOfEntry hands the
+// engine for an entry with a `price:` block.
+func pricedAt(input, output, cachedInput float64) domain.ServerPrice {
+	return domain.ServerPrice{
+		Rate:     domain.Price{Input: input, Output: output, CachedInput: cachedInput},
+		IsStated: true,
+	}
+}
+
+// stepText submits text and advances one Turn, failing the test on either error.
+func stepText(t *testing.T, a *Agent, text string) {
+	t.Helper()
+	if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+		t.Fatalf("Submit(%q): %v", text, err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step(%q): %v", text, err)
+	}
+}
+
+// TestUsageTallyPricesEachCallAtTheBoundServer pins ADR 0093 decisions 3 and 4 at the one place a
+// call is priced: a call to a priced server carries its own amount — the uncached prompt at the
+// input rate, the cached share at the cached-input rate, the completion at the output rate — and
+// adds it to Cumulative as a priced call; a call to an unpriced server carries nothing and is
+// counted as unpriced, never as a free priced call.
+func TestUsageTallyPricesEachCallAtTheBoundServer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		price      domain.ServerPrice
+		wantCost   int64
+		wantPriced bool
+		wantUsage  domain.Usage
+	}{
+		{
+			name:  "priced server",
+			price: pricedAt(2, 10, 0.5),
+			// 600 uncached × 2 + 400 cached × 0.5 + 100 completion × 10 millionths.
+			wantCost:   2400,
+			wantPriced: true,
+			wantUsage: domain.Usage{
+				Calls: 1, PromptTokens: 1000, CachedPromptTokens: 400, CompletionTokens: 100,
+				TotalTokens: 1100, CostMicros: 2400, PricedCalls: 1,
+			},
+		},
+		{
+			name:  "unpriced server",
+			price: domain.ServerPrice{},
+			wantUsage: domain.Usage{
+				Calls: 1, PromptTokens: 1000, CachedPromptTokens: 400, CompletionTokens: 100,
+				TotalTokens: 1100, UnpricedCalls: 1,
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := baseConfig(sink)
+			cfg.Price = tc.price
+			responder := scriptedResponder(t,
+				usageScript("reply", stubllm.Usage{Prompt: 1000, Completion: 100, Cached: 400}))
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			stepText(t, a, "hi")
+
+			got := usageEvents(sink.events)
+			if len(got) != 1 {
+				t.Fatalf("emitted %d UsageEvents, want 1", len(got))
+			}
+			if got[0].CostMicros != tc.wantCost || got[0].Priced != tc.wantPriced {
+				t.Errorf("call = {cost %d, priced %v}, want {cost %d, priced %v}",
+					got[0].CostMicros, got[0].Priced, tc.wantCost, tc.wantPriced)
+			}
+			if got[0].Cumulative != tc.wantUsage {
+				t.Errorf("Cumulative = %+v, want %+v", got[0].Cumulative, tc.wantUsage)
+			}
+		})
+	}
+}
+
+// TestUsageTallySwitchMidSessionSumsTwoPrices is ADR 0093's "a session is not on one server": a
+// call before a `/server` switch is priced at the first server, a call after it at the arrived-at
+// server's price the switch carried, and Cumulative is the plain sum of the two — the earlier call
+// is never repriced. A rebind that restates the price (a `price:` edit dropping the block) leaves
+// the next call unpriced, and a rebind silent about the price keeps the one in force.
+func TestUsageTallySwitchMidSessionSumsTwoPrices(t *testing.T) {
+	t.Parallel()
+
+	const (
+		firstEndpoint  = "http://first.local:1111"
+		secondEndpoint = "http://second.local:2222"
+	)
+	first := scriptedResponder(t, usageScript("on the first", stubllm.Usage{Prompt: 100, Completion: 10}))
+	second := scriptedResponder(t,
+		usageScript("on the second", stubllm.Usage{Prompt: 100, Completion: 10}),
+		usageScript("still on the second", stubllm.Usage{Prompt: 100, Completion: 10}),
+		usageScript("price dropped", stubllm.Usage{Prompt: 100, Completion: 10}),
+	)
+	dialer := dialerAnswering(func(endpoint string) provider.Responder {
+		if endpoint == secondEndpoint {
+			return second
+		}
+		return first
+	})
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Endpoint = firstEndpoint
+	cfg.Price = pricedAt(1, 2, 1)
+	a, err := New(cfg, WithDialer(dialer.dial))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	stepText(t, a, "one")
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: secondEndpoint, Price: pricedAt(3, 4, 3)}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+	if err := a.Rebind(RebindSpec{Model: testModel}); err != nil {
+		t.Fatalf("Rebind (silent about the price): %v", err)
+	}
+	stepText(t, a, "two")
+	stepText(t, a, "three")
+	unpriced := domain.ServerPrice{}
+	if err := a.Rebind(RebindSpec{Model: testModel, Price: &unpriced}); err != nil {
+		t.Fatalf("Rebind (price dropped): %v", err)
+	}
+	stepText(t, a, "four")
+
+	got := usageEvents(sink.events)
+	if len(got) != 4 {
+		t.Fatalf("emitted %d UsageEvents, want 4", len(got))
+	}
+	// 100 × 1 + 10 × 2 = 120 on the first server; 100 × 3 + 10 × 4 = 340 on the second.
+	wantCosts := []int64{120, 340, 340, 0}
+	for i, want := range wantCosts {
+		if got[i].CostMicros != want || got[i].Priced != (want != 0) {
+			t.Errorf("call %d = {cost %d, priced %v}, want {cost %d, priced %v}",
+				i, got[i].CostMicros, got[i].Priced, want, want != 0)
+		}
+	}
+	last := got[3].Cumulative
+	if last.CostMicros != 800 || last.PricedCalls != 3 || last.UnpricedCalls != 1 {
+		t.Errorf("final Cumulative = {cost %d, priced %d, unpriced %d}, want {800, 3, 1} — one sum over both prices",
+			last.CostMicros, last.PricedCalls, last.UnpricedCalls)
+	}
+}
+
+// TestUsageTallyRoutedDelegationPricesAtTheTarget is decision 3 for a routed delegation: a child
+// routed to the Sub-agent server prices its calls at THAT server's price — and a target with no
+// `price:` leaves the child unpriced rather than borrowing the parent's rate — while an unrouted
+// child calls the parent's server and so carries the parent's price.
+func TestUsageTallyRoutedDelegationPricesAtTheTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		target     *DelegationTarget
+		wantCost   int64
+		wantPriced bool
+	}{
+		// reading's call: 10 prompt, 5 completion.
+		{name: "routed to a priced target", target: routedTargetPriced(pricedAt(3, 4, 3)), wantCost: 50, wantPriced: true},
+		{name: "routed to an unpriced target", target: routedTargetPriced(domain.ServerPrice{})},
+		{name: "unrouted", target: nil, wantCost: 30, wantPriced: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			parent := routingParent(t)
+			parent.cfg.Price = pricedAt(1, 4, 1)
+			parent.SetDelegationTarget(tc.target)
+
+			child := reading(spawn(t, parent))
+
+			if child.CostMicros != tc.wantCost || child.Priced != tc.wantPriced {
+				t.Errorf("child call = {cost %d, priced %v}, want {cost %d, priced %v}",
+					child.CostMicros, child.Priced, tc.wantCost, tc.wantPriced)
+			}
+		})
+	}
+}
+
+// routedTargetPriced is routedTarget with the Sub-agent server's price set.
+func routedTargetPriced(price domain.ServerPrice) *DelegationTarget {
+	target := routedTarget()
+	target.Price = price
+	return target
+}
+
+// TestUsageCompactionCallIsPriced pins decision 3's maintenance half: the Compaction fold is a real
+// call to the server the agent is bound to, so its Maintenance reading is priced there through the
+// same tally — no second path — and its amount joins the Turns' in Cumulative.
+func TestUsageCompactionCallIsPriced(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Price = pricedAt(1, 2, 1)
+	responder := scriptedResponder(t,
+		usageScript("first", stubllm.Usage{Prompt: 10, Completion: 1}),
+		usageScript("second", stubllm.Usage{Prompt: 20, Completion: 2}),
+		usageScript("FOLDED-SUMMARY", stubllm.Usage{Prompt: 500, Completion: 60}),
+	)
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	stepText(t, a, "task one")
+	stepText(t, a, "task two")
+
+	if skipped, err := a.Compact(context.Background()); err != nil {
+		t.Fatalf("Compact: %v", err)
+	} else if skipped {
+		t.Fatal("Compact skipped a foldable conversation; want a real fold that spends tokens")
+	}
+
+	got := usageEvents(sink.events)
+	if len(got) != 3 || !got[2].Maintenance {
+		t.Fatalf("emitted %d UsageEvents (last maintenance: %v), want 3 ending in the fold", len(got), len(got) == 3 && got[2].Maintenance)
+	}
+	// 500 × 1 + 60 × 2 = 620; the Turns before it cost 12 and 24.
+	if fold := got[2]; fold.CostMicros != 620 || !fold.Priced {
+		t.Errorf("fold = {cost %d, priced %v}, want {620, true}", fold.CostMicros, fold.Priced)
+	}
+	if c := got[2].Cumulative; c.CostMicros != 656 || c.PricedCalls != 3 || c.UnpricedCalls != 0 {
+		t.Errorf("Cumulative after the fold = {cost %d, priced %d, unpriced %d}, want {656, 3, 0}",
+			c.CostMicros, c.PricedCalls, c.UnpricedCalls)
 	}
 }

@@ -284,7 +284,9 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// so an unattended run opens the connection a session on this entry opens (ADR 0031's Driver
 	// parity) — and its `request-extra:` passthrough (ADR 0085), for the wire's reason: every body
 	// an unattended run sends to this entry carries the keys a session on it sends. The model is
-	// the spec's, never the entry's pin: the resolution above already ranked the two.
+	// the spec's, never the entry's pin: the resolution above already ranked the two. The entry's
+	// `price:` rides the same binding (ADR 0093), so an unattended run prices its calls as a session
+	// on this entry does.
 	bindingOfEntry(in.entry, apiKey).fillDial(&cfg)
 	cfg.Model = spec.Model
 	// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
@@ -864,6 +866,9 @@ func raise(
 		RecordID: in.recordID,
 		// The clock the id above was minted from, so CreatedAt and the id prefix agree.
 		Now: now,
+		// The configured `currency:` label, written beside the record's usage so its amount is never
+		// read under another label (ADR 0093 decision 6).
+		Currency: in.opts.Currency,
 		// Both lanes of the `reactions:` list this Firing resolved, handed whole and armed on the
 		// Agent run.Once builds before its first Step: a `gate:` answers this run's very first tool
 		// call, and its trouble reaches the same report line the Runner's does (Config.Report,

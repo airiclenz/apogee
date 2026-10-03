@@ -58,6 +58,12 @@ type DelegationTarget struct {
 	// the child's Client merges over every body it sends. The TARGET's own value, "" included: a
 	// passthrough is a fact about the server, so a routed child never carries the parent's.
 	RequestExtra string
+	// Price is the flagged entry's `price:` (ADR 0093 decision 3): every call a routed child makes
+	// is priced at the server it dials, so this is the TARGET's own value, the unpriced zero
+	// included — a child routed to an entry with no `price:` counts its calls as unpriced and never
+	// borrows the parent's rate (decision 4). An unrouted child inherits the parent's Config, and
+	// with it the parent's price, because it calls the parent's server.
+	Price domain.ServerPrice
 	// Model is the model id a routed child sends on the wire — the entry's `model:` pin, else the
 	// model its heartbeat observed bound there. Required for the same reason Endpoint is: a
 	// delegation that cannot name a model is not a usable target, it is the fallback.

@@ -39,6 +39,10 @@ import (
 type sessionHost struct {
 	store     *session.Store
 	workspace string
+	// currency is the configured `currency:` label every Save writes onto Meta.Currency beside the
+	// usage it labels (ADR 0093 decision 6). The composition root sets it once, before the first
+	// Save; "" (tests, a host built without one) writes no label.
+	currency string
 	// now stamps Save's CreatedAt and UpdatedAt and a Fork's moment, and is the clock Live mints ids
 	// from (read through a closure, so a test that swaps it after construction moves both).
 	now func() time.Time
@@ -151,6 +155,7 @@ func (h *sessionHost) Save(
 			CtxUsed:       ctxUsed,
 			Usage:         usage,
 			DelegateUsage: delegateUsage,
+			Currency:      h.currency,
 			ServedModels:  servedModels,
 		},
 		Transcript: transcript,

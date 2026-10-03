@@ -89,7 +89,8 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// passthrough (ADR 0085) ride the same Config, for the pins' reason below: the Agent is
 	// constructed from it here, and a session that starts on an anthropic entry must open the
 	// Messages connection — merging the entry's keys over every body — from its very first Turn.
-	// The zero wire folds to openai at the dial; "" merges nothing.
+	// The zero wire folds to openai at the dial; "" merges nothing. The entry's `price:` rides with
+	// them (ADR 0093), so the session's very first call is priced at the server it goes to.
 	dial.fillDial(&cfg)
 	cfg.Model = entry.Model
 	// The same server in the HUMAN's words, for the orientation block to name the session seat by

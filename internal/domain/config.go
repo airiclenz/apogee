@@ -108,6 +108,16 @@ type Config struct {
 	// sent before this field existed.
 	RequestExtra string
 
+	// Price is the bound `servers:` entry's `price:` (ADR 0093 decision 3): what a call to the
+	// server this Agent is on costs, with whether the entry states one at all. It rides the server
+	// binding like Wire and RequestExtra — the bind, a `/server` switch (UpstreamSpec), a model
+	// rebind that restates the bound entry (RebindSpec) and a routed delegation (DelegationTarget)
+	// each move it — and it is read at exactly one point: when a completed call's usage is
+	// recorded, which prices that call once and for good. It never reaches the wire. The zero value
+	// is "not priced", so a caller that names no price records every call as unpriced — counted,
+	// never guessed (ADR 0093 decision 4).
+	Price ServerPrice
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)
@@ -483,6 +493,25 @@ type Config struct {
 	// no store gets ADR 0051's in-memory journal, which is what an engine constructed bare has
 	// always had. The default-on lives in the config key, where the human can see it.
 	UndoSnapshots bool
+}
+
+// ServerPrice is one server's Price with its presence typed in (ADR 0093 decisions 2 and 4): Rate
+// is what a call there costs and IsStated says whether the entry has a `price:` at all. The flag is
+// what tells an unpriced server from one priced at zero — a free tier is a real price, and an
+// unpriced call is counted as unpriced rather than as free. The zero value is the unpriced server.
+// It holds no pointer, so Config stays comparable.
+type ServerPrice struct {
+	Rate     Price
+	IsStated bool
+}
+
+// Of prices one call at s: the amount in millionths of the currency unit (Price.Of) and true when
+// the server is priced, 0 and false when it is not.
+func (s ServerPrice) Of(prompt, cached, completion int) (int64, bool) {
+	if !s.IsStated {
+		return 0, false
+	}
+	return s.Rate.Of(prompt, cached, completion), true
 }
 
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only
