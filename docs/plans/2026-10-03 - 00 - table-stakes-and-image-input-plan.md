@@ -72,7 +72,12 @@ internal/session/store.go — Meta.Usage, Meta.DelegateUsage ("spend" = tokens t
 **Acceptance:** `test -f docs/adr/0093-usage-is-priced-per-call-at-the-bound-server.md && grep -n '^\*\*Price\*\*\|Spend (money)' CONTEXT.md`
 **Commit:** `docs(adr): ADR 0093 — usage is priced per call at the bound server`
 
-## 2. Config keys — root `currency:` and per-server `price:`
+## 2. Config keys — root `currency:` and per-server `price:` — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): `currency` has no Validate hook. TestRegistryValidateHooksSitOnEditableKeys refuses a hook on a non-editable row, and TestRegistrySetRefusesWhatValidateRefuses then forbids a Set stricter than the hook. So the file pass does the refusing (registry.go currencyField: fileText plus fileLand through ParseCurrency), and the row's Set lands the value as written. No surface or env var can reach that Set, because the row is file-only.
+NOTES (2026-10-03): Price shape. Price has exported presence flags (HasInput, HasOutput, HasCachedInput, each `yaml:"-"`) so a rate of 0 is not mistaken for a missing one. It also has the helpers IsStated() and CachedInputRate(). The decoder refuses more than the plan lists: an empty block, an explicit `price: null`, a null rate and a rate stated twice. All of these use the requestExtraError wording `servers: entry %q: price: (line %d) … or remove the key`.
+NOTES (2026-10-03): consequential edit — internal/config/config_test.go: the expected defaults in TestResolvePrecedence gain `Currency: DefaultCurrency`. This is needed because the new row resolves an absent key to USD.
+NOTES (2026-10-03): the manual and the template describe only the keys. The cost surfaces (/usage, footer, /sessions, headless) are documented by later items.
 
 **What:**
 **Goal:** `currency:` (optional, default `USD`) and per-server `price:` load, validate and are documented; bad values are refused with the house `apogee: servers: entry %d (%q): price: … or remove the key` wording.

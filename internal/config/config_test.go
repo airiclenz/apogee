@@ -411,6 +411,7 @@ func wantDefaults() Options {
 		WorkflowContinuations: domain.DefaultWorkflowContinuations,
 		WorkflowWake:          true,
 		ServerStats:           true,
+		Currency:              DefaultCurrency,
 		AutoTitle:             true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
@@ -614,7 +615,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
 		"Present":      true,
 		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
-		"ToolsEnabled": true, "Sessions": true,
+		"ToolsEnabled": true, "Sessions": true, "Currency": true,
 	}
 
 	var got, unset Options
@@ -649,6 +650,7 @@ func everyKeyFileConfig() fileConfig {
 		SubAgentsServer:    "the-box",
 		SubAgentsChoice:    "model",
 		Servers:            []ServerEntry{{Name: "the-box", Endpoint: "http://localhost:9000"}},
+		Currency:           strptr("EUR"),
 		ConfineToWorkspace: boolptr(false),
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
 		WebSearch:          "https://search.example.com",
@@ -6250,5 +6252,133 @@ func TestServerEntryRequestExtraRoundTrips(t *testing.T) {
 	}
 	if strings.Contains(string(plain), "request-extra") {
 		t.Errorf("an entry with no passthrough rendered %q", plain)
+	}
+}
+
+// A server entry's `price:` block loads its three rates with a presence flag each, so a rate of 0
+// is a price rather than a key left out, and `cached-input:` falls back to the input rate. Every
+// refusal names the entry and the key and points at removing it: the decoder's for a shape no price
+// can have, ValidateServers' for a well-shaped block a call still could not be priced by.
+func TestServerEntryPriceLoads(t *testing.T) {
+	t.Parallel()
+	const head = "server: box\nservers:\n  - name: box\n    endpoint: http://127.0.0.1:1111\n"
+	tests := []struct {
+		name       string
+		price      string // the price lines, indented under the entry; "" leaves the key out
+		want       Price
+		wantCached float64
+		wantErr    string // a substring the refusal must carry beyond the entry and the key
+	}{
+		{name: "the key absent", want: Price{}},
+		{
+			name:       "all three rates",
+			price:      "    price: {input: 0.3, output: 1.2, cached-input: 0.03}\n",
+			want:       Price{Input: 0.3, Output: 1.2, CachedInput: 0.03, HasInput: true, HasOutput: true, HasCachedInput: true},
+			wantCached: 0.03,
+		},
+		{
+			name:       "cached-input left out takes the input rate",
+			price:      "    price:\n      input: 3\n      output: 15\n",
+			want:       Price{Input: 3, Output: 15, HasInput: true, HasOutput: true},
+			wantCached: 3,
+		},
+		{
+			name:  "a zero rate is a price",
+			price: "    price: {input: 0, output: 0}\n",
+			want:  Price{HasInput: true, HasOutput: true},
+		},
+		{name: "missing output", price: "    price: {input: 3}\n", wantErr: "no output rate"},
+		{name: "missing input", price: "    price: {output: 3, cached-input: 1}\n", wantErr: "no input rate"},
+		{name: "a negative rate", price: "    price: {input: -1, output: 3}\n", wantErr: "input: -1 is not a rate"},
+		{name: "a NaN rate", price: "    price: {input: 1, output: .nan}\n", wantErr: "output: NaN is not a rate"},
+		{name: "an infinite cached rate", price: "    price: {input: 1, output: 2, cached-input: .inf}\n",
+			wantErr: "cached-input: +Inf is not a rate"},
+		{name: "an unknown sub-key", price: "    price: {input: 1, output: 2, reasoning: 4}\n",
+			wantErr: `names "reasoning", which is not a rate`},
+		{name: "a rate that is not a number", price: "    price: {input: cheap, output: 2}\n",
+			wantErr: "not a number"},
+		{name: "an empty rate", price: "    price: {input: 1, output: null}\n", wantErr: "output: is empty"},
+		{name: "a scalar", price: "    price: 5\n", wantErr: "not a mapping"},
+		{name: "an empty block", price: "    price: {}\n", wantErr: "is empty"},
+		{name: "an explicit null", price: "    price: null\n", wantErr: "is empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, head+tt.price)}
+
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ApplyConfig refused %q: %v", tt.price, err)
+				}
+				if got := opts.StartupEntry.Price; got != tt.want {
+					t.Errorf("StartupEntry.Price = %+v; want %+v", got, tt.want)
+				}
+				if got := opts.StartupEntry.Price.CachedInputRate(); got != tt.wantCached {
+					t.Errorf("CachedInputRate() = %v; want %v", got, tt.wantCached)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted %q; want a refusal", tt.price)
+			}
+			for _, part := range []string{`"box"`, "price:", tt.wantErr, "or remove the key"} {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("the refusal does not carry %s: %v", part, err)
+				}
+			}
+		})
+	}
+}
+
+// The root `currency:` label resolves to USD when absent, lands trimmed as written when stated, and
+// a label that would print as nothing, as a sentence or as a terminal control sequence is refused
+// at the file pass.
+func TestCurrencyLoads(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		file    string
+		want    string
+		wantErr string
+	}{
+		{name: "absent is USD", file: "", want: "USD"},
+		{name: "a stated code", file: "currency: EUR\n", want: "EUR"},
+		{name: "a symbol", file: "currency: \"€\"\n", want: "€"},
+		{name: "padding is trimmed", file: "currency: \"  GBP \"\n", want: "GBP"},
+		{name: "a blank label", file: "currency: \"   \"\n", wantErr: "it is empty"},
+		{name: "an empty label", file: "currency: \"\"\n", wantErr: "it is empty"},
+		{name: "an over-long label", file: "currency: seventeen-letters\n", wantErr: "longer than 16"},
+		{name: "a control character", file: "currency: \"U\\tSD\"\n", wantErr: "control character"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, tt.file)}
+
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ApplyConfig refused %q: %v", tt.file, err)
+				}
+				if opts.Currency != tt.want {
+					t.Errorf("Currency = %q; want %q", opts.Currency, tt.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted %q; want a refusal", tt.file)
+			}
+			for _, part := range []string{"currency", tt.wantErr} {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("the refusal does not carry %s: %v", part, err)
+				}
+			}
+		})
 	}
 }

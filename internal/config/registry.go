@@ -246,6 +246,15 @@ var KeyRegistry = bindRows([]Key{
 		fromFile:  fileServers,
 	},
 	{
+		// File-only and not editable, like the list it labels: the rates on every entry are stated in
+		// this currency, so changing the label alone would re-denominate them all without touching a
+		// number — an edit belongs in the file beside the rates. No validate hook, since a
+		// non-editable row runs none; the file pass judges the label instead (currencyField).
+		Path: "currency", Kind: KindString, Default: DefaultCurrency,
+		Desc:  "The label every server's price: rates are stated in, printed beside each cost; a label only — nothing is converted.",
+		field: currencyField(),
+	},
+	{
 		// A kind of its own rather than an enum, even though its values ARE a closed set: EnumValues
 		// is static and TestRegistryEnumValuesMatchParseSites recovers each vocabulary from its parse
 		// site, while the names this key takes are whatever THIS config's `servers:` list spells. A
@@ -1305,6 +1314,21 @@ func ParseDelegateTimeout(value string) (time.Duration, error) {
 			"delegation run unbounded", d)
 	}
 	return d, nil
+}
+
+// currencyField is the descriptor of the root `currency:` label. The file's text lands through
+// ParseCurrency, so a blank, over-long or control-character label is refused at the file pass — on
+// a live re-read too — rather than printed beside every amount. Set lands its value as written:
+// the row is file-only, so no surface or source but the file ever lands one, and a Set stricter
+// than its absent hook would refuse what the writer's own kind check accepts.
+func currencyField() scalarField[string] {
+	at := func(o *Options) *string { return &o.Currency }
+	return scalarField[string]{
+		at:       at,
+		fileText: func(fc fileConfig) *string { return fc.Currency },
+		fileLand: land(ParseCurrency, at),
+		parse:    asIs, format: spelled[string],
+	}
 }
 
 // validateDelegateTimeout refuses a `delegate-timeout:` that is not a length of time to allow,

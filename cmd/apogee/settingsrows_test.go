@@ -26,6 +26,7 @@ func fabricatedSettings() config.Options {
 		Model:         "gpt-oss-20b",
 		Servers:       []config.ServerEntry{{Name: "workstation"}, {Name: "rented-box"}, {Name: "laptop"}},
 		StartupServer: "rented-box",
+		Currency:      "EUR",
 		Editor:        "code -w",
 		Mode:          "auto",
 		SystemPrompt: config.SystemPromptSettings{
@@ -383,6 +384,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
 	want := map[string]string{
 		"servers":                 "3 servers",
+		"currency":                "EUR", // a label printed as written, not the USD default
 		"server":                  "rented-box",
 		"sub-agents-server":       "auto (session server)",
 		"sub-agents-choice":       "fixed", // unset in the fixture, so the declared default is in force

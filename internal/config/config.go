@@ -778,6 +778,11 @@ type fileConfig struct {
 	// like mcp-servers: the list describes machines, not this invocation. Absent/empty ⇒ no server
 	// is configured at all (see ServerEntry for what an entry carries).
 	Servers []ServerEntry `yaml:"servers"`
+	// Currency is the label every entry's `price:` rates above are stated in (ParseCurrency): one
+	// label for the whole list, since apogee converts nothing. File-only (no flag/env), and a
+	// pointer so an explicit `currency: ""` is a stated blank the row refuses rather than the key
+	// left out. Absent ⇒ DefaultCurrency.
+	Currency *string `yaml:"currency"`
 	// Server names which entry of the list above a session STARTS on — the last one chosen, which
 	// /server records here automatically after a switch. Unlike the list, it has both an env var
 	// (`APOGEE_SERVER`) and a flag (`--server`): the list describes machines, and this says which
@@ -1312,6 +1317,11 @@ type UnconfinedHost struct {
 // provider's own routing or sampling knob (OpenRouter's `provider:` block, a vendor flag) reaches
 // the upstream without apogee learning its name. It is carried past the decode as canonical JSON —
 // see RequestExtra for why a string rather than a map.
+//
+// Price is what this server charges per 1M tokens (`price:`), in the root `currency:` label: the
+// rates a call's usage is priced at, so a server without one is simply not costed. It is a value
+// struct for RequestExtra's reason — ServerEntry is compared with `!=` — and see Price for how a
+// rate the file left out is told apart from a rate of 0.
 type ServerEntry struct {
 	Name            string       `yaml:"name"`
 	Endpoint        string       `yaml:"endpoint"`
@@ -1332,6 +1342,7 @@ type ServerEntry struct {
 	EffortDialect   string       `yaml:"effort-dialect,omitempty"`
 	Wire            string       `yaml:"wire,omitempty"`
 	RequestExtra    RequestExtra `yaml:"request-extra,omitempty"`
+	Price           Price        `yaml:"price,omitempty"`
 }
 
 // RequestExtra is a server entry's `request-extra:` mapping as the rest of apogee holds it: the
@@ -1407,8 +1418,149 @@ var requestExtraReservedKeys = []string{
 	"model", "messages", "stream", "stream_options", "tools", "system",
 }
 
-// UnmarshalYAML decodes a `servers:` entry and names the entry in a `request-extra:` refusal, which
-// the field's own Unmarshaler cannot do. Every other decode error passes through untouched.
+// Price is a server entry's `price:` block: what one million tokens cost on that server, in the
+// root `currency:` label. Input is the rate for prompt tokens, Output for generated ones, and
+// CachedInput for prompt tokens the server served from its cache — optional, because most servers
+// either have no cache discount or bill it at the input rate (CachedInputRate).
+//
+// It holds no pointer, map or slice, because ServerEntry is compared with `!=`; the Has* flags are
+// what tell a rate the file left out from a rate of 0, which is a real price (a free tier, a local
+// box). They carry no yaml name, so the unknown-key walk (unknownkeys.go) knows exactly the three
+// rate keys and stays silent on a priced entry. The zero Price is "no price:" — IsStated says so.
+//
+// The decoder (UnmarshalYAML) refuses the SHAPES no price can have: a non-mapping, an empty block,
+// a key that is not one of the three rates, a rate stated twice or written as anything but a
+// number. What a well-shaped block can still get wrong — a required rate missing, a rate negative
+// or not finite — is ValidateServers' refusal (validatePrice), so a hand-built entry is checked by
+// the same rule a decoded one is.
+type Price struct {
+	Input          float64 `yaml:"input"`
+	Output         float64 `yaml:"output"`
+	CachedInput    float64 `yaml:"cached-input"`
+	HasInput       bool    `yaml:"-"`
+	HasOutput      bool    `yaml:"-"`
+	HasCachedInput bool    `yaml:"-"`
+}
+
+// IsStated reports whether the entry carries a `price:` block at all — whether calls to the
+// server are costed.
+func (p Price) IsStated() bool {
+	return p.HasInput || p.HasOutput || p.HasCachedInput
+}
+
+// CachedInputRate is the rate a cached prompt token is priced at: the stated `cached-input:`, else
+// the input rate, since a server that names no discount charges a cached token as any other.
+func (p Price) CachedInputRate() float64 {
+	if p.HasCachedInput {
+		return p.CachedInput
+	}
+	return p.Input
+}
+
+// UnmarshalYAML reads a `price:` mapping rate by rate. Its refusals are priceErrors, which
+// ServerEntry.UnmarshalYAML completes with the entry's name, because yaml.v3 hands a field's
+// Unmarshaler the value node alone; an explicit `null` never reaches here (yaml.v3 short-circuits
+// it), so ServerEntry.UnmarshalYAML refuses that one itself.
+func (p *Price) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	if node.Kind != yaml.MappingNode {
+		return &priceError{line: node.Line, reason: "is not a mapping — write the rates per 1M tokens " +
+			"as a block (price: {input: 3, output: 15}), or remove the key"}
+	}
+	if len(node.Content) == 0 {
+		return &priceError{line: node.Line, reason: "is empty — give the input and output rates per " +
+			"1M tokens, or remove the key"}
+	}
+	var price Price
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode, valueNode := node.Content[i], resolveAlias(node.Content[i+1])
+		rate, stated := price.rateField(keyNode.Value)
+		switch {
+		case rate == nil:
+			return &priceError{line: keyNode.Line, reason: fmt.Sprintf("names %q, which is not a rate — "+
+				"price takes input, output and cached-input, each per 1M tokens; or remove the key",
+				keyNode.Value)}
+		case *stated:
+			return &priceError{line: keyNode.Line, reason: fmt.Sprintf("states %s twice — keep the one "+
+				"rate this server charges, or remove the key", keyNode.Value)}
+		case valueNode.ShortTag() == "!!null":
+			return &priceError{line: valueNode.Line, reason: fmt.Sprintf("%s: is empty — give the rate "+
+				"per 1M tokens, 0 for free, or remove the key", keyNode.Value)}
+		}
+		if err := valueNode.Decode(rate); err != nil {
+			return &priceError{line: valueNode.Line, reason: fmt.Sprintf("%s: %q is not a number — give "+
+				"the rate per 1M tokens, for example 0.5, or remove the key", keyNode.Value, valueNode.Value)}
+		}
+		*stated = true
+	}
+	*p = price
+	return nil
+}
+
+// rateField returns the rate and the presence flag a `price:` key names, nil for any other key.
+func (p *Price) rateField(key string) (*float64, *bool) {
+	switch key {
+	case "input":
+		return &p.Input, &p.HasInput
+	case "output":
+		return &p.Output, &p.HasOutput
+	case "cached-input":
+		return &p.CachedInput, &p.HasCachedInput
+	default:
+		return nil, nil
+	}
+}
+
+// priceError is a `price:` refusal still missing the entry it belongs to, requestExtraError's twin.
+type priceError struct {
+	line   int
+	reason string
+}
+
+func (e *priceError) Error() string {
+	return fmt.Sprintf("price: (line %d) %s", e.line, e.reason)
+}
+
+// validatePrice refuses a `price:` block a call could not be priced by: one missing the input or
+// the output rate — both are needed to price any call — or one stating a rate that is negative,
+// NaN or infinite. An entry with no block is not a defect; it is simply not costed.
+func validatePrice(p Price) error {
+	if !p.IsStated() {
+		return nil
+	}
+	if !p.HasInput {
+		return errors.New("has no input rate — give what 1M prompt tokens cost on this server, or " +
+			"remove the key")
+	}
+	if !p.HasOutput {
+		return errors.New("has no output rate — give what 1M generated tokens cost on this server, " +
+			"or remove the key")
+	}
+	for _, rate := range []struct {
+		key    string
+		value  float64
+		stated bool
+	}{
+		{"input", p.Input, true},
+		{"output", p.Output, true},
+		{"cached-input", p.CachedInput, p.HasCachedInput},
+	} {
+		if rate.stated && !isPriceRate(rate.value) {
+			return fmt.Errorf("%s: %v is not a rate — give a finite number per 1M tokens, 0 or more, "+
+				"or remove the key", rate.key, rate.value)
+		}
+	}
+	return nil
+}
+
+// isPriceRate reports whether rate can price tokens: finite and not negative.
+func isPriceRate(rate float64) bool {
+	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate >= 0
+}
+
+// UnmarshalYAML decodes a `servers:` entry and names the entry in a `request-extra:` or `price:`
+// refusal, which the fields' own Unmarshalers cannot do. Every other decode error passes through
+// untouched.
 func (e *ServerEntry) UnmarshalYAML(node *yaml.Node) error {
 	type plain ServerEntry
 	if err := node.Decode((*plain)(e)); err != nil {
@@ -1416,12 +1568,21 @@ func (e *ServerEntry) UnmarshalYAML(node *yaml.Node) error {
 		if errors.As(err, &extra) {
 			return fmt.Errorf("servers: entry %q: %w", entryNameOf(node), extra)
 		}
+		var price *priceError
+		if errors.As(err, &price) {
+			return fmt.Errorf("servers: entry %q: %w", entryNameOf(node), price)
+		}
 		return err
 	}
 	if value, ok := mappingValue(node, "request-extra"); ok && value.ShortTag() == "!!null" {
 		return fmt.Errorf("servers: entry %q: %w", entryNameOf(node),
 			&requestExtraError{line: value.Line, reason: "is empty — write the keys to add to every " +
 				"request body this server is sent, or remove the key"})
+	}
+	if value, ok := mappingValue(node, "price"); ok && value.ShortTag() == "!!null" {
+		return fmt.Errorf("servers: entry %q: %w", entryNameOf(node),
+			&priceError{line: value.Line, reason: "is empty — give the input and output rates per 1M " +
+				"tokens, or remove the key"})
 	}
 	return nil
 }
@@ -1576,6 +1737,12 @@ func canonicaliseServers(fc *fileConfig) {
 // deletion (validateRequestExtra). Its SHAPE — a mapping, representable as JSON — is the decoder's
 // refusal (RequestExtra.UnmarshalYAML), because by the time this runs a non-mapping is long gone.
 //
+// The entry's optional `price:` block is checked for what a well-shaped block can still get wrong
+// (validatePrice): an input or output rate left out — both are needed to price a call — and a rate
+// that is negative, NaN or infinite, which no amount of usage could be multiplied by. The block's
+// shape — a mapping of the three rate keys, each a number — is the decoder's refusal
+// (Price.UnmarshalYAML), for request-extra's reason.
+//
 // What it deliberately does NOT check is the delegation posture: `bypass:` is legal
 // on every entry, because which one takes the delegations is the root `sub-agents-server:` key's
 // answer and that key moves in a running session (`/sub-agents-server`). A posture written on an
@@ -1692,6 +1859,9 @@ func ValidateServers(servers []ServerEntry) error {
 		}
 		if err := validateRequestExtra(s.RequestExtra); err != nil {
 			return fmt.Errorf("apogee: servers: entry %d (%q): request-extra: %w", i+1, s.Name, err)
+		}
+		if err := validatePrice(s.Price); err != nil {
+			return fmt.Errorf("apogee: servers: entry %d (%q): price: %w", i+1, s.Name, err)
 		}
 	}
 	return nil

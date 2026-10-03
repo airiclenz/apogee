@@ -6,8 +6,12 @@ package config
 // cobra command that binds a handful of its fields (ADR 0043).
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -84,6 +88,13 @@ type Options struct {
 	// alternatives are configured); ApplyConfig sets it from the resolved settings, having already
 	// refused an entry that could never be switched to.
 	Servers []ServerEntry
+
+	// currency is the resolved root `currency:` key — the label every `servers:` entry's `price:`
+	// rates are stated in, and the one the cost surfaces print beside an amount. File-only (no
+	// flag/env): what a file's rates are denominated in is a fact about that file, not about one
+	// invocation. A display label only, printed as written: apogee converts nothing, so one
+	// currency covers every server. Absent ⇒ DefaultCurrency; ParseCurrency is its whole contract.
+	Currency string
 
 	// startupServer is the resolved `server:` key — the NAME of the servers entry this session
 	// starts on, which /server records after a switch. It is the one key of this pair with sources
@@ -430,6 +441,37 @@ const (
 	WorkflowWakeOn  = "on"
 	WorkflowWakeOff = "off"
 )
+
+// DefaultCurrency is the label an absent `currency:` key resolves to.
+const DefaultCurrency = "USD"
+
+// maxCurrencyRunes bounds the `currency:` label: it is printed beside every amount, on a footer
+// that gives up segments by width, so a label longer than a short code or symbol is a sentence
+// rather than a currency.
+const maxCurrencyRunes = 16
+
+// ParseCurrency admits the file's spelling of `currency:` as the label it prints: trimmed, not
+// empty, at most maxCurrencyRunes runes and free of control characters, since the label lands on a
+// terminal row as written. It is a label and nothing more — any word or symbol passes (`EUR`,
+// `€`, `credits`), because apogee converts nothing and checks no ISO table.
+func ParseCurrency(value string) (string, error) {
+	label := strings.TrimSpace(value)
+	switch {
+	case label == "":
+		return "", errors.New("apogee: invalid currency: it is empty — give the label your servers' " +
+			"price: rates are stated in, for example USD or EUR, or remove the key, which is " +
+			DefaultCurrency)
+	case utf8.RuneCountInString(label) > maxCurrencyRunes:
+		return "", fmt.Errorf("apogee: invalid currency: %q is longer than %d characters — give a "+
+			"short label such as USD, EUR or €, or remove the key, which is %s",
+			label, maxCurrencyRunes, DefaultCurrency)
+	case strings.ContainsFunc(label, unicode.IsControl):
+		return "", fmt.Errorf("apogee: invalid currency: %q carries a control character — give a "+
+			"printable label such as USD, EUR or €, or remove the key, which is %s",
+			label, DefaultCurrency)
+	}
+	return label, nil
+}
 
 // ParseWorkflowWake resolves the file's spelling of `workflow-wake:` into the switch it names,
 // refusing any word outside the two — `true` and `false` included, since a YAML bool is not how the

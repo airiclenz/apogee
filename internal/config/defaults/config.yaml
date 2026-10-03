@@ -193,6 +193,16 @@
 #
 #                plaintext-key-ok: true
 #
+#   price      what this server charges per 1M tokens, in the currency: label below — input for
+#              prompt tokens, output for generated ones, and the optional cached-input for prompt
+#              tokens the server served from its cache (left out, they cost the input rate). Each
+#              rate is a number, 0 or more. Optional: a server with no price: is not costed.
+#
+#                price:
+#                  input: 0.30
+#                  output: 1.20
+#                  cached-input: 0.03
+#
 # servers:
 #   - name: workstation
 #     endpoint: http://192.168.64.1:1111
@@ -209,6 +219,16 @@
 #   - name: openrouter
 #     endpoint: https://openrouter.ai/api
 #     api-key-env: OPENROUTER_API_KEY
+#     price:
+#       input: 0.30
+#       output: 1.20
+
+# =============================================================================
+# The currency every servers: entry's price: rates are stated in, printed beside each cost apogee
+# shows. One label for every server, and a label only: apogee converts nothing, so write the
+# rates above in the currency you name here. Any short word or symbol works — USD, EUR, €,
+# credits — up to 16 characters. Config-file only (no flag or env).
+# currency: USD
 
 # =============================================================================
 # Which servers: entry a session starts on — the name of one of the entries above. apogee keeps

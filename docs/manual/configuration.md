@@ -1382,7 +1382,8 @@ which lets apogee start, switch and stop that server itself — [below](#local-s
 `bypass` is optional too, and says what *delegations to* that entry run as
 rather than how the server itself behaves — further down this section — and so
 is `request-extra`, fields added to every request body sent to that server
-([below](#extra-fields-in-every-request--request-extra)).
+([below](#extra-fields-in-every-request--request-extra)), and `price`, what that
+server charges per million tokens ([below](#pricing--price-and-currency)).
 
 **A `.local` endpoint works in every build.** An `endpoint` may name a host by its
 mDNS `.local` name — `http://Apollo-II.local:1111` — and the release binaries reach it
@@ -1652,6 +1653,49 @@ you put there is still sent and still conflicts with thinking: leave sampling kn
 of an anthropic entry's `request-extra:`. Compaction summaries and session naming always
 ask for `off`, so they get the same shape: no thinking on most models, and the least the
 model allows on the ones above.
+
+### Pricing — `price:` and `currency:`
+
+A `servers:` entry may say what that server charges, so apogee can put a cost on
+the tokens a session spends there. `price:` takes three rates, each the price of
+**one million tokens**: `input` for prompt tokens, `output` for generated ones and,
+optionally, `cached-input` for prompt tokens the server served from its cache.
+Leave `cached-input` out and cached tokens cost the `input` rate. The root key
+`currency:` names the currency all the rates are in. It defaults to `USD`.
+
+```yaml
+# ~/.apogee/config.yaml
+currency: EUR
+servers:
+  - name: openrouter
+    endpoint: https://openrouter.ai/api
+    api-key-env: OPENROUTER_API_KEY
+    price:
+      input: 0.30         # per 1M prompt tokens
+      output: 1.20        # per 1M generated tokens
+      cached-input: 0.03  # optional; defaults to the input rate
+  - name: workstation     # no price: — calls to it are not costed
+    endpoint: http://192.168.64.1:1111
+```
+
+A server with no `price:` is not costed. A rate of `0` is a price, not a missing
+one: use it for a free tier.
+
+`currency:` is only a label. apogee prints it next to each amount as you wrote it
+and converts nothing, so one currency covers every server: write each server's
+rates in that currency. Any short word or symbol works (`USD`, `EUR`, `€`,
+`credits`), up to 16 characters.
+
+apogee refuses to start when a value is wrong:
+
+- a `price:` block with no `input` or no `output` rate;
+- a rate that is negative, not finite (`.nan`, `.inf`) or not a number;
+- a key inside `price:` other than the three rates;
+- a `price:` that is empty or not a mapping;
+- a `currency:` that is blank, longer than 16 characters, or holds a control character.
+
+Both keys are config-file only. `/settings` shows `currency:` but does not edit it,
+because changing the label alone would change what every rate means.
 
 ### How fast each server answers — the picker summary
 

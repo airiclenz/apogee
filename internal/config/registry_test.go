@@ -932,6 +932,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.tools-open": "UI", "ui.tools-fold-over": "UI",
 		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
+		"currency": "Currency",
 	}
 	noInverse := map[string]string{
 		"context-files.enable": "Read derives from the resolved list; the key owns no Options field",

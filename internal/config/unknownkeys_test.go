@@ -56,6 +56,11 @@ func TestUnknownKeysWalksTheSchemaAsDeepAsItGoes(t *testing.T) {
 			want:  nil,
 		},
 		{
+			name:  "a priced servers entry is walked into its price block, and the three rates are known",
+			given: "servers: [{name: a, price: {input: 1, output: 2, cached-input: 0.5}}]\n",
+			want:  nil,
+		},
+		{
 			name:  "the retired sub-agents flag is exempt on a servers entry",
 			given: "servers: [{name: a, sub-agents: true}]\n",
 			want:  nil,
