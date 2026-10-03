@@ -121,8 +121,11 @@ type paintInput struct {
 	text       string
 	tool       toolView
 	skillSpans []skillSpan
-	presented  presentedView
-	startup    startupView
+	// a sent user block's images, named on its "attached:" row (renderUserBlock). No term of the
+	// key: set once at commit and never moved, so the append-only rule covers it
+	images    []imageMark
+	presented presentedView
+	startup   startupView
 	// a workflow block's view (workflowblock.go) — live, or replayed from a record that kept it —
 	// from which its stage rows are painted; the zero value on every other kind, and on a block
 	// replayed from an older record, which paints its text.
@@ -139,7 +142,7 @@ type paintInput struct {
 // record exists for (see [paintInput]).
 func (e entry) painted() paintInput {
 	return paintInput{
-		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.presented, e.startup, e.workflow,
+		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.images, e.presented, e.startup, e.workflow,
 		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel,
 			e.stepCap, e.capRequested},
 	}

@@ -631,7 +631,8 @@ func TestAttachedImagesStayPendingThroughAnInterjection(t *testing.T) {
 }
 
 // An image-only submit sends — the empty-send gate counts a pending image — and the send carries
-// the images, beside any text, and clears the attach line.
+// the images, beside any text, and clears the attach line; the sent block names them on its own
+// "attached:" row, under the ❯ marker itself when the send had no text.
 func TestAttachedImagesRideTheSubmitAndClearTheLine(t *testing.T) {
 	t.Parallel()
 	for _, text := range []string{"", "what is this?"} {
@@ -646,8 +647,15 @@ func TestAttachedImagesRideTheSubmitAndClearTheLine(t *testing.T) {
 			if m.state != stateRunning {
 				t.Fatalf("state = %v, want running — the message was sent", m.state)
 			}
-			if len(m.images) != 0 || strings.Contains(plain(m.View()), "attached:") {
+			if len(m.images) != 0 || m.pendingImageRow() != "" {
 				t.Errorf("images = %d after the send, want the attach line gone", len(m.images))
+			}
+			wantRow := "attached: shot.png (2.0 KiB)"
+			if text == "" {
+				wantRow = glyphUser + " " + wantRow
+			}
+			if view := plain(m.View()); !strings.Contains(view, wantRow) || !strings.Contains(view, text) {
+				t.Errorf("view after the send lacks the sent block's %q row beside %q:\n%s", wantRow, text, view)
 			}
 			drainCmd(t, m, cmd)
 			if len(eng.submitted) != 1 {

@@ -290,12 +290,41 @@ func (e *promptEditor) nextClipboardName() string {
 // pendingImageLine is the pending images as the line above the box shows them —
 // "attached: <name> (<size>)" joined by " · " — or "" when none is pending.
 func (e promptEditor) pendingImageLine() string {
-	if len(e.images) == 0 {
+	return attachedLine(imageMarksOf(e.images))
+}
+
+// imageMark is one image as the transcript remembers a send carried it: the name it was attached
+// under and its size in bytes — never its data, which the engine holds and the scrollback does not
+// need to say what went out.
+type imageMark struct {
+	name string
+	size int
+}
+
+// imageMarksOf states images as the marks the attach line and the sent user block name them by,
+// nil when there are none.
+func imageMarksOf(images []domain.Image) []imageMark {
+	if len(images) == 0 {
+		return nil
+	}
+	marks := make([]imageMark, 0, len(images))
+	for _, img := range images {
+		marks = append(marks, imageMark{name: img.Name, size: len(img.Data)})
+	}
+	return marks
+}
+
+// attachedLine is marks the one way apogee names attached images — "attached: <name> (<size>)"
+// joined by " · " — or "" when there are none. The pending line above the box
+// ([promptEditor.pendingImageLine]) and the sent user block's row (renderUserBlock) both read it,
+// so what the human saw waiting is word for word what the block says went out.
+func attachedLine(marks []imageMark) string {
+	if len(marks) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(e.images))
-	for _, img := range e.images {
-		parts = append(parts, img.Name+" ("+imageSize(len(img.Data))+")")
+	parts := make([]string, 0, len(marks))
+	for _, mark := range marks {
+		parts = append(parts, mark.name+" ("+imageSize(mark.size)+")")
 	}
 	return "attached: " + strings.Join(parts, " · ")
 }

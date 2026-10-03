@@ -19,9 +19,14 @@ import (
 // the two are the same voice and so share one shape, and the glyph is the whole of the
 // difference the reader needs.
 //
+// A send that carried images closes the body with one "attached: <name> (<size>)" row naming them
+// (userBlockImageRow) — the pending line's own wording (attachedLine) — under a hanging indent, or
+// under the marker itself when the send had no text, so an image-only send is never an empty block.
+// The row stands outside the collapse below: a collapsed body still ends with it.
+//
 // It takes the sent block's own paint input rather than the entry: the text, where its skill tokens
-// sit in that text, and whether the block is open are exactly the three facts it reads, and the
-// record is what states that they are all it may (paintcache.go). The marker stays a parameter —
+// sit in that text, the images the send carried and whether the block is open are exactly the four
+// facts it reads, and the record is what states that they are all it may (paintcache.go). The marker stays a parameter —
 // which VOICE is speaking is the caller's, and the two callers differ only in it (renderEntryLines).
 //
 // A body that soft-wraps past promptCollapsedRows rows COLLAPSES to that many, the last of them
@@ -83,6 +88,13 @@ func renderUserBlock(th theme, marker string, in paintInput, width int) blockPai
 			out = append(out, accentRow(th, row, i, accents, limit))
 		}
 	}
+	if attached := attachedLine(in.images); attached != "" {
+		lead := marker // an image-only send: the row IS the block, so it carries the voice's marker
+		if text != "" {
+			lead = strings.Repeat(" ", th.measure.Width(marker))
+		}
+		out = append(out, userBlockImageRow(th, lead, attached, width))
+	}
 	if trailer != "" {
 		out = append(out, trailer)
 	}
@@ -99,6 +111,21 @@ func renderUserBlock(th theme, marker string, in paintInput, width int) blockPai
 	paint.add(out, kind)
 	paint.addPad(promptPadRow(th, glyphPadBelow, width), kind)
 	return paint
+}
+
+// userBlockImageRow is a sent block's "attached:" row — the images the send carried, worded as the
+// pending line above the box named them (attachedLine) — on the block's field across exactly width
+// cells. It is ONE row whatever its length: lead (the marker, or the hanging indent under a body)
+// then the line, cut with the house ellipsis where it would run past the block. It stands outside
+// the body's collapse: the cap counts the human's own rows, and this one is apogee's account of what
+// rode beside them. A block too narrow to hold the lead and one column sheds the lead whole, as the
+// body's own wrap does (hangCollapses).
+func userBlockImageRow(th theme, lead, line string, width int) string {
+	if hangCollapses(width, th.measure.Width(lead)) {
+		lead = ""
+	}
+	row := th.measure.Truncate(lead+line, max(0, width), "…")
+	return th.userBlock.Render(squareLine(th.measure, row, width))
 }
 
 // promptPadRow is one half row padding a sent prompt block: glyph run across exactly width cells

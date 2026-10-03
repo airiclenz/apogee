@@ -406,8 +406,13 @@ type entry struct {
 	// entryUser / entryInterjected: where the skills this message invoked sit IN text — one span
 	// per occurrence
 	skillSpans []skillSpan
-	presented  presentedView
-	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
+	// entryUser only: the images the send carried, by name and size (imageMark), painted as the
+	// block's one "attached:" row (renderUserBlock); nil on a text-only send and on every other kind.
+	// Set once at commit (addUserWithImages) and never mutated, which is what keeps it out of
+	// paintKey: committed content is covered by the append-only rule.
+	images    []imageMark
+	presented presentedView
+	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
 	// entryWorkflow only: the state of the Workflow the block reports (workflowblock.go), which each
 	// fold re-renders into text. Its structure is persisted beside the text (session.Entry.Workflow),
 	// so a replayed block carries it back — without the Workflow's id, so no later event finds it.
@@ -831,10 +836,19 @@ func (t *transcript) takePending(run runRef) string {
 // parsed inputs (joinedInterjections) re-bases them onto the composition, and spansWithin drops
 // any that still fail to land.
 func (t *transcript) addUser(text string, spans []skillSpan) {
+	t.addUserWithImages(text, spans, nil)
+}
+
+// addUserWithImages is addUser for a send that carried images (domain.UserInput.Images): the block
+// also names them, by name and size, on its one "attached:" row — so an image-only send leaves a
+// block that says what went out rather than an empty ❯. Only the idle submit calls it (Model.submit):
+// it is the one path that sends attached images.
+func (t *transcript) addUserWithImages(text string, spans []skillSpan, images []domain.Image) {
 	t.commit(entry{
 		kind:       entryUser,
 		text:       text,
 		skillSpans: spansWithin(text, spans),
+		images:     imageMarksOf(images),
 	})
 }
 

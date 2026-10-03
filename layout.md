@@ -248,7 +248,8 @@ is paid for out of the box's rows. It is not part of the frame's floor, so where
 row for it — at eight rows and below — it is not drawn, and while the approval or ask prompt is up it
 gives way to that pane's four rows too, so an attached image never pushes the frame past the
 terminal or a decision surface off it. The images stay pending; only the line that names them is
-not drawn, and it comes back with the rows.
+not drawn, and it comes back with the rows. Once the images are sent the line goes, and the sent
+block names them on a row of its own (see "A sent image is named in the block").
 
 **A capped box is a window onto the draft, and it says how much of it is out of sight.** The box
 scrolls to keep the line the caret is on in view, and the draft ITSELF is never cut: it is what the
@@ -1078,6 +1079,13 @@ padded five-row shape — its three rows between the `▄` and `▀` half rows, 
 block's range — a deliberately expanded one sticks expanded, self-inflicted and undone by one
 click. A prompt block as tall as the screen sticks without its half rows: they are breathing room,
 and on a frame with none to spare they would cover rows of the prompt itself.
+
+**A sent image is named in the block.** A send that carried attached images closes its block with
+one `attached: <name> (<size>)` row — several joined by ` · `, word for word the pending line that
+sat above the box — on the block's own field, under the hanging indent; a send that was only images
+puts the row under the `❯` marker itself, so it never leaves an empty block. It is one row at any
+width, cut with the house ellipsis where it runs long, and it stands outside the three-row cap: a
+collapsed prompt still ends with it. A text-only send paints no such row.
 
 **A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
 block, and in the conversation it is the whole of the run: it stands alone and the whole span

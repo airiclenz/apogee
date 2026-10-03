@@ -165,7 +165,9 @@ NOTES (2026-10-04): refusal reworded to "or run `apogee probe host` to see what 
 - `go test -count=1 -run 'Remedy|Payload|Match' ./internal/reactions/`
 **Commit:** `fix(daemon): point the auto refusal at apogee probe host`
 
-## 7. Mark a sent image in the user block
+## 7. Mark a sent image in the user block — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the attached row is one row at any width (truncated with the ellipsis) and stands outside the three-row prompt collapse, so a collapsed prompt still ends with it; layout.md documents this. The bead apogee-image-send-no-trace is left for item 8 to close (its persistence half).
 
 **What:** Fixes `apogee-image-send-no-trace` (TUI half): an image-only send leaves an empty `❯` block and nothing marks a sent image.
 **Regression guard.** Recast `TestAttachedImagesRideTheSubmitAndClearTheLine`'s `!strings.Contains(plain(m.View()), "attached:")` check (`prompteditor_test.go:649`) to the pending line alone (`len(m.images)==0 && m.pendingImageRow()==""`) and assert the sent block's row separately. Keep `addUser(text, spans)` (~180 callers) and add a sibling only `Model.submit` calls (e.g. `addUserWithImages`). The images go on `paintInput` and into `entry.painted()`'s unkeyed literal only; `paintKey` (compared with `==`, must stay comparable) gains no term — committed content is covered by the append-only rule.

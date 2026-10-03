@@ -2137,7 +2137,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.images = nil                 // the pending images ride this send (in.Images): the line above the box goes
 	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
 	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
-	m.transcript.addUser(in.Text, spans)
+	m.transcript.addUserWithImages(in.Text, spans, in.Images)
 	// The first prompt of a fresh Session record also NAMES it: one cosmetic out-of-band completion
 	// fired here, in parallel with the Exchange this prompt starts, so a single-slot server answers
 	// it between Turns 1 and 2 (autotitle.go). It drives no engine and enters no transcript — it
