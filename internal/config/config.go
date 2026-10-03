@@ -373,13 +373,18 @@ func fileUnconfinedHosts(o *Options, fc fileConfig) error {
 
 // fileMCPServers projects `mcp-servers:`. The on-disk entries are mapped across one by one, as they
 // are everywhere else in this package: the schema shape and the resolved one stay independently
-// evolvable.
+// evolvable. An entry whose `headers:` / `headers-env:` could not be sent as written is a startup
+// refusal (mcp.ServerConfig.ValidateHeaders owns the rule), so a reserved or malformed header is
+// never a request that fails later, per connect, with nothing in the config pointing at it.
 func fileMCPServers(o *Options, fc fileConfig) error {
 	o.MCPServers = nil
 	if len(fc.MCPServers) > 0 {
 		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
 		for i, m := range fc.MCPServers {
 			servers[i] = m.toServerConfig()
+			if err := servers[i].ValidateHeaders(); err != nil {
+				return fmt.Errorf("apogee: mcp-servers.%s: %w", m.Name, err)
+			}
 		}
 		o.MCPServers = servers
 	}
@@ -584,6 +589,58 @@ func mcpEnvAllowlistNotices(servers []mcp.ServerConfig) []string {
 		}
 	}
 	return notices
+}
+
+// mcpStdioHeaderNotices is one line per `mcp-servers:` entry that sets `headers:` or
+// `headers-env:` on a stdio server, in the order the file lists them, or nil when nothing does. A
+// stdio server is spoken to over its stdin and stdout, so there is no HTTP request for a header to
+// ride — the keys are read by nobody. A notice and never a refusal, for mcpEnvAllowlistNotices'
+// reason: the server still loads, and silence is the whole defect. The trigger is the key's
+// PRESENCE, so an explicitly empty map notices too.
+func mcpStdioHeaderNotices(servers []mcp.ServerConfig) []string {
+	var notices []string
+	for _, server := range servers {
+		if server.Transport != mcp.TransportStdio {
+			continue
+		}
+		var keys []string
+		if server.Headers != nil {
+			keys = append(keys, "headers:")
+		}
+		if server.HeadersEnv != nil {
+			keys = append(keys, "headers-env:")
+		}
+		if len(keys) == 0 {
+			continue
+		}
+		notices = append(notices, fmt.Sprintf("apogee: mcp-servers.%s sets %s, which only an sse or "+
+			"streamable-http server sends — a stdio server has no HTTP request to carry them; "+
+			"drop the key or switch the transport", server.Name, strings.Join(keys, " and ")))
+	}
+	return notices
+}
+
+// MCPHeaderEnvNames is every environment variable name an `mcp-servers:` entry reads a header
+// value out of (`headers-env:`), sorted and deduplicated. A root appends it to
+// [domain.Config.SecretEnvVars] beside APIKeyEnvNames and ReactionEnvNames, so the `terminal`,
+// `python_exec` and console tools cannot read an MCP server's token back out of the environment
+// they inherit. Sorted because the names come off a map, and a set that reordered between runs
+// would make every caller's own output unstable.
+func MCPHeaderEnvNames(o Options) []string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, server := range o.MCPServers {
+		for _, envName := range server.HeadersEnv {
+			name := strings.TrimSpace(envName)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 // resolveConfineToWorkspace is Auto's effective blast-radius decision (ADR 0012 as amended
@@ -2339,6 +2396,11 @@ type mcpServerConfig struct {
 	// list: absent leaves the stdio launch inheriting apogee's whole environment (the documented
 	// default), `env-allowlist: []` hands the child the platform floor alone.
 	EnvAllowlist *[]string `yaml:"env-allowlist"`
+	// Headers and HeadersEnv are the HTTP transports' extra request headers — literal values, and
+	// header → NAME of the environment variable holding the value — on the webhook Reaction's
+	// `headers:` / `headers-env:` precedent. An absent key stays a nil map.
+	Headers    map[string]string `yaml:"headers"`
+	HeadersEnv map[string]string `yaml:"headers-env"`
 }
 
 // toServerConfig maps the on-disk MCP server schema onto the mcp.ServerConfig value the client
@@ -2352,6 +2414,8 @@ func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 		Env:          m.Env,
 		Endpoint:     m.Endpoint,
 		EnvAllowlist: m.EnvAllowlist,
+		Headers:      m.Headers,
+		HeadersEnv:   m.HeadersEnv,
 	}
 }
 
@@ -3086,6 +3150,11 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// that spells it says nothing to anyone. Reported at this same startup boundary, and a notice
 	// rather than a refusal for the roster lists' reason — the entry loads exactly as written.
 	for _, n := range mcpEnvAllowlistNotices(opts.MCPServers) {
+		notify(n)
+	}
+	// Its mirror: `headers:` / `headers-env:` ride an HTTP request, which a stdio server never
+	// receives, so a stdio entry that spells either key is told so at the same boundary.
+	for _, n := range mcpStdioHeaderNotices(opts.MCPServers) {
 		notify(n)
 	}
 	// Which source won, for the keys where more than one could have: the resolved values above no

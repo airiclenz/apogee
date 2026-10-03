@@ -13,6 +13,8 @@ package main
 // the human seams (Approver, Asker, Presenter, the pre-emption door).
 
 import (
+	"slices"
+
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -90,8 +92,13 @@ func projectConfig(
 		// A webhook Reaction's `headers-env:` names variables holding a token too (ADR 0073 §6),
 		// and they are scrubbed beside the key sources for exactly the same reason: a token
 		// readable out of a `terminal` child is a token the model can read — and a Firing runs the
-		// same `reactions:` list a session does, so it scrubs the same variables.
-		SecretEnvVars: append(config.APIKeyEnvNames(opts), config.ReactionEnvNames(opts)...),
+		// same `reactions:` list a session does, so it scrubs the same variables. An HTTP MCP
+		// server's `headers-env:` names token variables on the same footing, and joins them.
+		SecretEnvVars: slices.Concat(
+			config.APIKeyEnvNames(opts),
+			config.ReactionEnvNames(opts),
+			config.MCPHeaderEnvNames(opts),
+		),
 		// The workspace context files (`context-files:`, file-only): the names the engine looks
 		// for in the workspace root at every session boundary, whose content rides the same first
 		// system message as the prompt — verbatim, never as a template. Nil ⇒ the feature is off,

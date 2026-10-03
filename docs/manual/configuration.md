@@ -424,7 +424,8 @@ dormant — no connections, no error, nothing on the model's menu. Each entry ne
 it becomes the prefix on every tool that server contributes, so the model sees `github__create_issue`
 and you can tell whose tool a call reached) and a `transport`, which is `stdio` for a local process
 apogee launches or `sse` / `streamable-http` for a server reached over http(s). A stdio entry takes
-`command`, optional `args`, and optional `env`; an http one takes `endpoint`.
+`command`, optional `args`, and optional `env`; an http one takes `endpoint`, and optional
+`headers` and `headers-env`.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -479,6 +480,36 @@ The key is read by the **stdio** launch alone. An `sse` or `streamable-http` ent
 process, so there is nothing for an allowlist to narrow — set it on one and apogee says so at
 startup, naming that entry. It is a notice, never a refusal: the server still connects and its tools
 still arrive; the line simply does nothing, and the fix is to drop it or make the entry `stdio`.
+
+**Headers for an http server — `headers:` and `headers-env:`.** A remote server that wants its own
+auth scheme, a tenant id or an API token gets it as extra request headers, on the webhook
+[reaction's](#reactions--reactions) precedent: `headers:` maps a header name to a literal value,
+and `headers-env:` maps a header name to the **name** of an environment variable holding its value,
+so a token never has to sit in this file.
+
+```yaml
+# ~/.apogee/config.yaml
+mcp-servers:
+  - name: docs
+    transport: streamable-http
+    endpoint: https://mcp.example.com/
+    headers:
+      X-Tenant: acme
+    headers-env:
+      Authorization: DOCS_MCP_TOKEN   # the variable's NAME, not the token
+```
+
+Both are sent on every request to that server's endpoint, and nowhere else. An entry is refused at
+startup, naming it and the header (never a value), when a header name is not a valid HTTP header
+name; when it is one the transport or the protocol sets itself — `Host`, `Content-Length`,
+`Content-Type`, `Accept`, `Connection`, `Transfer-Encoding`, `Last-Event-ID` and every `Mcp-*`
+name, in any case; when a `headers:` value carries a line break or a NUL; when one header is
+configured twice, in either map and in any case; and when a `headers-env:` entry names no
+variable. A variable `headers-env:` names is dropped from the environment of every tool subprocess,
+exactly as an `api-key-env:` name is, so a command the model chose cannot read the token back out —
+that scrub is fixed when apogee starts, so a variable a live edit adds is scrubbed from the next
+start. The two keys are read by the **http** transports alone: a `stdio` entry that sets either is
+told so at startup, as a notice and never a refusal.
 
 The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
 `⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
@@ -1868,8 +1899,8 @@ from the environment apogee itself was started in — and dropped from the envir
 tool subprocess and every `advise:` or `gate:` reaction command is handed, so a command the model chose cannot
 read that key back out. A `run:` reaction command is your own notifier, its output never reaches
 the model, and it inherits the environment whole. That scrub is one list, whichever server the session is on: the
-union of every entry's `api-key-env:` name, every webhook reaction's `headers-env:` names and
-`APOGEE_API_KEY`. A stdio MCP server is the exception — it inherits apogee's full environment
+union of every entry's `api-key-env:` name, every webhook reaction's `headers-env:` names, every
+`mcp-servers:` entry's `headers-env:` names and `APOGEE_API_KEY`. A stdio MCP server is the exception — it inherits apogee's full environment
 unless its entry sets `env-allowlist:`. Both resolve the first time this session actually
 needs that server's key — never at startup for entries you do not use — and a key that
 resolved is remembered for the rest of the session, while a failure is not: a locked keychain

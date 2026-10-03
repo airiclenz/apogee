@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -239,5 +240,29 @@ func TestProjectConfigFoldsTheWorkflowKeys(t *testing.T) {
 	}
 	if flow.ResolvedWake() {
 		t.Error("Config.Workflow wake = on, want the stated off")
+	}
+}
+
+// An HTTP MCP server's `headers-env:` names a token variable, so it joins the secret set beside the
+// key sources and the Reaction header sources: a token a `terminal` child could read is a token the
+// model can read.
+func TestProjectConfigScrubsTheMCPHeaderEnvNames(t *testing.T) {
+	t.Parallel()
+	opts := projectionOptions(t)
+	opts.MCPServers = []mcp.ServerConfig{{
+		Name:       "docs",
+		Transport:  mcp.TransportStreamableHTTP,
+		Endpoint:   "https://mcp.example.com/",
+		HeadersEnv: map[string]string{"Authorization": "DOCS_MCP_TOKEN"},
+	}}
+	roots := firingRoots(t)
+	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+
+	secrets := projectConfig(opts, roots, fenceableHost, domain.ModeAuto, provider).SecretEnvVars
+
+	for _, want := range []string{"BOX_KEY", "DOCS_MCP_TOKEN"} {
+		if !slices.Contains(secrets, want) {
+			t.Errorf("SecretEnvVars = %q; want it to carry %q", secrets, want)
+		}
 	}
 }

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/net/http/httpguts"
 )
 
 // ----------------------------------------------------------------------------
@@ -61,7 +64,8 @@ const (
 // configuration; the Client connects to each. Name is the registry alias that qualifies the
 // server's tool names (so two servers' identically named tools stay distinct and the human sees
 // which server a call reaches). Exactly one transport's fields are meaningful per Transport:
-// stdio uses Command/Args/Env/EnvAllowlist; SSE / streamable-http use Endpoint.
+// stdio uses Command/Args/Env/EnvAllowlist; SSE / streamable-http use Endpoint, Headers and
+// HeadersEnv.
 type ServerConfig struct {
 	// Name is the server alias — the prefix on each surfaced tool's registry name. Required and
 	// must be unique across the configured set (the Client rejects a duplicate or empty name).
@@ -94,6 +98,81 @@ type ServerConfig struct {
 	// connection is pinned to — a private endpoint is allowed (you named it), any OTHER private
 	// address on that connection is not.
 	Endpoint string
+
+	// Headers are extra HTTP headers sent, as written, on every request to an SSE /
+	// streamable-http server — the server's own auth scheme, a tenant id. HeadersEnv maps a
+	// header name to the NAME of an environment variable holding its value, so a token never sits
+	// in the config file. Both are nil when the config spells neither, and both are refused by
+	// ValidateHeaders when a name or value could not be sent as written.
+	Headers    map[string]string
+	HeadersEnv map[string]string
+}
+
+// reservedHeaderPrefix marks the header names the MCP protocol itself owns: the SDK sets
+// Mcp-Session-Id and Mcp-Protocol-Version, and Mcp-Method / Mcp-Name per request, so every name
+// under the prefix is refused rather than a list that a new SDK release would silently outgrow.
+const reservedHeaderPrefix = "mcp-"
+
+// reservedHeaders are the names, lower-cased, that the HTTP transports set themselves: a
+// configured value would fight the transport's own framing, content negotiation or SSE resume.
+var reservedHeaders = map[string]bool{
+	"host":              true,
+	"content-length":    true,
+	"content-type":      true,
+	"accept":            true,
+	"connection":        true,
+	"transfer-encoding": true,
+	"last-event-id":     true,
+}
+
+// ValidateHeaders refuses a Headers / HeadersEnv pair that could not be sent as written: a name
+// that is not an HTTP token, a name the transport or the MCP protocol sets itself (Host,
+// Content-Length, Content-Type, Accept, Connection, Transfer-Encoding, Last-Event-ID, and every
+// Mcp-* name — all case-insensitive), a literal value carrying CR, LF or NUL, one name configured
+// twice (header names are case-insensitive, so `Authorization` in one map and `authorization` in
+// the other are the same header), and a HeadersEnv entry with a blank variable name. Names are
+// checked in sorted order, so the same config always earns the same refusal. The error names the
+// key and the header, never a value.
+func (cfg ServerConfig) ValidateHeaders() error {
+	seen := make(map[string]string, len(cfg.Headers)+len(cfg.HeadersEnv))
+	for _, name := range slices.Sorted(maps.Keys(cfg.Headers)) {
+		if err := admitHeaderName("headers", name, seen); err != nil {
+			return err
+		}
+		if strings.ContainsAny(cfg.Headers[name], "\r\n\x00") {
+			return fmt.Errorf("headers: %q has a value with a line break or NUL in it — "+
+				"a header value is one line of text", name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(cfg.HeadersEnv)) {
+		if err := admitHeaderName("headers-env", name, seen); err != nil {
+			return err
+		}
+		if strings.TrimSpace(cfg.HeadersEnv[name]) == "" {
+			return fmt.Errorf("headers-env: %q maps to no environment variable name — "+
+				"the value is the NAME of the variable holding the header, not the header itself", name)
+		}
+	}
+	return nil
+}
+
+// admitHeaderName refuses one configured header name under key — not a token, reserved, or
+// already configured (seen holds every admitted name, lower-cased, against the key it came from)
+// — and records it in seen when it passes.
+func admitHeaderName(key, name string, seen map[string]string) error {
+	if !httpguts.ValidHeaderFieldName(name) {
+		return fmt.Errorf("%s: %q is not a valid HTTP header name", key, name)
+	}
+	folded := strings.ToLower(name)
+	if reservedHeaders[folded] || strings.HasPrefix(folded, reservedHeaderPrefix) {
+		return fmt.Errorf("%s: %q is set by apogee's MCP transport itself and cannot be configured", key, name)
+	}
+	if earlier, ok := seen[folded]; ok {
+		return fmt.Errorf("%s: %q is already configured under %s: — header names are case-insensitive, "+
+			"so keep one", key, name, earlier)
+	}
+	seen[folded] = key
+	return nil
 }
 
 // buildTransport constructs the SDK Transport for cfg, applying url-safety to the two HTTP

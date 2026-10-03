@@ -465,7 +465,12 @@ context-files:
 # the command is yours and most servers need PATH/HOME to run. To launch a LESS trusted one, add
 # `env-allowlist:` to that server: only the keys you name are inherited, with PATH scoped away from
 # the workspace; an empty list `[]` inherits nothing beyond what the platform itself needs, and the
-# server's own `env:` entries are appended last either way.
+# server's own `env:` entries are appended last either way. A server reached over http(s) takes
+# `headers:` (header: literal value) and `headers-env:` (header: the NAME of the environment
+# variable holding the value, so a token never sits in this file), sent on every request to that
+# endpoint. A header name the transport or protocol sets itself (Host, Content-Type, Accept, any
+# Mcp-* name, …), an invalid name, a value with a line break, or one header named twice is refused
+# at startup; a `headers-env:` variable is scrubbed from every tool subprocess from the next start.
 #
 # mcp-servers:
 #   - name: github                       # the prefix on each tool's name; must be unique
@@ -477,6 +482,10 @@ context-files:
 #   - name: docs
 #     transport: streamable-http         # sse | streamable-http: a remote http(s) server
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
+#     headers:                           # sse | streamable-http: optional literal headers
+#       X-Tenant: acme
+#     headers-env:                       # sse | streamable-http: header -> env variable NAME
+#       Authorization: DOCS_MCP_TOKEN
 
 # =============================================================================
 # The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all

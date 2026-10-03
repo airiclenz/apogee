@@ -3202,6 +3202,191 @@ func TestMCPEnvAllowlistNoticesNameTheTransportInFileOrder(t *testing.T) {
 	}
 }
 
+// An HTTP MCP server's `headers:` and `headers-env:` round-trip as the two maps the transport
+// sends from, and an entry that spells neither keeps both nil (TestApplyConfigMCPServers pins that).
+func TestApplyConfigMCPServerHeaders(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	const configYAML = `mcp-servers:
+  - name: docs
+    transport: streamable-http
+    endpoint: https://mcp.example.com/
+    headers:
+      X-Tenant: acme
+    headers-env:
+      Authorization: DOCS_MCP_TOKEN
+`
+	writeConfigHome(t, home, configYAML)
+	opts := Options{ConfigDir: home}
+
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+
+	if err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	want := []mcp.ServerConfig{{
+		Name:       "docs",
+		Transport:  mcp.TransportStreamableHTTP,
+		Endpoint:   "https://mcp.example.com/",
+		Headers:    map[string]string{"X-Tenant": "acme"},
+		HeadersEnv: map[string]string{"Authorization": "DOCS_MCP_TOKEN"},
+	}}
+	if !reflect.DeepEqual(opts.MCPServers, want) {
+		t.Errorf("mcpServers = %+v; want %+v", opts.MCPServers, want)
+	}
+}
+
+// A header that could not be sent as written is a startup refusal naming the entry, the key and
+// the header — never the value, which may be a token. The reserved names are refused by rule and
+// case-insensitively: every Mcp-* name (the SDK sets Mcp-Method and Mcp-Name per request, beside
+// Mcp-Session-Id and Mcp-Protocol-Version), plus the names the HTTP transport frames itself.
+func TestApplyConfigMCPServerHeadersRefusals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		mapsYAML string
+		want     string
+	}{
+		{
+			name:     "a name that is not an HTTP token",
+			mapsYAML: "    headers:\n      \"X Tenant\": acme\n",
+			want:     `apogee: mcp-servers.docs: headers: "X Tenant" is not a valid HTTP header name`,
+		},
+		{
+			name:     "a transport-owned name",
+			mapsYAML: "    headers:\n      Host: evil.example\n",
+			want:     `apogee: mcp-servers.docs: headers: "Host" is set by apogee's MCP transport itself`,
+		},
+		{
+			name:     "a transport-owned name in lower case",
+			mapsYAML: "    headers-env:\n      content-type: SOME_VAR\n",
+			want:     `apogee: mcp-servers.docs: headers-env: "content-type" is set by apogee's MCP transport itself`,
+		},
+		{
+			name:     "an Mcp-* name the SDK sets per request",
+			mapsYAML: "    headers:\n      Mcp-Method: tools/call\n",
+			want:     `apogee: mcp-servers.docs: headers: "Mcp-Method" is set by apogee's MCP transport itself`,
+		},
+		{
+			name:     "a mixed-case Mcp-* name",
+			mapsYAML: "    headers-env:\n      mCp-NaMe: SOME_VAR\n",
+			want:     `apogee: mcp-servers.docs: headers-env: "mCp-NaMe" is set by apogee's MCP transport itself`,
+		},
+		{
+			name:     "a value with a line break",
+			mapsYAML: "    headers:\n      X-Tenant: \"acme\\r\\nX-Injected: secret-value\"\n",
+			want:     `apogee: mcp-servers.docs: headers: "X-Tenant" has a value with a line break or NUL in it`,
+		},
+		{
+			name:     "a value with a NUL",
+			mapsYAML: "    headers:\n      X-Tenant: \"secret-value\\0\"\n",
+			want:     `apogee: mcp-servers.docs: headers: "X-Tenant" has a value with a line break or NUL in it`,
+		},
+		{
+			name: "one name in both maps, spelled in two cases",
+			mapsYAML: "    headers:\n      Authorization: secret-value\n" +
+				"    headers-env:\n      authorization: DOCS_MCP_TOKEN\n",
+			want: `apogee: mcp-servers.docs: headers-env: "authorization" is already configured under headers:`,
+		},
+		{
+			name:     "a blank variable name",
+			mapsYAML: "    headers-env:\n      Authorization: \" \"\n",
+			want: `apogee: mcp-servers.docs: headers-env: "Authorization" maps to no environment variable ` +
+				`name — the value is the NAME of the variable holding the header, not the header itself`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, "mcp-servers:\n  - name: docs\n    transport: sse\n"+
+				"    endpoint: https://mcp.example.com/\n"+tc.mapsYAML)
+			opts := Options{ConfigDir: home}
+
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted the entry; want a refusal containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q; want it to contain %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "secret-value") {
+				t.Errorf("error = %q; it must never echo a header value", err)
+			}
+		})
+	}
+}
+
+// `headers:` and `headers-env:` ride an HTTP request, which a stdio server never receives, so a
+// stdio entry that spells either is told so — a notice naming both keys when both are set, and
+// never a refusal: the server still loads. An HTTP entry spelling them is silent.
+func TestMCPStdioHeaderNoticesNameTheKeysInFileOrder(t *testing.T) {
+	t.Parallel()
+
+	notices := mcpStdioHeaderNotices([]mcp.ServerConfig{
+		{Name: "both", Transport: mcp.TransportStdio, Headers: map[string]string{"X-A": "a"},
+			HeadersEnv: map[string]string{"X-B": "B_VAR"}},
+		{Name: "remote", Transport: mcp.TransportSSE, Headers: map[string]string{"X-A": "a"}},
+		{Name: "quiet", Transport: mcp.TransportStdio},
+		{Name: "empty", Transport: mcp.TransportStdio, HeadersEnv: map[string]string{}},
+	})
+
+	want := []string{
+		"apogee: mcp-servers.both sets headers: and headers-env:, which only an sse or streamable-http " +
+			"server sends — a stdio server has no HTTP request to carry them; drop the key or switch the transport",
+		"apogee: mcp-servers.empty sets headers-env:, which only an sse or streamable-http " +
+			"server sends — a stdio server has no HTTP request to carry them; drop the key or switch the transport",
+	}
+	if !reflect.DeepEqual(notices, want) {
+		t.Errorf("notices = %q; want %q", notices, want)
+	}
+}
+
+// The stdio notice reaches the startup notify seam, and the entry still loads.
+func TestApplyConfigMCPHeadersOnAStdioServerNotices(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "mcp-servers:\n  - name: local\n    transport: stdio\n    command: a-mcp\n"+
+		"    headers:\n      X-Tenant: acme\n")
+	opts := Options{ConfigDir: home}
+	var notices []string
+
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, func(n string) { notices = append(notices, n) })
+
+	if err != nil {
+		t.Fatalf("a key the transport ignores must not stop startup: %v", err)
+	}
+	if !slices.ContainsFunc(notices, func(n string) bool {
+		return strings.HasPrefix(n, "apogee: mcp-servers.local sets headers:, which only an sse")
+	}) {
+		t.Errorf("notices = %q; want the stdio headers notice for mcp-servers.local", notices)
+	}
+	if len(opts.MCPServers) != 1 {
+		t.Errorf("the entry must still load: mcpServers = %+v", opts.MCPServers)
+	}
+}
+
+// MCPHeaderEnvNames is the secret set's MCP contribution: every `headers-env:` variable name across
+// the configured servers, trimmed, deduplicated and sorted, so the scrub is stable run to run.
+func TestMCPHeaderEnvNamesAreSortedAndDeduplicated(t *testing.T) {
+	t.Parallel()
+	opts := Options{MCPServers: []mcp.ServerConfig{
+		{Name: "a", Transport: mcp.TransportSSE, HeadersEnv: map[string]string{"Authorization": "ZED_TOKEN", "X-Key": "ALPHA_KEY"}},
+		{Name: "b", Transport: mcp.TransportStreamableHTTP, HeadersEnv: map[string]string{"Authorization": " ZED_TOKEN "}},
+		{Name: "c", Transport: mcp.TransportStreamableHTTP},
+	}}
+
+	got := MCPHeaderEnvNames(opts)
+
+	if want := []string{"ALPHA_KEY", "ZED_TOKEN"}; !slices.Equal(got, want) {
+		t.Errorf("MCPHeaderEnvNames = %q; want %q", got, want)
+	}
+}
+
 // The `tools:` block round-trips: the disabled roster parses into opts.toolsDisabled in file
 // order, an absent block leaves the whole roster standing, and a name matching no tool is a NOTICE
 // rather than a startup error — the rest of the list still applies, so pruning a roster can never

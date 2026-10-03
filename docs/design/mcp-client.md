@@ -122,6 +122,20 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   either it stops and returns the capped list silently, `Connect` having no report path but tools
   and errors — and skips a tool whose normalised schema exceeds `maxMCPToolSchemaBytes` (64 KiB)
   as it skips one with no name.
+- **An HTTP server's configured headers are validated before any connect** (2026-10-03).
+  `ServerConfig.Headers` (literal values) and `ServerConfig.HeadersEnv` (header → the NAME of an
+  environment variable holding the value) are the `headers:` / `headers-env:` keys, on the webhook
+  Reaction's precedent, read by the SSE and streamable-http transports alone.
+  `ServerConfig.ValidateHeaders` is the one rule: a name that is not an HTTP token, a reserved name
+  (case-insensitive: `Host`, `Content-Length`, `Content-Type`, `Accept`, `Connection`,
+  `Transfer-Encoding`, `Last-Event-ID`, and every `Mcp-*` name by prefix — the SDK sets
+  `Mcp-Session-Id`, `Mcp-Protocol-Version`, `Mcp-Method` and `Mcp-Name` itself, so a list would
+  outgrow itself), a literal value with CR, LF or NUL, one name configured twice across both maps
+  in any case, and a blank variable name are refused, naming the key and the header and never a
+  value. The config loader refuses such an entry at startup and `validateServers` refuses it again
+  before any connect, so a host that builds its `ServerConfig`s directly meets the same rule. The
+  `headers-env:` names join the host's secret-env scrub (`config.MCPHeaderEnvNames`), fixed at
+  startup.
 - **Every tool call is bounded by a 5-minute deadline** (2026-09-29). `serverTool.Execute` derives
   its call context from the caller's with `mcpCallTimeout` (5 minutes, a fixed package value, no
   config key), so a silent or wedged server can never hold the agent past it. The caller's own
@@ -145,7 +159,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   session and returns the error, so a half-wired MCP set never reaches the registry and no orphaned
   stdio process — or process tree — leaks. `workspaceRoot` is the exec fence a stdio server's
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
-  Close) — a host without MCP pays nothing. Server names must be non-empty and unique (the name
+  Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` (§2),
+  and server names must be non-empty and unique (the name
   prefixes each surfaced tool's registry key as `mcp__…` — actually `<name>__<tool>`, see §4).
 - **Host** is what a connect takes from the process rather than from config: `Host.Proxy` resolves
   the egress proxy the HTTP transports honour, nil meaning `http.ProxyFromEnvironment`; `Host.Shell`

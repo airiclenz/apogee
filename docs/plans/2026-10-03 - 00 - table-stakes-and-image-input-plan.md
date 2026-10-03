@@ -205,7 +205,13 @@ internal/agent/compact_test.go — TestCompactSummaryRequestOmitsSystemPrompt; i
 **Acceptance:** `go test -count=1 ./internal/context/` ; `go test -count=1 -run 'Compact|Overflow|ThinkingReplay' ./internal/agent/`
 **Commit:** `feat(context): compaction summary uses fixed section headings`
 
-## 8. MCP `headers:` / `headers-env:` — config and validation
+## 8. MCP `headers:` / `headers-env:` — config and validation — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): the webhook path has no reusable header validation (only a blank-env-name check inside domain.Reaction's validateHandlerRunnable), so the one rule is new: `mcp.ServerConfig.ValidateHeaders` in internal/mcp/transport.go, called by config's fileMCPServers (startup refusal, prefixed `apogee: mcp-servers.<name>:`) and by mcp's validateServers (so a host building ServerConfigs directly meets it too); the blank-variable sentence reuses the webhook wording verbatim. Header names use golang.org/x/net/http/httpguts.ValidHeaderFieldName (x/net was already a direct dependency).
+NOTES (2026-10-03): "one name in both maps" is enforced case-insensitively and also catches a name repeated in ONE map under two spellings (`X-A` and `x-a`) — the same header configured twice either way.
+NOTES (2026-10-03): MCPHeaderEnvNames collects `headers-env:` names from every entry, stdio ones included (the user declared them token variables; scrubbing an unused one is harmless). The SecretEnvVars fold in projectConfig became slices.Concat of the three sources.
+NOTES (2026-10-03): cmd/apogee/wire_config_test.go (not in the item's Files) carries TestProjectConfigScrubsTheMCPHeaderEnvNames, the test the item's Tests line asks for ("MCPHeaderEnvNames lands in SecretEnvVars"); it is selected by the Acceptance `-run 'MCP|Secret'`.
+NOTES (2026-10-03): the docs describe the headers as sent on every request to the endpoint; the transport that sends them is item 9.
 
 **What:**
 **Goal:** an `mcp-servers:` entry accepts `headers:` and `headers-env:` maps; bad entries are refused; from the next start, the env names join the secret set so the terminal, python and console tools cannot read them back; a stdio entry carrying either key gets a notice.
