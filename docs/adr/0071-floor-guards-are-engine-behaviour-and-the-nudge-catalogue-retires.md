@@ -1,5 +1,5 @@
 ---
-Status: accepted; decision 4, rejected alternative B and the `FloorGuardEvent` consequence superseded by ADR 0076
+Status: accepted; decision 4, rejected alternative B and the `FloorGuardEvent` consequence superseded by ADR 0076; decision 3's "the `validated` package ... all stay" sentence superseded by ADR 0076 A9
 Supersedes: ADR 0009 for structural behaviour; ADR 0070 Option C
 Amends: ADR 0006, ADR 0014, ADR 0015 D1, ADR 0016 (2026-08-29 amendment)
 ---
@@ -307,3 +307,17 @@ on a failure the model has already committed twice, and the result check is what
 `console_read` or `read_file` between other calls while a build runs, ADR 0059's design for a dev
 server — out of the rule while its output moves; a stalled poll is the loop. No fuzzy or
 windowed-count matching; the directive, the key and the Exchange scope are unchanged.
+
+## Amendment (2026-10-03) — the `validated` package is gone (ADR 0076 A9)
+
+Decision 3's closing sentence — "The `validated` package, the user-directory surface, `probe model`
+and the rebind path all stay" — no longer holds. [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)'s
+2026-09-08 amendment, A9, deleted the `validated-sets:` key, `internal/validated`, `shipped.json`,
+both `/settings` rows and the manual section, and the config migration strips the key from the file.
+With the package went the user-directory surface (`~/.apogee/validated/*.json` has no reader) and
+the graceful-degradation rule decision 3 calls load-bearing: there is no per-model enable set left
+to shed a retired id from, and a model rebind arms none. `probe model` stays; its probe record lives
+in `internal/probe` and serves its drift check alone (the Consequences' 2026-09-16 note).
+
+The rest of decision 3 stands: a row may retire on a ratified owner verdict, the fourteen rows
+retired, and the shipped gemma Validated entry retired with them. Decisions 1, 2 and 5 are untouched.

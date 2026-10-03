@@ -2,6 +2,7 @@
 Status: accepted
 Amends: ADR 0062 call 13 (goldens for rendering surfaces only — second supersession, after ADR 0075 §14); ADR 0075 (the `v:2` `run_finished` frame gains additive keys)
 ---
+> Note (2026-10-03): ADR 0062 has no numbered "call 13"; the goldens-for-rendering-surfaces-only rule this ADR cites as "ADR 0062 call 13" lives in `docs/design/test-drivers.md` § Goldens (and `internal/tuitest/golden.go`).
 
 # Context cost is a first-class engine report
 

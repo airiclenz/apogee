@@ -1,6 +1,7 @@
 ---
 Status: accepted; §5(b) superseded by ADR 0088
 ---
+> Note (2026-10-03): the status line omits one supersession — Decision 4's `maxSubAgentDepth = 2` bound was superseded 2026-09-15 (plan 2026-09-14 - 03, item 4) by `Config.Delegation.MaxDepth`, default 1; see the dated block under Decision 4.
 
 # The sub-agent orchestrator is a dispatch recursion point; its live guard state is isolated, its dangerous floor shared read-only
 

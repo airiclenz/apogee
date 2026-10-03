@@ -314,7 +314,10 @@ NOTES (2026-10-04): wholly or partly superseded Mechanism ADRs (0002, 0003, 0006
 **Acceptance:** the rule's grep lists only ADRs recorded as exclusions.
 **Commit:** `docs(adr): note the retired mechanism layer on remaining ADRs`
 
-## 15. Mark ADR contradictions with later decisions
+## 15. Mark ADR contradictions with later decisions — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): 0042's new Note sits directly below item 14's Mechanism Note, joined by a bare `>` line so the two render as separate paragraphs of one blockquote instead of merging into one; 0013 and 0079 carried no top Note, so theirs sits directly under the front matter.
+NOTES (2026-10-04): retry fix — 0005 amendment now says an Auto child is unfenced only when the parent's effective `confine-to-workspace` is false (global key, `unconfined-hosts` match, or a session `/confine off`), not only via the user's global config.
 
 **What:** ADR 0005 has no amendment yet still requires Confinement for Auto sub-agents, lists the removed audit guardrail and the tool-subset rule; ADR 0071 D3 says the `validated` package stays (ADR 0076 A9 deleted it); ADR 0013's status line lacks its §4 supersession; ADR 0042 D4 cites superseded 0004; ADR 0079 cites a nonexistent "ADR 0062 call 13" (the rule lives in `docs/design/test-drivers.md` § Goldens).
 **Regression guard.** items 14 and 15 may both add a top Note to 0013, 0042, 0071 and 0079 — item 15's Note goes on its own line directly below item 14's Mechanism Note (after any existing top Notes), and its `## Amendment (2026-10-03)` sections are appended at the end of 0005 and 0071. The 0005 suffix and amendment supersede only the "Auto sub-agent still requires Confinement" bullet (ADR 0012; the child inherits `ConfineToWorkspace`) and the audit guardrail (0013 Amendment 2026-10-02); the ≤-parent decision and the tool-subset rule stay standing — the item yields to `internal/agent/subagent.go:1955-1957` ("a privilege expansion is structurally impossible — ADR 0005"). 0079's "0062 call 13" sits in its `Amends:` front matter (line 3), above any top Note, so its Acceptance is `grep -c "test-drivers.md" docs/adr/0079-*.md` ≥ 1.

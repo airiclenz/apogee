@@ -2,6 +2,8 @@
 Status: accepted
 ---
 > Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
+>
+> Note (2026-10-03): Decision 4 cites ADR 0004, which ADR 0012 superseded; ADR 0012 is the governing decision for Auto and confinement — read Decision 4's ADR 0004 citation as historical.
 
 # External programs are optional enhancements, never prerequisites
 
