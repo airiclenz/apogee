@@ -112,7 +112,9 @@ NOTES (2026-10-04): closeout instruction — in CHANGELOG.md's Unreleased ConPTY
 **Acceptance:** `go test -count=1 -run 'Image' ./internal/agent/`
 **Commit:** `fix(agent): name no blank server in the vision refusal`
 
-## 4. Round-trip a priced server entry through YAML
+## 4. Round-trip a priced server entry through YAML — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): no CHANGELOG entry — no production path marshals a priced entry today (renderServerEntry renders unpriced legacy entries only), so no user-observable change; MarshalYAML returns an anonymous struct of *float64 fields with omitempty (field order fixes the input, output, cached-input order) rather than a hand-built yaml.Node.
 
 **What:** Fixes `apogee-price-marshal-yaml`: `config.Price` has an `UnmarshalYAML` but no `MarshalYAML`, so a priced `ServerEntry` does not round-trip.
 **Goal:** `yaml.Marshal` of a `ServerEntry` with a price, decoded again, equals the original; an omitted `cached-input` stays omitted (and `CachedInputRate()` still falls back to the input rate); stated zero rates survive; an unpriced entry renders no `price:` key.

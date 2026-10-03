@@ -1520,6 +1520,37 @@ func (p Price) CachedInputRate() float64 {
 	return p.Input
 }
 
+// IsZero reports whether the block is absent, so the encoder's `omitempty` drops an unpriced entry's
+// `price:` key by the same rule IsStated reads, not by comparing the struct field by field.
+func (p Price) IsZero() bool {
+	return !p.IsStated()
+}
+
+// MarshalYAML writes the block back as the mapping UnmarshalYAML reads: only the rates whose Has*
+// flag is set, in input, output, cached-input order, so an omitted `cached-input:` stays omitted
+// (and keeps falling back to the input rate) while a stated rate of 0 survives as a price. An
+// unpriced block never reaches here under ServerEntry's omitempty; it renders as null anyway.
+func (p Price) MarshalYAML() (any, error) {
+	if !p.IsStated() {
+		return nil, nil
+	}
+	var rendered struct {
+		Input       *float64 `yaml:"input,omitempty"`
+		Output      *float64 `yaml:"output,omitempty"`
+		CachedInput *float64 `yaml:"cached-input,omitempty"`
+	}
+	if p.HasInput {
+		rendered.Input = &p.Input
+	}
+	if p.HasOutput {
+		rendered.Output = &p.Output
+	}
+	if p.HasCachedInput {
+		rendered.CachedInput = &p.CachedInput
+	}
+	return rendered, nil
+}
+
 // UnmarshalYAML reads a `price:` mapping rate by rate. Its refusals are priceErrors, which
 // ServerEntry.UnmarshalYAML completes with the entry's name, because yaml.v3 hands a field's
 // Unmarshaler the value node alone; an explicit `null` never reaches here (yaml.v3 short-circuits

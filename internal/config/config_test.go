@@ -6471,6 +6471,75 @@ func TestServerEntryRequestExtraRoundTrips(t *testing.T) {
 	}
 }
 
+// A priced entry round-trips through the YAML writer as the `price:` mapping it was read from:
+// only the stated rates render, so an omitted `cached-input:` stays omitted and still falls back to
+// the input rate, a stated rate of 0 survives as a price, and an unpriced entry renders no key.
+func TestServerEntryPriceRoundTrips(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		price      Price
+		wantKeys   []string // the rate keys the rendered block must carry
+		absentKeys []string // the keys the rendering must not carry at all
+		wantCached float64
+	}{
+		{
+			name:       "all three rates",
+			price:      Price{Input: 0.3, Output: 1.2, CachedInput: 0.03, HasInput: true, HasOutput: true, HasCachedInput: true},
+			wantKeys:   []string{"price:", "input: 0.3", "output: 1.2", "cached-input: 0.03"},
+			wantCached: 0.03,
+		},
+		{
+			name:       "cached-input omitted",
+			price:      Price{Input: 3, Output: 15, HasInput: true, HasOutput: true},
+			wantKeys:   []string{"price:", "input: 3", "output: 15"},
+			absentKeys: []string{"cached-input"},
+			wantCached: 3,
+		},
+		{
+			name:     "zero rates",
+			price:    Price{HasInput: true, HasOutput: true, HasCachedInput: true},
+			wantKeys: []string{"price:", "input: 0", "output: 0", "cached-input: 0"},
+		},
+		{
+			name:       "unpriced",
+			price:      Price{},
+			absentKeys: []string{"price", "input", "output", "cached-input"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			in := ServerEntry{Name: "box", Endpoint: "http://h", Price: tt.price}
+
+			out, err := yaml.Marshal([]ServerEntry{in})
+			if err != nil {
+				t.Fatalf("yaml.Marshal: %v", err)
+			}
+			for _, key := range tt.wantKeys {
+				if !strings.Contains(string(out), key) {
+					t.Errorf("rendered %q; want it to carry %q", out, key)
+				}
+			}
+			for _, key := range tt.absentKeys {
+				if strings.Contains(string(out), key) {
+					t.Errorf("rendered %q; want no %q", out, key)
+				}
+			}
+			var back []ServerEntry
+			if err := yaml.Unmarshal(out, &back); err != nil {
+				t.Fatalf("yaml.Unmarshal of the rendered entry: %v", err)
+			}
+			if len(back) != 1 || back[0] != in {
+				t.Fatalf("round trip = %+v; want %+v", back, in)
+			}
+			if got := back[0].Price.CachedInputRate(); got != tt.wantCached {
+				t.Errorf("CachedInputRate() = %v; want %v", got, tt.wantCached)
+			}
+		})
+	}
+}
+
 // A server entry's `price:` block loads its three rates with a presence flag each, so a rate of 0
 // is a price rather than a key left out, and `cached-input:` falls back to the input rate. Every
 // refusal names the entry and the key and points at removing it: the decoder's for a shape no price
