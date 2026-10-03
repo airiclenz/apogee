@@ -90,7 +90,11 @@ internal/config/config_test.go — TestEveryConfigKeyReachesTheOptions, everyKey
 **Acceptance:** `go test -count=1 ./internal/config/` ; `go test -count=1 -run 'TestManualDocumentsEverySettingsKey|TestSettingsRows|TestEveryEditableSettingKeyHasAnApply' ./cmd/apogee/`
 **Commit:** `feat(config): currency and per-server price keys`
 
-## 3. Domain and session usage carry money
+## 3. Domain and session usage carry money — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): FormatCost goes slightly past the plan's three cases — an empty currency label renders the bare number (no trailing space), and a negative amount (only reachable through a misused Minus) keeps a leading "-" on the same rendering.
+NOTES (2026-10-03): Meta.Currency sits after DelegateUsage (beside both usage fields it labels), not between Usage and DelegateUsage.
+NOTES (2026-10-03): the field-by-field Usage copies outside domain/session (internal/agent tally, internal/run noteTurn1, internal/tui usageSince/transcriptbridge, eventjson, cmd/apogee/headless) are left to items 4, 5 and 6 per the regression guard; the struct conversions (session.Usage(...)/domain.Usage(...)) carry the new fields automatically and `go build ./...` passes.
 
 **What:** Recast at the regression check (2026-10-03).
 **Goal:** `domain.Usage` and `session.Usage` carry `CostMicros int64`, `PricedCalls int`, `UnpricedCalls int` (summed by `Sum`, differenced by `Minus`, kept by `Adopt`), session meta carries the currency label, and one `domain.FormatCost` renders amounts for every surface.

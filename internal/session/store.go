@@ -169,6 +169,13 @@ type Meta struct {
 	// deliberately rather than mistaking one for it. Like Usage it is compatible in
 	// both directions: an older record decodes to the zero Usage, an older build ignores the key.
 	DelegateUsage Usage `json:"delegateUsage,omitzero"`
+	// Currency is the label the CostMicros in Usage and DelegateUsage were priced in — the root
+	// `currency:` in force when its writer saved (ADR 0093 decision 6) — so an amount is only
+	// ever shown under its own label and never summed with one written under another. Changing
+	// `currency:` later relabels nothing already written. On the same tolerant terms as Usage: no
+	// RecordVersion bump, omitted when empty, and a record written before it existed decodes to ""
+	// with no priced call behind its usage, which reads as unpriced, never as zero spend.
+	Currency string `json:"currency,omitempty"`
 	// ServedModels is every distinct model id the upstream ANSWERED with over this session, in the
 	// order first seen — the reply's own `model` field, as its writer folded it off each UsageEvent
 	// (a Driver's fold; internal/run writes none). It sits beside Model rather than replacing it
@@ -189,12 +196,23 @@ type Meta struct {
 // CachedPromptTokens is the share of PromptTokens the server answered from its own prompt cache
 // (provider.Usage). It is INFORMATIONAL and part of the prompt count, never beside it: a cached
 // token is still context the model read, so nothing may subtract it from a total or a budget.
+//
+// CostMicros, PricedCalls and UnpricedCalls are the priced Spend (money) of those completions
+// (domain.Usage, ADR 0093): the amount in whole millionths of the unit of Meta.Currency, and how
+// many of Calls were and were not priced. Every key is omitted at zero, so a record written
+// before pricing existed loads unchanged — with no priced call, which reads as unpriced.
+//
+// The field names, types and order are domain.Usage's exactly, so the conversion between the two
+// is a struct conversion the compiler checks.
 type Usage struct {
-	Calls              int `json:"calls,omitempty"`
-	PromptTokens       int `json:"promptTokens,omitempty"`
-	CachedPromptTokens int `json:"cachedPromptTokens,omitempty"`
-	CompletionTokens   int `json:"completionTokens,omitempty"`
-	TotalTokens        int `json:"totalTokens,omitempty"`
+	Calls              int   `json:"calls,omitempty"`
+	PromptTokens       int   `json:"promptTokens,omitempty"`
+	CachedPromptTokens int   `json:"cachedPromptTokens,omitempty"`
+	CompletionTokens   int   `json:"completionTokens,omitempty"`
+	TotalTokens        int   `json:"totalTokens,omitempty"`
+	CostMicros         int64 `json:"costMicros,omitempty"`
+	PricedCalls        int   `json:"pricedCalls,omitempty"`
+	UnpricedCalls      int   `json:"unpricedCalls,omitempty"`
 }
 
 // Record is the on-disk shape: the metadata wrapper around the two opaque payloads.

@@ -971,10 +971,13 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		want := sampleRecord("20260811T120000Z-aaaa1111", time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC))
 		want.Meta.Usage = Usage{
 			Calls: 4, PromptTokens: 9000, CachedPromptTokens: 2400, CompletionTokens: 600, TotalTokens: 9600,
+			CostMicros: 37_440, PricedCalls: 3, UnpricedCalls: 1,
 		}
 		want.Meta.DelegateUsage = Usage{
 			Calls: 31, PromptTokens: 800000, CachedPromptTokens: 640000, CompletionTokens: 9000, TotalTokens: 809000,
+			CostMicros: 1_000_001, PricedCalls: 31,
 		}
+		want.Meta.Currency = "EUR"
 		if err := st.Save(want); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
@@ -988,6 +991,9 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		}
 		if got.Meta.DelegateUsage != want.Meta.DelegateUsage {
 			t.Errorf("loaded delegate usage = %+v, want %+v", got.Meta.DelegateUsage, want.Meta.DelegateUsage)
+		}
+		if got.Meta.Currency != want.Meta.Currency {
+			t.Errorf("loaded currency = %q, want %q — an amount travels with its label", got.Meta.Currency, want.Meta.Currency)
 		}
 		metas, err := st.List()
 		if err != nil {
@@ -1018,6 +1024,63 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		if bytes.Contains(data, []byte("usage")) {
 			t.Errorf("an empty accounting reached the record: %s", data)
 		}
+		if bytes.Contains(data, []byte("currency")) {
+			t.Errorf("an unlabelled record wrote a currency key: %s", data)
+		}
+	})
+
+	t.Run("an unpriced reading writes no priced keys", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		rec := sampleRecord("20260811T133000Z-dddd4444", time.Date(2026, 8, 11, 13, 30, 0, 0, time.UTC))
+		rec.Meta.Usage = Usage{Calls: 1, PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}
+		if err := st.Save(rec); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, rec.Meta.ID+".json"))
+		if err != nil {
+			t.Fatalf("read record: %v", err)
+		}
+		for _, key := range []string{"costMicros", "pricedCalls", "unpricedCalls"} {
+			if bytes.Contains(data, []byte(key)) {
+				t.Errorf("a zero %s reached the record: %s", key, data)
+			}
+		}
+	})
+
+	t.Run("a record written before pricing loads its tokens with no priced amount", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		legacy := fmt.Sprintf(
+			`{"recordVersion":%d,"meta":{"id":"20260811T150000Z-eeee5555","title":"greet the world",`+
+				`"createdAt":"2026-08-11T14:00:00Z","updatedAt":"2026-08-11T15:00:00Z","userMsgs":2,`+
+				`"usage":{"calls":2,"promptTokens":900,"cachedPromptTokens":100,"completionTokens":80,"totalTokens":980},`+
+				`"delegateUsage":{"calls":1,"promptTokens":50,"completionTokens":5,"totalTokens":55}},`+
+				`"session":{"Version":%d,"State":{"k":"v"}}}`,
+			RecordVersion, domain.SessionVersion)
+		if err := os.WriteFile(filepath.Join(dir, "20260811T150000Z-eeee5555.json"), []byte(legacy), filePerm); err != nil {
+			t.Fatalf("write pre-pricing record: %v", err)
+		}
+
+		got, err := st.Load("20260811T150000Z-eeee5555")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		wantUsage := Usage{Calls: 2, PromptTokens: 900, CachedPromptTokens: 100, CompletionTokens: 80, TotalTokens: 980}
+		if got.Meta.Usage != wantUsage {
+			t.Errorf("a pre-pricing record loaded usage %+v, want %+v", got.Meta.Usage, wantUsage)
+		}
+		wantDelegates := Usage{Calls: 1, PromptTokens: 50, CompletionTokens: 5, TotalTokens: 55}
+		if got.Meta.DelegateUsage != wantDelegates {
+			t.Errorf("a pre-pricing record loaded delegate usage %+v, want %+v", got.Meta.DelegateUsage, wantDelegates)
+		}
+		if got.Meta.Currency != "" {
+			t.Errorf("a pre-pricing record loaded currency %q, want none", got.Meta.Currency)
+		}
 	})
 
 	t.Run("a record written before the accounting loads as zero totals", func(t *testing.T) {
@@ -1047,6 +1110,9 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		}
 		if got.Meta.ServedModels != nil {
 			t.Errorf("a record predating the served set loaded %q, want none", got.Meta.ServedModels)
+		}
+		if got.Meta.Currency != "" {
+			t.Errorf("a record predating the accounting loaded currency %q, want none", got.Meta.Currency)
 		}
 	})
 }
