@@ -4,8 +4,8 @@
 │ Description: Autonomy mode: how tool calls are gated, from least to most autonomous.                                                     │
 │                                                                                                                                          │
 │                                                                                                                                          │
-│   Upstream                                                                                                                             ┃ │
 │   servers                             1 server               · ⏎ opens $EDITOR                                                         ┃ │
+│   currency                            USD                    · ⏎ opens $EDITOR                                                         ┃ │
 │   server                              probe-target                                                                                     │ │
 │   sub-agents-server                   auto (session server)  · ⏎ opens $EDITOR                                                         │ │
 │   sub-agents-choice                   fixed                                                                                            │ │
