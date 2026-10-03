@@ -180,7 +180,10 @@ NOTES (2026-10-04): the attached row is one row at any width (truncated with the
 **Acceptance:** `go test -count=1 -run 'TestAttachedImages|UserBlock' ./internal/tui/`
 **Commit:** `fix(tui): mark a sent image in the user block`
 
-## 8. Persist the image mark with the session
+## 8. Persist the image mark with the session — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): consequential edit — internal/tui/transcript.go: made necessary by fromWireEntry now setting entry.images on resume (the field comment named addUserWithImages as its only setter)
+NOTES (2026-10-04): consequential edit — docs/manual/commands.md: made necessary by the attached row now surviving save and resume (the image paragraph says it comes back on resume, names and sizes only)
 
 **What:** Fixes `apogee-image-send-no-trace` (persistence half): the mark from item 7 must survive save and resume.
 **Regression guard.** `DecodeTranscript` promises to strip every painted string (`stripEntry` in `internal/session/transcript.go`) and `fromWireEntry` strips nothing: strip each image name in `stripEntry` and add it to `TestDecodeTranscriptStripsEscapesEverywhereItCanBePainted` (`internal/session/transcript_test.go:327`).

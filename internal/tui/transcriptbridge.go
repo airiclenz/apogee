@@ -181,6 +181,7 @@ func toWireEntry(e *entry, kind string) session.Entry {
 		UsageUnpricedCalls:      e.usage.UnpricedCalls,
 
 		SkillSpans: toWireSkillSpans(e.skillSpans),
+		Images:     toWireImageMarks(e.images),
 	}
 	switch {
 	case e.kind == entryToolCall || e.kind == entrySchedule || e.kind == entryWorkflowItem:
@@ -263,6 +264,19 @@ func toWireSkillSpans(spans []skillSpan) []session.SkillSpan {
 	out := make([]session.SkillSpan, 0, len(spans))
 	for _, sp := range spans {
 		out = append(out, session.SkillSpan{Start: sp.start, End: sp.end})
+	}
+	return out
+}
+
+// toWireImageMarks projects a sent user block's image marks onto the wire — names and sizes only,
+// nil for nil, so a send without images serializes without the member at all.
+func toWireImageMarks(marks []imageMark) []session.ImageMark {
+	if len(marks) == 0 {
+		return nil
+	}
+	out := make([]session.ImageMark, 0, len(marks))
+	for _, mark := range marks {
+		out = append(out, session.ImageMark{Name: mark.name, Size: mark.size})
 	}
 	return out
 }
@@ -393,6 +407,7 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 	// re-stripped as untrusted disk input, so a span is kept only while it still locates a run of
 	// what came back — a corrupt or shortened record paints plain rather than slicing out of range.
 	e.skillSpans = spansWithin(e.text, fromWireSkillSpans(w.SkillSpans))
+	e.images = fromWireImageMarks(w.Images)
 	if w.Tool != nil {
 		// done travels with the view because one solo verdict is not knowable from the view alone: an
 		// ask_user record becomes a card of its own only once its answer landed, which is the same fact
@@ -488,6 +503,19 @@ func fromWireSkillSpans(ws []session.SkillSpan) []skillSpan {
 	out := make([]skillSpan, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, skillSpan{start: w.Start, end: w.End})
+	}
+	return out
+}
+
+// fromWireImageMarks rebuilds a sent user block's image marks from the wire — nil for none, which is
+// how a record written before the member existed reads: a text-only send.
+func fromWireImageMarks(ws []session.ImageMark) []imageMark {
+	if len(ws) == 0 {
+		return nil
+	}
+	out := make([]imageMark, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, imageMark{name: w.Name, size: w.Size})
 	}
 	return out
 }

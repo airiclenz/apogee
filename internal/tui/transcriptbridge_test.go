@@ -1156,6 +1156,62 @@ func TestTranscriptCodecRoundTripsSkillTokenSpans(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecRoundTripsSentImageMarks pins the sent-image mark through save and resume: a
+// send that carried images comes back naming them by name and size, so its block paints the same
+// "attached:" row, and the image bytes never reach the blob — the engine envelope holds those. A
+// record written before the member existed decodes as the text-only send it was written as.
+func TestTranscriptCodecRoundTripsSentImageMarks(t *testing.T) {
+	t.Parallel()
+	const secret = "PNG-BYTES-NEVER-ON-THE-WIRE"
+	tr := &transcript{}
+	tr.addUserWithImages("what is this?", nil, []domain.Image{
+		{Name: "shot.png", MediaType: "image/png", Data: []byte(secret)},
+		{Name: "clipboard-1.png", MediaType: "image/png", Data: make([]byte, 2048)},
+	})
+	tr.addUser("and this one has none", nil)
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if want := `"images":[{"name":"shot.png","size":27},{"name":"clipboard-1.png","size":2048}]`; !strings.Contains(string(data), want) {
+		t.Errorf("wire blob does not carry %s:\n%s", want, data)
+	}
+	if strings.Contains(string(data), secret) || strings.Contains(string(data), "image/png") {
+		t.Errorf("image data or its media type reached the wire:\n%s", data)
+	}
+	if n := strings.Count(string(data), `"images"`); n != 1 {
+		t.Errorf("wire blob carries %d images members; want one — a text-only send writes none:\n%s", n, data)
+	}
+
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries; want the two sends", len(got))
+	}
+	wantMarks := []imageMark{{name: "shot.png", size: 27}, {name: "clipboard-1.png", size: 2048}}
+	if !reflect.DeepEqual(got[0].images, wantMarks) {
+		t.Errorf("replayed marks = %+v, want %+v", got[0].images, wantMarks)
+	}
+	if want := "attached: shot.png (27 B) · clipboard-1.png (2.0 KiB)"; attachedLine(got[0].images) != want {
+		t.Errorf("replayed row = %q, want %q", attachedLine(got[0].images), want)
+	}
+	if got[1].images != nil {
+		t.Errorf("a text-only send came back with marks: %+v", got[1].images)
+	}
+
+	legacy := []byte(`{"version":1,"entries":[{"kind":"user","text":"what is this?"}]}`)
+	old, err := decodeTranscript(legacy)
+	if err != nil {
+		t.Fatalf("decodeTranscript(legacy): %v", err)
+	}
+	if want := []entry{{kind: entryUser, text: "what is this?"}}; !reflect.DeepEqual(old, want) {
+		t.Errorf("a record without the member decoded as %+v; want the text-only send %+v", old, want)
+	}
+}
+
 // fixedCommitTime is the instant a pinned transcript clock stamps every entry with: UTC, with no
 // monotonic reading, so it compares and serializes as the wall-clock instant it is.
 var fixedCommitTime = time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
@@ -1385,7 +1441,11 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			// The priced half of the same accounting (ADR 0093 decision 5): the run's cost and its
 			// calls split by whether their server had a `price:`.
 			"UsageCostMicros", "UsagePricedCalls", "UsageUnpricedCalls",
-			"SkillSpans", "Tool", "Presented",
+			"SkillSpans",
+			// Images: a sent user block's attached-image marks, names and sizes only, so a resumed
+			// block keeps its "attached:" row (refocus-followups plan, item 8).
+			"Images",
+			"Tool", "Presented",
 			// Item: a Workflow item's run head's place in its Workflow (enterable-workflow-stages
 			// plan, item 4).
 			"Item",

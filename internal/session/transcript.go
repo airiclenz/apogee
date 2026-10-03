@@ -177,8 +177,13 @@ type Entry struct {
 	UsagePricedCalls        int         `json:"usagePricedCalls,omitempty"`
 	UsageUnpricedCalls      int         `json:"usageUnpricedCalls,omitempty"`
 	SkillSpans              []SkillSpan `json:"skillSpans,omitempty"`
-	Tool                    *ToolView   `json:"tool,omitempty"`
-	Presented               *Presented  `json:"presented,omitempty"`
+	// Images are the images a user send carried, by name and size — never their bytes, which the
+	// engine envelope holds and the scrollback does not need to say what went out. A Driver paints
+	// them as the sent block's "attached:" row. Absent on a send without images, on every other kind
+	// and on a record written before the member existed, which reads as a text-only send.
+	Images    []ImageMark `json:"images,omitempty"`
+	Tool      *ToolView   `json:"tool,omitempty"`
+	Presented *Presented  `json:"presented,omitempty"`
 	// Item is an EntryKindWorkflowItem entry's place in its Workflow, absent on every other kind.
 	Item *WorkflowItem `json:"item,omitempty"`
 	// Workflow is an EntryKindWorkflow entry's structure as it stood when the record was written,
@@ -269,6 +274,15 @@ type WorkflowItem struct {
 type SkillSpan struct {
 	Start int `json:"start"`
 	End   int `json:"end"`
+}
+
+// ImageMark is one image a user send carried, as the record remembers it: the name it was attached
+// under and its size in bytes. Name is display text and is stripped on decode like every other such
+// field. Neither member takes omitempty, for SkillSpan's reason: the slice member carries the
+// omission, and a half-written mark would read as a whole one.
+type ImageMark struct {
+	Name string `json:"name"`
+	Size int    `json:"size"`
 }
 
 // ToolView is the serialized form of a tool call's card, including the raw tool Name — the id a
@@ -472,6 +486,9 @@ func UserMessageCount(entries []Entry) int {
 func stripEntry(e *Entry) {
 	e.Text = sanitize.StripEscapes(e.Text)
 	e.CtxModel = sanitize.StripEscapes(e.CtxModel)
+	for i := range e.Images {
+		e.Images[i].Name = sanitize.StripEscapes(e.Images[i].Name)
+	}
 	if e.Tool != nil {
 		stripToolView(e.Tool)
 	}

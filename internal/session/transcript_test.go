@@ -329,7 +329,8 @@ func TestDecodeTranscriptStripsEscapesEverywhereItCanBePainted(t *testing.T) {
 	// The ESC byte rides the fixture as its JSON escape, which is how a tampered file would carry it:
 	// a raw 0x1b inside a JSON string is not valid JSON and would never reach the decoder at all.
 	const esc = `\u001b[31m`
-	blob := []byte(`{"version":1,"entries":[{"kind":"user","text":"` + esc + `hi"},` +
+	blob := []byte(`{"version":1,"entries":[{"kind":"user","text":"` + esc + `hi",` +
+		`"images":[{"name":"` + esc + `shot.png","size":3}]},` +
 		`{"kind":"toolCall","callID":"c1","ctxModel":"` + esc + `m","tool":{` +
 		`"label":"` + esc + `Edit","verb":"` + esc + `editing","target":"` + esc + `main.go",` +
 		`"name":"` + esc + `edit_file","stat":"` + esc + `2 files",` +
@@ -351,12 +352,13 @@ func TestDecodeTranscriptStripsEscapesEverywhereItCanBePainted(t *testing.T) {
 		t.Fatalf("decoded %d entries, want 3", len(got))
 	}
 	tv, pv := got[1].Tool, got[2].Presented
-	if tv == nil || pv == nil {
-		t.Fatalf("the tool card or the presentation did not decode: %#v", got)
+	if tv == nil || pv == nil || len(got[0].Images) != 1 {
+		t.Fatalf("the tool card, the presentation or the image mark did not decode: %#v", got)
 	}
 	for name, field := range map[string]string{
 		"entry text":      got[0].Text,
 		"ctxModel":        got[1].CtxModel,
+		"image name":      got[0].Images[0].Name,
 		"label":           tv.Label,
 		"verb":            tv.Verb,
 		"target":          tv.Target,

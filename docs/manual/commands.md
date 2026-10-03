@@ -100,7 +100,8 @@ before. Attached images wait on one line above the prompt box
 (`attached: shot.png (412.0 KiB) · clipboard-1.png (88.3 KiB)`) and go out with the next
 message you send — on their own, if the box is empty. Once sent, the line goes and your message's
 block in the transcript ends with the same `attached:` row, so the scrollback says which images went
-out with it. A message queued while the model works
+out with it. The row is saved with the session and comes back when you resume it — the names and
+sizes only, never the images themselves. A message queued while the model works
 does not take them; they wait for the next send at idle. An image over the limits above is
 refused in the status line, and a clipboard image on a server without `vision: true` is
 refused there too.

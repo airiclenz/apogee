@@ -408,8 +408,8 @@ type entry struct {
 	skillSpans []skillSpan
 	// entryUser only: the images the send carried, by name and size (imageMark), painted as the
 	// block's one "attached:" row (renderUserBlock); nil on a text-only send and on every other kind.
-	// Set once at commit (addUserWithImages) and never mutated, which is what keeps it out of
-	// paintKey: committed content is covered by the append-only rule.
+	// Set once at commit (addUserWithImages, or fromWireEntry on resume) and never mutated, which is
+	// what keeps it out of paintKey: committed content is covered by the append-only rule.
 	images    []imageMark
 	presented presentedView
 	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
