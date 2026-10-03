@@ -44,19 +44,19 @@ import (
 // escape the job. A real shell has to start and parse its command line first, so the window
 // closes long before it can spawn anything; the alternative — a suspended start — is
 // unreachable because os/exec closes the process's initial thread handle, leaving nothing to
-// resume. The window stays that small only because every caller runs Contain straight after
+// resume (StartPseudoConsole, which calls CreateProcess itself, does start suspended and has no
+// such window). The window stays that small only because every caller runs Contain straight after
 // cmd.Start and before handing the process any input: a caller that let a protocol exchange
 // run first (an MCP server's handshake) would widen it to that whole round-trip.
 func NewProcessTeardown(cmd *exec.Cmd) ProcessTeardown {
-	td := &jobTeardown{job: windows.InvalidHandle}
-	if job, err := newTreeJob(); err == nil {
-		td.job = job
-	}
-
+	td := newJobTeardown()
 	cmd.Cancel = func() error { return td.cancel(cmd) }
 	cmd.WaitDelay = ProcessWaitDelay
 	return td
 }
+
+// killedExitCode is the exit code a terminated job or leader reports.
+const killedExitCode = 1
 
 // jobTeardown is the Windows ProcessTeardown: the Job Object holding one run's process tree.
 // cmd.Cancel runs on os/exec's watchdog goroutine while Contain/Release run on the goroutine
@@ -69,6 +69,20 @@ type jobTeardown struct {
 	// assigned reports that the process actually joined the job, which is what makes a job
 	// termination reap the whole tree rather than nothing.
 	assigned bool
+}
+
+// newJobTeardown returns a teardown holding a fresh tree job, or holding windows.InvalidHandle
+// when the job cannot be created — every operation then degrades to the leader alone.
+//
+// It is shared by both ways a process reaches the job: NewProcessTeardown's os/exec launch, which
+// joins by PID after Start (Contain), and StartPseudoConsole's suspended launch, which holds the
+// process handle from CreateProcess and joins before the first instruction runs (containHandle).
+func newJobTeardown() *jobTeardown {
+	td := &jobTeardown{job: windows.InvalidHandle}
+	if job, err := newTreeJob(); err == nil {
+		td.job = job
+	}
+	return td
 }
 
 // newTreeJob creates an unnamed Job Object that kills everything still in it when its last
@@ -107,11 +121,6 @@ func (t *jobTeardown) Contain(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.job == windows.InvalidHandle {
-		return
-	}
 	// Opening by PID is race-free here even though PIDs are recycled: os/exec still holds an
 	// open handle to the process (until Wait releases it), and Windows cannot reuse a PID
 	// while any handle to it is open.
@@ -120,7 +129,19 @@ func (t *jobTeardown) Contain(cmd *exec.Cmd) {
 		return
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
-	if err := windows.AssignProcessToJobObject(t.job, h); err != nil {
+	t.containHandle(h)
+}
+
+// containHandle assigns the process behind handle to the job — Contain's handle-keyed form, for a
+// launcher that holds the handle from CreateProcess. The handle needs PROCESS_SET_QUOTA and
+// PROCESS_TERMINATE access, and stays the caller's to close. Failure is silent, as in Contain.
+func (t *jobTeardown) containHandle(handle windows.Handle) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.job == windows.InvalidHandle {
+		return
+	}
+	if err := windows.AssignProcessToJobObject(t.job, handle); err != nil {
 		return
 	}
 	t.assigned = true
@@ -130,23 +151,41 @@ func (t *jobTeardown) Contain(cmd *exec.Cmd) {
 // It returns nil like the POSIX backend — the kill is the teardown, not an error the tool
 // reports; Wait surfaces the outcome.
 func (t *jobTeardown) cancel(cmd *exec.Cmd) error {
+	t.terminate(cmd.Process != nil, func() { _ = cmd.Process.Kill() })
+	return nil
+}
+
+// terminateHandle ends the tree of a process the job was given by handle (containHandle). An
+// invalid handle means the leader has already exited and its handle been closed: the job is then
+// the only thing left that can reach a descendant, so it is still terminated, and the leader
+// kill — which must never go through a closed handle — becomes a no-op.
+func (t *jobTeardown) terminateHandle(handle windows.Handle) {
+	t.terminate(true, func() {
+		if handle != windows.InvalidHandle {
+			_ = windows.TerminateProcess(handle, killedExitCode)
+		}
+	})
+}
+
+// terminate is the one kill plan behind cancel and terminateHandle: the job when the process
+// joined it, else killLeader, and nothing for a process that never started.
+func (t *jobTeardown) terminate(started bool, killLeader func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	switch planTreeKill(cmd.Process != nil, t.assigned && t.job != windows.InvalidHandle) {
+	switch planTreeKill(started, t.assigned && t.job != windows.InvalidHandle) {
 	case treeKillTree:
 		// Terminating the job is explicit and immediate; the KILL_ON_JOB_CLOSE limit only
 		// covers the path where nobody is left to make this call.
-		if err := windows.TerminateJobObject(t.job, 1); err != nil {
+		if err := windows.TerminateJobObject(t.job, killedExitCode); err != nil {
 			// The job may already be empty (the process exited between Done and here);
 			// fall back to the leader, ignoring "process already finished".
-			_ = cmd.Process.Kill()
+			killLeader()
 		}
 	case treeKillLeader:
-		_ = cmd.Process.Kill()
+		killLeader()
 	case treeKillNothing:
 	}
-	return nil
 }
 
 // Reap terminates the job once a run that was never cancelled has been waited on, so a process

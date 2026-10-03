@@ -329,7 +329,12 @@ internal/tui/clipboard.go — hostClipboard; internal/present/clipboard.go — S
 **Closes:** apogee-bmj
 Depends on item 12.
 
-## 14. Windows platform — pseudoconsole and handle-based job
+## 14. Windows platform — pseudoconsole and handle-based job — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): API shape for item 15 — platform.StartPseudoConsole(PseudoConsoleSpec{Path, CommandLine (verbatim), Dir, Env (nil inherits), Cols, Rows}) returns *PseudoConsole (io.Reader/io.Writer over the pipes, Pid, Wait() (code, err) backed by an internal reaper goroutine, Kill = job terminate with leader fallback, Close = Kill + ClosePseudoConsole + close both pipes + release job, idempotent); a host without ConPTY yields an error wrapping ErrPseudoConsoleUnavailable (CreatePseudoConsole is Find()-probed first, since the x/sys wrapper panics where the proc is missing).
+NOTES (2026-10-03): handle-based job is a refactor of jobTeardown rather than a second type: newJobTeardown (shared constructor), containHandle (Contain now opens by PID and delegates), terminate/terminateHandle (cancel delegates; the same planTreeKill plan); killedExitCode names the former literal 1. The NewProcessTeardown "Known, documented gap" paragraph notes StartPseudoConsole has no pre-join window.
+NOTES (2026-10-03): beyond the lifted code, the launcher sets STARTF_USESTDHANDLES with invalid std handles (so a child cannot inherit apogee's redirected stdio in place of the pseudoconsole's) and emits a proper double-NUL block for an empty Env; the tui harness now skips only on ErrPseudoConsoleUnavailable and fails on any other launch error (previously only newConPTY failure skipped — same split).
+NOTES (2026-10-03): Windows-only tests (echo through cmd.exe, Kill empties the job of cmd + its ping descendant, bad-spec refusals) are compiled here, not run; golangci-lint (GOOS=windows) reports a pre-existing errcheck at internal/platform/prewarm_windows.go:47, untouched.
 
 **What:**
 **Goal:** `internal/platform` exports a Windows pseudoconsole launcher (create pseudoconsole, start the process suspended with `STARTUPINFOEX` and the pseudoconsole attribute, assign it to a kill-on-close job, resume) and a job teardown keyed on a process handle; `internal/tui/conpty_windows_test.go` uses it instead of its private copy.

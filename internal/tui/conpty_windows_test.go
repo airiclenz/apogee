@@ -60,6 +60,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/sys/windows"
+
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // The child's contract with the parent, all of it: where to write its findings, and which ordering
@@ -100,6 +102,9 @@ const (
 	// conptyGiveUpTicks bounds the wait for the pseudoconsole's first window size, so a host that
 	// never sends one ends the run with a reason rather than with a process the parent has to kill.
 	conptyGiveUpTicks = 100
+	// conptyChildTimeout bounds one child run, inside its own -test.timeout so the parent reports
+	// the overrun rather than the child's panic.
+	conptyChildTimeout = 45 * time.Second
 )
 
 // conptyResult is what one child run measured. It crosses the process boundary as JSON, so every
@@ -207,25 +212,33 @@ func runConPTYChild(t *testing.T, arm string) conptyResult {
 	}
 	resultPath := filepath.Join(t.TempDir(), "conpty-"+arm+".json")
 
-	pty, err := newConPTY(conptyCols, conptyRows)
-	if err != nil {
+	// The parent holds the console's input end open for the whole run: nothing types at it — the
+	// run is scripted by a ticker, not by keys — but a console whose input has hit EOF is not the
+	// console a human's apogee talks to, and the renderer's input reader would see the session end
+	// under it. Close, deferred, kills the child if it is still running and releases everything.
+	pty, err := platform.StartPseudoConsole(platform.PseudoConsoleSpec{
+		Path: exe,
+		CommandLine: windows.ComposeCommandLine([]string{
+			exe, "-test.run=^TestConPTYChildProcess$", "-test.count=1", "-test.timeout=60s",
+		}),
+		Env:  append(os.Environ(), conptyResultEnv+"="+resultPath, conptyArmEnv+"="+arm),
+		Cols: conptyCols,
+		Rows: conptyRows,
+	})
+	if errors.Is(err, platform.ErrPseudoConsoleUnavailable) {
 		t.Skipf("no pseudoconsole on this host: %v", err)
 	}
-	defer pty.close()
+	if err != nil {
+		t.Fatalf("start the child inside the pseudoconsole: %v", err)
+	}
+	defer func() { _ = pty.Close() }()
 
 	// A child whose output pipe fills stops writing and never reaches its read-back, so the parent
 	// drains continuously. The bytes themselves are not the measurement — the console's buffer is —
 	// so they are discarded.
-	go func() { _, _ = io.Copy(io.Discard, pty.out) }()
+	go func() { _, _ = io.Copy(io.Discard, pty) }()
 
-	proc, err := pty.start(exe,
-		[]string{"-test.run=^TestConPTYChildProcess$", "-test.count=1", "-test.timeout=60s"},
-		append(os.Environ(), conptyResultEnv+"="+resultPath, conptyArmEnv+"="+arm))
-	if err != nil {
-		t.Fatalf("start the child inside the pseudoconsole: %v", err)
-	}
-	defer proc.close()
-	if err := proc.wait(45 * time.Second); err != nil {
+	if err := waitConPTYChild(pty, conptyChildTimeout); err != nil {
 		t.Fatalf("child (%s arm): %v", arm, err)
 	}
 
@@ -246,6 +259,37 @@ func runConPTYChild(t *testing.T, arm string) conptyResult {
 		t.Fatalf("child (%s arm) trace: %v", arm, err)
 	}
 	return res
+}
+
+// waitConPTYChild blocks until the child exits, and reports an error if it overruns or exits
+// non-zero. A pseudoconsole that misbehaves must not be able to hang the suite, which is what the
+// timeout is for; the caller's deferred Close then kills whatever is left, which also ends the
+// goroutine waiting here.
+func waitConPTYChild(pty *platform.PseudoConsole, timeout time.Duration) error {
+	type exit struct {
+		code int
+		err  error
+	}
+	exited := make(chan exit, 1)
+	go func() {
+		code, err := pty.Wait()
+		exited <- exit{code, err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return errors.New("the child did not finish in time")
+	case got := <-exited:
+		switch {
+		case got.err != nil:
+			return got.err
+		case got.code != 0:
+			return fmt.Errorf("the child exited with status %d", got.code)
+		}
+		return nil
+	}
 }
 
 // conptyTracePath is where a child writes --tui-trace, derived from its result path so the two
@@ -596,164 +640,4 @@ func conptyConsoleScreen(fd uintptr, width, height int) ([]string, error) {
 		rows = append(rows, string(utf16.Decode(out)))
 	}
 	return rows, nil
-}
-
-// ----------------------------------------------------------------------------
-// The pseudoconsole
-// ----------------------------------------------------------------------------
-
-// conPTY is a live Windows pseudoconsole and the two pipe ends the parent keeps.
-type conPTY struct {
-	handle windows.Handle
-	// in is the write end of the child's console input. Nothing types at it — the run is scripted
-	// by a ticker, not by keys — but the parent holds it open, because a console whose input has
-	// hit EOF is not the console a human's apogee talks to and the renderer's input reader would
-	// see the session end under it.
-	in  *os.File
-	out *os.File // the child's console output, drained by the parent and not otherwise read
-}
-
-// newConPTY creates a pseudoconsole of the given size. The failure it most plausibly meets — a host
-// that forbids one — is reported as an error for the caller to skip on, never as a fatal.
-func newConPTY(cols, rows int) (*conPTY, error) {
-	var inRead, inWrite, outRead, outWrite windows.Handle
-	if err := windows.CreatePipe(&inRead, &inWrite, nil, 0); err != nil {
-		return nil, fmt.Errorf("input pipe: %w", err)
-	}
-	if err := windows.CreatePipe(&outRead, &outWrite, nil, 0); err != nil {
-		_ = windows.CloseHandle(inRead)
-		_ = windows.CloseHandle(inWrite)
-		return nil, fmt.Errorf("output pipe: %w", err)
-	}
-	var handle windows.Handle
-	err := windows.CreatePseudoConsole(
-		windows.Coord{X: int16(cols), Y: int16(rows)}, inRead, outWrite, 0, &handle)
-	// The pseudoconsole duplicated the ends it needs; the parent keeps only its own two.
-	_ = windows.CloseHandle(inRead)
-	_ = windows.CloseHandle(outWrite)
-	if err != nil {
-		_ = windows.CloseHandle(inWrite)
-		_ = windows.CloseHandle(outRead)
-		return nil, fmt.Errorf("CreatePseudoConsole: %w", err)
-	}
-	return &conPTY{
-		handle: handle,
-		in:     os.NewFile(uintptr(inWrite), "conpty-in"),
-		out:    os.NewFile(uintptr(outRead), "conpty-out"),
-	}, nil
-}
-
-// close tears the pseudoconsole down. Closing the pseudoconsole first is what releases the child's
-// console and lets the drain goroutine's read end see EOF.
-func (p *conPTY) close() {
-	windows.ClosePseudoConsole(p.handle)
-	_ = p.in.Close()
-	_ = p.out.Close()
-}
-
-// procUpdateProcThreadAttribute is called directly rather than through the x/sys wrapper for one
-// reason: PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE takes the pseudoconsole HANDLE in the value slot, not
-// a pointer to it, and spelling that as an unsafe.Pointer is exactly the misuse `go vet`'s unsafeptr
-// check exists to catch. Allocation still goes through the wrapper's container.
-var procUpdateProcThreadAttribute = windows.NewLazySystemDLL("kernel32.dll").
-	NewProc("UpdateProcThreadAttribute")
-
-// conptyProcess is a running child and the handles the parent must give back.
-type conptyProcess struct {
-	process windows.Handle
-	thread  windows.Handle
-}
-
-// start launches exe inside the pseudoconsole. The child gets the pty as its console through the
-// process attribute list, which is what makes its stdout a real console handle — the precondition
-// for everything this file measures.
-func (p *conPTY) start(exe string, args, env []string) (*conptyProcess, error) {
-	attrs, err := windows.NewProcThreadAttributeList(1)
-	if err != nil {
-		return nil, fmt.Errorf("attribute list: %w", err)
-	}
-	defer attrs.Delete()
-	rc, _, callErr := procUpdateProcThreadAttribute.Call(
-		uintptr(unsafe.Pointer(attrs.List())),
-		0,
-		windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-		uintptr(p.handle),
-		unsafe.Sizeof(p.handle),
-		0,
-		0,
-	)
-	if rc == 0 {
-		return nil, fmt.Errorf("UpdateProcThreadAttribute: %w", callErr)
-	}
-
-	exe16, err := windows.UTF16PtrFromString(exe)
-	if err != nil {
-		return nil, err
-	}
-	cmd16, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{exe}, args...)))
-	if err != nil {
-		return nil, err
-	}
-	env16, err := conptyEnvBlock(env)
-	if err != nil {
-		return nil, err
-	}
-
-	si := &windows.StartupInfoEx{
-		StartupInfo:             windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))},
-		ProcThreadAttributeList: attrs.List(),
-	}
-	var pi windows.ProcessInformation
-	if err := windows.CreateProcess(exe16, cmd16, nil, nil, false,
-		windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_UNICODE_ENVIRONMENT,
-		env16, nil, &si.StartupInfo, &pi); err != nil {
-		return nil, fmt.Errorf("CreateProcess: %w", err)
-	}
-	return &conptyProcess{process: pi.Process, thread: pi.Thread}, nil
-}
-
-// wait blocks until the child exits, and reports an error if it overruns or exits non-zero. A
-// pseudoconsole that misbehaves must not be able to hang the suite, which is what the timeout is
-// for; close then kills whatever is left.
-func (c *conptyProcess) wait(timeout time.Duration) error {
-	switch ev, err := windows.WaitForSingleObject(c.process, uint32(timeout.Milliseconds())); {
-	case err != nil:
-		return fmt.Errorf("waiting for the child: %w", err)
-	case ev == uint32(windows.WAIT_TIMEOUT):
-		return errors.New("the child did not finish in time")
-	}
-	var code uint32
-	if err := windows.GetExitCodeProcess(c.process, &code); err != nil {
-		return fmt.Errorf("child exit code: %w", err)
-	}
-	if code != 0 {
-		return fmt.Errorf("the child exited with status %d", code)
-	}
-	return nil
-}
-
-// close terminates the child if it is still running and gives its handles back. It is deferred on
-// every path, so a stray process cannot outlive the test however the run ends.
-func (c *conptyProcess) close() {
-	_ = windows.TerminateProcess(c.process, 1)
-	_ = windows.CloseHandle(c.thread)
-	_ = windows.CloseHandle(c.process)
-}
-
-// conptyEnvBlock packs an environment into the doubly-NUL-terminated UTF-16 block CreateProcess
-// wants. Building it here rather than mutating this process's own environment keeps the two arms
-// independent of each other and of whatever else the suite is doing.
-func conptyEnvBlock(env []string) (*uint16, error) {
-	var block []uint16
-	for _, entry := range env {
-		encoded, err := windows.UTF16FromString(entry)
-		if err != nil {
-			// An entry with an embedded NUL cannot be spelled; dropping it is better than failing
-			// the run over something the test did not set.
-			continue
-		}
-		block = append(block, encoded...)
-	}
-	block = append(block, 0)
-	return &block[0], nil
 }

@@ -41,9 +41,9 @@
 //
 // # The files, one line each
 //
-// Twenty-six files, in five groups: the shell/path Host every OS-touching caller reads, the
-// Confiner backends, the process-tree teardown every spawner reuses, the per-machine identity,
-// and the single-instance lock. The Windows label mechanism is a module of its own beside them
+// Twenty-seven files, in five groups: the shell/path Host every OS-touching caller reads, the
+// Confiner backends, the process-tree teardown every spawner reuses (with the Windows
+// pseudoconsole launcher built on it), the per-machine identity, and the single-instance lock. The Windows label mechanism is a module of its own beside them
 // (internal/platform/winlabel).
 //
 // The Host abstraction. platform.go is the interface set — Shell (the argv, the raw command
@@ -108,7 +108,12 @@
 // that has not deliberately left it; one that calls setsid escapes the kill and survives the call,
 // unsupervised but still inside any confinement write-fence (an accepted residual, not an
 // enforcement gap). teardown_windows.go realises it with a Job Object, the only facility there
-// that holds a whole tree — and, breakaway being denied, one with no matching escape.
+// that holds a whole tree — and, breakaway being denied, one with no matching escape; the job is
+// keyed either on an os/exec process (joined by PID right after Start) or on a raw process handle
+// (joined before a suspended process first runs). conpty_windows.go is the Windows pseudoconsole
+// launcher (StartPseudoConsole): it creates a ConPTY, starts a verbatim command line inside it
+// suspended, joins it to the handle-keyed job and resumes it — the Windows backend of the Console
+// tools, and the only spawner whose tree is held from its first instruction.
 //
 // The per-machine fact. hostid.go computes HostID once per process from the systemd or dbus
 // machine-id file, falling back to the hostname, and reports whether the result is the
