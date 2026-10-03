@@ -1,0 +1,307 @@
+# Table stakes and image input — priced usage, structured compaction summary, MCP headers, image input, ConPTY consoles
+
+**Goal:** Ship four of the five open `apogee-rw6` table-stakes rows (priced usage in a user-chosen currency, a structured compaction summary, custom headers for HTTP MCP servers, a ConPTY backend for the Console family on Windows) and image input (`apogee-bmj`): image parts on both wire dialects, `@ref` images, clipboard paste and pasted-path attach in the TUI.
+**Date:** 2026-10-03
+**Status:** unexecuted
+**sized for:** ~200k-context host
+**base:** 7f1f94cb
+**Closes:** none at plan level (`apogee-rw6` keeps its MCP OAuth row; item 17 updates it)
+
+**Sources:**
+- `.beads/issues.jsonl` — `apogee-rw6`, `apogee-bmj`
+- `docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md` (decision 2: Content is a string, revisit for vision)
+- `docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md`
+- `docs/adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md` (Bounds: Windows)
+- `docs/adr/0075-*.md` (headless JSON v:2, additive keys); `docs/adr/0079-*.md` ("Context cost" is taken)
+- `internal/config/reactions.go` + `internal/webhook/webhook.go` (`headers:` / `headers-env:` precedent)
+
+**Ratified design calls** (owner, 2026-10-03):
+- **Currency:** optional root key `currency:`, default `USD`, a free label printed as written; one currency for all servers.
+- **Price:** per-server `price:` with `input`, `output`, optional `cached-input`, each per 1M tokens in that currency; a server without `price:` is not costed.
+- **Cost surfaces:** `/usage` pane, footer, `/sessions` spend cell, headless JSON + text.
+- **Compaction summary:** fixed markdown headings (Goal; Constraints & preferences; Progress → Done / In progress; Key decisions; Relevant files; Next steps); always from scratch; nothing parses it.
+- **MCP headers:** `headers:` (literal) + `headers-env:` (header → env-var NAME), mirroring webhook Reactions; sse + streamable-http only; OAuth stays open.
+- **Vision gate:** per-server opt-in `vision: true`; without it an image is refused before sending.
+- **Image input:** `@ref` to an image file, ctrl+v reads a clipboard image first then falls back to text, a bracketed paste that is exactly an image path attaches it; pending images show on one line above the prompt; Backspace on an empty draft drops the last pending image.
+- **ConPTY in Auto:** fail closed — a confined console on Windows reports `ErrConfinementUnavailable` (demoted to Approval); restricted-token launch is a follow-up bead.
+- **ConPTY output:** `stripEscapes` as on POSIX.
+- **Footer spend scope:** whole session, delegates and background workflows included (owner, 2026-10-03).
+- **Footer priority:** spend is priority 4, dropped before the effort word; ADR 0060 §6 amended (owner, 2026-10-03).
+- **Windows console_send in Auto:** each send to an unconfined Console is demoted to Approval; ADR 0059 Bounds amended (owner, 2026-10-03).
+
+**Standing requirements:**
+- skills: coding-standards
+- Tests run targeted (`-run` + one package); never a race run over a whole heavy package or a package pattern.
+- Windows-only code is verified by cross-compiling: `GOOS=windows go vet <pkg>` and `GOOS=windows go test -c -o /dev/null <pkg>`.
+
+**Out of scope:** MCP OAuth; main-loop mid-Exchange compaction (`apogee-1bf`); the deepseek capture (`apogee-l8s`); vision auto-detection from `/props`; ConPTY restricted-token launch; images in MCP tool results or `read_file`.
+
+**Regression check (2026-10-03, 7f1f94cb):**
+- 2: guard folded
+- 3: recast (CostMicros int64, `Usage.Minus`, field-by-field copy rule)
+- 4: guard folded (price rides the dial binding; Meta.Currency writers named); yields to ADR 0037 Amendment (2026-08-24) — a `price:` edit applies live
+- 5: recast — split into 5 (TUI usage plumbing) and 5a (TUI display)
+- 5a: recast (new, from 5); supersedes ADR 0060 decision 6 (2026-09-02 amendment) "the effort word is the FIRST thing a narrow row gives up"
+- 6: guard folded; yields to internal/eventjson/encode.go's no-omitempty rule (ADR 0075 decision 3) and docs/manual/headless.md "Every member is always present"
+- 7: guard folded
+- 8: guard folded
+- 9: guard folded
+- 10: guard folded (adds `domain.Config.Vision` and the domain image caps); amends ADR 0001 decision 2 as already planned
+- 11: guard folded
+- 12: guard folded; `@ref` images yield to composeUserMessage's "never a refusal" contract (internal/agent/loop.go)
+- 13: guard folded; yields to ADR 0025, docs/manual/commands.md and CONTEXT.md — empty-box ⌫ pops a queued row before it drops an image
+- 14: guard folded; yields to internal/platform/platform.go "no platform surface without a production caller" — items 14 and 15 land back to back
+- 15: guard folded
+- 16: recast; supersedes ADR 0059 §2's open-time fence on console_send, for Windows
+- 17: guard folded
+- 5 (round 2): guard folded — transcriptbridge_test.go's session.Entry member pin extended, TestTranscriptCodec in Acceptance; a cmd/apogee test pins Options.Currency
+- 5a (round 2): guard folded — docs-guard grep widened (doc.go, ADR 0060:102-103, footerfit.go rung list); subagentblock_test.go listed outright; still supersedes ADR 0060 decision 6 (2026-09-02 amendment), now at its line 102 restatement too
+- 16 (round 2): guard folded (decision) — builds on item 15's OpenSpec in internal/console/registry.go; console_send's execHost joins TestBuiltinToolsShareOneExecHost
+- 16 (round 3): guard folded (decision) — send demotion gated to the host whose console open cannot confine (Windows), POSIX Ask-opened Console still sends under a box; Console.Confined covered in internal/console/registry_test.go; docs-guard grep and `GOOS=windows go test -c ./internal/agent/` in Acceptance; supersedes ADR 0059 §2 for Windows only
+- 17 (round 3): recast (decision) — files a third bead for the pre-existing POSIX console_send gap (ADR 0059 §2, item 16); Acceptance greps open beads for `console_send`
+
+## 1. ADR 0093 — priced usage, plus CONTEXT.md terms
+
+**What:**
+**Goal:** `docs/adr/0093-*.md` records the pricing decisions and `CONTEXT.md` defines **Price** and **Spend (money)** as terms distinct from **Context cost**.
+**Approach (assumed at the header base):** New ADR in the house ADR format: one currency label for the whole config (root `currency:`, default `USD`); per-server `price:` per 1M tokens (input, output, optional cached-input defaulting to input); every provider call is priced **at record time with the price of the server bound to that call** (main loop, server switch per ADR 0028, sub-agent routing per ADR 0045/0066, maintenance calls such as compaction); unpriced calls are counted, never guessed; the cost of a session is persisted with the currency label in force when it was written. Cite ADR 0079 for why the word "cost" alone is avoided in the glossary. Add both terms to `CONTEXT.md` beside **Context cost**, cross-linking it.
+**Files:** docs/adr/0093-usage-is-priced-per-call-at-the-bound-server.md, CONTEXT.md
+**Read first:** CONTEXT.md — **Context cost**, **Server stats** (_Avoid_ "cost"); docs/adr/0079-context-cost-is-a-first-class-engine-report.md — decision 1; docs/adr/0037-every-settings-edit-applies-to-the-running-session.md — Amendment 2026-08-24;
+internal/session/store.go — Meta.Usage, Meta.DelegateUsage ("spend" = tokens today); internal/tui/sessions.go — spend cell (format.Tokens)
+**Tests:** none (docs only).
+**Acceptance:** `test -f docs/adr/0093-usage-is-priced-per-call-at-the-bound-server.md && grep -n '^\*\*Price\*\*\|Spend (money)' CONTEXT.md`
+**Commit:** `docs(adr): ADR 0093 — usage is priced per call at the bound server`
+
+## 2. Config keys — root `currency:` and per-server `price:`
+
+**What:**
+**Goal:** `currency:` (optional, default `USD`) and per-server `price:` load, validate and are documented; bad values are refused with the house `apogee: servers: entry %d (%q): price: … or remove the key` wording.
+**Approach (assumed at the header base):** `currency` is a registry row (top-level key) in `internal/config/registry.go`: trimmed, non-empty, ≤ 16 runes, no control characters; it is a display label only. `price` is a field on `ServerEntry` holding a **comparable value struct** (no pointers, maps or slices — `ServerEntry` is compared with `!=`), decoded in `ServerEntry.UnmarshalYAML` the way `RequestExtra` is; `input` and `output` required when `price:` is present, every rate finite and ≥ 0, `cached-input` optional (absent ⇒ the input rate), unknown sub-keys refused. Validation lives in `ValidateServers`. Document both in `docs/manual/configuration.md` (servers section, a `### Pricing — price: and currency:` subsection) and the commented examples in `internal/config/defaults/config.yaml`.
+**Regression guard.** `currency` is a file-only, non-editable registry row with a Set landing on `Options.Currency`: add `"currency": "Currency"` to TestRegistrySetIsTheInverseOfRead's `owns` table, pin it in TestSettingsRowsFormatEffectiveValues, add `Currency` to TestEveryConfigKeyReachesTheOptions' want and a non-USD value to everyKeyFileConfig. Tag the price struct's fields exactly `yaml:"input"`, `yaml:"output"`, `yaml:"cached-input"` (any presence flag `yaml:"-"`) so the unknown-key walk stays silent on a priced entry. The `apogee: servers: entry %d (%q): price: …` wording covers ValidateServers refusals only; decoder refusals (unknown sub-key, non-mapping) take the requestExtraError shape `servers: entry %q: price: (line %d) … or remove the key`.
+**Files:** internal/config/config.go, internal/config/registry.go, internal/config/options.go, internal/config/config_test.go, internal/config/registry_test.go, internal/config/unknownkeys_test.go, cmd/apogee/settingsrows_test.go, internal/config/defaults/config.yaml, docs/manual/configuration.md
+**Read first:** internal/config/config.go — ServerEntry.UnmarshalYAML, ValidateServers; internal/config/unknownkeys.go — walkUnknownKeys, schemaKeys; internal/config/registry_test.go — TestRegistrySetIsTheInverseOfRead;
+internal/config/config_test.go — TestEveryConfigKeyReachesTheOptions, everyKeyFileConfig; cmd/apogee/settingsrows_test.go — TestSettingsRowsFormatEffectiveValues
+**Tests:** table tests for valid price, missing output, negative/NaN rate, unknown sub-key, cached-input defaulting; currency default, blank and over-long refusal; a priced entry yields no unknown-key notice.
+**Acceptance:** `go test -count=1 ./internal/config/` ; `go test -count=1 -run 'TestManualDocumentsEverySettingsKey|TestSettingsRows|TestEveryEditableSettingKeyHasAnApply' ./cmd/apogee/`
+**Commit:** `feat(config): currency and per-server price keys`
+
+## 3. Domain and session usage carry money
+
+**What:** Recast at the regression check (2026-10-03).
+**Goal:** `domain.Usage` and `session.Usage` carry `CostMicros int64`, `PricedCalls int`, `UnpricedCalls int` (summed by `Sum`, differenced by `Minus`, kept by `Adopt`), session meta carries the currency label, and one `domain.FormatCost` renders amounts for every surface.
+**Approach (assumed at the header base):** Add `domain.Price{Input, Output, CachedInput float64}` with `Price.Of(prompt, cached, completion int) int64` = ((prompt − cached, floored at 0)·Input + cached·CachedInput + completion·Output) / 1e6, in millionths of the currency unit, rounded half away from zero. Extend `domain.Usage` (`internal/domain/usage.go`) and mirror field-for-field in `session.Usage` (`internal/session/store.go`) — the runner converts one to the other directly, so both change together; JSON keys `omitempty` so older sessions load unchanged. Add `Currency string` (`omitempty`) to the session meta beside `Usage`. `FormatCost(micros int64, currency string) string`: two decimals, `<0.01 <currency>` for a positive amount below 0.01, `0.00 <currency>` for zero.
+**Regression guard.** Cost is stored as an int64 count of millionths of the currency unit (field `CostMicros`), never a float, so sums are exact and independent of map order; `Price.Of` returns micro-units rounded half away from zero per call and `FormatCost` takes micro-units. Add `domain.Usage.Minus` (field-wise difference, the inverse of `Sum`) so no caller rebuilds a Usage field by field. Rule for every field-by-field copy of `domain.Usage`/`session.Usage` (find them with `grep -rn 'CachedPromptTokens' --include=*.go internal cmd | grep -v _test`): each must carry CostMicros/PricedCalls/UnpricedCalls; item 3 converts the domain and session sites, item 5 owns the internal/tui sites (usageSince, transcriptbridge), item 6 owns run.noteTurn1 and the eventjson frames.
+**Files:** internal/domain/usage.go, internal/domain/usage_test.go, internal/session/store.go, internal/session/store_test.go
+**Read first:** internal/domain/usage.go — Usage, Sum, Adopt; internal/session/store.go — Usage, Meta; internal/tui/sessionsave.go — snapshotPayload (session.Usage(m.usage) struct conversion);
+internal/tui/usage.go — usageSince; internal/tui/model.go — usageBase/delegateUsage restore (domain.Usage(r.Usage))
+**Tests:** `Price.Of` with and without cached tokens, and its half-away-from-zero rounding; `Sum`/`Minus`/`Adopt` over the new fields; `FormatCost` boundaries; a meta round-trip with and without the new keys (old JSON loads).
+**Acceptance:** `go test -count=1 ./internal/domain/ ./internal/session/`
+**Commit:** `feat(domain): usage carries priced cost and call counts`
+Depends on item 2.
+
+## 4. Engine prices every call at the bound server
+
+**What:**
+**Goal:** every recorded provider call (turns, compaction and other maintenance calls, delegate folds, routed sub-agents) adds its cost to the running `Cumulative` usage at the price of the server it went to, or counts as unpriced.
+**Approach (assumed at the header base):** `domain.Config` gains the bound server's price (a value plus a set flag). `cmd/apogee/wire_server.go` copies it from the `ServerEntry`; `internal/agent/rebind.go` (`SwitchUpstream`) rebinds it; `internal/agent/delegationtarget.go` gives a routed child its target server's price. `(*usageTally).record` in `internal/agent/agent.go` prices each call; `domain.UsageEvent` gains per-call `Cost` and `Priced`. `compactCompleter.Complete` already records through the tally — confirm it is priced, do not add a second path. Whoever writes `Meta.Usage` also writes `Meta.Currency` from the configured `currency`.
+**Regression guard.** The bound price rides the per-server dial binding (upstreamBinding/serverBinding) exactly as Wire does, so startup, SwitchUpstream and delegation routing all carry it. Name the Meta.Currency writers explicitly — internal/run/run.go (record save) and cmd/apogee/wire_session.go (TUI save) — plus the plumbing that hands each the configured currency, and add them to **Files:**. Every exact-equality Usage want over a real agent (TestOnceReportsWhatTheFiringSpent, TestOnceRecordsWhatTheFiringAndItsDelegatesSpent, TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated, TestE2EClearResetsUsage) is updated with UnpricedCalls. Yields to ADR 0037 (Amendment 2026-08-24, "every settings edit applies to the running session"): a `price:` edit on the bound entry applies live — setServers reports it and RebindSpec or a setter carries it. Name the compaction test so the Acceptance regex selects it (`…UsageCompaction…`).
+**Files:** internal/domain/config.go, internal/domain/events.go, internal/agent/agent.go, internal/agent/rebind.go, internal/agent/delegationtarget.go, internal/agent/serverbinding.go, cmd/apogee/wire_server.go, cmd/apogee/dial.go, cmd/apogee/upstream.go, cmd/apogee/delegation.go, cmd/apogee/wire_firing.go, cmd/apogee/wire_session.go, cmd/apogee/wire_settings.go, internal/run/run.go, internal/run/run_test.go, cmd/apogee/e2e_usage_test.go, internal/agent/usagetally_test.go
+**Read first:** internal/agent/agent.go — usageTally.record; internal/agent/serverbinding.go — serverBinding.applyTo, UpstreamSpec.binding, DelegationTarget.binding; internal/agent/compact.go — compactCompleter.Complete;
+cmd/apogee/upstream.go — sessionMover.move; cmd/apogee/delegation.go — resolveDelegationTarget; cmd/apogee/wire_firing.go — bindFiringConfig
+**Tests:** priced call; unpriced server; switch mid-session (two prices, one sum); routed child at its own price; compaction call priced (`…UsageCompaction…`); a mid-session `price:` edit on the bound entry prices the next call at the new rate; a Firing record and a TUI save carry `Meta.Currency`.
+**Acceptance:** `go test -count=1 -run 'Usage|Tally|Rebind|Delegation' ./internal/agent/` ; `go test -count=1 -run TestOnce ./internal/run/` ; `go test -count=1 -run 'TestE2EClearResetsUsage|Price' ./cmd/apogee/` ; `go build ./cmd/apogee/`
+**Commit:** `feat(agent): price each provider call at the bound server`
+Depends on item 3.
+
+## 5. TUI usage plumbing
+
+**What:** Recast at the regression check (2026-10-03).
+**Goal:** the TUI keeps `CostMicros`, `PricedCalls` and `UnpricedCalls` wherever it carries usage: per-head usage survives save and resume, a background workflow's spend keeps its cost, and the TUI holds the configured currency label.
+**Approach (assumed at the header base):** `session.Entry` (`internal/session/transcript.go`) gains the three fields beside `UsageCachedPromptTokens`, and `toWireEntry` / `fromWireEntry` (`internal/tui/transcriptbridge.go`) carry them both ways. `usageSince` (`internal/tui/usage.go`) uses `domain.Usage.Minus`. `tui.Options.Currency` (`internal/tui/tui.go`) is set from `cmd/apogee/wire_options.go`.
+**Regression guard.** Split into two items. Item 5 "TUI usage plumbing": session.Entry and both transcriptbridge directions (toWireEntry/fromWireEntry) persist CostMicros/PricedCalls/UnpricedCalls following the UsageCachedPromptTokens precedent, with a restored-delegate cost test modelled on TestUsageRestoredDelegateKeepsItsCachedShare; usageSince uses domain `Usage.Minus`, tested through TestBackgroundWorkflowSpendReachesUsageAndTheRecord; `tui.Options.Currency` is set from cmd/apogee/wire_options.go. A new item 5a "TUI display" (Depends on item 5; renumber nothing else — use the id 5a): the /usage cost column and the footer segment; the footer segment is produced in Model.footerLeftText from domain.Sum(m.usage, m.delegateUsageTotal()) — whole-session spend including sub-agents and background workflows; spend is footer priority 4 and is dropped BEFORE the effort word; ADR 0060 §6 gets a dated amendment superseding "the effort word is the FIRST thing a narrow row gives up"; the docs-guard grep and the usageSubAgentRows rule are item 5a's (its guard is binding).
+Widening session.Entry turns TestTranscriptCodecPersistsANamedDelegationAsItsTarget red (it pins Entry's exact member list): extend its wantEntry after "UsageTotalTokens" with the three new names, and Acceptance runs TestTranscriptCodec. The configured currency reaching the TUI is pinned by a cmd/apogee test, TestRunRootWiresTheConfiguredCurrency, that checks w.options().Currency equals the configured `currency:` on TestRunRootWiresTheAutoTitleHookToTheNamer's wiring harness (naming_test.go).
+**Files:** internal/session/transcript.go, internal/tui/transcriptbridge.go, internal/tui/usage.go, internal/tui/tui.go, cmd/apogee/wire_options.go, internal/tui/usage_test.go, internal/tui/transcriptbridge_test.go, cmd/apogee/wire_options_test.go
+**Read first:** internal/session/transcript.go — Entry; internal/tui/transcriptbridge.go — toWireEntry, fromWireEntry; internal/tui/transcriptbridge_test.go — TestTranscriptCodecPersistsANamedDelegationAsItsTarget;
+internal/tui/usage.go — usageSince, runSpend.with; internal/tui/usage_test.go — TestUsageRestoredDelegateKeepsItsCachedShare; cmd/apogee/wire_options.go — rootWiring.options
+**Tests:** a restored delegate keeps its cost (modelled on TestUsageRestoredDelegateKeepsItsCachedShare); TestBackgroundWorkflowSpendReachesUsageAndTheRecord covers a priced workflow's cost and call counts; TestTranscriptCodecPersistsANamedDelegationAsItsTarget's wantEntry carries the three new fields; TestRunRootWiresTheConfiguredCurrency.
+**Acceptance:** `go test -count=1 ./internal/session/` ; `go test -count=1 -run 'Usage|BackgroundWorkflowSpend|TestTranscriptCodec' ./internal/tui/` ; `go test -count=1 -run TestRunRootWiresTheConfiguredCurrency ./cmd/apogee/` ; `go build ./cmd/apogee/`
+**Commit:** `feat(tui): carry priced usage through the transcript and background workflows`
+Depends on item 4.
+
+## 5a. TUI — cost in `/usage` and the footer
+
+**What:** Recast at the regression check (2026-10-03).
+**Goal:** `/usage` shows a cost column and total when any call was priced, and the footer shows the running session cost; neither appears in a session with no priced call.
+**Approach (assumed at the header base):** `internal/tui/usage.go` (`usageHeaderCells`, `usageRows`): the cost column follows the cached column's rule (shown only when something reports it); an unpriced row shows `—`; the total is prefixed `≥ ` when both priced and unpriced calls exist. Footer (`internal/tui/footerfit.go`): a spend segment `FormatCost(…)` at priority 4, dropped before the effort word when the footer is narrow. Fold via `Model.foldStats` (`internal/tui/fold.go`). Amend the `/usage` row in `docs/manual/commands.md` and `README.md`'s `/usage` line.
+**Regression guard.** The /usage cost column and the footer segment; the footer segment is produced in Model.footerLeftText from domain.Sum(m.usage, m.delegateUsageTotal()) — whole-session spend including sub-agents and background workflows; spend is footer priority 4 and is dropped BEFORE the effort word; ADR 0060 §6 gets a dated amendment superseding "the effort word is the FIRST thing a narrow row gives up" (docs/adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md, decision 6, 2026-09-02 amendment, and its restatement at line 102); rule: amend every site `grep -rn "effort word.*first\|given up first\|given up$\|priority 3\|FIRST thing a narrow\|full run; the run without" layout.md internal/tui docs/adr` finds (it catches internal/tui/doc.go's footer paragraph, ADR 0060:102-103 split across lines, and footerFit's rung list). internal/tui/subagentblock_test.go is listed outright (TestGeneratedDelegationNameReachesEverySurface calls `m.usageSubAgentRows(false)`): keep `cached bool` and work out the cost verdict inside the Model method, or change the signature and update that call.
+**Files:** internal/tui/usage.go, internal/tui/footerfit.go, internal/tui/fold.go, internal/tui/model.go, internal/tui/usage_test.go, internal/tui/footerfit_test.go, internal/tui/mode_test.go, layout.md, docs/adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md, docs/manual/commands.md, README.md, internal/tui/doc.go, internal/tui/subagentblock_test.go
+**Read first:** internal/tui/model.go — footerLeftText; internal/tui/footerfit.go — footerInput, footerFit; internal/tui/usage.go — usageRows, usageHeaderCells, usageSubAgentRows;
+internal/tui/footerfit_test.go — TestFooterFitDropsSegmentsInPriorityOrder; internal/tui/subagentblock_test.go — TestGeneratedDelegationNameReachesEverySurface
+**Tests:** usage pane with priced, unpriced and mixed rows; footer present/absent, spend dropped before the effort word at narrow width; the footer amount includes a delegate's and a background workflow's spend.
+**Acceptance:** `go test -count=1 -run 'Usage|Footer|Mode' ./internal/tui/` ; `go vet ./internal/tui/`
+**Commit:** `feat(tui): show priced spend in /usage and the footer`
+Depends on item 5.
+
+## 6. Headless output and `/sessions` show cost
+
+**What:**
+**Goal:** headless JSON `run_finished` carries `cost`, `currency` and `unpriced_calls` inside its usage frames, always present (zero values when no call was priced); headless text mode prints a cost line; the `/sessions` spend cell appends the stored cost with the stored currency label.
+**Approach (assumed at the header base):** `internal/eventjson/writer.go` (`Usage`, `SubAgentUsage`) — additive keys under ADR 0075 v:2; mapping in `cmd/apogee/headless.go` (`usageFrame`, `subAgentFrames`, `headlessUsageLines`); `internal/run/run.go` (`Result.Usage`, `sessionUsage`, `delegateTotals`) carries the new fields. `/sessions`: `sessionSpendCell` in `internal/tui/sessions.go` reads `Meta.Currency`. Document in `docs/manual/headless.md` and `docs/manual/sessions.md`.
+**Regression guard.** Also convert the field-by-field Usage copies in run.noteTurn1 and eventjson usageFrame/subAgentFrames per item 3's rule. Yields to internal/eventjson/encode.go's "NONE carries omitempty" (ADR 0075 decision 3) and docs/manual/headless.md "Every member is always present": `cost`, `currency`, `unpriced_calls` are written always (0 / "" / N); refresh cmd/apogee/testdata/eventlines/run.jsonl, not-started.jsonl and the writer_test.go run_finished pin. Firing records get `Meta.Currency` through item 4's run.Spec plumbing; pin it with a firing-record round trip in internal/run. The spend-cell test sits beside TestSessionRowCellsSpendIsTheSessionTotal.
+**Files:** internal/eventjson/writer.go, internal/eventjson/writer_test.go, cmd/apogee/headless.go, cmd/apogee/headless_test.go, cmd/apogee/testdata/eventlines/run.jsonl, cmd/apogee/testdata/eventlines/not-started.jsonl, internal/run/run.go, internal/run/run_test.go, internal/tui/sessions.go, internal/tui/sessions_test.go, docs/manual/headless.md, docs/manual/sessions.md
+**Read first:** cmd/apogee/headless.go — usageFrame, subAgentFrames, headlessUsageLines; internal/eventjson/writer.go — Usage, SubAgentUsage; internal/run/run.go — Once's record Meta literal, Spec;
+internal/tui/sessions.go — sessionSpendCell
+**Tests:** JSON frame with and without priced calls (keys present as zero values when unpriced); text line; spend cell for an old session (no cost) and a priced one; a firing record round-trips `Meta.Currency`.
+**Acceptance:** `go test -count=1 ./internal/eventjson/ ./internal/run/` ; `go test -count=1 -run 'Headless|TestE2EEventLinesGolden' ./cmd/apogee/` ; `go test -count=1 -run 'Session' ./internal/tui/`
+**Commit:** `feat(headless): report priced spend in run_finished and /sessions`
+Depends on item 4.
+
+## 7. Structured compaction summary
+
+**What:**
+**Goal:** the compaction instruction requires the summary under exactly these headings, in order: `## Goal`, `## Constraints & preferences`, `## Progress` with `### Done` and `### In progress`, `## Key decisions`, `## Relevant files`, `## Next steps`; an empty section reads `None`.
+**Approach (assumed at the header base):** Rewrite `internal/context/prompts/summary-instruction.txt` only — `summary-message-prefix.txt`, `summary-tail-instruction.txt`, the delegate-fold brief, `compactMaxTokens` and the truncation marker stay as they are. Every fold trigger (on demand, estimate, overflow, child mid-Exchange) already uses this text. Amend ADR 0018 with a dated note recording the template, the **Compaction** entry in `CONTEXT.md`, the compaction section of `docs/manual/configuration.md` and the `/compact` row of `docs/manual/commands.md`.
+**Regression guard.** The template opens with the words "You are compacting a conversation" verbatim — agent tests find the summarizer call by that prefix (compact_test.go) and by summaryInstructionMark (autocompact_test.go, overflowrecovery_test.go, thinking_replay_test.go). The file ends with exactly one newline (mustPrompt trims only one).
+**Files:** internal/context/prompts/summary-instruction.txt, internal/context/compact_test.go, docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md, CONTEXT.md, docs/manual/configuration.md, docs/manual/commands.md
+**Read first:** internal/context/prompts/summary-instruction.txt; internal/context/compact.go — mustPrompt, summaryInstruction; internal/context/compact_test.go — TestEmbeddedPromptsLoadWithoutTrailingNewline; internal/agent/autocompact_test.go — summaryInstructionMark;
+internal/agent/compact_test.go — TestCompactSummaryRequestOmitsSystemPrompt; internal/agent/overflowrecovery_test.go — summary-request matcher; docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md
+**Tests:** a test asserting `summaryInstruction` names every heading in order; existing `TestEmbeddedPromptsLoadWithoutTrailingNewline` passes.
+**Acceptance:** `go test -count=1 ./internal/context/` ; `go test -count=1 -run 'Compact|Overflow|ThinkingReplay' ./internal/agent/`
+**Commit:** `feat(context): compaction summary uses fixed section headings`
+
+## 8. MCP `headers:` / `headers-env:` — config and validation
+
+**What:**
+**Goal:** an `mcp-servers:` entry accepts `headers:` and `headers-env:` maps; bad entries are refused; from the next start, the env names join the secret set so the terminal, python and console tools cannot read them back; a stdio entry carrying either key gets a notice.
+**Approach (assumed at the header base):** `mcpServerConfig` and `mcp.ServerConfig` gain `Headers` and `HeadersEnv` (`map[string]string`). Refuse: a name that is not an HTTP token; a reserved name, case-insensitive (`Host`, `Content-Length`, `Content-Type`, `Accept`, `Connection`, `Transfer-Encoding`, `Mcp-Session-Id`, `Mcp-Protocol-Version`, `Last-Event-ID`); a value with CR, LF or NUL; one name in both maps; a blank env name (webhook wording: "the value is the NAME of the variable"). Reuse the webhook header validation if one exists — one rule, one reason to change; never copy it. Notice beside `mcpEnvAllowlistNotices`. `config.MCPHeaderEnvNames(opts)` appended to `SecretEnvVars` in `cmd/apogee/wire_config.go`. Document in `docs/manual/configuration.md` (MCP section), `internal/config/defaults/config.yaml`, `docs/design/mcp-client.md`.
+**Regression guard.** **Files:** adds internal/mcp/transport.go (mcp.ServerConfig is declared there). Reserved names are refused by rule, not a closed list: every `Mcp-*` name (prefix, case-insensitive — the SDK sets `Mcp-Method` and `Mcp-Name` per request), plus `Host`, `Content-Length`, `Content-Type`, `Accept`, `Connection`, `Transfer-Encoding`, `Last-Event-ID`. The secret scrub takes effect from the next start (as reactions' `headers-env:` does); say so in `docs/manual/configuration.md`.
+**Files:** internal/config/config.go, internal/config/config_test.go, internal/mcp/client.go, internal/mcp/transport.go, cmd/apogee/wire_config.go, internal/config/defaults/config.yaml, docs/manual/configuration.md, docs/design/mcp-client.md
+**Read first:** internal/config/config.go — mcpServerConfig, toServerConfig, mcpEnvAllowlistNotices; internal/mcp/transport.go — ServerConfig; cmd/apogee/wire_config.go — projectConfig (SecretEnvVars);
+internal/config/reactions.go — ReactionEnvNames, webhookFromMapping; internal/config/config_test.go — TestApplyConfigMCPServers (DeepEqual: absent keys must stay nil maps)
+**Tests:** parse both maps; each refusal, including `Mcp-Method` and a mixed-case `mcp-name`; stdio notice; `MCPHeaderEnvNames` lands in `SecretEnvVars`.
+**Acceptance:** `go test -count=1 ./internal/config/` ; `go test -count=1 -run 'MCP|Secret' ./cmd/apogee/`
+**Commit:** `feat(config): headers and headers-env on HTTP MCP servers`
+
+## 9. MCP headers ride the HTTP transports
+
+**What:**
+**Goal:** every request apogee sends to an sse or streamable-http MCP server carries the configured headers; a missing env var fails the connect with an error naming server, header and variable, never a value.
+**Approach (assumed at the header base):** In `internal/mcp/transport.go`, `buildSSETransport` and `buildStreamableTransport` compose a header-setting `RoundTripper` through `GuardedClientOptions.WrapTransport`, beneath `OriginPinTransport`, so headers only reach the configured origin. Env values are read with `os.LookupEnv` when the transport is built (each connect and reconnect); headers applied in sorted name order. Share env resolution with `webhook.Headers()` if their shapes match.
+**Regression guard.** The header RoundTripper is composed inside vetEndpoint's existing WrapTransport closure, next to boundedBodyTransport (both beneath OriginPinTransport) — never a second or replacing WrapTransport, which would drop the 4 MiB body bound. It clones the request before setting headers.
+**Files:** internal/mcp/transport.go, internal/mcp/transport_test.go
+**Read first:** internal/mcp/transport.go — vetEndpoint, boundedBodyTransport, buildSSETransport, buildStreamableTransport; internal/security/httpclient.go — GuardedClientOptions.WrapTransport, OriginPinTransport;
+internal/webhook/webhook.go — Headers; internal/mcp/transport_test.go — TestGuardedClient_AnOversizeBodyFailsTheRead
+**Tests:** an `httptest` server (`mcpsdk.NewStreamableHTTPHandler` and `NewSSEHandler`) asserts the headers on the initialize request and on a later call; missing env var error text contains neither value nor endpoint query; `TestGuardedClient_AnOversizeBodyFailsTheRead` still passes.
+**Acceptance:** `go test -count=1 -run 'Header|Connect|Transport|GuardedClient' ./internal/mcp/`
+**Commit:** `feat(mcp): send configured headers on HTTP transports`
+Depends on item 8.
+
+## 10. Domain images — type, persistence, estimate, compaction render
+
+**What:**
+**Goal:** `domain.Message` and `domain.UserInput` carry `Images []domain.Image{Name, MediaType string; Data []byte}`; images round-trip through session state; the token estimate charges a fixed amount per image; compaction transcripts show `[image: <name>]` and never bytes.
+**Approach (assumed at the header base):** Extend `Message` in `internal/domain/hooks.go` (`messageJSON`, `messageKnownKeys`, `MarshalJSON`/`UnmarshalJSON`, key `images`). `PromptChars` (`internal/domain/budget.go`) charges a named constant per image equal to 1,024 tokens at the estimator's chars-per-token ratio. `renderMessage` in `internal/context/compact.go` emits `[image: <name>]` per image. Confirm `agent/state.go` `checkRestoredShape` / `messageBytes` accept a message with images within `maxRestoredMessageBytes`. Caps (enforced by producers, item 12): each image ≤ 5 MiB, a message's images ≤ 5 MiB total. Reactions payloads and `internal/floor` stay text-only — note it in their doc comments. Amend ADR 0001 decision 2 with a dated note: images are an additive field, Content stays a string.
+**Regression guard.** domain.Config gains `Vision bool` in THIS item (item 11 consumes it; item 12 wires the config key to it). The image caps (5 MiB per image, 5 MiB per message) are named constants in internal/domain — the TUI cannot import internal/agent — and items 12 and 13 use them. The per-image charge is a chars constant defined in domain (1024 × 4.0 = 4096 chars), charged by both `PromptChars` and `ConversationChars` (pinned equal by TestConversationChars_MatchesPromptChars) and so entering the Calibrate sample. `messageBytes` (and the PendingInput check) counts each image's `len(Data)`. `apogee.go` gains `type Image = domain.Image`.
+**Files:** internal/domain/hooks.go, internal/domain/config.go, internal/domain/budget.go, internal/domain/budget_test.go, internal/domain/hooks_test.go, internal/context/compact.go, internal/context/compact_test.go, internal/agent/state.go, internal/agent/state_test.go, apogee.go, docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md
+**Read first:** internal/domain/hooks.go — Message, messageJSON, messageKnownKeys; internal/domain/budget.go — PromptChars, ConversationChars; internal/context/compact.go — renderMessage;
+internal/agent/state.go — messageBytes; apogee.go — UserInput, Message aliases
+**Tests:** JSON round-trip with images; old JSON without the key; `PromptChars` with images; an image message in TestConversationChars_MatchesPromptChars; a Restore test refusing a snapshot whose image bytes exceed `maxRestoredMessageBytes`; transcript render.
+**Acceptance:** `go test -count=1 ./internal/domain/ ./internal/context/` ; `go test -count=1 -run 'Restore|State' ./internal/agent/`
+**Commit:** `feat(domain): messages carry image parts`
+
+## 11. Images on the wire — OpenAI and Anthropic dialects
+
+**What:**
+**Goal:** a message with images encodes as OpenAI `content: [{type:text},{type:image_url,image_url:{url:"data:<mime>;base64,…"}}]` and as Anthropic `image` blocks (`source{type:base64, media_type, data}`); a message without images encodes byte-identically to today; when the bound server lacks `vision: true`, each image is replaced by the text `[image omitted: <name>]`.
+**Approach (assumed at the header base):** `provider.Message` (`internal/provider/wire.go`) gains images; `toProviderRequest` (`internal/agent/wire.go`) projects them and applies the vision rule; `formatMessage` / `openaiCodec` (`wirejson.go`, `wire_openai.go`) and `anthropicMessages` / `anthropicBlock` (`wire_anthropic.go`). `internal/stubllm` (`wire.go`, `wire_anthropic.go`) decodes array content so stub-driven tests keep working.
+**Regression guard.** The vision rule reads `domain.Config.Vision`, which item 10 adds; this item adds no Config field.
+**Files:** internal/provider/wire.go, internal/provider/wirejson.go, internal/provider/wire_openai.go, internal/provider/wire_anthropic.go, internal/provider/wire_test.go, internal/agent/wire.go, internal/stubllm/wire.go, internal/stubllm/wire_anthropic.go
+**Read first:** internal/agent/wire.go — toProviderRequest; internal/provider/wire.go — Message; internal/provider/wire_openai.go — formatMessage; internal/provider/wirejson.go — chatMessage;
+internal/provider/wire_anthropic.go — anthropicMessages, anthropicBlock; internal/stubllm/wire.go — chatMessage; internal/stubllm/wire_anthropic.go — anthropicContent.UnmarshalJSON
+**Tests:** golden request bodies for both dialects with and without images; omission text for a non-vision server; stubllm decodes array content.
+**Acceptance:** `go test -count=1 ./internal/provider/ ./internal/stubllm/` ; `go test -count=1 -run 'Wire|Projection' ./internal/agent/`
+**Commit:** `feat(provider): encode image parts on both wire dialects`
+Depends on item 10.
+
+## 12. `vision:` key and image `@ref`s
+
+**What:**
+**Goal:** per-server `vision: true` is a documented key; an `@ref` naming a PNG, JPEG, GIF or WebP file becomes an image part (detected by magic bytes, not extension); images (from `@ref` or `UserInput.Images`) sent to a server without `vision: true` are refused before any request with `server %q does not accept images: set vision: true on its servers: entry`; an image over the caps is refused naming the file and the cap.
+**Approach (assumed at the header base):** `ServerEntry` gains `Vision bool`, copied onto `domain.Config` in `cmd/apogee/wire_server.go` and rebound in `internal/agent/rebind.go`. `resolveFileRefs` / `readFileRef` in `internal/agent/loop.go` sniff image magic bytes before the PDF/text paths; `composeUserMessage` merges `UserInput.Images`, enforces caps and the vision refusal. Headless `userInput` in `internal/eventjson/encode.go` lists image names and sizes, never bytes. Document `vision:` in `docs/manual/configuration.md` and image `@ref`s in `docs/manual/commands.md`.
+**Regression guard.** Vision rides the per-server dial binding (upstreamBinding/serverBinding) like Wire, so server switch and delegation routing carry it; item 12 does not re-add the domain.Config field. Never on RebindSpec (its fields are always present, so every rebind would reset it). Refusal channels: `UserInput.Images` on a non-vision server → `Agent.Submit` / `Interject` return the error; a non-vision `@ref` image → `refIgnored` (yields to composeUserMessage's "never a refusal" contract), its "@x could not be resolved and was ignored: …" wrapper pinned by the test. The headless `images` key is always present (encode.go's no-omitempty rule); update the three child_interjection pins in encode_test.go. Caps are item 10's domain constants.
+**Files:** internal/config/config.go, internal/config/config_test.go, cmd/apogee/wire_server.go, cmd/apogee/dial.go, cmd/apogee/upstream.go, cmd/apogee/delegation.go, cmd/apogee/wire_firing.go, internal/agent/serverbinding.go, internal/agent/rebind.go, internal/agent/agent.go, internal/agent/interject.go, internal/agent/loop.go, internal/agent/loop_test.go, internal/eventjson/encode.go, internal/eventjson/encode_test.go, docs/manual/configuration.md, docs/manual/commands.md
+**Read first:** internal/agent/loop.go — composeUserMessage, readFileRef, refIgnored; cmd/apogee/dial.go — upstreamBinding, fillDial; internal/agent/serverbinding.go — serverBinding.applyTo;
+internal/agent/agent.go — Submit; internal/eventjson/encode.go — userInput
+**Tests:** `@shot.png` becomes an image part; a `.png` that is text stays text; non-vision refusal wording from Submit/Interject; a non-vision `@ref` image is ignored with the refIgnored wording; a move from a vision server to a non-vision one carries the flag; cap refusal; headless event shape.
+**Acceptance:** `go test -count=1 ./internal/config/ ./internal/eventjson/` ; `go test -count=1 -run 'FileRef|Compose|Image|Submit|Interject|Rebind|Delegation' ./internal/agent/` ; `go build ./cmd/apogee/`
+**Commit:** `feat(agent): image @refs and the per-server vision key`
+Depends on item 11.
+
+## 13. TUI — clipboard image paste, pasted image paths, pending-image line
+
+**What:**
+**Goal:** ctrl+v attaches a clipboard image when the clipboard holds one and pastes text otherwise; a bracketed paste that is exactly the path of an existing image file attaches that file instead of inserting text; pending images show on one line above the prompt (`attached: <name> (<size>)` joined by ` · `) and travel as `UserInput.Images` on the next submit; Backspace on an empty draft drops the last pending image.
+**Approach (assumed at the header base):** `internal/present/clipboard.go` gains `ReadImage` with bounded-time candidates `wl-paste --type image/png`, `xclip -selection clipboard -t image/png -o`, `pngpaste -`, `powershell.exe` `Get-Clipboard -Format Image`, through the existing exec-resolution fence; no candidate or no image ⇒ the text paste path. ctrl+v is intercepted in `internal/tui/prompteditor.go` before the textarea; paths in `foldPaste`. Clipboard images are named `clipboard-<n>.png`. Caps from item 12 are checked on attach with a transient notice. `parseInput` / `parsedInput.userInput` (`internal/tui/command.go`) carries the images. The `/inspect` viewer shows `[image: <media_type>, <N> bytes]`, never base64.
+**Regression guard.** Empty-box ⌫ keeps its order — newest queued command, then newest interjection — and drops the last pending image only when nothing is queued (yields to ADR 0025, docs/manual/commands.md, CONTEXT.md); amend every doc line the grep `Backspace on an empty box|⌫\` on an empty box` finds across docs/ and CONTEXT.md. Pending images stay pending through an interjection or child message (stageInterjection, stageChildMessage, joinedInterjections stay text-only) and satisfy the empty-send gate on an idle submit. A pasted image path attaches only when the bound server has `vision: true`, else inserts text as today. Caps are item 10's domain constants. ctrl+v probes through a new output runner and a `readClipboardImage` seam in `internal/tui/clipboard.go`, as a tea.Cmd that falls back to textarea.Paste; `powershell.exe` only under WSL. `foldWire` replaces each data-URL or Anthropic base64 `data` value with `[image: <media_type>, <N> bytes]` before formatting.
+**Files:** internal/present/clipboard.go, internal/present/clipboard_test.go, internal/tui/prompteditor.go, internal/tui/command.go, internal/tui/model.go, internal/tui/interject.go, internal/tui/clipboard.go, internal/tui/inspector.go, internal/tui/inspector_test.go, internal/tui/prompteditor_test.go, docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md, CONTEXT.md, docs/manual/commands.md
+**Read first:** internal/tui/model.go — handleKey; internal/tui/interject.go — stageInterjection, popInterjection; internal/tui/prompteditor.go — foldPaste; internal/tui/command.go — parsedInput.userInput;
+internal/tui/clipboard.go — hostClipboard; internal/present/clipboard.go — StdinRunner; internal/tui/inspector.go — foldWire
+**Tests:** paste of an image path attaches on a vision server and inserts text on a non-vision one; paste of a non-image path inserts text; ctrl+v with a fake reader returning an image vs none; Backspace pops a queued row first, then drops the last image; an image-only submit sends; submit carries images and clears the line; the inspector shows `[image: …]` for a base64 payload.
+**Acceptance:** `go test -count=1 ./internal/present/` ; `go test -count=1 -run 'Paste|Attach|Prompt|Inspect|Interject' ./internal/tui/`
+**Commit:** `feat(tui): attach images by clipboard paste or pasted path`
+**Closes:** apogee-bmj
+Depends on item 12.
+
+## 14. Windows platform — pseudoconsole and handle-based job
+
+**What:**
+**Goal:** `internal/platform` exports a Windows pseudoconsole launcher (create pseudoconsole, start the process suspended with `STARTUPINFOEX` and the pseudoconsole attribute, assign it to a kill-on-close job, resume) and a job teardown keyed on a process handle; `internal/tui/conpty_windows_test.go` uses it instead of its private copy.
+**Approach (assumed at the header base):** Lift `newConPTY`, `conPTY.start`, `conptyEnvBlock` and the process wait/close from `internal/tui/conpty_windows_test.go` into `internal/platform/conpty_windows.go`; add a handle-based variant of `jobTeardown` in `teardown_windows.go` (suspended start closes the documented pre-join window). The command line is passed verbatim. Keep `procUpdateProcThreadAttribute` called directly (vet unsafeptr).
+**Regression guard.** `internal/platform/doc.go` gains a file-map line for conpty_windows.go and the handle-based job in its teardown paragraph (TestDocMapNamesEveryFile reads every *.go regardless of build tag). Yields to internal/platform/platform.go's "no platform surface without a production caller": items 14 and 15 land back to back.
+**Files:** internal/platform/conpty_windows.go, internal/platform/teardown_windows.go, internal/platform/conpty_windows_test.go, internal/platform/doc.go, internal/tui/conpty_windows_test.go
+**Read first:** internal/tui/conpty_windows_test.go — newConPTY, conPTY.start, conptyEnvBlock; internal/platform/teardown_windows.go — newTreeJob, jobTeardown.cancel; internal/platform/doc.go — file map;
+internal/platform/docmap_test.go — TestDocMapNamesEveryFile; internal/platform/platform_windows_test.go — TestMain
+**Tests:** Windows-only tests (start `cmd /c echo hi`, read output, job kill reaps); compiled here, run on Windows.
+**Acceptance:** `GOOS=windows go vet ./internal/platform/ ./internal/tui/` ; `GOOS=windows go test -c -o /dev/null ./internal/platform/` ; `GOOS=windows go test -c -o /dev/null ./internal/tui/` ; `go test -count=1 -run TestDocMapNamesEveryFile ./internal/platform/` ; `go build ./...`
+**Commit:** `feat(platform): Windows pseudoconsole launcher and handle-based job`
+
+## 15. Console backend on ConPTY
+
+**What:**
+**Goal:** on Windows, `console.Start` runs the command under a pseudoconsole with the same `Process` behaviour as POSIX (40x160 window, 1 MiB ring, `stripEscapes`, bounded close, exit code); a confined spec returns an error wrapping `ErrConfinementUnavailable` before any process starts.
+**Approach (assumed at the header base):** Replace `internal/console/process_other.go` with `process_windows.go` on item 14's launcher. The command line comes from the `Prepare`d `exec.Cmd`'s `SysProcAttr.CmdLine`, plus `Dir` and `Env`; `Prepare` setting `SysProcAttr.Token` or `Spec.Confined` ⇒ the fail-closed error. Move platform-neutral parts of `process.go` (`collectOutput`, the reap/close join) into a shared file both builds use — one implementation. `Kill` terminates the job; `Close` closes the pseudoconsole within `closeJoinTimeout`.
+**Regression guard.** `console.OpenSpec` and `Spec` gain a raw command-line field, filled by console_open from `t.host.shell.CommandLine(args.Command)` and passed to the launcher verbatim (no argv join). On Windows, `Start` refuses `Spec.Confined` with the `ErrConfinementUnavailable` wrap BEFORE calling `Prepare`; the Token check is a backstop. On Windows, Close releases the pseudoconsole (and job) BEFORE joining the reader; the shared helper takes the release step as a parameter, so the POSIX order is unchanged.
+**Files:** internal/console/process.go, internal/console/process_shared.go, internal/console/process_windows.go, internal/console/process_other.go, internal/console/process_windows_test.go, internal/console/registry.go, internal/console/registry_test.go, internal/console/doc.go, internal/tools/console_open.go, internal/tools/console_open_test.go
+**Read first:** internal/console/process.go — Start, Process.Close, joinBefore, collectOutput; internal/console/process_other.go — Spec; internal/console/registry.go — OpenSpec;
+internal/tools/console_open.go — ConsoleOpen.Execute; internal/subprocess/cmdline_other.go — setRawCommandLine
+**Tests:** Windows-only open/send/read/close (Close returns well inside `closeJoinTimeout`) and confined refusal with `Prepare` never called; console_open hands the raw command line to the opener; `TestRegistryOpenWithoutAPseudoTerminalBackend` updated; POSIX tests unchanged.
+**Acceptance:** `go test -count=1 ./internal/console/` ; `go test -count=1 -run 'ConsoleOpen' ./internal/tools/` ; `GOOS=windows go vet ./internal/console/` ; `GOOS=windows go test -c -o /dev/null ./internal/console/`
+**Commit:** `feat(console): ConPTY backend on Windows`
+Depends on item 14.
+
+## 16. Console tools on Windows — Enter, Auto demotion, docs
+
+**What:** Recast at the regression check (2026-10-03).
+**Goal:** on Windows a non-raw `console_send` ends input with `\r`; `console_open` in Auto on Windows is demoted to Approval through the existing `ErrConfinementUnavailable` path, and so is each `console_send` to a Console that was not opened confined; the docs no longer say the Console family is POSIX-only.
+**Approach (assumed at the header base):** `consoleInputBytes` (`internal/tools/console_common.go`) takes the line ending from the host rules, not a GOOS switch scattered in the tool. Remove the Windows skip in `internal/tools/console_open_test.go` where the test is backend-neutral. Amend ADR 0059's Bounds Windows bullet (dated note: ConPTY backend exists; Auto still fails closed) and every prose site the docs-guard grep below finds.
+**Regression guard.** Recast per owner decision. On the host whose console open cannot confine (Windows, per the host rules — not a GOOS switch in the tool), console_send to a Console that was not opened confined, while the ctx carries a confinement box (confinementBox), returns an error wrapping ErrConfinementUnavailable so dispatch demotes EACH such send to Approval. POSIX behaviour is unchanged: a Console opened in Ask mode and sent to after a switch to Auto still sends as today (dispatch.go executeTool; docs/manual/configuration.md Console section) — pin that with a POSIX test. Console records whether it was opened Confined (exported Console.Confined copied from OpenSpec.Confined in Registry.Open), covered in internal/console/registry_test.go. The ADR 0059 Bounds amendment states this and explicitly supersedes ADR 0059 §2's assumption that the open-time fence binds console_send, for Windows only; the pre-existing POSIX gap is filed as a bead by item 17. Enter: add newConsoleSend(h execHost) as builtinTools' route, NewConsoleSend() stays on defaultExecHost; pin the Windows line ending in internal/platform/host_test.go; add internal/tools/console_send.go, internal/tools/registry.go, internal/platform/host_test.go to **Files:**. Keep skipWithoutPOSIXShell; remove a skip only per test whose body runs no `sh` and expects no confined success. Reword console_send.go's NewConsoleSend and ConsoleSend.Execute comments ("the Console it types into was fenced when console_open opened it"; "there is no confinement demotion to make") to match, and reword the model-facing console_send and console_open descriptions host-neutrally ("Enter is pressed after the input unless raw is true"; "the platform shell") and update any tool-schema golden that pins them. Docs guard as a rule plus grep (`grep -rn 'not supported on Windows yet\|ErrUnsupported\|Windows is a later plan\|unsupported on Windows\|POSIX only, for now' --include=*.go --include=*.md . | grep -v CHANGELOG | grep -v internal/platform/winlabel`), never a list; it runs in Acceptance and must print no Console-family hit. If the item then exceeds the caps, split the docs/prose sweep into a new item 16a (Depends on 16). internal/console/registry.go is edited by item 15 (raw command-line field on OpenSpec) and by item 16 (Console.Confined) — item 16 builds on item 15's OpenSpec (it already Depends on 15) and lists internal/console/registry.go in **Files:**. If console_send takes an execHost, add it to TestBuiltinToolsShareOneExecHost (internal/tools/exec_host_test.go; the count of host-holding tools rises by one) and list that file in **Files:**.
+**Files:** internal/tools/console_common.go, internal/tools/console_send.go, internal/tools/console_open.go, internal/tools/registry.go, internal/tools/console_open_test.go, internal/tools/console_send_test.go, internal/platform/host.go, internal/platform/host_test.go, docs/adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md, docs/manual/configuration.md, cmd/apogee/e2e_console_test.go, internal/agent/console_test.go, internal/agent/restoresession_test.go, internal/console/registry.go, internal/console/registry_test.go, internal/tools/exec_host_test.go
+**Read first:** internal/tools/console_send.go — ConsoleSend.Execute, NewConsoleSend; internal/tools/console_common.go — consoleInputBytes; internal/console/registry.go — Console, Registry.Open;
+internal/agent/dispatch.go — executeConfineFallback; internal/platform/host.go — windowsRules; internal/tools/registry.go — builtinTools
+**Tests:** `consoleInputBytes` per host rule; the Windows line ending in host_test.go; on the Windows host rules a send to an unconfined Console under a confinement box wraps `ErrConfinementUnavailable`; on POSIX an Ask-opened (unconfined) Console still sends under a box; Console.Confined mirrors OpenSpec.Confined (internal/console/registry_test.go); Auto demotion test compiled for Windows; TestBuiltinToolsShareOneExecHost counts console_send's host (one more host-holding tool).
+**Acceptance:** `go test -count=1 -run 'Console' ./internal/tools/` ; `go test -count=1 -run 'Host' ./internal/platform/` ; `GOOS=windows go vet ./internal/tools/` ; `GOOS=windows go test -c -o /dev/null ./internal/tools/` ; `GOOS=windows go test -c -o /dev/null ./internal/agent/` ; `go test -count=1 -run 'Registry' ./internal/console/` ; the docs-guard grep above (no Console-family hit)
+**Commit:** `feat(tools): console tools run on Windows under ConPTY`
+Depends on item 15.
+
+## 17. Bead bookkeeping
+
+**What:** Recast at the regression check (2026-10-03).
+**Goal:** `apogee-rw6` notes record which rows shipped and that MCP OAuth remains; three new beads exist: ConPTY restricted-token launch (ADR 0059, follow-up), a Windows owner-run check of the ConPTY console (child of `apogee-2uh`), and the pre-existing POSIX `console_send` confinement gap.
+**Approach (assumed at the header base):** `bd update apogee-rw6 --append-notes …`; `bd create` for each new bead with a description citing this plan.
+**Regression guard.** Use `--append-notes`, never `--notes` (it replaces the 2026-09-19 note that plan 2026-09-19-01 item 14 owns the /help row). Acceptance greps for text only the new state has: the restricted-token bead's title contains `restricted-token`, and the owner-run bead is a child of `apogee-2uh`. Also file a bead recording the pre-existing POSIX gap: a Console opened unconfined in an ask-before mode and then sent to after /mode auto runs console_send without a fence or prompt; its description cites ADR 0059 §2 and this plan's item 16; Acceptance adds `bd list --status open | grep -i 'console_send'`.
+**Files:** .beads/issues.jsonl
+**Read first:** .beads/issues.jsonl — apogee-rw6 (title, notes), apogee-2uh (epic, parent of the owner-run bead)
+**Tests:** none.
+**Acceptance:** `bd show apogee-rw6 | grep -i 'shipped'` ; `bd list --status open --title-contains restricted-token | grep -i restricted` ; `bd list --parent apogee-2uh | grep -i conpty` ; `bd list --status open | grep -i 'console_send'`
+**Commit:** `chore(issues): record shipped table-stakes rows and file ConPTY follow-ups`
+Depends on items 1–16.
