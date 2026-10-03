@@ -45,8 +45,8 @@ const (
 //
 // Every process claim is made with `ps` against the pid of the binary the driver spawned, so a
 // `sleep` some other test or some other developer left on the machine can neither satisfy nor break
-// it. It skips on Windows, where console_open answers "console is not supported on Windows yet" and
-// the item is BLOCKED for a human too (the PTY driver skips there anyway).
+// it. It does not run on Windows: its process claims are `ps` against POSIX `sleep` Consoles, and
+// the PTY driver skips there anyway.
 func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	t.Parallel()
 

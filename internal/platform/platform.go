@@ -104,7 +104,28 @@ type Path interface {
 	Contains(root, target string) bool
 }
 
-// Host is the per-OS platform facility: shell invocation plus path semantics.
+// Terminal abstracts the two facts that differ per OS once a program runs behind a
+// pseudo-terminal as a Console (ADR 0059): which bytes the Enter key sends it, and
+// whether such a program can be started confined at all.
+type Terminal interface {
+	// Enter returns the bytes typing Enter delivers to a program reading a terminal.
+	// It is "\n" on POSIX, where the pty line discipline hands a line-oriented reader
+	// its line on a newline. It is "\r" on Windows: a pseudoconsole turns a carriage
+	// return into the Enter key event, while a bare "\n" arrives as Ctrl+Enter, which
+	// cmd.exe and most console programs do not read as submitting the line.
+	Enter() string
+
+	// ConsoleConfines reports whether a Console can be opened confined on this
+	// platform. It is true on POSIX, where the pty child takes the same Confiner wrap
+	// as any subprocess. It is false on Windows: the pseudoconsole launcher has no
+	// restricted-token path, so a confined open fails closed with
+	// domain.ErrConfinementUnavailable and every Console there runs unfenced — which
+	// is why a send to one cannot lean on a fence set when it was opened.
+	ConsoleConfines() bool
+}
+
+// Host is the per-OS platform facility: shell invocation, path semantics and the
+// terminal facts a Console needs.
 // Current returns the implementation selected at build time for the target OS.
 // It is an interface, not a concrete type, precisely because the implementation
 // is chosen by build tag — while both rule sets behind it are compiled
@@ -112,6 +133,7 @@ type Path interface {
 type Host interface {
 	Shell
 	Path
+	Terminal
 }
 
 // denyConfiner is the no-confinement backend. It enforces nothing: Capabilities

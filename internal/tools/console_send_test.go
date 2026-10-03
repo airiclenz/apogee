@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 func consoleSendCall(callID string, id int, input string, raw bool, waitMS int) domain.ToolCall {
@@ -166,6 +168,113 @@ func TestConsoleSend_RawSendsNoNewline(t *testing.T) {
 	}
 	if !strings.Contains(entered.Content, "42") {
 		t.Errorf("result after the newline = %q, want the line to have run", entered.Content)
+	}
+}
+
+// TestConsoleInputBytes_EndsWithTheHostsEnter pins the line ending per host rule: a typed line is
+// followed by whatever the host's Enter key sends — "\n" under a POSIX pty, "\r" under a Windows
+// pseudoconsole, where a bare "\n" is Ctrl+Enter — and a raw send gets no Enter on either.
+func TestConsoleInputBytes_EndsWithTheHostsEnter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		raw   bool
+		enter string
+		want  string
+	}{
+		{name: "posix line", input: "echo hi", enter: "\n", want: "echo hi\n"},
+		{name: "windows line", input: "echo hi", enter: "\r", want: "echo hi\r"},
+		{name: "posix empty presses Enter", input: "", enter: "\n", want: "\n"},
+		{name: "windows empty presses Enter", input: "", enter: "\r", want: "\r"},
+		{name: "raw on posix", input: "\u0003", raw: true, enter: "\n", want: "\u0003"},
+		{name: "raw on windows", input: "\u0003", raw: true, enter: "\r", want: "\u0003"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := string(consoleInputBytes(tc.input, tc.raw, tc.enter))
+
+			if got != tc.want {
+				t.Errorf("consoleInputBytes(%q, raw=%v, enter=%q) = %q, want %q", tc.input, tc.raw, tc.enter, got, tc.want)
+			}
+		})
+	}
+}
+
+// terminalRulesHost is the platform rules with the two Console facts overridden, so a test can
+// drive console_send under the Windows answer ("a Console open cannot confine") from any host.
+type terminalRulesHost struct {
+	platform.Host
+	confines bool
+}
+
+// ConsoleConfines reports the overridden answer.
+func (h terminalRulesHost) ConsoleConfines() bool { return h.confines }
+
+// consoleSendOn returns a console_send tool whose platform rules answer confines for whether a
+// Console open can confine.
+func consoleSendOn(confines bool) *ConsoleSend {
+	h := defaultExecHost()
+	h.shell = terminalRulesHost{Host: platform.Current(), confines: confines}
+	return newConsoleSend(h)
+}
+
+// withFSConfinement returns ctx carrying a confinement handle whose box is a fresh temp dir — the
+// context a Confine verdict (Auto, confine-to-workspace on) hands a call.
+func withFSConfinement(t *testing.T, ctx context.Context) context.Context {
+	t.Helper()
+	return domain.WithConfinement(ctx, domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
+	})
+}
+
+// TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined pins the Windows send
+// fence (ADR 0059 Bounds): on a host whose Console open cannot confine, a send under a confinement
+// box to a Console that was not opened confined is refused with ErrConfinementUnavailable — the
+// sentinel the dispatch demotes to Approval. The same send with no box (the unconfined re-run
+// Approval grants) goes through. The Console runs the host's own platform shell interactively
+// (sh, or cmd.exe), so the test is exercised on every host.
+func TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined(t *testing.T) {
+	t.Parallel()
+	ctx, _ := consoleTestCtx(t)
+	id := openTestConsole(t, ctx, platform.Current().Shell())
+	tool := consoleSendOn(false)
+
+	_, boxedErr := tool.Execute(withFSConfinement(t, ctx), consoleSendCall("c1", id, "echo hi", false, 10))
+	unboxed, unboxedErr := tool.Execute(ctx, consoleSendCall("c2", id, "", true, 10))
+
+	if !errors.Is(boxedErr, domain.ErrConfinementUnavailable) {
+		t.Errorf("send under a box = %v, want an error wrapping ErrConfinementUnavailable", boxedErr)
+	}
+	if unboxedErr != nil || unboxed.IsError {
+		t.Errorf("send with no box = %q (err=%v), want it typed as before", unboxed.Content, unboxedErr)
+	}
+}
+
+// TestConsoleSend_AskOpenedConsoleStillSendsUnderABoxOnPOSIX pins the POSIX half of that fence:
+// where a Console open CAN confine, a Console opened unconfined (in Ask, before a switch to Auto)
+// still takes a send made under a confinement box exactly as it always has — the demotion is the
+// Windows host's alone.
+func TestConsoleSend_AskOpenedConsoleStillSendsUnderABoxOnPOSIX(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, registry := consoleTestCtx(t)
+	id := openTestConsole(t, ctx, "sh")
+	if opened, _ := registry.Get(id); opened.Confined {
+		t.Fatalf("console %d was opened confined; the test needs an Ask-opened (unconfined) one", id)
+	}
+
+	res, err := consoleSendOn(true).Execute(withFSConfinement(t, ctx), consoleSendCall("c1", id, "echo still-sends", false, 2000))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil (no demotion where a Console can be confined)", err)
+	}
+	if res.IsError || !strings.Contains(res.Content, "still-sends") {
+		t.Errorf("result = %q (isError=%v), want the line to have run", res.Content, res.IsError)
 	}
 }
 

@@ -120,14 +120,16 @@ func consoleWait(waitMS, defaultMS, maxMS int) time.Duration {
 }
 
 // consoleInputBytes renders what console_send actually writes to a Console's terminal: the input
-// with a newline appended, which is what "typing it" means, unless the call asked for the bytes
-// verbatim. Raw is how a control character is sent on its own — a JSON \u0003 escape is
-// Ctrl-C, and appending a newline to it would send a second keystroke nobody asked for.
-func consoleInputBytes(input string, raw bool) []byte {
+// followed by enter — the bytes the host's Enter key sends (platform.Terminal.Enter: "\n" on
+// POSIX, "\r" under a Windows pseudoconsole) — which is what "typing it" means, unless the call
+// asked for the bytes verbatim. Raw is how a control character is sent on its own — a JSON
+// \u0003 escape is Ctrl-C, and appending Enter to it would send a second keystroke nobody asked
+// for.
+func consoleInputBytes(input string, raw bool, enter string) []byte {
 	if raw {
 		return []byte(input)
 	}
-	return []byte(input + "\n")
+	return []byte(input + enter)
 }
 
 // consoleCutShortNote closes a console_open or console_send result whose wait window a ctx

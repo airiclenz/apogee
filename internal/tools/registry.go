@@ -281,7 +281,8 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 
 // builtinToolsWith is builtinTools with the execHost the execution tools are built on supplied —
 // the five that launch a program for the model (terminal, python_exec, diagnostics, run_tests,
-// console_open), the six git tools and the two file operations that stage through git
+// console_open), console_send (which types into a Console with the host's Enter key and its
+// confinement rule), the six git tools and the two file operations that stage through git
 // (move_file, delete_file): ONE host, built once here and handed to each, so the operating system
 // every one of them resolves and launches through is the same value — which is what lets a test
 // hand all of them a host carrying fakes.
@@ -334,7 +335,7 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		// DEFAULT-OFF: nothing here reaches a default menu, so its place in build order costs no
 		// model a slot, and a roster that lifts it appends it after the tools every model gets.
 		newConsoleOpen(root, host.SecretEnvVars, h),
-		NewConsoleSend(),
+		newConsoleSend(h),
 		NewConsoleRead(),
 		NewConsoleClose(),
 		// The three host-delegate tools close the build whether or not this host backs them: a nil

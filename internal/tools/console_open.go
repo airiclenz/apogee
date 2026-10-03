@@ -23,7 +23,7 @@ var consoleOpenSpec = toolSpec{
   "type": "object",
   "required": ["command"],
   "properties": {
-    "command": {"type": "string", "description": "The command line to start, run through the platform shell (POSIX sh) inside a pseudo-terminal. Supports pipes, redirection, and globs."},
+    "command": {"type": "string", "description": "The command line to start, run through the platform shell inside a pseudo-terminal. Supports pipes, redirection, and globs."},
     "workdir": {"type": "string", "description": "Optional working directory (relative to the workspace root or absolute)"},
     "wait_ms": {"type": "integer", "description": "Optional milliseconds to collect the program's first output before returning (default 500, max 10000)"}
   }

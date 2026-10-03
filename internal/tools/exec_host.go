@@ -15,7 +15,8 @@ import (
 // that launches a program for the MODEL reaches for — resolving a program name on PATH, running
 // a one-shot subprocess, the platform shell's rules, and opening a Console. It is ONE value the
 // five execution tools (terminal, python_exec, run_tests, diagnostics, console_open) are built
-// with — and the six git tools and the two git-staging file operations (move_file, delete_file)
+// with — console_send too, which reads its platform rules for the Enter key and whether a Console
+// could be opened confined — and the six git tools and the two git-staging file operations (move_file, delete_file)
 // resolve and launch their git through it (git) — so a test hands a tool a host whose facilities
 // are fakes rather than swapping a package-level var beside every other test that reads it.
 //

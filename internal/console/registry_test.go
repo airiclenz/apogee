@@ -269,6 +269,27 @@ func TestRegistryOpenRefusesAConfinedConsoleOnWindows(t *testing.T) {
 	}
 }
 
+// TestRegistryOpenRecordsWhetherTheConsoleWasConfined pins Console.Confined as a copy of
+// OpenSpec.Confined: a later send reads it to tell a fenced Console from an unfenced one, so the
+// registry must carry the open's answer rather than guess it.
+func TestRegistryOpenRecordsWhetherTheConsoleWasConfined(t *testing.T) {
+	t.Parallel()
+	requireConsoleBackend(t)
+
+	for _, confined := range []bool{false, true} {
+		registry := newTestRegistry(t)
+
+		console, err := registry.Open(OpenSpec{Command: "sh", Argv: []string{"sh"}, Confined: confined})
+
+		if err != nil {
+			t.Fatalf("Open(Confined: %v): %v", confined, err)
+		}
+		if console.Confined != confined {
+			t.Errorf("Console.Confined = %v, want %v (OpenSpec.Confined)", console.Confined, confined)
+		}
+	}
+}
+
 // requireConsoleBackend skips a test that drives a POSIX `sh` Console. Windows has a backend
 // (ConPTY) but no `sh`; process_windows_test.go covers it with cmd.exe instead.
 func requireConsoleBackend(t *testing.T) {

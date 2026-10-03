@@ -367,7 +367,16 @@ internal/tools/console_open.go — ConsoleOpen.Execute; internal/subprocess/cmdl
 **Commit:** `feat(console): ConPTY backend on Windows`
 Depends on item 14.
 
-## 16. Console tools on Windows — Enter, Auto demotion, docs
+## 16. Console tools on Windows — Enter, Auto demotion, docs — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): re-derived from "the host rules are reached through internal/platform/host.go alone" — the Host interface lives in internal/platform/platform.go, so it gains a third embedded interface, Terminal (Enter() and ConsoleConfines()), which hostRules implements (POSIX "\n"/true, Windows "\r"/false). consoleInputBytes takes the Enter bytes as a parameter; console_send reads both answers from its execHost's shell.
+NOTES (2026-10-03): consequential edit — internal/platform/doc.go: made necessary by the new Terminal interface on Host (package comment and Host-abstraction paragraph).
+NOTES (2026-10-03): consequential edit — internal/tools/exec_host.go: made necessary by console_send taking the shared execHost (execHost doc comment names it).
+NOTES (2026-10-03): consequential edit — internal/tools/doc.go: made necessary by console_send taking the shared execHost (subprocess-plumbing paragraph names it).
+NOTES (2026-10-03): console_open's Auto demotion on Windows needed no new code: item 15's Start already refuses a confined spec with an ErrConfinementUnavailable wrap and console_open already returns it as a Go error; this item adds the per-send demotion (ConsoleSend.consoleSendUnfenced) on top.
+NOTES (2026-10-03): the Windows skip is removed only from TestConsoleOpen_ExitedProgramIsReportedNotHidden (`exit 3` reads the same under sh and cmd); every other skipped console_open test runs `sh`, POSIX tools (yes/head/sleep) or expects a confined success. skipWithoutPOSIXShell's skip text is reworded. The new send-demotion test runs on every host (it opens platform.Current().Shell()); the POSIX Ask-opened-send test is POSIX-only.
+NOTES (2026-10-03): the docs-guard grep still prints hits under docs/plans only — the archived console-family plan's historical text and this plan's own item-15 NOTES line (ErrUnsupported removal); neither is current-behaviour prose and plan records are not this item's to edit. Outside docs/plans it prints nothing.
+NOTES (2026-10-03): Windows-native behaviour (the "\r" Enter reaching cmd.exe, demotion under the real windowsRules) is compiled here (GOOS=windows vet + test -c for tools, agent, console, platform), not run; the demotion logic is covered on Linux through injected host rules.
 
 **What:** Recast at the regression check (2026-10-03).
 **Goal:** on Windows a non-raw `console_send` ends input with `\r`; `console_open` in Auto on Windows is demoted to Approval through the existing `ErrConfinementUnavailable` path, and so is each `console_send` to a Console that was not opened confined; the docs no longer say the Console family is POSIX-only.

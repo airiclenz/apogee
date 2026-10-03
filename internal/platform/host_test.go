@@ -95,6 +95,36 @@ func TestCommandLineIsWindowsOnlyAndVerbatim(t *testing.T) {
 	}
 }
 
+func TestHostTerminalRulesPerPlatform(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		rules           hostRules
+		wantEnter       string
+		wantConfineable bool
+	}{
+		// POSIX: the pty line discipline hands a reader its line on a newline, and a pty
+		// child takes the same Confiner wrap as any subprocess.
+		{name: "posix", rules: posixRules(), wantEnter: "\n", wantConfineable: true},
+		// Windows: a pseudoconsole reads a carriage return as the Enter key (a bare \n is
+		// Ctrl+Enter), and its launcher has no restricted-token path to confine with.
+		{name: "windows", rules: windowsRules(), wantEnter: "\r", wantConfineable: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tc.rules.Enter(); got != tc.wantEnter {
+				t.Errorf("Enter() = %q, want %q", got, tc.wantEnter)
+			}
+			if got := tc.rules.ConsoleConfines(); got != tc.wantConfineable {
+				t.Errorf("ConsoleConfines() = %v, want %v", got, tc.wantConfineable)
+			}
+		})
+	}
+}
+
 func TestQuoteIsLiteralForThePlatformShell(t *testing.T) {
 	t.Parallel()
 

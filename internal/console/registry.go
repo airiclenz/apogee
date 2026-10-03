@@ -30,9 +30,9 @@ var (
 	ErrTooMany = errors.New("too many open consoles")
 )
 
-// Console is one open console: a live process behind a pseudo-terminal, plus the three facts the
+// Console is one open console: a live process behind a pseudo-terminal, plus the four facts the
 // engine and the model need about it — the id they address it by, the delegation that owns it,
-// and the command line it was opened with.
+// the command line it was opened with, and whether it was opened confined.
 //
 // Everything it can do is forwarded to the process, and everything it exposes is safe from any
 // goroutine. Only the registry closes one: a Console removed from the registry is finished, so
@@ -48,6 +48,11 @@ type Console struct {
 	// Command is the command line as the model gave it, kept for display: the open result
 	// names it, and a transcript reading "console 3" is only useful next to what console 3 is.
 	Command string
+	// Confined reports that the Console was opened confined (OpenSpec.Confined): its process
+	// runs inside the fence the open was resolved under. A send relies on that fence where the
+	// platform can set one (ADR 0059 §2); where it cannot (Windows), an unconfined Console's
+	// send under a confinement box is demoted instead.
+	Confined bool
 
 	proc *Process
 }
@@ -197,7 +202,13 @@ func (r *Registry) Open(spec OpenSpec) (*Console, error) {
 		return nil, err
 	}
 
-	console := &Console{ID: r.nextID, Owner: spec.Owner, Command: spec.Command, proc: process}
+	console := &Console{
+		ID:       r.nextID,
+		Owner:    spec.Owner,
+		Command:  spec.Command,
+		Confined: spec.Confined,
+		proc:     process,
+	}
 	r.consoles[console.ID] = console
 	r.nextID++
 	return console, nil

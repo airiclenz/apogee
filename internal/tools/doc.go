@@ -261,8 +261,9 @@
 //
 // The subprocess plumbing. exec_host.go is execHost, the operating system as ONE value — PATH
 // lookup, the subprocess runner, the platform shell rules and the Console opener — that
-// builtinTools builds once and hands to the five execution tools, the six git tools and the two
-// git-staging file operations, with the shell resolution and the PATH-scoped environment as its
+// builtinTools builds once and hands to the five execution tools, console_send (which types with
+// the host's Enter key and reads whether its Console open could confine), the six git tools and
+// the two git-staging file operations, with the shell resolution and the PATH-scoped environment as its
 // methods; every one-shot launch a tool makes goes through that host's run — the execution
 // tools' and diagnostics' go vet directly, the git family's and the staging helper's through
 // gitexec, handed the host as execHost.git(). exec_common.go carries the environment scrub and

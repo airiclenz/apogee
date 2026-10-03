@@ -35,11 +35,13 @@ func consoleOpenCall(id, command string, waitMS int) domain.ToolCall {
 	}
 }
 
-// skipWithoutPOSIXShell skips a test that needs a real `sh` behind a pseudo-terminal.
+// skipWithoutPOSIXShell skips a test that needs a real `sh` behind a pseudo-terminal, or a
+// confined Console (which a Windows pseudoconsole cannot open). A test whose command reads the
+// same under either platform shell and expects no confined success runs on Windows too.
 func skipWithoutPOSIXShell(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell under a pseudo-terminal; consoles are unsupported on Windows")
+		t.Skip("drives a POSIX sh under a pseudo-terminal; the Windows platform shell is cmd.exe")
 	}
 }
 
@@ -90,7 +92,6 @@ func TestConsoleOpen_OpensAndNamesTheConsole(t *testing.T) {
 // command that is over before the window closes reports its exit code, because "console 2 opened"
 // on its own would tell the model it has something to talk to when it has not.
 func TestConsoleOpen_ExitedProgramIsReportedNotHidden(t *testing.T) {
-	skipWithoutPOSIXShell(t)
 	t.Parallel()
 	ctx, _ := consoleTestCtx(t)
 	tool := NewConsoleOpen(t.TempDir(), nil)

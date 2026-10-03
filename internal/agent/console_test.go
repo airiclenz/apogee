@@ -97,7 +97,7 @@ func runOneExchange(t *testing.T, a *Agent, text string) {
 func newConsoleAgent(t *testing.T, n int) (*Agent, *consoleOpener) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("a Console needs a pseudo-terminal; Windows is a later plan (ADR 0059)")
+		t.Skip("these Consoles drive a POSIX sh; the Windows ConPTY backend is covered by internal/console")
 	}
 
 	opener := &consoleOpener{}

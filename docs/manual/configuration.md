@@ -2538,10 +2538,16 @@ program mid-run, the next read says so in the same words the one-shot tools use 
 workspace confinement: …]`). Reading and closing ask nobody: they run in every mode, because
 neither one can start anything.
 
-**POSIX only, for now.** Consoles need a pseudo-terminal, and apogee has one on macOS, Linux and
-the BSDs. On Windows the four tools are still on the menu — so a config that enables them is not a
-startup notice about tools that do not exist — but `console_open` answers `console is not supported
-on Windows yet` rather than pretending. ConPTY support is a later change.
+**On Windows, through ConPTY — and never fenced.** Consoles need a pseudo-terminal: on macOS,
+Linux and the BSDs that is the system's own, and on Windows it is a pseudoconsole (ConPTY), where
+the command runs through `cmd /c` and `console_send` presses Enter as a carriage return, the key a
+Windows console program reads as "submit the line". What Windows cannot do yet is fence a Console,
+so in Auto it fails closed instead of running one unfenced: `console_open` is demoted to Approval —
+you are asked before the program starts — and so is **every** `console_send` to it while Auto's
+fence is on, each send asked on its own. (On macOS and Linux nothing changes: a send rides on the
+fence the Console was opened under, so one opened unfenced in Ask-Before still takes sends after a
+switch to Auto.)
+A Windows host without ConPTY answers `could not open a console` rather than pretending.
 
 ## The task list
 

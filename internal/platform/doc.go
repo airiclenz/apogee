@@ -3,7 +3,7 @@
 // matrix (ADR 0012). The Confiner interface itself is public (package apogee);
 // only the backends live here.
 //
-// The Shell/Path interfaces and a Host accessor carry real POSIX and Windows
+// The Shell/Path/Terminal interfaces and a Host accessor carry real POSIX and Windows
 // implementations: one rule table (host.go), compiled on every target and
 // selected by build tag, so Windows shell/quoting/path semantics are
 // table-testable from any host and exercised natively on Windows. The real
@@ -47,7 +47,8 @@
 // (internal/platform/winlabel).
 //
 // The Host abstraction. platform.go is the interface set — Shell (the argv, the raw command
-// line, quoting, the scoped environment) and Path — plus the Host accessor they hang off and
+// line, quoting, the scoped environment), Path and Terminal (a Console's Enter bytes and
+// whether it can be opened confined) — plus the Host accessor they hang off and
 // denyConfiner, the deny-all backend every OS without a facility falls back to. host.go is the
 // one behaviour table behind those interfaces: BOTH the POSIX and the Windows rule sets,
 // compiled on every target, so Windows quoting and path semantics are table-testable from any

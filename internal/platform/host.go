@@ -45,6 +45,13 @@ type hostRules struct {
 	// Current on Windows; nil means final forms cannot be resolved here, which the backend
 	// refuses a box root on rather than guesses about.
 	finalPath func(string) (string, bool)
+	// enter is the byte sequence the Enter key sends to a program behind a pseudo-terminal
+	// ("\n" on POSIX, "\r" under a Windows pseudoconsole); see Terminal.Enter.
+	enter string
+	// consoleConfines reports that a Console can be opened confined on this platform (false
+	// on Windows, whose pseudoconsole launcher has no restricted-token path); see
+	// Terminal.ConsoleConfines.
+	consoleConfines bool
 }
 
 // posixRules is the POSIX rule set (Linux, macOS and the other Unix targets): `sh -c`,
@@ -53,9 +60,11 @@ type hostRules struct {
 // caller's policy, not the platform's floor).
 func posixRules() hostRules {
 	return hostRules{
-		windows: false,
-		shell:   []string{"sh", "-c"},
-		envKeys: nil,
+		windows:         false,
+		shell:           []string{"sh", "-c"},
+		envKeys:         nil,
+		enter:           "\n",
+		consoleConfines: true,
 	}
 }
 
@@ -78,6 +87,8 @@ func windowsRules() hostRules {
 			"USERNAME", "COMPUTERNAME",
 			"NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS",
 		},
+		enter:           "\r",
+		consoleConfines: false,
 	}
 }
 
@@ -105,6 +116,14 @@ func (r hostRules) CommandLine(line string) string {
 	}
 	return strings.Join(r.shell, " ") + " " + line
 }
+
+// Enter returns the bytes the Enter key sends to a program behind a pseudo-terminal on this
+// platform (Terminal.Enter).
+func (r hostRules) Enter() string { return r.enter }
+
+// ConsoleConfines reports whether a Console can be opened confined on this platform
+// (Terminal.ConsoleConfines).
+func (r hostRules) ConsoleConfines() bool { return r.consoleConfines }
 
 // Quote returns arg quoted so the platform shell reads it as a single argument.
 func (r hostRules) Quote(arg string) string {

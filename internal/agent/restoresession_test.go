@@ -412,12 +412,12 @@ func TestRestoreSession_RefusalLeavesConsolesAndTallyStanding(t *testing.T) {
 // consoleUsageAgent builds a top-level Agent wired to the Console-opening fake tool of
 // console_test.go and to scripts of the caller's own making, so one fixture can drive both halves
 // of the restore boundary — the Consoles and the usage tally — in a single Exchange sequence.
-// Like newConsoleAgent it needs a pseudo-terminal and registers the teardown for whatever shells
+// Like newConsoleAgent it drives a POSIX sh and registers the teardown for whatever shells
 // the test leaves running.
 func consoleUsageAgent(t *testing.T, sink *recordingSink, scripts ...stubllm.Turn) (*Agent, *consoleOpener) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("a Console needs a pseudo-terminal; Windows is a later plan (ADR 0059)")
+		t.Skip("these Consoles drive a POSIX sh; the Windows ConPTY backend is covered by internal/console")
 	}
 
 	opener := &consoleOpener{}
