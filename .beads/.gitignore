@@ -78,3 +78,6 @@ bd.db
 
 # Added by bd (missing required patterns)
 *.gate.lock*
+
+# Added by bd (missing required patterns)
+dolt-server-config.yaml
