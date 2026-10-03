@@ -2,11 +2,14 @@ package console
 
 import (
 	"errors"
+	"os/exec"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // registryTestTimeout bounds every wait in this file: long enough that a loaded CI host does not
@@ -235,28 +238,43 @@ func TestRegistryOpenIDsOwnedByListsOnlyThatOwnersConsoles(t *testing.T) {
 	}
 }
 
-// TestRegistryOpenWithoutAPseudoTerminalBackend pins what a Windows host gets: the tools are
-// registered there like everywhere else, so the answer has to be the honest ErrUnsupported rather
-// than a panic or an unknown-tool notice.
-func TestRegistryOpenWithoutAPseudoTerminalBackend(t *testing.T) {
+// TestRegistryOpenRefusesAConfinedConsoleOnWindows pins what a Windows host gets for a confined
+// open: nothing there can confine a Console yet, so the open fails closed with the
+// ErrConfinementUnavailable wrap the tool layer demotes to Approval on — before the caller's
+// Prepare hook runs — and the refusal consumes no id.
+func TestRegistryOpenRefusesAConfinedConsoleOnWindows(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != "windows" {
-		t.Skip("this platform has a pseudo-terminal backend")
+		t.Skip("a confined Console is supported on this platform")
 	}
 
-	_, err := New().Open(OpenSpec{Command: "cmd", Argv: []string{"cmd"}})
+	registry := newTestRegistry(t)
+	prepared := false
+	_, err := registry.Open(OpenSpec{
+		Command:     "cmd",
+		Argv:        []string{"cmd"},
+		CommandLine: "cmd",
+		Confined:    true,
+		Prepare:     func(*exec.Cmd) error { prepared = true; return nil },
+	})
 
-	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("Open() = %v, want ErrUnsupported", err)
+	if !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Fatalf("Open(confined) = %v, want ErrConfinementUnavailable", err)
+	}
+	if prepared {
+		t.Error("Prepare ran for a confined open that Windows refuses")
+	}
+	if ids := registry.OpenIDs(); len(ids) != 0 {
+		t.Errorf("OpenIDs() = %v after a refused open, want none", ids)
 	}
 }
 
-// requireConsoleBackend skips a test that needs a real process where no pseudo-terminal backend
-// exists yet.
+// requireConsoleBackend skips a test that drives a POSIX `sh` Console. Windows has a backend
+// (ConPTY) but no `sh`; process_windows_test.go covers it with cmd.exe instead.
 func requireConsoleBackend(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("no pseudo-terminal backend on this platform yet")
+		t.Skip("these tests drive a POSIX sh; the Windows backend is covered by process_windows_test.go")
 	}
 }
 

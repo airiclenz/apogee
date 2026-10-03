@@ -347,7 +347,13 @@ internal/platform/docmap_test.go — TestDocMapNamesEveryFile; internal/platform
 **Acceptance:** `GOOS=windows go vet ./internal/platform/ ./internal/tui/` ; `GOOS=windows go test -c -o /dev/null ./internal/platform/` ; `GOOS=windows go test -c -o /dev/null ./internal/tui/` ; `go test -count=1 -run TestDocMapNamesEveryFile ./internal/platform/` ; `go build ./...`
 **Commit:** `feat(platform): Windows pseudoconsole launcher and handle-based job`
 
-## 15. Console backend on ConPTY
+## 15. Console backend on ConPTY — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): process_other.go is deleted (replaced by process_windows.go); Spec, Process and the platform-neutral methods (Read/ReadContext, Alive, ExitCode, DenialStopped, collectOutput, recordExit, outputSink, the shutdown/joinBefore close) now live once in process_shared.go, with each build supplying an embedded `terminal` half plus Start/Write/Kill/Close/reap; shutdown takes the release step and a releaseOrder (POSIX releaseAfterJoin — order unchanged; Windows releaseBeforeJoin).
+NOTES (2026-10-03): console.ErrUnsupported is removed as dead code (nothing returns it now); a Windows host without ConPTY surfaces platform.ErrPseudoConsoleUnavailable through console_open's "could not open a console" result. The console package now imports internal/domain for ErrConfinementUnavailable (doc.go's imports paragraph updated).
+NOTES (2026-10-03): beyond the plan text, the Windows reap releases the pseudoconsole after the leader exits — a pseudoconsole's output does not end with its process, so without it the ring never closes and a read on an exited Console waits out its window; it also terminates whatever the command left in its job (the Windows form of the §2.4 clean-exit teardown). The release is idempotent and Close returns the same error.
+NOTES (2026-10-03): TestRegistryOpenWithoutAPseudoTerminalBackend is replaced by TestRegistryOpenRefusesAConfinedConsoleOnWindows (renamed: Windows now has a backend; it pins the confined refusal, Prepare not run, no id consumed); requireConsoleBackend keeps its name with its comment/skip text reworded (the tests drive a POSIX sh).
+NOTES (2026-10-03): Windows-only tests (typed input, exit code, bounded Close, confined and token refusals, Prepare sees the raw command line) are compiled here, not run; golangci-lint clean for linux (console, tools) and GOOS=windows (console). No CHANGELOG entry: the user-visible "consoles work on Windows" lands with item 16 (Enter as \r, Auto demotion, docs); the remaining docs-guard hits (console_open_test.go skip text, agent tests, e2e_console_test.go, configuration.md) are item 16's.
 
 **What:**
 **Goal:** on Windows, `console.Start` runs the command under a pseudoconsole with the same `Process` behaviour as POSIX (40x160 window, 1 MiB ring, `stripEscapes`, bounded close, exit code); a confined spec returns an error wrapping `ErrConfinementUnavailable` before any process starts.

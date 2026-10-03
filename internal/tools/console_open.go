@@ -138,7 +138,8 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 	// The pre-flight is derived from the raw command line the platform would hand the shell,
 	// exactly as terminal's is: empty means a real argv (POSIX sh -c) and a POSIX splitter is
 	// the right second opinion; non-empty means cmd.exe, which has none worth giving.
-	if err := preflightCommandLine(args.Command, t.host.shell.CommandLine(args.Command) == ""); err != nil {
+	rawCommandLine := t.host.shell.CommandLine(args.Command)
+	if err := preflightCommandLine(args.Command, rawCommandLine == ""); err != nil {
 		return errorResult(call.ID, "could not parse command line: "+err.Error()), nil
 	}
 
@@ -170,13 +171,16 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 		// and the parent's are not (ADR 0059 §6). The key is the engine's, minted per delegation
 		// and never the model-supplied call id — two siblings can collide on that. Empty at the
 		// top level.
-		Owner:    domain.ConsoleOwnerFromContext(ctx),
-		Command:  args.Command,
-		Argv:     argv,
-		Dir:      dir,
-		Env:      t.host.subprocessEnvScopedPath(t.root, t.secretEnv, consoleTermVar),
-		Confined: confined,
-		Prepare:  prepare,
+		Owner:   domain.ConsoleOwnerFromContext(ctx),
+		Command: args.Command,
+		Argv:    argv,
+		// The raw line goes to the launcher verbatim on Windows, never re-joined from argv:
+		// cmd.exe does not read the escapes an argv join adds. "" on POSIX.
+		CommandLine: rawCommandLine,
+		Dir:         dir,
+		Env:         t.host.subprocessEnvScopedPath(t.root, t.secretEnv, consoleTermVar),
+		Confined:    confined,
+		Prepare:     prepare,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrConfinementUnavailable) {

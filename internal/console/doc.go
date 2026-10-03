@@ -24,6 +24,13 @@
 // setsid of its own is outside that reach — the same accepted residual the one-shot subprocess
 // path documents.
 //
+// On Windows the terminal is a pseudoconsole (ConPTY) and the group is a Job Object: the command is
+// created suspended inside a kill-on-close job before it runs (platform.StartPseudoConsole), so
+// Kill and Close reach every descendant, and the pseudoconsole is released when the command exits
+// — its output, unlike a pseudo-terminal's, does not end on its own. The command line is handed to
+// the launcher verbatim ([Spec.CommandLine]), and a confined Console is refused with
+// domain.ErrConfinementUnavailable before anything starts: nothing there can confine one yet.
+//
 // How many, and whose. Above the process sits a [Registry]: the set of Consoles one engine holds,
 // each under a small id that is issued in order and never reused, so a stale id in a model's
 // context cannot come back pointing at a different process. It is live host state — built with the
@@ -38,17 +45,19 @@
 // command and hands it in through [Spec.Prepare], and all this package does with that fact is
 // put the kill-on-denial watch on the output path when [Spec.Confined] says the command was
 // confined (ADR 0056 §2). It knows nothing about tools, models or the engine's exchange — it
-// imports internal/platform (the denial watch and the §2.4 process teardown, whose group kill
-// is the one a Console tears its tree down with on cancel and on clean exit alike) and the
-// pseudo-terminal dependency and nothing else, which is what keeps the file boundary at the
-// process; an owner is an opaque string it matches and never reads meaning into. Windows has no backend here yet: the build-tag pair keeps the whole exported
-// surface and [Start] returns [ErrUnsupported], because the tools above it are registered on
-// every platform.
+// imports internal/platform (the denial watch, the §2.4 process teardown, whose group kill
+// is the one a Console tears its tree down with on cancel and on clean exit alike, and the
+// Windows pseudoconsole launcher), internal/domain for the confinement-unavailable sentinel, and
+// the pseudo-terminal dependency and nothing else, which is what keeps the file boundary at the
+// process; an owner is an opaque string it matches and never reads meaning into. The build-tag
+// pair (process.go, process_windows.go) supplies the platform's half of one [Process] whose
+// reading, exit bookkeeping and bounded close live once, in process_shared.go.
 //
 // Files:
 //   - doc.go — this map and the package's rationale.
-//   - process.go — the POSIX Process: start under a pseudo-terminal, read, write, kill, reap.
-//   - process_other.go — the Windows stand-in, whose Start reports ErrUnsupported.
+//   - process_shared.go — Spec and Process: reading, exit bookkeeping, the bounded close.
+//   - process.go — the POSIX half: start under a pseudo-terminal, write, kill, reap.
+//   - process_windows.go — the Windows half: start under a pseudoconsole, write, kill, reap.
 //   - ring.go — the bounded drain-on-read buffer of unread output.
 //   - ansi.go — stripping the terminal control sequences out of what the model reads.
 //   - registry.go — the engine's open Consoles: ids, owners, the cap, closing by owner.

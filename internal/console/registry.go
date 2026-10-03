@@ -96,6 +96,10 @@ type OpenSpec struct {
 	Command string
 	// Argv is the program and arguments actually executed — the shell wrapping of Command.
 	Argv []string
+	// CommandLine is the verbatim process command line Argv is launched with on a platform
+	// whose argv joining is not faithful (Windows), "" where it is (POSIX). See
+	// [Spec.CommandLine].
+	CommandLine string
 	// Dir is the working directory, already resolved and fenced by the caller.
 	Dir string
 	// Env is the child's complete environment; nil inherits this process's.
@@ -166,7 +170,8 @@ func (r *Registry) MintOwner() string {
 // It refuses with [ErrTooMany] once MaxOpen Consoles are open — counting the ones whose process
 // has exited, since those still hold an id and unread output — and the refusal names the open
 // ids so the caller can tell the model which ones it could close. A process that fails to start
-// (including [ErrUnsupported] on a platform with no pseudo-terminal backend) consumes no id.
+// (including a confined one on Windows, refused with domain.ErrConfinementUnavailable, and any on
+// a Windows host without a pseudoconsole) consumes no id.
 //
 // The registry is locked across the start, which is what keeps the cap exact and the ids in
 // order under concurrent delegations; the wait for the process to say something is the caller's
@@ -181,11 +186,12 @@ func (r *Registry) Open(spec OpenSpec) (*Console, error) {
 	}
 
 	process, err := Start(Spec{
-		Argv:     spec.Argv,
-		Dir:      spec.Dir,
-		Env:      spec.Env,
-		Confined: spec.Confined,
-		Prepare:  spec.Prepare,
+		Argv:        spec.Argv,
+		CommandLine: spec.CommandLine,
+		Dir:         spec.Dir,
+		Env:         spec.Env,
+		Confined:    spec.Confined,
+		Prepare:     spec.Prepare,
 	})
 	if err != nil {
 		return nil, err

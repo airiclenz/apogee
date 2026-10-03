@@ -164,6 +164,49 @@ func TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal(t *testing.T) {
 	}
 }
 
+// TestConsoleOpen_HandsTheRawCommandLineToTheOpener pins that the opener receives the platform's
+// verbatim command line for the model's line — the string a Windows launch hands to cmd.exe
+// unjoined — and the empty one where the platform's argv joining is faithful. The Windows rules
+// ride in on the tool's own execHost; the fake opener launches nothing.
+func TestConsoleOpen_HandsTheRawCommandLineToTheOpener(t *testing.T) {
+	t.Parallel()
+	const command = `echo "hi there"`
+
+	tests := []struct {
+		name  string
+		shell func(execHost) execHost
+	}{
+		{"this platform's rules", func(h execHost) execHost { return h }},
+		{"Windows raw-command-line rules", func(h execHost) execHost {
+			h.shell = rawCmdlineHost{Host: h.shell}
+			return h
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			var captured console.OpenSpec
+			h := testCase.shell(defaultExecHost())
+			h.openConsole = func(_ *console.Registry, spec console.OpenSpec) (*console.Console, error) {
+				captured = spec
+				return nil, errors.New("not launched")
+			}
+			ctx, _ := consoleTestCtx(t)
+
+			if _, err := newConsoleOpen(t.TempDir(), nil, h).Execute(ctx, consoleOpenCall("c1", command, 10)); err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+
+			if captured.Command != command {
+				t.Fatalf("the opener was not reached with the model's line (Command = %q)", captured.Command)
+			}
+			if want := h.shell.CommandLine(command); captured.CommandLine != want {
+				t.Errorf("CommandLine = %q, want the platform's verbatim %q", captured.CommandLine, want)
+			}
+		})
+	}
+}
+
 // TestConsoleOpen_StampsTheEngineMintedOwnerKey pins WHICH identity ownership rides on. The tool
 // reads the engine-minted owner key, which is what a delegation's end reaps by; the spawn call id
 // beside it is display identity the model chose, and two siblings of one Turn can carry the same
