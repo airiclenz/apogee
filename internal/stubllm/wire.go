@@ -1,5 +1,10 @@
 package stubllm
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // This file holds the literal OpenAI chat-completions JSON — the shapes on the wire — kept
 // apart from server.go's transport logic for the same reason internal/provider keeps
 // wirejson.go apart from client.go: the schema is a contract with real servers and reads best
@@ -125,13 +130,51 @@ type chatRequest struct {
 	ReasoningEffort    *string        `json:"reasoning_effort"`
 }
 
-// chatMessage is one message off a request. Content is a pointer because a tool-call-only
-// assistant turn serialises it as JSON null, which is absence rather than an empty string.
+// chatMessage is one message off a request.
 type chatMessage struct {
 	Role       string         `json:"role"`
-	Content    *string        `json:"content"`
+	Content    chatContent    `json:"content"`
 	ToolCallID string         `json:"tool_call_id"`
 	ToolCalls  []wireToolCall `json:"tool_calls"`
+}
+
+// chatContent is a message's content in any of the three shapes a request spells it: a plain
+// string, JSON null (a tool-call-only assistant turn — absence, read as empty), or the
+// multimodal array of parts a message with images carries. text is the string, or the array's
+// text parts concatenated in order; an image_url part carries no text, so it adds nothing.
+type chatContent struct {
+	text string
+}
+
+// chatPartText is the type of a multimodal content array's text part.
+const chatPartText = "text"
+
+// chatContentPart is one member of a multimodal content array; only a text part's text is read.
+type chatContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// UnmarshalJSON accepts every spelling of content: null leaves text empty.
+func (c *chatContent) UnmarshalJSON(data []byte) error {
+	switch {
+	case len(data) == 0 || string(data) == "null":
+		return nil
+	case data[0] == '"':
+		return json.Unmarshal(data, &c.text)
+	}
+	var parts []chatContentPart
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return err
+	}
+	var text strings.Builder
+	for _, part := range parts {
+		if part.Type == chatPartText {
+			text.WriteString(part.Text)
+		}
+	}
+	c.text = text.String()
+	return nil
 }
 
 // chatTool is one offered tool; only the name is read, because that is all a matcher or an
@@ -146,10 +189,7 @@ type chatTool struct {
 func (r chatRequest) messages() []Message {
 	out := make([]Message, 0, len(r.Messages))
 	for _, m := range r.Messages {
-		message := Message{Role: m.Role, ToolCallID: m.ToolCallID}
-		if m.Content != nil {
-			message.Content = *m.Content
-		}
+		message := Message{Role: m.Role, Content: m.Content.text, ToolCallID: m.ToolCallID}
 		for _, call := range m.ToolCalls {
 			message.ToolCalls = append(message.ToolCalls, ToolCall{
 				ID:        call.ID,

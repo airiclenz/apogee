@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -182,25 +183,46 @@ func isNamedEffort(e Effort) bool {
 // formatMessage renders one seam Message onto the wire schema. Without native tools a
 // tool-result degrades to a user message (the model never sees a bare "tool" role it was
 // not told to produce); with native tools the tool linkage is preserved. content is null
-// when an assistant message carries only tool calls (OpenAI's convention).
+// when an assistant message carries only tool calls (OpenAI's convention), and an array of
+// parts when the message carries images (chatParts).
 func formatMessage(m Message, hasTools bool) chatMessage {
 	if !hasTools && m.Role == "tool" {
-		content := m.Content
-		return chatMessage{Role: "user", Content: &content}
+		return chatMessage{Role: "user", Content: chatText(m.Content)}
 	}
 
 	out := chatMessage{Role: m.Role}
-	if len(m.ToolCalls) > 0 && m.Content == "" {
-		out.Content = nil // null: tool-call-only assistant turn
-	} else {
-		content := m.Content
-		out.Content = &content
+	switch {
+	case len(m.Images) > 0:
+		out.Content = chatParts(m.Content, m.Images)
+	case len(m.ToolCalls) > 0 && m.Content == "":
+		// The zero chatContent: null for a tool-call-only assistant turn.
+	default:
+		out.Content = chatText(m.Content)
 	}
 	if hasTools {
 		out.ToolCallID = m.ToolCallID
 		out.ToolCalls = m.ToolCalls
 	}
 	return out
+}
+
+// chatText is the plain-string content member.
+func chatText(text string) chatContent {
+	return chatContent{text: &text}
+}
+
+// chatParts is the multimodal content member: one text part for text (none when it is empty),
+// then one image_url part per image, in order, each carrying the image as a base64 data URL.
+func chatParts(text string, images []Image) chatContent {
+	parts := make([]chatContentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: text})
+	}
+	for _, img := range images {
+		url := "data:" + img.MediaType + ";base64," + base64.StdEncoding.EncodeToString(img.Data)
+		parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url}})
+	}
+	return chatContent{parts: parts}
 }
 
 // parseSSE reads the SSE body line by line and yields Deltas. It accumulates every tool

@@ -300,7 +300,8 @@ func anthropicSystem(msgs []Message) string {
 // in a single turn); an assistant message carries a text block for its content and one tool_use
 // block per call, with the thinking blocks it carries verbatim at their places
 // (Message.ThinkingBlocks, assistantBlocks) when guard admits them over the messages rendered
-// before it — a nil guard admits every one. A message that ends up with no block at all — an
+// before it — a nil guard admits every one; a user message carries its image blocks ahead of its
+// text (userBlocks). A message that ends up with no block at all — an
 // assistant turn with neither text, calls nor thinking — is dropped: the API refuses an empty
 // content array.
 //
@@ -336,10 +337,28 @@ func anthropicMessages(msgs []Message, hasTools bool, guard *anthropicReplayGuar
 			}
 			out = appendMessage(out, "assistant", blocks)
 		default:
-			out = appendMessage(out, "user", textBlocks(m.Content))
+			out = appendMessage(out, "user", userBlocks(m))
 		}
 	}
 	return out, nil
+}
+
+// userBlocks renders a user message: one image block per image, in order, then its text block.
+// The images lead because the Messages API reads an image best placed ahead of the text that
+// asks about it; a message without images is its text block alone, as it always was.
+func userBlocks(m Message) []anthropicBlock {
+	if len(m.Images) == 0 {
+		return textBlocks(m.Content)
+	}
+	blocks := make([]anthropicBlock, 0, len(m.Images)+1)
+	for _, img := range m.Images {
+		blocks = append(blocks, anthropicBlock{Type: "image", Source: &anthropicImageSource{
+			Type:      anthropicImageSourceBase64,
+			MediaType: img.MediaType,
+			Data:      img.Data,
+		}})
+	}
+	return append(blocks, textBlocks(m.Content)...)
 }
 
 // appendMessage appends one message of blocks to out, dropping a message that has none.
@@ -810,8 +829,9 @@ const (
 )
 
 // anthropicBlock is one content block in either direction: text, tool_use (id/name/input),
-// tool_result (tool_use_id/content/is_error) or thinking. The union is flat because every
-// member is omitted when zero, so each block type serialises to exactly its own keys. A
+// tool_result (tool_use_id/content/is_error), thinking, or — request-only — image (source).
+// The union is flat because every member is omitted when zero, so each block type serialises
+// to exactly its own keys. A
 // reasoning block is the exception: raw holds it as its JSON object — captured on decode
 // (UnmarshalJSON), or a carried Message.ThinkingBlocks entry on encode — and MarshalJSON writes
 // those bytes instead of the flat members, so a signature, a `data` payload or an empty
@@ -831,9 +851,22 @@ type anthropicBlock struct {
 	IsError   *bool  `json:"is_error,omitempty"`
 	// thinking
 	Thinking string `json:"thinking,omitempty"`
+	// image
+	Source *anthropicImageSource `json:"source,omitempty"`
 
 	// raw is a reasoning block's own JSON object; nil for every other block.
 	raw json.RawMessage
+}
+
+// anthropicImageSourceBase64 is the one image source type this codec writes: the bytes inline.
+const anthropicImageSourceBase64 = "base64"
+
+// anthropicImageSource is an image block's source. Data is the image bytes; encoding/json writes
+// a []byte as standard base64, which is exactly the encoding the base64 source type names.
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      []byte `json:"data"`
 }
 
 // MarshalJSON writes a reasoning block's raw bytes as they are and every other block by its

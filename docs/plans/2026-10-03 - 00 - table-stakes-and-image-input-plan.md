@@ -260,7 +260,15 @@ internal/agent/state.go — messageBytes; apogee.go — UserInput, Message alias
 **Acceptance:** `go test -count=1 ./internal/domain/ ./internal/context/` ; `go test -count=1 -run 'Restore|State' ./internal/agent/`
 **Commit:** `feat(domain): messages carry image parts`
 
-## 11. Images on the wire — OpenAI and Anthropic dialects
+## 11. Images on the wire — OpenAI and Anthropic dialects — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): the projection test lives in internal/agent/wire_test.go (TestProviderRequestImageProjection, matched by the Acceptance `-run 'Wire|Projection'`) and the stubllm decode test in a new internal/stubllm/wire_test.go; neither file is on the item's Files line, but the item's Tests line asks for both.
+NOTES (2026-10-03): consequential edit — internal/domain/config.go: made necessary by the `[image omitted: <name>]` wire fallback; Config.Vision's doc said an image is "refused before the request leaves, never silently stripped", now it says a new image is refused before it is sent and an image already in history goes out as the omission text.
+NOTES (2026-10-03): consequential edit — internal/provider/doc.go: made necessary by the new provider.Image seam type; the package map's wire.go row lists it.
+NOTES (2026-10-03): on the anthropic wire a user message's image blocks go ahead of its text block (the Messages API reads an image best before the text asking about it); on the openai wire the text part leads, as the item's Goal spells it. An image-only message has no text part/block on either wire.
+NOTES (2026-10-03): the omission text is one `[image omitted: <name>]` line per image appended to the content with "\n" (alone when the content is empty); the replacement is wire-only, history keeps the images.
+NOTES (2026-10-03): stubllm logs only a message's text; image parts are decoded but not recorded on stubllm.Message — an image-only anthropic user message is now still logged as a user message. Recording image parts in the log would need a stubllm.Message field (log.go) if a later stub-driven test wants to assert images reached the wire.
+NOTES (2026-10-03): no CHANGELOG entry — the wire encoding has no user-visible effect until item 12 wires `vision:` and the `@ref` producer.
 
 **What:**
 **Goal:** a message with images encodes as OpenAI `content: [{type:text},{type:image_url,image_url:{url:"data:<mime>;base64,…"}}]` and as Anthropic `image` blocks (`source{type:base64, media_type, data}`); a message without images encodes byte-identically to today; when the bound server lacks `vision: true`, each image is replaced by the text `[image omitted: <name>]`.

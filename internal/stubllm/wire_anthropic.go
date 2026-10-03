@@ -29,6 +29,10 @@ const (
 	eventError        = "error"
 )
 
+// blockImage is the image block type: a request carries it on a user message, and the stub only
+// ever reads it.
+const blockImage = "image"
+
 // The content block and fragment types the stub writes.
 const (
 	blockText             = "text"
@@ -208,17 +212,23 @@ func assistantMessage(blocks []anthropicBlock) Message {
 func userMessages(role string, blocks []anthropicBlock) []Message {
 	var out []Message
 	var text strings.Builder
+	// An image block carries no text, but it still makes the turn a user message: without this
+	// an image-only message would vanish from the log.
+	hasImage := false
 	flush := func() {
-		if text.Len() == 0 {
+		if text.Len() == 0 && !hasImage {
 			return
 		}
 		out = append(out, Message{Role: role, Content: text.String()})
 		text.Reset()
+		hasImage = false
 	}
 	for _, b := range blocks {
 		switch b.Type {
 		case blockText:
 			text.WriteString(b.text())
+		case blockImage:
+			hasImage = true
 		case blockToolResult:
 			flush()
 			out = append(out, Message{Role: "tool", ToolCallID: b.ToolUseID, Content: blocksText(b.Content)})

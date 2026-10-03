@@ -212,3 +212,62 @@ func TestProviderRequestReplaysSignedThinkingOnlyToItsModel(t *testing.T) {
 		})
 	}
 }
+
+// TestProviderRequestImageProjection pins the vision rule at the wire boundary: a server whose
+// entry opts into vision gets every image beside the unchanged text, any other server gets one
+// `[image omitted: <name>]` line per image in its place and no image at all, and a message
+// without images projects identically either way.
+func TestProviderRequestImageProjection(t *testing.T) {
+	t.Parallel()
+
+	png := domain.Image{Name: "shot.png", MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}
+	jpeg := domain.Image{Name: "photo.jpg", MediaType: "image/jpeg", Data: []byte{0xff, 0xd8}}
+	cases := []struct {
+		name   string
+		vision bool
+		msg    domain.Message
+		want   provider.Message
+	}{
+		{
+			name:   "a vision server gets the images beside the text",
+			vision: true,
+			msg:    domain.Message{Role: domain.RoleUser, Content: "what is this?", Images: []domain.Image{png, jpeg}},
+			want: provider.Message{Role: "user", Content: "what is this?", Images: []provider.Image{
+				{MediaType: "image/png", Data: png.Data},
+				{MediaType: "image/jpeg", Data: jpeg.Data},
+			}},
+		},
+		{
+			name: "a server without vision gets one omission line per image",
+			msg:  domain.Message{Role: domain.RoleUser, Content: "what is this?", Images: []domain.Image{png, jpeg}},
+			want: provider.Message{
+				Role:    "user",
+				Content: "what is this?\n[image omitted: shot.png]\n[image omitted: photo.jpg]",
+			},
+		},
+		{
+			name: "an image-only message without vision is the omission line alone",
+			msg:  domain.Message{Role: domain.RoleUser, Images: []domain.Image{png}},
+			want: provider.Message{Role: "user", Content: "[image omitted: shot.png]"},
+		},
+		{
+			name:   "a message without images is untouched on a vision server",
+			vision: true,
+			msg:    domain.Message{Role: domain.RoleUser, Content: "hi"},
+			want:   provider.Message{Role: "user", Content: "hi"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := &Agent{cfg: domain.Config{Model: "test-model", Vision: tc.vision}}
+			req := domain.NewRequest("test-model", []domain.Message{tc.msg}, nil, domain.Budget{}, 0)
+
+			got := a.toProviderRequest(req)
+
+			if !reflect.DeepEqual(got.Messages, []provider.Message{tc.want}) {
+				t.Errorf("projected messages = %+v, want %+v", got.Messages, []provider.Message{tc.want})
+			}
+		})
+	}
+}

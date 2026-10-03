@@ -40,8 +40,8 @@
 //     `.local` host the system resolver cannot find.
 //   - mergepatch.go — the RFC 7396 JSON Merge Patch a server entry's request-extra is decoded
 //     into once and applied to every encoded body (ADR 0085).
-//   - wire.go — the provider-local seam types: Message, ToolCall, Request, Sampling, Effort,
-//     Usage, RawResponse, Wire and the WireRecord a wire observer receives.
+//   - wire.go — the provider-local seam types: Message, Image, ToolCall, Request, Sampling,
+//     Effort, Usage, RawResponse, Wire and the WireRecord a wire observer receives.
 //   - wirejson.go — the literal OpenAI chat-completions request/response JSON structs the
 //     openai codec maps onto, kept apart from the seam types.
 //   - wire_openai.go — openaiCodec, the default wire: chat-completions body building, effort

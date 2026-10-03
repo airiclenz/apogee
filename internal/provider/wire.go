@@ -23,6 +23,18 @@ type Message struct {
 	// digests as the one the entries name, else it leaves them off (ADR 0092); the openai codec
 	// never reads them.
 	ThinkingBlocks []json.RawMessage
+	// Images are the image parts a user message carries, in attachment order. Each codec writes
+	// them in its own dialect beside the message's text; a message without images encodes exactly
+	// as it did before the field existed. Whether the bound server may see them at all is the
+	// caller's rule, applied before the Request is built — this package sends what it is given.
+	Images []Image
+}
+
+// Image is one image part on the wire: its IANA media type and the encoded image bytes, exactly
+// as read. The codecs base64-encode Data themselves.
+type Image struct {
+	MediaType string
+	Data      []byte
 }
 
 // ToolCall is one tool invocation the model emitted, in the OpenAI "function" shape.

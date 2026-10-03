@@ -82,3 +82,76 @@ func TestSetAuthAppliesTheCodecHeaders(t *testing.T) {
 		t.Errorf("headers without a key = %v, want none", without)
 	}
 }
+
+// TestCodecsEncodeImageParts pins the request bodies both dialects write for a user message
+// carrying images: openai turns content into an array of a text part and one image_url part per
+// image, each a base64 data URL; anthropic writes one base64 image block per image ahead of the
+// text block. A message without images keeps the plain shape each dialect always sent.
+func TestCodecsEncodeImageParts(t *testing.T) {
+	t.Parallel()
+
+	images := []Image{
+		{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}},
+		{MediaType: "image/jpeg", Data: []byte{0xff, 0xd8}},
+	}
+	withText := Request{Model: "m", Messages: []Message{{Role: "user", Content: "what is this?", Images: images}}}
+	imageOnly := Request{Model: "m", Messages: []Message{{Role: "user", Images: images[:1]}}}
+	textOnly := Request{Model: "m", Messages: []Message{{Role: "user", Content: "hi"}}}
+	cases := []struct {
+		name  string
+		codec wireCodec
+		req   Request
+		want  string
+	}{
+		{
+			name:  "openai: a text part, then one image_url part per image",
+			codec: &openaiCodec{},
+			req:   withText,
+			want:  `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"what is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw=="}},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9g="}}]}],"stream":false}`,
+		},
+		{
+			name:  "openai: an image-only message has no text part",
+			codec: &openaiCodec{},
+			req:   imageOnly,
+			want:  `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw=="}}]}],"stream":false}`,
+		},
+		{
+			name:  "openai: a message without images keeps string content",
+			codec: &openaiCodec{},
+			req:   textOnly,
+			want:  `{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":false}`,
+		},
+		{
+			name:  "anthropic: one image block per image, then the text block",
+			codec: &anthropicCodec{},
+			req:   withText,
+			want:  `{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9g="}},{"type":"text","text":"what is this?"}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
+		},
+		{
+			name:  "anthropic: an image-only message is its image block alone",
+			codec: &anthropicCodec{},
+			req:   imageOnly,
+			want:  `{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
+		},
+		{
+			name:  "anthropic: a message without images is its text block alone",
+			codec: &anthropicCodec{},
+			req:   textOnly,
+			want:  `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			body, _, err := tc.codec.encode(tc.req)
+
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			if got := string(body); got != tc.want {
+				t.Errorf("body mismatch\n got: %s\nwant: %s", got, tc.want)
+			}
+		})
+	}
+}

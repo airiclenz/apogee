@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
@@ -12,10 +14,11 @@ import (
 // translation boundary between the loop's domain state and the domain-free provider.Request
 // (ADR 0010). It carries messages (with tool calls + tool-call IDs, load-bearing for a
 // multi-Turn tool exchange, and an assistant message's signed reasoning blocks under the replay
-// rule — replayedThinking), the tool menu, the sampling a pre-request hook shaped, and the
-// resolved Thinking effort (resolvedEffort — override ▸ profile ▸ nothing) in the wire dialect the
-// bound SERVER reads it in (a.effortDialect, committed by Rebind — ADR 0060); the provider wire has
-// no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
+// rule — replayedThinking, and a user message's images under the vision rule — projectedImages),
+// the tool menu, the sampling a pre-request hook shaped, and the resolved Thinking effort
+// (resolvedEffort — override ▸ profile ▸ nothing) in the wire dialect the bound SERVER reads it in
+// (a.effortDialect, committed by Rebind — ADR 0060); the provider wire has no carrier for
+// SetExtra fields yet (response_format is a Phase-4 concern).
 func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	st := req.State()
 	msgs := st.Messages
@@ -37,12 +40,14 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 
 	messages := make([]provider.Message, 0, len(msgs))
 	for _, m := range msgs {
+		content, images := a.projectedImages(m)
 		messages = append(messages, provider.Message{
 			Role:           string(m.Role),
-			Content:        m.Content,
+			Content:        content,
 			ToolCalls:      toProviderToolCalls(m.ToolCalls),
 			ToolCallID:     m.ToolCallID,
 			ThinkingBlocks: a.replayedThinking(m, st.Model),
+			Images:         images,
 		})
 	}
 
@@ -54,6 +59,37 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 		ThinkingEffort: toProviderEffort(a.resolvedEffort()),
 		EffortDialect:  a.effortDialect,
 	}
+}
+
+// imageOmittedFormat is the text an image becomes on a request to a server without vision: one
+// line per image, naming it, so the model still learns an image was attached.
+const imageOmittedFormat = "[image omitted: %s]"
+
+// projectedImages returns the content and wire images m goes out with, under the vision rule:
+// a message without images is its content alone; on a server whose entry opts into vision
+// (a.cfg.Vision) every image rides the wire beside the unchanged content; on any other server no
+// image is sent and each is replaced by an imageOmittedFormat line appended to the content. The
+// replacement is wire-only — history keeps the images, so a later request to a vision server
+// still sends them.
+func (a *Agent) projectedImages(m domain.Message) (string, []provider.Image) {
+	if len(m.Images) == 0 {
+		return m.Content, nil
+	}
+	if a.cfg.Vision {
+		images := make([]provider.Image, 0, len(m.Images))
+		for _, img := range m.Images {
+			images = append(images, provider.Image{MediaType: img.MediaType, Data: img.Data})
+		}
+		return m.Content, images
+	}
+	lines := make([]string, 0, len(m.Images)+1)
+	if m.Content != "" {
+		lines = append(lines, m.Content)
+	}
+	for _, img := range m.Images {
+		lines = append(lines, fmt.Sprintf(imageOmittedFormat, img.Name))
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 // thinkingBlocksExtra is the Extra key a committed assistant message keeps the reply's signed

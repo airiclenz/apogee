@@ -119,10 +119,11 @@ type Config struct {
 	Price ServerPrice
 
 	// Vision is whether the bound `servers:` entry accepts image input — a per-server opt-in, stated
-	// on the construction surface like Wire. A server without it is never sent an image: a message
-	// carrying images is refused before the request leaves, never silently stripped. The zero value
-	// is "no vision", so a caller that names nothing sends exactly what it sent before this field
-	// existed.
+	// on the construction surface like Wire. A server without it is never sent an image: a new
+	// image is refused before it is sent, and an image already in history (a resumed session,
+	// a switch to another server) goes out as the text `[image omitted: <name>]` in its place —
+	// the history itself keeps it. The zero value is "no vision", so a caller that names nothing
+	// sends exactly what it sent before this field existed.
 	Vision bool
 
 	// Autonomy.

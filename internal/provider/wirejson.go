@@ -65,13 +65,43 @@ type reasoningField struct {
 	Enabled *bool  `json:"enabled,omitempty"`
 }
 
-// chatMessage is one wire message. Content is a pointer so a tool-call-only assistant
-// turn serialises content as JSON null (OpenAI's convention) rather than omitting it.
+// chatMessage is one wire message. Content is never omitted: a tool-call-only assistant
+// turn serialises it as JSON null (OpenAI's convention), and a message with images as an
+// array of parts (chatContent).
 type chatMessage struct {
-	Role       string     `json:"role"`
-	Content    *string    `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role       string      `json:"role"`
+	Content    chatContent `json:"content"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
+}
+
+// chatContent is a message's content member in the one shape the message needs: the plain
+// string every message without images has always sent, JSON null when text is nil (the zero
+// value), or — when parts is set — the multimodal array of text and image_url parts.
+type chatContent struct {
+	text  *string
+	parts []chatContentPart
+}
+
+// MarshalJSON writes the parts array when there is one, else the text (null when unset).
+func (c chatContent) MarshalJSON() ([]byte, error) {
+	if c.parts != nil {
+		return json.Marshal(c.parts)
+	}
+	return json.Marshal(c.text)
+}
+
+// chatContentPart is one member of a multimodal content array: a text part or an image_url
+// part, each serialising to exactly its own keys.
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+// chatImageURL is an image_url part's object; URL is a base64 data URL of the image.
+type chatImageURL struct {
+	URL string `json:"url"`
 }
 
 // streamOptions asks the server to include a final usage chunk on a streamed response.
