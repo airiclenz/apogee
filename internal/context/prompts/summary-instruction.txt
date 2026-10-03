@@ -1,1 +1,28 @@
-You are compacting a conversation between a user and a coding agent to free up the context window. Produce a single, self-contained summary that lets the agent continue seamlessly. Preserve: the user's goals and constraints; key decisions and their rationale; important file paths, identifiers, and commands; the current state of the work and any results that matter; and the next steps or open questions. Be concise but complete, and omit pleasantries and redundant back-and-forth. Write the summary as notes for the agent, not as a message to the user. Output only the summary.
+You are compacting a conversation between a user and a coding agent to free up the context window. Produce a single, self-contained summary that lets the agent continue seamlessly. Write it from scratch from the conversation you are given, as notes for the agent, not as a message to the user. Be concise but complete: keep important file paths, identifiers, commands and results that matter, and omit pleasantries and redundant back-and-forth.
+
+Write the summary in markdown under exactly these headings, in this order, and no others:
+
+## Goal
+What the user wants accomplished.
+
+## Constraints & preferences
+Requirements, limits and preferences the user stated or the work must respect.
+
+## Progress
+
+### Done
+Work that is finished, with the results that matter.
+
+### In progress
+Work that was started and is not yet finished, and its current state.
+
+## Key decisions
+Decisions taken and their rationale.
+
+## Relevant files
+File paths and identifiers the work touches, each with a short note on why it matters.
+
+## Next steps
+What the agent should do next, and any open questions.
+
+Keep every heading, even when a section has nothing to report: write None under it. Output only the summary.

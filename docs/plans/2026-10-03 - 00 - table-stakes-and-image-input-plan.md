@@ -192,7 +192,7 @@ internal/tui/sessions.go — sessionSpendCell
 **Commit:** `feat(headless): report priced spend in run_finished and /sessions`
 Depends on item 4.
 
-## 7. Structured compaction summary
+## 7. Structured compaction summary — ✅ DONE (2026-10-03)
 
 **What:**
 **Goal:** the compaction instruction requires the summary under exactly these headings, in order: `## Goal`, `## Constraints & preferences`, `## Progress` with `### Done` and `### In progress`, `## Key decisions`, `## Relevant files`, `## Next steps`; an empty section reads `None`.

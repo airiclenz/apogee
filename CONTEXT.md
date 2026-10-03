@@ -2244,7 +2244,10 @@ stands down for the delegation, and the emergency fold and `/compact` keep their
 `auto-compact: false` opts out of all of them; the on-demand
 `/compact` stays boundary-only. **Pruning** runs first: the cheap structural collapse of stale tool
 results clears what it can at a Turn boundary before the estimate-driven trigger is ever reached, so
-a model call is spent only on history that pruning could not relieve. See
+a model call is spent only on history that pruning could not relieve. Every trigger asks for the
+same **structured summary**, written from scratch under fixed markdown headings — Goal, Constraints &
+preferences, Progress (Done / In progress), Key decisions, Relevant files, Next steps — with an empty
+section reading `None`; nothing parses it. See
 [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).
 

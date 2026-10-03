@@ -340,3 +340,33 @@ and `(*Agent).budget()` caps it at the fold's own transcript budget
 whenever a window is advertised — so §8's survivability ordering, the structural floor below the
 fold's transcript budget, now holds at every window instead of only above the ~8.9k crossover this
 section computes, and the crossover band is arithmetic history rather than a live caveat.
+
+## Amendment (2026-10-03) — the summary is written under fixed section headings
+
+The summarizer's instruction (`internal/context/prompts/summary-instruction.txt`) now asks for the
+summary in markdown under exactly these headings, in this order and no others:
+
+```
+## Goal
+## Constraints & preferences
+## Progress
+### Done
+### In progress
+## Key decisions
+## Relevant files
+## Next steps
+```
+
+Every heading is kept even when its section has nothing to report; that section reads `None`. The
+summary is always written from scratch from the transcript the fold is given — a later fold does not
+patch an earlier summary's sections; where the history still carries one, it is read like any other
+turn. The
+structure is for the model and the reader: nothing in apogee parses it, so a model that strays from
+the template still produces a usable fold, and a stray summary is not an error.
+
+One instruction serves every fold trigger — on demand (`/compact`), estimate-driven, the overflow
+emergency fold, and a child's mid-Exchange fold — so all of them produce the same shape. What else
+the fold sends is unchanged: the message prefix that labels the summary, the tail instruction that
+closes the summary call, the `BriefDelegateFold` instruction (a different reader, not a Compaction),
+`compactMaxTokens` and the transcript-truncation marker. The instruction still opens with "You are
+compacting a conversation", the words the summary call is recognised by in tests.

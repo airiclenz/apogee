@@ -763,6 +763,13 @@ it stays on even under `--bypass` — so it is on by default; set the file-only
 `auto-compact:` key to `false` to manage the window yourself with `/compact` instead,
 which opts out of the recovery too.
 
+Every fold — automatic, overflow recovery or `/compact` — writes the summary under the
+same fixed headings, in this order: **Goal**, **Constraints & preferences**, **Progress**
+(with **Done** and **In progress**), **Key decisions**, **Relevant files** and **Next
+steps**. A section with nothing to report reads `None`. The summary is written afresh
+each time from the conversation it folds, and it is there for the model and for you to
+read in scrollback; apogee does not parse it.
+
 Before Compaction is ever reached, **Pruning** clears the stale bulk out of the window.
 A long session fills up with the *output* of tool calls the model has already read and
 moved past — whole files, long searches, build logs — and that output crowds out the

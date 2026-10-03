@@ -471,3 +471,39 @@ func TestEmbeddedPromptsLoadWithoutTrailingNewline(t *testing.T) {
 		}
 	}
 }
+
+// TestSummaryInstructionNamesEveryHeadingInOrder pins the structured compaction summary (ADR
+// 0018, 2026-10-03 amendment): the summarizer's instruction keeps the "You are compacting a
+// conversation" opening the agent tests match the summary call by, names each fixed section
+// heading as a line of its own in the documented order, and says an empty section reads None.
+func TestSummaryInstructionNamesEveryHeadingInOrder(t *testing.T) {
+	t.Parallel()
+
+	if !strings.HasPrefix(summaryInstruction, "You are compacting a conversation") {
+		t.Errorf("summary instruction lost its opening words: %q", summaryInstruction)
+	}
+
+	headings := []string{
+		"## Goal",
+		"## Constraints & preferences",
+		"## Progress",
+		"### Done",
+		"### In progress",
+		"## Key decisions",
+		"## Relevant files",
+		"## Next steps",
+	}
+	var got []string
+	for _, line := range strings.Split(summaryInstruction, "\n") {
+		if strings.HasPrefix(line, "#") {
+			got = append(got, line)
+		}
+	}
+	if !reflect.DeepEqual(got, headings) {
+		t.Errorf("summary instruction headings = %q, want exactly %q", got, headings)
+	}
+
+	if !strings.Contains(summaryInstruction, "write None under it") {
+		t.Errorf("summary instruction no longer says an empty section reads None:\n%s", summaryInstruction)
+	}
+}
