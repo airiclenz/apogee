@@ -900,8 +900,10 @@ func NewReactionRunner(list []Reaction, o RunnerOptions) (*ReactionRunner, error
 type EventLines = eventjson.Writer
 
 // EventLinesOptions are the facts an EventLines cannot derive: the run's session id (empty until
-// SetSession, so the lines carry null), the clock its `time` stamps come from, and where the one
-// report of a failed write goes.
+// SetSession, so the lines carry null), the clock its `time` stamps come from, where the one
+// report of a failed write goes, and Currency — the `currency:` label the run's Config.Price rates
+// are stated in, which every usage line names once a call was priced (empty until SetCurrency, so
+// an embedder that holds the label at construction sets it here).
 type EventLinesOptions = eventjson.Options
 
 // RunStarted is the data of the opening frame — what the run was asked to be. The Driver fills it;

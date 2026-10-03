@@ -656,7 +656,7 @@ func contextCostFrame(report domain.ContextCost) eventjson.ContextCost {
 // out field by field on purpose: the frame's key order is golden-pinned (ADR 0075 D4) and differs
 // from domain.Usage's field order, so a struct conversion cannot land here. The priced Spend
 // (money) rides beside the tokens: currency is the label the run was priced in (run.Result.Currency),
-// stated only on a reading with a priced call behind it (frameCurrency).
+// stated only on a reading with a priced call behind it (eventjson.FrameCurrency).
 func usageFrame(u run.Usage, currency string) eventjson.Usage {
 	return eventjson.Usage{
 		Calls:              u.Calls,
@@ -665,19 +665,9 @@ func usageFrame(u run.Usage, currency string) eventjson.Usage {
 		TotalTokens:        u.TotalTokens,
 		CachedPromptTokens: u.CachedPromptTokens,
 		Cost:               eventjson.CostAmount(u.CostMicros),
-		Currency:           frameCurrency(u, currency),
+		Currency:           eventjson.FrameCurrency(u, currency),
 		UnpricedCalls:      u.UnpricedCalls,
 	}
-}
-
-// frameCurrency is the label a usage frame states beside its cost: the run's currency when at
-// least one call behind the reading was priced, "" when none was — so an unpriced reading's frame
-// carries the zero values (0, "") rather than naming a currency for an amount nobody priced.
-func frameCurrency(u run.Usage, currency string) string {
-	if u.PricedCalls <= 0 {
-		return ""
-	}
-	return currency
 }
 
 // subAgentFrames restates each finished sub-agent run's fill and spend for the frame, in the
@@ -698,7 +688,7 @@ func subAgentFrames(runs []run.SubAgentUsage, currency string) []eventjson.SubAg
 			TotalTokens:        r.TotalTokens,
 			CachedPromptTokens: r.CachedPromptTokens,
 			Cost:               eventjson.CostAmount(r.CostMicros),
-			Currency:           frameCurrency(r.Usage, currency),
+			Currency:           eventjson.FrameCurrency(r.Usage, currency),
 			UnpricedCalls:      r.UnpricedCalls,
 		})
 	}
@@ -995,6 +985,10 @@ func runHeadlessBody(
 			return events
 		}
 		events = lines.Wrap(events)
+		// The Writer was built before ApplyConfig resolved the `currency:` label, so the label
+		// reaches it here — before the first usage line, and from the same opts the run's Spec
+		// prices its record in (run.Spec.Currency).
+		lines.SetCurrency(opts.Currency)
 		lines.RunStarted(eventjson.RunStarted{
 			Session:   recordID,
 			Workspace: roots.workspace,

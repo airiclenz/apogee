@@ -336,6 +336,57 @@ func TestWriterSessionNullUntilSet(t *testing.T) {
 	}
 }
 
+// TestWriterStatesTheCurrencyOnUsageLines pins both ways the run's label reaches a usage line: an
+// embedder that holds it at construction (Options.Currency), and a Driver that resolves it only
+// after it built the Writer (SetCurrency) — where a line written before the label arrived keeps
+// the "" it was stamped with.
+func TestWriterStatesTheCurrencyOnUsageLines(t *testing.T) {
+	t.Parallel()
+
+	priced := domain.UsageEvent{
+		CostMicros: 1_000,
+		Priced:     true,
+		Cumulative: domain.Usage{Calls: 1, CostMicros: 1_000, PricedCalls: 1},
+	}
+
+	t.Run("Options.Currency", func(t *testing.T) {
+		t.Parallel()
+
+		var out bytes.Buffer
+		w := New(&out, Options{Now: fixedClock, Currency: "EUR"})
+
+		w.Emit(priced)
+
+		got := lines(t, &out)
+		if len(got) != 1 || !strings.Contains(got[0], `"cost":0.001,`) ||
+			!strings.Contains(got[0], `"currency":"EUR",`) {
+			t.Errorf("usage line does not carry the constructed label and cost:\n%s", out.String())
+		}
+	})
+
+	t.Run("SetCurrency", func(t *testing.T) {
+		t.Parallel()
+
+		var out bytes.Buffer
+		w := New(&out, Options{Now: fixedClock})
+
+		w.Emit(priced)
+		w.SetCurrency("CHF")
+		w.Emit(priced)
+
+		got := lines(t, &out)
+		if len(got) != 2 {
+			t.Fatalf("wrote %d lines, want 2:\n%s", len(got), out.String())
+		}
+		if !strings.Contains(got[0], `"currency":"",`) {
+			t.Errorf("line 1 names a currency before one was set: %s", got[0])
+		}
+		if !strings.Contains(got[1], `"currency":"CHF",`) {
+			t.Errorf("line 2 does not carry the currency that was set: %s", got[1])
+		}
+	})
+}
+
 // TestWriterMalformedDataFallsBackToNullData pins the fallback the losslessness rule rests on: a
 // `data` value that refuses to marshal costs THIS line's data and nothing else. The envelope still
 // lands with `"data":null`, its seq is spent exactly as a marshalable line would have spent it, the

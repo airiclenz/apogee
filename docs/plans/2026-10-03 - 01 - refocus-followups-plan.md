@@ -126,7 +126,7 @@ NOTES (2026-10-04): no CHANGELOG entry — no production path marshals a priced 
 **Acceptance:** `go test -count=1 -run 'TestServerEntryPrice|TestServerEntryRequestExtraRoundTrips' ./internal/config/`
 **Commit:** `fix(config): round-trip a priced server entry through YAML`
 
-## 5. Price the headless usage line
+## 5. Price the headless usage line — ✅ DONE (2026-10-04)
 
 **What:** Fixes `apogee-usage-frame-no-cost`: the headless per-call `usage` event line carries no money keys; only `run_finished` is priced.
 **Regression guard.** the shared currency rule moved out of cmd/apogee/headless.go (`frameCurrency`) into internal/eventjson takes a `domain.Usage` (run.Usage is an alias) — eventjson must not import internal/run. `runHeadless` builds the Writer (`headless.go:572`) before `runHeadlessBody` runs `config.ApplyConfig` (`:765`), so `opts.Currency` is unresolved there: add `Writer.SetCurrency` (`SetSession`'s twin, under `w.mu`) and call it in headless.go's `narrate`/`onID` path after `ApplyConfig`, before `RunStarted`; keep `Options.Currency` for embedders and document it on `EventLinesOptions` in `apogee.go`. The existing "usage" case of `TestEncodeJSONGolden` gains `"cost":0,"priced":false,"cumulative_cost":0,"cumulative_unpriced_calls":0,"currency":""` in its `wantData` (in the struct's key order).

@@ -33,11 +33,17 @@ const lineVersion = 2
 // stream is exactly what ADR 0076 A5 promised; on, each seam closure is one more line, at every
 // depth — `pre-request` and `post-response` close once per streamed Turn and the two tool seams
 // once per tool call, which is why a consumer asks for them rather than filtering them out.
+//
+// Currency is the run's configured `currency:` label (ADR 0093 decision 6), which every usage
+// line's `currency` member states once a call behind its running sums was priced
+// (FrameCurrency). An embedder that holds the label at construction sets it here; a Driver that
+// resolves its configuration later leaves it empty and calls SetCurrency.
 type Options struct {
-	Session string
-	Now     func() time.Time
-	Report  func(error)
-	Seams   bool
+	Session  string
+	Now      func() time.Time
+	Report   func(error)
+	Seams    bool
+	Currency string
 }
 
 // Writer renders the engine's Event stream as the Event lines — one JSON line per Event on the
@@ -63,10 +69,11 @@ type Writer struct {
 	report func(error)
 	seams  bool
 
-	mu      sync.Mutex
-	session string
-	seq     int
-	stopped bool
+	mu       sync.Mutex
+	session  string
+	currency string
+	seq      int
+	stopped  bool
 
 	inner domain.EventSink
 }
@@ -78,7 +85,8 @@ func New(w io.Writer, o Options) *Writer {
 	if now == nil {
 		now = time.Now
 	}
-	return &Writer{out: bufio.NewWriter(w), now: now, report: o.Report, seams: o.Seams, session: o.Session}
+	return &Writer{out: bufio.NewWriter(w), now: now, report: o.Report, seams: o.Seams, session: o.Session,
+		currency: o.Currency}
 }
 
 // Wrap installs inner as the sink every Emit is forwarded to and returns the Writer itself, so a
@@ -98,6 +106,15 @@ func (w *Writer) SetSession(id string) {
 	w.session = id
 }
 
+// SetCurrency binds the run's currency label to every usage line written from now on — SetSession's
+// twin, for a Driver that resolves its configuration only after it built the Writer. Lines already
+// written keep the label they were stamped with.
+func (w *Writer) SetCurrency(label string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.currency = label
+}
+
 // Emit writes one Event as a line and forwards it to the wrapped sink.
 //
 // A domain.WireEvent is forwarded only: it is raw provider protocol and is excluded from the
@@ -111,7 +128,10 @@ func (w *Writer) SetSession(id string) {
 // from the very SeamClosedEvent the default stream holds back, so the forward is never gated.
 func (w *Writer) Emit(ev domain.Event) {
 	if _, held := ev.(domain.SeamClosedEvent); !held || w.seams {
-		if kind, base, data, ok := Encode(ev); ok {
+		w.mu.Lock()
+		currency := w.currency
+		w.mu.Unlock()
+		if kind, base, data, ok := encode(ev, currency); ok {
 			w.writeLine(kind, &base, data)
 		}
 	}
@@ -353,6 +373,17 @@ type SubAgentUsage struct {
 	Cost          json.Number `json:"cost"`
 	Currency      string      `json:"currency"`
 	UnpricedCalls int         `json:"unpriced_calls"`
+}
+
+// FrameCurrency is the label a usage reading states beside its cost: currency when at least one
+// call behind the reading was priced, "" when none was — so an unpriced reading carries the zero
+// values (0, "") rather than naming a currency for an amount nobody priced. It is the one rule the
+// usage line and the closing frame's usage and sub_agents members all follow.
+func FrameCurrency(u domain.Usage, currency string) string {
+	if u.PricedCalls <= 0 {
+		return ""
+	}
+	return currency
 }
 
 // CostAmount spells an amount held in millionths of the currency unit (domain.Usage.CostMicros) as

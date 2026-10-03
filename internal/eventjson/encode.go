@@ -90,7 +90,17 @@ func Kinds() []string {
 // alone: that variant declares a CallID of its own — the AUDITED call — which shadows the
 // embedded one. The envelope must carry the SPAWNING delegation's id like every other line, so the
 // embedded field is what travels here and the audited call rides `data.call_id`.
+//
+// A usage line's `currency` is the one data member no Event carries: it is the run's configured
+// label, which a Writer holds (Options.Currency, Writer.SetCurrency) and passes in through encode.
+// Encode itself writes the label as "" — what an unpriced line carries anyway.
 func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok bool) {
+	return encode(ev, "")
+}
+
+// encode is Encode with the run's currency label in hand, stated on a usage line only under
+// FrameCurrency's rule.
+func encode(ev domain.Event, currency string) (kind string, base domain.EventBase, data any, ok bool) {
 	switch e := ev.(type) {
 	case domain.TokenEvent:
 		return kindToken, e.EventBase, tokenData{Text: e.Text}, true
@@ -166,6 +176,11 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			CumulativeTotalTokens:        e.Cumulative.TotalTokens,
 			CumulativeCachedPromptTokens: e.Cumulative.CachedPromptTokens,
 			CumulativeCalls:              e.Cumulative.Calls,
+			Cost:                         CostAmount(e.CostMicros),
+			Priced:                       e.Priced,
+			CumulativeCost:               CostAmount(e.Cumulative.CostMicros),
+			CumulativeUnpricedCalls:      e.Cumulative.UnpricedCalls,
+			Currency:                     FrameCurrency(e.Cumulative, currency),
 			Maintenance:                  e.Maintenance,
 		}, true
 	case domain.AuditEvent:
@@ -391,6 +406,13 @@ type refClippedData struct {
 // server put on the reply — what actually answered, beside the model that was asked for — and ""
 // where the server named none; added within v 2, since a member a reader did not know is one it
 // ignores.
+//
+// The priced Spend (money, ADR 0093) rides beside the tokens on the same additive terms: cost and
+// priced are THIS call's amount and whether it was priced at all, cumulative_cost and
+// cumulative_unpriced_calls the emitting agent's running sums, and currency the label every amount
+// is in — the configured one only once a call behind the running sums was priced (FrameCurrency).
+// Amounts are exact decimals (CostAmount), and an unpriced line writes the zero values rather than
+// dropping the keys.
 type usageData struct {
 	PromptTokens       int    `json:"prompt_tokens"`
 	CompletionTokens   int    `json:"completion_tokens"`
@@ -405,6 +427,12 @@ type usageData struct {
 	CumulativeTotalTokens        int `json:"cumulative_total_tokens"`
 	CumulativeCachedPromptTokens int `json:"cumulative_cached_prompt_tokens"`
 	CumulativeCalls              int `json:"cumulative_calls"`
+
+	Cost                    json.Number `json:"cost"`
+	Priced                  bool        `json:"priced"`
+	CumulativeCost          json.Number `json:"cumulative_cost"`
+	CumulativeUnpricedCalls int         `json:"cumulative_unpriced_calls"`
+	Currency                string      `json:"currency"`
 
 	Maintenance bool `json:"maintenance"`
 }

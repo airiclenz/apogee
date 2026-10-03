@@ -392,7 +392,8 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"context_window":32768,` +
 				`"cumulative_prompt_tokens":1800,"cumulative_completion_tokens":240,` +
 				`"cumulative_total_tokens":2040,"cumulative_cached_prompt_tokens":640,` +
-				`"cumulative_calls":2,"maintenance":true}`,
+				`"cumulative_calls":2,"cost":0,"priced":false,"cumulative_cost":0,` +
+				`"cumulative_unpriced_calls":0,"currency":"","maintenance":true}`,
 		},
 		{
 			// The envelope takes the SPAWNING delegation's id off the embedded EventBase while
@@ -580,6 +581,66 @@ func TestEncodeSeamClosed(t *testing.T) {
 			}
 			if strings.Contains(string(encoded), "value") {
 				t.Errorf("the seam's live Value reached the line: %s", encoded)
+			}
+		})
+	}
+}
+
+// TestEncodeUsageCarriesTheSpend pins the usage line's money members (ADR 0093) under the run's
+// label: this call's exact amount and whether it was priced, the agent's running amount and
+// unpriced count, and the label named only once a call behind the running sums was priced — so an
+// unpriced reading writes the zero values and never a currency for an amount nobody priced.
+func TestEncodeUsageCarriesTheSpend(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		event domain.UsageEvent
+		want  string
+	}{
+		{
+			name: "priced",
+			event: domain.UsageEvent{
+				CostMicros: 2_200,
+				Priced:     true,
+				Cumulative: domain.Usage{Calls: 2, CostMicros: 3_000, PricedCalls: 2},
+			},
+			want: `"cost":0.0022,"priced":true,"cumulative_cost":0.003,` +
+				`"cumulative_unpriced_calls":0,"currency":"EUR"`,
+		},
+		{
+			name: "unpriced",
+			event: domain.UsageEvent{
+				Cumulative: domain.Usage{Calls: 1, UnpricedCalls: 1},
+			},
+			want: `"cost":0,"priced":false,"cumulative_cost":0,` +
+				`"cumulative_unpriced_calls":1,"currency":""`,
+		},
+		{
+			name: "an unpriced call after a priced one",
+			event: domain.UsageEvent{
+				Cumulative: domain.Usage{Calls: 2, CostMicros: 2_200, PricedCalls: 1, UnpricedCalls: 1},
+			},
+			want: `"cost":0,"priced":false,"cumulative_cost":0.0022,` +
+				`"cumulative_unpriced_calls":1,"currency":"EUR"`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			kind, _, data, ok := encode(c.event, "EUR")
+
+			if !ok || kind != "usage" {
+				t.Fatalf("encode(UsageEvent) = %q, ok %v; want a usage line", kind, ok)
+			}
+			encoded, err := json.Marshal(data)
+			if err != nil {
+				t.Fatalf("json.Marshal(data): %v", err)
+			}
+			if !strings.Contains(string(encoded), c.want) {
+				t.Errorf("data JSON =\n  %s\nwant it to carry\n  %s", encoded, c.want)
 			}
 		})
 	}

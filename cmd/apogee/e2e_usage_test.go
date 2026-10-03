@@ -367,6 +367,58 @@ func TestE2EUsageHeadlessCachedCellIsSelfHiding(t *testing.T) {
 	}
 }
 
+// TestE2EUsageLinePricedOnAPricedHome is the headless `--format json` half of the priced Spend: on
+// a home whose bound entry carries a `price:` and a `currency:` label, every per-call usage line
+// names that label and its call as priced, and the last line's running amount is the amount the
+// closing frame reports. The label reaches the Writer only after the configuration resolves, so
+// the golden's unpriced home (eventLinesHome) could never catch a line that lost it.
+func TestE2EUsageLinePricedOnAPricedHome(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "eventlines"))
+	workspace := e2eWorkspace(t)
+	home := t.TempDir()
+	writePricedConfig(t, home, stub, 1, 2)
+
+	out, errOut, err := headlessEventLines(t, run.Once, home, workspace, eventLinesPrompt)
+	if err != nil {
+		t.Fatalf("the scripted run returned %v\nstderr:\n%s", err, errOut)
+	}
+	stub.AssertConsumed(t)
+
+	lines := jsonEventLines(t, out)
+	var last map[string]any
+	for _, line := range lines {
+		if line["event"] != "usage" {
+			continue
+		}
+		data, ok := line["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("a usage line carries no data object: %v", line)
+		}
+		if data["currency"] != "EUR" {
+			t.Errorf("usage line currency = %v; want the configured %q", data["currency"], "EUR")
+		}
+		if data["priced"] != true {
+			t.Errorf("usage line priced = %v; want true on a priced entry", data["priced"])
+		}
+		if cost, _ := data["cost"].(float64); cost <= 0 {
+			t.Errorf("usage line cost = %v; want a positive amount on a priced entry", data["cost"])
+		}
+		last = data
+	}
+	if last == nil {
+		t.Fatalf("the stream carried no usage line:\n%s", out)
+	}
+	_, finished := finishedFrame(t, lines)
+	usage, ok := finished["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("the closing frame's usage is %v; want the usage block", finished["usage"])
+	}
+	if last["cumulative_cost"] != usage["cost"] {
+		t.Errorf("the last usage line's cumulative_cost = %v; want the closing frame's cost %v",
+			last["cumulative_cost"], usage["cost"])
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Reading the two panes
 // ----------------------------------------------------------------------------
