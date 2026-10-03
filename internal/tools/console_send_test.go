@@ -128,7 +128,7 @@ func TestConsoleSend_RunsTheLineAndReportsLiveness(t *testing.T) {
 	ctx, _ := consoleTestCtx(t)
 	id := openTestConsole(t, ctx, "sh")
 
-	res, err := NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "echo hi", false, 2000))
+	res, err := NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "echo $((40+2))", false, 2000))
 
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
@@ -136,8 +136,8 @@ func TestConsoleSend_RunsTheLineAndReportsLiveness(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("send produced an error result: %q", res.Content)
 	}
-	if !strings.Contains(res.Content, "hi") {
-		t.Errorf("result = %q, want it to carry the command's output", res.Content)
+	if !strings.Contains(res.Content, "42") {
+		t.Errorf("result = %q, want it to carry the command's output (42, which only running the line prints)", res.Content)
 	}
 	if !strings.HasSuffix(res.Content, consoleAliveStatus) {
 		t.Errorf("result = %q, want it to end with %q", res.Content, consoleAliveStatus)
@@ -204,8 +204,9 @@ func TestConsoleInputBytes_EndsWithTheHostsEnter(t *testing.T) {
 	}
 }
 
-// terminalRulesHost is the platform rules with the two Console facts overridden, so a test can
-// drive console_send under the Windows answer ("a Console open cannot confine") from any host.
+// terminalRulesHost is the platform rules with the Console-confines fact overridden, so a test
+// can drive console_send under either answer ("a Console open can confine" on POSIX, "cannot" on
+// Windows) from any host — the answer picks the wording of a demoted send's error.
 type terminalRulesHost struct {
 	platform.Host
 	confines bool
@@ -235,7 +236,8 @@ func withFSConfinement(t *testing.T, ctx context.Context) context.Context {
 // TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined pins the Windows send
 // fence (ADR 0059 Bounds): on a host whose Console open cannot confine, a send under a confinement
 // box to a Console that was not opened confined is refused with ErrConfinementUnavailable — the
-// sentinel the dispatch demotes to Approval. The same send with no box (the unconfined re-run
+// sentinel the dispatch demotes to Approval — and its text says the platform cannot confine a
+// Console, since reopening it would not help. The same send with no box (the unconfined re-run
 // Approval grants) goes through. The Console runs the host's own platform shell interactively
 // (sh, or cmd.exe), so the test is exercised on every host.
 func TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined(t *testing.T) {
@@ -250,31 +252,46 @@ func TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined(t *
 	if !errors.Is(boxedErr, domain.ErrConfinementUnavailable) {
 		t.Errorf("send under a box = %v, want an error wrapping ErrConfinementUnavailable", boxedErr)
 	}
+	if boxedErr != nil && !strings.Contains(boxedErr.Error(), "this platform cannot confine a console") {
+		t.Errorf("send under a box = %q, want it to say this platform cannot confine a console", boxedErr)
+	}
 	if unboxedErr != nil || unboxed.IsError {
 		t.Errorf("send with no box = %q (err=%v), want it typed as before", unboxed.Content, unboxedErr)
 	}
 }
 
-// TestConsoleSend_AskOpenedConsoleStillSendsUnderABoxOnPOSIX pins the POSIX half of that fence:
-// where a Console open CAN confine, a Console opened unconfined (in Ask, before a switch to Auto)
-// still takes a send made under a confinement box exactly as it always has — the demotion is the
-// Windows host's alone.
-func TestConsoleSend_AskOpenedConsoleStillSendsUnderABoxOnPOSIX(t *testing.T) {
+// TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX pins the POSIX half of that fence
+// (ADR 0059, Amendment 2026-10-04): where a Console open CAN confine, a Console opened unconfined
+// (in Ask-Before, before a switch to Auto) is no fenced shell either, so a send to it under a
+// confinement box is refused with ErrConfinementUnavailable before anything is typed, and the
+// error tells the model to close the Console and reopen it. The proof nothing was typed is the
+// arithmetic: an Enter pressed afterwards, unboxed, would run a typed-but-unentered line and print
+// 42. The same line sent with no box runs and prints it.
+func TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX(t *testing.T) {
 	skipWithoutPOSIXShell(t)
 	t.Parallel()
 	ctx, registry := consoleTestCtx(t)
 	id := openTestConsole(t, ctx, "sh")
 	if opened, _ := registry.Get(id); opened.Confined {
-		t.Fatalf("console %d was opened confined; the test needs an Ask-opened (unconfined) one", id)
+		t.Fatalf("console %d was opened confined; the test needs an unconfined one", id)
 	}
+	tool := consoleSendOn(true)
 
-	res, err := consoleSendOn(true).Execute(withFSConfinement(t, ctx), consoleSendCall("c1", id, "echo still-sends", false, 2000))
+	_, boxedErr := tool.Execute(withFSConfinement(t, ctx), consoleSendCall("c1", id, "echo $((40+2))", true, 10))
+	entered, enteredErr := tool.Execute(ctx, consoleSendCall("c2", id, "", false, 500))
+	unboxed, unboxedErr := tool.Execute(ctx, consoleSendCall("c3", id, "echo $((40+2))", false, 2000))
 
-	if err != nil {
-		t.Fatalf("Execute err = %v, want nil (no demotion where a Console can be confined)", err)
+	if !errors.Is(boxedErr, domain.ErrConfinementUnavailable) {
+		t.Fatalf("send under a box = %v, want an error wrapping ErrConfinementUnavailable", boxedErr)
 	}
-	if res.IsError || !strings.Contains(res.Content, "still-sends") {
-		t.Errorf("result = %q (isError=%v), want the line to have run", res.Content, res.IsError)
+	if msg := boxedErr.Error(); !strings.Contains(msg, "close it") || !strings.Contains(msg, "reopen it") {
+		t.Errorf("send under a box = %q, want it to tell the model to close the console and reopen it", msg)
+	}
+	if enteredErr != nil || strings.Contains(entered.Content, "42") {
+		t.Errorf("Enter after the boxed send = %q (err=%v), want nothing typed by the refused send", entered.Content, enteredErr)
+	}
+	if unboxedErr != nil || unboxed.IsError || !strings.Contains(unboxed.Content, "42") {
+		t.Errorf("send with no box = %q (err=%v), want the line to have run", unboxed.Content, unboxedErr)
 	}
 }
 
@@ -366,7 +383,7 @@ func TestConsoleSend_QuotedIDAddressesTheSameConsole(t *testing.T) {
 	call := domain.ToolCall{
 		ID:        "c1",
 		Tool:      "console_send",
-		Arguments: []byte(fmt.Sprintf(`{"id":"%d","input":"echo quoted-ok","wait_ms":2000}`, id)),
+		Arguments: []byte(fmt.Sprintf(`{"id":"%d","input":"printf 'quoted%%s\\n' -ok","wait_ms":2000}`, id)),
 	}
 
 	res, err := NewConsoleSend().Execute(ctx, call)

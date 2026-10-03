@@ -819,8 +819,11 @@ promise; the box can still fail to establish at run time. So the **subproc, caps
 cell carries one precomputed contingency: if `Confine` returns `ErrConfinementUnavailable`, the call
 demotes to a **forced `Gate`** whose allow-continuation **re-runs the subprocess unconfined** (Approval
 is now the bound — the same "gate if you can't" outcome, decided at run time); with **no Approver** the
-fallback is a **`Refuse`** ("subprocess could not be confined and approval was not granted"). The
-fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
+fallback is a **`Refuse`** ("subprocess could not be confined and approval was not granted"). That
+refusal, and a denial of the demoted gate, carry after their reason whatever the tool's own
+`ErrConfinementUnavailable` error says beyond the sentinel — `console_send`'s "close it … and reopen
+it … to run it fenced" — so the model learns the way to a fenced run; the Approval prompt stays
+generic. The fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
 it without re-deciding.
 
 > **The approved escape executes (landed 2026-08-14 —

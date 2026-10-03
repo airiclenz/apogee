@@ -49,9 +49,9 @@ type Console struct {
 	// names it, and a transcript reading "console 3" is only useful next to what console 3 is.
 	Command string
 	// Confined reports that the Console was opened confined (OpenSpec.Confined): its process
-	// runs inside the fence the open was resolved under. A send relies on that fence where the
-	// platform can set one (ADR 0059 §2); where it cannot (Windows), an unconfined Console's
-	// send under a confinement box is demoted instead.
+	// runs inside the fence the open was resolved under, and a send relies on that fence (ADR 0059
+	// §2). A send under a confinement box to an unconfined Console is demoted to Approval on
+	// every host (ADR 0059, Amendment 2026-10-04).
 	Confined bool
 
 	proc *Process

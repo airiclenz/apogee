@@ -2544,9 +2544,10 @@ the command runs through `cmd /c` and `console_send` presses Enter as a carriage
 Windows console program reads as "submit the line". What Windows cannot do yet is fence a Console,
 so in Auto it fails closed instead of running one unfenced: `console_open` is demoted to Approval —
 you are asked before the program starts — and so is **every** `console_send` to it while Auto's
-fence is on, each send asked on its own. (On macOS and Linux nothing changes: a send rides on the
-fence the Console was opened under, so one opened unfenced in Ask-Before still takes sends after a
-switch to Auto.)
+fence is on, each send asked on its own. (macOS and Linux fence a Console opened in Auto, so a send
+to it runs inside that fence. One opened unfenced in Ask-Before is gated the same way after a
+switch to Auto: each send under the fence is asked on its own, refused when nobody can be asked, and
+the model is told to close that Console and reopen it so it runs fenced.)
 A Windows host without ConPTY answers `could not open a console` rather than pretending.
 
 ## The task list

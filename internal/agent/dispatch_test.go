@@ -735,6 +735,76 @@ func TestDisposition_RuntimeConfineUnavailable_DemotesToApproval(t *testing.T) {
 	})
 }
 
+// unfencedTargetTool is a subprocess tool shaped like confinePropagatingTool whose own target —
+// not the Confiner — is what cannot be fenced: handed a Confinement handle, it returns detail
+// wrapped in ErrConfinementUnavailable before doing anything, as console_send does for a Console
+// opened unconfined. The Confiner is capable, so the demote is the tool's claim alone.
+type unfencedTargetTool struct {
+	name   string
+	detail string
+	ran    *int
+}
+
+func (t unfencedTargetTool) Name() string            { return t.name }
+func (t unfencedTargetTool) Description() string     { return t.name + " (subprocess)" }
+func (t unfencedTargetTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t unfencedTargetTool) ReadOnly() bool          { return false }
+func (t unfencedTargetTool) Subprocess() bool        { return true }
+
+func (t unfencedTargetTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if _, ok := domain.ConfinementFromContext(ctx); ok {
+		return domain.ToolResult{}, fmt.Errorf("%w: %s", domain.ErrConfinementUnavailable, t.detail)
+	}
+	if t.ran != nil {
+		*t.ran++
+	}
+	return domain.ToolResult{CallID: call.ID, Content: "ran"}, nil
+}
+
+// TestDispatch_ConfineFallbackRefusalCarriesTheToolError proves the model hears WHY a demoted
+// call was refused: when the confinement fallback refuses a subprocess call headless (no
+// Approver), or the human denies the demoted call, the result holds the tool's own
+// ErrConfinementUnavailable text — console_send's "close it and reopen it" — beside the refusal
+// reason, rather than the bare reason alone.
+func TestDispatch_ConfineFallbackRefusalCarriesTheToolError(t *testing.T) {
+	t.Parallel()
+	const detail = "console 3 was opened unconfined; close it and reopen it to run it fenced"
+
+	tests := []struct {
+		name     string
+		approver domain.Approver
+	}{
+		{name: "headless refusal", approver: nil},
+		{name: "denied demoted call", approver: &fakeApprover{decision: domain.ApprovalDeny}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			ran := 0
+			sub := unfencedTargetTool{name: "console_send", detail: detail, ran: &ran}
+			cfg := autoConfig(sink, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}, true, sub)
+			cfg.Approver = tc.approver
+
+			driveToolCall(t, cfg, sink, "c1", "console_send", `{"id":3,"input":"ls"}`)
+
+			res, _ := lastToolResult(sink.events)
+			if ran != 0 {
+				t.Errorf("tool ran %d times; a refused demoted call must never run unconfined", ran)
+			}
+			if !res.IsError {
+				t.Fatalf("result = %q, want an error result", res.Content)
+			}
+			if !strings.Contains(res.Content, confineDemoteRefuseReason) {
+				t.Errorf("result = %q, want it to hold the refusal reason %q", res.Content, confineDemoteRefuseReason)
+			}
+			if !strings.Contains(res.Content, detail) {
+				t.Errorf("result = %q, want it to carry the tool's own error text %q", res.Content, detail)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // A Tier-2 forced gate on a Confine leaf — approval decides WHETHER, the box WHERE
 // ----------------------------------------------------------------------------

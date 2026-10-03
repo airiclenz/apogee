@@ -119,8 +119,10 @@ type Terminal interface {
 	// platform. It is true on POSIX, where the pty child takes the same Confiner wrap
 	// as any subprocess. It is false on Windows: the pseudoconsole launcher has no
 	// restricted-token path, so a confined open fails closed with
-	// domain.ErrConfinementUnavailable and every Console there runs unfenced — which
-	// is why a send to one cannot lean on a fence set when it was opened.
+	// domain.ErrConfinementUnavailable and every Console there runs unfenced. It does
+	// not decide whether a send is gated — a send under a box to any unconfined
+	// Console is, on every platform — only whether reopening the Console could fence
+	// it, which the demoted send's error tells the model.
 	ConsoleConfines() bool
 }
 

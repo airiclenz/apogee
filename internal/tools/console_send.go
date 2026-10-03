@@ -46,25 +46,26 @@ type consoleSendArgs struct {
 // mode is never a standing permission in another; a mode change or a `/confine` change reaches
 // the next send, never the live process (§4).
 //
-// On a host whose Console open cannot confine (Windows, per platform.Terminal.ConsoleConfines),
-// the fence console_open set is not there to rely on: every Console there runs unfenced, so a send
-// to one that was not opened confined, made under a confinement box, is refused with
-// domain.ErrConfinementUnavailable and the dispatch demotes that send to Approval — each send on
-// its own (ADR 0059 Bounds, Windows).
+// A send made under a confinement box to a Console that was not opened confined has no fence
+// behind the shell it would reach — on Windows because no Console there is ever fenced, on POSIX
+// because the Console was opened unconfined (in Ask-Before, before a switch to Auto). On every
+// host such a send is refused with domain.ErrConfinementUnavailable and the dispatch demotes it to
+// Approval — each send on its own (ADR 0059 Bounds and its 2026-10-04 Amendment).
 //
 // It is DEFAULT-OFF beside the rest of the family (ADR 0057).
 type ConsoleSend struct {
 	toolSpec
 	// host is the operating system the tool types through: its platform rules supply the bytes
-	// the Enter key sends and whether a Console could have been opened confined at all.
+	// the Enter key sends, and whether a Console could have been opened confined at all — which
+	// picks the wording of the demotion error, never whether a send is demoted.
 	host execHost
 }
 
 // NewConsoleSend returns a console_send tool on the real operating system (defaultExecHost). It
-// takes no root and no credential names: it starts nothing and resolves no path — where the
-// platform can confine a Console, the one it types into was fenced when console_open opened it;
-// where it cannot, Execute demotes the send instead. builtinTools builds it on the execution
-// tools' one host through newConsoleSend.
+// takes no root and no credential names: it starts nothing and resolves no path — a Console
+// opened confined was fenced when console_open opened it, and a send under a box to one that was
+// not is demoted by Execute instead. builtinTools builds it on the execution tools' one host
+// through newConsoleSend.
 func NewConsoleSend() *ConsoleSend {
 	return newConsoleSend(defaultExecHost())
 }
@@ -110,14 +111,14 @@ func (t *ConsoleSend) ApprovalScope(call domain.ToolCall) string {
 // An unknown id, a missing input and a terminal that refused the write are all error RESULTS —
 // each is something the model can act on, and the unknown-id refusal names the ids that are open.
 // Only two things are Go errors, both BEFORE the write: ctx cancellation, and the confinement
-// demotion — a send under a confinement box to a Console that was not opened confined, on a host
-// whose Console open cannot confine (consoleSendUnfenced), returns an error wrapping
-// domain.ErrConfinementUnavailable so the dispatch gates it through Approval rather than typing
-// into an unfenced shell. Where the platform CAN confine, an unconfined Console (one opened
-// before a switch to Auto) still sends as it always has (ADR 0059 §2). A cancel during the wait
-// window ends it promptly with a nil error, returning the output collected so far and
-// consoleCutShortNote — the input was already typed, and that is finished work the model must be
-// told about (ADR 0088).
+// demotion — a send under a confinement box to a Console that was not opened confined
+// (consoleSendUnfenced) returns an error wrapping domain.ErrConfinementUnavailable, on every
+// host, so the dispatch gates it through Approval rather than typing into an unfenced shell
+// (ADR 0059, Amendment 2026-10-04). The error's text is what the model reads beside the refusal:
+// where the platform can confine a Console it says to close this one and reopen it fenced, and
+// where it cannot it says so. A cancel during the wait window ends it promptly with a nil error,
+// returning the output collected so far and consoleCutShortNote — the input was already typed,
+// and that is finished work the model must be told about (ADR 0088).
 func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -137,10 +138,7 @@ func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	if t.consoleSendUnfenced(ctx, target) {
-		return domain.ToolResult{}, fmt.Errorf(
-			"%w: console %d was opened unconfined and this platform cannot confine a console",
-			domain.ErrConfinementUnavailable, args.ID,
-		)
+		return domain.ToolResult{}, t.unfencedSendError(int(args.ID))
 	}
 
 	if _, err := target.Write(consoleInputBytes(*args.Input, args.Raw, t.host.shell.Enter())); err != nil {
@@ -152,12 +150,29 @@ func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain
 }
 
 // consoleSendUnfenced reports that a send to target must be demoted rather than typed: the call
-// runs under a confinement box, target was not opened confined, and the host's Console open
-// cannot confine (platform.Terminal.ConsoleConfines) — so no fence stands behind the shell the
-// line would reach. On a host that can confine it is always false, which keeps the POSIX send
-// to an Ask-opened Console exactly as it was.
+// runs under a confinement box and target was not opened confined, so no fence stands behind the
+// shell the line would reach. It holds on every host — whether the host's Console open can
+// confine (platform.Terminal.ConsoleConfines) changes only what unfencedSendError says.
 func (t *ConsoleSend) consoleSendUnfenced(ctx context.Context, target *console.Console) bool {
-	return confinementBox(ctx) != nil && !target.Confined && !t.host.shell.ConsoleConfines()
+	return confinementBox(ctx) != nil && !target.Confined
+}
+
+// unfencedSendError is the demotion error for a send to console id: it wraps
+// domain.ErrConfinementUnavailable so the dispatch gates the send, and its text names the way to
+// a fenced send. Where a Console open can confine (POSIX), the way is to close this Console and
+// reopen it, which fences the new one; where it cannot (Windows), there is none to name.
+func (t *ConsoleSend) unfencedSendError(id int) error {
+	if !t.host.shell.ConsoleConfines() {
+		return fmt.Errorf(
+			"%w: console %d was opened unconfined and this platform cannot confine a console",
+			domain.ErrConfinementUnavailable, id,
+		)
+	}
+	return fmt.Errorf(
+		"%w: console %d was opened unconfined; close it with console_close and reopen it with"+
+			" console_open to run it fenced",
+		domain.ErrConfinementUnavailable, id,
+	)
 }
 
 var (

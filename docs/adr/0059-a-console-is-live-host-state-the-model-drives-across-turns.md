@@ -99,7 +99,7 @@ orphaned child process and a dead server mid-Exchange are both worse failure mod
   only, the assumption behind §2 and §4 that the fence set when `console_open` opened a Console is
   what binds every later send to it. POSIX is unchanged: a Console opened unconfined (in
   Ask-Before) and sent to after a switch to Auto still takes the send — that pre-existing gap is
-  filed as its own follow-up bead.
+  filed as its own follow-up bead. *(Superseded for POSIX by the 2026-10-04 Amendment below.)*
 - The bench needs no stub: a Console is not an `ExternalEffectTool`; a fork simply inherits none.
 
 ## Consequences
@@ -111,3 +111,20 @@ orphaned child process and a dead server mid-Exchange are both worse failure mod
   line against this record.
 - A saved implementation plan follows (house format, `docs/plans/`); nothing ships from this
   record alone.
+
+## Amendment (2026-10-04) — POSIX gates a send to an unconfined Console like Windows
+
+The Bounds bullet's "POSIX is unchanged" sentence is superseded. On every host, a `console_send`
+made under a confinement box to a Console that was not opened confined reports
+`ErrConfinementUnavailable` before it types anything, and the dispatch demotes that send to
+Approval — each send on its own, refused headless. On POSIX such a Console is one opened unfenced
+in Ask-Before and sent to after a switch to Auto; the fence a later `console_open` would set is
+not behind it, so §2's "the fence set at open binds every later send" no longer lets it through.
+A send with no box (Ask-Before, Bypass, or the unconfined re-run Approval grants) and a send to a
+confined Console run as before.
+
+`Terminal.ConsoleConfines` now chooses only the wording the model reads. Where a Console open can
+confine (POSIX), the error tells the model to close the Console and reopen it so it runs fenced;
+where it cannot (Windows), the text is unchanged. The dispatch carries that text into the
+refusal or denial result after its own reason; the Approval prompt stays generic. The demote
+error event still fires, now on every gated POSIX send too.
