@@ -2064,7 +2064,9 @@ func TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated(t *testing.T) {
 // TestOncePricesTheFiringAndRecordsItsCurrency pins ADR 0093 decisions 3 and 6 for an unattended
 // run: a Firing on a priced server prices each call at that server (Config.Price), and the record
 // writes the configured currency label (Spec.Currency) onto Meta.Currency beside the amount it
-// labels, so the amount is never read under another label.
+// labels, so the amount is never read under another label. The record round-trips the label through
+// the store, and the Result states it beside the amount for the Driver that reports the run, with
+// the Turn-1 reading carrying that first call's own price.
 func TestOncePricesTheFiringAndRecordsItsCurrency(t *testing.T) {
 	t.Parallel()
 
@@ -2099,6 +2101,15 @@ func TestOncePricesTheFiringAndRecordsItsCurrency(t *testing.T) {
 	}
 	if rec.Meta.Currency != "EUR" {
 		t.Errorf("Meta.Currency = %q, want the configured %q", rec.Meta.Currency, "EUR")
+	}
+	if res.Currency != "EUR" {
+		t.Errorf("Result.Currency = %q, want the configured %q", res.Currency, "EUR")
+	}
+	if res.Usage.CostMicros != 2200 || res.Usage.PricedCalls != 1 {
+		t.Errorf("Result.Usage = %+v, want the priced amount 2200 over one priced call", res.Usage)
+	}
+	if res.Turn1Usage.CostMicros != 2200 || res.Turn1Usage.PricedCalls != 1 || res.Turn1Usage.UnpricedCalls != 0 {
+		t.Errorf("Result.Turn1Usage = %+v, want the first call's own price (2200, one priced call)", res.Turn1Usage)
 	}
 }
 
@@ -2502,7 +2513,10 @@ func TestOnceReportsContextCostAndTurn1Usage(t *testing.T) {
 	if res.ContextCost.Calibrated {
 		t.Error("Result.ContextCost.Calibrated = true; the report is taken idle, before any server count could fold in")
 	}
-	wantTurn1 := Usage{Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100, CompletionTokens: 10, TotalTokens: 1244}
+	wantTurn1 := Usage{
+		Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100, CompletionTokens: 10, TotalTokens: 1244,
+		UnpricedCalls: 1,
+	}
 	if res.Turn1Usage != wantTurn1 {
 		t.Errorf("Result.Turn1Usage = %+v, want %+v — the first call's own figures, untouched by the second", res.Turn1Usage, wantTurn1)
 	}
@@ -2522,21 +2536,23 @@ func TestEventTapTurn1IgnoresAMaintenanceReading(t *testing.T) {
 
 	tap.Emit(domain.UsageEvent{
 		EventBase: domain.EventBase{Turn: 0}, PromptTokens: 5000, CompletionTokens: 300, Maintenance: true,
-		Cumulative: domain.Usage{Calls: 1, PromptTokens: 5000, CompletionTokens: 300},
+		CostMicros: 900, Priced: true,
+		Cumulative: domain.Usage{Calls: 1, PromptTokens: 5000, CompletionTokens: 300, CostMicros: 900, PricedCalls: 1},
 	})
 	if got := tap.turn1(); got.Calls != 0 {
 		t.Fatalf("turn1() = %+v after a maintenance reading alone, want nothing latched", got)
 	}
 	tap.Emit(domain.UsageEvent{
 		EventBase: domain.EventBase{Turn: 0}, PromptTokens: 1234, CompletionTokens: 10, CachedPromptTokens: 100,
-		Cumulative: domain.Usage{Calls: 2, PromptTokens: 6234, CompletionTokens: 310},
+		CostMicros: 50, Priced: true,
+		Cumulative: domain.Usage{Calls: 2, PromptTokens: 6234, CompletionTokens: 310, CostMicros: 950, PricedCalls: 2},
 	})
 	tap.Emit(domain.UsageEvent{
 		EventBase: domain.EventBase{Turn: 1}, PromptTokens: 2345, CompletionTokens: 20,
 		Cumulative: domain.Usage{Calls: 3, PromptTokens: 8579, CompletionTokens: 330},
 	})
 
-	want := Usage{Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100, CompletionTokens: 10}
+	want := Usage{Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100, CompletionTokens: 10, CostMicros: 50, PricedCalls: 1}
 	if got := tap.turn1(); got != want {
 		t.Errorf("turn1() = %+v, want %+v — the first real call's own figures, not the cumulative", got, want)
 	}

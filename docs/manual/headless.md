@@ -122,6 +122,10 @@ A server that reports how much of a prompt it answered from its own prefix cache
 `· cached 12k` column to that agent's line — a subset of the prompt count, never a
 replacement for it; a server that says nothing about caching leaves the column off rather
 than printing a zero that would read as a cache miss.
+When any of that agent's calls ran on a server with a `price:`, the line also carries what
+those calls cost in the configured `currency:` — `· spend 0.42 USD`, led by `≥ ` when some of
+the agent's calls ran on an unpriced server, so the amount covers only part of them. An agent
+with no priced call has no `spend` column: an unpriced call is never shown as free.
 Below the usage lines comes what apogee itself put in front of the model at Turn 1, before
 the prompt: `context cost: ~812 tokens (prompt 640 · orientation 90 · tool menu 82)` — the
 estimate over the standing system content and the tool menu, one column per piece present —
@@ -275,6 +279,14 @@ binary that wrote it).
 (the run's error text, `null` when there was none), `title`, `final_text`, `wrote`,
 `context_files`, `context_cost`, `undo_note`, `saved`, `usage`, `sub_agents`,
 `turn1_prompt_tokens` and `turn1_cached_prompt_tokens`.
+
+`usage` and each `sub_agents` entry carry the token counters — `calls`, `prompt_tokens`,
+`completion_tokens`, `total_tokens`, `cached_prompt_tokens` — and the priced spend beside them:
+`cost`, the amount of that agent's priced calls in whole currency units, exact to the millionth
+(`0.0022`, never rounded for display); `currency`, the configured `currency:` label it was priced
+in; and `unpriced_calls`, how many of `calls` ran on a server with no `price:`. A non-zero
+`unpriced_calls` beside a `cost` means the amount covers only part of that agent's calls. An agent
+with no priced call writes `cost` `0` and `currency` `""` — the members are always present.
 
 `context_cost` is what apogee itself put in front of the model at Turn 1, before the prompt — the
 standing system content and the tool menu — as `rows` (one `{name, bytes, tokens}` per piece, in

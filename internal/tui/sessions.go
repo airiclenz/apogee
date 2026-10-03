@@ -871,12 +871,25 @@ func sessionRowCells(meta session.Meta, parentTitle string, currentWorkspace str
 // before the accounting existed, and a server that omits usage entirely, both land there, and
 // neither of them spent nothing — they never said. It is the last cell, so a row without it simply
 // ends where it always did.
+//
+// The priced Spend (money) follows the tokens in the same cell, over the same sum, under the label
+// the record was written in (Meta.Currency, ADR 0093 decision 6) and through the one renderer the
+// /usage pane uses (spendText, "≥ " when part of the session ran unpriced). A record with no priced
+// call — one written before pricing existed, or one whose servers carry no `price:` — shows tokens
+// only, never a zero amount.
 func sessionSpendCell(meta session.Meta) string {
-	spend := format.Tokens(meta.Usage.TotalTokens + meta.DelegateUsage.TotalTokens)
-	if spend == "" {
+	total := domain.Sum(domain.Usage(meta.Usage), domain.Usage(meta.DelegateUsage))
+	var parts []string
+	if tokens := format.Tokens(total.TotalTokens); tokens != "" {
+		parts = append(parts, tokens)
+	}
+	if money := spendText(total, meta.Currency); money != "" {
+		parts = append(parts, money)
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return "· " + spend
+	return "· " + strings.Join(parts, " · ")
 }
 
 // msgsLabel renders the user-message count, singularising "1 msg".

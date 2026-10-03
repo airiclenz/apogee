@@ -3,7 +3,10 @@ package eventjson
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -315,12 +318,21 @@ type ContextFileNote struct {
 // Usage mirrors the Firing's own cumulative token accounting — the top-level agent's totals for
 // the whole run, Compaction folds included. A delegated run's spend is its own and rides
 // SubAgents.
+//
+// Cost, Currency and UnpricedCalls are the priced Spend (money) beside the tokens (ADR 0093),
+// added under v:2's additive rule: Cost is the amount of the priced calls in Currency's units
+// (CostAmount), Currency the configured label it was priced in, and UnpricedCalls how many of
+// Calls ran on a server with no `price:` — so a Cost beside a non-zero UnpricedCalls covers only
+// part of the run. A run with no priced call writes 0 and "" for the first two.
 type Usage struct {
-	Calls              int `json:"calls"`
-	PromptTokens       int `json:"prompt_tokens"`
-	CompletionTokens   int `json:"completion_tokens"`
-	TotalTokens        int `json:"total_tokens"`
-	CachedPromptTokens int `json:"cached_prompt_tokens"`
+	Calls              int         `json:"calls"`
+	PromptTokens       int         `json:"prompt_tokens"`
+	CompletionTokens   int         `json:"completion_tokens"`
+	TotalTokens        int         `json:"total_tokens"`
+	CachedPromptTokens int         `json:"cached_prompt_tokens"`
+	Cost               json.Number `json:"cost"`
+	Currency           string      `json:"currency"`
+	UnpricedCalls      int         `json:"unpriced_calls"`
 }
 
 // SubAgentUsage mirrors one finished sub-agent run's context fill and cumulative spend, in FINISH
@@ -337,4 +349,28 @@ type SubAgentUsage struct {
 	CompletionTokens   int    `json:"completion_tokens"`
 	TotalTokens        int    `json:"total_tokens"`
 	CachedPromptTokens int    `json:"cached_prompt_tokens"`
+	// Cost, Currency and UnpricedCalls are this run's priced Spend (money), on Usage's terms.
+	Cost          json.Number `json:"cost"`
+	Currency      string      `json:"currency"`
+	UnpricedCalls int         `json:"unpriced_calls"`
+}
+
+// CostAmount spells an amount held in millionths of the currency unit (domain.Usage.CostMicros) as
+// the frame's `cost` number, in whole currency units. It is decimal text cut from the integer
+// itself, never a float division, so the number a consumer parses is exactly the amount apogee
+// summed (ADR 0093 decision 5) — trailing zeros dropped, and zero spelled "0". The display rounding
+// of domain.FormatCost is deliberately NOT applied: the frame is data, not a display.
+func CostAmount(micros int64) json.Number {
+	sign := ""
+	if micros < 0 {
+		sign = "-"
+		micros = -micros
+	}
+	const microsPerUnit = 1_000_000
+	whole, frac := micros/microsPerUnit, micros%microsPerUnit
+	if frac == 0 {
+		return json.Number(sign + strconv.FormatInt(whole, 10))
+	}
+	digits := strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
+	return json.Number(sign + strconv.FormatInt(whole, 10) + "." + digits)
 }

@@ -378,10 +378,11 @@ func usageCostCell(totals domain.Usage, currency string) string {
 }
 
 // spendText is the Spend (money) a reading states, spelled the one way every TUI surface shows it
-// (the /usage cost cells and the footer's spend segment): the amount and its currency label
-// (domain.FormatCost), led by spendPartialMark where some of the calls behind it were unpriced. It
-// is empty where no call was priced at all, which is the caller's signal that there is no amount
-// to show — never a zero, because an unpriced call is not a free one (ADR 0093 decision 4).
+// (the /usage cost cells, the footer's spend segment and the /sessions spend cell): the amount and
+// its currency label (domain.FormatCost), led by spendPartialMark where some of the calls behind it
+// were unpriced. It is empty where no call was priced at all, which is the caller's signal that
+// there is no amount to show — never a zero, because an unpriced call is not a free one (ADR 0093
+// decision 4).
 func spendText(totals domain.Usage, currency string) string {
 	if totals.PricedCalls <= 0 {
 		return ""

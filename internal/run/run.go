@@ -171,6 +171,11 @@ type Result struct {
 	// the record (Meta.Usage plus Meta.DelegateUsage), and a caller reading the Result takes
 	// for itself.
 	Usage Usage
+	// Currency is the label Usage's and every SubAgents entry's CostMicros is priced in — the
+	// Spec's Currency, the same label Once writes onto Meta.Currency — so a Driver reporting the
+	// amount names the label it was written in (ADR 0093 decision 6). It is empty on the exits
+	// that ran nothing, and a Driver shows no label for a reading with no priced call.
+	Currency string
 	// ContextFiles is what the session's workspace context files contributed — one note per
 	// loaded or unreadable file, plus what the standing system content they ride in costs
 	// against its Budget share. It is measured at SESSION CONSTRUCTION, the same boundary an
@@ -529,6 +534,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		Fault:        a.LastFault(),
 		SubAgents:    tap.subAgentRuns(),
 		Usage:        tap.totals(),
+		Currency:     spec.Currency,
 		ContextFiles: contextFiles,
 		ContextCost:  contextCost,
 		Turn1Usage:   tap.turn1(),
@@ -946,6 +952,12 @@ func (t *eventTap) noteTurn1(ev domain.UsageEvent) {
 		CachedPromptTokens: ev.CachedPromptTokens,
 		CompletionTokens:   ev.CompletionTokens,
 		TotalTokens:        ev.TotalTokens,
+		CostMicros:         ev.CostMicros,
+	}
+	if ev.Priced {
+		t.firstCall.PricedCalls = 1
+	} else {
+		t.firstCall.UnpricedCalls = 1
 	}
 }
 

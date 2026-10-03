@@ -604,8 +604,8 @@ func runFinishedFrame(res run.Result, err error) eventjson.RunFinished {
 		// The RECORD, not the run: --no-save leaves SessionID empty on a run that carried an id
 		// all along, and this is what a consumer reads before it feeds an id to `apogee undo`.
 		Saved:     res.SessionID != "",
-		Usage:     usageFrame(res.Usage),
-		SubAgents: subAgentFrames(res.SubAgents),
+		Usage:     usageFrame(res.Usage, res.Currency),
+		SubAgents: subAgentFrames(res.SubAgents, res.Currency),
 		// The measured Turn-1 context beside the estimate above: the event's own per-call
 		// figures for the run's first call (run.Result.Turn1Usage), zero when none landed.
 		Turn1PromptTokens:       res.Turn1Usage.PromptTokens,
@@ -654,21 +654,36 @@ func contextCostFrame(report domain.ContextCost) eventjson.ContextCost {
 
 // usageFrame restates the Firing's own cumulative token accounting for the frame. It is written
 // out field by field on purpose: the frame's key order is golden-pinned (ADR 0075 D4) and differs
-// from domain.Usage's field order, so a struct conversion cannot land here.
-func usageFrame(u run.Usage) eventjson.Usage {
+// from domain.Usage's field order, so a struct conversion cannot land here. The priced Spend
+// (money) rides beside the tokens: currency is the label the run was priced in (run.Result.Currency),
+// stated only on a reading with a priced call behind it (frameCurrency).
+func usageFrame(u run.Usage, currency string) eventjson.Usage {
 	return eventjson.Usage{
 		Calls:              u.Calls,
 		PromptTokens:       u.PromptTokens,
 		CompletionTokens:   u.CompletionTokens,
 		TotalTokens:        u.TotalTokens,
 		CachedPromptTokens: u.CachedPromptTokens,
+		Cost:               eventjson.CostAmount(u.CostMicros),
+		Currency:           frameCurrency(u, currency),
+		UnpricedCalls:      u.UnpricedCalls,
 	}
+}
+
+// frameCurrency is the label a usage frame states beside its cost: the run's currency when at
+// least one call behind the reading was priced, "" when none was — so an unpriced reading's frame
+// carries the zero values (0, "") rather than naming a currency for an amount nobody priced.
+func frameCurrency(u run.Usage, currency string) string {
+	if u.PricedCalls <= 0 {
+		return ""
+	}
+	return currency
 }
 
 // subAgentFrames restates each finished sub-agent run's fill and spend for the frame, in the
 // finish order the Result already carries. A Firing that delegated nothing composes nothing, so
 // the member is null rather than an empty list.
-func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
+func subAgentFrames(runs []run.SubAgentUsage, currency string) []eventjson.SubAgentUsage {
 	var frames []eventjson.SubAgentUsage
 	for _, r := range runs {
 		frames = append(frames, eventjson.SubAgentUsage{
@@ -682,6 +697,9 @@ func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
 			CompletionTokens:   r.CompletionTokens,
 			TotalTokens:        r.TotalTokens,
 			CachedPromptTokens: r.CachedPromptTokens,
+			Cost:               eventjson.CostAmount(r.CostMicros),
+			Currency:           frameCurrency(r.Usage, currency),
+			UnpricedCalls:      r.UnpricedCalls,
 		})
 	}
 	return frames
@@ -1360,11 +1378,11 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 // headlessSubAgentTarget, so a child is named here exactly as it is named a few lines above.
 func headlessUsageLines(res run.Result) []string {
 	lines := make([]string, 0, 1+len(res.SubAgents))
-	if line := headlessUsageLine(res.Usage, ""); line != "" {
+	if line := headlessUsageLine(res.Usage, res.Currency, ""); line != "" {
 		lines = append(lines, line)
 	}
 	for _, r := range res.SubAgents {
-		if line := headlessUsageLine(r.Usage, headlessSubAgentTarget(r)); line != "" {
+		if line := headlessUsageLine(r.Usage, res.Currency, headlessSubAgentTarget(r)); line != "" {
 			lines = append(lines, line)
 		}
 	}
@@ -1380,7 +1398,12 @@ func headlessUsageLines(res run.Result) []string {
 // most Upstreams never report, so a zero there means "this server said nothing about caching"
 // rather than a spend of zero — the same self-hiding rule the fill lines apply, and the reason it
 // is appended after the counters the line always carries rather than wedged between them.
-func headlessUsageLine(u run.Usage, who string) string {
+//
+// The priced Spend (money) hides itself on the same terms (ADR 0093): a reading with no priced
+// call behind it carries no amount, so no `spend` column appears for it; one with a priced call
+// appends the amount in currency (domain.FormatCost), led by "≥ " when some of its calls were
+// unpriced, because then the amount covers only part of what the agent spent.
+func headlessUsageLine(u run.Usage, currency, who string) string {
 	if u.Calls <= 0 {
 		return ""
 	}
@@ -1389,10 +1412,30 @@ func headlessUsageLine(u run.Usage, who string) string {
 	if u.CachedPromptTokens > 0 {
 		line += " · cached " + headlessTokens(u.CachedPromptTokens)
 	}
+	if spend := headlessSpend(u, currency); spend != "" {
+		line += " · spend " + spend
+	}
 	if who != "" {
 		line += " · " + who
 	}
 	return line
+}
+
+// headlessSpendPartialMark leads an amount that covers only some of the calls behind it — the rest
+// ran on a server with no `price:` — the /usage pane's own mark for the same reading.
+const headlessSpendPartialMark = "≥ "
+
+// headlessSpend spells one reading's priced amount with its currency label, "" when no call behind
+// it was priced.
+func headlessSpend(u run.Usage, currency string) string {
+	if u.PricedCalls <= 0 {
+		return ""
+	}
+	amount := domain.FormatCost(u.CostMicros, currency)
+	if u.UnpricedCalls > 0 {
+		return headlessSpendPartialMark + amount
+	}
+	return amount
 }
 
 // headlessContextCostLine spells the Turn-1 context cost — what apogee itself put in front of the

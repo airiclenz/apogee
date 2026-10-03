@@ -97,7 +97,11 @@ still remembers.
   most of its work to delegates costs most of its tokens in windows that closed
   with those runs, so a row reporting only the conversation you steered would
   understate it by a wide margin; `/usage` is where the two halves are read apart
-  again.
+  again. When any call of the session ran on a server with a `price:`, the row
+  appends what the session cost after the tokens — `· 1M · 0.42 USD`, in the
+  currency label the record was saved under, led by `≥ ` when part of the session
+  ran unpriced. A session with no priced call, including one saved before pricing
+  existed, shows tokens only.
 - A record also keeps **which models actually answered** — every distinct id the
   server put on a reply, in the order first seen, a sub-agent's or a workflow's
   included — beside the profile the session was bound to, because the two can

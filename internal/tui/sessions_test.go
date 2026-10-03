@@ -1071,6 +1071,39 @@ func TestSessionRowCellsSpendIsTheSessionTotal(t *testing.T) {
 	}
 }
 
+// The spend cell appends the record's priced Spend (money) to its tokens — over the same session
+// sum, under the label the record was written in (Meta.Currency), "≥ " when part of the session ran
+// unpriced. A record with no priced call, an old one written before pricing included, keeps the
+// tokens-only cell rather than growing a zero amount (ADR 0093 decisions 4 and 6).
+func TestSessionRowCellsSpendCarriesTheStoredCost(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	base := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a"}
+
+	priced := base
+	priced.Usage = session.Usage{Calls: 4, TotalTokens: 64000, CostMicros: 400_000, PricedCalls: 4}
+	priced.DelegateUsage = session.Usage{Calls: 2, TotalTokens: 36000, CostMicros: 20_000, PricedCalls: 2}
+	priced.Currency = "EUR"
+	want := popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(100_000) + " · 0.42 EUR"}
+	if got := sessionRowCells(priced, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("priced cells = %v, want the session's amount under its stored label (%v)", got, want)
+	}
+
+	partial := priced
+	partial.DelegateUsage = session.Usage{Calls: 2, TotalTokens: 36000, UnpricedCalls: 2}
+	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(100_000) + " · ≥ 0.40 EUR"}
+	if got := sessionRowCells(partial, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("partly priced cells = %v, want the amount marked as a floor (%v)", got, want)
+	}
+
+	old := base
+	old.Usage = session.Usage{Calls: 4, TotalTokens: 64000}
+	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(64000)}
+	if got := sessionRowCells(old, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("cells for a record with no priced call = %v, want tokens only (%v)", got, want)
+	}
+}
+
 // A record one Firing of a Schedule wrote carries its Schedule's name as a tag in the title cell
 // (ADR 0033), so a scheduled run reads as one of a series rather than as a session nobody remembers
 // starting — and it carries it in the all-workspaces view too, beside the workspace base, since the

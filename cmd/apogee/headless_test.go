@@ -2789,6 +2789,104 @@ func TestHeadlessFormatJSONCarriesContextCost(t *testing.T) {
 	}
 }
 
+// TestHeadlessFormatJSONCarriesPricedSpend pins the priced Spend (money) on the closing frame (ADR
+// 0093 under ADR 0075's additive v:2 rule): each usage frame carries `cost` (whole currency units,
+// exact to the millionth), `currency` and `unpriced_calls`, and an unpriced reading writes the keys
+// as zero values (0, "", its count) rather than dropping them or naming a currency for an amount
+// nobody priced.
+func TestHeadlessFormatJSONCarriesPricedSpend(t *testing.T) {
+	stub := &stubRunner{res: run.Result{
+		SessionID: "s-1", FinalText: "the answer", Turns: 2,
+		Usage: run.Usage{
+			Calls: 3, PromptTokens: 1800, CompletionTokens: 120, TotalTokens: 1920,
+			CostMicros: 2_200, PricedCalls: 2, UnpricedCalls: 1,
+		},
+		Currency: "EUR",
+		SubAgents: []run.SubAgentUsage{
+			{
+				Used: 1200, Limit: 32768, Task: "a priced child", Name: "scout",
+				Usage: run.Usage{Calls: 1, PromptTokens: 1000, TotalTokens: 1000, CostMicros: 1_500_000, PricedCalls: 1},
+			},
+			{
+				Used: 900, Limit: 32768, Task: "an unpriced child", Name: "local",
+				Usage: run.Usage{Calls: 2, PromptTokens: 800, TotalTokens: 800, UnpricedCalls: 2},
+			},
+		},
+	}}
+	out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+	for _, want := range []string{
+		`"cached_prompt_tokens":0,"cost":0.0022,"currency":"EUR","unpriced_calls":1}`,
+		`"cached_prompt_tokens":0,"cost":1.5,"currency":"EUR","unpriced_calls":0}`,
+		`"cached_prompt_tokens":0,"cost":0,"currency":"","unpriced_calls":2}`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("run_finished lost %s:\n%s", want, out)
+		}
+	}
+
+	unpriced := &stubRunner{res: run.Result{
+		SessionID: "s-2", FinalText: "the answer", Turns: 1, Currency: "EUR",
+		Usage: run.Usage{Calls: 2, PromptTokens: 900, TotalTokens: 900, UnpricedCalls: 2},
+	}}
+	out, _, err = headlessRun(t, unpriced, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+	_, data := finishedFrame(t, jsonEventLines(t, out))
+	usage, ok := data["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("run_finished.usage = %v, want the usage frame", data["usage"])
+	}
+	for key, want := range map[string]any{"cost": float64(0), "currency": "", "unpriced_calls": float64(2)} {
+		got, present := usage[key]
+		if !present || got != want {
+			t.Errorf("run_finished.usage[%q] = %v (present %v), want %v always written", key, got, present, want)
+		}
+	}
+}
+
+// TestHeadlessUsageLinesSpellPricedSpend pins the text twin: a usage line whose reading had a priced
+// call appends `spend <amount> <currency>`, led by "≥ " when part of that agent's calls ran
+// unpriced, and a reading with no priced call grows no spend column at all — never "0.00".
+func TestHeadlessUsageLinesSpellPricedSpend(t *testing.T) {
+	stub := &stubRunner{res: run.Result{
+		SessionID: "s-9", FinalText: "the answer", Turns: 2, Currency: "EUR",
+		Usage: run.Usage{
+			Calls: 3, PromptTokens: 18000, CompletionTokens: 1200, TotalTokens: 19200,
+			CostMicros: 420_000, PricedCalls: 3,
+		},
+		SubAgents: []run.SubAgentUsage{
+			{
+				Used: 12000, Limit: 32768, Task: "audit the issues", Name: "repo-scout",
+				Usage: run.Usage{
+					Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+					CostMicros: 10_000, PricedCalls: 1, UnpricedCalls: 1,
+				},
+			},
+			{
+				Used: 4000, Limit: 32768, Task: "a local look", Name: "local-scout",
+				Usage: run.Usage{Calls: 1, PromptTokens: 900, CompletionTokens: 100, TotalTokens: 1000, UnpricedCalls: 1},
+			},
+		},
+	}}
+	_, errOut, err := headlessRun(t, stub, "a prompt")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+	for _, want := range []string{
+		"usage: calls 3 · prompt 18k · completion 1k · total 19k · spend 0.42 EUR\n",
+		"usage: calls 2 · prompt 12k · completion 200 · total 12k · spend ≥ 0.01 EUR · repo-scout\n",
+		"usage: calls 1 · prompt 900 · completion 100 · total 1k · local-scout\n",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr lost %q:\n%s", want, errOut)
+		}
+	}
+}
+
 // --format json replaces stdout and NOTHING else: every line this command narrates in its own voice
 // still goes to stderr, exactly as it does on the text path, and the answer that used to be printed
 // raw is now only in the stream (ADR 0075 decision 6).

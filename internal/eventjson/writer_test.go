@@ -123,7 +123,7 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 			`"data":{"exit_code":0,"turns":2,"denied":0,"faulted":false,"fault":"","error":null,"title":"","final_text":"done","wrote":null,` +
 			`"context_files":{"files":null,"standing_tokens":0,"system_share":0},` +
 			`"context_cost":{"rows":null,"bytes":0,"tokens":0,"calibrated":false},"undo_note":"","saved":true,` +
-			`"usage":{"calls":0,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"cached_prompt_tokens":0},"sub_agents":null,` +
+			`"usage":{"calls":0,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"cached_prompt_tokens":0,"cost":0,"currency":"","unpriced_calls":0},"sub_agents":null,` +
 			`"turn1_prompt_tokens":0,"turn1_cached_prompt_tokens":0}}`,
 	}
 
@@ -414,5 +414,52 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 				t.Errorf("inner sink saw %d events, want 2", len(inner.events))
 			}
 		})
+	}
+}
+
+// TestCostAmount pins the `cost` number's spelling: whole currency units cut from the integer
+// millionths (ADR 0093 decision 5), exact to the last millionth, with no trailing zeros and no
+// display rounding — a frame is data, so 1 234 millionths is 0.001234, never "<0.01".
+func TestCostAmount(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		micros int64
+		want   json.Number
+	}{
+		{0, "0"},
+		{1, "0.000001"},
+		{1234, "0.001234"},
+		{2_200, "0.0022"},
+		{1_500_000, "1.5"},
+		{3_000_000, "3"},
+		{12_345_678, "12.345678"},
+		{-2_500_000, "-2.5"},
+	} {
+		if got := CostAmount(tc.micros); got != tc.want {
+			t.Errorf("CostAmount(%d) = %q, want %q", tc.micros, got, tc.want)
+		}
+	}
+}
+
+// A priced frame's `cost` lands in the JSON as a NUMBER, exactly as CostAmount spelled it, beside
+// the label and the unpriced count; an unpriced one writes the zero values rather than dropping
+// the keys (encode.go: no member carries omitempty).
+func TestUsageFrameWritesCostAsANumber(t *testing.T) {
+	t.Parallel()
+
+	priced, err := json.Marshal(Usage{Calls: 3, Cost: CostAmount(2_200), Currency: "EUR", UnpricedCalls: 1})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if want := `"cost":0.0022,"currency":"EUR","unpriced_calls":1}`; !strings.HasSuffix(string(priced), want) {
+		t.Errorf("priced frame = %s, want it to end %s", priced, want)
+	}
+	unpriced, err := json.Marshal(SubAgentUsage{Calls: 2, UnpricedCalls: 2})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if want := `"cost":0,"currency":"","unpriced_calls":2}`; !strings.HasSuffix(string(unpriced), want) {
+		t.Errorf("unpriced frame = %s, want it to end %s", unpriced, want)
 	}
 }

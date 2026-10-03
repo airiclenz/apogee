@@ -170,7 +170,15 @@ internal/tui/footerfit_test.go — TestFooterFitDropsSegmentsInPriorityOrder; in
 **Commit:** `feat(tui): show priced spend in /usage and the footer`
 Depends on item 5.
 
-## 6. Headless output and `/sessions` show cost
+## 6. Headless output and `/sessions` show cost — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): `cost` is written as an exact JSON number cut from the integer millionths (eventjson.CostAmount -> json.Number, e.g. 0.0022, trailing zeros dropped, zero is `0`), not a float division and not domain.FormatCost's two-decimal display rounding, so a consumer parses exactly the summed amount (ADR 0093 decision 5).
+NOTES (2026-10-03): `currency` in a usage frame is the run's label only when that reading has at least one priced call, and "" otherwise, so an unpriced frame is fully zero-valued (0 / "" / N) as the regression guard specifies. The label reaches the Driver through a new run.Result.Currency, set from Spec.Currency, which is the same value Once writes onto Meta.Currency.
+NOTES (2026-10-03): the text "cost line" is a `· spend <amount>` column appended to each agent's existing `usage:` line, placed after the cached column and before the delegation label, with `≥ ` for a partial amount. It is not a separate summed line, because headlessUsageLines prints addends and never a session total, and ADR 0093's vocabulary keeps the word "cost" for Context cost. The /sessions cell reuses the TUI's spendText (`· 1M · 0.42 EUR`).
+NOTES (2026-10-03): noteTurn1 now carries the first call's CostMicros and its priced or unpriced count (per item 3's copy rule). Because of that, TestOnceReportsContextCostAndTurn1Usage's wantTurn1 gains UnpricedCalls: 1, and TestEventTapTurn1IgnoresAMaintenanceReading now prices both readings to pin that a maintenance call's price never leaks into Turn1Usage. The firing-record round trip of Meta.Currency already existed (TestOncePricesTheFiringAndRecordsItsCurrency, item 4), and it is extended to assert Result.Currency and the priced Turn1Usage.
+NOTES (2026-10-03): consequential edit — cmd/apogee/testdata/eventlines/not-started-after-sink.jsonl: made necessary by the new always-present usage keys (a third run_finished golden beside the two the plan names)
+NOTES (2026-10-03): consequential edit — internal/tui/usage.go: made necessary by sessionSpendCell now using spendText (its doc comment listed the surfaces that use it, so it now names the /sessions spend cell)
+NOTES (2026-10-03): the per-call `usage` Event line (kind `usage`) carries no cost keys. The item's goal covers run_finished only, so that line was left unchanged.
 
 **What:**
 **Goal:** headless JSON `run_finished` carries `cost`, `currency` and `unpriced_calls` inside its usage frames, always present (zero values when no call was priced); headless text mode prints a cost line; the `/sessions` spend cell appends the stored cost with the stored currency label.
