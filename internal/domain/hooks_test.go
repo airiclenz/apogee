@@ -501,6 +501,88 @@ func TestMessageInterjectedRoundTripsJSON(t *testing.T) {
 	})
 }
 
+// TestMessageImagesRoundTripJSON pins the snapshot shape of a message's image parts: they ride
+// under the Apogee-owned "images" key with Data base64-encoded, decode back byte-for-byte, never
+// leak into the Extra set, stay off a text-only message, and a snapshot written before the key
+// existed decodes with no images.
+func TestMessageImagesRoundTripJSON(t *testing.T) {
+	t.Parallel()
+
+	withImage := Message{Role: RoleUser, Content: "what is this?", Images: []Image{
+		{Name: "shot.png", MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}},
+	}}
+
+	data, err := json.Marshal(withImage)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	const want = `{"role":"user","content":"what is this?",` +
+		`"images":[{"name":"shot.png","media_type":"image/png","data":"iVBORw=="}]}`
+	if string(data) != want {
+		t.Errorf("Message JSON = %s, want %s", data, want)
+	}
+
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(got.Images) != 1 || got.Images[0].Name != "shot.png" ||
+		got.Images[0].MediaType != "image/png" || !bytes.Equal(got.Images[0].Data, withImage.Images[0].Data) {
+		t.Errorf("round-trip Images = %+v, want %+v", got.Images, withImage.Images)
+	}
+	if _, leaked := got.Extra("images"); leaked {
+		t.Error("the images key leaked into the Extra set — it is a known field")
+	}
+
+	t.Run("a text-only message never emits the key", func(t *testing.T) {
+		plain, err := json.Marshal(Message{Role: RoleUser, Content: "the ask"})
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if bytes.Contains(plain, []byte("images")) {
+			t.Errorf("text-only Message JSON = %s, want no images key", plain)
+		}
+	})
+
+	t.Run("a payload without the key decodes no images", func(t *testing.T) {
+		var old Message
+		if err := json.Unmarshal([]byte(`{"role":"user","content":"the ask"}`), &old); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if old.Images != nil {
+			t.Errorf("a pre-images snapshot decoded Images = %+v, want nil", old.Images)
+		}
+	})
+}
+
+// TestUserInputImagesRoundTripJSON pins that a pending input's images survive a snapshot and that
+// a snapshot saved before the field existed still loads with none.
+func TestUserInputImagesRoundTripJSON(t *testing.T) {
+	t.Parallel()
+
+	in := UserInput{Text: "look", Images: []Image{{Name: "a.jpg", MediaType: "image/jpeg", Data: []byte("jpg")}}}
+
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got UserInput
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if len(got.Images) != 1 || got.Images[0].Name != "a.jpg" || string(got.Images[0].Data) != "jpg" {
+		t.Errorf("round-trip Images = %+v, want %+v", got.Images, in.Images)
+	}
+	var old UserInput
+	if err := json.Unmarshal([]byte(`{"Text":"look","FileRefs":null}`), &old); err != nil {
+		t.Fatalf("Unmarshal old: %v", err)
+	}
+	if old.Images != nil {
+		t.Errorf("a pre-images UserInput decoded Images = %+v, want nil", old.Images)
+	}
+}
+
 // TestMessageMarshalDeterministic locks in stable, sorted Extra key order on the wire, so a
 // snapshot carrying preserved siblings is byte-reproducible — Go's randomized map iteration
 // order must not leak into the serialized form.

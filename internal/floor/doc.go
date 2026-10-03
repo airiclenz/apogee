@@ -10,6 +10,9 @@
 // firing emits all live in internal/agent (floorguards.go). That split is internal/agent/prune.go
 // over internal/context's: the wiring is the engine's, the decision is the package's.
 //
+// The floor is text-only: a guard reads a message's Content and tool calls, never its image parts
+// (domain.Message.Images), so an image a user attached neither trips a guard nor feeds one.
+//
 // One deep module, one direction: internal/floor imports internal/domain for the values it reads
 // and internal/context for the shared context arithmetic, and nothing else in the tree — never
 // internal/agent, never internal/tools, never the root module path (ADR 0010).

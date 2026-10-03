@@ -30,6 +30,9 @@ type ScheduleRef struct {
 // The payload is NOT secret-scrubbed: it goes to the user's own command or URL, which is the same
 // trust as the screen (ADR 0073 §6).
 //
+// It is text-only: a message's image parts (Message.Images) never ride it, so a firing's size
+// stays bounded by text and a script never has to decode image bytes.
+//
 // On the observe lane the matcher (internal/reactions) fills the event-derived fields and the
 // Runner stamps the identity ones it alone knows — Reaction, Time, Workspace and Schedule — as it
 // hands the payload to each subscribing reaction. On the sync lane the agent builds the document

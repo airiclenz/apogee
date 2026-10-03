@@ -243,7 +243,11 @@ internal/webhook/webhook.go — Headers; internal/mcp/transport_test.go — Test
 **Commit:** `feat(mcp): send configured headers on HTTP transports`
 Depends on item 8.
 
-## 10. Domain images — type, persistence, estimate, compaction render
+## 10. Domain images — type, persistence, estimate, compaction render — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): internal/domain/seampayload.go and internal/floor/doc.go are not on the item's Files line; the item's Approach asks for the "text-only" note in the Reactions payload (SeamPayload) and internal/floor doc comments, so both got one doc-comment paragraph and nothing else.
+NOTES (2026-10-03): the Image type and the MaxImageBytes / MaxMessageImageBytes caps live in internal/domain/hooks.go beside Message (no new file, so no package-map change); ImageTokens / ImageChars live in budget.go, with ImageChars = 1024 × 4 kept equal to internal/context.DefaultCharsPerToken by comment (domain cannot import context). PromptChars and ConversationChars now share one per-message helper (messageChars).
+NOTES (2026-10-03): no CHANGELOG entry — this item is plumbing with no user-visible effect; the image-input entry belongs to the items that expose it (12/13).
 
 **What:**
 **Goal:** `domain.Message` and `domain.UserInput` carry `Images []domain.Image{Name, MediaType string; Data []byte}`; images round-trip through session state; the token estimate charges a fixed amount per image; compaction transcripts show `[image: <name>]` and never bytes.

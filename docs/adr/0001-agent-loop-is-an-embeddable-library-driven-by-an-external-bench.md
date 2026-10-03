@@ -138,3 +138,12 @@ re-emitted verbatim, so a provider field apogee has no opinion about survives a 
 untouched. **Revisit when a vision-model target appears** — that is the case this call is scoped
 against, and it would be an additive change to the wire projection, not a break in the hook
 surface.
+
+> (Amended 2026-10-03: the vision case arrived, and it landed additively as this call foresaw.
+> `Message` and `UserInput` gained `Images []Image` (`Name`, `MediaType`, `Data`) beside
+> `Content`, which stays a plain string — no parts union, no type switch in any reader. Images
+> ride the session snapshot under an `images` key that omits itself when empty, so no
+> `SessionVersion` bump; the token estimate charges a fixed `domain.ImageChars` per image; a
+> compaction transcript shows `[image: <name>]`, never the bytes; Reaction payloads and the
+> Floor stay text-only. Each wire dialect projects images explicitly, so only a server that
+> opts in with `vision:` is ever sent one.)

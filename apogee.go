@@ -771,6 +771,9 @@ const (
 // Message is a read-only snapshot of one conversation message handed to hooks.
 type Message = domain.Message
 
+// Image is one image part of a user message: its name, media type and bytes.
+type Image = domain.Image
+
 // ToolDef is one entry of the tool menu the model sees.
 type ToolDef = domain.ToolDef
 

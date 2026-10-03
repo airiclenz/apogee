@@ -86,6 +86,13 @@ type Message struct {
 	ToolCalls  []ToolCall // RoleAssistant only
 	ToolCallID string     // RoleTool only — links the result to its ToolCall.ID
 
+	// Images are the image parts that ride beside Content (ADR 0001, amendment 2 note of
+	// 2026-10-03): an additive field, so Content stays a plain string and every reader that
+	// only knows text keeps working. Only a RoleUser message carries them. Their bytes are
+	// never rendered as text — a compaction transcript shows a `[image: <name>]` placeholder —
+	// and the token estimate charges ImageChars per image rather than reading Data.
+	Images []Image
+
 	// ToolOutcome records whether the tool call this RoleTool message answers failed. It is
 	// stamped at the ONE seam every tool result crosses into history (internal/agent
 	// appendToolResult) from the result's IsError, so no route — a plain call, a refusal, a
@@ -117,6 +124,27 @@ type Message struct {
 	// plain literal carries none.
 	extra map[string]json.RawMessage
 }
+
+// Image is one image part of a user message: the file or paste name it was attached under, its
+// IANA media type ("image/png", "image/jpeg", …) and the encoded image bytes, exactly as read.
+// The producers (the `@ref` expansion and the TUI's paste/attach) bound Data by MaxImageBytes
+// and a message's images together by MaxMessageImageBytes before an Image is built; the
+// session snapshot carries Data base64-encoded under the message's "images" key.
+type Image struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Data      []byte `json:"data"`
+}
+
+// The image caps the producers enforce. They live here rather than beside the engine because the
+// TUI attaches images too and cannot import internal/agent (ADR 0010); every producer reads the
+// same two numbers.
+const (
+	// MaxImageBytes bounds one image's Data.
+	MaxImageBytes = 5 * 1024 * 1024
+	// MaxMessageImageBytes bounds the summed Data of every image one message carries.
+	MaxMessageImageBytes = 5 * 1024 * 1024
+)
 
 // Extra reports a preserved unknown wire field on the message (reasoning_content,
 // tool_choice, thinking, …). Round-trip preservation of these is load-bearing for
@@ -158,6 +186,12 @@ type messageJSON struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 
+	// Images rides the session snapshot under an Apogee-owned key — the provider wire never
+	// reads this encoding; each dialect projects images explicitly. omitempty keeps it off
+	// every text-only message, so no SessionVersion bump is needed: an older snapshot lacks the
+	// key and decodes no images, and an older binary round-trips it as an unknown sibling.
+	Images []Image `json:"images,omitempty"`
+
 	// Interjected is Apogee-owned, not an OpenAI wire field: it rides the session snapshot
 	// (the marker must survive save/restore) and never reaches a provider. omitempty keeps
 	// it absent from every ordinary message, so no SessionVersion bump is needed — an older
@@ -174,7 +208,9 @@ type messageJSON struct {
 
 // messageKnownKeys are the top-level JSON keys messageJSON owns; UnmarshalJSON strips them
 // so only genuinely-unknown siblings land in extra. Kept in sync with messageJSON's tags.
-var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id", "interjected", "tool_outcome"}
+var messageKnownKeys = []string{
+	"role", "content", "tool_calls", "tool_call_id", "images", "interjected", "tool_outcome",
+}
 
 // isKnownMessageKey reports whether key is one messageJSON owns (so a same-named extra entry
 // is skipped on encode — the known field always wins a collision).
@@ -208,6 +244,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		Content:     m.recordContent(),
 		ToolCalls:   m.ToolCalls,
 		ToolCallID:  m.ToolCallID,
+		Images:      m.Images,
 		Interjected: m.Interjected,
 		ToolOutcome: m.ToolOutcome,
 	})
@@ -260,6 +297,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.Content = known.Content
 	m.ToolCalls = known.ToolCalls
 	m.ToolCallID = known.ToolCallID
+	m.Images = known.Images
 	m.Interjected = known.Interjected
 	m.ToolOutcome = known.ToolOutcome
 

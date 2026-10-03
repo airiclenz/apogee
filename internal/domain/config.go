@@ -118,6 +118,13 @@ type Config struct {
 	// never guessed (ADR 0093 decision 4).
 	Price ServerPrice
 
+	// Vision is whether the bound `servers:` entry accepts image input — a per-server opt-in, stated
+	// on the construction surface like Wire. A server without it is never sent an image: a message
+	// carrying images is refused before the request leaves, never silently stripped. The zero value
+	// is "no vision", so a caller that names nothing sends exactly what it sent before this field
+	// existed.
+	Vision bool
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)
@@ -1106,9 +1113,14 @@ func modeRank(m Mode) int {
 // from a snapshot when nil, so a snapshot saved before it existed still loads. RecipeInputs, when
 // set, are the launch's inputs already bound (StartRecipe binds them, asking for any missing one,
 // before it submits), and the Step takes them as they are instead of binding the text again.
+//
+// Images are the image parts the message carries beside Text (domain.Image), already bounded by
+// MaxImageBytes and MaxMessageImageBytes by whichever producer attached them. They are omitted from
+// a snapshot when empty, so a snapshot saved before they existed still loads.
 type UserInput struct {
 	Text         string
 	FileRefs     []string
+	Images       []Image           `json:",omitempty"`
 	SkillIDs     []string          `json:",omitempty"`
 	Recipe       *RecipeLaunch     `json:",omitempty"`
 	RecipeInputs map[string]string `json:",omitempty"`

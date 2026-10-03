@@ -222,14 +222,19 @@ func renderTranscript(msgs []domain.Message) string {
 }
 
 // renderMessage renders one message the way renderTranscript does — a "[role]" header, its
-// content, and any tool calls inline — so the whole-transcript and budgeted-transcript paths
-// share one rendering and one length measure.
+// content, an "[image: <name>]" placeholder per image, and any tool calls inline — so the
+// whole-transcript and budgeted-transcript paths share one rendering and one length measure. An
+// image's bytes never reach the transcript: the summarizer reads text, and base64 would only
+// spend its budget.
 func renderMessage(m domain.Message) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s]\n", m.Role)
 	if m.Content != "" {
 		b.WriteString(m.Content)
 		b.WriteString("\n")
+	}
+	for _, img := range m.Images {
+		fmt.Fprintf(&b, "[image: %s]\n", img.Name)
 	}
 	for _, tc := range m.ToolCalls {
 		fmt.Fprintf(&b, "(called tool %s with %s)\n", tc.Tool, string(tc.Arguments))

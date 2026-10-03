@@ -413,13 +413,25 @@ func checkRestoredShape(conv *domain.Conversation) error {
 	return bad
 }
 
-// messageBytes is the size checkRestoredShape bounds: the message's content plus the arguments of
-// any tool calls it carries, the two fields a payload can make arbitrarily large. The rest of a
-// Message is ids, roles and flags.
+// messageBytes is the size checkRestoredShape bounds: the message's content, the arguments of any
+// tool calls it carries and the bytes of any images, the fields a payload can make arbitrarily
+// large. The rest of a Message is ids, roles and flags. The image producers hold a message's
+// images to domain.MaxMessageImageBytes, half this bound, so images alone never make a message
+// apogee wrote unrestorable.
 func messageBytes(m domain.Message) int {
-	n := len(m.Content)
+	n := len(m.Content) + imageBytes(m.Images)
 	for _, tc := range m.ToolCalls {
 		n += len(tc.Arguments)
+	}
+	return n
+}
+
+// imageBytes sums the Data of images — the bytes an image part adds to a message or a pending
+// input, as messageBytes and the pending-input bound both count them.
+func imageBytes(images []domain.Image) int {
+	n := 0
+	for _, img := range images {
+		n += len(img.Data)
 	}
 	return n
 }
@@ -554,7 +566,7 @@ func dropLeadingSystem(conv *domain.Conversation) int {
 // pendingInput is the one field that is BOUNDED as well as checked: it is not part of the
 // conversation, so checkRestoredShape's per-message cap never saw it, yet a restore submits it as
 // a message. maxRestoredMessageBytes is therefore the right ceiling — the same one a message it
-// is about to become is held to. Its FileRefs are not checked here: decodeState is Agent-less and
+// is about to become is held to, over its text and its image bytes alike (imageBytes). Its FileRefs are not checked here: decodeState is Agent-less and
 // workspace-blind, and an escaping ref is already fenced by security.SafeOpen when readFileRef
 // opens it (loop.go).
 //
@@ -600,7 +612,7 @@ func checkRestoredStructure(st *agentState) error {
 		return err
 	}
 	if st.PendingInput != nil {
-		if n := len(st.PendingInput.Text); n > maxRestoredMessageBytes {
+		if n := len(st.PendingInput.Text) + imageBytes(st.PendingInput.Images); n > maxRestoredMessageBytes {
 			return fmt.Errorf(
 				"apogee: decode session state: pending input is %d bytes, over the %d-byte limit: %w",
 				n, maxRestoredMessageBytes, ErrSnapshotRefused,

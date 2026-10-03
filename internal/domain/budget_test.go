@@ -133,6 +133,27 @@ func TestPromptChars_CountsContentToolArgsAndMenu(t *testing.T) {
 	}
 }
 
+// TestPromptChars_ChargesImageCharsPerImage pins the fixed per-image charge: each image adds
+// ImageChars whatever its byte size, so the estimate never reads image bytes as prose.
+func TestPromptChars_ChargesImageCharsPerImage(t *testing.T) {
+	t.Parallel()
+	msgs := []Message{
+		{Role: RoleUser, Content: "abc", Images: []Image{
+			{Name: "small.png", Data: []byte("x")},
+			{Name: "large.png", Data: make([]byte, 100_000)},
+		}},
+	}
+
+	got := PromptChars(msgs, nil)
+
+	if want := 3 + 2*ImageChars; got != want {
+		t.Errorf("PromptChars = %d, want %d", got, want)
+	}
+	if ImageChars != 1024*4 {
+		t.Errorf("ImageChars = %d, want 1024 tokens at 4 chars per token", ImageChars)
+	}
+}
+
 // TestBudgetHistoryFill pins the fill measure the context-fill notice reports (ADR 0077):
 // estimated tokens over the History allocation, through the same ceil rounding as
 // EstimateTokens, and 0 — inert, no substitute ceiling — on an unknown window or an
@@ -216,7 +237,9 @@ func TestConversationChars_MatchesPromptChars(t *testing.T) {
 	t.Parallel()
 	msgs := []Message{
 		{Role: RoleSystem, Content: "be brief"},
-		{Role: RoleUser, Content: "read the file"},
+		{Role: RoleUser, Content: "read the file", Images: []Image{
+			{Name: "diagram.png", MediaType: "image/png", Data: []byte("png")},
+		}},
 		{Role: RoleAssistant, Content: "on it", ToolCalls: []ToolCall{
 			{ID: "c1", Tool: "read", Arguments: json.RawMessage(`{"path":"a.go"}`)},
 			{ID: "c2", Tool: "ls", Arguments: json.RawMessage(`{}`)},

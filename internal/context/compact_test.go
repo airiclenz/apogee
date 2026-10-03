@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -270,6 +271,26 @@ func TestRenderTranscriptIncludesRolesContentAndToolCalls(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered transcript missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestRenderTranscriptShowsImagePlaceholdersNeverBytes pins that an image part reaches the
+// summarizer as an "[image: <name>]" line and its bytes — raw or base64 — never do.
+func TestRenderTranscriptShowsImagePlaceholdersNeverBytes(t *testing.T) {
+	data := []byte("IMAGE-BYTES-MARKER")
+	msgs := []domain.Message{{Role: domain.RoleUser, Content: "what is this?", Images: []domain.Image{
+		{Name: "shot.png", MediaType: "image/png", Data: data},
+		{Name: "chart.jpg", MediaType: "image/jpeg", Data: data},
+	}}}
+
+	got := renderTranscript(msgs)
+
+	want := "[user]\nwhat is this?\n[image: shot.png]\n[image: chart.jpg]"
+	if got != want {
+		t.Errorf("rendered transcript = %q, want %q", got, want)
+	}
+	if strings.Contains(got, string(data)) || strings.Contains(got, base64.StdEncoding.EncodeToString(data)) {
+		t.Errorf("rendered transcript carries image bytes:\n%s", got)
 	}
 }
 

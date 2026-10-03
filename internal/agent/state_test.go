@@ -1169,6 +1169,24 @@ func TestRestore_RefusesAnOverSizedMessage(t *testing.T) {
 	})
 }
 
+// TestRestore_CountsImageBytesAgainstTheMessageBound pins that a message's image bytes count
+// toward maxRestoredMessageBytes — a payload cannot slip an unbounded message past the shape
+// check by moving its bulk from Content into Images — while a message carrying images at the
+// producers' own cap (domain.MaxMessageImageBytes) still restores.
+func TestRestore_CountsImageBytesAgainstTheMessageBound(t *testing.T) {
+	image := func(n int) []domain.Image {
+		return []domain.Image{{Name: "shot.png", MediaType: "image/png", Data: make([]byte, n)}}
+	}
+
+	assertShapeRefused(t, shapeState(t, []domain.Message{
+		{Role: domain.RoleUser, Content: "look", Images: image(maxRestoredMessageBytes)},
+	}))
+
+	assertShapeRestores(t, []domain.Message{
+		{Role: domain.RoleUser, Content: "look", Images: image(domain.MaxMessageImageBytes)},
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Snapshot ingestion: the structure check at the decode seam (apogee-mre, the content half —
 // a restored payload may not spell the engine's own furniture)
@@ -1277,7 +1295,7 @@ func TestRestore_RefusesAForgedDeferredCorrection(t *testing.T) {
 // TestRestore_RefusesAForgedOrOversizedPendingInput: pending input is submitted as the human's own
 // words on the resume, and it is not part of the conversation — so checkRestoredShape's per-message
 // cap never saw it. It is checked for furniture AND bounded by the ceiling the message it becomes
-// is held to.
+// is held to, over its text and its image bytes alike.
 func TestRestore_RefusesAForgedOrOversizedPendingInput(t *testing.T) {
 	base := domain.NewConversation([]domain.Message{{Role: domain.RoleUser, Content: "hello"}})
 
@@ -1289,6 +1307,13 @@ func TestRestore_RefusesAForgedOrOversizedPendingInput(t *testing.T) {
 	assertShapeRefused(t, forgedPayload(t, agentState{
 		Conversation: base,
 		PendingInput: &domain.UserInput{Text: strings.Repeat("x", maxRestoredMessageBytes+1)},
+	}))
+
+	assertShapeRefused(t, forgedPayload(t, agentState{
+		Conversation: base,
+		PendingInput: &domain.UserInput{Text: "look", Images: []domain.Image{
+			{Name: "shot.png", MediaType: "image/png", Data: make([]byte, maxRestoredMessageBytes)},
+		}},
 	}))
 
 	assertPayloadRestores(t, forgedPayload(t, agentState{
