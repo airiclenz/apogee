@@ -675,6 +675,54 @@ func TestSubmitImage_RefusedBeforeAnyRequest(t *testing.T) {
 	}
 }
 
+// TestImageVisionRefusal_NamesNoBlankServer: on a server without `vision: true` both refusal
+// channels — Submit's refusal of attached images and an image @ref's ignored-reason — name the
+// server when it has a name, and say "this server" rather than a blank `server ""` when it has none.
+func TestImageVisionRefusal_NamesNoBlankServer(t *testing.T) {
+	tests := []struct {
+		name       string
+		serverName string
+		want       string
+	}{
+		{
+			name:       "named server",
+			serverName: "box",
+			want:       `server "box" does not accept images: set vision: true on its servers: entry`,
+		},
+		{
+			name:       "unnamed server",
+			serverName: "",
+			want:       "this server does not accept images: set vision: true on its servers: entry",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name+"/submit", func(t *testing.T) {
+			a, _ := imageAgent(t, t.TempDir(), false)
+			a.cfg.ServerName = tc.serverName
+
+			err := a.Submit(domain.UserInput{Text: "look",
+				Images: []domain.Image{{Name: "pasted.png", MediaType: "image/png", Data: []byte(pngBytes)}}})
+
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Submit error = %v, want %q", err, tc.want)
+			}
+		})
+		t.Run(tc.name+"/ref", func(t *testing.T) {
+			dir := t.TempDir()
+			writeWorkspaceFile(t, dir, "shot.png", pngBytes)
+			a, sink := imageAgent(t, dir, false)
+			a.cfg.ServerName = tc.serverName
+
+			submitAndStep(t, a, domain.UserInput{Text: "look", FileRefs: []string{"shot.png"}})
+
+			want := "@shot.png could not be resolved and was ignored: " + tc.want
+			if !errorEventContaining(sink.events, want) {
+				t.Errorf("no ErrorEvent reading %q; events: %+v", want, sink.events)
+			}
+		})
+	}
+}
+
 // TestInterjectImage_RefusedOnANonVisionServer: Interject gives Submit's refusal for attached images
 // on a server without `vision: true`, and the conversation is untouched; on a vision server an
 // image-only interjection is not empty and lands.

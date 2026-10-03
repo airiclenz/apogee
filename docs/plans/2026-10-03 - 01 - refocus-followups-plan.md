@@ -100,7 +100,7 @@ NOTES (2026-10-04): closeout instruction — in CHANGELOG.md's Unreleased ConPTY
 - `grep -n "POSIX is unchanged\|On macOS and Linux nothing changes" docs/manual/configuration.md` prints nothing
 **Commit:** `fix(tools): gate a POSIX send to an unconfined console under a box`
 
-## 3. Name no blank server in the vision refusal
+## 3. Name no blank server in the vision refusal — ✅ DONE (2026-10-04)
 
 **What:** Fixes `apogee-vision-refusal-blank-server`: with `cfg.ServerName == ""` the refusal reads `server "" does not accept images`.
 **Goal:** With an empty server name, both the Submit refusal and the `@ref` image refusal read "this server does not accept images: set vision: true on its servers: entry"; with a named server, the text is unchanged.

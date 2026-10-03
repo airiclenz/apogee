@@ -1412,6 +1412,20 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 // input (Config.Vision), naming the server and the key that would let it through.
 const visionRefusalFormat = "server %q does not accept images: set vision: true on its servers: entry"
 
+// unnamedVisionRefusal is visionRefusalFormat's wording when the bound server has no name
+// (Config.ServerName is empty), so the refusal names no blank server. It matches the TUI's
+// clipboard flash (noVisionNote in internal/tui).
+const unnamedVisionRefusal = "this server does not accept images: set vision: true on its servers: entry"
+
+// visionRefusal is the refusal an image meets on a server without `vision: true` — naming the
+// server when it has a name, and "this server" when it has none.
+func (a *Agent) visionRefusal() string {
+	if a.cfg.ServerName == "" {
+		return unnamedVisionRefusal
+	}
+	return fmt.Sprintf(visionRefusalFormat, a.cfg.ServerName)
+}
+
 // imageSignatures are the leading bytes of the four image formats an @ref or an attached image may
 // carry, with the media type each is sent as. WebP is a RIFF container, so its signature is checked
 // at two offsets (imageMediaType).
@@ -1459,7 +1473,7 @@ func imageCapError(name string, size, attached int) error {
 // human through refIgnored, never as a refusal of the message (composeUserMessage).
 func (a *Agent) refImageRefusal(ref string, size, attached int) string {
 	if !a.cfg.Vision {
-		return fmt.Sprintf(visionRefusalFormat, a.cfg.ServerName)
+		return a.visionRefusal()
 	}
 	if err := imageCapError(ref, size, attached); err != nil {
 		return err.Error()
@@ -1476,7 +1490,7 @@ func (a *Agent) checkInputImages(in domain.UserInput) error {
 		return nil
 	}
 	if !a.cfg.Vision {
-		return fmt.Errorf(visionRefusalFormat, a.cfg.ServerName)
+		return errors.New(a.visionRefusal())
 	}
 	attached := 0
 	for _, img := range in.Images {
