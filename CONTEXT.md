@@ -1565,8 +1565,10 @@ Apogee's production execution).
 A **footgun-guard — *not* a security boundary** — that refuses a small model's obvious
 catastrophic *mistakes* before execution, in **every** mode independent of Confinement (ADR 0012;
 lives in `internal/security`, P3.6). Two tiers: **hard-refuse** (`rm -rf` of a root/home/system
-path, fork bombs, writes to `~/.ssh`/credential/persistence files — no per-call override) and
-**force-approval** (`curl | bash`-class — sometimes a legit installer — and a write under
+path, fork bombs, writes to `~/.ssh`/credential/persistence files or to a repository's git control
+plane (`.git/hooks`, `.git/config`, `.git/modules`), a raw `dd` write to a block device — no
+per-call override) and
+**force-approval** (`curl | bash`-class — sometimes a legit installer — `sudo` of any command, a write under
 `~/.apogee`, apogee's own control plane, which the operator legitimately curates by hand
 (ADR 0049 §4) — except the session's own scratch dir, which the box already declares writable
 (ADR 0049 amendment 2026-08-28), and `commit-secrets` — a `git_commit` whose shadow-staged diff or

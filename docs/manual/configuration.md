@@ -2438,7 +2438,8 @@ stricter than the mode would have made it, never looser. It has two tiers.
 prompt to say yes on: an `rm -rf` aimed at an absolute path — any absolute path, the
 workspace's own directory included; a relative target such as `./build` is allowed — a
 fork bomb, a write to `~/.ssh`, to a credential or persistence file, or to a repository's
-git control plane — `.git/hooks`, `.git/config` or `.git/modules`. The model gets back an error
+git control plane (`.git/hooks`, `.git/config` or `.git/modules`), and a raw `dd` write to a
+block device (`dd … of=/dev/sd…`, `nvme`, `hd`, `mmcblk` or `disk`). The model gets back an error
 naming why, and — where the matched rule knows a
 sanctioned route — where to go instead: the `rm -rf` refusal, for one, says to re-issue the
 path relative to the workspace or delete through the native tools. The git control-plane

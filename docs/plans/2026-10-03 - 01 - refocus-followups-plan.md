@@ -239,7 +239,9 @@ NOTES (2026-10-04): the override is held as `Model.sessionCurrency` ("" reads `o
 **Acceptance:** `go test -count=1 -run 'Usage|Resume|Currency|Footer' ./internal/tui/`
 **Commit:** `fix(tui): show a resumed session under its own currency`
 
-## 11. List every Tier-1 refusal in the docs
+## 11. List every Tier-1 refusal in the docs — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the manual's git control-plane path list moved from a dash aside into parentheses so the added block-device clause reads as one sentence; commit-secrets stays where both docs already placed it (Tier 2 / force-approval). The CONTEXT.md entry still says `rm -rf` "of a root/home/system path" where the rule refuses every absolute target — left as is, outside this item's listing scope.
 
 **What:** Docs fix: `docs/manual/configuration.md` § "The dangerous-action guard" omits Tier-1 `overwrite-block-device`; the CONTEXT.md **Dangerous-action guard** entry also omits it, the git control plane, and `sudo` among force-approval rules.
 **Regression guard.** The Goal reads "the rules in `DefaultDangerousRules` plus `commit-secrets` (`security.SecretsRuleID`)": `commit-secrets` (`internal/security/secrets.go:14`) is live but sits outside `DefaultDangerousRules` (`rules.go:90`), and stays where both docs place it now.
