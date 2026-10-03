@@ -91,7 +91,7 @@ func TestMatchApproval(t *testing.T) {
 	t.Parallel()
 
 	request := domain.ApprovalRequest{
-		Tool: "terminal", Reason: "write", Remedy: "run `apogee doctor`",
+		Tool: "terminal", Reason: "write", Remedy: "run `apogee probe host`",
 		SubAgentName: "docs sweep", Scope: "reads the package directory",
 	}
 
@@ -113,7 +113,7 @@ func TestMatchApproval(t *testing.T) {
 		t.Errorf("approval-requested payload decision = %q, want it empty — no verdict has been reached", verdict)
 	}
 	got := requested[0].Payload
-	if got.Tool != "terminal" || got.Reason != "write" || got.Remedy != "run `apogee doctor`" ||
+	if got.Tool != "terminal" || got.Reason != "write" || got.Remedy != "run `apogee probe host`" ||
 		got.SubAgentName != "docs sweep" || got.Scope != "reads the package directory" {
 		t.Errorf("approval payload = %+v, want the request's fields carried through", got)
 	}

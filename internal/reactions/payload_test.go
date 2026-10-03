@@ -57,12 +57,12 @@ func TestPayloadJSONGolden(t *testing.T) {
 			payload: domain.SeamPayload{
 				Event: ApprovalRequested, Reaction: "bell", Time: "2026-09-06T09:41:00Z",
 				Workspace: "/work/repo", Depth: 1, Turn: 4, CallID: "call-2",
-				Tool: "terminal", Reason: "write", Remedy: "run `apogee doctor`",
+				Tool: "terminal", Reason: "write", Remedy: "run `apogee probe host`",
 				SubAgentName: "docs sweep", Scope: "reads the package directory",
 			},
 			want: `{"event":"approval-requested","reaction":"bell","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":1,"turn":4,"call_id":"call-2","tool":"terminal",` +
-				`"reason":"write","remedy":"run ` + "`apogee doctor`" + `",` +
+				`"reason":"write","remedy":"run ` + "`apogee probe host`" + `",` +
 				`"sub_agent_name":"docs sweep","scope":"reads the package directory"}`,
 		},
 		{

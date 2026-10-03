@@ -412,7 +412,7 @@ func resolveMode(label string, mode domain.Mode, host Host) (domain.Mode, error)
 			!host.Confinement.Unconfined) != "" {
 			return mode, fmt.Errorf("%s run: mode: auto, but this host cannot confine a run to its workspace — an "+
 				"unattended autonomous Firing is not something apogee will start for you unconfined; run this entry in "+
-				"plan mode, or check `apogee doctor` for what this host is missing", label)
+				"plan mode, or run `apogee probe host` to see what this host is missing", label)
 		}
 		return mode, nil
 	default:

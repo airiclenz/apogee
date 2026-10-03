@@ -146,7 +146,9 @@ NOTES (2026-10-04): no CHANGELOG entry — no production path marshals a priced 
 - `go test -count=1 -run 'TestE2EEventLinesGolden|TestManualListsEveryEventLineKind|Usage' ./cmd/apogee/`
 **Commit:** `fix(eventjson): price the headless usage line`
 
-## 6. Point the daemon's Auto refusal at apogee probe host
+## 6. Point the daemon's Auto refusal at apogee probe host — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): refusal reworded to "or run `apogee probe host` to see what this host is missing" (the plan fixes only the command name); the "cannot confine a run to its workspace" clause cmd/apogee/daemon_test.go pins is unchanged.
 
 **What:** Fix: the daemon refuses Auto with "check `apogee doctor`", a command that does not exist (a name apogee announces but lacks).
 **Goal:** No Go source or test names `apogee doctor`; the daemon's Auto refusal names `apogee probe host`, pinned by a test.

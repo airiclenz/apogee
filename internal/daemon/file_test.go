@@ -293,7 +293,7 @@ func TestLoadNamesEveryDefect(t *testing.T) {
 			name:   "auto on a host that cannot confine",
 			yaml:   entry(workspaceLine + "      mode: auto\n"),
 			mutate: func(h *Host) { h.Confinement = HostConfinement{Backend: "none"} },
-			wants:  []string{"mode: auto", "cannot confine a run to its workspace"},
+			wants:  []string{"mode: auto", "cannot confine a run to its workspace", "apogee probe host"},
 		},
 		{
 			// The zero value fails CLOSED: a Driver that builds a Host and forgets the confinement
@@ -302,7 +302,7 @@ func TestLoadNamesEveryDefect(t *testing.T) {
 			name:   "auto on a host that states no confinement facts at all",
 			yaml:   entry(workspaceLine + "      mode: auto\n"),
 			mutate: func(h *Host) { *h = Host{} },
-			wants:  []string{"mode: auto", "cannot confine a run to its workspace"},
+			wants:  []string{"mode: auto", "cannot confine a run to its workspace", "apogee probe host"},
 		},
 		{
 			name: "auto on a host whose backend fences the filesystem is legal",

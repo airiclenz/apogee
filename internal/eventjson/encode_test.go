@@ -269,7 +269,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 					Tool:           "terminal",
 					Arguments:      json.RawMessage(`{"command":"rm -rf build"}`),
 					Reason:         "write",
-					Remedy:         "run `apogee doctor`",
+					Remedy:         "run `apogee probe host`",
 					SubAgentTask:   "sweep the docs",
 					SubAgentName:   "docs sweep",
 					CacheKey:       "terminal:rm",
@@ -284,7 +284,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Turn: 4},
 			wantData: `{"phase":"decided","request":{"tool":"terminal",` +
 				`"arguments":{"command":"rm -rf build"},"reason":"write",` +
-				"\"remedy\":\"run `apogee doctor`\"," +
+				"\"remedy\":\"run `apogee probe host`\"," +
 				`"sub_agent_task":"sweep the docs","sub_agent_name":"docs sweep",` +
 				`"cache_key":"terminal:rm","mcp_server_grant":true,"mcp_server_alias":"files",` +
 				`"resolved_path":"/work/repo/build","scope":"reads the package directory"},` +
