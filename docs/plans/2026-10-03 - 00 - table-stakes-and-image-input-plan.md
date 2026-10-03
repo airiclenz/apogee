@@ -390,7 +390,9 @@ internal/agent/dispatch.go — executeConfineFallback; internal/platform/host.go
 **Commit:** `feat(tools): console tools run on Windows under ConPTY`
 Depends on item 15.
 
-## 17. Bead bookkeeping
+## 17. Bead bookkeeping — ✅ DONE (2026-10-03)
+
+NOTES (2026-10-03): bd auto-export wrote only the apogee-rw6 notes change; ran `bd export -o .beads/issues.jsonl` so the three new beads (apogee-6ef3 restricted-token launch, apogee-2uh.6 owner-run ConPTY check, apogee-zwvj POSIX console_send gap) reach the JSONL — diff is exactly those four lines.
 
 **What:** Recast at the regression check (2026-10-03).
 **Goal:** `apogee-rw6` notes record which rows shipped and that MCP OAuth remains; three new beads exist: ConPTY restricted-token launch (ADR 0059, follow-up), a Windows owner-run check of the ConPTY console (child of `apogee-2uh`), and the pre-existing POSIX `console_send` confinement gap.
