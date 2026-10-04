@@ -316,7 +316,7 @@ check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "needs gofmt:"; echo "$$out"; exit 1; fi
 # Plain `go vet ./...` has no step of its own: golangci-lint's standard set runs govet.
 	@echo "==> go vet (windows build tag: the Windows-tagged tests must still compile)"
-	@GOOS=windows go vet ./internal/platform/... ./internal/probe/...
+	@GOOS=windows go vet ./internal/platform/... ./internal/probe/... ./internal/console/...
 	@echo "==> golangci-lint"
 	@$(MAKE) --no-print-directory lint
 	@echo "==> go build ./..."

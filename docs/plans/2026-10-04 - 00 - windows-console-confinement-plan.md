@@ -139,7 +139,7 @@ NOTES (2026-10-04): the manual's Console section also states the one remaining W
 - `go test -count=1 -run 'Manual|Readme' ./internal/...` with no new failure
 **Commit:** `docs(console): record the confined ConPTY launch on Windows`
 
-## 6. CI gates the Windows Console tests
+## 6. CI gates the Windows Console tests — ✅ DONE (2026-10-04)
 
 **What:** owner call: `test-windows` also covers `./internal/console/...`. Depends on item 3.
 **Regression guard.** Rule: every sentence naming the trees the Windows job tests or the Windows vet covers follows — including the `ci.yml` step comment (~175-184, "These two trees rather than `./...`", "the Windows half … is the confinement backend") and `building.md`'s `make check` table row (~35); find with `grep -rn 'two trees\|internal/platform` and `internal/probe' .github Makefile docs/manual`.
