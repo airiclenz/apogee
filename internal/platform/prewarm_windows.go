@@ -44,6 +44,6 @@ func PrewarmLabelWalk(c domain.Confiner, workspaceRoot string, out io.Writer) {
 	if tc.closed || !tc.caps.FSWrite || tc.token == 0 {
 		return
 	}
-	fmt.Fprintln(out, WindowsLabelProgressNotice(workspaceRoot))
+	_, _ = fmt.Fprintln(out, WindowsLabelProgressNotice(workspaceRoot))
 	_ = tc.labelBox(domain.ConfinementBox{WorkspaceRoot: workspaceRoot})
 }
