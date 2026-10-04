@@ -122,7 +122,10 @@ NOTES (2026-10-04): `unfencedSendError`'s "cannot confine" branch stays (reachab
 - the comment grep in the guard, read line by line
 **Commit:** `test(tools): drive confined Console journeys on Windows`
 
-## 5. Docs: a Windows Console can be fenced
+## 5. Docs: a Windows Console can be fenced — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the superseded ADR 0059 sentences (Bounds Windows bullet, its 2026-10-03 amendment, the POSIX Amendment's "where it cannot (Windows)" and the Note's "On Windows … generic wording") stay as history with italic pointers to the new Amendment, following the record's existing "(Superseded for POSIX …)" pattern.
+NOTES (2026-10-04): the manual's Console section also states the one remaining Windows difference (a denied write does not stop the program and no `[blocked by workspace confinement: …]` note appears), since its preceding paragraph's "if the fence stops a confined Console's program mid-run" would otherwise read as holding on Windows.
 
 **What:** the user- and design-facing half of `apogee-6ef3`. Depends on item 3.
 **Regression guard.** The rule also covers every sentence that restricts the `console_send` `ConfineDemoteError` wording to POSIX (e.g. `confinement-execution-contract.md`:791, :834) — find with `grep -rnE 'POSIX.{0,40}(send|console_send)'` over the same paths. The line-based greps miss wrapped sentences, so read the Console sections whole (`configuration.md` ~2549-2563, `CONTEXT.md` ~1398-1408).

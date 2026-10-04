@@ -89,7 +89,8 @@ orphaned child process and a dead server mid-Exchange are both worse failure mod
 - Windows: ConPTY creates the process itself and cannot take the restricted token, so the
   contract's "confine if you can, gate if you can't" row makes `console_open` gate in Auto there
   — a consequence of the existing table, not a new cell. The Job Object container (§2.4) still
-  applies.
+  applies. *(Superseded by the "a Windows Console runs confined" Amendment (2026-10-04) below:
+  the launch now takes the restricted token.)*
   *Amended 2026-10-03:* the ConPTY backend exists — on Windows a Console runs `cmd /c` under a
   pseudoconsole, and a non-raw `console_send` ends its input with `\r`, the Enter key there. Auto
   still fails closed: a confined open reports `ErrConfinementUnavailable` and is demoted to
@@ -99,7 +100,8 @@ orphaned child process and a dead server mid-Exchange are both worse failure mod
   only, the assumption behind §2 and §4 that the fence set when `console_open` opened a Console is
   what binds every later send to it. POSIX is unchanged: a Console opened unconfined (in
   Ask-Before) and sent to after a switch to Auto still takes the send — that pre-existing gap is
-  filed as its own follow-up bead. *(Superseded for POSIX by the 2026-10-04 Amendment below.)*
+  filed as its own follow-up bead. *(Superseded for POSIX by the 2026-10-04 Amendment below, and
+  for Windows by the "a Windows Console runs confined" Amendment (2026-10-04) below.)*
 - The bench needs no stub: a Console is not an `ExternalEffectTool`; a fork simply inherits none.
 
 ## Consequences
@@ -125,7 +127,7 @@ confined Console run as before.
 
 `Terminal.ConsoleConfines` now chooses only the wording the model reads. Where a Console open can
 confine (POSIX), the error tells the model to close the Console and reopen it so it runs fenced;
-where it cannot (Windows), the text is unchanged. The dispatch carries that text into the
+where it cannot (Windows, until the last Amendment below), the text is unchanged. The dispatch carries that text into the
 refusal or denial result after its own reason; the Approval prompt stays generic. The demote
 error event still fires, now on every gated POSIX send too.
 
@@ -136,4 +138,30 @@ the host-incapacity demote reason and `/confine off` remedy: Reason
 `send to console N, which was opened unconfined` (N the console id), Fix
 `deny it — the agent is told to close the console and reopen it fenced`. Lifting confinement for
 the session is not the fix here; the fence is one reopen away. On Windows, and on every other
-runtime demote, the prompt keeps the generic wording.
+runtime demote, the prompt keeps the generic wording. *(Windows: superseded by the Amendment
+below.)*
+
+## Amendment (2026-10-04) — a Windows Console runs confined
+
+The Bounds bullet's premise — ConPTY creates the process itself and cannot take the restricted
+token — is superseded, and with it the 2026-10-03 fail-closed Windows Console. The pseudoconsole
+launcher now starts its child through `CreateProcessAsUser` under the token `Prepare` set
+(`platform.PseudoConsoleSpec.Token`), so a Windows Console opened under a confinement box runs
+under the same restricted, low-integrity token as a confined `terminal` call, inside the same
+kill-on-close Job Object. The contract's "confine if you can" row now applies there as it does on
+POSIX: in Auto `console_open` confines instead of being demoted to Approval, and a send to a
+Console opened confined runs inside that fence. A confined spec whose `Prepare` set no token still
+fails closed with `ErrConfinementUnavailable`, and a host whose Confiner cannot fence writes still
+gates the open ("gate if you can't").
+
+`Terminal.ConsoleConfines` is now true on Windows, so the 2026-10-04 Amendment and Note above hold
+on every host: a send under a confinement box to a Console opened unconfined gets the
+`domain.ConfineDemoteError` — the reopen-fenced advice to the model, and the Console-naming Reason
+and Fix on the Approval prompt — rather than the generic host-incapacity wording.
+
+One bound stays POSIX-only: kill-on-denial. The denial watch that stops a confined command at its
+first denied operation and tells the model `[blocked by workspace confinement: …]` matches POSIX
+denial spellings only (`internal/platform/denialkill.go`); the Windows token backend's
+`Access is denied.` is deliberately not matched, as for `terminal` on Windows. A confined Windows
+Console's denied write therefore fails inside the program, which keeps running, and the model
+reads the program's own error in the next `console_read`.

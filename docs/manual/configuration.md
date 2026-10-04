@@ -2546,20 +2546,21 @@ program mid-run, the next read says so in the same words the one-shot tools use 
 workspace confinement: …]`). Reading and closing ask nobody: they run in every mode, because
 neither one can start anything.
 
-**On Windows, through ConPTY — and never fenced.** Consoles need a pseudo-terminal: on macOS,
-Linux and the BSDs that is the system's own, and on Windows it is a pseudoconsole (ConPTY), where
-the command runs through `cmd /c` and `console_send` presses Enter as a carriage return, the key a
-Windows console program reads as "submit the line". What Windows cannot do yet is fence a Console,
-so in Auto it fails closed instead of running one unfenced: `console_open` is demoted to Approval —
-you are asked before the program starts — and so is **every** `console_send` to it while Auto's
-fence is on, each send asked on its own. (macOS and Linux fence a Console opened in Auto, so a send
-to it runs inside that fence. One opened unfenced in Ask-Before is gated the same way after a
-switch to Auto: each send under the fence is asked on its own, refused when nobody can be asked, and
-the model is told to close that Console and reopen it so it runs fenced. The Approval prompt for
-such a send names the cause — `send to console N, which was opened unconfined` — with the Fix
-`deny it — the agent is told to close the console and reopen it fenced`, rather than pointing you
-at `/confine off`. Every other unfenced run that asks, Windows Consoles included, keeps the generic
-`confinement unavailable on this host` wording.)
+**On Windows, through ConPTY — fenced like everything else.** Consoles need a pseudo-terminal: on
+macOS, Linux and the BSDs that is the system's own, and on Windows it is a pseudoconsole (ConPTY),
+where the command runs through `cmd /c` and `console_send` presses Enter as a carriage return, the
+key a Windows console program reads as "submit the line". A Console opened in Auto is fenced on
+every one of them — on Windows under the same restricted, low-integrity token as a confined
+`terminal` call — so a send to it runs inside that fence. One opened unfenced in Ask-Before is gated
+after a switch to Auto: each send under the fence is asked on its own, refused when nobody can be
+asked, and the model is told to close that Console and reopen it so it runs fenced. The Approval
+prompt for such a send names the cause — `send to console N, which was opened unconfined` — with
+the Fix `deny it — the agent is told to close the console and reopen it fenced`, rather than
+pointing you at `/confine off`. Every other unfenced run that asks keeps the generic
+`confinement unavailable on this host` wording. One difference remains on Windows: a denied write
+there does not stop the Console's program the way it does on macOS and Linux — the program sees
+`Access is denied.`, keeps running, and the next read shows its own error rather than the
+`[blocked by workspace confinement: …]` note, the same as a confined `terminal` call on Windows.
 A Windows host without ConPTY answers `could not open a console` rather than pretending.
 
 ## The task list

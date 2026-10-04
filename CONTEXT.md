@@ -1400,10 +1400,10 @@ until closed, `/new`, a session restore, or engine exit; a snapshot, fork, or re
 `send` takes its own **Resolution**; `read` and `close` sit on the read-only floor. The program runs
 under a pseudo-terminal on POSIX and under a **ConPTY** pseudoconsole on Windows (Windows 10 1809 or
 later), there via `cmd /c` inside a kill-on-close Job Object, with Enter sent as a carriage return
-(`internal/console`, `platform.StartPseudoConsole`). A Windows Console cannot be fenced yet, so
-Auto fails closed there: `console_open` is demoted to Approval. On every host a `send` under a
-confinement box to a Console that was not opened confined is demoted to Approval too, each send
-on its own. Ships
+(`internal/console`, `platform.StartPseudoConsole`); a Console opened confined runs there under
+the Confiner's restricted Low token, so Auto fences it on every host (kill-on-denial stays
+POSIX-only). On every host a `send` under a confinement box to a Console that was not opened
+confined is demoted to Approval, each send on its own. Ships
 **default-off**, profile-enabled (ADR 0057) — the first tool to use that state. See
 [ADR 0059](docs/adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md).
 _Avoid_: "terminal session" / "PTY session" (the mechanism, and "session" is the saved record),
