@@ -295,6 +295,54 @@ func TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX(t *testing.T) {
 	}
 }
 
+// TestConsoleSend_UnfencedSendErrorNamesTheConsoleOnTheApprovalPrompt pins what the demoted send
+// puts on the Approval prompt. Where a Console open can confine (POSIX), the cause is this Console,
+// not the host, so the error is a domain.ConfineDemoteError whose Reason names the Console and
+// whose Remedy is to deny the send — the model is already told to close and reopen it — while it
+// still unwraps to ErrConfinementUnavailable and its text still carries that advice. Where a
+// Console open cannot confine (Windows), the error stays a plain wrap, so the prompt keeps the
+// host-incapacity wording.
+func TestConsoleSend_UnfencedSendErrorNamesTheConsoleOnTheApprovalPrompt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("console open can confine", func(t *testing.T) {
+		t.Parallel()
+
+		err := consoleSendOn(true).unfencedSendError(3)
+
+		var demote *domain.ConfineDemoteError
+		if !errors.As(err, &demote) {
+			t.Fatalf("unfencedSendError = %v (%T), want a *domain.ConfineDemoteError", err, err)
+		}
+		if want := "send to console 3, which was opened unconfined"; demote.Reason != want {
+			t.Errorf("Reason = %q, want %q", demote.Reason, want)
+		}
+		if want := "deny it — the agent is told to close the console and reopen it fenced"; demote.Remedy != want {
+			t.Errorf("Remedy = %q, want %q", demote.Remedy, want)
+		}
+		if !errors.Is(err, domain.ErrConfinementUnavailable) {
+			t.Errorf("unfencedSendError = %v, want it to wrap ErrConfinementUnavailable", err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, "close it") || !strings.Contains(msg, "reopen it") {
+			t.Errorf("unfencedSendError = %q, want it to tell the model to close the console and reopen it", msg)
+		}
+	})
+
+	t.Run("console open cannot confine", func(t *testing.T) {
+		t.Parallel()
+
+		err := consoleSendOn(false).unfencedSendError(3)
+
+		var demote *domain.ConfineDemoteError
+		if errors.As(err, &demote) {
+			t.Errorf("unfencedSendError = %v, want a plain wrap: reopening cannot fence it here", err)
+		}
+		if !errors.Is(err, domain.ErrConfinementUnavailable) {
+			t.Errorf("unfencedSendError = %v, want it to wrap ErrConfinementUnavailable", err)
+		}
+	})
+}
+
 // TestConsoleSend_UnknownIDNamesTheOpenConsoles covers the refusal a model actually meets: an id
 // from before a /new, or one it simply invented. It is an error RESULT naming what IS open, so
 // the next call can be right.

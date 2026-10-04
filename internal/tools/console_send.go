@@ -152,15 +152,29 @@ func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain
 // consoleSendUnfenced reports that a send to target must be demoted rather than typed: the call
 // runs under a confinement box and target was not opened confined, so no fence stands behind the
 // shell the line would reach. It holds on every host — whether the host's Console open can
-// confine (platform.Terminal.ConsoleConfines) changes only what unfencedSendError says.
+// confine (platform.Terminal.ConsoleConfines) changes only what unfencedSendError says, to the
+// model and on the Approval prompt.
 func (t *ConsoleSend) consoleSendUnfenced(ctx context.Context, target *console.Console) bool {
 	return confinementBox(ctx) != nil && !target.Confined
 }
 
+const (
+	// consoleUnfencedSendReasonFormat is the Approval prompt reason for a demoted send on a host
+	// whose Console open can confine: the cause is this Console, not the host, so the prompt names
+	// it. The %d is the console id.
+	consoleUnfencedSendReasonFormat = "send to console %d, which was opened unconfined"
+	// consoleUnfencedSendRemedy is that prompt's way out. The fence is one reopen away and the
+	// model already holds that advice (the error's detail), so denying is the fix — not lifting
+	// confinement for the session.
+	consoleUnfencedSendRemedy = "deny it — the agent is told to close the console and reopen it fenced"
+)
+
 // unfencedSendError is the demotion error for a send to console id: it wraps
 // domain.ErrConfinementUnavailable so the dispatch gates the send, and its text names the way to
 // a fenced send. Where a Console open can confine (POSIX), the way is to close this Console and
-// reopen it, which fences the new one; where it cannot (Windows), there is none to name.
+// reopen it, which fences the new one, and the error is a domain.ConfineDemoteError so the
+// Approval prompt names this Console and that fix; where it cannot (Windows), there is none to
+// name and the prompt keeps the host-incapacity wording.
 func (t *ConsoleSend) unfencedSendError(id int) error {
 	if !t.host.shell.ConsoleConfines() {
 		return fmt.Errorf(
@@ -168,11 +182,15 @@ func (t *ConsoleSend) unfencedSendError(id int) error {
 			domain.ErrConfinementUnavailable, id,
 		)
 	}
-	return fmt.Errorf(
-		"%w: console %d was opened unconfined; close it with console_close and reopen it with"+
-			" console_open to run it fenced",
-		domain.ErrConfinementUnavailable, id,
-	)
+	return &domain.ConfineDemoteError{
+		Detail: fmt.Sprintf(
+			"console %d was opened unconfined; close it with console_close and reopen it with"+
+				" console_open to run it fenced",
+			id,
+		),
+		Reason: fmt.Sprintf(consoleUnfencedSendReasonFormat, id),
+		Remedy: consoleUnfencedSendRemedy,
+	}
 }
 
 var (

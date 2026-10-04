@@ -738,10 +738,15 @@ func TestDisposition_RuntimeConfineUnavailable_DemotesToApproval(t *testing.T) {
 // unfencedTargetTool is a subprocess tool shaped like confinePropagatingTool whose own target —
 // not the Confiner — is what cannot be fenced: handed a Confinement handle, it returns detail
 // wrapped in ErrConfinementUnavailable before doing anything, as console_send does for a Console
-// opened unconfined. The Confiner is capable, so the demote is the tool's claim alone.
+// opened unconfined. The Confiner is capable, so the demote is the tool's claim alone. With a
+// reason set it returns a domain.ConfineDemoteError carrying that reason and remedy for the
+// Approval prompt, as console_send does on POSIX; without one, a plain %w wrap, as it does on
+// Windows.
 type unfencedTargetTool struct {
 	name   string
 	detail string
+	reason string
+	remedy string
 	ran    *int
 }
 
@@ -753,6 +758,9 @@ func (t unfencedTargetTool) Subprocess() bool        { return true }
 
 func (t unfencedTargetTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if _, ok := domain.ConfinementFromContext(ctx); ok {
+		if t.reason != "" {
+			return domain.ToolResult{}, &domain.ConfineDemoteError{Detail: t.detail, Reason: t.reason, Remedy: t.remedy}
+		}
 		return domain.ToolResult{}, fmt.Errorf("%w: %s", domain.ErrConfinementUnavailable, t.detail)
 	}
 	if t.ran != nil {
@@ -773,16 +781,22 @@ func TestDispatch_ConfineFallbackRefusalCarriesTheToolError(t *testing.T) {
 	tests := []struct {
 		name     string
 		approver domain.Approver
+		reason   string
 	}{
 		{name: "headless refusal", approver: nil},
 		{name: "denied demoted call", approver: &fakeApprover{decision: domain.ApprovalDeny}},
+		{
+			name:     "denied demoted call naming its own reason",
+			approver: &fakeApprover{decision: domain.ApprovalDeny},
+			reason:   "send to console 3, which was opened unconfined",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			sink := &recordingSink{}
 			ran := 0
-			sub := unfencedTargetTool{name: "console_send", detail: detail, ran: &ran}
+			sub := unfencedTargetTool{name: "console_send", detail: detail, reason: tc.reason, ran: &ran}
 			cfg := autoConfig(sink, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}, true, sub)
 			cfg.Approver = tc.approver
 
@@ -800,6 +814,66 @@ func TestDispatch_ConfineFallbackRefusalCarriesTheToolError(t *testing.T) {
 			}
 			if !strings.Contains(res.Content, detail) {
 				t.Errorf("result = %q, want it to carry the tool's own error text %q", res.Content, detail)
+			}
+		})
+	}
+}
+
+// TestDispatch_ConfineFallbackPromptCarriesTheToolReason proves the runtime-demote Approval prompt
+// names the call's own cause when the tool knows it: a tool returning a domain.ConfineDemoteError
+// — console_send to a Console opened unconfined, on a host that can confine one — puts its Reason
+// and Remedy on the prompt, rather than the host-incapacity pair that would send the human to
+// /confine off on a host whose fence works. A tool whose error is a plain wrap of the sentinel —
+// the Confiner itself could not establish the box — keeps that pair byte for byte.
+func TestDispatch_ConfineFallbackPromptCarriesTheToolReason(t *testing.T) {
+	t.Parallel()
+	const (
+		toolReason = "send to console 3, which was opened unconfined"
+		toolRemedy = "deny it — the agent is told to close the console and reopen it fenced"
+	)
+
+	tests := []struct {
+		name       string
+		tool       domain.Tool
+		confiner   *fakeConfiner
+		wantReason string
+		wantRemedy string
+	}{
+		{
+			name: "tool names its own cause",
+			tool: unfencedTargetTool{
+				name:   "console_send",
+				detail: "console 3 was opened unconfined; close it and reopen it to run it fenced",
+				reason: toolReason,
+				remedy: toolRemedy,
+			},
+			confiner:   &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+			wantReason: toolReason,
+			wantRemedy: toolRemedy,
+		},
+		{
+			name:       "plain sentinel wrap keeps the generic pair",
+			tool:       confinePropagatingTool{name: "console_send"},
+			confiner:   &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true},
+			wantReason: confineDemoteGateReason,
+			wantRemedy: confineUnavailableRemedy,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := autoConfig(sink, tc.confiner, true, tc.tool)
+			cfg.Approver = &fakeApprover{decision: domain.ApprovalDeny}
+
+			driveToolCall(t, cfg, sink, "c1", "console_send", `{"id":3,"input":"ls"}`)
+
+			req := requestOnApproval(t, sink.events)
+			if req.Reason != tc.wantReason {
+				t.Errorf("approval reason = %q, want %q", req.Reason, tc.wantReason)
+			}
+			if req.Remedy != tc.wantRemedy {
+				t.Errorf("approval remedy = %q, want %q", req.Remedy, tc.wantRemedy)
 			}
 		})
 	}

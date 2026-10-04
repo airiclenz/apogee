@@ -35,7 +35,11 @@
 - Resume reaching headless/daemon drivers (`domain.Usage.Unpriced()` single consumer).
 - Any change to Windows Console confinement.
 
-## 1. Console send carries its own approval reason
+## 1. Console send carries its own approval reason — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): executeTool keeps its two-value signature as a thin wrapper over a new executeToolDemotable (third value: the tool's ErrConfinementUnavailable error), which only executeConfine calls; executeConfineFallback now takes that error instead of its text, and a new confineDemotePrompt picks the ConfineDemoteError's Reason/Remedy (when Reason is non-empty) over the fallback's. treesnapshot_test.go and undo_group_test.go untouched.
+NOTES (2026-10-04): no CHANGELOG entry here — the user-visible change amends the [Unreleased] apogee-zwvj sentence "The Approval prompt is unchanged.", which the plan assigns to item 2, as it does the stale "stays generic" line in docs/adr/0059 (:129); the code-comment sites the grep rule names are all updated in this item.
+NOTES (2026-10-04): the existing refusal test (TestDispatch_ConfineFallbackRefusalCarriesTheToolError) gained a typed-error denial row, pinning that the model-facing deny text is unchanged for a ConfineDemoteError.
 
 **What:**
 **Goal:** Under a confinement box on POSIX, a `console_send` to a Console opened unconfined raises an approval request whose Reason is `send to console N, which was opened unconfined` and whose Remedy is `deny it — the agent is told to close the console and reopen it fenced`. Every other route into the confine fallback keeps `confineDemoteGateReason` / `confineUnavailableRemedy` byte for byte. The refusal/deny text the model receives is unchanged. Fixes `apogee-console-prompt-generic-reason`: the prompt advised `/confine off` on a host that can confine.

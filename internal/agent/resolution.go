@@ -63,7 +63,8 @@ const (
 	confineDemoteRefuseReason = "subprocess could not be confined and approval was not granted"
 	// confineUnavailableRemedy is the Approval remedy the two confinement-unavailable gates carry
 	// — the ladder cell that could not fence the subprocess and the runtime demote whose box
-	// failed to establish. Same cause, same way out, so both name it in the same words — mirroring
+	// failed to establish (unless the tool's domain.ConfineDemoteError names its own cause and
+	// remedy instead). Same cause, same way out, so both name it in the same words — mirroring
 	// the escape `/confine status` already offers (internal/tui/confine.go), condensed to one line
 	// because an Approval prompt has room for a sentence, not a paragraph. It is a bare sentence: the
 	// "Fix: " label a Driver paints in front of it is presentation, not engine (ADR 0031).
@@ -134,7 +135,8 @@ type resolution struct {
 	reason string
 
 	// remedy is the optional one-line route out of the condition that forced a Gate, carried to
-	// the Approval prompt beside the reason. The two confinement-unavailable gates set it, and so
+	// the Approval prompt beside the reason. The two confinement-unavailable gates set it (the
+	// runtime demote's may be replaced at run time by a domain.ConfineDemoteError's own), and so
 	// does a Tier-2 forced gate whose rule carries a Hint — the guard's own way out is the route
 	// out of the condition that forced this look. A gate the autonomy rung itself asked for has
 	// nothing to fix and leaves it empty. Gate only.
@@ -837,6 +839,9 @@ func finishConfine(in resolutionInput, confine resolution) resolution {
 // fallback never carries its own fallback — the demote is a single, bounded step. The gate
 // carries the same remedy as the caps-insufficient ladder cell: the two prompts differ only in
 // WHEN the host's incapacity was discovered, and the way out of both is the same one command.
+// That reason and remedy are the default: a tool whose own target, not the host, could not be
+// fenced (console_send to a Console opened unconfined) returns a domain.ConfineDemoteError, and
+// executeConfineFallback puts its Reason and Remedy on the prompt in their place.
 //
 // A recipe's script stage in Plan falls back to a refusal whatever the Approver: Plan runs it
 // only confined (ADR 0012 amendment 2026-09-27), so neither a gate nor an unconfined re-run is

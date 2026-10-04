@@ -306,7 +306,7 @@ func assertConfineFallback(t *testing.T, got resolution, approverPresent bool) {
 }
 
 // ----------------------------------------------------------------------------
-// The Gate remedy — only the two confinement-unavailable gates carry one
+// The Gate remedy — at resolve time only the two confinement-unavailable gates carry one
 // ----------------------------------------------------------------------------
 
 // TestResolve_GateRemedy pins which gates name a way out. A remedy answers "and what do I do
@@ -314,7 +314,9 @@ func assertConfineFallback(t *testing.T, got resolution, approverPresent bool) {
 // Auto + confine=true + caps-insufficient ladder cell, and the runtime demote whose box failed
 // to establish. Every gate the autonomy rung itself asked for carries none — there is nothing
 // to fix, only a mode to be in — which is why this is a focused test rather than a column on
-// the ladder table: three non-empty cells out of ~40 rows.
+// the ladder table: three non-empty cells out of ~40 rows. The runtime demote's remedy is only
+// its default: a tool's domain.ConfineDemoteError replaces it at run time, which
+// TestDispatch_ConfineFallbackPromptCarriesTheToolReason pins.
 func TestResolve_GateRemedy(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()

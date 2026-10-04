@@ -60,3 +60,32 @@ var (
 	// addressed — currently an empty Name.
 	ErrInvalidTool = errors.New("apogee: invalid tool")
 )
+
+// ConfineDemoteError is an ErrConfinementUnavailable that says, beside the sentinel, why its own
+// call could not be fenced and what the human asked to approve the unconfined run can do about it.
+// A subprocess tool returns it instead of a plain %w wrap when the cause is the call's own target
+// rather than the host — console_send to a Console opened unconfined, on a host that can confine
+// one — so the runtime-demote Approval prompt names that cause instead of the host-incapacity one.
+//
+// It unwraps to ErrConfinementUnavailable, so errors.Is and every consumer of the error text keep
+// working: Error yields exactly what fmt.Errorf("%w: %s", ErrConfinementUnavailable, Detail) would.
+type ConfineDemoteError struct {
+	// Detail is the MODEL-facing text after the sentinel: the way to a fenced run. A refused or
+	// denied demote carries it to the model.
+	Detail string
+	// Reason is the human-facing Approval prompt reason for the demoted call. Required: an error
+	// with an empty Reason leaves the prompt to the dispatch's generic demote wording.
+	Reason string
+	// Remedy is the Approval prompt's optional one-line way out, beside Reason.
+	Remedy string
+}
+
+// Error returns the sentinel's text followed by Detail, as a %w wrap of it would read.
+func (e *ConfineDemoteError) Error() string {
+	return ErrConfinementUnavailable.Error() + ": " + e.Detail
+}
+
+// Unwrap returns ErrConfinementUnavailable, the sentinel the dispatch demotes on.
+func (e *ConfineDemoteError) Unwrap() error {
+	return ErrConfinementUnavailable
+}

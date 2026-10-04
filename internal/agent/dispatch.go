@@ -1186,14 +1186,14 @@ func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, cal
 // cannot be established at run time (the subprocess tool returns ErrConfinementUnavailable
 // rather than running unconfined), it follows the verdict's precomputed fallback instead of
 // deciding anew — the runtime "confine if you can, gate if you can't" net (Resolution D4).
-// The tool's own error text, which executeTool hands back in the result, travels with it.
+// The tool's own error, which executeToolDemotable hands back beside the result, travels with it.
 func (a *Agent) executeConfine(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
-	result, outcome := a.executeTool(ctx, turn, tool, call, &verdict.box)
+	result, outcome, demoteErr := a.executeToolDemotable(ctx, turn, tool, call, &verdict.box)
 	if outcome == dispatchCancelled {
 		return result, dispatchCancelled
 	}
 	if outcome == dispatchConfinementUnavailable {
-		return a.executeConfineFallback(ctx, turn, tool, call, verdict, result.Content)
+		return a.executeConfineFallback(ctx, turn, tool, call, verdict, demoteErr)
 	}
 	a.recordExecutedTrip(turn, call, verdict, result)
 	return result, dispatchDone
@@ -1205,11 +1205,14 @@ func (a *Agent) executeConfine(ctx context.Context, turn int, tool domain.Tool, 
 // allow-continuation re-runs the call UNCONFINED (Approval is now the bound), or, when no
 // Approver is configured, a Refuse. The executor follows the plan; it never decides.
 //
-// toolError is the text of the tool's ErrConfinementUnavailable error. A refusal or a denial
-// carries what it says beyond the sentinel (confineFailureDetail) after its own reason, so the
-// model reads the tool's way to a fenced run — console_send's "close it and reopen it" — rather
-// than a bare refusal it cannot act on. The approval prompt stays generic.
-func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution, toolError string) (domain.ToolResult, dispatchOutcome) {
+// toolErr is the tool's ErrConfinementUnavailable error. A refusal or a denial carries what its
+// text says beyond the sentinel (withConfineFailureDetail) after its own reason, so the model
+// reads the tool's way to a fenced run — console_send's "close it and reopen it" — rather than a
+// bare refusal it cannot act on. The approval prompt carries the fallback's generic demote reason
+// and remedy, unless toolErr is a domain.ConfineDemoteError: then its own Reason and Remedy name
+// the call's cause — console_send's "send to console N, which was opened unconfined" — in their
+// place, since the host-incapacity wording would point the human at the wrong fix.
+func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution, toolErr error) (domain.ToolResult, dispatchOutcome) {
 	a.cfg.Events.Emit(domain.ErrorEvent{
 		EventBase: a.base(turn),
 		Source:    call.Tool,
@@ -1220,23 +1223,34 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 	if fb.kind == resolveRefuse {
 		// No Approver: the subprocess could not be confined and no human could authorise the
 		// unconfined run.
-		result := errorToolResult(call.ID, withConfineFailureDetail(fb.reason, toolError))
+		result := errorToolResult(call.ID, withConfineFailureDetail(fb.reason, toolErr.Error()))
 		a.emitAudit(turn, call, fb.auditDecision, fb.auditReason, result)
 		return result, dispatchDone
 	}
 
-	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, fb.reason, fb.remedy)
+	reason, remedy := confineDemotePrompt(fb, toolErr)
+	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, reason, remedy)
 	if outcome == dispatchCancelled {
 		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
 	}
 	if !allowed {
-		result := errorToolResult(call.ID, withConfineFailureDetail(confineDemoteRefuseReason, toolError))
+		result := errorToolResult(call.ID, withConfineFailureDetail(confineDemoteRefuseReason, toolErr.Error()))
 		a.emitAudit(turn, call, fb.auditDecision, fb.auditReason, result)
 		return result, dispatchDone
 	}
 	// Approval granted: re-run with NO confinement handle installed (the call already failed to
 	// confine, and Approval is the bound the human granted).
 	return a.executeRun(ctx, turn, tool, call, verdict)
+}
+
+// confineDemotePrompt is the Approval reason and remedy for a runtime-demote gate: the tool's own
+// pair when toolErr is a domain.ConfineDemoteError carrying a Reason, else the fallback's.
+func confineDemotePrompt(fb *resolution, toolErr error) (reason, remedy string) {
+	var demote *domain.ConfineDemoteError
+	if errors.As(toolErr, &demote) && demote.Reason != "" {
+		return demote.Reason, demote.Remedy
+	}
+	return fb.reason, fb.remedy
 }
 
 // withConfineFailureDetail appends to reason what a tool's ErrConfinementUnavailable error text
@@ -1453,7 +1467,18 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 // result — so the claim is never swallowed into an empty result.
 // An ExternalEffectTool routes through the injected ExternalEffects boundary (ADR 0008) when
 // the host supplied one; else it runs live.
-func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, box *domain.ConfinementBox) (result domain.ToolResult, outcome dispatchOutcome) {
+//
+// executeConfine, the one caller with a demote to follow, calls executeToolDemotable instead, to
+// receive the tool's ErrConfinementUnavailable error itself rather than only its text.
+func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, box *domain.ConfinementBox) (domain.ToolResult, dispatchOutcome) {
+	result, outcome, _ := a.executeToolDemotable(ctx, turn, tool, call, box)
+	return result, outcome
+}
+
+// executeToolDemotable is executeTool, also returning the tool's ErrConfinementUnavailable error
+// when the outcome is dispatchConfinementUnavailable (nil on every other outcome), so the demote
+// fallback can read a domain.ConfineDemoteError's own Approval reason and remedy off it.
+func (a *Agent) executeToolDemotable(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, box *domain.ConfinementBox) (result domain.ToolResult, outcome dispatchOutcome, demoteErr error) {
 	outcome = dispatchDone
 	defer func() {
 		if r := recover(); r != nil {
@@ -1464,6 +1489,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 			})
 			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
 			outcome = dispatchDone
+			demoteErr = nil
 		}
 	}()
 
@@ -1471,7 +1497,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// ran and ignored it — keeps the call from running at all, so the result it settles with says
 	// the call did nothing (ADR 0088 D1) rather than letting a tool start under a dead context.
 	if ctx.Err() != nil {
-		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
+		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled, nil
 	}
 
 	// The carriers installed below, and every other context key the engine installs (the box, the
@@ -1601,7 +1627,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	res, err := a.runTool(ctx, tool, call)
 	if err != nil {
 		if ctx.Err() != nil {
-			return errorToolResult(call.ID, cancelledWhileRunningContent), dispatchCancelled
+			return errorToolResult(call.ID, cancelledWhileRunningContent), dispatchCancelled, nil
 		}
 		// A subprocess tool that could not confine its command (the backend returned
 		// ErrConfinementUnavailable when asked to wrap the cmd) reports it as a Go error rather
@@ -1612,7 +1638,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		// would swallow the claim into an empty result — the sentinel takes the ordinary
 		// tool-error branch below instead, reaching the human and the model.
 		if box != nil && errors.Is(err, domain.ErrConfinementUnavailable) {
-			return domain.ToolResult{CallID: call.ID, Content: err.Error()}, dispatchConfinementUnavailable
+			return domain.ToolResult{CallID: call.ID, Content: err.Error()}, dispatchConfinementUnavailable, err
 		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: err.Error()})
 		errResult := errorToolResult(call.ID, err.Error())
@@ -1621,12 +1647,12 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 			// still have written before it failed — the incident's exact shape.
 			appendTreeMutationWarning(&errResult, a.tree.mutationWarning(floorCtx, preTree))
 		}
-		return errResult, dispatchDone
+		return errResult, dispatchDone, nil
 	}
 	if watchTree {
 		appendTreeMutationWarning(&res, a.tree.mutationWarning(floorCtx, preTree))
 	}
-	return res, dispatchDone
+	return res, dispatchDone, nil
 }
 
 // runTool routes the call to the injected ExternalEffects boundary for an external-effect
