@@ -2,7 +2,7 @@
 
 **Goal:** Close the open, Linux-fixable beads left by the 2026-10-03 table-stakes plan (the POSIX unconfined-Console send, four image/pricing bugs, two P4s), fix the `apogee doctor` remedy, and bring the docs, glossary and ADRs that lag the code back in line.
 **Date:** 2026-10-03
-**Status:** unexecuted
+**Status:** done — all 15 items done (2026-10-04)
 **sized for:** ~200k-context host
 **base:** 0d739da4
 
