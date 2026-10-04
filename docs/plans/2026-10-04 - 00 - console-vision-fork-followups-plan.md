@@ -156,7 +156,10 @@ NOTES (2026-10-04): commands.md's ⌃v passage now says a clipboard image is ref
 - `grep -n 'an --endpoint server cannot turn vision on' docs/manual/configuration.md docs/manual/commands.md CONTEXT.md` matches in all three.
 **Commit:** `docs(vision): explain the --endpoint vision refusal`
 
-## 6. A fork starts at zero spend
+## 6. A fork starts at zero spend — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): consequential edit — internal/tui/transcript.go: made necessary by withoutSpend in forkAt (the prefixThrough doc comment called the prefix "the child's transcript"; it now says the spend is cleared first)
+NOTES (2026-10-04): the spend is cleared by a new helper, withoutSpend (fork.go), applied to prefixThrough's copy inside forkAt. Only `usage` is cleared; the view-only itemSpend is never persisted, so the child, which is built from the record, never sees it
 
 **What:**
 **Goal:** After `/fork`, the forked session's `/usage` delegate and session rows, footer spend and first saved `Meta.DelegateUsage` count only calls the fork itself made; the parent's pre-cut sub-agent and Workflow spend is in neither the fork's transcript record nor its sums. Copied run cards keep their context fill. The parent's live transcript and saved record are unchanged. Fixes `apogee-fork-inherits-delegate-spend` (also an ADR 0093 decision 6 breach when the parent's label differs).

@@ -46,7 +46,8 @@ func encodeTranscript(t *transcript) ([]byte, error) {
 // entriesToRecords projects committed entries onto their neutral form under encodeTranscript's
 // skip rules — it IS the save path's encoder, split out so a cut prefix ([transcript.prefixThrough])
 // can be encoded exactly as the whole scrollback is: a forked child's transcript blob then holds
-// what the parent's would, up to the cut, and nothing a resume would have skipped.
+// what the parent's would, up to the cut, less the spend the fork clears first (withoutSpend), and
+// nothing a resume would have skipped.
 func entriesToRecords(entries []entry) []session.Entry {
 	records := make([]session.Entry, 0, len(entries))
 	for i := range entries {

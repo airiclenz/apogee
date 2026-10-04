@@ -1211,9 +1211,9 @@ func (t *transcript) forkPoints() []forkPoint {
 // Exchange's tool cards, its delegates' blocks (depth ≥ 1, a child's own entryUser included), and
 // the host notes that landed behind it all stay — with the one-time start-up box left out, because
 // a child session re-seeds its own (encodeTranscript skips it for the same reason). It is the
-// child's transcript when a session is forked at that prompt: the same cut the engine makes from
-// the end ([forkPoint.drop]), made here from the front, because the scrollback is what the picker
-// showed and the index is what it picked. An index that is not a depth-0 prompt returns nil.
+// child's transcript, its spend cleared (withoutSpend), when a session is forked at that prompt:
+// the same cut the engine makes from the end ([forkPoint.drop]), made here from the front, because
+// the scrollback is what the picker showed and the index is what it picked. An index that is not a depth-0 prompt returns nil.
 func (t *transcript) prefixThrough(index int) []entry {
 	if index < 0 || index >= len(t.entries) {
 		return nil

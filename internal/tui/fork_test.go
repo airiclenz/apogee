@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
@@ -130,6 +131,90 @@ func TestForkPickerListsPromptsAndForks(t *testing.T) {
 	want := "forked from " + saves[0].id + " — " + sessionTitle(forkPrompts[0])
 	if got := lastNote(m); got != want {
 		t.Errorf("last note = %q, want %q", got, want)
+	}
+}
+
+// recordUsage reads the spend one persisted entry carries back into the shape the Model sums.
+func recordUsage(e session.Entry) domain.Usage {
+	return domain.Usage{
+		Calls:              e.UsageCalls,
+		PromptTokens:       e.UsagePromptTokens,
+		CachedPromptTokens: e.UsageCachedPromptTokens,
+		CompletionTokens:   e.UsageCompletionTokens,
+		TotalTokens:        e.UsageTotalTokens,
+		CostMicros:         e.UsageCostMicros,
+		PricedCalls:        e.UsagePricedCalls,
+		UnpricedCalls:      e.UsageUnpricedCalls,
+	}
+}
+
+// A fork starts at zero spend, delegate spend included: a priced sub-agent run the parent made
+// before the cut is copied into the child's transcript with its context fill but without its spend,
+// so the child's /usage delegate sum, its footer and its first saved delegate sum are all zero —
+// while the parent, whose record already counted that run, keeps it.
+func TestForkStartsAtZeroSpend(t *testing.T) {
+	t.Parallel()
+
+	eng := &fakeEngine{}
+	host := &fakeSessionHost{}
+	m := newForkModel(t, eng, host)
+	spent := domain.Usage{
+		Calls: 2, PromptTokens: 4000, CompletionTokens: 500, TotalTokens: 4500,
+		CostMicros: 1200, PricedCalls: 2,
+	}
+	const childUsed, childLimit, childModel = 4096, 8192, "reviewer-model"
+	m = delegate(t, m, "call-1", "review the diff", spent, 0)
+	head := &m.transcript.entries[len(m.transcript.entries)-1]
+	head.ctxUsed, head.ctxLimit, head.ctxModel = childUsed, childLimit, childModel
+	m = openForkPicker(t, m)
+	m = step(t, m, keyDown())
+	m = step(t, m, keyDown()) // highlight row 3: the delegate lies inside its Exchange
+	parent := m
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
+
+	if got := parent.delegateUsageTotal(); got != spent {
+		t.Errorf("parent delegate total = %+v after the fork; want its own spend %+v kept", got, spent)
+	}
+	saves, forks := host.savedCalls(), host.forkCalls()
+	if len(saves) != 1 || len(forks) != 1 {
+		t.Fatalf("host saw %d saves and %d forks; want one of each", len(saves), len(forks))
+	}
+	if got := domain.Usage(saves[0].delegateUsage); got != spent {
+		t.Errorf("parent's saved delegate sum = %+v; want %+v", got, spent)
+	}
+	var card *session.Entry
+	for i, e := range forks[0].transcript {
+		if got := recordUsage(e); got != (domain.Usage{}) {
+			t.Errorf("child entry %d (%s) carries spend %+v; want none", i, e.Kind, got)
+		}
+		if e.CtxUsed > 0 {
+			card = &forks[0].transcript[i]
+		}
+	}
+	if card == nil {
+		t.Fatal("the child's transcript holds no run card with a context fill; want the delegate's copied")
+	}
+	if card.CtxUsed != childUsed || card.CtxLimit != childLimit || card.CtxModel != childModel {
+		t.Errorf("copied card fill = %d/%d on %q; want %d/%d on %q",
+			card.CtxUsed, card.CtxLimit, card.CtxModel, childUsed, childLimit, childModel)
+	}
+	if got := m.delegateUsageTotal(); got != (domain.Usage{}) {
+		t.Errorf("child delegate total = %+v; want zero", got)
+	}
+	if got := m.footerLeftText().spend; got != "" {
+		t.Errorf("child footer spend = %q; want none", got)
+	}
+
+	m = runWrites(t, m, m.saveAtIdle())
+
+	saves = host.savedCalls()
+	if len(saves) != 2 {
+		t.Fatalf("host saw %d saves; want the parent's and the child's first", len(saves))
+	}
+	if got := saves[1].delegateUsage; got != (session.Usage{}) {
+		t.Errorf("child's first saved delegate sum = %+v; want zero", got)
 	}
 }
 

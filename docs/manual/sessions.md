@@ -73,7 +73,11 @@ still remembers.
   which starts under its parent's title. The session you were in stays saved as it
   was, and the browser tags the fork `⑂ <parent title>` beside its title — by the
   parent's id once the parent has been deleted — so the two rows, both named for the
-  same task, still read as one history and the branch that left it.
+  same task, still read as one history and the branch that left it. The new
+  session starts at zero spend: the sub-agent and workflow cards it keeps show
+  how full each run's context got, but their spend stays counted in the parent,
+  so `/usage`, the footer and the new session's record count only the calls it
+  makes itself.
 - Every tool card in a record keeps a bounded copy of the arguments the model sent
   with that call — the main agent's and every sub-agent's alike — so a finished
   run's tool use can still be read back off the file. It stays a summary and not a

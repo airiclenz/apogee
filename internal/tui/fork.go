@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -121,6 +122,10 @@ func (m Model) acceptFork(offered int) (tea.Model, tea.Cmd) {
 // may read ActiveID as "" before the first Save lands, which is exactly why the host stamps
 // ParentID from its own identity once that Save has. keep — the human's `n` to "stop running
 // workflows?" — rides the write to the restore that switches to the child (foldFork).
+//
+// The prefix the child keeps is copied without its spend (withoutSpend): the child starts at zero
+// spend, delegate spend included, so its record and every sum it shows count only the calls the
+// child itself makes.
 func (m Model) forkAt(point forkPoint, keep bool) (tea.Model, tea.Cmd) {
 	sess, err := m.eng.CutSnapshot(point.drop)
 	if err != nil {
@@ -130,12 +135,30 @@ func (m Model) forkAt(point forkPoint, keep bool) (tea.Model, tea.Cmd) {
 	saveCmd := m.saveAtIdle()
 	forkCmd := m.scheduleWrite(recordWrite{kind: writeFork, fork: forkPayload{
 		sess:    sess,
-		entries: entriesToRecords(m.transcript.prefixThrough(point.index)),
+		entries: entriesToRecords(withoutSpend(m.transcript.prefixThrough(point.index))),
 		title:   title,
 		parent:  session.Meta{ID: m.sessions.ActiveID(), Title: title},
 		keep:    keep,
 	}})
 	return m, tea.Batch(saveCmd, forkCmd)
+}
+
+// withoutSpend clears the token spend every entry of prefix carries — a sub-agent run's totals, a
+// Workflow's summed spend, a background workflow finish line's — and returns prefix. A forked child
+// starts at zero spend: that spend was the parent's and is counted in the parent's record, so a copy
+// that kept it would count it twice — in the child's /usage rows, footer and saved delegate sum —
+// and, where the child's currency label differs from the parent's, sum it under a label not its own
+// (ADR 0093 decision 6). The context fill (ctxUsed, ctxLimit, ctxModel) stays: it is what a copied
+// run card says about its own window, not spend. A copied finish line then no longer carries a
+// Workflow's spend (carriesWorkflowSpend) and reads as the plain note it says.
+//
+// prefix must be a copy ([transcript.prefixThrough] returns one): the parent's live entries keep
+// their spend.
+func withoutSpend(prefix []entry) []entry {
+	for i := range prefix {
+		prefix[i].usage = domain.Usage{}
+	}
+	return prefix
 }
 
 // foldFork folds a landed fork write: the child record the queue assembled becomes the live session

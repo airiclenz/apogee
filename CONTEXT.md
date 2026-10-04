@@ -612,7 +612,9 @@ by `Depth` and call-ID) — plus
 browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). A
 forked record carries its parent's id in `Meta.ParentID` — an additive key like the Schedule
 identity, empty on every record that is not a fork, cleared (never refused) on load when it is
-not a valid id. Not
+not a valid id. A fork's copied scrollback keeps each run card's context fill but none of the
+parent's spend: its `Usage*` fields are cleared at the cut, so the child starts at zero spend,
+delegate spend included, and its `Meta.DelegateUsage` counts only the calls the child makes. Not
 every scrollback entry is persisted: an **ephemeral** entry is display-only — rendered exactly
 like its kind, skipped by the encoder — because it is *re-derived* at each startup or resume
 rather than earned by the conversation. Today those are the start-up box, the `resumed: <title>`
