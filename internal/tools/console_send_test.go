@@ -205,8 +205,9 @@ func TestConsoleInputBytes_EndsWithTheHostsEnter(t *testing.T) {
 }
 
 // terminalRulesHost is the platform rules with the Console-confines fact overridden, so a test
-// can drive console_send under either answer ("a Console open can confine" on POSIX, "cannot" on
-// Windows) from any host — the answer picks the wording of a demoted send's error.
+// can drive console_send under either answer ("a Console open can confine", as every shipped
+// platform answers, or "cannot") from any host — the answer picks the wording of a demoted send's
+// error.
 type terminalRulesHost struct {
 	platform.Host
 	confines bool
@@ -233,13 +234,14 @@ func withFSConfinement(t *testing.T, ctx context.Context) context.Context {
 	})
 }
 
-// TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined pins the Windows send
-// fence (ADR 0059 Bounds): on a host whose Console open cannot confine, a send under a confinement
-// box to a Console that was not opened confined is refused with ErrConfinementUnavailable — the
-// sentinel the dispatch demotes to Approval — and its text says the platform cannot confine a
-// Console, since reopening it would not help. The same send with no box (the unconfined re-run
-// Approval grants) goes through. The Console runs the host's own platform shell interactively
-// (sh, or cmd.exe), so the test is exercised on every host.
+// TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined pins the send fence on a
+// host whose rules say a Console open cannot confine (no shipped platform says so since Windows
+// Consoles confine; the fake terminalRulesHost keeps that answer reachable): a send under a
+// confinement box to a Console that was not opened confined is refused with
+// ErrConfinementUnavailable — the sentinel the dispatch demotes to Approval — and its text says the
+// platform cannot confine a Console, since reopening it would not help. The same send with no box
+// (the unconfined re-run Approval grants) goes through. The Console runs the host's own platform
+// shell interactively (sh, or cmd.exe), so the test is exercised on every host.
 func TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined(t *testing.T) {
 	t.Parallel()
 	ctx, _ := consoleTestCtx(t)
@@ -260,13 +262,14 @@ func TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined(t *
 	}
 }
 
-// TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX pins the POSIX half of that fence
-// (ADR 0059, Amendment 2026-10-04): where a Console open CAN confine, a Console opened unconfined
-// (in Ask-Before, before a switch to Auto) is no fenced shell either, so a send to it under a
-// confinement box is refused with ErrConfinementUnavailable before anything is typed, and the
-// error tells the model to close the Console and reopen it. The proof nothing was typed is the
-// arithmetic: an Enter pressed afterwards, unboxed, would run a typed-but-unentered line and print
-// 42. The same line sent with no box runs and prints it.
+// TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX pins the POSIX half of the fence (ADR
+// 0059, Amendment 2026-10-04; console_open_windows_test.go pins the Windows half): where a Console
+// open CAN confine, a Console opened unconfined (in Ask-Before, before a switch to Auto) is no
+// fenced shell either, so a send to it under a confinement box is refused with
+// ErrConfinementUnavailable before anything is typed, and the error tells the model to close the
+// Console and reopen it. The proof nothing was typed is the arithmetic: an Enter pressed
+// afterwards, unboxed, would run a typed-but-unentered line and print 42. The same line sent with
+// no box runs and prints it.
 func TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX(t *testing.T) {
 	skipWithoutPOSIXShell(t)
 	t.Parallel()
@@ -300,8 +303,8 @@ func TestConsoleSend_UnconfinedConsoleIsDemotedUnderABoxOnPOSIX(t *testing.T) {
 // not the host, so the error is a domain.ConfineDemoteError whose Reason names the Console and
 // whose Remedy is to deny the send — the model is already told to close and reopen it — while it
 // still unwraps to ErrConfinementUnavailable and its text still carries that advice. Where a
-// Console open cannot confine (Windows), the error stays a plain wrap, so the prompt keeps the
-// host-incapacity wording.
+// Console open cannot confine (a host whose rules say so; no shipped platform does), the error
+// stays a plain wrap, so the prompt keeps the host-incapacity wording.
 func TestConsoleSend_UnfencedSendErrorNamesTheConsoleOnTheApprovalPrompt(t *testing.T) {
 	t.Parallel()
 

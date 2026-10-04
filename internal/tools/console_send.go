@@ -46,11 +46,11 @@ type consoleSendArgs struct {
 // mode is never a standing permission in another; a mode change or a `/confine` change reaches
 // the next send, never the live process (§4).
 //
-// A send made under a confinement box to a Console that was not opened confined has no fence
-// behind the shell it would reach — on Windows because no Console there is ever fenced, on POSIX
-// because the Console was opened unconfined (in Ask-Before, before a switch to Auto). On every
-// host such a send is refused with domain.ErrConfinementUnavailable and the dispatch demotes it to
-// Approval — each send on its own (ADR 0059 Bounds and its 2026-10-04 Amendment).
+// A send made under a confinement box to a Console that was not opened confined has no fence behind
+// the shell it would reach: the Console was opened unconfined (in Ask-Before, before a switch to
+// Auto), on Windows as on POSIX. On every host such a send is refused with
+// domain.ErrConfinementUnavailable and the dispatch demotes it to Approval — each send on its own
+// (ADR 0059 Bounds and its 2026-10-04 Amendment).
 //
 // It is DEFAULT-OFF beside the rest of the family (ADR 0057).
 type ConsoleSend struct {
@@ -171,10 +171,11 @@ const (
 
 // unfencedSendError is the demotion error for a send to console id: it wraps
 // domain.ErrConfinementUnavailable so the dispatch gates the send, and its text names the way to
-// a fenced send. Where a Console open can confine (POSIX), the way is to close this Console and
-// reopen it, which fences the new one, and the error is a domain.ConfineDemoteError so the
-// Approval prompt names this Console and that fix; where it cannot (Windows), there is none to
-// name and the prompt keeps the host-incapacity wording.
+// a fenced send. Where a Console open can confine (every shipped platform, Windows included),
+// the way is to close this Console and reopen it, which fences the new one, and the error is a
+// domain.ConfineDemoteError so the Approval prompt names this Console and that fix; on a host
+// whose rules say a Console open cannot confine, there is none to name and the prompt keeps the
+// host-incapacity wording.
 func (t *ConsoleSend) unfencedSendError(id int) error {
 	if !t.host.shell.ConsoleConfines() {
 		return fmt.Errorf(

@@ -36,8 +36,10 @@ func consoleOpenCall(id, command string, waitMS int) domain.ToolCall {
 }
 
 // skipWithoutPOSIXShell skips a test that needs a real `sh` behind a pseudo-terminal, or a
-// confined Console (which a Windows pseudoconsole cannot open). A test whose command reads the
-// same under either platform shell and expects no confined success runs on Windows too.
+// confined Console fenced by fakeConfiner — which sets no restricted token, so a Windows confined
+// open fails closed on it; console_open_windows_test.go drives the real Windows Confiner instead.
+// A test whose command reads the same under either platform shell and expects no confined success
+// runs on Windows too.
 func skipWithoutPOSIXShell(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
