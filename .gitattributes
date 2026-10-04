@@ -8,3 +8,14 @@ graphics/apogee-logo.md text eol=lf
 # would otherwise turn a byte-identical frame into a diff that looks identical.
 *.golden text eol=lf
 **/testdata/** text eol=lf
+
+# The go:embed'd defaults must stay LF for the same reason the block art above does: //go:embed
+# bakes the bytes into the binary verbatim, so a core.autocrlf=true checkout ships a daemon unit,
+# a plist and a starter config whose every line ends in a carriage return, and which `apogee
+# daemon install` then writes out that way. It also fails the generation tests, which compare a
+# rendering against an LF .golden and so report a diff that prints identically. VERSION is
+# embedded too — strings.TrimSpace in version.go already saves the version NUMBER, but it is
+# pinned here so no embedded file is left relying on its reader to trim.
+cmd/apogee/defaults/** text eol=lf
+internal/config/defaults/** text eol=lf
+VERSION text eol=lf
