@@ -2548,7 +2548,11 @@ you are asked before the program starts — and so is **every** `console_send` t
 fence is on, each send asked on its own. (macOS and Linux fence a Console opened in Auto, so a send
 to it runs inside that fence. One opened unfenced in Ask-Before is gated the same way after a
 switch to Auto: each send under the fence is asked on its own, refused when nobody can be asked, and
-the model is told to close that Console and reopen it so it runs fenced.)
+the model is told to close that Console and reopen it so it runs fenced. The Approval prompt for
+such a send names the cause — `send to console N, which was opened unconfined` — with the Fix
+`deny it — the agent is told to close the console and reopen it fenced`, rather than pointing you
+at `/confine off`. Every other unfenced run that asks, Windows Consoles included, keeps the generic
+`confinement unavailable on this host` wording.)
 A Windows host without ConPTY answers `could not open a console` rather than pretending.
 
 ## The task list

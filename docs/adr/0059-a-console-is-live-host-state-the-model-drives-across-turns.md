@@ -128,3 +128,12 @@ confine (POSIX), the error tells the model to close the Console and reopen it so
 where it cannot (Windows), the text is unchanged. The dispatch carries that text into the
 refusal or denial result after its own reason; the Approval prompt stays generic. The demote
 error event still fires, now on every gated POSIX send too.
+
+**Note (2026-10-04) — the Approval prompt names the Console.** "The Approval prompt stays generic"
+above is superseded. Where a Console open can confine (POSIX), the send's error is a
+`domain.ConfineDemoteError` carrying its own prompt wording, and the dispatch shows it in place of
+the host-incapacity demote reason and `/confine off` remedy: Reason
+`send to console N, which was opened unconfined` (N the console id), Fix
+`deny it — the agent is told to close the console and reopen it fenced`. Lifting confinement for
+the session is not the fix here; the fence is one reopen away. On Windows, and on every other
+runtime demote, the prompt keeps the generic wording.

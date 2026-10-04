@@ -63,7 +63,12 @@ NOTES (2026-10-04): the existing refusal test (TestDispatch_ConfineFallbackRefus
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Resolve' ./internal/agent/`
 **Commit:** `fix(agent): name the Console and the reopen fix in its unconfined-send approval prompt`
 
-## 2. Console prompt — docs follow the code
+## 2. Console prompt — docs follow the code — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): CHANGELOG.md [Unreleased] apogee-zwvj — "The Approval prompt is unchanged." replaced in place (per the item's regression guard), so CHANGELOG.md is in FILES though not on the plan's **Files:** line.
+NOTES (2026-10-04): contract bold lead "on two cells only a `Remedy`" left as is — the Console case stays inside the runtime-demote cell, only its wording differs, so the lead is still true; the Remedy paragraph and the D4 paragraph carry the Console case.
+NOTES (2026-10-04): no CLOSES — apogee-console-prompt-generic-reason is item 1's (its sidecar claims it) and this item's text names no ticket.
+NOTES (2026-10-04): CONTEXT.md Console entry read and left unchanged — it states no prompt wording.
 
 **What:**
 **Goal:** Every doc line that describes the confine-fallback approval prompt states that a POSIX send to an unconfined Console shows a Console-specific Reason and Fix, and that every other demote keeps the generic wording. No doc says the Console prompt "stays generic". Depends on item 1.

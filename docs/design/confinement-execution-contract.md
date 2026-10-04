@@ -788,6 +788,13 @@ cause the user can lift — the **Auto + `confine=true` + caps-insufficient** ce
 runtime-demote fallback below — and both read
 `/confine off runs commands unconfined this session (disposable machines only)` — the escape
 `/confine status` already offers, condensed to the one line an Approval prompt has room for.
+One send keeps the runtime-demote cell but not its words (2026-10-04): a POSIX `console_send` to a
+Console opened unconfined fails with a `domain.ConfineDemoteError`, whose own Reason and Remedy
+the dispatch puts on the prompt in place of the generic pair (`confineDemotePrompt`) — Reason
+`send to console N, which was opened unconfined`, Fix
+`deny it — the agent is told to close the console and reopen it fenced` — because that cause is the
+Console, not the host, and the fence is one reopen away rather than a `/confine off`. On Windows,
+and on every other demote, the prompt carries the generic wording above.
 For that cell the reason and the remedy leave the resolver
 TOGETHER, out of ONE cell predicate written once, so a prompt can never name one cause and
 prescribe another's fix. Every other gate carries none: a gate the autonomy rung itself asked for
@@ -823,8 +830,9 @@ is now the bound — the same "gate if you can't" outcome, decided at run time);
 fallback is a **`Refuse`** ("subprocess could not be confined and approval was not granted"). That
 refusal, and a denial of the demoted gate, carry after their reason whatever the tool's own
 `ErrConfinementUnavailable` error says beyond the sentinel — `console_send`'s "close it … and reopen
-it … to run it fenced" — so the model learns the way to a fenced run; the Approval prompt stays
-generic. The fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
+it … to run it fenced" — so the model learns the way to a fenced run. The Approval prompt carries
+the generic demote reason and remedy, except a POSIX send to a Console opened unconfined, whose
+error names the Console and the reopen fix in their place (the `Remedy` paragraph above). The fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
 it without re-deciding.
 
 > **The approved escape executes (landed 2026-08-14 —
