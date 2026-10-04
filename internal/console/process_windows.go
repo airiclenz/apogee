@@ -5,8 +5,10 @@ package console
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 
@@ -17,7 +19,20 @@ import (
 // terminal is the Windows half of a Process: the pseudoconsole (ConPTY) the command runs in, which
 // also holds the kill-on-close Job Object the command and every descendant live in.
 type terminal struct {
-	console *platform.PseudoConsole
+	console pseudoConsole
+}
+
+// pseudoConsole is what a Process needs of its platform.PseudoConsole. It is an interface so a
+// test can stand in for the real one and watch the order the teardown runs in.
+type pseudoConsole interface {
+	io.ReadWriter
+	Wait() (int, error)
+	Kill()
+	// Release ends the tree and the pseudoconsole but leaves the output open, so the reader can
+	// drain the final frame to the end of output.
+	Release() error
+	// CloseOutput gives the output's read end back, ending a read still in flight.
+	CloseOutput() error
 }
 
 // Start runs spec's command inside a pseudoconsole and returns the live Process.
@@ -112,10 +127,13 @@ func (p *Process) Kill() { p.console.Kill() }
 // Close kills the process tree, releases the pseudoconsole and its job, and waits for the process
 // to be reaped and its output drained (see shutdown for what holds afterwards). The pseudoconsole
 // is released BEFORE the joins: its output never ends while it is open, so releasing it is what
-// lets the reader finish. It is idempotent: a Console is closed by whoever gets there first, its
-// owner or the engine.
+// lets the reader finish. The output pipe is closed only AFTER them — closing it under a read in
+// flight would cut off the final frame — and closing it then still ends a reader the bounded join
+// gave up on. It is idempotent: a Console is closed by whoever gets there first, its owner or the
+// engine.
 func (p *Process) Close() error {
-	return p.shutdown(p.console.Close, releaseBeforeJoin)
+	err := p.shutdown(p.console.Release, releaseBeforeJoin)
+	return errors.Join(err, p.console.CloseOutput())
 }
 
 // reap waits for the process, records how it ended, and then releases the pseudoconsole.
@@ -123,13 +141,18 @@ func (p *Process) Close() error {
 // The release is the Windows form of the §2.4 teardown-on-every-exit: it terminates whatever the
 // command left running in its job, and — because a pseudoconsole's output does not end when its
 // process does — it is what lets the reader drain the final frame and close the ring, so a read
-// waiting on an exited Console returns instead of sitting out its window. Its error is not lost:
-// the release is idempotent and hands the same error to Close.
+// waiting on an exited Console returns instead of sitting out its window. The output pipe is
+// closed only once the reader has reached the end of output (or closeJoinTimeout has passed):
+// conhost flushes a short command's last frame as the pseudoconsole closes, and closing the pipe
+// at once would cancel the read carrying it. Neither error is lost: both steps are idempotent and
+// hand the same error to Close.
 func (p *Process) reap() {
 	defer close(p.reaped)
 	// An exit that could not be observed reports -1 — the code of a process whose end is
 	// unknown — and that is all a Console has to say about it.
 	code, _ := p.console.Wait()
 	p.recordExit(code)
-	_ = p.console.Close()
+	_ = p.console.Release()
+	joinBefore(p.readerDone, time.Now().Add(closeJoinTimeout))
+	_ = p.console.CloseOutput()
 }

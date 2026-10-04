@@ -58,6 +58,11 @@ type PseudoConsoleSpec struct {
 // and Write types into the child's console input. A caller must keep reading: a pseudoconsole
 // whose output pipe fills stops the child mid-write. Wait reports the exit code, Kill ends the
 // whole tree, and Close releases everything; all of them are safe to call from any goroutine.
+//
+// A caller that reads to the end splits Close in two: Release ends the tree and the pseudoconsole
+// but leaves the output open, so the reader drains conhost's final flush and sees io.EOF, and
+// CloseOutput then gives the read end back. Closing the output at once — what Close does — cancels
+// a read still in flight, and with it the last frame a short command painted.
 type PseudoConsole struct {
 	console windows.Handle
 	// in is the write end of the child's console input; out is the read end of what the
@@ -75,8 +80,12 @@ type PseudoConsole struct {
 	exitCode int
 	waitErr  error
 
-	closeOnce sync.Once
-	closeErr  error
+	releaseOnce sync.Once
+	releaseErr  error
+	outputOnce  sync.Once
+	outputErr   error
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // StartPseudoConsole creates a pseudoconsole of spec's size and starts spec's command inside it.
@@ -101,7 +110,7 @@ func StartPseudoConsole(spec PseudoConsoleSpec) (*PseudoConsole, error) {
 		return nil, err
 	}
 	if err := c.launch(spec); err != nil {
-		_ = c.releaseConsole() // the launch error is the one worth reporting
+		c.discard()
 		return nil, err
 	}
 	return c, nil
@@ -291,7 +300,7 @@ func waitExitCode(process windows.Handle) (int, error) {
 func (c *PseudoConsole) Pid() int { return c.pid }
 
 // Read reads what the pseudoconsole has rendered. It returns io.EOF once the pseudoconsole is
-// closed and its output drained, and an error once Close has released the pipe.
+// released and its output drained, and an error once Close or CloseOutput has closed the pipe.
 func (c *PseudoConsole) Read(p []byte) (int, error) { return c.out.Read(p) }
 
 // Write types p into the child's console input.
@@ -313,21 +322,51 @@ func (c *PseudoConsole) Kill() {
 	c.job.terminateHandle(c.process)
 }
 
-// Close kills the tree, closes the pseudoconsole and both pipe ends, and releases the job. A read
-// in flight on another goroutine returns io.EOF or an error. It does not wait for the leader to be
-// reaped — Wait does — and it is idempotent; the first call's error is the one every call returns.
+// Close kills the tree, closes the pseudoconsole and both pipe ends, and releases the job: Release
+// and CloseOutput back to back. A read in flight on another goroutine returns io.EOF or an error,
+// so a caller that wants the final frame calls Release, drains to io.EOF and only then
+// CloseOutput. Close does not wait for the leader to be reaped — Wait does — and it is idempotent;
+// the first call's error is the one every call returns.
 func (c *PseudoConsole) Close() error {
 	c.closeOnce.Do(func() {
-		c.Kill()
-		c.closeErr = c.releaseConsole()
-		c.job.Release()
+		c.closeErr = errors.Join(c.Release(), c.CloseOutput())
 	})
 	return c.closeErr
 }
 
-// releaseConsole closes the pseudoconsole and then both pipe ends. The pseudoconsole goes first:
+// Release kills the tree, closes the pseudoconsole and the input pipe, and releases the job, but
+// leaves the output pipe open: conhost flushes its final frame as it exits and closes its write
+// end, so a reader drains that frame and then sees io.EOF. CloseOutput gives the read end back
+// afterwards. Release is idempotent; the first call's error is the one every call returns.
+func (c *PseudoConsole) Release() error {
+	c.releaseOnce.Do(func() {
+		c.Kill()
+		c.releaseErr = c.releaseConsole()
+		c.job.Release()
+	})
+	return c.releaseErr
+}
+
+// CloseOutput closes the read end of the pseudoconsole's output, ending a read still in flight.
+// It is idempotent; the first call's error is the one every call returns.
+func (c *PseudoConsole) CloseOutput() error {
+	c.outputOnce.Do(func() {
+		c.outputErr = c.out.Close()
+	})
+	return c.outputErr
+}
+
+// releaseConsole closes the pseudoconsole and then the input pipe. The pseudoconsole goes first:
 // closing it is what detaches the child's console and lets a pending read see the end of output.
+// The output pipe is left to CloseOutput, so the reader can drain the final frame first.
 func (c *PseudoConsole) releaseConsole() error {
 	windows.ClosePseudoConsole(c.console)
-	return errors.Join(c.in.Close(), c.out.Close())
+	return c.in.Close()
+}
+
+// discard gives back everything a pseudoconsole whose launch failed still holds. Nothing is
+// running and no reader exists yet, so there is no final frame to wait for: both pipe ends go now.
+func (c *PseudoConsole) discard() {
+	_ = c.releaseConsole() // the launch error is the one worth reporting
+	_ = c.CloseOutput()
 }

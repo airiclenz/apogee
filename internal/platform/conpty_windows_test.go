@@ -5,7 +5,9 @@ package platform
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -45,6 +47,84 @@ func TestStartPseudoConsoleRunsTheCommand(t *testing.T) {
 	}
 	if !strings.Contains(got, marker) {
 		t.Errorf("the pseudoconsole rendered %q, want it to contain %q", got, marker)
+	}
+}
+
+// TestPseudoConsoleReleaseKeepsTheFinalFrame is the pseudoconsole-level regression guard for a
+// short command's last frame: Release leaves the output open, the reader drains conhost's final
+// flush to the end of output, and only then does CloseOutput give the read end back.
+func TestPseudoConsoleReleaseKeepsTheFinalFrame(t *testing.T) {
+	t.Parallel()
+
+	const runs = 50
+	for i := range runs {
+		marker := fmt.Sprintf("apogee-conpty-final-frame-%d", i)
+		pty := startTestPseudoConsole(t, "cmd /c echo "+marker)
+		t.Cleanup(func() { _ = pty.Close() })
+		output := drainPseudoConsole(pty)
+
+		waitWithin(t, pty)
+		if err := pty.Release(); err != nil {
+			t.Fatalf("run %d: Release: %v", i, err)
+		}
+		got := output.wait(t)
+		if err := pty.CloseOutput(); err != nil {
+			t.Fatalf("run %d: CloseOutput: %v", i, err)
+		}
+
+		if !strings.Contains(got, marker) {
+			t.Fatalf("run %d: the pseudoconsole rendered %q, want it to contain %q", i, got, marker)
+		}
+	}
+}
+
+// TestPseudoConsoleCloseClosesTheOutput pins that a Close-only caller is left holding no read
+// handle: Close releases the output pipe along with everything else.
+func TestPseudoConsoleCloseClosesTheOutput(t *testing.T) {
+	t.Parallel()
+
+	pty := startTestPseudoConsole(t, "cmd /c exit")
+	output := drainPseudoConsole(pty)
+	waitWithin(t, pty)
+
+	if err := pty.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	output.wait(t)
+
+	if _, err := pty.out.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("reading the output after Close = %v, want os.ErrClosed", err)
+	}
+}
+
+// TestPseudoConsoleFailedLaunchClosesTheOutput pins that a launch that fails gives back both pipe
+// ends: with no reader, there is no final frame to keep the output open for.
+func TestPseudoConsoleFailedLaunchClosesTheOutput(t *testing.T) {
+	t.Parallel()
+
+	pty, err := newPseudoConsole(conptyTestCols, conptyTestRows)
+	if errors.Is(err, ErrPseudoConsoleUnavailable) {
+		t.Skipf("no pseudoconsole on this host: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("newPseudoConsole: %v", err)
+	}
+	if err := pty.launch(PseudoConsoleSpec{
+		Path:        `C:\apogee-no-such-dir\missing.exe`,
+		CommandLine: "missing",
+		Cols:        conptyTestCols,
+		Rows:        conptyTestRows,
+	}); err == nil {
+		t.Fatal("launch succeeded, want an error")
+	}
+
+	pty.discard()
+
+	if _, err := pty.out.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("reading the output after a failed launch = %v, want os.ErrClosed", err)
+	}
+	if _, err := pty.in.Write([]byte("x")); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("writing the input after a failed launch = %v, want os.ErrClosed", err)
 	}
 }
 

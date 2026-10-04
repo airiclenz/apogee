@@ -38,7 +38,12 @@
 - Closing the pre-join window of the `os/exec` Bash path (`teardown_windows.go`).
 - Any TUI change.
 
-## 1. Keep a short-lived ConPTY command's final frame
+## 1. Keep a short-lived ConPTY command's final frame — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the platform split is `Release` (kill, close pseudoconsole + input, release job; output left open) and `CloseOutput`; `Close` is both back to back for Close-only callers, and the launch-failure path now goes through a `discard` helper that still closes both pipe ends. The console layer holds the pseudoconsole behind a small unexported `pseudoConsole` interface so the seam bite test can inject a fake; `reap` calls `Release`, joins the reader within `closeJoinTimeout`, then `CloseOutput`, and `Process.Close` likewise closes the output only after `shutdown`'s joins.
+NOTES (2026-10-04): the bite test is `TestProcessClosesTheOutputOnlyAfterTheFinalFrameOnWindows` (internal/console), not a platform `PseudoConsole` test — the plan allows either. Against the pre-item tree it fails to compile (no `Release`/`CloseOutput`); with `reap`'s drain join removed it fails at runtime ("the output was closed before the reader reached the end of output"), checked by hand. It holds the fake's flush back with a 100ms timer window, so a buggy reaper's early close is caught deterministically.
+NOTES (2026-10-04): consequential edit — internal/console/process_shared.go: made necessary by closing the output only after the reader's EOF (collectOutput's comment said a released pseudoconsole ends the read with a closed pipe; it now ends with EOF, a closed pipe only when the bounded join gives up).
+NOTES (2026-10-04): `make check` not run on this windows/arm64 box (no -race); Windows-host Acceptance ran with -count=1, plus both full packages green.
 
 **What:** fix for `apogee-conpty-final-frame-lost`: when a short command exits, the reap path closes the pseudoconsole and then immediately closes the output pipe, cancelling the pending read before conhost's final flush is drained.
 **Regression guard.** Ratified design call (owner, 2026-10-04) — **Item 1 bite test:** the reviewer's 690 base-order runs on build 26200 lost no frame, so the looped `cmd /c echo` test is a regression guard only, never the bite test; the fix stays (drain before closing the output pipe) and its bite test asserts the ordering at a seam — the output read end is not closed until the reader reaches EOF — through an injected or fake pipe/closer, failing against the pre-item tree; the bead still closes.

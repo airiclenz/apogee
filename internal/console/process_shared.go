@@ -152,8 +152,9 @@ func (p *Process) DenialStopped() bool {
 // collectOutput drains source — the terminal — into collect, the ring or the denial watch in front
 // of it, until the terminal reports the end of its output. The read error at the end is the
 // ordinary way a terminal reports that (EIO from a Linux pseudo-terminal, EOF elsewhere, a closed
-// pipe once a pseudoconsole is released), so there is nothing to report; the ring closes to
-// release anyone waiting on output that will not come.
+// pipe when a pseudoconsole's output is closed under a read the teardown stopped waiting for), so
+// there is nothing to report; the ring closes to release anyone waiting on output that will not
+// come.
 func (p *Process) collectOutput(source io.Reader, collect io.Writer) {
 	defer close(p.readerDone)
 	_, _ = io.Copy(collect, source)
