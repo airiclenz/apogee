@@ -60,7 +60,10 @@ Ordering: `Close` closes the pseudoconsole and `c.in`, then waits (bounded) for 
 - `GOOS=linux go vet ./internal/console/... ./internal/platform/...` and `GOOS=darwin go vet ./internal/console/... ./internal/platform/...`
 **Commit:** `fix(console): drain a ConPTY's final frame before closing its output pipe`
 
-## 2. Launch a pseudoconsole child under a restricted token (spike gate)
+## 2. Launch a pseudoconsole child under a restricted token (spike gate) — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): spike gate passed on build 26200 — `TestStartPseudoConsoleRunsUnderARestrictedToken` (real `NewConfiner().Confine` token, `Close()` via `t.Cleanup`) echoes through ConPTY, writes inside the box, gets "Access is denied." with a non-zero exit and no file outside it, and `pollJob` sees the tree emptied on `Kill`.
+NOTES (2026-10-04): the test is deliberately not `t.Parallel()` — the real confiner journals under the real apogee home and its construction replays any journal found there; it also asserts the inside-box write lands, beyond the plan's listed assertions. The launch logic moved into a small `createSuspended`/`duplicateToken` pair rather than inlining the branch in `launch`.
 
 **What:** the platform half of `apogee-6ef3`, and the run's gate: if the tests below cannot pass because a Low-integrity restricted-token child does not run under a pseudoconsole, STOP the run here, revert the item, and add a dated NOTES line with the observed failure (Win32 error, build number) to this item and a comment on `apogee-6ef3`. Do not fall back to a weaker token.
 **Regression guard.** Any test using a real Windows confiner (platform.NewConfiner) must Close() it via t.Cleanup — it journals labels under the real %USERPROFILE%\.apogee (winlabel.Home) and a leaked journal is replayed by the next session's Recover.

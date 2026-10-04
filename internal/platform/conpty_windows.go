@@ -49,6 +49,12 @@ type PseudoConsoleSpec struct {
 	Env []string
 	// Cols and Rows are the pseudoconsole's size in character cells; both must be positive.
 	Cols, Rows int
+	// Token, when non-zero, is the primary token the child runs under — the restricted Low token a
+	// Confiner put on an exec.Cmd's SysProcAttr — and the launch goes through CreateProcessAsUser.
+	// It is borrowed, never owned: the launch duplicates it for the call's lifetime and closes only
+	// the duplicate, so the caller keeps it and a confiner Close racing the launch cannot free the
+	// handle mid-call. Zero runs the child under this process's own token.
+	Token windows.Token
 }
 
 // PseudoConsole is a process running inside a Windows pseudoconsole (ConPTY), held in a
@@ -175,11 +181,9 @@ func (c *PseudoConsole) launch(spec PseudoConsoleSpec) error {
 		},
 		ProcThreadAttributeList: attrs.List(),
 	}
-	var pi windows.ProcessInformation
-	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED)
-	if err := windows.CreateProcess(call.path, call.commandLine, nil, nil, false,
-		flags, call.env, call.dir, &si.StartupInfo, &pi); err != nil {
-		return fmt.Errorf("CreateProcess: %w", err)
+	pi, err := createSuspended(spec.Token, call, si)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = windows.CloseHandle(pi.Thread) }()
 
@@ -195,6 +199,44 @@ func (c *PseudoConsole) launch(spec PseudoConsoleSpec) error {
 	}
 	go c.reap()
 	return nil
+}
+
+// createSuspended creates call's process suspended inside the pseudoconsole si carries: under
+// token through CreateProcessAsUser when one is given, under this process's own token otherwise.
+// The flags and the attribute list are the same either way, so a confined child gets the same
+// console, the same environment encoding and the same suspended start the job containment needs.
+func createSuspended(token windows.Token, call createProcessArgs, si *windows.StartupInfoEx) (windows.ProcessInformation, error) {
+	var pi windows.ProcessInformation
+	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED)
+	if token == 0 {
+		if err := windows.CreateProcess(call.path, call.commandLine, nil, nil, false,
+			flags, call.env, call.dir, &si.StartupInfo, &pi); err != nil {
+			return pi, fmt.Errorf("CreateProcess: %w", err)
+		}
+		return pi, nil
+	}
+	held, err := duplicateToken(token)
+	if err != nil {
+		return pi, err
+	}
+	defer func() { _ = held.Close() }()
+	if err := windows.CreateProcessAsUser(held, call.path, call.commandLine, nil, nil, false,
+		flags, call.env, call.dir, &si.StartupInfo, &pi); err != nil {
+		return pi, fmt.Errorf("CreateProcessAsUser: %w", err)
+	}
+	return pi, nil
+}
+
+// duplicateToken takes a handle of this process's own on a borrowed token, with the borrowed
+// handle's access, so the token stays valid for the launch even if its owner closes it meanwhile.
+func duplicateToken(token windows.Token) (windows.Token, error) {
+	self := windows.CurrentProcess()
+	var held windows.Handle
+	if err := windows.DuplicateHandle(self, windows.Handle(token), self, &held, 0, false,
+		windows.DUPLICATE_SAME_ACCESS); err != nil {
+		return 0, fmt.Errorf("pseudoconsole token: %w", err)
+	}
+	return windows.Token(held), nil
 }
 
 // pseudoConsoleAttributes builds the attribute list that hands console to the child as its

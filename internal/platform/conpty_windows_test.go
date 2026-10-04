@@ -4,11 +4,14 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +19,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // The pseudoconsole tests' bounds: generous, because a loaded CI host can take seconds to start
@@ -148,6 +153,103 @@ func TestPseudoConsoleKillReapsTheTree(t *testing.T) {
 	pollJob(t, pty, func(active uint32) bool { return active == 0 }, "the job to empty")
 }
 
+// TestStartPseudoConsoleRunsUnderARestrictedToken is the spike gate for a confined Console: a
+// child started with the real confiner's restricted Low token prints through the pseudoconsole,
+// writes inside its labelled box, is denied a write outside it, and is still torn down by Kill.
+func TestStartPseudoConsoleRunsUnderARestrictedToken(t *testing.T) {
+	// Not parallel: the real confiner journals its labels under the real apogee home, and its
+	// construction replays any journal it finds there — it must not run beside another session's.
+	if _, _, build := windows.RtlGetNtVersionNumbers(); belowWindowsFloor(build) {
+		t.Skipf("Windows confinement is unavailable below build %d (this host is %d)", windowsFloorBuild, build)
+	}
+	confiner := NewConfiner()
+	if closer, ok := confiner.(interface{ Close() error }); ok {
+		t.Cleanup(func() { _ = closer.Close() })
+	}
+	if !confiner.Capabilities().FSWrite {
+		t.Fatalf("NewConfiner() = %T cannot fence writes on a host at or above build %d", confiner, windowsFloorBuild)
+	}
+	box, outside := tempDir(t), tempDir(t)
+	token := confinedToken(t, confiner, domain.ConfinementBox{WorkspaceRoot: box})
+
+	t.Run("prints and writes inside the box", func(t *testing.T) {
+		const marker = "apogee-conpty-confined-marker"
+		inside := filepath.Join(box, "inside.txt")
+		pty := startTestPseudoConsoleAs(t, token, "cmd /c echo "+marker+"& echo inside>"+inside)
+		t.Cleanup(func() { _ = pty.Close() })
+		output := drainPseudoConsole(pty)
+
+		code := waitWithin(t, pty)
+		if err := pty.Release(); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		got := output.wait(t)
+
+		if code != 0 {
+			t.Errorf("exit code = %d, want 0 (output %q)", code, got)
+		}
+		if !strings.Contains(got, marker) {
+			t.Errorf("the pseudoconsole rendered %q, want it to contain %q", got, marker)
+		}
+		if _, err := os.Stat(inside); err != nil {
+			t.Errorf("the confined child's write inside its box did not land: %v", err)
+		}
+	})
+
+	t.Run("is denied a write outside the box", func(t *testing.T) {
+		denied := filepath.Join(outside, "denied.txt")
+		pty := startTestPseudoConsoleAs(t, token, "cmd /c echo escaped>"+denied)
+		t.Cleanup(func() { _ = pty.Close() })
+		output := drainPseudoConsole(pty)
+
+		code := waitWithin(t, pty)
+		if err := pty.Release(); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		got := output.wait(t)
+
+		if code == 0 {
+			t.Errorf("exit code = 0, want a failure for a write outside the box (output %q)", got)
+		}
+		if !strings.Contains(got, "Access is denied") {
+			t.Errorf("the pseudoconsole rendered %q, want it to name the denial", got)
+		}
+		if _, err := os.Stat(denied); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat of the denied write = %v, want it not to exist", err)
+		}
+	})
+
+	t.Run("is torn down by Kill", func(t *testing.T) {
+		pty := startTestPseudoConsoleAs(t, token, "cmd /c ping -n 60 127.0.0.1 >nul")
+		t.Cleanup(func() { _ = pty.Close() })
+		drainPseudoConsole(pty)
+
+		pollJob(t, pty, func(active uint32) bool { return active >= 2 }, "the descendant to join the job")
+
+		pty.Kill()
+
+		if code := waitWithin(t, pty); code != killedExitCode {
+			t.Errorf("exit code after Kill = %d, want %d", code, killedExitCode)
+		}
+		pollJob(t, pty, func(active uint32) bool { return active == 0 }, "the job to empty")
+	})
+}
+
+// confinedToken has confiner prepare a cmd for box and returns the token it put on it — the same
+// borrowed token a confined Console launch would hand StartPseudoConsole.
+func confinedToken(t *testing.T, confiner domain.Confiner, box domain.ConfinementBox) windows.Token {
+	t.Helper()
+
+	cmd := exec.Command("cmd")
+	if err := confiner.Confine(context.Background(), box, cmd); err != nil {
+		t.Fatalf("Confine: %v", err)
+	}
+	if cmd.SysProcAttr == nil || cmd.SysProcAttr.Token == 0 {
+		t.Fatal("Confine set no token on the cmd")
+	}
+	return windows.Token(cmd.SysProcAttr.Token)
+}
+
 // TestStartPseudoConsoleRefusesABadSpec covers the launches that must fail before anything runs.
 func TestStartPseudoConsoleRefusesABadSpec(t *testing.T) {
 	t.Parallel()
@@ -187,6 +289,12 @@ func TestStartPseudoConsoleRefusesABadSpec(t *testing.T) {
 // that will not create a pseudoconsole.
 func startTestPseudoConsole(t *testing.T, commandLine string) *PseudoConsole {
 	t.Helper()
+	return startTestPseudoConsoleAs(t, 0, commandLine)
+}
+
+// startTestPseudoConsoleAs is startTestPseudoConsole under token; zero is this process's own.
+func startTestPseudoConsoleAs(t *testing.T, token windows.Token, commandLine string) *PseudoConsole {
+	t.Helper()
 
 	cmdPath, err := exec.LookPath("cmd")
 	if err != nil {
@@ -197,6 +305,7 @@ func startTestPseudoConsole(t *testing.T, commandLine string) *PseudoConsole {
 		CommandLine: commandLine,
 		Cols:        conptyTestCols,
 		Rows:        conptyTestRows,
+		Token:       token,
 	})
 	if errors.Is(err, ErrPseudoConsoleUnavailable) {
 		t.Skipf("no pseudoconsole on this host: %v", err)
