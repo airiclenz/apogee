@@ -37,11 +37,12 @@ type pseudoConsole interface {
 
 // Start runs spec's command inside a pseudoconsole and returns the live Process.
 //
-// A confined spec is refused before anything else happens — before Prepare runs, before any
-// process starts — with an error wrapping domain.ErrConfinementUnavailable: nothing on Windows can
-// confine a Console yet, and the caller's fail-closed path (a demotion to Approval) is what that
-// sentinel exists for. A Prepare hook that puts a restricted token on the command is refused the
-// same way, as a backstop: the pseudoconsole launcher has no way to honour one.
+// A confined spec runs under the restricted token its Prepare hook put on the command (the
+// Windows Confiner's only touch on it): the launcher creates the child under that token, inside
+// the same job. A confined spec whose Prepare set no token is refused before any process starts
+// with an error wrapping domain.ErrConfinementUnavailable — the caller's fail-closed path (a
+// demotion to Approval) is what that sentinel exists for — so a command reported confined never
+// runs unfenced.
 //
 // The process is created suspended inside a kill-on-close job and only then resumed
 // (platform.StartPseudoConsole), so Kill and Close reach everything it spawns. A host without a
@@ -50,10 +51,6 @@ func Start(spec Spec) (*Process, error) {
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("console: no command to run")
 	}
-	if spec.Confined {
-		return nil, fmt.Errorf("%w: a console cannot be confined on Windows", domain.ErrConfinementUnavailable)
-	}
-
 	launch, err := prepareLaunch(spec)
 	if err != nil {
 		return nil, err
@@ -72,8 +69,9 @@ func Start(spec Spec) (*Process, error) {
 
 // prepareLaunch assembles the command as an *exec.Cmd — the shape the caller's Prepare hook is
 // written against on every platform — and reads the pseudoconsole launch back out of it: the
-// resolved program, the verbatim command line, the directory and the environment, whatever
-// Prepare left them as. The command is never started through os/exec.
+// resolved program, the verbatim command line, the directory, the environment and the token,
+// whatever Prepare left them as. The command is never started through os/exec. A confined spec
+// whose Prepare left no token fails closed with domain.ErrConfinementUnavailable.
 func prepareLaunch(spec Spec) (platform.PseudoConsoleSpec, error) {
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
 	cmd.Dir = spec.Dir
@@ -90,9 +88,10 @@ func prepareLaunch(spec Spec) (platform.PseudoConsoleSpec, error) {
 	if cmd.Err != nil {
 		return platform.PseudoConsoleSpec{}, cmd.Err
 	}
-	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Token != 0 {
+	token := launchToken(cmd)
+	if spec.Confined && token == 0 {
 		return platform.PseudoConsoleSpec{}, fmt.Errorf(
-			"%w: a console cannot run under a restricted token", domain.ErrConfinementUnavailable)
+			"%w: the console was to be confined but no restricted token was prepared", domain.ErrConfinementUnavailable)
 	}
 
 	return platform.PseudoConsoleSpec{
@@ -102,7 +101,18 @@ func prepareLaunch(spec Spec) (platform.PseudoConsoleSpec, error) {
 		Env:         cmd.Env,
 		Cols:        windowCols,
 		Rows:        windowRows,
+		Token:       token,
 	}, nil
+}
+
+// launchToken returns the primary token Prepare put on cmd, or zero when it set none and the
+// child is to run under this process's own. The token stays borrowed: the Confiner that minted it
+// owns the handle, and the launcher holds its own duplicate for the length of the launch.
+func launchToken(cmd *exec.Cmd) windows.Token {
+	if cmd.SysProcAttr == nil {
+		return 0
+	}
+	return windows.Token(cmd.SysProcAttr.Token)
 }
 
 // launchCommandLine returns the command line cmd is launched with: the raw one when the caller set

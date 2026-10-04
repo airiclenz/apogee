@@ -175,8 +175,9 @@ func (r *Registry) MintOwner() string {
 // It refuses with [ErrTooMany] once MaxOpen Consoles are open — counting the ones whose process
 // has exited, since those still hold an id and unread output — and the refusal names the open
 // ids so the caller can tell the model which ones it could close. A process that fails to start
-// (including a confined one on Windows, refused with domain.ErrConfinementUnavailable, and any on
-// a Windows host without a pseudoconsole) consumes no id.
+// (including a confined one on Windows whose Prepare set no restricted token, refused with
+// domain.ErrConfinementUnavailable, and any on a Windows host without a pseudoconsole) consumes
+// no id.
 //
 // The registry is locked across the start, which is what keeps the cap exact and the ids in
 // order under concurrent delegations; the wait for the process to say something is the caller's

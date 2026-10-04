@@ -108,8 +108,8 @@ func TestHostTerminalRulesPerPlatform(t *testing.T) {
 		// child takes the same Confiner wrap as any subprocess.
 		{name: "posix", rules: posixRules(), wantEnter: "\n", wantConfineable: true},
 		// Windows: a pseudoconsole reads a carriage return as the Enter key (a bare \n is
-		// Ctrl+Enter), and its launcher has no restricted-token path to confine with.
-		{name: "windows", rules: windowsRules(), wantEnter: "\r", wantConfineable: false},
+		// Ctrl+Enter), and its launcher runs the child under the Confiner's restricted token.
+		{name: "windows", rules: windowsRules(), wantEnter: "\r", wantConfineable: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -78,7 +78,13 @@ NOTES (2026-10-04): the test is deliberately not `t.Parallel()` — the real con
 **Commit:** `feat(platform): launch a pseudoconsole child under a restricted token`
 **NOTES:** 2026-10-04 regression check — the reviewer's empirical probe on build 26200 passed the spike (CreateProcessAsUser + Low token under ConPTY echoes; outside write prints "Access is denied.", exit 1, no file).
 
-## 3. Let a Windows Console open Confined
+## 3. Let a Windows Console open Confined — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the two real-confiner tests (`TestProcessStartRunsAConfinedSpecOnWindows`, `TestRegistryOpenRunsAConfinedConsoleOnWindows`) are not `t.Parallel()` — the real confiner journals under the real apogee home; both share one `newRealTestConfiner` helper in registry_test.go (compiles everywhere, `Close()` via `t.Cleanup`, skips when the Confiner cannot fence writes). The token read-back lives in a small `launchToken` helper.
+NOTES (2026-10-04): a non-confined spec whose Prepare sets a token now launches under it rather than being refused — the old backstop is dropped as the plan's approach directs; only the confined-without-token case fails closed.
+NOTES (2026-10-04): `internal/tools/console_send.go`'s comment "(POSIX)" on where a Console open can confine is now stale; left to item 4, whose comment rule owns `internal/tools`.
+NOTES (2026-10-04): `TestConsoleSend` fails on this Windows host at the run's base (a7695e00) and at HEAD alike — `TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined` hits a `TempDir RemoveAll` "file in use" cleanup error; its assertions pass and it uses an injected `consoleSendOn(false)` host, so this item's flip does not reach it.
+NOTES (2026-10-04): retry — the raw CR bytes in the `Write` string literals of both test files are now the `\r` escape, and registry_test.go is back to LF, so the stored blobs carry no CR.
 
 **What:** the console half of `apogee-6ef3`. Depends on item 2.
 **Regression guard.** Any test using a real Windows confiner (platform.NewConfiner) must Close() it via t.Cleanup — it journals labels under the real %USERPROFILE%\.apogee (winlabel.Home) and a leaked journal is replayed by the next session's Recover. This item yields to ADR 0059 Bounds (Windows bullet, amended 2026-10-03, fail-closed Windows Console) until item 5 amends it; this item's CHANGELOG entry says so. Comment rule: every non-historical "cannot confine / no restricted-token path" sentence tied to Windows in a touched file is reworded — including `host.go`'s `consoleConfines` field comment — found with `grep -rniE 'windows.{0,80}(confin|restricted-token)|(confin|token).{0,80}windows' internal/console internal/platform/host.go internal/platform/platform.go`. The flip changes `console_send`'s Windows demotion to the `ConfineDemoteError` at this commit, so Acceptance runs `TestConsoleSend`.

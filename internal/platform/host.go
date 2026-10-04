@@ -48,9 +48,9 @@ type hostRules struct {
 	// enter is the byte sequence the Enter key sends to a program behind a pseudo-terminal
 	// ("\n" on POSIX, "\r" under a Windows pseudoconsole); see Terminal.Enter.
 	enter string
-	// consoleConfines reports that a Console can be opened confined on this platform (false
-	// on Windows, whose pseudoconsole launcher has no restricted-token path); see
-	// Terminal.ConsoleConfines.
+	// consoleConfines reports that a Console can be opened confined on this platform (true
+	// everywhere: the Windows pseudoconsole launcher runs the child under the Confiner's
+	// restricted token); see Terminal.ConsoleConfines.
 	consoleConfines bool
 }
 
@@ -88,7 +88,7 @@ func windowsRules() hostRules {
 			"NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS",
 		},
 		enter:           "\r",
-		consoleConfines: false,
+		consoleConfines: true,
 	}
 }
 

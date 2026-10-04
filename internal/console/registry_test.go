@@ -1,6 +1,7 @@
 package console
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // registryTestTimeout bounds every wait in this file: long enough that a loaded CI host does not
@@ -238,34 +240,42 @@ func TestRegistryOpenIDsOwnedByListsOnlyThatOwnersConsoles(t *testing.T) {
 	}
 }
 
-// TestRegistryOpenRefusesAConfinedConsoleOnWindows pins what a Windows host gets for a confined
-// open: nothing there can confine a Console yet, so the open fails closed with the
-// ErrConfinementUnavailable wrap the tool layer demotes to Approval on — before the caller's
-// Prepare hook runs — and the refusal consumes no id.
-func TestRegistryOpenRefusesAConfinedConsoleOnWindows(t *testing.T) {
-	t.Parallel()
+// TestRegistryOpenRunsAConfinedConsoleOnWindows pins what a Windows host gets for a confined open:
+// the caller's Prepare hook puts the real Confiner's restricted token on the command, the Console
+// opens under it with an id and records that it was confined, and the command runs.
+func TestRegistryOpenRunsAConfinedConsoleOnWindows(t *testing.T) {
+	// Not parallel: the real confiner journals its labels under the real apogee home.
 	if runtime.GOOS != "windows" {
-		t.Skip("a confined Console is supported on this platform")
+		t.Skip("the POSIX confined open is covered by TestRegistryOpenRecordsWhetherTheConsoleWasConfined")
 	}
+	confiner := newRealTestConfiner(t)
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
 
 	registry := newTestRegistry(t)
-	prepared := false
-	_, err := registry.Open(OpenSpec{
-		Command:     "cmd",
-		Argv:        []string{"cmd"},
-		CommandLine: "cmd",
+	const marker = "apogee-confined-registry-marker"
+	console, err := registry.Open(OpenSpec{
+		Command:     "cmd /q",
+		Argv:        []string{"cmd", "/q"},
+		CommandLine: "cmd /q",
+		Dir:         box.WorkspaceRoot,
 		Confined:    true,
-		Prepare:     func(*exec.Cmd) error { prepared = true; return nil },
+		Prepare: func(cmd *exec.Cmd) error {
+			return confiner.Confine(context.Background(), box, cmd)
+		},
 	})
+	if err != nil {
+		t.Fatalf("Open(confined): %v", err)
+	}
+	if _, err := console.Write([]byte("echo " + marker + "\r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
 
-	if !errors.Is(err, domain.ErrConfinementUnavailable) {
-		t.Fatalf("Open(confined) = %v, want ErrConfinementUnavailable", err)
+	readRegistryUntil(t, console, marker)
+	if !console.Confined {
+		t.Error("Console.Confined = false for a confined open")
 	}
-	if prepared {
-		t.Error("Prepare ran for a confined open that Windows refuses")
-	}
-	if ids := registry.OpenIDs(); len(ids) != 0 {
-		t.Errorf("OpenIDs() = %v after a refused open, want none", ids)
+	if ids := registry.OpenIDs(); !slices.Equal(ids, []int{console.ID}) {
+		t.Errorf("OpenIDs() = %v after a confined open, want [%d]", ids, console.ID)
 	}
 }
 
@@ -288,6 +298,21 @@ func TestRegistryOpenRecordsWhetherTheConsoleWasConfined(t *testing.T) {
 			t.Errorf("Console.Confined = %v, want %v (OpenSpec.Confined)", console.Confined, confined)
 		}
 	}
+}
+
+// newRealTestConfiner returns this host's real Confiner, closed when the test ends — on Windows it
+// journals its labels under the real apogee home, and a journal left behind is replayed by the
+// next session. It skips on a host whose Confiner cannot fence writes (Windows below its floor).
+func newRealTestConfiner(t *testing.T) domain.Confiner {
+	t.Helper()
+	confiner := platform.NewConfiner()
+	if closer, ok := confiner.(interface{ Close() error }); ok {
+		t.Cleanup(func() { _ = closer.Close() })
+	}
+	if !confiner.Capabilities().FSWrite {
+		t.Skipf("this host's Confiner (%T) cannot fence writes", confiner)
+	}
+	return confiner
 }
 
 // requireConsoleBackend skips a test that drives a POSIX `sh` Console. Windows has a backend

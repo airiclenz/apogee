@@ -28,8 +28,9 @@
 // created suspended inside a kill-on-close job before it runs (platform.StartPseudoConsole), so
 // Kill and Close reach every descendant, and the pseudoconsole is released when the command exits
 // — its output, unlike a pseudo-terminal's, does not end on its own. The command line is handed to
-// the launcher verbatim ([Spec.CommandLine]), and a confined Console is refused with
-// domain.ErrConfinementUnavailable before anything starts: nothing there can confine one yet.
+// the launcher verbatim ([Spec.CommandLine]), and a confined Console runs under the restricted token
+// the caller's Prepare hook put on the command — one whose hook set no token is refused with
+// domain.ErrConfinementUnavailable before anything starts.
 //
 // How many, and whose. Above the process sits a [Registry]: the set of Consoles one engine holds,
 // each under a small id that is issued in order and never reused, so a stale id in a model's

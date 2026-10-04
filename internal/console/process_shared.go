@@ -44,8 +44,9 @@ type Spec struct {
 	Env []string
 	// Confined reports that the caller fenced the command, which is what puts the
 	// kill-on-denial watch on the output path. It describes the command's treatment, not a
-	// request: this package never confines anything itself. On Windows, where a Console cannot
-	// be confined yet, Start refuses a confined spec with domain.ErrConfinementUnavailable.
+	// request: this package never confines anything itself. On Windows the fence is the
+	// restricted token Prepare puts on the command, and Start refuses a confined spec that
+	// carries none with domain.ErrConfinementUnavailable.
 	Confined bool
 	// Prepare is the caller's hook on the assembled *exec.Cmd — confinement, refusals,
 	// anything that must touch the command before it starts. It runs after Dir, Env and the

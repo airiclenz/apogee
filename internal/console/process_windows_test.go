@@ -3,15 +3,17 @@
 package console
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -126,41 +128,67 @@ func TestProcessKeepsTheFinalFrameOfAShortCommandOnWindows(t *testing.T) {
 	}
 }
 
-// TestProcessStartRefusesAConfinedSpecOnWindows pins the fail-closed refusal: a confined Console
-// cannot be honoured on Windows, so Start wraps ErrConfinementUnavailable before Prepare runs and
-// before anything starts.
-func TestProcessStartRefusesAConfinedSpecOnWindows(t *testing.T) {
+// TestProcessStartRunsAConfinedSpecOnWindows runs a confined Console under the real Confiner's
+// restricted token: a command inside its box runs and writes there, and a write outside the box
+// is denied.
+func TestProcessStartRunsAConfinedSpecOnWindows(t *testing.T) {
+	// Not parallel: the real confiner journals its labels under the real apogee home.
+	confiner := newRealTestConfiner(t)
+	box, outside := t.TempDir(), t.TempDir()
+	confined := func(commandLine string) Spec {
+		spec := cmdSpec(commandLine)
+		spec.Dir = box
+		spec.Confined = true
+		spec.Prepare = func(cmd *exec.Cmd) error {
+			return confiner.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: box}, cmd)
+		}
+		return spec
+	}
+
+	t.Run("prints and writes inside the box", func(t *testing.T) {
+		const marker = "apogee-console-confined-marker"
+		inside := filepath.Join(box, "inside.txt")
+		process := startWindowsProcess(t, confined("cmd /q"))
+
+		if _, err := process.Write([]byte("echo " + marker + "& echo inside>" + inside + "\r")); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		readWindowsUntil(t, process, marker)
+
+		awaitWindows(t, func() bool { _, err := os.Stat(inside); return err == nil }, "the write inside the box to land")
+	})
+
+	t.Run("is denied a write outside the box", func(t *testing.T) {
+		denied := filepath.Join(outside, "denied.txt")
+		process := startWindowsProcess(t, confined("cmd /q"))
+
+		if _, err := process.Write([]byte("echo escaped>" + denied + "\r")); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		readWindowsUntil(t, process, "Access is denied")
+
+		if _, err := os.Stat(denied); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat of the denied write = %v, want it not to exist", err)
+		}
+	})
+}
+
+// TestProcessStartRefusesAConfinedSpecWithoutATokenOnWindows pins the fail-closed backstop: a
+// spec reported confined whose Prepare put no restricted token on the command is refused with
+// ErrConfinementUnavailable rather than run unfenced.
+func TestProcessStartRefusesAConfinedSpecWithoutATokenOnWindows(t *testing.T) {
 	t.Parallel()
-	prepared := false
 	spec := cmdSpec("cmd /q")
 	spec.Confined = true
-	spec.Prepare = func(*exec.Cmd) error { prepared = true; return nil }
+	spec.Prepare = func(*exec.Cmd) error { return nil }
 
 	process, err := Start(spec)
 
 	if !errors.Is(err, domain.ErrConfinementUnavailable) {
-		t.Fatalf("Start(confined) = %v, want ErrConfinementUnavailable", err)
+		t.Fatalf("Start(confined, no token) = %v, want ErrConfinementUnavailable", err)
 	}
 	if process != nil {
 		t.Error("Start returned a Process for a refused spec")
-	}
-	if prepared {
-		t.Error("Prepare ran for a confined spec Windows refuses")
-	}
-}
-
-// TestProcessStartRefusesARestrictedTokenOnWindows covers the backstop: a Prepare hook that puts a
-// token on the command is refused the same fail-closed way, since the launcher cannot honour it.
-func TestProcessStartRefusesARestrictedTokenOnWindows(t *testing.T) {
-	t.Parallel()
-	spec := cmdSpec("cmd /q")
-	spec.Prepare = func(cmd *exec.Cmd) error {
-		cmd.SysProcAttr.Token = syscall.Token(1)
-		return nil
-	}
-
-	if _, err := Start(spec); !errors.Is(err, domain.ErrConfinementUnavailable) {
-		t.Fatalf("Start(token) = %v, want ErrConfinementUnavailable", err)
 	}
 }
 
