@@ -115,6 +115,7 @@ func TestUpstreamChoicesAssembly(t *testing.T) {
 	}
 	ephemeralRow := config.ServerEntry{
 		Name: "rented", Endpoint: "http://rented:8080", APIKey: "rented-key", Model: "rented-model",
+		Ephemeral: true,
 	}
 
 	tests := []struct {
@@ -1078,6 +1079,49 @@ func TestMoveCarriesTheEntrysWireToTheEngineAndTheBinding(t *testing.T) {
 	}
 	if got := holder.Binding().Wire; got != "" {
 		t.Errorf("Binding().Wire after the second move = %q; want it cleared with the endpoint", got)
+	}
+}
+
+// A `/server` switch onto the row synthesized for an `--endpoint` run hands the engine the ephemeral
+// mark (domain.Config.ServerEphemeral), and a switch back onto a configured entry clears it: the
+// mark is a fact about the arrived-at server, so the UpstreamSpec states it every move, false
+// included.
+func TestMoveCarriesTheEphemeralFlag(t *testing.T) {
+	t.Parallel()
+
+	holder := newUpstreamHolder()
+	holder.Bind(upstreamBinding{Endpoint: "http://rented.invalid:8080"},
+		heartbeat.NewMonitor("http://rented.invalid:8080", "", ""))
+	switcher := &fakeSwitcher{}
+	mover := sessionMover{
+		agent: switcher, holder: holder, host: &fakeStamper{},
+		live: newLiveSettings(config.Options{}), keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{}),
+	}
+	rows := upstreamChoices(config.Options{
+		Endpoint:         "http://rented.invalid:8080",
+		HostAlias:        "rented.invalid",
+		StartupEphemeral: true,
+		Servers:          []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid:3333"}},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("upstreamChoices = %+v; want the synthesized row and the configured one", rows)
+	}
+
+	for _, row := range []config.ServerEntry{rows[1], rows[0], rows[1]} {
+		if _, err := mover.move(row); err != nil {
+			t.Fatalf("move onto %q: %v", row.Name, err)
+		}
+	}
+
+	want := []bool{false, true, false}
+	if len(switcher.specs) != len(want) {
+		t.Fatalf("the engine saw %d switches; want %d", len(switcher.specs), len(want))
+	}
+	for i, spec := range switcher.specs {
+		if spec.ServerEphemeral != want[i] {
+			t.Errorf("switch %d onto %q: UpstreamSpec.ServerEphemeral = %v; want %v",
+				i, spec.ServerName, spec.ServerEphemeral, want[i])
+		}
 	}
 }
 

@@ -251,6 +251,49 @@ func TestDelegationWiringRecordsTheTargetsRequestExtraForNaming(t *testing.T) {
 	assertEveryWitness(t, grunt, "sub-agents", targetWitness)
 }
 
+// TestFiringConfigCarriesTheEphemeralFlag: an unattended run's Config carries whether its bound
+// entry is the one-run `--endpoint`/`APOGEE_ENDPOINT` override (domain.Config.ServerEphemeral) — a
+// headless run started with the flag, a daemon whose endpoint came from the variable — and a
+// configured `servers:` entry is never marked.
+func TestFiringConfigCarriesTheEphemeralFlag(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry config.ServerEntry
+		want  bool
+	}{
+		{
+			name:  "the override entry",
+			entry: config.ServerEntry{Name: "rented.invalid", Endpoint: "http://rented.invalid:8080", Ephemeral: true},
+			want:  true,
+		},
+		{
+			name:  "a configured entry",
+			entry: config.ServerEntry{Name: "box", Endpoint: "http://box.invalid:3333"},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bound, err := bindFiringConfig(firingInputs{
+				opts:     config.Options{Bypass: true},
+				entry:    tt.entry,
+				model:    "entry-model",
+				apiKey:   "literal-key",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+			})
+			if err != nil {
+				t.Fatalf("bindFiringConfig: %v", err)
+			}
+			if bound.cfg.ServerEphemeral != tt.want {
+				t.Errorf("Config.ServerEphemeral = %v; want %v — the bound entry's own mark",
+					bound.cfg.ServerEphemeral, tt.want)
+			}
+		})
+	}
+}
+
 // TestFiringConfigCarriesTheEntrysRequestExtra: an unattended run's Config carries its bound
 // entry's passthrough (ADR 0031's Driver parity), its routed target the Sub-agent entry's, and the
 // Firing namer sends each server's own value on the naming call it makes there.

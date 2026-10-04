@@ -1564,6 +1564,60 @@ func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
 	}
 }
 
+// The startup bind hands the engine whether the entry is the one-run `--endpoint` override
+// (domain.Config.ServerEphemeral) through the Config the Agent is constructed from, and a
+// configured entry is never marked — so the session knows from its first Turn which kind of server
+// it is on.
+func TestServerBindHandsTheEphemeralFlagToTheEngine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry config.ServerEntry
+		want  bool
+	}{
+		{
+			name:  "the override entry",
+			entry: config.ServerEntry{Name: "rented.invalid", Endpoint: "http://127.0.0.1:1111", Ephemeral: true},
+			want:  true,
+		},
+		{
+			name:  "a configured entry",
+			entry: config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			engine := newLateEngine(apogee.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			var handed apogee.Config
+			binder := serverBinder{
+				cfg:    validCfg(t),
+				engine: engine,
+				holder: newUpstreamHolder(),
+				caps:   newParallelAgentsCap(engine),
+				keys:   config.NewKeyResolver(""),
+				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+					handed = cfg
+					return buildAgent(cfg, resumed)
+				},
+			}
+			if err := binder.bind(tt.entry); err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+			if handed.Endpoint != tt.entry.Endpoint {
+				t.Fatalf("the Agent was constructed against %q; want the entry's %q", handed.Endpoint, tt.entry.Endpoint)
+			}
+			if handed.ServerEphemeral != tt.want {
+				t.Errorf("Config.ServerEphemeral = %v; want %v — the bound entry's own mark",
+					handed.ServerEphemeral, tt.want)
+			}
+		})
+	}
+}
+
 // The three bounds the entry decides reach the engine through the Config the Agent is CONSTRUCTED
 // from — not through a push afterwards, because at a bind there is nothing yet to push at. That
 // Config is written onto a copy no caller keeps, which is what serverBinder.build exists for: the

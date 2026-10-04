@@ -18,7 +18,7 @@ type bindingCells struct {
 	ResponseReserveFraction                                             float64
 	Profile                                                             domain.ModelProfile
 	EffortDialect                                                       domain.EffortDialect
-	Bypass                                                              bool
+	Bypass, ServerEphemeral                                             bool
 }
 
 func cellsOf(cfg domain.Config) bindingCells {
@@ -38,6 +38,7 @@ func cellsOf(cfg domain.Config) bindingCells {
 		Profile:                 cfg.Profile,
 		EffortDialect:           cfg.EffortDialect,
 		Bypass:                  cfg.Bypass,
+		ServerEphemeral:         cfg.ServerEphemeral,
 	}
 }
 
@@ -58,6 +59,9 @@ func bindingParent() domain.Config {
 		}},
 		EffortDialect: domain.EffortDialectKwargs,
 		Bypass:        true,
+		// The parent is on the one-run `--endpoint` entry, so a spec that states the mark visibly
+		// clears it and a spec that never states it (a rebind) visibly keeps it.
+		ServerEphemeral: true,
 	}
 	cfg.Context.MaxContextTokens = 131072
 	cfg.Context.WorkingWindow = 100000
@@ -102,7 +106,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 			want:    func(*bindingCells) {},
 		},
 		{
-			name: "rebind states the per-model bindings and the dialect, the zero included",
+			name: "rebind states the per-model bindings and the dialect, the zero included, and keeps the ephemeral mark",
 			binding: RebindSpec{
 				Model:            model,
 				SystemPrompt:     "",
@@ -140,7 +144,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 			},
 		},
 		{
-			name: "switch states the dial facts, the request-extra, the seat's words and all four bounds, and unbinds the model",
+			name: "switch states the dial facts, the request-extra, the seat's words, the ephemeral mark and all four bounds, and unbinds the model",
 			binding: UpstreamSpec{
 				Endpoint:                endpoint,
 				APIKey:                  key,
@@ -148,6 +152,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				ServerName:              "grunt",
 				ServerDescription:       "the cheap box",
 				RequestExtra:            extra,
+				ServerEphemeral:         true,
 				MaxContextTokens:        window,
 				WorkingWindow:           working,
 				MaxOutputTokens:         ceiling,
@@ -160,6 +165,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.ServerName = "grunt"
 				c.ServerDescription = "the cheap box"
 				c.RequestExtra = extra
+				c.ServerEphemeral = true
 				c.Model = ""
 				c.MaxContextTokens = window
 				c.WorkingWindow = working
@@ -168,7 +174,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 			},
 		},
 		{
-			name:    "switch applies its zero bounds and clears the seat's words as written",
+			name:    "switch applies its zero bounds and clears the seat's words and the ephemeral mark as written",
 			binding: UpstreamSpec{Endpoint: endpoint}.binding(),
 			want: func(c *bindingCells) {
 				c.Endpoint = endpoint
@@ -177,6 +183,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.ServerName = ""
 				c.ServerDescription = ""
 				c.RequestExtra = ""
+				c.ServerEphemeral = false
 				c.Model = ""
 				c.MaxContextTokens = 0
 				c.WorkingWindow = 0
@@ -185,7 +192,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 			},
 		},
 		{
-			name: "target states the dial facts, its name, the request-extra, the model, the window, both inner bounds, the share, the profile, the dialect and the posture",
+			name: "target states the dial facts, its name, the request-extra, a configured server's false ephemeral mark, the model, the window, both inner bounds, the share, the profile, the dialect and the posture",
 			binding: (&DelegationTarget{
 				Endpoint:                endpoint,
 				APIKey:                  key,
@@ -215,6 +222,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Profile = profile
 				c.EffortDialect = domain.EffortDialectReasoning
 				c.Bypass = false
+				c.ServerEphemeral = false
 			},
 		},
 		{
@@ -229,6 +237,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Wire = ""
 				c.ServerName = ""
 				c.RequestExtra = ""
+				c.ServerEphemeral = false
 				c.Model = model
 				c.WorkingWindow = 0
 				c.MaxOutputTokens = 0
@@ -249,6 +258,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Wire = ""
 				c.ServerName = ""
 				c.RequestExtra = ""
+				c.ServerEphemeral = false
 				c.Model = model
 				c.WorkingWindow = 0
 				c.MaxOutputTokens = 0

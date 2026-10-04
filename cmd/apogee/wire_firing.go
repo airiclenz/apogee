@@ -295,6 +295,9 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// far seat is unreadable beside a near one the model can only call "this server".
 	cfg.ServerName = in.entry.Name
 	cfg.ServerDescription = in.entry.Description
+	// And whether that entry is the one-run `--endpoint`/`APOGEE_ENDPOINT` override, as the bind
+	// states it (wire_server.go): a headless or daemon run started on one is on a server in no file.
+	cfg.ServerEphemeral = in.entry.Ephemeral
 	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 	// rather than off opts, so the run reads responses in the same shape a session on the same
 	// model would, and a built-in match has already narrated itself through the notices.

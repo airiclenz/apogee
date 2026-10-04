@@ -99,6 +99,9 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// say what this box is from its very first Turn, and the entry is in hand exactly here.
 	cfg.ServerName = entry.Name
 	cfg.ServerDescription = entry.Description
+	// And whether the entry is the one-run `--endpoint` override rather than a `servers:` entry, so
+	// the engine knows from its first Turn that the server it is on is in no file.
+	cfg.ServerEphemeral = entry.Ephemeral
 	// The fourth field the server decides, and the one that cannot be pushed after the fact here:
 	// the Agent does not exist yet, so the resolved cap goes in through the Config it is built from.
 	// follow's own push at the still-unbound engine is the no-op that says so.

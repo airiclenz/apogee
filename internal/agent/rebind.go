@@ -297,6 +297,10 @@ type UpstreamSpec struct {
 	// and false is applied, not skipped, so a move off a vision server never sends the new one an
 	// image: history's images go out as their omission text and a new one is refused.
 	Vision bool
+	// ServerEphemeral says the new server is the one-run `--endpoint` entry rather than a `servers:`
+	// entry (domain.Config.ServerEphemeral). It rides the switch for Vision's reason, and false is
+	// applied, not skipped, so a move to a configured entry stops calling the server ephemeral.
+	ServerEphemeral bool
 	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
 	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
 	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named

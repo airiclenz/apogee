@@ -1042,7 +1042,7 @@ func TestApplyConfigHoldsTheStartupEntry(t *testing.T) {
 		}
 		// The ephemeral entry carries nothing but the endpoint — no key, no pins, no words — and its
 		// Name is the label the footer calls it by, not the empty name that marks it ephemeral.
-		want := ServerEntry{Name: "rented.example", Endpoint: "http://rented.example:8080/v1"}
+		want := ServerEntry{Name: "rented.example", Endpoint: "http://rented.example:8080/v1", Ephemeral: true}
 		if opts.StartupEntry != want {
 			t.Errorf("StartupEntry = %+v; want the ephemeral entry under its alias %+v", opts.StartupEntry, want)
 		}
@@ -1502,6 +1502,45 @@ func TestApplyConfigEphemeralEntryIsUnnamed(t *testing.T) {
 	// synthesize a row for it or the way back to this run's server would be lost.
 	if !opts.StartupEphemeral {
 		t.Error("startupEphemeral = false; want true — the run started on an override endpoint")
+	}
+	// And the entry itself carries the mark the bind hands the engine (domain.Config.ServerEphemeral).
+	if !opts.StartupEntry.Ephemeral {
+		t.Error("StartupEntry.Ephemeral = false; want true — the entry is the override's, in no file")
+	}
+}
+
+// A configured entry is never marked ephemeral, whichever way it was selected — by `server:` or by
+// `--server` — so the engine only calls a server ephemeral when no `servers:` entry names it.
+func TestApplyConfigConfiguredEntryIsNotEphemeral(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n" +
+		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n" +
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n" +
+		"server: laptop\n"
+	tests := []struct {
+		name    string
+		changed func(string) bool
+		server  string
+	}{
+		{name: "by server:", changed: func(string) bool { return false }},
+		{name: "by --server", changed: func(name string) bool { return name == "server" }, server: "workstation"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, servers), StartupServer: tc.server}
+			if err := ApplyConfig(&opts, tc.changed, func(string) string { return "" }, os.ReadFile,
+				noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.StartupEntry.Name == "" {
+				t.Fatal("no startup entry was selected")
+			}
+			if opts.StartupEntry.Ephemeral {
+				t.Errorf("StartupEntry(%q).Ephemeral = true; want false — the entry is in servers:",
+					opts.StartupEntry.Name)
+			}
+		})
 	}
 }
 

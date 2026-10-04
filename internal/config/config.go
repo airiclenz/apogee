@@ -1384,6 +1384,11 @@ type UnconfinedHost struct {
 // ever sent an image. Without it, a new image is refused before any request goes out, and an image
 // already in the history goes to that server as an `[image omitted: <name>]` line instead. It is
 // never detected — a server's `/props` does not say whether the model it serves reads images.
+//
+// Ephemeral marks the entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds for one run (ADR
+// 0036 decision 6), and the `/server` row synthesized from it (upstreamChoices): an entry that is
+// nowhere in `servers:`, so advice that names the file has to tell the user to add one. It is never
+// read from or written to the file — `yaml:"-"` — because the file holds configured entries only.
 type ServerEntry struct {
 	Name            string       `yaml:"name"`
 	Endpoint        string       `yaml:"endpoint"`
@@ -1406,6 +1411,7 @@ type ServerEntry struct {
 	RequestExtra    RequestExtra `yaml:"request-extra,omitempty"`
 	Price           Price        `yaml:"price,omitempty"`
 	Vision          bool         `yaml:"vision,omitempty"`
+	Ephemeral       bool         `yaml:"-"`
 }
 
 // RequestExtra is a server entry's `request-extra:` mapping as the rest of apogee holds it: the
@@ -3337,7 +3343,7 @@ func (o startupOverrides) overlay(entry ServerEntry) ServerEntry {
 func resolveStartupEntry(o startupOverrides, name string, servers []ServerEntry, configPath string,
 	serverFlag bool) (ServerEntry, error) {
 	if o.endpoint != "" {
-		return ServerEntry{Endpoint: o.endpoint, APIKey: o.apiKey, Model: o.model}, nil
+		return ServerEntry{Endpoint: o.endpoint, APIKey: o.apiKey, Model: o.model, Ephemeral: true}, nil
 	}
 	entry, err := selectStartupServer(name, servers, configPath, serverFlag)
 	if err != nil {

@@ -88,7 +88,9 @@ NOTES (2026-10-04): CONTEXT.md Console entry read and left unchanged — it stat
 - `grep -n 'The Approval prompt is unchanged' CHANGELOG.md` matches nothing.
 **Commit:** `docs(confine): describe the Console-specific approval prompt`
 
-## 3. The bound server knows it came from --endpoint
+## 3. The bound server knows it came from --endpoint — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the configured-entry half of the config test is a new sibling, TestApplyConfigConfiguredEntryIsNotEphemeral (selected by `server:` and by `--server`), rather than an extension of TestApplyConfigEphemeralEntryIsUnnamed; the firing test drives bindFiringConfig directly (offline) rather than firingConfig, since the flag is set in that half. No CHANGELOG entry: the flag has no user-visible effect until item 4 reads it.
 
 **What:** Recast at the regression check (2026-10-04).
 **Goal:** `domain.Config` carries a bool marking the bound server as an ephemeral `--endpoint` entry. It is true after the startup bind of an `--endpoint` run, after a `/server` switch to the synthesized `--endpoint` row, in a headless firing started with `--endpoint`, and in a daemon firing whose endpoint comes from APOGEE_ENDPOINT. It is false for every configured `servers:` entry, including after a `/server` switch away from the ephemeral one.

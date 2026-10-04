@@ -317,6 +317,9 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// another box must not go on describing the one it left.
 	spec.ServerName = entry.Name
 	spec.ServerDescription = entry.Description
+	// And whether that entry is the one-run `--endpoint` row rather than a `servers:` entry, for the
+	// name's reason: a move back to the override row states it, a move to a configured entry clears it.
+	spec.ServerEphemeral = entry.Ephemeral
 	spec.MaxContextTokens = window
 	spec.WorkingWindow = working
 	spec.MaxOutputTokens = int(entry.MaxOutputTokens)
@@ -378,6 +381,8 @@ func upstreamChoices(opts config.Options) []config.ServerEntry {
 			Endpoint: opts.Endpoint,
 			APIKey:   opts.APIKey,
 			Model:    opts.Model,
+			// The row IS the override entry, so it carries the mark a switch back to it states.
+			Ephemeral: true,
 		})
 	}
 	return append(entries, opts.Servers...)

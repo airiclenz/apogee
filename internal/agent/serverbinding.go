@@ -58,6 +58,9 @@ type serverBinding struct {
 	// a fact about the server, so it moves with the dial facts. A model change never states it —
 	// RebindSpec's fields are always present, so carrying it there would reset it on every rebind.
 	Vision *bool
+	// ServerEphemeral says the server is the one-run `--endpoint` entry (domain.Config.ServerEphemeral):
+	// a fact about the server for Vision's reason, and absent from a model change for the same one.
+	ServerEphemeral *bool
 }
 
 // applyTo projects the binding onto cfg and returns the result: every present field replaces the
@@ -117,6 +120,9 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 	if b.Vision != nil {
 		cfg.Vision = *b.Vision
 	}
+	if b.ServerEphemeral != nil {
+		cfg.ServerEphemeral = *b.ServerEphemeral
+	}
 	return cfg
 }
 
@@ -125,7 +131,8 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 // spec states them, the zero included (see each field's contract in rebind.go); the two optional
 // bounds and the price pass through as the pointers they already are, so a spec silent about one
 // leaves it exactly where the bind or the move that set it put it. The dial facts, the seat's words,
-// the working window and the vision opt-in are never a model change's to state, so they stay absent.
+// the working window, the vision opt-in and the ephemeral mark are never a model change's to state,
+// so they stay absent.
 func (s RebindSpec) binding() serverBinding {
 	return serverBinding{
 		Model:                   &s.Model,
@@ -143,9 +150,10 @@ func (s RebindSpec) binding() serverBinding {
 // passthrough among them, "" included, so a move to an entry that names none clears the retired
 // one's — the price (unpriced included, so a move off a priced server never bills the new one at
 // the retired rate), the vision opt-in (false included, so a move off a vision server never sends
-// the new one an image) and the seat's human words are present, and so are all four token bounds — applied as the spec states them, the zeroes included,
-// because an absent pin is a fact about the new server rather than a licence to keep the retired
-// one's number (see each field's contract in rebind.go). Model is present as `""`: a switch UNBINDS
+// the new one an image), the ephemeral mark (false included, so a move off the `--endpoint` entry
+// stops calling the server ephemeral) and the seat's human words are present, and so are all four
+// token bounds — applied as the spec states them, the zeroes included, because an absent pin is a
+// fact about the new server rather than a licence to keep the retired one's number (see each field's contract in rebind.go). Model is present as `""`: a switch UNBINDS
 // the model rather than guessing what the new server serves (ADR 0024), and that unbinding is a
 // present zero here, not an absence. The system prompt, the profile, the effort dialect and the
 // posture stand until the new server's first observed model binds through Rebind.
@@ -160,6 +168,7 @@ func (s UpstreamSpec) binding() serverBinding {
 		RequestExtra:            &s.RequestExtra,
 		Price:                   &s.Price,
 		Vision:                  &s.Vision,
+		ServerEphemeral:         &s.ServerEphemeral,
 		Model:                   &unbound,
 		MaxContextTokens:        &s.MaxContextTokens,
 		WorkingWindow:           &s.WorkingWindow,
@@ -172,7 +181,9 @@ func (s UpstreamSpec) binding() serverBinding {
 // delegationtarget.go read as presence: the dial facts (the request-extra passthrough among them,
 // "" included, so a child routed to an entry that names none never keeps the parent's), the
 // target's price (unpriced included, for the passthrough's reason), its vision opt-in (false
-// included, for the same reason), the target's entry name as
+// included, for the same reason), the ephemeral mark as a present false (a target is always a
+// configured `servers:` entry, so a child of an `--endpoint` session never inherits the mark), the
+// target's entry name as
 // ServerName, Model, WorkingWindow, MaxOutputTokens and Profile are always
 // present (their zeroes ARE the target's answer); ContextWindow is present only
 // when positive, since a target that names no window leaves the parent's standing rather than
@@ -185,6 +196,7 @@ func (s UpstreamSpec) binding() serverBinding {
 // where the parent's name would describe the box the child left; the description and the system
 // prompt are not a target's to state.
 func (t *DelegationTarget) binding() serverBinding {
+	configured := false
 	b := serverBinding{
 		Endpoint:        &t.Endpoint,
 		APIKey:          &t.APIKey,
@@ -193,6 +205,7 @@ func (t *DelegationTarget) binding() serverBinding {
 		RequestExtra:    &t.RequestExtra,
 		Price:           &t.Price,
 		Vision:          &t.Vision,
+		ServerEphemeral: &configured,
 		Model:           &t.Model,
 		WorkingWindow:   &t.WorkingWindow,
 		MaxOutputTokens: &t.MaxOutputTokens,

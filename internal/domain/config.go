@@ -126,6 +126,15 @@ type Config struct {
 	// sends exactly what it sent before this field existed.
 	Vision bool
 
+	// ServerEphemeral is whether the bound server is the EPHEMERAL entry a raw
+	// `--endpoint`/`APOGEE_ENDPOINT` override builds for one run (ADR 0036 decision 6) rather than an
+	// entry out of `servers:` — a fact about where the server came from, so advice about the server
+	// can tell a user to add an entry instead of editing one that does not exist. It rides the server
+	// binding like Vision: the bind and a `/server` switch (UpstreamSpec) state it, a routed child is
+	// always on a configured entry (DelegationTarget states false), and a model rebind never touches
+	// it. It never reaches the wire. The zero value is "a configured entry".
+	ServerEphemeral bool
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)
