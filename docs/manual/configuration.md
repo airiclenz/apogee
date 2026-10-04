@@ -1620,7 +1620,10 @@ the config file and the line or block that would fix it.
 **An override runs one session elsewhere.** `--endpoint` / `APOGEE_ENDPOINT` starts
 this run on an unlisted server: it wins over any `server:` name, takes its bearer
 token from `APOGEE_API_KEY` and its model hint from `--model` / `APOGEE_MODEL`, and
-is never written back. `--server` / `APOGEE_SERVER` picks a listed entry by name
+is never written back. Such a server cannot take images: there is no entry to set
+[`vision: true`](#images--vision) on and no flag for it, so an image there is refused with
+the advice to add a `servers:` entry for it with `vision: true` and start with
+`--server <name>`. `--server` / `APOGEE_SERVER` picks a listed entry by name
 instead, riding the ordinary flag-over-env-over-file precedence on the `server:`
 key; with no endpoint override, the key and hint variables overlay those two fields
 of whichever entry the session starts on.
@@ -1760,6 +1763,10 @@ You attach an image with an `@` reference to a PNG, JPEG, GIF or WebP file
 ([file references](commands.md)). An image you attach on a server without
 `vision: true` is not sent: apogee says
 `server "workstation" does not accept images: set vision: true on its servers: entry`.
+A server you start on with [`--endpoint`](#the-servers-you-run-models-on) has no entry to
+set the key on, and no flag turns it on, so an image there is refused with
+`server "<host>" does not accept images: an --endpoint server cannot turn vision on — add a servers: entry for it with vision: true and start with --server <name>` —
+`<host>` is the name apogee gives that run's server, taken from its address.
 An image is refused if it is over 5 MiB, or if it would bring the images in one
 message past 5 MiB together; the message names the file and the limit.
 

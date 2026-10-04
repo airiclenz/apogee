@@ -86,7 +86,10 @@ contains, not its name: a text file called `notes.png` is sent as text, and a
 screenshot saved without an extension is still sent as an image. On a server without
 `vision: true` the image is not sent: you see
 `@shot.png could not be resolved and was ignored: server "workstation" does not accept images: set vision: true on its servers: entry`,
-and the rest of your message goes ahead. An image over 5 MiB, or one that would bring
+and the rest of your message goes ahead. On a server you started with `--endpoint` there is no
+entry to edit, so the refusal reads
+`server "<host>" does not accept images: an --endpoint server cannot turn vision on — add a servers: entry for it with vision: true and start with --server <name>`
+instead ([below](configuration.md#images--vision)). An image over 5 MiB, or one that would bring
 the message's images past 5 MiB together, is left out the same way, with the file and
 the limit named.
 
@@ -104,7 +107,7 @@ out with it. The row is saved with the session and comes back when you resume it
 sizes only, never the images themselves. A message queued while the model works
 does not take them; they wait for the next send at idle. An image over the limits above is
 refused in the status line, and a clipboard image on a server without `vision: true` is
-refused there too.
+refused there too, with the same reason an `@` reference to an image gives.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works, and a queued message does not wait for sub-agents that have not started yet:

@@ -2099,7 +2099,10 @@ image** on the `attached: <name> (<size>)` line above the prompt and goes out wi
 send. Only a server whose `servers:` entry sets **`vision: true`** is ever sent one: the key is a
 per-server opt-in, never detected (a server's `/props` does not say whether its model reads
 images). On a server without it a new image is refused before any request goes out
-(`server "<name>" does not accept images: set vision: true on its servers: entry`), and an image
+(`server "<name>" does not accept images: set vision: true on its servers: entry`; an
+`--endpoint` run has no entry to set the key on and no flag for it, so there the refusal reads
+`server "<name>" does not accept images: an --endpoint server cannot turn vision on — add a servers: entry for it with vision: true and start with --server <name>`),
+and an image
 already in the history — a resumed session, a switch to another server — goes out as an
 `[image omitted: <name>]` line instead while the history keeps it. One image, and a message's
 images together, are capped at 5 MiB (`MaxImageBytes`, `MaxMessageImageBytes`). The session

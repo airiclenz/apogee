@@ -137,7 +137,9 @@ NOTES (2026-10-04): the loop.go comment on unnamedVisionRefusal now calls noVisi
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'LateEngineVision' ./cmd/apogee/`
 **Commit:** `fix(agent): give actionable vision advice on an --endpoint run`
 
-## 5. Vision advice — docs follow the code
+## 5. Vision advice — docs follow the code — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): commands.md's ⌃v passage now says a clipboard image is refused with the same reason an `@` image reference gives, following item 4's switch of the flash to the engine's wording; the quoted refusals use `<host>` (manual) and `<name>` (CONTEXT.md) for the host-derived server name an --endpoint run carries.
 
 **What:**
 **Goal:** The docs that quote the vision refusal or describe `--endpoint` state that an `--endpoint` server cannot turn vision on and quote the item-4 wording for that case. Depends on item 4.
