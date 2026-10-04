@@ -153,7 +153,10 @@ NOTES (2026-10-04): the manual's Console section also states the one remaining W
 - `go test -count=1 ./internal/console/` on the Windows host
 **Commit:** `ci(windows): gate the Console package on the Windows runner`
 
-## 7. Automate the 2uh.6 hands-on check
+## 7. Automate the 2uh.6 hands-on check — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): the Approval demotion is asserted at the tool seam only (`ConfineDemoteError` wrapping `ErrConfinementUnavailable`, with the close-and-reopen advice); `internal/agent` `executeConfineFallback` is not reachable from a `tools` test without a full agent harness, so it is not driven here.
+NOTES (2026-10-04): `bd` was on PATH, so the bead was rewritten with `bd update apogee-2uh.6 --description` and re-exported with `bd export -o .beads/issues.jsonl` (one row changed); new test names are `TestConsoleJourney_Windows...` (each carries "Windows").
 
 **What:** owner call: drive every `apogee-2uh.6` step a Windows-host `go test` can reach; leave the bead open with only the real-TUI tail. Depends on items 1, 3 and 4.
 **Regression guard.** Any test using a real Windows confiner (platform.NewConfiner) must Close() it via t.Cleanup — it journals labels under the real %USERPROFILE%\.apogee (winlabel.Home) and a leaked journal is replayed by the next session's Recover. The Goal's approval clauses are read at the tool seam: the confined open under a real-confiner handle returns no Go error and a Console with `Confined=true`; the send returns a `ConfineDemoteError` wrapping `ErrConfinementUnavailable`. Every test in `console_windows_test.go` carries "Windows" in its name (`TestConsole..._Windows...`). When `bd` is absent, do not hand-edit `.beads/issues.jsonl` (Dolt is the source of truth; the next export reverts it): carry the new description in the item's sidecar for the owner to apply with `bd update apogee-2uh.6 --description` then `bd export -o .beads/issues.jsonl`.
