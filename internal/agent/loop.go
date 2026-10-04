@@ -1414,14 +1414,26 @@ const visionRefusalFormat = "server %q does not accept images: set vision: true 
 
 // unnamedVisionRefusal is visionRefusalFormat's wording when the bound server has no name
 // (Config.ServerName is empty), so the refusal names no blank server. It matches the TUI's
-// clipboard flash (noVisionNote in internal/tui).
+// fallback clipboard flash (noVisionNote in internal/tui), shown when no engine is bound to say.
 const unnamedVisionRefusal = "this server does not accept images: set vision: true on its servers: entry"
 
+// ephemeralVisionRefusalFormat is visionRefusalFormat's wording when the bound server is the
+// one-run `--endpoint` entry (Config.ServerEphemeral): there is no servers: entry to edit, and no
+// flag turns vision on, so the advice is to add an entry and start on it. The trailing `<name>` is a
+// literal placeholder for the name the user gives that entry.
+const ephemeralVisionRefusalFormat = "server %q does not accept images: an --endpoint server cannot turn vision on" +
+	" — add a servers: entry for it with vision: true and start with --server <name>"
+
 // visionRefusal is the refusal an image meets on a server without `vision: true` — naming the
-// server when it has a name, and "this server" when it has none.
+// server when it has a name, and "this server" when it has none; a named `--endpoint` server gets
+// the add-an-entry advice instead of the edit-your-entry one. It is the one source of the wording:
+// the TUI's clipboard flash asks for it through VisionRefusal.
 func (a *Agent) visionRefusal() string {
 	if a.cfg.ServerName == "" {
 		return unnamedVisionRefusal
+	}
+	if a.cfg.ServerEphemeral {
+		return fmt.Sprintf(ephemeralVisionRefusalFormat, a.cfg.ServerName)
 	}
 	return fmt.Sprintf(visionRefusalFormat, a.cfg.ServerName)
 }

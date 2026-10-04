@@ -401,6 +401,24 @@ type visionEngine struct {
 // Vision reports the bound server as accepting images.
 func (visionEngine) Vision() bool { return true }
 
+// VisionRefusal is never asked of a vision server; it answers "" as an engine with no wording would.
+func (visionEngine) VisionRefusal() string { return "" }
+
+// noVisionEngine is a fakeEngine on a server without `vision: true` that gives its own refusal
+// wording — a sentinel distinct from noVisionNote, so a flash equal to it came from the engine.
+type noVisionEngine struct {
+	*fakeEngine
+}
+
+// noVisionEngineRefusal is noVisionEngine's refusal wording.
+const noVisionEngineRefusal = "engine refusal: this server takes no images"
+
+// Vision reports the bound server as refusing images.
+func (noVisionEngine) Vision() bool { return false }
+
+// VisionRefusal is the engine's own refusal wording.
+func (noVisionEngine) VisionRefusal() string { return noVisionEngineRefusal }
+
 // pngBytes is a PNG signature followed by filler — enough for the sniff, which reads the leading
 // bytes only.
 var pngBytes = []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("x", 2040))
@@ -560,17 +578,30 @@ func TestPasteCtrlVFallsBackToText(t *testing.T) {
 }
 
 // A clipboard image on a server without `vision: true` is not attached: the status line says why,
-// since the engine would refuse the message it rode.
+// since the engine would refuse the message it rode — in the engine's own words when it has them,
+// and noVisionNote when it cannot say (a bare fakeEngine, as an unbound session's holder answers).
 func TestPasteCtrlVImageOnANonVisionServerIsRefused(t *testing.T) {
-	m := newTestModel(t)
-
-	m = step(t, m, clipboardImageMsg{data: pngBytes})
-
-	if len(m.images) != 0 {
-		t.Errorf("images = %+v, want none on a non-vision server", m.images)
+	tests := []struct {
+		name string
+		eng  Engine
+		want string
+	}{
+		{"engine wording", noVisionEngine{&fakeEngine{}}, noVisionEngineRefusal},
+		{"no engine wording", &fakeEngine{}, noVisionNote},
 	}
-	if m.flash != noVisionNote {
-		t.Errorf("flash = %q, want %q", m.flash, noVisionNote)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModelEng(t, tc.eng, testOpts)
+
+			m = step(t, m, clipboardImageMsg{data: pngBytes})
+
+			if len(m.images) != 0 {
+				t.Errorf("images = %+v, want none on a non-vision server", m.images)
+			}
+			if m.flash != tc.want {
+				t.Errorf("flash = %q, want %q", m.flash, tc.want)
+			}
+		})
 	}
 }
 

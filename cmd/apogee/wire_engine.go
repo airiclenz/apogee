@@ -655,6 +655,19 @@ func (e *lateEngine) Vision() bool {
 	return agent != nil && agent.Vision()
 }
 
+// VisionRefusal is the bound Agent's refusal for an image on a server without vision
+// (Agent.VisionRefusal), and "" while the session is unbound — the renderer reads "" as having no
+// engine wording and falls back to its own note.
+func (e *lateEngine) VisionRefusal() string {
+	e.mu.Lock()
+	agent := e.agent
+	e.mu.Unlock()
+	if agent == nil {
+		return ""
+	}
+	return agent.VisionRefusal()
+}
+
 // ConfineToWorkspace reports the blast radius the next tool call will read: the Agent's own once
 // there is one, and until then the value a bind would install.
 func (e *lateEngine) ConfineToWorkspace() bool {

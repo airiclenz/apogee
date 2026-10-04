@@ -149,6 +149,8 @@ func TestLateEngineBindKeepsTheFarWidthOfThePendingTarget(t *testing.T) {
 
 // Vision answers the bound server's `vision:` flag through the Agent, and no while unbound: the
 // renderer asks it before it attaches a pasted image, and an unbound session has nowhere to send one.
+// VisionRefusal is the Agent's own refusal wording once bound — here an `--endpoint` server's — and
+// "" while unbound, the cue the renderer reads to fall back to its own note.
 func TestLateEngineVisionFollowsTheBoundServer(t *testing.T) {
 	t.Parallel()
 
@@ -158,16 +160,29 @@ func TestLateEngineVisionFollowsTheBoundServer(t *testing.T) {
 		if engine.Vision() {
 			t.Fatal("Vision() = true unbound; want false")
 		}
+		if got := engine.VisionRefusal(); got != "" {
+			t.Fatalf("VisionRefusal() unbound = %q; want \"\" so the renderer falls back to its own note", got)
+		}
 
+		var bound *apogee.Agent
 		if err := engine.Bind(func() (*apogee.Agent, error) {
 			cfg := validCfg(t)
 			cfg.Vision = vision
-			return apogee.New(cfg)
+			cfg.ServerName = "rented.invalid"
+			cfg.ServerEphemeral = true
+			agent, err := apogee.New(cfg)
+			bound = agent
+			return agent, err
 		}); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		if got := engine.Vision(); got != vision {
 			t.Errorf("Vision() bound on vision=%v = %v", vision, got)
+		}
+		const want = `server "rented.invalid" does not accept images: an --endpoint server cannot turn vision on` +
+			` — add a servers: entry for it with vision: true and start with --server <name>`
+		if got := engine.VisionRefusal(); got != want || got != bound.VisionRefusal() {
+			t.Errorf("VisionRefusal() bound = %q; want the engine's wording %q", got, want)
 		}
 	}
 }

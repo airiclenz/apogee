@@ -678,10 +678,13 @@ func TestSubmitImage_RefusedBeforeAnyRequest(t *testing.T) {
 // TestImageVisionRefusal_NamesNoBlankServer: on a server without `vision: true` both refusal
 // channels — Submit's refusal of attached images and an image @ref's ignored-reason — name the
 // server when it has a name, and say "this server" rather than a blank `server ""` when it has none.
+// On the one-run `--endpoint` entry (Config.ServerEphemeral) there is no entry to edit, so both
+// channels advise adding one instead.
 func TestImageVisionRefusal_NamesNoBlankServer(t *testing.T) {
 	tests := []struct {
 		name       string
 		serverName string
+		ephemeral  bool
 		want       string
 	}{
 		{
@@ -694,11 +697,19 @@ func TestImageVisionRefusal_NamesNoBlankServer(t *testing.T) {
 			serverName: "",
 			want:       "this server does not accept images: set vision: true on its servers: entry",
 		},
+		{
+			name:       "endpoint server",
+			serverName: "rented.invalid",
+			ephemeral:  true,
+			want: `server "rented.invalid" does not accept images: an --endpoint server cannot turn vision on` +
+				` — add a servers: entry for it with vision: true and start with --server <name>`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name+"/submit", func(t *testing.T) {
 			a, _ := imageAgent(t, t.TempDir(), false)
 			a.cfg.ServerName = tc.serverName
+			a.cfg.ServerEphemeral = tc.ephemeral
 
 			err := a.Submit(domain.UserInput{Text: "look",
 				Images: []domain.Image{{Name: "pasted.png", MediaType: "image/png", Data: []byte(pngBytes)}}})
@@ -712,6 +723,7 @@ func TestImageVisionRefusal_NamesNoBlankServer(t *testing.T) {
 			writeWorkspaceFile(t, dir, "shot.png", pngBytes)
 			a, sink := imageAgent(t, dir, false)
 			a.cfg.ServerName = tc.serverName
+			a.cfg.ServerEphemeral = tc.ephemeral
 
 			submitAndStep(t, a, domain.UserInput{Text: "look", FileRefs: []string{"shot.png"}})
 

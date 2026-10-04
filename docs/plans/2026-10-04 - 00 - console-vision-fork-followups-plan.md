@@ -112,7 +112,10 @@ NOTES (2026-10-04): the configured-entry half of the config test is a new siblin
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Rebind|ServerBindingApplyTo' ./internal/agent/`
 **Commit:** `feat(config): mark the bound server as an --endpoint entry`
 
-## 4. Vision refusal gives --endpoint advice, from one source
+## 4. Vision refusal gives --endpoint advice, from one source — ✅ DONE (2026-10-04)
+
+NOTES (2026-10-04): visionRefusal keeps the empty-name check first, so a nameless ephemeral binding still reads "this server ..." rather than `server ""`; every bind path names the --endpoint entry by its host alias (config.go StartupEntry.Name = HostAlias, upstreamChoices), so the ephemeral wording is what an --endpoint session gets.
+NOTES (2026-10-04): the loop.go comment on unnamedVisionRefusal now calls noVisionNote the TUI's fallback flash, since the flash takes the engine's wording when one is bound.
 
 **What:**
 **Goal:** On a bound `--endpoint` server without vision, every image refusal — Submit/Interject gate, image `@ref`, and the TUI ctrl+v flash — reads `server "<name>" does not accept images: an --endpoint server cannot turn vision on — add a servers: entry for it with vision: true and start with --server <name>`. Configured servers keep today's named and unnamed wordings byte for byte. The TUI flash takes its wording from the engine, not a restated constant. Depends on item 3. Fixes `apogee-endpoint-vision-advice`.

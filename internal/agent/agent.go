@@ -1244,6 +1244,14 @@ func (a *Agent) Vision() bool {
 	return a.cfg.Vision
 }
 
+// VisionRefusal is the refusal an image meets on the bound server when it does not accept images
+// (visionRefusal) — the wording Submit, Interject and an image @ref give, served so a host that
+// refuses an attach before the engine sees it says exactly what the engine would. It reads the
+// binding without a lock for Vision's reason.
+func (a *Agent) VisionRefusal() string {
+	return a.visionRefusal()
+}
+
 // ConfineToWorkspace reports whether Auto's blast radius is currently fenced to the workspace
 // (ADR 0012). It reads the live flag under the lock, so a concurrent SetConfineToWorkspace
 // (/confine from the UI) is observed safely from the worker goroutine.

@@ -147,7 +147,7 @@ func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
 		return m, textarea.Paste
 	}
 	if !m.serverAcceptsImages() {
-		return m, m.showFlash(noVisionNote)
+		return m, m.showFlash(m.visionRefusal())
 	}
 	img := domain.Image{Name: m.nextClipboardName(), MediaType: mediaType, Data: msg.data}
 	if err := m.attachImage(img); err != nil {
@@ -156,14 +156,29 @@ func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// noVisionNote is the flash a clipboard image meets on a server that does not accept images.
+// noVisionNote is the flash a clipboard image meets on a server that does not accept images when
+// the engine has no wording of its own to give (visionRefusal).
 const noVisionNote = "this server does not accept images: set vision: true on its servers: entry"
 
 // visionReporter is the engine's optional answer to whether the bound server accepts image input
-// (agent.Agent.Vision, through the composition root's holder). It is asked by assertion rather
-// than added to [Engine] because only the image attach needs it.
+// (agent.Agent.Vision, through the composition root's holder), and the refusal the engine gives an
+// image when it does not (agent.Agent.VisionRefusal). It is asked by assertion rather than added to
+// [Engine] because only the image attach needs it.
 type visionReporter interface {
 	Vision() bool
+	VisionRefusal() string
+}
+
+// visionRefusal is the flash for a clipboard image the bound server would refuse: the engine's own
+// refusal, so the status line says what a send would, and noVisionNote when the engine cannot say —
+// none bound (the holder answers ""), or a double that does not report vision at all.
+func (m Model) visionRefusal() string {
+	if v, ok := m.eng.(visionReporter); ok {
+		if refusal := v.VisionRefusal(); refusal != "" {
+			return refusal
+		}
+	}
+	return noVisionNote
 }
 
 // serverAcceptsImages reports whether an image attached now could be sent: the engine says its
