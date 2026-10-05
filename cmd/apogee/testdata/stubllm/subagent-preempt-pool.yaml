@@ -1,0 +1,52 @@
+# The upstream TestE2EQueuedMessagePreemptsAPooledSubAgentAndItsRowOpensInPlace talks to: one reply
+# that issues THREE delegations at `parallel-agents: 2`, so the first two run at once and the third
+# waits for a worker. A message the human queues while both run is what skips the third at its
+# dequeue (ADR 0025) — and since the first child is still held when that happens, the skipped row
+# stands on screen BEFORE its group's results burst, which is the window the test expands it in.
+#
+# Two gates order the journey. `staged` holds the second child until the queued readout is on
+# screen, so its worker dequeues the third delegation with the message already pending. `held`
+# holds the first child until the test has expanded the skipped row, so the group is still
+# unjoined while it does. There is deliberately no turn for the third child — it must never be
+# asked — so a request carrying its task falls to the fallback below.
+model: preempt-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml): `auto-title:` is on
+    # by default and an unanswered request is an HTTP 500.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Three delegations, one queued message
+    # The main turn: three sub_agent calls in ONE reply, which is what makes them one group.
+    - when:
+        last_message: ^Delegate three summaries
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Summarise the alpha half of the workspace","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Summarise the beta half of the workspace","name":"beta"}'
+        - name: sub_agent
+          arguments: '{"task":"Summarise the gamma half of the workspace","name":"gamma"}'
+    # The parent's wrap-up, matched on the human's QUEUED message being the last thing said. It is
+    # listed before the children's turns so a parent request can never be answered as a child's.
+    - when:
+        last_message: ^Also check the tests
+      repeat: true
+      text: Message received; the gamma half was not started.
+    # The first child, held until the skipped row has been expanded.
+    - when:
+        last_message: alpha half of the workspace
+      repeat: true
+      await: held
+      text: The alpha half is two files and a README.
+    # The second child, held until the message is queued: its report frees the worker that dequeues
+    # the third delegation.
+    - when:
+        last_message: beta half of the workspace
+      repeat: true
+      await: staged
+      text: The beta half is one package.
+    # Anything neither the parent nor the first two children claim — the third child, if it were
+    # ever asked, lands here, and the request log then names it.
+    - repeat: true
+      text: Nothing else to add.

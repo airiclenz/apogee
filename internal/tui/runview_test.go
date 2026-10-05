@@ -134,6 +134,33 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 		}
 	})
 
+	t.Run("a delegation reported by its phase alone keeps the inline toggle", func(t *testing.T) {
+		t.Parallel()
+
+		// A fan-out member that finished — here skipped, never started — before its group's results
+		// burst: its finished phase is in and its result is not yet paired, so done is still false.
+		// It left nothing behind it, so it is no run, exactly as the paired case above.
+		m := newTestModel(t)
+		m.transcript.reset()
+		m.transcript.addUser("survey the repo", nil)
+		subAgentCall(&m.transcript, "s1", "survey", 0)
+		m.transcript.apply(domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Phase:     domain.SubAgentFinished,
+			Result:    domain.ToolResult{CallID: "s1", Content: "not started", IsError: true},
+		})
+		m.refreshViewport()
+
+		m = enterOnLastBlock(t, m)
+
+		if m.inRunView() {
+			t.Error("a delegation over before its burst opened a view; a view of nothing is a blank screen")
+		}
+		if !m.transcript.entries[1].expanded {
+			t.Error("the unframed delegation did not take the inline toggle instead")
+		}
+	})
+
 	t.Run("the sub-agent umbrella keeps its own click", func(t *testing.T) {
 		t.Parallel()
 

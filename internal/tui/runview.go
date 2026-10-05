@@ -222,12 +222,15 @@ func (m Model) legendFor(top string) string {
 // keyboard and the mouse cannot come to disagree about what expanding a delegation means.
 //
 // The predicate is the framing rule evaluated as if the head were already open: a run with entries
-// behind it, or one that has not reported yet. The second half is what lets a child be opened
-// BEFORE its first entry lands — a delegation announces itself a beat before it says anything, and
-// a reader who clicked it then must not get an inline rail that the view would replace a moment
-// later. A delegation that is over and left nothing behind it (refused at the depth bound, faulted
-// before its first event) is not a run: it keeps the ordinary block's inline toggle, as does the
-// ✦ Sub-Agent umbrella, whose click is its own kind (targetUmbrella).
+// behind it, or one that has not reported yet (subAgentReported — its finished phase, or its paired
+// result). The second half is what lets a child be opened BEFORE its first entry lands — a
+// delegation announces itself a beat before it says anything, and a reader who clicked it then must
+// not get an inline rail that the view would replace a moment later. A delegation that is over and
+// left nothing behind it (refused at the depth bound, faulted before its first event, skipped for a
+// queued message) is not a run: it keeps the ordinary block's inline toggle, as does the ✦ Sub-Agent
+// umbrella, whose click is its own kind (targetUmbrella). "Over" is read through the finished phase
+// as well as done, because in a fan-out a skipped member's phase lands long before its group's
+// results burst and pair it — a head asked by done alone would open an empty view in that gap.
 //
 // The one run that is NOT a run to open is the one already on screen. A rooted paint spends its
 // root's head on the header and on the task row beneath it, and marks that row for the head like any
@@ -255,7 +258,7 @@ func (m Model) openRunAt(index int) (Model, bool) {
 	if m.viewedRun() == ref {
 		return m, false
 	}
-	if subAgentSpan(m.transcript.entries, index) == 0 && head.done {
+	if subAgentSpan(m.transcript.entries, index) == 0 && subAgentReported(head.painted()) {
 		return m, false
 	}
 	return m.openRun(ref), true

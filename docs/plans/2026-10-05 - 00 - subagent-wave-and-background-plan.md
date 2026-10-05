@@ -53,7 +53,11 @@
 - A config knob for the preempt.
 - Switching skills (code-audit) to background fan_out.
 
-## 1. Skipped sub-agent row expands in place before the burst
+## 1. Skipped sub-agent row expands in place before the burst — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the pool fixture gates BOTH running children (`held` on alpha, `staged` on beta) rather than leaving one ungated: an ungated child reports before the message can be queued, so its worker would dequeue and RUN the third delegation instead of skipping it. Releasing `staged` after the queued readout is what makes the third skip at dequeue while alpha keeps the group unjoined.
+NOTES (2026-10-05): the e2e awaits the parent's wrap-up request on the wire (preemptParentRequest) rather than the wrap-up text on screen, because the click leaves the viewport standing on the opened row instead of following the tail.
+NOTES (2026-10-05): `preemptHome` gained a `parallel-agents` argument (the serial journey passes 1, the pool journey 2), and the file header's "the pool path gets no second journey here" sentence was rewritten to describe the new pool journey.
 
 **What:**
 **Goal:** Expanding (⏎ or click) a skipped or never-started sub-agent row before its group's results burst shows the skip's result text in place; no empty run view is pushed.

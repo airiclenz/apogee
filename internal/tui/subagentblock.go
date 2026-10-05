@@ -66,7 +66,7 @@ func subAgentFramed(head paintInput, span int) bool {
 	if !head.headsRun() {
 		return false
 	}
-	return span > 0 || (head.expanded && !head.done)
+	return span > 0 || (head.expanded && !subAgentReported(head))
 }
 
 // insideCollapsedRun reports whether a block about to be painted at depth would land inside a

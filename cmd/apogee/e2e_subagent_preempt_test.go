@@ -13,13 +13,16 @@ package main
 // talking to a scripted server produces the parent request the design promises, in order, and
 // the row on screen that says why.
 //
-// It runs at `parallel-agents: 1` and therefore drives the serial dispatch only; the pool path is
-// pinned by internal/agent's own tests and gets no second journey here (writer decision
-// 2026-09-14).
+// The journey runs at `parallel-agents: 1` and therefore drives the serial dispatch; the pool's
+// skip rule is pinned by internal/agent's own tests (writer decision 2026-09-14). The pool gets one
+// journey of its own here for what ONLY a pool shows the human: a skipped row standing on screen
+// before its group's results burst, which must open its reason in place rather than an empty run
+// view (TestE2EQueuedMessagePreemptsAPooledSubAgentAndItsRowOpensInPlace).
 
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -55,18 +58,18 @@ const (
 		"running; delegate again if the task is still needed"
 )
 
-// preemptHome writes a one-server home whose entry pins `parallel-agents: 1`, the cap that makes
-// the two delegations dispatch serially. It is written whole rather than appended, for
-// parallelHome's reason: the pin sits INSIDE the `servers:` entry and no helper can add it after
-// the fact.
-func preemptHome(t *testing.T, stub *stubllm.Server) string {
+// preemptHome writes a one-server home whose entry pins `parallel-agents:` to agents — 1 is the cap
+// that makes the delegations dispatch serially, 2 the pool the pre-burst journey needs. It is
+// written whole rather than appended, for parallelHome's reason: the pin sits INSIDE the
+// `servers:` entry and no helper can add it after the fact.
+func preemptHome(t *testing.T, stub *stubllm.Server, agents int) string {
 	t.Helper()
 
 	body := "servers:\n" +
 		"  - name: probe-target\n" +
 		"    endpoint: " + stub.URL + "\n" +
 		"    model: " + stub.Model + "\n" +
-		"    parallel-agents: 1\n" +
+		"    parallel-agents: " + strconv.Itoa(agents) + "\n" +
 		"server: probe-target\n"
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
@@ -84,7 +87,7 @@ func TestE2EQueuedMessagePreemptsTheScheduledSubAgents(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "subagent-preempt"))
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIOn(t, drv, stub, preemptHome(t, stub), "")
+	sess := launchTUIOn(t, drv, stub, preemptHome(t, stub, 1), "")
 
 	submit(drv, preemptPrompt)
 	// The first delegation is on screen and its child is held on the gate: the window the human
@@ -123,6 +126,76 @@ func TestE2EQueuedMessagePreemptsTheScheduledSubAgents(t *testing.T) {
 	}
 	if strings.Contains(flatten(frame.String()), preemptScheduledWord) {
 		t.Errorf("a delegation still reads %q after the run settled:\n%s", preemptScheduledWord, frame)
+	}
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// The pool fixture's own words (testdata/stubllm/subagent-preempt-pool.yaml).
+const (
+	poolPreemptPrompt  = "Delegate three summaries of the workspace."
+	poolSkippedName    = "gamma"
+	poolSkippedTask    = "gamma half of the workspace"
+	poolStagedGate     = "staged" // holds the second child until the message is queued
+	poolHeldGate       = "held"   // holds the first child until the skipped row has been expanded
+	poolRunViewCrumbAt = "← main ›"
+)
+
+// TestE2EQueuedMessagePreemptsAPooledSubAgentAndItsRowOpensInPlace is the pre-burst expand: three
+// delegations at `parallel-agents: 2`, a message queued while the first two run, the third skipped
+// at its dequeue once the second reports — and, with the first child still held so the group has
+// not joined, a click on the skipped row. The row is over (its finished phase is in) but not yet
+// paired with its result, and a child that never ran has no run to show: the click must open the
+// skip's own words in place and push no run view.
+func TestE2EQueuedMessagePreemptsAPooledSubAgentAndItsRowOpensInPlace(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "subagent-preempt-pool"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, stub, preemptHome(t, stub, 2), "")
+
+	submit(drv, poolPreemptPrompt)
+	drv.WaitText(poolSkippedName)
+
+	submit(drv, preemptMessage)
+	drv.WaitText(preemptQueuedReadout)
+
+	// The second child reports; its worker dequeues the third delegation with the message pending,
+	// and the row reads the verdict while the first child is still held.
+	stub.Release(poolStagedGate)
+	drv.WaitFor(func() bool {
+		f := drv.Frame()
+		_, y, ok := f.Find(poolSkippedName)
+		return ok && strings.Contains(f.Row(y), preemptErrorWord)
+	}, tuitest.Awaiting("the skipped row to read its verdict before the burst"))
+
+	frame := drv.Frame()
+	x, y, ok := frame.Find(poolSkippedName)
+	if !ok {
+		t.Fatalf("the skipped row left the screen:\n%s", frame)
+	}
+	click(drv, x, y)
+	drv.WaitText("sub-agent not started")
+
+	if opened := drv.Frame(); strings.Contains(opened.String(), poolRunViewCrumbAt) {
+		t.Errorf("expanding the skipped row before the burst opened a run view:\n%s", opened)
+	}
+
+	// The click left the viewport standing on the opened row rather than following the tail, so the
+	// wrap-up is awaited on the wire: the parent's request that ends on the queued message.
+	stub.Release(poolHeldGate)
+	drv.WaitFor(func() bool {
+		_, ok := preemptParentRequest(stub)
+		return ok
+	}, tuitest.Awaiting("the parent's request carrying the queued message"))
+	drv.WaitQuiet(settled)
+
+	for _, req := range stub.Requests() {
+		if carriesTask(req, poolSkippedTask) {
+			t.Errorf("request %d carries the skipped delegation's task; the skipped child was run", req.N)
+		}
 	}
 
 	if err := sess.Quit(); err != nil {

@@ -2421,12 +2421,10 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 	// that read only the missing started phase would leave it queued for the rest of the session.
 	const scheduledWord = "scheduled"
 
-	// build is the serial shape the e2e drives: the first delegation ran and reported, the second
+	// fill is the serial shape the e2e drives: the first delegation ran and reported, the second
 	// was skipped once the message was queued. The skipped head is entry 2 — the first run's read
 	// stands between the two calls.
-	build := func(t *testing.T, burst bool) *transcript {
-		t.Helper()
-		tr := &transcript{}
+	fill := func(tr *transcript, burst bool) {
 		subAgentCall(tr, "s1", "survey", 0)
 		subAgentStarted(tr, "s1", 1)
 		readCall(tr, "rs1", "a.go", 1, 5, 1)
@@ -2439,6 +2437,11 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		if burst {
 			subAgentReport(tr, "s1", "all clear", 0)
 		}
+	}
+	build := func(t *testing.T, burst bool) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		fill(tr, burst)
 		return tr
 	}
 	collapsed := strings.Join([]string{
@@ -2491,6 +2494,49 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 			t.Errorf("expanded skipped member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
+
+	// BEFORE the burst the skipped head is reported by its finished phase alone — done is still
+	// false, because a fan-out pairs every result at once when the group joins (ADR 0039 decision 4).
+	// A gesture on it then must open the skip's words in place, by either reach, and never push a
+	// run view: the child never ran, so a view of it would be an empty screen.
+	for _, reach := range []struct {
+		name string
+		act  func(t *testing.T, m Model) Model
+	}{
+		{name: "⏎", act: enterOnLastBlock},
+		{name: "click", act: func(t *testing.T, m Model) Model { return clickLine(t, m, memberRows(t, m, 3)[0]) }},
+	} {
+		t.Run("expanded before the burst by "+reach.name+", the skip content is the body", func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestModel(t)
+			m.transcript.reset()
+			m.transcript.addUser("survey and check", nil)
+			fill(&m.transcript, false) // the skipped head is entries[3]
+			m.refreshViewport()
+			if m.transcript.entries[3].done {
+				t.Fatal("setup: the skipped head is paired already; the case is the gap before the burst")
+			}
+
+			m = reach.act(t, m)
+
+			if m.inRunView() {
+				t.Fatalf("expanding a skipped member before the burst pushed a run view of %q; a child that never ran has none", m.viewedRun().spawn)
+			}
+			if !m.transcript.entries[3].expanded {
+				t.Error("the skipped member did not take the inline toggle")
+			}
+			screen := strip(strings.Join(m.lines, "\n"))
+			for _, line := range []string{
+				unframedSubAgentPromptLead + "check",
+				"sub-agent not started: the user sent a message while this group was",
+			} {
+				if !strings.Contains(screen, line) {
+					t.Errorf("the opened skipped member lacks %q:\n%s", line, screen)
+				}
+			}
+		})
+	}
 
 	// A lone skipped delegation — a message queued before the group's only delegation could start
 	// — is the same head in the lone frame: the refusal's shape row for row.

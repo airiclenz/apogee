@@ -1941,7 +1941,7 @@ func (t *transcript) setExpanded(index int, expanded bool) bool {
 	if index < 0 || index >= len(t.entries) || !t.entries[index].kind.carriesBlockState() {
 		return false
 	}
-	if head := t.entries[index]; head.headsRun() && (subAgentSpan(t.entries, index) > 0 || !head.done) {
+	if head := t.entries[index]; head.headsRun() && (subAgentSpan(t.entries, index) > 0 || !subAgentReported(head.painted())) {
 		return false
 	}
 	t.entries[index].expanded = expanded
