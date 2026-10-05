@@ -72,7 +72,11 @@ Fixes the audit's High finding: `/clear` or a session switch with a running back
 
 **Commit:** `fix(agent): stop background workflows without blocking the caller`
 
-## 2. Driven `/clear` and session-switch test with a running background workflow
+## 2. Driven `/clear` and session-switch test with a running background workflow — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): restoreOtherSession was neither retyped nor reused: the switch passes through the boundary confirm between Enter and "resumed:", so the new file carries its own browser steps (open /sessions, Down, Enter, answer `y`) and e2e_console_test.go is untouched
+NOTES (2026-10-05): the other session is seeded in the same run (one greeting turn, saved, then a /clear with nothing running) rather than by a relaunch; the test waits for each session record before opening /sessions so the browser's second row is the greeting session
+NOTES (2026-10-05): bite check run — with item 1's internal/agent/background.go reverted, both tests time out after the driver's 60s default (clear: the closed reply never leaves the screen; switch: "resumed:" never lands); background.go restored afterwards
 
 **What:** Depends on item 1. End-to-end guard for the deadlock through the real TUI.
 

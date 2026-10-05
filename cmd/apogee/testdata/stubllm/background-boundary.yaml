@@ -1,0 +1,43 @@
+# The upstream TestE2EBackgroundClearDoesNotHang and TestE2EBackgroundSessionSwitchDoesNotHang talk
+# to: a background sub_agent (ADR 0094) is launched and its child held on the `scouted` gate, so a
+# session boundary — `/clear`, or a `/sessions` switch — arrives with a background workflow running
+# and the human answers its stop-or-keep confirm with `y`.
+#
+# The switch needs a second session to switch to, so a plain greeting turn comes first; the clear
+# test never sends it. The run's home lifts `workflow` (tools: enabled), which is what offers
+# sub_agent's background switch in the TUI; without it the call would run blocking.
+model: background-boundary-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml): `auto-title:` is on
+    # by default and an unanswered request is an HTTP 500. Every session asks once.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: A session over a background scout
+    # The switch test's first session: one turn, so a record exists to switch back to.
+    - when:
+        last_message: ^Say hello before the scout
+      repeat: true
+      text: Hello before the scout.
+    # The main turn: one sub_agent call asking for the background.
+    - when:
+        last_message: ^Scout the repository in the background
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Scan the scout area of the repo","name":"scout","background":true}'
+    # The call's immediate answer is the last message: the reply ends, the child still running.
+    - when:
+        last_message: ^sub_agent started in the background
+      repeat: true
+      text: The scout is running in the background.
+    # The child. Its answer is held on the `scouted` gate, so the workflow is still running when the
+    # boundary stops it; the stop cancels the request, and the gate is let go only after the test
+    # has seen the boundary land.
+    - when:
+        last_message: scout area of the repo
+      repeat: true
+      await: scouted
+      text: The scout found three files.
+    # Anything neither the parent nor the child claims lands here, and the request log then names it.
+    - repeat: true
+      text: Nothing else to add.
