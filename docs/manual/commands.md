@@ -111,7 +111,7 @@ refused there too, with the same reason an `@` reference to an image gives.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works, and a queued message does not wait for sub-agents that have not started yet:
-those are skipped, the model is told so, and your message lands once the running ones finish.
+those are skipped — their rows read `not started · your message` — the model is told so, and your message lands once the running ones finish.
 A command that needs a quiet engine queues the same way — `⏎` on `/clear` mid-run stages a
 `queued command: /clear` row above the box, below any queued messages, and the queued commands
 run in the order you typed them the moment the model is idle, **before** any queued message is
@@ -135,7 +135,7 @@ the user`. The model is told at its next request that you cut the run short ther
 redoes that work nor mistakes its silence for an answer. Delegations are kept the same way: a
 sub-agent that had already finished keeps its report, one still working is stopped exactly as `^x`
 stops it (see the run view below) and its row reads `stopped by you`, and one still waiting for a
-slot is told it was never started. Stopping a working sub-agent means apogee summarizes what it had
+slot is told it was never started and its row reads `stopped by you` too. Stopping a working sub-agent means apogee summarizes what it had
 done, for up to 20 seconds per sub-agent — one that cannot be summarized in time is kept with
 `[engine summary unavailable — …]` — and a second `esc` twice while those summaries run skips the
 rest at once. Nothing a cancel does reverts a file: what the run wrote stays written. While a group

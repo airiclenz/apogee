@@ -44,9 +44,9 @@ const (
 	// The gate the fixture holds the first child's answer on, released once the queued row is on
 	// screen — which is what puts the ⏎ strictly before the engine decides on the second delegation.
 	preemptChildGate = "staged"
-	// The one word the skipped row's outcome slot reads (internal/tui's `error` verdict), and the
+	// The verdict the skipped row's outcome slot reads (internal/tui's neutral pre-emption verdict), and the
 	// word it must not: the row is over, not waiting.
-	preemptErrorWord     = "error"
+	preemptErrorWord     = "not started · your message"
 	preemptScheduledWord = "scheduled"
 	// preemptQueuedReadout is the status line's count of staged messages while one waits.
 	preemptQueuedReadout = "1 queued"

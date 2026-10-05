@@ -73,7 +73,13 @@ internal/tui/subagentblock_test.go — TestSubAgentSkippedRowReadsItsResult; int
 - `go test -race -count=1 -run TestE2EQueuedMessagePreempts ./cmd/apogee/`
 **Commit:** `fix(tui): expand a skipped sub-agent row in place before its group's results`
 
-## 2. Skipped delegations get a neutral verdict
+## 2. Skipped delegations get a neutral verdict — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the turn-cancel text is folded into delegationStoppedByUser (so proseDelegationOutcome/delegationOutcomeVerdict already word it `stopped by you`); the pre-emption text gets no DelegationOutcome field, because it is always error-shaped and only ever reaches the slot through absorbFailure (new delegationNeverStartedVerdict) — no domain change was needed.
+NOTES (2026-10-05): stoppedSummary also accepts the new `not started · your message` verdict, which is what withholds the ✓ (subAgentFinished) — no separate predicate.
+NOTES (2026-10-05): added TestSubAgentSkippedContentIsWhatTheVerdictMatches pinning the presenter's restated skip text to the test file's engine restatement; the replay round trip is TestSubAgentSkippedRowReplaysNeutralFromAnOldSession.
+NOTES (2026-10-05): consequential edit — docs/layout/tool-layout.md: made necessary by the new neutral verdicts on the sub-agent slot list
+NOTES (2026-10-05): consequential edit — docs/manual/commands.md: made necessary by the skipped and turn-cancelled rows' new verdict words
 
 **What:**
 **Goal:** A delegation skipped by an interjection preempt reads `not started · your message`, and one skipped by a turn cancel reads `stopped by you`, both in the neutral marker tone with no ✓, live and on replay of old sessions; the fan-out-ceiling refusal still reads `error`.

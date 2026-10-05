@@ -384,9 +384,11 @@ func endedWithoutReportSummary(text string) bool {
 // which withholds the done ✓: a stopped run did not do what it was sent for. It sets no field, so it
 // reads in the step cap's ordinary marker tone — neither the red of a failure nor the green of done
 // — and a queued stop, whose result is error-shaped, is worded here too rather than red
-// (toolView.absorbFailure), because the human's stop is not the child's failure.
+// (toolView.absorbFailure), because the human's stop is not the child's failure. A delegation a
+// queued message pre-empted (`not started · your message`, delegationPreemptedVerdict) reads the same
+// way for the same reason: it never ran, by the human's act, and is neither done nor failed.
 func stoppedSummary(text string) bool {
-	if text == delegationStoppedVerdict {
+	if text == delegationStoppedVerdict || text == delegationPreemptedVerdict {
 		return true
 	}
 	return strings.HasPrefix(text, delegationStoppedVerdict+slotSeparator+delegationSteeredLead)

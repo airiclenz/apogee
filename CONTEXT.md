@@ -239,8 +239,10 @@ A delegation the group has **not started** when an **Interjection** is staged fo
 **skipped**, not run: it commits, in call order, the tool result `sub-agent not started: the user
 sent a message while this group was running; delegate again if the task is still needed` with a
 finished phase and no started one, so the model is told and may delegate again; the TUI paints that
-row with the `error` verdict (never `scheduled`) and opens it onto the skip's own words, like a
-refusal at the depth bound. The children already running finish untouched — a message never
+row with the neutral `not started · your message` verdict in the marker tone, no ✓ (never `scheduled`,
+never the red `error`: the skip is the human's act, not a failure), and opens it onto the skip's own
+words, like a refusal at the depth bound. A delegation a turn cancel caught queued reads `stopped by
+you` the same way. The children already running finish untouched — a message never
 cancels anything — and a child holding a message in its own mailbox skips its unstarted
 grandchildren the same way (ADR 0039, amended 2026-09-14). Headless runs and Firings have no
 queue, so nothing is ever skipped there.

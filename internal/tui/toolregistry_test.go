@@ -320,6 +320,40 @@ func TestDelegationVerdictReadsTheHumansStop(t *testing.T) {
 	if delegationStoppedVerdict != "stopped by you" {
 		t.Errorf("delegationStoppedVerdict = %q, want %q", delegationStoppedVerdict, "stopped by you")
 	}
+
+	// The error-shaped results of a delegation that never ran reach the slot through the failure
+	// layer (toolView.absorbFailure): the human's act — a queued stop, a turn cancel that caught it
+	// queued, a pre-emption by a queued message — words a neutral verdict, and every other refusal,
+	// the fan-out ceiling's included, keeps the failure's `error`.
+	const ceilingRefusal = "sub-agent not started: this reply fanned out 9 delegations and the ceiling is 8 " +
+		"(2 rounds × width 4) — the first 8 ran; delegate the rest again once their results are in"
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"a queued stop", delegationStoppedQueuedContent, delegationStoppedVerdict},
+		{"a turn cancel of a queued member", delegationCancelledQueuedContent, delegationStoppedVerdict},
+		{"a pre-emption by a queued message", delegationPreemptedContent, delegationPreemptedVerdict},
+		{"a fan-out ceiling refusal", ceilingRefusal, erroredSummary},
+		{"a failure quoting the pre-emption", "sub-agent failed: " + delegationPreemptedContent, erroredSummary},
+	} {
+		t.Run("error-shaped: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := toolView{name: subAgentToolName}
+			tv.absorbFailure(domain.ToolResult{Content: tc.content, IsError: true})
+			if tv.Summary.Text != tc.want {
+				t.Errorf("absorbFailure(%q) slot = %q, want %q", tc.content, tv.Summary.Text, tc.want)
+			}
+			if failed := tc.want == erroredSummary; tv.Summary.failed != failed {
+				t.Errorf("absorbFailure(%q) failed = %v, want %v", tc.content, tv.Summary.failed, failed)
+			}
+		})
+	}
+	if delegationPreemptedVerdict != "not started · your message" {
+		t.Errorf("delegationPreemptedVerdict = %q, want %q", delegationPreemptedVerdict, "not started · your message")
+	}
 }
 
 // Neither stopped text is PROMOTED into the slot, however short: the slot is the stopped verdict's,

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -627,6 +629,21 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 			lines = append(lines, detailLine{Kind: detailKind(d.Kind), Gutter: d.Gutter, Text: d.Text})
 		}
 		tv.Details = newToolBody(lines)
+	}
+	// A delegation the human's act settled before it started — pre-empted by a queued message, or
+	// caught queued by a turn cancel — is re-derived from its stored body rather than trusted: a
+	// session recorded before those rows took their neutral verdict (delegationNeverStartedVerdict)
+	// stored the failure's `error`, and replaying it as such would paint red what the live row now
+	// paints in the marker tone. The body is the very failure body absorbFailure laid the result out
+	// as, so it reads back whole; only an `error` slot is re-read, so no other verdict can move.
+	if tv.headsRun() && !tv.Summary.quoted && tv.Summary.Text == erroredSummary {
+		texts := make([]string, 0, len(w.Details))
+		for _, d := range w.Details {
+			texts = append(texts, d.Text)
+		}
+		if verdict, ok := delegationNeverStartedVerdict(strings.Join(texts, "\n")); ok {
+			tv.Summary = namedSummary(detailLine{Kind: tv.Summary.Kind, Text: verdict})
+		}
 	}
 	// The header's count is the third thing re-derived rather than trusted, and for the same reason:
 	// it is not on the wire at all (toolView.count), and the rows it is read off ARE — task_list's

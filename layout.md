@@ -1003,7 +1003,8 @@ wears, so a run says it finished once in two places rather than twice in two col
 exception is anchored on the **delegation vocabulary** and reaches nothing else: it is the engine's
 word for a run it drove to its own boundary, where a tool's `clean`, `PASS` or `exit 0` is that
 tool's reading of its own work and stays in the marker tone, as does a run `capped at its step
-cap`, which did not finish, one `stopped by you`, which did not finish either, and one that `ended
+cap`, which did not finish, one `stopped by you`, which did not finish either, one `not started ·
+your message`, which a queued message pre-empted before it ran, and one that `ended
 without a report`, which reached its boundary with nothing to hand back. Where both verdicts stand the red wins. Every other kind of summary,
 promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder

@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
@@ -2147,6 +2148,47 @@ func TestSubAgentStoppedByYouWearsNoCheck(t *testing.T) {
 		}
 	})
 
+	// The other two never-ran kinds the human's act settles — a queued member a turn cancel caught,
+	// and one a queued message pre-empted — read their neutral verdicts the same way: no ✓, no red.
+	for _, tc := range []struct {
+		name, content, verdict string
+	}{
+		{"a turn cancel of a queued member", delegationCancelledQueuedContent, delegationStoppedVerdict},
+		{"a pre-emption by a queued message", delegationPreemptedContent, delegationPreemptedVerdict},
+	} {
+		t.Run(tc.name+" reads its verdict, never error", func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			loneDelegation(tr, "s1", "survey", "a.go", "all clear\nnothing else to report")
+			subAgentCall(tr, "s2", "build", 0)
+			result := domain.ToolResult{CallID: "s2", Content: tc.content, IsError: true}
+			tr.apply(domain.SubAgentPhaseEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+				Phase:     domain.SubAgentFinished,
+				Result:    result,
+			})
+			tr.apply(domain.ToolResultEvent{Result: result})
+			head := len(tr.entries) - 1
+			for name, view := range map[string]*transcript{"live": tr, "replayed": replay(t, tr)} {
+				e := view.entries[head]
+				if !e.neverStarted() {
+					t.Errorf("%s: neverStarted = false; the delegation never ran", name)
+				}
+				if subAgentFinished(e.painted()) || e.tool.Summary.failed {
+					t.Errorf("%s: finished = %v, failed = %v; want neither",
+						name, subAgentFinished(e.painted()), e.tool.Summary.failed)
+				}
+				rows := strings.Split(renderPlain(view, width), "\n")
+				row := rows[len(rows)-1]
+				if !strings.Contains(row, "build") || !strings.Contains(row, tc.verdict) ||
+					strings.Contains(row, erroredSummary) || strings.Contains(row, glyphDone) {
+					t.Errorf("%s: the row = %q; want %q, no %q and no ✓", name, row, tc.verdict, erroredSummary)
+				}
+			}
+		})
+	}
+
 	t.Run("the verdict is painted in the marker tone", func(t *testing.T) {
 		t.Parallel()
 
@@ -2388,6 +2430,56 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 const skippedDelegationContent = "sub-agent not started: the user sent a message while this group " +
 	"was running; delegate again if the task is still needed"
 
+// TestSubAgentSkippedRowReplaysNeutralFromAnOldSession replays a never-ran delegation head as a
+// session recorded before the neutral verdicts stored it — the failure's `error` in the slot, the
+// skip's words as its body — through fromWireToolView: the verdict is re-derived from the body, so
+// the old row paints exactly as a live one now does, while a refusal stored the same way keeps its
+// `error`.
+func TestSubAgentSkippedRowReplaysNeutralFromAnOldSession(t *testing.T) {
+	t.Parallel()
+
+	const ceilingRefusal = "sub-agent not started: this reply fanned out 9 delegations and the ceiling is 8 " +
+		"(2 rounds × width 4) — the first 8 ran; delegate the rest again once their results are in"
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"a pre-emption", skippedDelegationContent, delegationPreemptedVerdict},
+		{"a turn cancel of a queued member", delegationCancelledQueuedContent, delegationStoppedVerdict},
+		{"a fan-out ceiling refusal", ceilingRefusal, erroredSummary},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			stored := &session.ToolView{
+				Name:    subAgentToolName,
+				Summary: session.BranchSummary{DetailLine: session.DetailLine{Text: erroredSummary}},
+				Details: []session.DetailLine{{Text: tc.content}},
+			}
+			tv := fromWireToolView(stored, true)
+			if tv.Summary.Text != tc.want {
+				t.Errorf("replayed slot = %q, want %q", tv.Summary.Text, tc.want)
+			}
+			if failed := tc.want == erroredSummary; tv.Summary.failed != failed {
+				t.Errorf("replayed failed = %v, want %v", tv.Summary.failed, failed)
+			}
+			if lines := tv.Details.all(); len(lines) != 1 || lines[0].Text != tc.content {
+				t.Errorf("replayed body = %+v, want the stored result whole", lines)
+			}
+		})
+	}
+}
+
+// TestSubAgentSkippedContentIsWhatTheVerdictMatches pins the presenter's own restatement of the
+// engine's skip text (delegationPreemptedContent), which its neutral verdict is matched on WHOLE,
+// to the engine's text byte for byte: a drift on either side would quietly paint the skip `error`.
+func TestSubAgentSkippedContentIsWhatTheVerdictMatches(t *testing.T) {
+	t.Parallel()
+
+	if delegationPreemptedContent != skippedDelegationContent {
+		t.Errorf("delegationPreemptedContent = %q, want the engine's %q", delegationPreemptedContent, skippedDelegationContent)
+	}
+}
+
 // skippedDelegation folds a delegation the engine SKIPPED for a pending interjection, exactly as
 // skipDelegation emits it: the call, then a finished phase with no started one before it, carrying
 // the error-shaped skip result — and, when burst is set, the trailing ToolResultEvent that pairs the
@@ -2409,8 +2501,8 @@ func skippedDelegation(tr *transcript, id, task string, burst bool) {
 // built from an IsError result through the finished phase alone — no started phase ever came,
 // because the child never ran — so it is `subAgentReported` without being started, which is the
 // shape of the engine's REAL depth-bound refusal on the wire (errorToolResult) and paints through
-// the same `absorbFailure` path: collapsed, the outcome slot reads the `error` verdict and never
-// `scheduled`, whether or not the trailing result burst has landed; expanded, the skip's own words
+// the same `absorbFailure` path: collapsed, the outcome slot reads the neutral `not started · your
+// message` verdict — never `scheduled`, and never the red `error` a refusal reads — whether or not the trailing result burst has landed; expanded, the skip's own words
 // are the body under the task the delegation carried, exactly as a refusal's are
 // (TestUnframedSubAgentShowsThePromptWhenExpanded).
 func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
@@ -2447,7 +2539,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 	collapsed := strings.Join([]string{
 		"✦ Sub-Agent (2)",
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
-		groupMemberLine("  ┕ check ⋯ error"),
+		groupMemberLine("  ┕ check ⋯ not started · your message"),
 	}, "\n")
 
 	for _, tc := range []struct {
@@ -2483,7 +2575,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		want := strings.Join([]string{
 			"✦ Sub-Agent (2)",
 			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
-			leaderEdgeRow("  ┕ check ⋯ error", glyphExpanded),
+			leaderEdgeRow("  ┕ check ⋯ not started · your message", glyphExpanded),
 			"  │ " + unframedSubAgentPromptLead + "check",
 			"  │",
 			"  │ sub-agent not started: the user sent a message while this group was",
@@ -2545,8 +2637,9 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 
 		tr := &transcript{}
 		skippedDelegation(tr, "s1", "check", true)
-		if got := renderPlain(tr, width); strings.Contains(got, scheduledWord) || !strings.Contains(got, "error") {
-			t.Errorf("collapsed lone skip does not read the error verdict:\n%s", got)
+		if got := renderPlain(tr, width); strings.Contains(got, scheduledWord) ||
+			!strings.Contains(got, delegationPreemptedVerdict) || strings.Contains(got, erroredSummary) {
+			t.Errorf("collapsed lone skip does not read the neutral %q verdict:\n%s", delegationPreemptedVerdict, got)
 		}
 		if !tr.setExpanded(0, true) {
 			t.Fatalf("setExpanded(0, true) = false; want the lone delegation open")

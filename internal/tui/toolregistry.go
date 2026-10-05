@@ -892,6 +892,11 @@ const (
 	delegationSteeredMessage  = "message"
 )
 
+// delegationPreemptedVerdict is the slot of a delegation a queued user message pre-empted before it
+// started (delegationPreemptedContent, ADR 0025): it never ran, by the human's act, so it is neither
+// `done` nor the child's failure.
+const delegationPreemptedVerdict = "not started · your message"
+
 // delegationBoundHead matches the marker line a delegation stopped at one of its BOUNDS opens with
 // — "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]",
 // or the same shape naming its token budget or its time limit (internal/agent's
@@ -971,19 +976,52 @@ func delegationSteeredCell(steered int) string {
 // again here as the bound head is: the engine formats them deliberately. The stopped head is read
 // only for a result carrying no typed outcome (proseDelegationOutcome); the queued stop's text is
 // the one reading of its kind, because a delegation that never ran has no outcome to carry.
+//
+// Two more never-ran kinds are the human's act rather than the child's failure, and are spelled
+// again here for the same reason: delegationCancelledQueuedContent is the whole result of a
+// delegation still queued when the human cancelled the turn (internal/agent's
+// cancelledQueuedDelegationContent) — a stop of the whole turn, worded `stopped by you` like the
+// queued stop — and delegationPreemptedContent is the whole result of one a queued user message
+// pre-empted (internal/agent's skippedDelegationContent, ADR 0025), worded
+// delegationPreemptedVerdict. Both stay error-shaped on the wire for the model; only the row's
+// verdict is neutral (delegationNeverStartedVerdict).
 const (
 	delegationStoppedHead          = "[stopped by the user — engine summary follows]"
 	delegationStoppedQueuedContent = "sub-agent not started: the user stopped it before it started; " +
+		"delegate again if the task is still needed"
+	delegationCancelledQueuedContent = "sub-agent not started: the user cancelled the turn before it started; " +
+		"delegate again if the task is still needed"
+	delegationPreemptedContent = "sub-agent not started: the user sent a message while this group was running; " +
 		"delegate again if the task is still needed"
 )
 
 // delegationStoppedByUser reads the human's stop off a delegation's result: the stopped head as the
 // body's first line — anchored at the START, where the engine writes it, so a line the child printed
-// cannot be read as the marker — or the queued stop's whole text. body is the result with the
-// steering notice already taken off (readDelegationSteering).
+// cannot be read as the marker — or the whole text of a queued stop or of a turn cancel that caught
+// the delegation queued. body is the result with the steering notice already taken off
+// (readDelegationSteering).
 func delegationStoppedByUser(body string) bool {
 	head, _, _ := strings.Cut(body, "\n")
-	return head == delegationStoppedHead || strings.TrimSpace(body) == delegationStoppedQueuedContent
+	whole := strings.TrimSpace(body)
+	return head == delegationStoppedHead || whole == delegationStoppedQueuedContent ||
+		whole == delegationCancelledQueuedContent
+}
+
+// delegationNeverStartedVerdict words the slot of an error-shaped delegation result the HUMAN's act
+// settled before its child ran: `stopped by you` for a queued stop or a turn cancel
+// (delegationStoppedByUser), `not started · your message` for a pre-emption by a queued message
+// (delegationPreemptedContent). ok is false for every other result — a fan-out ceiling refusal, a
+// depth-bound refusal, a child's own failure — which keeps the failure's `error`. It is matched on
+// the WHOLE content, so a failure that merely quotes the words is still a failure.
+func delegationNeverStartedVerdict(content string) (verdict string, ok bool) {
+	body, _ := readDelegationSteering(content)
+	switch {
+	case delegationStoppedByUser(body):
+		return delegationStoppedVerdict, true
+	case strings.TrimSpace(body) == delegationPreemptedContent:
+		return delegationPreemptedVerdict, true
+	}
+	return "", false
 }
 
 // delegationNoReportMarker is the whole of the result a child gets back to its parent when its

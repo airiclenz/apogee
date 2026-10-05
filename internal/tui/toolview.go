@@ -1275,14 +1275,16 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // read_file failing on an in-workspace path carries that path absolute beneath a branch whose slot
 // now names nothing at all.
 //
-// The one error-shaped result that is not a failure is a delegation the human stopped before it
-// started (delegationStoppedQueuedContent, ADR 0086 D4): its slot takes the stopped verdict in the
-// ordinary marker tone (stoppedSummary) rather than the red, and its text lays out as the same
-// failure body, so the head line entry.neverStarted reads stays where it looks.
+// The error-shaped results that are not failures are a delegation the human's act settled before it
+// started (delegationNeverStartedVerdict): stopped while it queued (delegationStoppedQueuedContent,
+// ADR 0086 D4), caught queued by a turn cancel, or pre-empted by a queued message (ADR 0025). Its
+// slot takes `stopped by you` or `not started · your message` in the ordinary marker tone
+// (stoppedSummary) rather than the red, and its text lays out as the same failure body, so the head
+// line entry.neverStarted reads stays where it looks.
 func (tv *toolView) absorbFailure(result domain.ToolResult) {
 	content := result.Content
-	if tv.headsRun() && delegationStoppedByUser(content) {
-		tv.Summary = namedSummary(detailLine{Text: delegationStoppedVerdict})
+	if verdict, ok := delegationNeverStartedVerdict(content); tv.headsRun() && ok {
+		tv.Summary = namedSummary(detailLine{Text: verdict})
 		tv.Details = tv.Details.with(failureBody(content))
 		return
 	}

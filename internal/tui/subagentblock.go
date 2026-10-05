@@ -688,7 +688,8 @@ const scheduledSummary = "scheduled"
 // arrives (dispatch.go), and a row left "scheduled" over a delegation that already answered would
 // say so forever. A delegation a queued user message PRE-EMPTED is the same shape one producer
 // over — its finished phase arrives without a started one, carrying the error-shaped skip result
-// (skipDelegation, ADR 0025) — so the row reads that result's verdict, `error`, and opens onto the
+// (skipDelegation, ADR 0025) — so the row reads that result's neutral verdict, `not started · your
+// message` (delegationNeverStartedVerdict), and opens onto the
 // skip's own words exactly as a refusal does. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a
 // reader having opened it. That one is the answer for a producer that emits no phases at all: a
 // hand-built test transcript, a record replayed from a session written before the phase existed. A
