@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/fs"
 	"maps"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -225,7 +225,7 @@ func clonePlan(plan workflow.Plan) workflow.Plan {
 // `shipped:` for one of apogee's own, the host folder for one found on disk. It is nil when the
 // address opens nothing, which only a relative Dir or an unknown shipped folder is.
 //
-// A folder on disk is served through an os.Root, never os.DirFS: a repo can ship a recipe's
+// A folder on disk is served through security.RootFS, never os.DirFS: a repo can ship a recipe's
 // `prompt:` file as a symlink to a host file, and os.DirFS follows it out of the folder, where the
 // root refuses every path that resolves outside it (and every absolute symlink target). The root
 // stays open for as long as the returned FS is reachable — the recipe run holding it — and is
@@ -244,19 +244,7 @@ func skillFiles(dir string) fs.FS {
 	if !filepath.IsAbs(dir) {
 		return nil
 	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return unopenedFS{err: err}
-	}
-	return root.FS()
-}
-
-// unopenedFS is the FS of a skill folder that did not open: every Open fails with that error.
-type unopenedFS struct{ err error }
-
-// Open satisfies fs.FS, refusing name with the folder's open error.
-func (u unopenedFS) Open(name string) (fs.File, error) {
-	return nil, &fs.PathError{Op: "open", Path: name, Err: u.err}
+	return security.RootFS(dir)
 }
 
 // Compile-time proof the catalog satisfies the loop's resolver seam (ADR 0010: skills depends

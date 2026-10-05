@@ -138,6 +138,10 @@
 // opens non-blocking so a planted FIFO cannot wedge it: safeio_open_unix.go is that flag,
 // syscall.O_NONBLOCK, for every non-Windows target; safeio_open_windows.go is its zero on
 // Windows, which has no such flag and no pipe inside a workspace tree.
+// rootfs.go is the read side's fs.FS form — RootFS, a folder served through an os.Root so a
+// symlink resolving outside it (and any absolute symlink) is refused while a relative in-root one
+// is followed, for readers handed an fs.FS (a skill folder, a workflow workspace); unopenedFS is
+// the non-nil FS it returns for a folder that will not open, failing every Open with that error.
 // writepermit.go is the fence's one exception and the whole of it: the approved escape target
 // (ADR 0049). openMutationRoot — the single place every Fence verb decides which root bounds
 // it — plus the re-resolution that reproduces dispatch's classification rather than trusting

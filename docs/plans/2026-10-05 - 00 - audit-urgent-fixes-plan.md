@@ -100,7 +100,7 @@ NOTES (2026-10-05): bite check run — with item 1's internal/agent/background.g
 
 **Commit:** `test(apogee): drive /clear and session switch over a running background workflow`
 
-## 3. An `os.Root`-backed workspace FS helper in `internal/security`
+## 3. An `os.Root`-backed workspace FS helper in `internal/security` — ✅ DONE (2026-10-05)
 
 **What:** Preparation for item 4. One shared helper replaces the unexported `skillFiles` / `unopenedFS` pair in `internal/skills/catalog.go`.
 
