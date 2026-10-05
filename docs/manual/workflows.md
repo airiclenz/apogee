@@ -6,13 +6,16 @@ of its own — that reports back in a short, fixed shape. Your agent never reads
 prose. It gets **one line per item** and the path of a report, so fifty items cost it fifty
 lines, not fifty conversations.
 
-A workflow comes from one of two places, and in both the work is *asked for* — apogee plans
+A workflow comes from one of three places, and in each the work is *asked for* — apogee plans
 nothing on its own:
 
 - **The model asks for one** with the `fan_out` tool: one brief over a list, optionally followed
   by an adversarial check of each item and one combined report.
 - **You wrote one down** as a **recipe** — a skill whose header lists the stages to run. You
   start it with `/<id>`, like any skill; apogee ships one, `audit`.
+- **The model sends one delegation to the background** with `sub_agent`'s `background: true` — a
+  workflow of one item whose helper hands back its whole report rather than one line (see
+  [A background `sub_agent`](#a-background-sub_agent)).
 
 Every finished item is kept on disk as it lands. A cancel, a quit or a crash loses only the items
 that were still running, and starting the same workflow again skips the ones already done.
@@ -48,11 +51,12 @@ A profile's `tools:` replaces a built-in roster for that model whole, so re-list
 built-in one lifted — `qwen3.8`'s Console family, for one.
 
 `fan_out` alone is enough for workflows that run to their end inside the reply that asked for
-them. Adding `workflow` beside it also gives `fan_out` its `background` switch — see
-[Background workflows](#background-workflows). Background workflows exist in the TUI only: a
-[`headless`](headless.md) run or a [`daemon`](daemon.md) firing has no conversation to go on
-while a workflow runs, so there `fan_out` always blocks and `workflow` is not offered, whatever
-the roster says. A delegate — a `sub_agent` child or a workflow's helper — is never offered
+them. Lifting `workflow` also gives a `background` switch to `fan_out` (when it is lifted too) and
+to `sub_agent` (which is on by default) — see [Background workflows](#background-workflows).
+Background workflows exist in the TUI only: a [`headless`](headless.md) run or a
+[`daemon`](daemon.md) firing has no conversation to go on while a workflow runs, so there
+`fan_out` and `sub_agent` always block, neither shows a `background` switch, and `workflow` is
+not offered, whatever the roster says. A delegate — a `sub_agent` child or a workflow's helper — is never offered
 `workflow` or `background` either: background workflows belong to your agent alone. The rest of the `tools:` block — `disabled:`, typos, which list wins — is in
 [Configuration](configuration.md).
 
@@ -371,13 +375,16 @@ all of them from the start (the sketch shortens `audit`'s list):
 ## Background workflows
 
 A background workflow runs **beside the conversation**: you and the agent go on working, and it
-reports when it ends. There are two ways to start one:
+reports when it ends. There are three ways to start one:
 
 - **You**, with `/bg /<recipe> <text>` — e.g. `/bg /audit internal/`. Its inputs bind from the
   text alone; a required one the text leaves out is refused as `missing input: <name>` rather than
   asked. apogee notes `started <id> in the background`.
 - **The model**, with `fan_out`'s `background: true` — offered only while the `workflow` tool is
   on its roster. The call answers at once with the workflow's id and its `status.json` path.
+- **The model**, with `sub_agent`'s `background: true` — offered under the same gate as
+  `fan_out`'s. It runs that one delegation as a workflow of one item and answers at once, the same
+  way; see [A background `sub_agent`](#a-background-sub_agent).
 
 While one runs, the status line reads `1 workflow running` (`N workflows running`). A background
 workflow runs one helper short of the server's width, so a slot stays free for the conversation;
@@ -387,7 +394,9 @@ server and tools it started with, and `esc` never reaches it: it is stopped from
 [`/workflows`](#the-workflows-view--workflows) or by the model's `workflow` tool. While it is
 still driving its folder, starting the same workflow blocking — a `fan_out` call, a typed
 `/<recipe>` line — is refused with `apogee: workflow <id> is already running in the background`;
-once it ends, the same call resumes it.
+once it ends, the same `fan_out` call or `/<recipe>` line resumes it. A background `sub_agent`
+never resumes and is never refused this way: each call is a run of its own, so the same task sent
+again starts a fresh one.
 
 **Questions wait for you.** An approval one of its helpers needs, or an `ask` stage's question,
 never interrupts what you are doing. The status line adds `· 1 workflow waiting for you`, and the
@@ -399,7 +408,12 @@ workflow's [`/workflows`](#the-workflows-view--workflows) detail opens it at onc
 finish note into the transcript. A fan_out or recipe workflow's is one line: its name, how it
 ended, its items counted by status (and the verify verdicts) and the path of its report — ending on the
 [seat-fallback note](configuration.md#letting-the-model-pick-the-seat) when its helpers asked for
-the sub-agents server and ran on the session server instead. Then:
+the sub-agents server and ran on the session server instead. A background `sub_agent`'s carries its
+report: one lead line, `sub_agent <name> finished` (or `stopped`), with `— transcript: <path>`
+added when the helper wrote a transcript, and under it the helper's report, held to the same size
+cap a blocking `sub_agent` result is — ending on the seat-fallback note once when the helper ran on
+the session server instead. A run that could not proceed is the one line
+`sub_agent <name> failed — <why>`. Then:
 
 - an **idle** agent is woken: apogee opens a turn of its own on the note, shown as a
   `(background workflow report)` prompt row, which `esc` cancels like any other;
@@ -418,6 +432,39 @@ the sub-agents server and ran on the session server instead. Then:
   folders, finished items skipped, and a finish note that had not reached the agent yet rides its
   next message.
 
+### A background `sub_agent`
+
+`sub_agent`'s `background: true` hands one delegation to a workflow of one item and answers the
+call at once: `sub_agent started in the background as workflow <id>: <name>` (or `queued … behind
+another workflow on its server`), the workflow's `status.json` path, and how the `workflow` tool
+checks on it or stops it. The workflow is named for the delegation — the call's `name`, or the
+first line of its task when it gave none.
+
+Only the delivery changes. The helper is the same `sub_agent` child a blocking call spawns: it
+writes a prose report rather than a one-line receipt, keeps the call's `max_steps`, `tools`
+(`read-only` included) and `output_path`, and may delegate in turn wherever
+[`delegate-max-depth:`](configuration.md#delegated-sub-agents--what-one-may-spend) lets a blocking
+child. It runs once — a `fan_out` item's continuations and retries never apply — and its report
+arrives on the finish note ([the wake](#background-workflows)).
+
+Because the call answers at once, the delegation is never part of its reply's group of
+sub-agents: a message sent now with `ctrl+g` never skips it, `esc` never reaches it, and it does
+not count against [`delegate-fanout-rounds:`](configuration.md#delegated-sub-agents--what-one-may-spend). Stop it
+from [`/workflows`](#the-workflows-view--workflows) or with the model's `workflow` tool.
+
+A delegation the call named is kept when it finishes, exactly as a blocking one is, and a capped,
+faulted or stopped one is kept whatever its name (see
+[continuing a delegation](configuration.md#delegated-sub-agents--what-one-may-spend)). A later
+`sub_agent` call can `continue` it, but that continuation runs blocking: a call that carries both
+`continue` and `background: true` is refused, nothing runs, and the result says to call again
+without `background`.
+
+In the transcript the call paints as a background-workflow call — the delegation's name over the
+call's answer — never as a `✦ Sub-Agent` row with a run view to open, and its finish line names the
+delegation. Where apogee cannot keep a background workflow — a `headless` run, a `daemon` firing,
+a sub-agent's own call — no `background` switch is shown, and a call that carries one anyway runs as
+a plain blocking `sub_agent`.
+
 ## The `workflow` tool
 
 `workflow` is the model's handle on the workflows it sent to the background. It takes an
@@ -434,12 +481,15 @@ The model is woken with a workflow's result when it ends, so it has no need to p
 ## The workflows view — `/workflows`
 
 `/workflows` lists the session's workflows — every `fan_out` and every recipe run, background or
-not — one row each with its state (`running`, `waiting for you` while an approval or a question of
-it waits on you, `queued`, or how it ended) and its items done of all.
+not, and every background `sub_agent` — one row each with its state (`running`, `waiting for you`
+while an approval or a question of it waits on you, `queued`, or how it ended) and its items done
+of all. A background `sub_agent`'s row is named for its delegation and ends on `· sub_agent` after
+its id.
 
 - `⏎` opens one to its stages and their items, each by its short name with its status and
   summary; `⏎` on an item opens it read-only — its receipt, the detail output it wrote and its
-  whole conversation.
+  whole conversation. On a background `sub_agent`'s one stage `⏎` opens its one item, whose
+  detail output is the delegation's report.
 - `^a` answers what the workflow waits on: the pane closes and its oldest waiting approval or
   question opens — one `esc` sent back included — only while the agent is idle; mid-turn it says
   so and opens nothing.
@@ -449,7 +499,8 @@ it waits on you, `queued`, or how it ended) and its items done of all.
 - `^s` saves a `fan_out`'s workflow as a **recipe**: it asks for a name and writes
   `~/.apogee/skills/<name>/SKILL.md`, whose recipe runs the same stages — the path the items came
   from becomes its `scope` input — and `/<name>` runs it at once. A name a skill or command already
-  answers to, or a folder already there, is refused, never overwritten.
+  answers to, or a folder already there, is refused, never overwritten. A background `sub_agent`'s
+  workflow is one delegation, not a recipe: its legend offers no `^s`, and pressing it notes why.
 - `esc` goes one level up, and closes the pane from the list.
 
 The full command reference is in [Commands](commands.md).

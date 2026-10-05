@@ -39,6 +39,12 @@ arrives as `workflow_phase` lines. A workflow that could not run, was stopped, f
 ended with every item blocked exits `1` whatever the model then said. The items are the ones the
 workflow's finish note counts — its fan-out items, each on the receipt its latest round ended on;
 a verify or merge receipt is not an item.
+
+Nothing a headless run (or a [`daemon`](daemon.md) firing) starts goes to the background: with no
+conversation to go on, the model's `fan_out` and `sub_agent` calls always block until their work
+ends, neither shows its `background` switch, and the `workflow` tool is not offered, whatever the
+roster lifts — see [Background workflows](workflows.md#background-workflows).
+
 `--endpoint`, `--model`, `--server`, `--bypass`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from

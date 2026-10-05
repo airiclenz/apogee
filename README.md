@@ -169,7 +169,8 @@ The full tour is in [the manual](docs/manual/README.md).
   reports one line back, so fifty items cost your agent fifty lines, not fifty
   conversations. Write one down as a recipe skill and start it with `/name`, or send it
   to the background with `/bg` and be told when it ends; the model's own `fan_out` and
-  `workflow` tools are off until you turn them on. See
+  `workflow` tools are off until you turn them on, and lifting `workflow` also lets the model
+  send one `sub_agent` delegation to the background and be woken with its report. See
   [Workflows](docs/manual/workflows.md).
 - **Parallel sub-agents**, each with a context window of its own and a token, time and
   step budget; a job can be narrowed to read-only tools, and by default a sub-agent cannot
@@ -285,7 +286,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 | [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
 | [Sessions](docs/manual/sessions.md) | Saving, resuming, forking, browsing, renaming conversations |
 | [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers and wires, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
-| [Workflows](docs/manual/workflows.md) | One brief over many items: `fan_out`, recipes, `/bg` background workflows, `/workflows` |
+| [Workflows](docs/manual/workflows.md) | One brief over many items: `fan_out`, recipes, `/bg` background workflows, background `sub_agent`, `/workflows` |
 | [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did (`run:`), commands or webhooks that advise the model on a tool result (`advise:`) or gate a tool call (`gate:`), migrating from `hooks:` |
 | [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model and terminal can do, what the config file says, and what the model is sent at turn 1 |
 | [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts; the JSON event lines |

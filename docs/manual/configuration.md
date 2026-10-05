@@ -147,15 +147,17 @@ The **built-in tools** are all on by default — all but the default-off **Conso
 (`console_open`, `console_send`, `console_read`, `console_close`;
 [what they do](#the-console-family)), `fan_out`, which asks apogee to run one brief over a
 list of items with a fresh helper per item, and `workflow`, which lets the model check on, stop or
-message the workflows it started in the background — and `tools:` (a file-only block) is how you change that:
+message the workflows it started in the background with `fan_out` or `sub_agent` — and `tools:` (a file-only block) is how you change that:
 `disabled:` takes a tool off the menu — the model is never shown it, and a call naming it is
 refused as a tool that does not exist — while `enabled:` puts one back on, for a tool this build
 leaves off by default. The Console family, `fan_out` and `workflow` are what that second list is for
-today: they are in the binary and offered to nobody until you name them. Lifting `workflow` beside
-`fan_out` also gives `fan_out` its `background` switch, which starts a workflow in the background and
-wakes the model when it ends — in the TUI only: a `headless` or `daemon` run has no conversation to
-go on while a workflow runs, so there `fan_out` always blocks and `workflow` is not offered, whatever
-the list says.
+today: they are in the binary and offered to nobody until you name them. Lifting `workflow` also
+gives a `background` switch to `fan_out` (when it is lifted too) and to `sub_agent`: the switch
+starts a workflow in the background — for `sub_agent`, that one delegation as a workflow of one item
+whose finish note carries its report ([Workflows](workflows.md#a-background-sub_agent)) — and wakes
+the model when it ends. That is in the TUI only: a `headless` or `daemon` run has no conversation to
+go on while a workflow runs, so there `fan_out` and `sub_agent` always block, neither shows the
+switch, and `workflow` is not offered, whatever the list says.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -948,7 +950,9 @@ to the width rather than a fixed count because the width is what one round costs
 two rounds is two rounds on any server. A server with no width has width 1 (an unkeyed
 local server, or a sub-agent's own delegations, which run one at a time), so its ceiling is
 the round count itself, and the ceiling applies at every depth. `0` switches it off, which
-is what a reply could do before this key existed.
+is what a reply could do before this key existed. A `sub_agent` call carrying `background: true`
+is never part of the group and never counts against the ceiling: it answers at once, and its report
+arrives later on its own finish note ([Workflows](workflows.md#a-background-sub_agent)).
 
 How **deep** delegation may nest is `delegate-max-depth:` (a file-only key). Your session
 is depth 0 and may hand work to a sub-agent; at the default of **1** the sub-agents it

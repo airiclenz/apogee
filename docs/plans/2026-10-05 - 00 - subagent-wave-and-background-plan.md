@@ -286,7 +286,10 @@ cmd/apogee/e2e_subagent_preempt_test.go — preemptHome; internal/stubllm/script
 - `go test -race -count=1 -run TestE2EBackgroundSubAgent ./cmd/apogee/`
 **Commit:** `feat(tui): show a background sub_agent in /workflows and its finish`
 
-## 12. Manual speaks background sub_agent
+## 12. Manual speaks background sub_agent — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): beyond the named sites, the regression-guard grep also restated workflows.md's intro "A workflow comes from one of two places" (now three) and configuration.md's `delegate-fanout-rounds:` ceiling paragraph (a background `sub_agent` call is not counted, ADR 0094 D6)
+NOTES (2026-10-05): headless.md — the new no-background paragraph also ends the recipe paragraph, so the following `--endpoint …` text now starts a paragraph of its own instead of running on from it
 
 **What:**
 **Goal:** The manual documents sub_agent's `background` switch, its gate, its finish note, and that headless and daemon run it blocking.
