@@ -73,7 +73,9 @@
 // own. landlock_linux.go is the Linux backend:
 // the ABI probe, the ruleset built from the box, the encode/decode of that box across the
 // re-exec, and ApplyLandlockAndExec, the helper mode the apogee binary re-enters as the
-// launcher. namespace_linux.go is the second Linux backend, for a kernel without landlock:
+// launcher — it locks its OS thread first, because no_new_privs and landlock_restrict_self
+// bind to the calling thread only and that thread must be the one that execs
+// (landlock_guard_test.go pins the lock). namespace_linux.go is the second Linux backend, for a kernel without landlock:
 // bwrap taken only from a fixed list of system directories (never from PATH), the bwrap flags
 // built from the box (a read-only bind of / with the writable roots bound over it), its
 // capabilities and the launch under bwrap. seatbelt.go is the host-agnostic

@@ -187,9 +187,14 @@ logic) and calls a single exported helper in `internal/platform`, e.g.
 func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error
 ```
 
-which builds the ruleset from `box` (workspace-write + `WritablePaths`; a TCP-connect restriction added
-only when the box opts into network-deny), calls `landlock_restrict_self`, then `syscall.Exec(argv[0],
-argv, os.Environ())`. Both halves use **raw `golang.org/x/sys/unix` syscalls** (`SYS_LANDLOCK_*` over the
+which first calls `runtime.LockOSThread()` (never undone), then builds the ruleset from `box`
+(workspace-write + `WritablePaths`; a TCP-connect restriction added only when the box opts into
+network-deny), sets `PR_SET_NO_NEW_PRIVS`, calls `landlock_restrict_self`, then `syscall.Exec(argv[0],
+argv, os.Environ())`. The lock comes first because `PR_SET_NO_NEW_PRIVS` and `landlock_restrict_self`
+bind to the calling OS thread only: without it the Go scheduler may move the goroutine between the
+restriction and the exec, and the exec'ing thread would be an unrestricted one.
+`internal/platform/landlock_guard_test.go` fails if the lock stops being the function's first
+statement or is ever released. Both halves use **raw `golang.org/x/sys/unix` syscalls** (`SYS_LANDLOCK_*` over the
 typed `LandlockRulesetAttr`/`LandlockPathBeneathAttr`) — no CGO, consistent with `CGO_ENABLED=0`. P3.2
 decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and records it in the commit; the
 *contract* above is the same either way.

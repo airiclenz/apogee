@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -34,8 +35,8 @@ import (
 // CGO_ENABLED=0, so "apply landlock before execve" is realised as a re-exec wrapper:
 // Confine rewrites the command to re-invoke the apogee binary itself in a hidden
 // __confined-exec helper mode that, as a separate process, calls ApplyLandlockAndExec
-// — which builds the ruleset, calls landlock_restrict_self, then syscall.Exec's the
-// real argv. Both halves use raw golang.org/x/sys/unix syscalls (SYS_LANDLOCK_* over
+// — which locks its OS thread, builds the ruleset, calls landlock_restrict_self, then
+// syscall.Exec's the real argv. Both halves use raw golang.org/x/sys/unix syscalls (SYS_LANDLOCK_* over
 // the typed attrs); x/sys exposes no high-level wrappers, so raw syscalls are the only
 // CGO-free option and the github.com/landlock-l/go-landlock helper was not needed.
 //
@@ -299,7 +300,17 @@ func (c *landlockConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 // syscall.Exec. Because landlock domains survive execve, the exec'd program runs confined;
 // because only this child ever called restrict_self, the parent stays unrestricted.
 // It returns only on failure to establish the domain or exec — on success it never returns.
+//
+// Its first act is to lock the calling goroutine to its OS thread, and it never unlocks:
+// PR_SET_NO_NEW_PRIVS and landlock_restrict_self bind to the calling thread only, so the
+// thread that restricts itself must be the thread that calls execve. Without the lock the Go
+// scheduler may move the goroutine between the restriction and the exec, and the exec'd
+// program would inherit an unrestricted thread's credentials. The lock outlives an error
+// return too: the caller exits on failure, and a goroutine that ends locked takes its
+// thread with it. TestApplyLandlockAndExecLocksItsThreadFirst fails if the lock stops being
+// the first statement.
 func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error {
+	runtime.LockOSThread()
 	if len(argv) == 0 {
 		return fmt.Errorf("apogee: confined-exec: empty argv")
 	}
@@ -314,8 +325,9 @@ func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error {
 
 // applyLandlock creates the ruleset for box, adds the path-beneath allow rules for each
 // writable root (and a TCP-connect handler when the box opts into network-deny), then
-// calls landlock_restrict_self with NO_NEW_PRIVS set. After it returns nil the calling
-// process is confined for the remainder of its life and across any subsequent execve.
+// calls landlock_restrict_self with NO_NEW_PRIVS set. Both bind to the calling OS thread only:
+// after it returns nil that thread is confined for the remainder of its life and across an
+// execve it makes, which is why ApplyLandlockAndExec locks the thread before calling it.
 func applyLandlock(box domain.ConfinementBox) error {
 	abi, errno := probeLandlockABI()
 	if abi < landlockABIFSWrite {

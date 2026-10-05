@@ -178,7 +178,10 @@ NOTES (2026-10-05): splitParts already refused a root that is not a directory ("
 
 **Commit:** `fix(workflow): refuse non-regular sources and escaping scratch reads`
 
-## 6. Pin the OS thread before landlock restriction and exec
+## 6. Pin the OS thread before landlock restriction and exec — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): added TestApplyLandlockAndExecLocksItsThreadFirstBites (fixture table: late lock, no lock, deferred/closure unlock, aliased import, method of the same name, missing body) beside the named guard so the detector is proven, not assumed; the guard also requires a plain `import "runtime"` and no runtime.UnlockOSThread anywhere in the function.
+NOTES (2026-10-05): landlock_linux.go's header comment and applyLandlock doc comment now say the restriction is per-thread and name the lock step (same listed file; the old "calling process is confined" wording was what the fix corrects).
 
 **What:** Fixes the audit finding "Landlock helper does not pin its OS thread": `PR_SET_NO_NEW_PRIVS` and `landlock_restrict_self` bind to the calling thread only, then `syscall.Exec`.
 
