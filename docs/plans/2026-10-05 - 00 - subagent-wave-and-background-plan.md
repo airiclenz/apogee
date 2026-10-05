@@ -239,7 +239,13 @@ internal/agent/launch.go — buildLaunch; internal/agent/background.go — start
 - `go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(agent): sub_agent background runs as a one-item workflow`
 
-## 10. The finish note carries the background child's report
+## 10. The finish note carries the background child's report — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): finishNote learns the origin from `workflow.OriginOf(run.plan)`. Item 8's unexported `originOf` (internal/workflow/store.go) was exported as `OriginOf` so that the engine can read it. Its one call site and its doc line follow.
+NOTES (2026-10-05): the new store helper is `workflow.ItemTranscriptPath(dir, key) (path, found, err)`. The note names a transcript only when `found`. A stat that fails for any other reason also leaves the path unnamed, as that line's comment says.
+NOTES (2026-10-05): the note re-applies `capDelegateResult` to the report it reads from the item's output.md. The Runner already wrote that report capped, so the second cap is a no-op unless the body notes push it past the cap. internal/agent/workflowcall.go needed no change: the item's literal grep finds no one-line finish-note sentence there.
+NOTES (2026-10-05): the plan's CONTEXT.md:880 sentence now sits at CONTEXT.md:904. It is restated together with the docs/manual/workflows.md wake paragraph. A fuller manual description of the background sub_agent note is left to item 12.
+NOTES (2026-10-05): consequential edit — internal/agent/doc.go: made necessary by finishNote no longer always being one line (the package map called it "one-line finish note").
 
 **What:**
 Recast at the regression check (2026-10-05).

@@ -396,8 +396,8 @@ puts it back to wait until your next exchange ends. You need not wait for either
 workflow's [`/workflows`](#the-workflows-view--workflows) detail opens it at once.
 
 **The wake.** When a background workflow ends — finished, stopped or failed — apogee writes a
-one-line finish note into the transcript: its name, how it ended, its items counted by status (and
-the verify verdicts) and the path of its report — ending on the
+finish note into the transcript. A fan_out or recipe workflow's is one line: its name, how it
+ended, its items counted by status (and the verify verdicts) and the path of its report — ending on the
 [seat-fallback note](configuration.md#letting-the-model-pick-the-seat) when its helpers asked for
 the sub-agents server and ran on the session server instead. Then:
 

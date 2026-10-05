@@ -96,7 +96,7 @@ type RunStatus struct {
 	Recipe string `json:"recipe,omitempty"`
 	// Origin is what launched the workflow when that is not a recipe or a fan_out: OriginSubAgent
 	// for a background sub_agent's one-item workflow (ADR 0094), "" otherwise and in every
-	// status.json written before it existed. Create stamps it from the plan (originOf).
+	// status.json written before it existed. Create stamps it from the plan (OriginOf).
 	Origin   string        `json:"origin,omitempty"`
 	PlanHash string        `json:"plan_hash"`
 	Phase    Phase         `json:"phase"`
@@ -180,7 +180,7 @@ func (s *Store) Create(plan Plan, planHash string, now time.Time) (RunStatus, er
 	}
 
 	status := RunStatus{
-		ID: id, Name: plan.Name, Origin: originOf(plan), PlanHash: planHash, Phase: PhasePending,
+		ID: id, Name: plan.Name, Origin: OriginOf(plan), PlanHash: planHash, Phase: PhasePending,
 		Created: now, Updated: now, Stages: make([]StageStatus, 0, len(plan.Stages)),
 	}
 	for _, stage := range plan.Stages {
@@ -199,9 +199,10 @@ func (s *Store) Create(plan Plan, planHash string, now time.Time) (RunStatus, er
 // background sub_agent's one-item workflow (ADR 0094).
 const OriginSubAgent = "sub_agent"
 
-// originOf is the Origin a workflow folder of plan is created with: OriginSubAgent when one of its
-// stages runs the sub_agent path, else none.
-func originOf(plan Plan) string {
+// OriginOf is the Origin a workflow folder of plan is created with: OriginSubAgent when one of its
+// stages runs the sub_agent path, else none. The engine reads it too, to word a background
+// workflow's finish note by what launched it.
+func OriginOf(plan Plan) string {
 	for _, stage := range plan.Stages {
 		if stage.RunsSubAgent() {
 			return OriginSubAgent
@@ -431,6 +432,25 @@ func ReadItemTranscript(dir, key string) (messages []domain.Message, found bool,
 		messages = append(messages, message)
 	}
 	return messages, true, nil
+}
+
+// ItemTranscriptPath is the path of the transcript.jsonl WriteTranscript saved for the item key of
+// the workflow folder dir (an Info's or a Result's Dir); found is false when the item saved none —
+// it has not finished, its child faulted before it started, or its stage runs no child — and the
+// path is then empty, so a caller names only a transcript that is there. ErrInvalidKey refuses a key
+// that is not an item key, so no key can turn into a path outside the folder.
+func ItemTranscriptPath(dir, key string) (path string, found bool, err error) {
+	if !isValidKey(key) {
+		return "", false, fmt.Errorf("%w: %q", ErrInvalidKey, key)
+	}
+	path = filepath.Join(dir, itemsDirName, key, transcriptName)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("workflow: stat transcript of item %q: %w", key, err)
+	}
+	return path, true, nil
 }
 
 // ItemOutputPath is where the item key, labelled label, of the stage named stage in the workflow

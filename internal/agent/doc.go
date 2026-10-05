@@ -105,8 +105,9 @@
 // ClearContext or RestoreSession unless KeepWorkflows kept them across that boundary — a finished
 // one's blocked and faulted items run again by RerunFailed, and carried
 // across a session snapshot as identifiers that ResumeWorkflows starts again; it holds each ended
-// one's one-line finish note until a Driver's drain, the Wake that opens an Exchange on it, or the
-// next opening message takes it (ADR 0089 D3), and a note still held rides the snapshot too.
+// one's finish note — one line, or a background sub_agent's lead line and report — until a
+// Driver's drain, the Wake that opens an Exchange on it, or the next opening message takes it (ADR
+// 0089 D3), and a note still held rides the snapshot too.
 // approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.

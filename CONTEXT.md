@@ -901,8 +901,8 @@ never started gets a not-run result — and a cancelled delegation pool keeps it
 and stops each running one as `^x` would (**Stop (a delegation)**); only a Turn cancelled before
 its reply finished streaming is dropped ([ADR 0088](docs/adr/0088-cancel-settles-and-never-rewinds-finished-work.md) D1–D2, superseding
 [ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md)
-§5(b)). An Exchange usually opens on a user message, but may also open on the one-line finish note
-of a **Background workflow** that ended while the agent was idle — the **wake** ([ADR 0089](docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md) D3).
+§5(b)). An Exchange usually opens on a user message, but may also open on the finish note
+of a **Background workflow** (one line, or a background `sub_agent`'s lead line and report) that ended while the agent was idle — the **wake** ([ADR 0089](docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md) D3).
 
 **Step**:
 The bench/embedder primitive that advances the loop **one Turn** and returns at a

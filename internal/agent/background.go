@@ -50,14 +50,17 @@ package agent
 // directory and recipe catalog, which a Resume has not re-supplied yet when restoreState runs).
 //
 // Finish notes and the wake (ADR 0089 D3). A background workflow's end — finished, stopped or
-// failed — leaves one line for the parent (finishNote), which the manager HOLDS before the
+// failed — leaves a note for the parent (finishNote): one line for a fan_out or recipe workflow, a
+// lead line and the child's report under it for a background sub_agent's (ADR 0094 D3). The
+// manager HOLDS it before the
 // WorkflowPhaseEvent that ends the workflow is emitted, so a Driver reacting to that event always
 // finds it. The engine never delivers it on its own; the held note is consumed by whichever comes
 // first: the Driver's between-Steps drain while an Exchange runs (Agent.TakeWorkflowNotes, committed
 // through Interject), the wake that opens an Exchange on it while the agent is idle (Agent.Wake —
 // refused under `workflow-wake: off`), or the next Exchange a message opens, whose opening message
 // carries it after the human's text (step). Every form reads the same: a fixed plain header, then
-// one line per note (renderWorkflowNotes) — recorded text, so a snapshot keeps it. A note held and
+// the notes, one per line — a blank line apart once one spans lines (renderWorkflowNotes) —
+// recorded text, so a snapshot keeps it. A note held and
 // not yet delivered rides the snapshot as the additive `workflow_notes` key, so a session saved
 // with one — the record saved at quit, before Close stops the set — hands it to the resumed
 // conversation: a restore loads the notes beside the `workflows` set and ResumeWorkflows adopts
@@ -123,6 +126,18 @@ const (
 	finishPhaseFinished   = "finished"
 	finishPhaseStopped    = "stopped"
 	workflowNoteSeparator = "\n\n"
+	workflowNoteLineBreak = "\n"
+)
+
+// The words a background sub_agent's finish note (subAgentFinishNote, ADR 0094 D3) is built from.
+// Its lead is the restore discriminator (checkRestoredWorkflowNotes): no fan_out or recipe note,
+// which opens on finishLeadFormat or finishFailedFormat, starts with it.
+const (
+	subAgentNoteLead            = "sub_agent "
+	subAgentLeadFormat          = subAgentNoteLead + "%s %s"
+	subAgentFailedFormat        = subAgentNoteLead + "%s failed — %s"
+	subAgentTranscriptPrefix    = "transcript: "
+	subAgentReportUnreadableFmt = "its report could not be read: %v"
 )
 
 // errDelegateBackground refuses a background launch on a delegate: background workflows belong to
@@ -554,7 +569,7 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 // held before the end is reported, so a Driver that wakes on that event finds it.
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	result, err := run.runner.Run(ctx, run.plan)
-	a.background.hold(finishNote(run.plan.Name, result, err, seatFellBack(run.runner)))
+	a.background.hold(finishNote(workflow.OriginOf(run.plan), run.plan.Name, result, err, seatFellBack(run.runner)))
 	run.observer.end(result, err)
 	a.endBackground(run)
 }
@@ -834,9 +849,11 @@ func checkRestoredWorkflows(entries []workflowEntryJSON) error {
 
 // checkRestoredWorkflowNotes checks the held finish notes a snapshot carries (the `workflow_notes`
 // key). A note reaches the model as recorded text in an Exchange's opening message, so it is held to
-// the rules of the text a restore submits: one line each — a finish note is always one (oneLine) —
-// opening with no fence apogee never commits, and all of them together within the byte bound a
-// restored message is held to. Anything else refuses the whole payload.
+// the rules of the text a restore submits: one line each, as a fan_out or recipe finish note always
+// is (oneLine) — save a background sub_agent's, told apart by its lead (subAgentNoteLead), whose
+// report spans lines as a committed delegation result does; no line opening with a fence apogee
+// never commits; and all of them together within the byte bound a restored message is held to.
+// Anything else refuses the whole payload.
 func checkRestoredWorkflowNotes(notes []string) error {
 	total := 0
 	for i, note := range notes {
@@ -846,7 +863,7 @@ func checkRestoredWorkflowNotes(notes []string) error {
 		}
 		total += len(note)
 		switch {
-		case strings.ContainsAny(note, "\r\n"):
+		case !strings.HasPrefix(note, subAgentNoteLead) && strings.ContainsAny(note, "\r\n"):
 			return refuse("spans more than one line")
 		case total > maxRestoredMessageBytes:
 			return refuse("takes the notes past the %d-byte limit", maxRestoredMessageBytes)
@@ -1114,24 +1131,25 @@ func (a *Agent) Wake(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// finishNote is the one line a background workflow's end leaves for the parent (ADR 0089 D3): its
-// name and how it ended, its items counted by status across its fan-outs (with the unfinished ones
-// and the verify verdicts when there are any), and where to read more — the report a merge wrote,
-// else the full item listing. A run that could not proceed says so with its cause instead. When any
-// item child asked for the Sub-agent server and ran on the session one (fellBack, seatFellBack), a
-// finished or stopped run's note ends on SeatFallbackNote, once — the answer-level line a blocking
-// workflow's call gets from workflowAnswer, since this note is what the model reads of a background
-// run (ADR 0069 decision 9). It joins as one more part, so the note stays one line.
-func finishNote(name string, result workflow.Result, runErr error, fellBack bool) string {
+// finishNote is the note a background workflow's end leaves for the parent, worded by origin, what
+// launched it (workflow.OriginOf): a background sub_agent's is subAgentFinishNote, every other one
+// line (ADR 0089 D3) — its name and how it ended, its items counted by status across its fan-outs
+// (with the unfinished ones and the verify verdicts when there are any), and where to read more —
+// the report a merge wrote, else the full item listing. A run that could not proceed says so with
+// its cause instead. When any item child asked for the Sub-agent server and ran on the session one
+// (fellBack, seatFellBack), a finished or stopped run's note ends on SeatFallbackNote, once — the
+// answer-level line a blocking workflow's call gets from workflowAnswer, since this note is what the
+// model reads of a background run (ADR 0069 decision 9). It joins as one more part, so the note
+// stays one line.
+func finishNote(origin, name string, result workflow.Result, runErr error, fellBack bool) string {
+	if origin == workflow.OriginSubAgent {
+		return subAgentFinishNote(name, result, runErr, fellBack)
+	}
 	name = oneLine(name)
 	if runErr != nil {
 		return fmt.Sprintf(finishFailedFormat, name, oneLine(runErr.Error()))
 	}
-	phase := finishPhaseFinished
-	if result.Stopped() {
-		phase = finishPhaseStopped
-	}
-	parts := []string{fmt.Sprintf(finishLeadFormat, name, phase), workflow.TallyOf(result).Line()}
+	parts := []string{fmt.Sprintf(finishLeadFormat, name, finishPhase(result)), workflow.TallyOf(result).Line()}
 	switch {
 	case result.Report != "":
 		parts = append(parts, finishReportPrefix+result.Report)
@@ -1144,17 +1162,94 @@ func finishNote(name string, result workflow.Result, runErr error, fellBack bool
 	return strings.Join(parts, finishSeparator)
 }
 
-// oneLine folds every run of whitespace in text, line breaks included, into one space, so a note
-// stays the one line ADR 0089 D3 promises whatever a name or an error spells.
+// subAgentFinishNote is a background sub_agent's finish note (ADR 0094 D3): one lead line with no
+// item counts — `sub_agent <name> <finished|stopped>`, plus `— transcript: <path>` only when the
+// child's transcript was written (a child that faulted before it started wrote none) — and under it
+// the child's report as its item's output file keeps it, held to the cap a blocking delegation
+// result is (capDelegateResult). A child that asked for the Sub-agent server and ran on the session
+// one carries SeatFallbackNote once: its report already ends on it when the delegation wrote it, and
+// the note adds it only when it did not. A run that could not proceed is the one line naming its
+// cause, as a fan_out's is.
+func subAgentFinishNote(name string, result workflow.Result, runErr error, fellBack bool) string {
+	name = oneLine(name)
+	if runErr != nil {
+		return fmt.Sprintf(subAgentFailedFormat, name, oneLine(runErr.Error()))
+	}
+	lead := fmt.Sprintf(subAgentLeadFormat, name, finishPhase(result))
+	item, ok := soleItem(result)
+	if !ok {
+		return lead
+	}
+	// A transcript the folder cannot confirm (a stat that fails) is not named, as a missing one is.
+	if path, found, err := workflow.ItemTranscriptPath(result.Dir, item.Key); err == nil && found {
+		lead += finishSeparator + subAgentTranscriptPrefix + path
+	}
+	lines := []string{lead}
+	report := subAgentReport(item.Output)
+	if report != "" {
+		lines = append(lines, report)
+	}
+	if fellBack && !strings.Contains(report, SeatFallbackNote) {
+		lines = append(lines, SeatFallbackNote)
+	}
+	return strings.Join(lines, workflowNoteLineBreak)
+}
+
+// finishPhase is the word a finish note says a run ended with: stopped when a cancel ended it before
+// every item finished, else finished.
+func finishPhase(result workflow.Result) string {
+	if result.Stopped() {
+		return finishPhaseStopped
+	}
+	return finishPhaseFinished
+}
+
+// soleItem is the first item of result's first stage that has one — a background sub_agent's one
+// item; ok is false when no stage holds an item.
+func soleItem(result workflow.Result) (workflow.ItemResult, bool) {
+	for _, stage := range result.Stages {
+		if len(stage.Items) > 0 {
+			return stage.Items[0], true
+		}
+	}
+	return workflow.ItemResult{}, false
+}
+
+// subAgentReport is the report a sub_agent-path item's output file keeps (the Runner writes the
+// child's delegation result there), trailing line breaks trimmed and held to delegateResultMaxBytes;
+// empty when the item wrote none — it was stopped, or never ran — and a line saying why when the
+// file is there but cannot be read.
+func subAgentReport(output string) string {
+	if output == "" {
+		return ""
+	}
+	data, err := os.ReadFile(output)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		return fmt.Sprintf(subAgentReportUnreadableFmt, err)
+	}
+	return capDelegateResult(strings.TrimRight(string(data), "\r\n"))
+}
+
+// oneLine folds every run of whitespace in text, line breaks included, into one space, so a fan_out
+// or recipe note stays the one line ADR 0089 D3 promises, and a sub_agent note's lead its one line,
+// whatever a name or an error spells.
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
 
-// renderWorkflowNotes is the recorded text notes reach the model as — the fixed header, then one
-// line per note — whether it opens a wake, is interjected into a running Exchange, or follows the
-// human's own message.
+// renderWorkflowNotes is the recorded text notes reach the model as — the fixed header, then the
+// notes one per line, or a blank line apart (workflowNoteSeparator) once any of them spans lines,
+// so a sub_agent's report never runs into the note after it — whether it opens a wake, is
+// interjected into a running Exchange, or follows the human's own message.
 func renderWorkflowNotes(notes []string) string {
-	return workflowNoteHeader + "\n" + strings.Join(notes, "\n")
+	separator := workflowNoteLineBreak
+	if slices.ContainsFunc(notes, func(note string) bool { return strings.Contains(note, workflowNoteLineBreak) }) {
+		separator = workflowNoteSeparator
+	}
+	return workflowNoteHeader + workflowNoteLineBreak + strings.Join(notes, separator)
 }
 
 // hold keeps note until the Driver's drain, a wake or the next opening message takes it.
