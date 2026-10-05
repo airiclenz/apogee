@@ -1093,6 +1093,9 @@ func TestWorkflowCall_EmitsItsPhases(t *testing.T) {
 		if phase.Call != "fo1" {
 			t.Errorf("phase %s names call %q, want the fan_out call fo1 its item children run under", phase.Phase, phase.Call)
 		}
+		if phase.Origin != "" {
+			t.Errorf("phase %s carries origin %q, want none — a fan_out is no sub_agent run", phase.Phase, phase.Origin)
+		}
 		if phase.Phase == domain.WorkflowItemFinished {
 			if phase.Stage != fanOutStageName || phase.Resumed || phase.Receipt.Status != "ok" || phase.Receipt.Fields["count"] != "1" {
 				t.Errorf("item_finished = %+v, want an ok items receipt with count=1, not resumed", phase)
@@ -1877,6 +1880,39 @@ func TestWorkflowCall_BackgroundSubAgentAnswersAtOnceAndRunsBesideTheConversatio
 	}
 	if phases := itemPhases(workflowInfo(t, a, id)); phases["surveyor"] != workflow.PhaseDone {
 		t.Errorf("item phases = %v, want surveyor done", phases)
+	}
+}
+
+// TestWorkflowCall_ABackgroundSubAgentsPhasesCarryItsOrigin pins that every phase event of a
+// background sub_agent's one-item workflow names what launched it: workflow.OriginSubAgent, the
+// origin its folder's status records.
+func TestWorkflowCall_ABackgroundSubAgentsPhasesCarryItsOrigin(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundSubAgentConfig(t, sink)
+	up := (&workflowResponder{}).
+		route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, backgroundSubAgentArgsJSON(nil))).
+		route("please delegate", nil, contentScript("started it")).
+		route(subAgentTask, nil, contentScript("The repo holds three modules."))
+	a := newBackgroundParent(t, cfg, up)
+
+	runSubmitted(t, context.Background(), a, "please delegate")
+	a.background.waitAll()
+
+	id := soleWorkflowID(t, a)
+	phases := workflowPhaseEvents(lockedEvents(sink))
+	if len(phases) == 0 {
+		t.Fatal("no workflow phase event was emitted, want the background sub_agent's phases")
+	}
+	for _, phase := range phases {
+		if phase.Workflow != id || phase.Origin != workflow.OriginSubAgent {
+			t.Errorf("phase %s of workflow %q carries origin %q, want %q on workflow %q",
+				phase.Phase, phase.Workflow, phase.Origin, workflow.OriginSubAgent, id)
+		}
+	}
+	if ends := workflowEnds(sink, id); !slices.Equal(ends, []domain.WorkflowPhase{domain.WorkflowFinished}) {
+		t.Errorf("workflow ends = %v, want one finished", ends)
 	}
 }
 

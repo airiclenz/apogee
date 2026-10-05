@@ -736,6 +736,9 @@ type workflowObserver struct {
 	// (domain.WorkflowPhaseEvent.Call); every caller of observeWorkflow sets it before the run
 	// starts.
 	call string
+	// origin is what launched the Workflow when that is not a Recipe or a fan_out
+	// (domain.WorkflowPhaseEvent.Origin): observeWorkflow sets it from the plan (workflow.OriginOf).
+	origin string
 	// resume is the resume command the started phase carries (domain.WorkflowPhaseEvent.Resume):
 	// wireLaunch sets it from a blocking launch's resumeCommand before the run starts; "" otherwise.
 	resume string
@@ -767,7 +770,7 @@ type itemRuns struct {
 // are what the events carry.
 func (a *Agent) observeWorkflow(runner *workflow.Runner, turn int, plan workflow.Plan) *workflowObserver {
 	observer := &workflowObserver{
-		agent: a, turn: turn, name: plan.Name,
+		agent: a, turn: turn, name: plan.Name, origin: workflow.OriginOf(plan),
 		stages: stageNames(plan), rounds: repeatedRounds(plan), runs: map[itemPlace]itemRuns{},
 	}
 	runner.Observer = observer
@@ -919,11 +922,12 @@ func (o *workflowObserver) startLocked(id string) {
 	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Stages: slices.Clone(o.stages), Resume: o.resume})
 }
 
-// emitLocked stamps event with this Agent's identity, the Workflow's id and name, and emits it.
-// The caller holds mu.
+// emitLocked stamps event with this Agent's identity, the Workflow's id, name and origin, and
+// emits it. The caller holds mu.
 func (o *workflowObserver) emitLocked(event domain.WorkflowPhaseEvent) {
 	event.EventBase = o.agent.base(o.turn)
 	event.Workflow, event.Name, event.Background, event.Call = o.id, o.name, o.background, o.call
+	event.Origin = o.origin
 	o.agent.cfg.Events.Emit(event)
 }
 

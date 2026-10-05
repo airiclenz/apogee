@@ -240,8 +240,9 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 // under the same names. A member added to an Event variant is added here only when the line's
 // documented shape grows with it: domain.WorkflowPhaseEvent's ItemName, Stages, Items, Round,
 // Rounds, Run and Attempt describe the Workflow's shape for a Driver that draws it, Resume is the
-// resume command such a Driver shows its user, and Tally is the end phase's item tally, read in
-// process only; none is on the workflow_phase line (workflowPhaseData).
+// resume command such a Driver shows its user, Tally is the end phase's item tally and Origin
+// names a background sub_agent's run, read in process only; none is on the workflow_phase line
+// (workflowPhaseData).
 
 // tokenData is the token line: one streamed chunk of assistant text.
 type tokenData struct {

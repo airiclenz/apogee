@@ -851,6 +851,12 @@ func (t WorkflowTally) Total() int {
 // It is what a Driver hangs the item runs off: the block that started the Workflow, whose call
 // the children name as their spawning call.
 //
+// Origin is what launched the Workflow when that is not a Recipe or a fan_out, as
+// workflow.RunStatus.Origin records it: workflow.OriginSubAgent ("sub_agent") on every phase of a
+// background sub_agent's one-item workflow (ADR 0094), "" on a fan_out's and a Recipe's. It is a
+// launcher's name, unrelated to the Origin type that classes a Reaction's source. The NDJSON
+// encoding does not carry it.
+//
 // Resume is, on the WorkflowStarted of a Recipe launch, the text telling the user how to resume
 // the Workflow should it stop — "re-run `/<id> <text>` to resume" for a typed launch, "run `/<id>`
 // again with the same inputs to resume" for one StartRecipe made — and "" on every other
@@ -877,6 +883,7 @@ type WorkflowPhaseEvent struct {
 	Detail     string
 	Background bool
 	Call       string
+	Origin     string
 	Stages     []string
 	Items      int
 	Round      int

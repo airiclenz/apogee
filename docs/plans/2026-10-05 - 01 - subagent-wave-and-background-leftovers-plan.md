@@ -145,7 +145,9 @@ internal/tui/model.go — Model.escStopHint; internal/tui/model_test.go — fanO
 **Commit:** `fix(tui): show the wave hints for a serial sub-agent group`
 **Closes:** apogee-serial-wave-hint-hidden
 
-## 6. Workflow phase events carry the run's origin
+## 6. Workflow phase events carry the run's origin — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): no CHANGELOG entry — the field is read in process only and changes nothing a user sees until item 7's finish line reads it; the NDJSON workflow_phase line is unchanged.
 
 **What:**
 **Goal:** Every `domain.WorkflowPhaseEvent` of a background sub_agent run carries `Origin == "sub_agent"` (`workflow.OriginSubAgent`); fan_out and recipe runs carry `""`; the NDJSON line for the event is unchanged.
