@@ -911,12 +911,34 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 // background workflow's item on the sub_agent path runs off a launch-time snapshot (backgroundHost)
 // whose own registry and retained set nobody reads, so its spawner hands in the top-level Agent's —
 // pointers, never copies of their mutexes — and no ledger: the ledger is the open Exchange's
-// account of its own delegations, and the workflow folder is the background child's record.
+// account of its own delegations, and the workflow folder is the background child's record. Its
+// run rides no Turn of the Exchange open on the top-level Agent, so its site also retains and
+// takes past that Exchange (isPastExchange): an abort of it keeps what the background child left.
 type delegateSite struct {
-	turn     func() int
-	children *childRegistry
-	retained *retainedDelegates
-	ledger   *delegationLedger // nil books no row
+	turn           func() int
+	children       *childRegistry
+	retained       *retainedDelegates
+	ledger         *delegationLedger // nil books no row
+	isPastExchange bool              // retain and take write through to the Exchange-start copy (retainPastExchange)
+}
+
+// retain keeps d in the site's retained set — written through past the open Exchange for a
+// background child (isPastExchange).
+func (s delegateSite) retain(d retainedDelegate) {
+	if s.isPastExchange {
+		s.retained.retainPastExchange(d)
+		return
+	}
+	s.retained.retain(d)
+}
+
+// take takes the entry under name from the site's retained set — written through past the open
+// Exchange for a background child (isPastExchange).
+func (s delegateSite) take(name string) (retainedDelegate, bool) {
+	if s.isPastExchange {
+		return s.retained.takePastExchange(name)
+	}
+	return s.retained.take(name)
 }
 
 // ownDelegateSite is the site of a delegation this Agent's own sub_agent call spawns, stamped with
@@ -1047,12 +1069,12 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	giveBack := func() {}
 	if args.Continue != "" {
 		var ok bool
-		prior, ok = site.retained.take(args.Continue)
+		prior, ok = site.take(args.Continue)
 		if !ok {
 			return errorToolResult(call.ID, unknownContinueResult(args.Continue, site.retained.names())), dispatchDone
 		}
 		continuing = true
-		giveBack = func() { site.retained.retain(prior) }
+		giveBack = func() { site.retain(prior) }
 		task = continuationTask(prior, args.Task)
 		if delegationName(args.Name) == "" {
 			args.Name, inheritedName = prior.name, prior.name
@@ -1267,7 +1289,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		if continuing {
 			round.instructions = args.Task
 		}
-		site.retained.retain(entry.withRound(round))
+		site.retain(entry.withRound(round))
 	}
 	return result, outcome
 }

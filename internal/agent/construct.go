@@ -199,7 +199,9 @@ func (a *Agent) turnRolledBack() {
 
 // exchangeAborted is the Agent's half of the exchangeObserver contract for an Exchange's ABORT
 // (turnLifecycle.abort): the retained delegations are put back as the Exchange opened
-// (retainedDelegates.rollBackExchange, from the copy step's markExchange took at the opening), and
+// (retainedDelegates.rollBackExchange, from the copy step's markExchange took at the opening) —
+// all but what a background sub_agent child retained or took meanwhile, which that copy was
+// written through with (retainPastExchange / takePastExchange) and so stands — and
 // the workflow finish notes delivered into it — by its opening message, the Wake that queued it, or
 // a TakeWorkflowNotes interjection — are held again (backgroundManager.restoreDelivered), since
 // the abort dropped every message that carried them. A note held again may let the Driver's wake

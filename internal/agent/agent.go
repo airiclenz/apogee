@@ -433,7 +433,8 @@ type Agent struct {
 	// runSubAgent after a capped, faulted, stopped, continued or named completed child's result is
 	// read; it survives later Exchanges and rides the session snapshot, is emptied by /clear
 	// (ClearContext), replaced by a restore with the restored snapshot's set (restoreState), cut
-	// by a fork (CutSession), and put back as its Exchange opened by an abort (exchangeAborted). A
+	// by a fork (CutSession), and put back as its Exchange opened by an abort (exchangeAborted) —
+	// keeping what a background sub_agent child retained or took meanwhile (retainPastExchange). A
 	// cancelled Turn leaves it standing: the cancel settles the delegations, it never drops them.
 	retained retainedDelegates
 	// background is the set of Workflows THIS Agent runs outside any Turn (background.go, ADR

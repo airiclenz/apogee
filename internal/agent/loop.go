@@ -107,7 +107,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// stays continuable for the whole session (ADR 0086 D1; ClearContext drops them).
 		a.delegations.clear()
 		// Mark the retained set as this Exchange opens: an aborted Exchange restores it
-		// (Agent.exchangeAborted), since every Turn that changed it is dropped with the abort.
+		// (Agent.exchangeAborted), since every Turn that changed it is dropped with the abort — all
+		// but what a background sub_agent child, which rides no Turn of it, writes through to the
+		// mark meanwhile (retainedDelegates.retainPastExchange).
 		a.retained.markExchange()
 		// The message itself — skill blocks, @file blocks, then the text — is composed by the
 		// helper an interjection shares (composeUserMessage), so both doors read identically.

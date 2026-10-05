@@ -1382,3 +1382,68 @@ func TestBackground_ANamedSubAgentChildIsRetainedOnTheRootAndContinued(t *testin
 		t.Errorf("continuation request = %+v, want it seeded with the background child's report", requests[1].Messages)
 	}
 }
+
+// TestBackground_ARetainedSubAgentChildSurvivesAnAbortedExchange pins the background write-through
+// (apogee-background-child-exchange-rollback): a named child a background sub_agent item retains
+// on the root while the root's Exchange is open is still retained once that Exchange aborts — its
+// run rode none of the Exchange's Turns — and a later sub_agent call still continues it by name.
+func TestBackground_ARetainedSubAgentChildSurvivesAnAbortedExchange(t *testing.T) {
+	t.Parallel()
+
+	upstream := scriptedResponder(t, contentTurn("The survey found three modules."), contentTurn("Counted: forty tests."))
+	a := newBackgroundParent(t, workflowConfig(t, &recordingSink{}), upstream)
+	built, err := a.buildLaunch(workflowLaunch{
+		plan: subAgentWorkflowPlan(`{"task":"survey the repo","name":"surveyor"}`),
+		mode: launchModeBackground,
+	})
+	if err != nil {
+		t.Fatalf("buildLaunch: %v", err)
+	}
+	a.retained.markExchange()
+	if _, err := built.runner.Run(context.Background(), built.plan); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	a.exchangeAborted()
+
+	if names := a.retained.names(); !slices.Equal(names, []string{"surveyor"}) {
+		t.Fatalf("root retained after the abort = %v, want the background child kept", names)
+	}
+	continued, _ := a.runSubAgent(context.Background(), domain.ToolCall{
+		ID: "c2", Tool: tools.SubAgentToolName,
+		Arguments: json.RawMessage(`{"continue":"surveyor","task":"now count the tests"}`),
+	}, a.runIDs.mint())
+	if continued.IsError {
+		t.Errorf("continue result = %q, want the continued child's report", continued.Content)
+	}
+}
+
+// TestBackground_ABlockingWorkflowChildIsRolledBackWithAnAbortedExchange pins the other side of
+// the write-through: a blocking workflow's sub_agent item rides the open Exchange's Turn, so the
+// child it retained is undone with that Exchange's abort.
+func TestBackground_ABlockingWorkflowChildIsRolledBackWithAnAbortedExchange(t *testing.T) {
+	t.Parallel()
+
+	upstream := scriptedResponder(t, contentTurn("The survey found three modules."))
+	a := newBackgroundParent(t, workflowConfig(t, &recordingSink{}), upstream)
+	built, err := a.buildLaunch(workflowLaunch{
+		plan: subAgentWorkflowPlan(`{"task":"survey the repo","name":"surveyor"}`),
+		mode: launchModeBlocking,
+	})
+	if err != nil {
+		t.Fatalf("buildLaunch: %v", err)
+	}
+	a.retained.markExchange()
+	if _, err := built.runner.Run(context.Background(), built.plan); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if names := a.retained.names(); !slices.Equal(names, []string{"surveyor"}) {
+		t.Fatalf("root retained before the abort = %v, want the blocking child", names)
+	}
+
+	a.exchangeAborted()
+
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("root retained after the abort = %v, want the blocking child rolled back", names)
+	}
+}

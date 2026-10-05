@@ -627,6 +627,36 @@ func TestRetainedDelegates_KeepsTheLatestUnderEachName(t *testing.T) {
 	}
 }
 
+// TestRetainedDelegates_PastExchangeWritesSurviveARollBack pins the background write-through
+// (apogee-background-child-exchange-rollback): a rollback drops what was retained the ordinary way
+// since the Exchange opened, but keeps what retainPastExchange wrote and never brings back what
+// takePastExchange consumed — and a set never marked still keeps a write-through entry.
+func TestRetainedDelegates_PastExchangeWritesSurviveARollBack(t *testing.T) {
+	entry := func(name string) retainedDelegate {
+		return retainedDelegate{name: name, rounds: []delegateRound{{spawnCallID: name}}}
+	}
+	var marked retainedDelegates
+	marked.retain(entry("Consumed"))
+	marked.markExchange()
+	marked.retain(entry("InTurn"))
+	marked.retainPastExchange(entry("Background"))
+	if _, ok := marked.takePastExchange("Consumed"); !ok {
+		t.Fatal("takePastExchange(Consumed) found nothing")
+	}
+	var unmarked retainedDelegates
+	unmarked.retainPastExchange(entry("Background"))
+
+	marked.rollBackExchange()
+	unmarked.rollBackExchange()
+
+	if names := marked.names(); !slices.Equal(names, []string{"Background"}) {
+		t.Errorf("marked names after rollback = %v, want only the background entry", names)
+	}
+	if names := unmarked.names(); !slices.Equal(names, []string{"Background"}) {
+		t.Errorf("unmarked names after rollback = %v, want the background entry", names)
+	}
+}
+
 // TestRetainedDelegate_WithRoundNeverAliasesTheEntryItExtends pins withRound's copy: appending a
 // round to a taken entry leaves the entry it came from exactly as it was.
 func TestRetainedDelegate_WithRoundNeverAliasesTheEntryItExtends(t *testing.T) {

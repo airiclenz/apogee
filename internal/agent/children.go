@@ -272,7 +272,10 @@ func (d retainedDelegate) withRound(round delegateRound) retainedDelegate {
 // snapshot carries (Agent.restoreState — none, for a snapshot without the key), and a fork keeps
 // only the rounds spawned before its cut (CutSession). An aborted Exchange puts it back as its
 // Exchange opened (markExchange / rollBackExchange), so what the dropped Turns retained or took is
-// undone with the conversation they rode (ADR 0086 D3). A cancelled Turn changes nothing here: it
+// undone with the conversation they rode (ADR 0086 D3) — except what a background sub_agent child
+// retained or took (retainPastExchange / takePastExchange, ADR 0094): its run rode no Turn of the
+// Exchange, so no abort of it drops its result, and its retention is written through to the
+// Exchange-start copy and survives the abort. A cancelled Turn changes nothing here: it
 // is settled, not rolled back, and what its delegations retained stands with the results that name
 // them (ADR 0088). It is guarded because the depth-0 fan-out retains from several pool workers at once (ADR 0039).
 //
@@ -282,10 +285,11 @@ type retainedDelegates struct {
 	byName map[string]retainedDelegate
 	seq    uint64 // the last use sequence stamped (retain)
 
-	// atExchange is the set as the open Exchange opened — what an aborted Exchange restores. It is a
-	// shallow copy of byName, which is safe because an entry's rounds are never written in place
-	// (retain and withRound clone before they write). It is not serialized: a restore resets it to
-	// the set it loads (load), and clear empties it with the set.
+	// atExchange is the set as the open Exchange opened, plus what a background sub_agent child
+	// retained or took since (retainPastExchange / takePastExchange) — what an aborted Exchange
+	// restores. It is a shallow copy of byName, which is safe because an entry's rounds are never
+	// written in place (retain and withRound clone before they write). It is not serialized: a
+	// restore resets it to the set it loads (load), and clear empties it with the set.
 	atExchange map[string]retainedDelegate
 }
 
@@ -297,6 +301,21 @@ type retainedDelegates struct {
 // round re-retained, or the entry given back on a refusal or on a cancel that reached the
 // continuation before its child started.
 func (r *retainedDelegates) retain(d retainedDelegate) {
+	r.store(d, false)
+}
+
+// retainPastExchange is retain for a delegation whose run rode no Turn of the open Exchange — a
+// background sub_agent child (ADR 0094), which retains on the top-level Agent whenever it ends: it
+// also writes the entry through to the Exchange-start copy, so an abort of the Exchange open as
+// it ends keeps it, continuable by name. With no Exchange open the copy is stale and the next
+// markExchange replaces it, so the extra write is inert.
+func (r *retainedDelegates) retainPastExchange(d retainedDelegate) {
+	r.store(d, true)
+}
+
+// store is retain's body: it stamps d and keeps it under its name, and — when isPastExchange —
+// in the Exchange-start copy too (retainPastExchange).
+func (r *retainedDelegates) store(d retainedDelegate, isPastExchange bool) {
 	if d.name == "" {
 		return
 	}
@@ -312,6 +331,13 @@ func (r *retainedDelegates) retain(d retainedDelegate) {
 		d.rounds[n-1].seq = r.seq
 	}
 	r.byName[d.name] = d
+	if !isPastExchange {
+		return
+	}
+	if r.atExchange == nil {
+		r.atExchange = make(map[string]retainedDelegate, 1)
+	}
+	r.atExchange[d.name] = d
 }
 
 // entries returns every retained delegation, least recently used first — the order the session
@@ -351,7 +377,8 @@ func (r *retainedDelegates) load(entries []retainedDelegate) {
 }
 
 // markExchange records the set as an Exchange opens (Agent.step, at turnLifecycle.open) — what
-// rollBackExchange restores should the Exchange be aborted.
+// rollBackExchange restores should the Exchange be aborted, together with what a background
+// sub_agent child retains or takes while it is open (retainPastExchange / takePastExchange).
 func (r *retainedDelegates) markExchange() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -359,7 +386,9 @@ func (r *retainedDelegates) markExchange() {
 }
 
 // rollBackExchange restores the set the aborted Exchange opened with (Agent.exchangeAborted), undoing
-// every Turn of it that the abort drops from the conversation.
+// every Turn of it that the abort drops from the conversation. What a background sub_agent child
+// retained or took while it was open stands: the write-through (retainPastExchange /
+// takePastExchange) already carried it into that set.
 func (r *retainedDelegates) rollBackExchange() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -380,13 +409,31 @@ func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 // wearing, whatever its outcome — and a continuation refused, or reached by a cancel, before its
 // child started gives the taken entry back (runSubAgent).
 func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
+	return r.remove(name, false)
+}
+
+// takePastExchange is take for a background sub_agent child's continuation (retainPastExchange):
+// it forgets the entry in the Exchange-start copy too, so an abort of the open Exchange never
+// brings back an entry the continuation consumed — its rounds live on in the entry the continued
+// run retains.
+func (r *retainedDelegates) takePastExchange(name string) (retainedDelegate, bool) {
+	return r.remove(name, true)
+}
+
+// remove is take's body: it returns the entry under name and forgets it, and — when
+// isPastExchange — forgets it in the Exchange-start copy too (takePastExchange).
+func (r *retainedDelegates) remove(name string, isPastExchange bool) (retainedDelegate, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d, ok := r.byName[name]
-	if ok {
-		delete(r.byName, name)
+	if !ok {
+		return d, false
 	}
-	return d, ok
+	delete(r.byName, name)
+	if isPastExchange {
+		delete(r.atExchange, name)
+	}
+	return d, true
 }
 
 // names returns the retained names, most recently used first (the use sequence retain stamps), so a

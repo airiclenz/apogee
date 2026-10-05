@@ -19,7 +19,8 @@ package agent
 // background sub_agent's one item, which runs the blocking sub_agent path itself (runDelegate) —
 // its prose report, max_steps, roster, output_path, delegation depth, namer and retention, a named
 // child retained on the top-level Agent so a later `continue` finds it — and differs only in
-// delivery. It gets no finish tool; the Runner synthesizes its receipt and writes its report to the
+// delivery, and in that its retention survives an abort of the Exchange open as it ends
+// (delegateSite.isPastExchange). It gets no finish tool; the Runner synthesizes its receipt and writes its report to the
 // item's output file. It books no ledger row either: the ledger is the open Exchange's account of
 // its own delegations, and a background child ends outside it.
 
@@ -196,6 +197,10 @@ type workflowSpawner struct {
 	// spawner holds the top-level Agent's as it holds its children registry — a pointer, never a
 	// copy of the set's mutex.
 	retained *retainedDelegates
+	// isBackground is set for a background workflow's spawner (wireLaunch): its sub_agent items
+	// retain and take past the Exchange open on the top-level Agent (delegateSite.isPastExchange),
+	// since their runs ride none of its Turns.
+	isBackground bool
 }
 
 // newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn, on
@@ -314,7 +319,10 @@ func (s *workflowSpawner) spawnSubAgent(ctx context.Context, spec workflow.ItemS
 		CapRequested: requested,
 	})
 	var end delegateEnd
-	site := delegateSite{turn: func() int { return s.turn }, children: s.children, retained: s.retained}
+	site := delegateSite{
+		turn: func() int { return s.turn }, children: s.children, retained: s.retained,
+		isPastExchange: s.isBackground,
+	}
 	result, dispatched := a.runDelegate(ctx, call, runID, site, &end)
 	if dispatched == dispatchCancelled {
 		result = errorToolResult(s.call.ID, cancelledQueuedDelegationContent)

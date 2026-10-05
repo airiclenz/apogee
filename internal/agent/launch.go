@@ -262,7 +262,8 @@ func (a *Agent) runBlocking(ctx context.Context, launch workflowLaunch) (result 
 // off built.host and bracketed under call yet addressable through this Agent, on launch's seat; a
 // recipe's scripts run through the host's Resolution; its phases reported by an observer. A
 // blocking launch's started phase carries its resume command; a background launch's events are
-// marked background, and its ask stages put through the manager's queue — set after
+// marked background, its sub_agent items retain past the open Exchange (workflowSpawner.isBackground),
+// and its ask stages put through the manager's queue — set after
 // observeWorkflow, which would wrap the Asker to report the question before it is queued: a
 // background question is reported once it waits in the queue (backgroundScope.announce).
 func (a *Agent) wireLaunch(launch workflowLaunch, built builtLaunch, call domain.ToolCall) *workflowObserver {
@@ -281,6 +282,7 @@ func (a *Agent) wireLaunch(launch workflowLaunch, built builtLaunch, call domain
 		return observer
 	}
 	observer.background = true
+	spawner.isBackground = true
 	if runner.Asker != nil {
 		runner.Asker = backgroundAsker{scope: backgroundScope{manager: &a.background, workflow: built.id, observer: observer}}
 	}

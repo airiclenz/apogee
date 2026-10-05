@@ -44,7 +44,11 @@
 - 8: guard folded
 - re-check of 7 (recast): SAFE
 
-## 1. An aborted Exchange keeps a retained background sub_agent child
+## 1. An aborted Exchange keeps a retained background sub_agent child — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): added `takePastExchange` beside `retainPastExchange`, so a background continuation that consumes an entry also drops it from the Exchange-start copy; without it, an abort would bring back a consumed entry under its old name next to the continued one. Both are routed through new `delegateSite.retain`/`take` methods on an `isPastExchange` flag, set from `workflowSpawner.isBackground` (set in `wireLaunch`'s background branch).
+NOTES (2026-10-05): added `TestBackground_ABlockingWorkflowChildIsRolledBackWithAnAbortedExchange` as the counter-case pinning the goal's blocking half for a workflow item, in addition to the root-call `TestAbortExchange_RestoresRetentionToTheExchangeStart`.
+NOTES (2026-10-05): consequential edit — internal/agent/loop.go: made necessary by the write-through (the markExchange call-site comment said every change to the set rides a Turn the abort drops).
 
 **What:**
 **Goal:** A background sub_agent child that is retained on the root while the root's own Exchange is open is still retained (and continuable by name) after that Exchange aborts; a blocking delegation retained inside an aborted Exchange is still rolled back.
