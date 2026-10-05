@@ -674,6 +674,41 @@ type toolView struct {
 	// same reason it is: a record that says what each call asked should say how much it got back.
 	// Nothing paints it; it is the record's number, not the card's. Zero while the call is open.
 	chars int
+
+	// background says this card is a background sub_agent's call (ADR 0094): a sub_agent call that
+	// asked for `background: true` and spawned no run of the conversation's own — its child runs as a
+	// one-item background workflow, whose events never reach the transcript (workflow.go). Such a
+	// card heads no run: it paints as a background-workflow call, like a fan_out's that asked for the
+	// background, by its own presenter (backgroundSubAgentPresenter), never as a delegation block.
+	// The fact is read off the call where the block is placed (transcript.addToolCall) and re-derived
+	// from the record's own arguments and spawned run id on replay (backgroundSubAgentCall), so it is
+	// not on the wire. A bool is not display text, so the escape seam has nothing to strip in it.
+	background bool
+}
+
+// backgroundSubAgentPresenter is the row a background sub_agent's call is presented by (ADR 0094,
+// toolView.background): the background-workflow call's plain floor that fan_out's row is — the
+// delegation's name (or its task's first line) as the target, the immediate answer's first line as
+// the detail — under the delegation's own label, and solo for the reason a fan_out call is. It is
+// no registry row, because the registry is keyed by the tool's name and this is one sub_agent call
+// shape, not a tool.
+var backgroundSubAgentPresenter = toolPresenter{
+	label:  "Sub-Agent",
+	verb:   "delegating in the background",
+	target: subAgentTarget,
+	detail: firstLineDetail,
+	solo:   true,
+}
+
+// presenter is the row this card's result is presented by: the background sub_agent row for a
+// background call (toolView.background), the registry's row for its tool otherwise; known is false
+// for a tool the registry has no row for.
+func (tv toolView) presenter() (p toolPresenter, known bool) {
+	if tv.background {
+		return backgroundSubAgentPresenter, true
+	}
+	p, known = toolRegistry[tv.name]
+	return p, known
 }
 
 // headsRun reports whether this card is a delegation's — the sub_agent call whose block heads a run
@@ -682,8 +717,11 @@ type toolView struct {
 // must not switch the rule off, and a third-party tool that happens to share the label must not
 // switch it on. That the answer is knowable from the name alone is what lets a decoded record
 // re-derive its own solo mark rather than trust one the wire may predate (fromWireToolView).
+//
+// A background sub_agent's call (toolView.background) is the one sub_agent card that heads no run:
+// its child runs in a background workflow, out of the conversation.
 func (tv toolView) headsRun() bool {
-	return tv.name == subAgentToolName
+	return tv.name == subAgentToolName && !tv.background
 }
 
 // rename gives a delegation the name it was handed out of band (domain.SubAgentNamedEvent, ADR
@@ -876,6 +914,19 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// case where nothing else would keep the arguments, and sub_agent — the call whose whole run
 	// hangs beneath it — is one of them. It is taken from the call's raw JSON and not from the
 	// parsed map so the stored form is the one wireArgs bounds, not one this presenter reshaped.
+	tv.argsWire = wireArgs(call.Tool, call.Arguments)
+	tv.finishDisplay(ws)
+	return tv
+}
+
+// presentBackgroundSubAgentCall is presentToolCall for a background sub_agent's call
+// (toolView.background): the card backgroundSubAgentPresenter builds, with the record's bounded
+// copy of the arguments every call keeps. It carries no task and no agent name — it heads no run,
+// so no run body opens with the one and no live phrase looks the other up.
+func presentBackgroundSubAgentCall(call domain.ToolCall, ws workspaceRoot) toolView {
+	p := backgroundSubAgentPresenter
+	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool, solo: p.solo, background: true}
+	tv.Target = p.target(parseArgs(call.Arguments))
 	tv.argsWire = wireArgs(call.Tool, call.Arguments)
 	tv.finishDisplay(ws)
 	return tv
@@ -1218,7 +1269,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 		tv.absorbFailure(result)
 		return
 	}
-	p, known := toolRegistry[tv.name]
+	p, known := tv.presenter()
 	tv.absorbProse(p, known, result)
 	if regions, ok := recordedRegions(result); ok {
 		tv.showRegions(regions.Regions)
@@ -1288,7 +1339,7 @@ func (tv *toolView) absorbFailure(result domain.ToolResult) {
 		tv.Details = tv.Details.with(failureBody(content))
 		return
 	}
-	if p, known := toolRegistry[tv.name]; known && p.failure != nil {
+	if p, known := tv.presenter(); known && p.failure != nil {
 		if word, output, ok := p.failure(result); ok {
 			tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + word})
 			tv.Details = tv.Details.with(outputBody(output))

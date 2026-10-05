@@ -205,7 +205,9 @@ func (m Model) foldStats(e domain.Event) Model {
 //
 //   - A depth-0 ToolCallEvent for sub_agent: the delegation is ISSUED. This is the save that puts
 //     the assistant message that delegated, and the prompt it carried, into the record. Without it a
-//     Turn holding a fan-out shows nothing of the delegation until the whole Turn ends.
+//     Turn holding a fan-out shows nothing of the delegation until the whole Turn ends. A
+//     background sub_agent's call is not one (backgroundSubAgentCall): it delegates nothing the
+//     Turn waits on — its answer comes back at once and the per-Turn snapshot saves it.
 //   - A ToolResultEvent at depth 1 or deeper: a CHILD crossed a tool boundary, which is the running
 //     delegation's progress. A depth-0 result is deliberately not one — the Turn's own tool calls
 //     are followed by the per-Turn snapshot that saves them (turnSnapshotMsg), and a long LEAF tool
@@ -230,7 +232,8 @@ func (m Model) foldStats(e domain.Event) Model {
 func progressSaveTrigger(e domain.Event) bool {
 	switch e := e.(type) {
 	case domain.ToolCallEvent:
-		return e.Depth == 0 && e.Call.Tool == subAgentToolName
+		return e.Depth == 0 && e.Call.Tool == subAgentToolName &&
+			!backgroundSubAgentCall(e.Call.Tool, e.Call.Arguments, e.SpawnRunID)
 	case domain.ToolResultEvent:
 		return e.Depth >= 1
 	case domain.SubAgentPhaseEvent:

@@ -1649,8 +1649,15 @@ func (t *transcript) commitCancelled() {
 // A header-folding card (toolView.collapsesToHeader) is the one block not born collapsed: it is
 // seeded from the shared fold preference (taskListOpen), so a card the model writes while the
 // reader has the lists open opens too, and one written after a fold stays folded with the rest.
+//
+// A background sub_agent's call (backgroundSubAgentCall) is placed as the background-workflow call
+// it is (presentBackgroundSubAgentCall), never as the head of a run: its child runs out of the
+// conversation, and nothing of it folds into the block but the immediate answer.
 func (t *transcript) addToolCall(call domain.ToolCall, resolved, spawnRunID string, run runRef) {
 	tv := presentToolCall(call, resolved, t.ws)
+	if backgroundSubAgentCall(call.Tool, call.Arguments, spawnRunID) {
+		tv = presentBackgroundSubAgentCall(call, t.ws)
+	}
 	t.place(inRun(entry{
 		kind:       entryToolCall,
 		callID:     call.ID,
@@ -2266,8 +2273,30 @@ type groupBlock struct {
 // of a walk that may have found nothing. It matches the RETAINED tool name rather than the friendly
 // label for [toolView.headsRun]'s reason: a relabelling must not switch the rule off, and a
 // third-party tool that happens to share the label must not switch it on.
+//
+// A background sub_agent's call (toolView.background) is no delegation's head, so it never joins a
+// "✦ Sub-Agent (N)" group either.
 func ownHeads(entries []entry, i int, name string) bool {
-	return i >= 0 && i < len(entries) && entries[i].kind == entryToolCall && entries[i].tool.name == name
+	return i >= 0 && i < len(entries) && entries[i].kind == entryToolCall && entries[i].tool.name == name &&
+		!entries[i].tool.background
+}
+
+// backgroundSubAgentCall reports whether a call is a background sub_agent's (ADR 0094): a sub_agent
+// call whose arguments ask for `background: true` and that spawned no run of its own. The engine
+// mints a delegation's run id before its call is announced, and a background call runs as a
+// one-item background workflow instead, so its call carries none — while a call that asked for the
+// background where the switch is not offered runs blocking, with a run id, and stays a delegation.
+// It is a pure function of the call's tool, its arguments and the run id it spawned, which is what
+// lets a replayed record — which keeps the arguments (toolView.argsWire) and the run id — re-derive
+// it exactly as the live fold did.
+func backgroundSubAgentCall(tool string, args json.RawMessage, spawnRunID string) bool {
+	if tool != subAgentToolName || spawnRunID != "" || len(args) == 0 {
+		return false
+	}
+	var asked struct {
+		Background bool `json:"background"`
+	}
+	return json.Unmarshal(args, &asked) == nil && asked.Background
 }
 
 // subAgentHeads reports whether entries[i] is a delegation's call block — the head a sub-agent run

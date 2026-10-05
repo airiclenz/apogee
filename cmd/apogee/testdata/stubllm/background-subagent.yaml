@@ -1,0 +1,46 @@
+# The upstream TestE2EBackgroundSubAgent talks to (ADR 0094): the model delegates with
+# `background: true`, the call is answered at once and the reply ends, the human sends a message
+# while the child is still held on its gate and the model answers it, and once the child is let go
+# its finish note wakes the idle agent with the child's report.
+#
+# The run's home lifts `workflow` (tools: enabled), which is what offers sub_agent's background
+# switch in the TUI; without it the call would run blocking.
+model: background-subagent-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml): `auto-title:` is on
+    # by default and an unanswered request is an HTTP 500.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: One delegation in the background
+    # The main turn: one sub_agent call asking for the background.
+    - when:
+        last_message: ^Scout the repository in the background
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Scan the scout area of the repo","name":"scout","background":true}'
+    # The call's immediate answer is the last message: the reply ends, the child still running.
+    - when:
+        last_message: ^sub_agent started in the background
+      repeat: true
+      text: The scout is running in the background.
+    # The human's message while the child is held: it reaches the model at once.
+    - when:
+        last_message: ^What else is there to do
+      repeat: true
+      text: Nothing else while the scout runs.
+    # The wake: the finish note — the lead line and the child's report — is the last message.
+    - when:
+        last_message: sub_agent scout finished
+      repeat: true
+      text: The scout reported three files.
+    # The child. Its answer is held on the `scouted` gate until the test has seen the human's
+    # message answered, so that message provably reached the model while the child ran.
+    - when:
+        last_message: scout area of the repo
+      repeat: true
+      await: scouted
+      text: The scout found three files.
+    # Anything neither the parent nor the child claims lands here, and the request log then names it.
+    - repeat: true
+      text: Nothing else to add.

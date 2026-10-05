@@ -1728,6 +1728,13 @@ it from `/workflows`. That pane's list reads `waiting for you` as such a workflo
 detail's hint adds `^a answer`: `^a` closes the pane and opens the workflow's oldest waiting prompt,
 a dismissed one included, through the same route — at idle only; mid-turn it notes
 `a question opens only while the agent is idle — press ^a again once it is` and opens nothing.
+A background `sub_agent` (ADR 0094) is such a workflow of one item. Its call paints as a
+background-workflow call, the way a background `fan_out`'s does, and never as a delegation block:
+the delegation's name sits over the call's immediate answer, and the row has no run to open and
+never joins a `✦ Sub-Agent (N)` group. Its finish line names the delegation
+(`background workflow <name> finished — items 1 · ok 1 · …`). In `/workflows` its row ends on
+`· sub_agent` after the id, and its detail's hint offers no `^s save as recipe`. Pressing `^s` there
+gives a note saying why, and `⏎` on its one stage's row opens that stage's one item.
 
 **And the two facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
 input box below already invites a message — but the slot is where a surface that has gone leaves its

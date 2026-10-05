@@ -34,6 +34,9 @@ import (
 // They are chords by the rule the /sessions browser ratified (sessionBrowserKey): no letter of a
 // list pane is a verb. ^a answers the question or approval it waits on: it closes the pane and opens
 // the workflow's oldest waiting prompt, one esc sent back included, at idle only (answerShownWorkflow).
+// A background sub_agent's workflow (ADR 0094 D9) is listed with its `sub_agent` origin beside its
+// delegation's name, its legend offers no ^s, and ⏎ on its one stage's row opens that stage's one
+// item, as a one-item stage opens its item's run view in the conversation.
 // Another, ^s, saves a fan_out's workflow as a recipe skill: it asks for a name
 // on the pane's own name row (workflowsNameKey) and writes <ConfigHome>/skills/<name>/SKILL.md off
 // the Update loop (saveWorkflowRecipe), refusing a name a skill or a command already answers to and
@@ -55,6 +58,10 @@ const (
 	workflowsAnswerHint = "↑/↓ select · ⏎ open item · ^a answer · ^x stop · ^r re-run failed · ^s save as recipe · esc back"
 	workflowsNamingHint = "type a skill name · ⏎ save · esc cancel"
 	workflowsItemHint   = "↑/↓ scroll · esc back"
+	// A background sub_agent's workflow offers no save-as-recipe (ADR 0094 D9): its legends are the
+	// detail's two above without the chord.
+	workflowsSubAgentHint       = "↑/↓ select · ⏎ open item · ^x stop · ^r re-run failed · esc back"
+	workflowsSubAgentAnswerHint = "↑/↓ select · ⏎ open item · ^a answer · ^x stop · ^r re-run failed · esc back"
 )
 
 // The notes and prose rows the view words itself with.
@@ -74,6 +81,7 @@ const (
 	workflowAnswerNotIdle = "a question opens only while the agent is idle — press ^a again once it is"
 	workflowSavePrompt    = "save as recipe — skill name: "
 	workflowSaveRecipe    = "only a fan_out workflow saves as a recipe — this one already runs the recipe /%s"
+	workflowSaveSubAgent  = "only a fan_out workflow saves as a recipe — this one runs one sub_agent delegation"
 	workflowSaveTaken     = "a %s is already named %q — pick another name"
 	workflowSavedNote     = "recipe %q written to %s — /%s runs it"
 )
@@ -391,8 +399,9 @@ func (m Model) answerShownWorkflow() (tea.Model, tea.Cmd) {
 }
 
 // openWorkflowSave is ^s in a workflow's detail: it opens the name row the workflow is saved under.
-// Only a fan_out's workflow saves — a recipe's already is one, and saying which is the answer — and
-// only with an apogee home resolved to hold the library.
+// Only a fan_out's workflow saves — a recipe's already is one, and saying which is the answer; a
+// background sub_agent's is one delegation, not a recipe (ADR 0094 D9) — and only with an apogee
+// home resolved to hold the library.
 func (m Model) openWorkflowSave() Model {
 	info, ok := m.workflowsPane.shownInfo()
 	switch {
@@ -400,6 +409,9 @@ func (m Model) openWorkflowSave() Model {
 		return m
 	case info.Status.Recipe != "":
 		m.transcript.addNote(fmt.Sprintf(workflowSaveRecipe, sanitize.StripEscapesToLine(info.Status.Recipe)))
+		return m
+	case subAgentWorkflow(info):
+		m.transcript.addNote(workflowSaveSubAgent)
 		return m
 	case m.opts.ConfigHome == "":
 		m.transcript.addError(skillsSource, noSkillExporterNote, runRef{})
@@ -508,7 +520,8 @@ func (m Model) workflowsBack() Model {
 
 // workflowsAccept is ⏎ on the highlighted row — the keyboard's and a second click's alike: a
 // workflow opens to its stages and items, an item opens to its detail (read off the loop), and a
-// stage's own row or the item level's reading takes nothing.
+// stage's own row or the item level's reading takes nothing — except a background sub_agent's one
+// stage, whose row opens its one item.
 func (m Model) workflowsAccept() (tea.Model, tea.Cmd) {
 	pane := &m.workflowsPane
 	switch pane.level {
@@ -523,10 +536,16 @@ func (m Model) workflowsAccept() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		_, targets := workflowDetailRows(info)
-		if pane.detail.selected >= len(targets) || targets[pane.detail.selected].item < 0 {
+		if pane.detail.selected >= len(targets) {
 			return m, nil
 		}
 		target := targets[pane.detail.selected]
+		if target.item < 0 && subAgentWorkflow(info) && len(info.Status.Stages[target.stage].Items) == 1 {
+			target.item = 0 // a background sub_agent's one stage opens its one item
+		}
+		if target.item < 0 {
+			return m, nil
+		}
 		pane.level, pane.lines, pane.item = workflowsAtItem, nil, listCursor{}
 		pane.ref = workflowItemRef{workflow: pane.shown, stage: target.stage, item: target.item}
 		return m, m.loadWorkflowItem(pane.ref)
@@ -596,6 +615,12 @@ func (m Model) workflowsListContent() (listContent, bool) {
 		}
 		if info, ok := pane.shownInfo(); ok {
 			c.title = "workflow  " + workflowName(info) + "  (" + workflowState(info, m.workflows.waits(pane.shown)) + ")"
+			if subAgentWorkflow(info) {
+				c.hint = workflowsSubAgentHint
+				if m.workflows.waits(pane.shown) {
+					c.hint = workflowsSubAgentAnswerHint
+				}
+			}
 		}
 		if pane.naming {
 			c.hint = workflowsNamingHint
@@ -700,7 +725,10 @@ func workflowState(info workflow.Info, waiting bool) string {
 
 // workflowListRow is one workflow's row: its name, its state (waiting says a prompt of it waits on
 // the human), its fan-out items done of all (the engine's TallyOfStatus — verify and merge items
-// are not items, a skipped fan-out is left out), its id.
+// are not items, a skipped fan-out is left out; a background sub_agent's one item counts on the
+// receipt the engine built for it), its id, and — for a background sub_agent's workflow, whose name
+// is its delegation's — its `sub_agent` origin (workflowOrigin; an empty cell otherwise, which
+// still pads, so the columns stay aligned).
 func workflowListRow(info workflow.Info, waiting bool) popupRow {
 	tally := workflow.TallyOfStatus(info.Status)
 	return popupRow{
@@ -708,7 +736,24 @@ func workflowListRow(info workflow.Info, waiting bool) popupRow {
 		"· " + workflowState(info, waiting),
 		fmt.Sprintf("· %d/%d items", tally.Total()-tally.Unfinished, tally.Total()),
 		"· " + sanitize.StripEscapesToLine(info.Status.ID),
+		workflowOrigin(info),
 	}
+}
+
+// subAgentWorkflow reports whether info is a background sub_agent's workflow (ADR 0094): the
+// one-item workflow a `sub_agent` call carrying `background: true` runs as, its origin recorded in
+// its status.json.
+func subAgentWorkflow(info workflow.Info) bool {
+	return info.Status.Origin == workflow.OriginSubAgent
+}
+
+// workflowOrigin is a workflow's origin cell in the list: `· sub_agent` for a background
+// sub_agent's, "" for a fan_out's or a recipe's, whose rows say what they are by their names.
+func workflowOrigin(info workflow.Info) string {
+	if subAgentWorkflow(info) {
+		return "· " + workflow.OriginSubAgent
+	}
+	return ""
 }
 
 // workflowRowTarget is what a detail row stands for: a stage's own row (item −1) or one of its items.

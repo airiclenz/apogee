@@ -970,3 +970,127 @@ func TestWorkflowItemStatus_ReadsTheEngineStatusWord(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A background sub_agent's workflow (ADR 0094 D9)
+// ----------------------------------------------------------------------------
+
+// The words the background sub_agent fixture's one item ended on.
+const (
+	subAgentWorkflowName   = "scout"
+	subAgentWorkflowReport = "The scout found three files."
+)
+
+// subAgentWorkflowsFixture writes the one-item workflow a background sub_agent call runs as — its
+// stage carrying the call's arguments, so the store records its `sub_agent` origin — ended ok on
+// the receipt the engine builds from the child's report, which its output file holds.
+func subAgentWorkflowsFixture(t *testing.T) []workflow.Info {
+	t.Helper()
+	store, err := workflow.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := workflow.Plan{Name: subAgentWorkflowName, Stages: []workflow.Stage{{
+		Name: "sub_agent", Kind: workflow.StageFanout, Task: "the sub_agent call s1",
+		Over:     &workflow.ItemSource{List: []string{subAgentWorkflowName}},
+		SubAgent: json.RawMessage(`{"task":"Scan the scout area","name":"scout","background":true}`),
+	}}}
+	status, err := store.Create(plan, "hash", time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Origin != workflow.OriginSubAgent {
+		t.Fatalf("precondition: the store recorded origin %q, want %q", status.Origin, workflow.OriginSubAgent)
+	}
+	status.Phase = workflow.PhaseDone
+	status.Stages[0].Phase = workflow.PhaseDone
+	status.Stages[0].Items = []workflow.ItemStatus{{
+		Key: testWorkflowKey, Label: subAgentWorkflowName, Phase: workflow.PhaseDone,
+		Receipt: &workflow.Receipt{Status: workflow.StatusOK, Summary: subAgentWorkflowReport},
+	}}
+	if err := store.WriteStatus(status); err != nil {
+		t.Fatal(err)
+	}
+	output, err := store.Path(status.ID, "items/"+testWorkflowKey+"/output.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(output, []byte(subAgentWorkflowReport+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := store.Dir(status.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []workflow.Info{{Status: status, Dir: dir}}
+}
+
+// A background sub_agent's workflow is listed under its delegation's name with its `sub_agent`
+// origin and its one item counted on the engine's receipt; its detail offers no save-as-recipe and
+// ^s says why; ⏎ on its one stage's row opens that stage's one item.
+func TestWorkflowsViewShowsABackgroundSubAgent(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowInfos: subAgentWorkflowsFixture(t)}
+	m := newTestModelEng(t, eng, testOpts)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 60})
+	id := eng.workflowInfos[0].Status.ID
+
+	m = openWorkflowsLine(t, m)
+	assertPaneHas(t, m, subAgentWorkflowName, "· done", "· 1/1 items", "· "+id, "· sub_agent")
+
+	m = workflowsKeyStep(t, m, keyEnter())
+	if m.workflowsPane.level != workflowsAtDetail {
+		t.Fatalf("level = %d after ⏎ on the list, want the detail", m.workflowsPane.level)
+	}
+	if c, _ := m.workflowsListContent(); c.hint != workflowsSubAgentHint {
+		t.Errorf("the detail's legend = %q, want %q", c.hint, workflowsSubAgentHint)
+	}
+	if painted := strip(m.renderWorkflows()); strings.Contains(painted, "save as recipe") {
+		t.Errorf("a background sub_agent's detail offers save-as-recipe:\n%s", painted)
+	}
+
+	m = step(t, m, keyCtrlS())
+	if m.workflowsPane.naming {
+		t.Error("^s opened the name row on a background sub_agent's workflow")
+	}
+	if note := lastNote(m); note != workflowSaveSubAgent {
+		t.Errorf("^s noted %q, want %q", note, workflowSaveSubAgent)
+	}
+
+	m = workflowsKeyStep(t, m, keyEnter()) // on the stage's own row: its one item opens
+	if m.workflowsPane.level != workflowsAtItem || m.workflowsPane.ref.item != 0 {
+		t.Fatalf("pane = level %d ref %+v after ⏎ on the stage row, want its one item", m.workflowsPane.level, m.workflowsPane.ref)
+	}
+	assertPaneHas(t, m, "status: ok — "+subAgentWorkflowReport)
+}
+
+// A background sub_agent's list row is pinned whole: the name, the state, the item counted on the
+// engine's receipt, the id and the origin — and a fan_out's row carries an empty origin cell, so
+// the columns stay aligned.
+func TestWorkflowsListRowNamesASubAgentOrigin(t *testing.T) {
+	t.Parallel()
+	info := subAgentWorkflowsFixture(t)[0]
+	want := popupRow{subAgentWorkflowName, "· done", "· 1/1 items", "· " + info.Status.ID, "· sub_agent"}
+	if got := workflowListRow(info, false); !slices.Equal(got, want) {
+		t.Errorf("row = %q, want %q", got, want)
+	}
+	fanOut := workflowsFixture(t)[0]
+	if got := workflowListRow(fanOut, false); got[len(got)-1] != "" {
+		t.Errorf("a fan_out's origin cell = %q, want empty", got[len(got)-1])
+	}
+}
+
+// A waiting background sub_agent's detail offers ^a and still no save-as-recipe.
+func TestWorkflowsViewSubAgentAnswerHintOffersNoSave(t *testing.T) {
+	t.Parallel()
+	infos := subAgentWorkflowsFixture(t)
+	id := infos[0].Status.ID
+	eng := &fakeEngine{workflowInfos: infos}
+	m := openWorkflowsLine(t, streamOneScreen(t, newTestModelEng(t, eng, testOpts)))
+	waiting := domain.WorkflowPhaseEvent{Phase: domain.WorkflowWaiting, Workflow: id, Name: subAgentWorkflowName, Background: true}
+	m = foldEvents(t, m, waiting)
+	m = workflowsKeyStep(t, m, keyEnter())
+	if c, _ := m.workflowsListContent(); c.hint != workflowsSubAgentAnswerHint {
+		t.Errorf("the waiting detail's legend = %q, want %q", c.hint, workflowsSubAgentAnswerHint)
+	}
+}

@@ -264,7 +264,14 @@ internal/workflow/store.go — WriteTranscript, ReadItemTranscript; internal/age
 - `go test -race -count=1 ./internal/workflow/`
 **Commit:** `feat(agent): a background sub_agent's finish note carries its report`
 
-## 11. TUI shows a background sub_agent
+## 11. TUI shows a background sub_agent — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): re-derived from "the finish line words it by origin". `domain.WorkflowPhaseEvent` carries no origin, so the TUI cannot tell a sub_agent workflow's end phase from another workflow's without a domain and engine change outside this item's files. The finish line keeps `backgroundFinishFormat` and names the run by its delegation's name, which is the plan's name. `internal/tui/workflow.go` is therefore unchanged. The text is pinned in `TestBackgroundSubAgent_FinishLineNamesTheDelegation` and in the e2e test.
+NOTES (2026-10-05): re-derived from "the paint sites are toolview.go, transcript.go and fold.go". A background call is recognised by `backgroundSubAgentCall`: the tool is sub_agent, the arguments carry `background: true`, and the call has an empty SpawnRunID, so the blocking fallback stays a delegation. A replayed record has to re-derive the same fact. The fact is not on the wire, so `internal/tui/transcriptbridge.go`'s entry decode sets `toolView.background` from the record's own argsWire and spawnRunID. That is one line, at the place where the replayed call row is built.
+NOTES (2026-10-05): `toolView.background` gates `headsRun` and `ownHeads`. The card gets its own `backgroundSubAgentPresenter`, which is the target plus the first line of the answer and is not a registry row, because `TestToolRegistry*` requires every row to be a real tool. `toolView.presenter()` routes enrichWithResult and absorbFailure to that presenter. A background call also fires no delegation progress save (`progressSaveTrigger`).
+NOTES (2026-10-05): "its stage opens its item's run view" is read as the `/workflows` item level. A background workflow's item runs never reach the transcript, so no conversation Run view exists for them. ⏎ on a sub_agent workflow's one-item stage row opens that item. Other workflows' stage rows still take nothing.
+NOTES (2026-10-05): the `/workflows` origin is a trailing fifth cell. It reads `· sub_agent` for a sub_agent workflow and is empty for any other, so the existing columns and the `row[2]` count pin are unchanged.
+NOTES (2026-10-05): layout.md gains one paragraph on the background sub_agent's row, finish line and `/workflows` behaviour. The manual is left to item 12.
 
 **What:**
 **Goal:** `/workflows` lists a background sub_agent run under its delegation name with a sub_agent origin and offers no save-as-recipe; its stage opens its item's run view; the finish line names it; a driven test covers the launch, a user message reaching the model while the child runs, and the finish note's wake.

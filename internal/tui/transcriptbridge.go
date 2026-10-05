@@ -416,6 +416,10 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 		// ask_user record becomes a card of its own only once its answer landed, which is the same fact
 		// this bit keeps (fromWireToolView).
 		e.tool = fromWireToolView(w.Tool, e.done)
+		// A background sub_agent's call is re-derived from the record's own arguments and spawned
+		// run id, exactly as the live fold read it (backgroundSubAgentCall), so it replays as the
+		// background-workflow call it was, never as a delegation's head.
+		e.tool.background = backgroundSubAgentCall(e.tool.name, e.tool.argsWire, e.spawnRunID)
 	}
 	if w.Presented != nil {
 		e.presented = fromWirePresented(w.Presented)

@@ -611,3 +611,117 @@ func TestBackgroundPromptCloseIsSettledByTheTail(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A background sub_agent (ADR 0094)
+// ----------------------------------------------------------------------------
+
+// bgSubAgentStarted is the immediate answer a background sub_agent call gets (internal/agent's
+// subAgentBackgroundStarted over the workflow's id and the delegation's name).
+const bgSubAgentStarted = "sub_agent started in the background as workflow " + bgWorkflowID + ": scout"
+
+// bgSubAgentCall is a depth-0 sub_agent call asking for the background, with the run id the engine
+// spawned for it — "" for a call that runs as a background workflow.
+func bgSubAgentCall(id, spawnRunID string) domain.ToolCallEvent {
+	return domain.ToolCallEvent{
+		Call: domain.ToolCall{
+			ID: id, Tool: subAgentToolName,
+			Arguments: []byte(`{"task":"Scan the scout area of the repo","name":"scout","background":true}`),
+		},
+		SpawnRunID: spawnRunID,
+	}
+}
+
+// bgSubAgentAnswer is the immediate answer to the call id names.
+func bgSubAgentAnswer(id string) domain.ToolResultEvent {
+	return domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID:  id,
+		Content: bgSubAgentStarted + "\nYou are woken with its report when it ends.",
+	}}
+}
+
+// A background sub_agent's call paints as a background-workflow call — its name as the target,
+// the immediate answer's first line in the slot — and never as a delegation block: it heads no
+// run, wears no `done`, two of them never fold into one "Sub-Agent (2)" group, and its call fires
+// no delegation progress save.
+func TestBackgroundSubAgent_CallPaintsAsABackgroundWorkflowCall(t *testing.T) {
+	t.Parallel()
+	tr := feed(bgSubAgentCall("s1", ""), bgSubAgentAnswer("s1"), bgSubAgentCall("s2", ""), bgSubAgentAnswer("s2"))
+
+	for i, e := range tr.entries {
+		if e.kind != entryToolCall {
+			continue
+		}
+		if e.headsRun() || !e.tool.background {
+			t.Errorf("entry %d: headsRun %v, background %v; want a background call that heads no run", i, e.headsRun(), e.tool.background)
+		}
+		if group := subAgentGroup(tr.entries, i); group != nil {
+			t.Errorf("entry %d groups as a delegation: %+v", i, group)
+		}
+	}
+	painted := plainRender(tr)
+	if !strings.Contains(painted, "scout "+glyphLeaderDot+" "+bgSubAgentStarted) {
+		t.Errorf("no row reads the delegation's name over its immediate answer:\n%s", painted)
+	}
+	for _, refused := range []string{"done", "Sub-Agent (2)"} {
+		if strings.Contains(painted, refused) {
+			t.Errorf("a background sub_agent's call reads %q:\n%s", refused, painted)
+		}
+	}
+	if progressSaveTrigger(bgSubAgentCall("s3", "")) {
+		t.Error("a background sub_agent's call fired the delegation progress save")
+	}
+}
+
+// A call that asked for the background where the switch is not offered runs blocking, with a run
+// id of its own, and stays a delegation's head.
+func TestBackgroundSubAgent_ABlockingFallbackStaysADelegation(t *testing.T) {
+	t.Parallel()
+	tr := feed(bgSubAgentCall("s1", "run.1"))
+	if e := tr.entries[0]; !e.headsRun() || e.tool.background {
+		t.Errorf("headsRun %v, background %v; want a blocking delegation's head", e.headsRun(), e.tool.background)
+	}
+	if !progressSaveTrigger(bgSubAgentCall("s1", "run.1")) {
+		t.Error("a blocking delegation's call fired no progress save")
+	}
+}
+
+// A background sub_agent's call replays from the record as the background call it was: the record
+// keeps its arguments and its (empty) spawned run id, and the decode re-derives the rest.
+func TestBackgroundSubAgent_CallReplaysAsABackgroundCall(t *testing.T) {
+	t.Parallel()
+	data, err := encodeTranscript(feed(bgSubAgentCall("s1", ""), bgSubAgentAnswer("s1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(entries, func(e entry) bool { return e.kind == entryToolCall })
+	if i < 0 {
+		t.Fatal("the replayed record holds no call")
+	}
+	if e := entries[i]; e.headsRun() || !e.tool.background {
+		t.Errorf("replayed: headsRun %v, background %v; want the background call", e.headsRun(), e.tool.background)
+	}
+}
+
+// A background sub_agent's finish line names it by its delegation's name and counts its one item
+// on the receipt the engine built for it.
+func TestBackgroundSubAgent_FinishLineNamesTheDelegation(t *testing.T) {
+	t.Parallel()
+	const want = "background workflow scout finished — items 1 · ok 1 · partial 0 · blocked 0"
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	startStubWorker(t, &m)
+
+	started := bgPhase(domain.WorkflowStarted)
+	started.Name = "scout"
+	end := bgEnd(domain.WorkflowFinished, domain.WorkflowTally{OK: 1})
+	end.Name = "scout"
+	m = foldEvents(t, m, started, end)
+
+	if !slices.Contains(noteTexts(m), want) {
+		t.Errorf("notes = %q, want the finish line %q", noteTexts(m), want)
+	}
+}
