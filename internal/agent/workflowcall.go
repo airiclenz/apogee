@@ -118,12 +118,12 @@ const (
 
 // The one-item plan a background sub_agent call runs as (backgroundSubAgentPlan): its one fanout
 // stage's name, and the brief that stage carries — never rendered for a child, because the item
-// runs the call's own arguments (workflow.Stage.SubAgent), but naming the call, which salts the
-// plan hash (ADR 0094 D8) so the same task asked again is a new run, never a resume of a finished
-// one.
+// runs the call's own arguments (workflow.Stage.SubAgent), but naming the call and a nonce minted
+// for it, which salt the plan hash (ADR 0094 D8) so the same task asked again is a new run, never a
+// resume of a finished one — even when an upstream hands two calls the same id.
 const (
 	subAgentStageName       = "sub_agent"
-	subAgentStageTaskFormat = "the sub_agent call %s"
+	subAgentStageTaskFormat = "the sub_agent call %s (run %s)"
 )
 
 // backgroundWording is how one tool words the answer a background launch gets at once: its started
@@ -344,7 +344,8 @@ func (a *Agent) backgroundSubAgentResult(turn int, call domain.ToolCall) domain.
 	if _, err := a.requestedChildTools(args.Tools); err != nil {
 		return errorToolResult(call.ID, err.Error())
 	}
-	id, err := a.startBackground(workflowLaunch{plan: backgroundSubAgentPlan(call, args), seat: seat, turn: turn, call: call})
+	plan := backgroundSubAgentPlan(call, a.runIDs.mint(), args)
+	id, err := a.startBackground(workflowLaunch{plan: plan, seat: seat, turn: turn, call: call})
 	if err != nil {
 		return errorToolResult(call.ID, fmt.Sprintf(subAgentBackgroundFailed, err))
 	}
@@ -354,14 +355,16 @@ func (a *Agent) backgroundSubAgentResult(turn int, call domain.ToolCall) domain.
 // backgroundSubAgentPlan is the one-item plan a background sub_agent call runs as: one fanout stage
 // whose one item, labelled with the delegation's name (or its task's first line), runs the call's
 // own arguments on the blocking sub_agent path (workflow.Stage.SubAgent). The plan is named as the
-// item is, so /workflows lists it under the delegation's name, and the stage's brief names the call,
-// salting the plan hash with its id (ADR 0094 D8).
-func backgroundSubAgentPlan(call domain.ToolCall, args tools.SubAgentArgs) workflow.Plan {
+// item is, so /workflows lists it under the delegation's name, and the stage's brief names the call
+// and nonce, salting the plan hash with both (ADR 0094 D8): the call id alone is the upstream's
+// choice and not guaranteed unique, so a re-used id would otherwise resume the earlier call's run.
+// A resume or rerun reads the plan back from its folder, so it keeps the nonce it was started with.
+func backgroundSubAgentPlan(call domain.ToolCall, nonce string, args tools.SubAgentArgs) workflow.Plan {
 	label := delegationLabel(delegationName(args.Name), call)
 	return workflow.Plan{Name: label, Stages: []workflow.Stage{{
 		Name:     subAgentStageName,
 		Kind:     workflow.StageFanout,
-		Task:     fmt.Sprintf(subAgentStageTaskFormat, call.ID),
+		Task:     fmt.Sprintf(subAgentStageTaskFormat, call.ID, nonce),
 		Over:     &workflow.ItemSource{List: []string{label}},
 		SubAgent: call.Arguments,
 	}}}

@@ -1968,7 +1968,8 @@ func TestWorkflowCall_ABackgroundSubAgentIsRefusedBeforeItStartsAWorkflow(t *tes
 }
 
 // TestWorkflowCall_TwoIdenticalBackgroundSubAgentsBothRun pins ADR 0094 D6 and D8: two calls of
-// one reply delegating the same task are two runs (the plan hash is salted with the call id), and
+// one reply delegating the same task are two runs (the plan hash is salted with the call id and a
+// minted nonce), and
 // neither is a member of the reply's tool round — with a message waiting the whole time and a
 // fan-out ceiling of one, neither is skipped and neither is refused.
 func TestWorkflowCall_TwoIdenticalBackgroundSubAgentsBothRun(t *testing.T) {
@@ -2000,6 +2001,46 @@ func TestWorkflowCall_TwoIdenticalBackgroundSubAgentsBothRun(t *testing.T) {
 	infos, err := a.Workflows()
 	if err != nil || len(infos) != 2 {
 		t.Fatalf("Workflows = %+v, %v; want two runs of the one task", infos, err)
+	}
+	for _, info := range infos {
+		if info.Status.Phase != workflow.PhaseDone {
+			t.Errorf("workflow %s phase = %s, want done", info.Status.ID, info.Status.Phase)
+		}
+	}
+	if asked := up.askedCount(subAgentTask); asked != 2 {
+		t.Errorf("children asked = %d, want both delegations run", asked)
+	}
+}
+
+// TestWorkflowCall_AReusedCallIDStartsAFreshBackgroundSubAgent pins ADR 0094 D8 as amended
+// 2026-10-05: an upstream that hands the same call id to the same task in a later Exchange gets a
+// second run, never a resume of the first one's finished folder — the minted nonce beside the call
+// id keeps the two plans' hashes apart.
+func TestWorkflowCall_AReusedCallIDStartsAFreshBackgroundSubAgent(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundSubAgentConfig(t, sink)
+	args := backgroundSubAgentArgsJSON(nil)
+	// "please delegate" is registered before subAgentTask: the second Exchange's opening carries the
+	// first run's finish note, labelled with subAgentTask, and routes match in registration order.
+	up := (&workflowResponder{}).
+		route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, args)).
+		route("please delegate", nil, contentScript("started it")).
+		route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, args)).
+		route("please delegate", nil, contentScript("started it again")).
+		route(subAgentTask, nil, contentScript("first survey")).
+		route(subAgentTask, nil, contentScript("second survey"))
+	a := newBackgroundParent(t, cfg, up)
+
+	runSubmitted(t, context.Background(), a, "please delegate")
+	a.background.waitAll()
+	runSubmitted(t, context.Background(), a, "please delegate it again")
+	a.background.waitAll()
+
+	infos, err := a.Workflows()
+	if err != nil || len(infos) != 2 {
+		t.Fatalf("Workflows = %+v, %v; want two runs of the one call id", infos, err)
 	}
 	for _, info := range infos {
 		if info.Status.Phase != workflow.PhaseDone {

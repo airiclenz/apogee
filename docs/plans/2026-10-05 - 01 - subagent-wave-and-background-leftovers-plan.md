@@ -82,7 +82,7 @@ internal/tools/sub_agent.go — SubAgentOptions
 **Commit:** `test(agent): pin a background sub_agent's unreadable run_on refusal`
 **Closes:** apogee-background-run-on-refusal-untested
 
-## 3. Every background sub_agent call starts a fresh run
+## 3. Every background sub_agent call starts a fresh run — ✅ DONE (2026-10-05)
 
 **What:**
 **Goal:** Two background `sub_agent` calls with the same call id and identical arguments, in two Exchanges, start two workflow runs and run two children; crash resume and `/workflows` rerun of a background sub_agent run still resume that run's own folder; ADR 0094 D8 states the nonce.

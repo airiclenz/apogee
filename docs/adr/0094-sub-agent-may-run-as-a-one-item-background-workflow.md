@@ -70,6 +70,15 @@ of a blocking re-issue against a folder a background run still drives never fire
 `sub_agent` calls. The salt enters only this kind of plan: every `fan_out` and Recipe plan hashes as
 before.
 
+> **Amended 2026-10-05 — the salt is the call id plus a minted nonce.** A call id is the upstream's
+> choice, not the engine's, and nothing guarantees it unique: a server that numbers its calls afresh
+> each reply hands the same id again, and a re-issue of the same task with that id would hash to the
+> earlier run's plan and resume its finished folder instead of running. The plan is therefore
+> salted with the call id **and** a run id the engine mints for the call from the tree's run-id
+> minter, so every background `sub_agent` call is a new run whatever id it arrives with. A crash
+> resume or a `/workflows` re-run reads the plan back from the run's own folder, nonce included, so
+> it still finds and drives that folder.
+
 **D9 — `/workflows` lists it as a `sub_agent` workflow.** The listing names its origin as
 `sub_agent`. It offers no save-as-recipe, because one delegation is not a recipe. Inspect, stop and
 re-run work as for any workflow (ADR 0089 D5).
