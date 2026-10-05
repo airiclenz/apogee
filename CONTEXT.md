@@ -390,8 +390,12 @@ width 4, 35 never started, and lost the lot to one Esc), and the model is told t
 its first call by the **Orientation block**'s `Delegation bounds:` line and the `max_steps`
 schema text. It binds `sub_agent` alone: a `fan_out` **Workflow** runs its items in waves of the
 width with no ceiling, since each item hands back a one-line **Receipt** rather than a full report,
-and when `fan_out` is enabled the refusal names it ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D7). Ratified 2026-09-20 (ADR 0039,
-amended the same day; amended 2026-09-27 by ADR 0087).
+and when `fan_out` is enabled the refusal names it ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D7). A `sub_agent` call carrying
+`background: true` is outside it too: it returns at once and runs as a one-item **Background
+workflow** outside the reply's tool round, so it is neither counted against the ceiling nor
+refused by it ([ADR 0094](docs/adr/0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D6).
+Ratified 2026-09-20 (ADR 0039, amended the same day; amended 2026-09-27 by ADR 0087 and
+2026-10-05 by ADR 0094).
 _Avoid_: "fan-out cap" (the cap is the width; this is a count of rounds of it), "delegation
 limit" (says nothing about what is bounded — calls per reply, not per session).
 
