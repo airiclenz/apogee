@@ -35,9 +35,9 @@ const (
 	bgSubAgentStarted = "sub_agent started in the background"
 	// bgSubAgentNoteLead is the finish note's lead line (internal/agent's sub_agent note).
 	bgSubAgentNoteLead = "sub_agent scout finished"
-	// bgSubAgentFinishLine is the transcript's finish line (internal/tui's backgroundFinishFormat
+	// bgSubAgentFinishLine is the transcript's finish line (internal/tui's subAgentFinishFormat
 	// over the delegation's name and the item tally the engine's receipt counts).
-	bgSubAgentFinishLine = "background workflow scout finished — items 1 · ok 1 · partial 0 · blocked 0"
+	bgSubAgentFinishLine = "background sub_agent scout finished — items 1 · ok 1 · partial 0 · blocked 0"
 	// bgSubAgentWorkflowsRow is the /workflows row's tail: the item counted, and the origin.
 	bgSubAgentItems  = "· 1/1 items"
 	bgSubAgentOrigin = "· sub_agent"

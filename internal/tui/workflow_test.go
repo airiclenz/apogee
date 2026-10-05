@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // bgWorkflowID and bgWorkflowName are the one background workflow these tests fold.
@@ -99,6 +100,49 @@ func TestBackgroundWorkflow_FinishWhileIdleWakesTheAgent(t *testing.T) {
 	}
 	if m.wakePending {
 		t.Error("the wake is still pending after it was tried")
+	}
+}
+
+// A background sub_agent's finish line names it as one however it ends, while a fan_out's or a
+// recipe's (no origin) keeps reading as a background workflow. An end phase whose started phase was
+// never folded takes its origin from the end phase itself.
+func TestBackgroundWorkflow_ASubAgentsFinishLineNamesIt(t *testing.T) {
+	t.Parallel()
+	failed := bgPhase(domain.WorkflowFailed)
+	failed.Detail = "disk full"
+	for name, tc := range map[string]struct {
+		origin  string
+		end     domain.WorkflowPhaseEvent
+		started bool
+		want    string
+	}{
+		"sub_agent finished": {workflow.OriginSubAgent, bgEnd(domain.WorkflowFinished, domain.WorkflowTally{OK: 1}), true,
+			"background sub_agent sweep finished — items 1 · ok 1 · partial 0 · blocked 0"},
+		"sub_agent stopped": {workflow.OriginSubAgent, bgEnd(domain.WorkflowStopped, domain.WorkflowTally{Unfinished: 1}), true,
+			"background sub_agent sweep stopped — items 0 · ok 0 · partial 0 · blocked 0"},
+		"sub_agent failed": {workflow.OriginSubAgent, failed, true,
+			"background sub_agent sweep failed — disk full"},
+		"sub_agent ending unstarted": {workflow.OriginSubAgent, bgEnd(domain.WorkflowFinished, domain.WorkflowTally{OK: 1}), false,
+			"background sub_agent sweep finished — items 1 · ok 1 · partial 0 · blocked 0"},
+		"fan_out finished": {"", bgEnd(domain.WorkflowFinished, domain.WorkflowTally{OK: 1}), true, bgFinishLine},
+		"fan_out failed":   {"", failed, true, "background workflow sweep failed — disk full"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModelEng(t, &fakeEngine{}, testOpts)
+			startStubWorker(t, &m)
+			started, end := bgPhase(domain.WorkflowStarted), tc.end
+			started.Origin, end.Origin = tc.origin, tc.origin
+			if tc.started {
+				m = foldEvents(t, m, started)
+			}
+
+			m = foldEvents(t, m, end)
+
+			if !slices.Contains(noteTexts(m), tc.want) {
+				t.Errorf("notes = %q, want the finish line %q", noteTexts(m), tc.want)
+			}
+		})
 	}
 }
 
@@ -711,14 +755,14 @@ func TestBackgroundSubAgent_CallReplaysAsABackgroundCall(t *testing.T) {
 // on the receipt the engine built for it.
 func TestBackgroundSubAgent_FinishLineNamesTheDelegation(t *testing.T) {
 	t.Parallel()
-	const want = "background workflow scout finished — items 1 · ok 1 · partial 0 · blocked 0"
+	const want = "background sub_agent scout finished — items 1 · ok 1 · partial 0 · blocked 0"
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	startStubWorker(t, &m)
 
 	started := bgPhase(domain.WorkflowStarted)
-	started.Name = "scout"
+	started.Name, started.Origin = "scout", workflow.OriginSubAgent
 	end := bgEnd(domain.WorkflowFinished, domain.WorkflowTally{OK: 1})
-	end.Name = "scout"
+	end.Name, end.Origin = "scout", workflow.OriginSubAgent
 	m = foldEvents(t, m, started, end)
 
 	if !slices.Contains(noteTexts(m), want) {

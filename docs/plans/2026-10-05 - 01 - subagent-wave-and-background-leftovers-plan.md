@@ -164,7 +164,10 @@ internal/agent/workflowcall_test.go — TestWorkflowCall_EmitsItsPhases
 **Depends on item 4** (same files).
 **Commit:** `feat(agent): stamp a workflow phase event with its run's origin`
 
-## 7. A background sub_agent's finish line names it
+## 7. A background sub_agent's finish line names it — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the CHANGELOG text above REPLACES the existing [Unreleased] entry "**The TUI shows a background `sub_agent`**" (CHANGELOG.md:30) in place — amend that entry, do not add a second one (plan item 7: supersedes CHANGELOG.md:30).
+NOTES (2026-10-05): backgroundWorkflows.view now takes the phase event (was view(id, name)) so a view opened without a folded started phase takes its origin from the event, as it already took its name; both callers are in foldBackgroundPhase.
 
 **What:**
 Recast at the regression check (2026-10-05).

@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/workflow"
 )
 
 // Background workflows in the TUI (ADR 0089). A background workflow runs beside the conversation,
@@ -54,10 +55,14 @@ import (
 // rebases a view that runs across it (backgroundWorkflows.rebased): the closed session's record took
 // what it had spent, and the fresh one counts only what comes after.
 
-// The words the finish line, the wake's prompt row and the two failure notes are built from.
+// The words the finish line, the wake's prompt row and the two failure notes are built from. A
+// background sub_agent's finish line (ADR 0094) names it as one — subAgentFinishFormat and
+// subAgentFailedFormat — where a fan_out's or a recipe's reads as a background workflow.
 const (
 	backgroundFinishFormat = "background workflow %s %s — %s"
 	backgroundFailedFormat = "background workflow %s failed — %s"
+	subAgentFinishFormat   = "background sub_agent %s %s — %s"
+	subAgentFailedFormat   = "background sub_agent %s failed — %s"
 	wakePromptText         = "(background workflow report)"
 	wakeFailedPrefix       = "could not wake the agent on a background workflow's report: "
 	workflowNoteLostPrefix = "a background workflow's report did not reach the model: "
@@ -88,12 +93,14 @@ type backgroundWorkflows struct {
 	dismissed map[uint64]bool
 }
 
-// backgroundWorkflow is one live background workflow: its name, how many of its prompts wait for
-// the human, and what its runs
+// backgroundWorkflow is one live background workflow: its name, what launched it when that is not a
+// recipe or a fan_out (origin, the phase events' Origin — workflow.OriginSubAgent for a background
+// sub_agent's), how many of its prompts wait for the human, and what its runs
 // have spent — each run's latest reading (spend), less what they had spent when this session began
 // (base, the readings a session boundary rebased the view at).
 type backgroundWorkflow struct {
 	name    string
+	origin  string
 	waiting int
 	spend   runSpend
 	base    runSpend
@@ -298,11 +305,12 @@ func (b backgroundWorkflows) readout() string {
 	return text
 }
 
-// view is id's live view, named from e when no started phase was folded for it.
-func (b backgroundWorkflows) view(id, name string) backgroundWorkflow {
-	view, ok := b.live[id]
+// view is the live view of e's workflow, named and given its origin from e when no started phase
+// was folded for it.
+func (b backgroundWorkflows) view(e domain.WorkflowPhaseEvent) backgroundWorkflow {
+	view, ok := b.live[e.Workflow]
 	if !ok {
-		view.name = name
+		view.name, view.origin = e.Name, e.Origin
 	}
 	return view
 }
@@ -315,16 +323,21 @@ func (v backgroundWorkflow) spent() domain.Usage {
 // finishLine is the transcript line an end phase writes: how the workflow ended and the end phase's
 // item tally (tallyLine) — the items the model's note counts, never a verify or merge step's
 // receipt — or the cause of a failure. A finished or stopped end carrying no tally (only a test
-// builds one) reads as no items.
+// builds one) reads as no items. A background sub_agent's line names it as one (ADR 0094); a
+// fan_out's or a recipe's names a background workflow.
 func (v backgroundWorkflow) finishLine(e domain.WorkflowPhaseEvent) string {
+	finishFormat, failedFormat := backgroundFinishFormat, backgroundFailedFormat
+	if v.origin == workflow.OriginSubAgent {
+		finishFormat, failedFormat = subAgentFinishFormat, subAgentFailedFormat
+	}
 	if e.Phase == domain.WorkflowFailed {
-		return fmt.Sprintf(backgroundFailedFormat, v.name, e.Detail)
+		return fmt.Sprintf(failedFormat, v.name, e.Detail)
 	}
 	var tally domain.WorkflowTally
 	if e.Tally != nil {
 		tally = *e.Tally
 	}
-	return fmt.Sprintf(backgroundFinishFormat, v.name, e.Phase, tallyLine(tally))
+	return fmt.Sprintf(finishFormat, v.name, e.Phase, tallyLine(tally))
 }
 
 // foldBackgroundEvent folds one event owns claimed: into the Inspector's rings, which record every
@@ -363,14 +376,14 @@ func (m Model) foldBackgroundEvent(e domain.Event) Model {
 func (m Model) foldBackgroundPhase(e domain.WorkflowPhaseEvent) Model {
 	switch e.Phase {
 	case domain.WorkflowStarted:
-		m.workflows = m.workflows.withWorkflow(e.Workflow, backgroundWorkflow{name: e.Name})
+		m.workflows = m.workflows.withWorkflow(e.Workflow, backgroundWorkflow{name: e.Name, origin: e.Origin})
 	case domain.WorkflowWaiting:
-		view := m.workflows.view(e.Workflow, e.Name)
+		view := m.workflows.view(e)
 		view.waiting++
 		m.workflows = m.workflows.withWorkflow(e.Workflow, view)
 		m.promptPending = true
 	case domain.WorkflowFinished, domain.WorkflowStopped, domain.WorkflowFailed:
-		view := m.workflows.view(e.Workflow, e.Name)
+		view := m.workflows.view(e)
 		m.workflows = m.workflows.without(e.Workflow)
 		if origin := m.workflowPromptOrigin(); origin != nil && origin.Workflow == e.Workflow {
 			m.closeWorkflowPrompt()
