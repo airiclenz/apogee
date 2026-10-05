@@ -1780,10 +1780,17 @@ func TestWorkflowControl_ADelegateIsRefused(t *testing.T) {
 // workflow control tool and one read-only tool on its menu, a scratch dir and a workspace.
 func backgroundSubAgentConfig(t *testing.T, sink domain.EventSink) domain.Config {
 	t.Helper()
+	return backgroundSubAgentConfigWith(t, sink, false)
+}
+
+// backgroundSubAgentConfigWith is backgroundSubAgentConfig whose sub_agent also publishes `run_on`
+// when seatChoice is set — the only registry under which a call's seat is read at all.
+func backgroundSubAgentConfigWith(t *testing.T, sink domain.EventSink, seatChoice bool) domain.Config {
+	t.Helper()
 	cfg := baseConfig(sink)
 	cfg.Mode = domain.ModeAskBefore
 	reg := domain.NewToolRegistry()
-	_ = reg.Register(tools.NewSubAgentWith(tools.SubAgentOptions{Background: true}))
+	_ = reg.Register(tools.NewSubAgentWith(tools.SubAgentOptions{Background: true, SeatChoice: seatChoice}))
 	_ = reg.Register(tools.NewWorkflow())
 	_ = reg.Register(fakeTool{name: "read_thing", readOnly: true, result: "package main"})
 	cfg.Tools = reg
@@ -1926,16 +1933,23 @@ func TestWorkflowCall_ABackgroundSubAgentIsRefusedBeforeItStartsAWorkflow(t *tes
 
 	for _, tc := range []struct {
 		name, args, want string
+		seatChoice       bool
 	}{
-		{"a continuation", backgroundSubAgentArgsJSON(map[string]any{"continue": "surveyor"}), subAgentBackgroundContinue},
-		{"an empty task", `{"task":"","background":true}`, subAgentBackgroundNoTask},
-		{"an unknown roster", backgroundSubAgentArgsJSON(map[string]any{"tools": []string{"no_such_tool"}}), "no_such_tool"},
+		{name: "a continuation", args: backgroundSubAgentArgsJSON(map[string]any{"continue": "surveyor"}), want: subAgentBackgroundContinue},
+		{name: "an empty task", args: `{"task":"","background":true}`, want: subAgentBackgroundNoTask},
+		{name: "an unknown roster", args: backgroundSubAgentArgsJSON(map[string]any{"tools": []string{"no_such_tool"}}), want: "no_such_tool"},
+		{
+			name:       "an unreadable run_on",
+			args:       backgroundSubAgentArgsJSON(map[string]any{"run_on": "gpu"}),
+			want:       `invalid run_on "gpu": want "session" or "sub-agents-server"`,
+			seatChoice: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			sink := newLockedSink()
-			cfg := backgroundSubAgentConfig(t, sink)
+			cfg := backgroundSubAgentConfigWith(t, sink, tc.seatChoice)
 			up := (&workflowResponder{}).
 				route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, tc.args)).
 				route("please delegate", nil, contentScript("understood"))

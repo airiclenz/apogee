@@ -65,7 +65,10 @@ internal/agent/background_test.go — TestBackground_ANamedSubAgentChildIsRetain
 **Commit:** `fix(agent): keep a retained background sub_agent child across an aborted Exchange`
 **Closes:** apogee-background-child-exchange-rollback
 
-## 2. Pin the unreadable run_on refusal of a background sub_agent
+## 2. Pin the unreadable run_on refusal of a background sub_agent — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the per-row config comes from a new helper `backgroundSubAgentConfigWith(t, sink, seatChoice)`, which `backgroundSubAgentConfig` now delegates to with `false`; its other eight callers and the existing rows' registry are unchanged. The table's rows switched to keyed fields so the new `seatChoice` field need not be spelled `false` on the three existing rows.
+NOTES (2026-10-05): mutation check — flipping the new row to `seatChoice: false` makes it fail (the call starts a background workflow), so the row pins the seat-choice gate as well as the refusal text.
 
 **What:**
 Test-only. A background `sub_agent` call with an unreadable `run_on` (e.g. `"gpu"`) is refused with `invalid run_on "gpu": want "session" or "sub-agents-server"` before any workflow folder exists (`backgroundSubAgentResult`, `internal/agent/workflowcall.go`; `parseDelegationSeat`, `internal/agent/subagent.go`). The check runs only when the tool publishes seat choice, and `backgroundSubAgentConfig` (`workflowcall_test.go`) registers `SubAgentOptions{Background: true}` without `SeatChoice`. Add a `seatChoice bool` field to the table of `TestWorkflowCall_ABackgroundSubAgentIsRefusedBeforeItStartsAWorkflow` and build the config per row, so the existing rows keep their registry unchanged; the new row asserts the refusal text and `len(a.Workflows()) == 0`.
