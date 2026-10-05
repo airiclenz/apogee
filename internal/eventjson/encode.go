@@ -71,10 +71,13 @@ func Kinds() []string {
 // the envelope's turn/depth/call_id/run_id are stamped from, and the value that marshals to the
 // line's `data` object.
 //
-// ok is false for the one SINK-ONLY variant — domain.WireEvent — and for a nil or unrecognised
-// event. The Inspector's raw provider protocol is excluded by ADR 0075 decision 2: putting a wire
-// format on a documented stdout contract would make it part of a public surface. A caller that
-// sees false writes no line at all and, per the same decision, consumes no sequence number for it.
+// ok is false for the two SINK-ONLY variants — domain.WireEvent and domain.SubAgentGroupEvent —
+// and for a nil or unrecognised event. The Inspector's raw provider protocol is excluded by ADR
+// 0075 decision 2: putting a wire format on a documented stdout contract would make it part of a
+// public surface. A sub-agent group's announced size is a drawing Driver's queued count (ADR 0025,
+// amended 2026-10-05) and has no line kind: the stream's tool_call and sub_agent_phase lines
+// already tell a consumer every member as it reaches it. A caller that sees false writes no line at
+// all and, per the same decision, consumes no sequence number for it.
 //
 // ok is false as well for the two workflow phases that describe a Workflow's shape for a Driver
 // that draws it — domain.WorkflowItemStarted and domain.WorkflowStageFinished — which the

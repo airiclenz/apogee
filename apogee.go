@@ -307,6 +307,7 @@ type (
 	ApprovalEvent          = domain.ApprovalEvent
 	TurnEvent              = domain.TurnEvent
 	SubAgentPhaseEvent     = domain.SubAgentPhaseEvent
+	SubAgentGroupEvent     = domain.SubAgentGroupEvent
 	SubAgentNamedEvent     = domain.SubAgentNamedEvent
 	ChildInterjectionEvent = domain.ChildInterjectionEvent
 	ReactionFiredEvent     = domain.ReactionFiredEvent

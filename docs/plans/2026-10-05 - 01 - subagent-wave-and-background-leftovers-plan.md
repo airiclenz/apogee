@@ -99,7 +99,10 @@ docs/adr/0094-sub-agent-may-run-as-a-one-item-background-workflow.md — D8
 **Commit:** `fix(agent): salt a background sub_agent plan with a nonce beside the call id`
 **Closes:** apogee-reused-call-id-resumes-run
 
-## 4. The engine announces a sub-agent group's size
+## 4. The engine announces a sub-agent group's size — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the emission sits in a small helper, `Agent.announceSubAgentGroup`, which `dispatchTools` calls between the leaf group and the delegations' `dispatchGroup`, passing the very width that `dispatchGroup` then receives. `encode.go` skips the event the way it skips `WireEvent`: through the switch's `default` arm, with no explicit case. The doc comment says so.
+NOTES (2026-10-05): the doc comment on `TestEncodeSkipsTheWireEvent` (`encode_test.go`) called WireEvent "the one variant the lines never carry". It now reads "a variant the lines never carry", which is one of the prose sites the item says to reword.
 
 **What:**
 **Goal:** Before the first delegation of a reply's group of two or more `sub_agent` calls is prepared, the engine emits one `domain.SubAgentGroupEvent` carrying the group's size (capped at the fan-out ceiling) and its run width, at every width; `eventjson` writes no line for it; ADR 0025's 2026-10-05 amendment names the event as the Driver's source for the queued count.

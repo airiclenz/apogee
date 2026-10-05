@@ -465,7 +465,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 }
 
 // TestEncodeSkipsTheWireEvent pins ADR 0075 decision 2: the Inspector's raw provider protocol is
-// the one variant the lines never carry, and a caller learns that from ok alone.
+// a variant the lines never carry, and a caller learns that from ok alone.
 func TestEncodeSkipsTheWireEvent(t *testing.T) {
 	t.Parallel()
 
@@ -480,6 +480,26 @@ func TestEncodeSkipsTheWireEvent(t *testing.T) {
 	}
 	if kind != "" || data != nil || base != (domain.EventBase{}) {
 		t.Errorf("Encode(WireEvent) = (%q, %+v, %v, false), want zero values", kind, base, data)
+	}
+}
+
+// TestEncodeSkipsTheSubAgentGroupEvent pins that a sub-agent group's announced size is sink-only:
+// it feeds a drawing Driver's queued count and has no line kind, so the stream carries no line for
+// it and the kind list is unchanged.
+func TestEncodeSkipsTheSubAgentGroupEvent(t *testing.T) {
+	t.Parallel()
+
+	kind, base, data, ok := Encode(domain.SubAgentGroupEvent{
+		EventBase: domain.EventBase{Turn: 1},
+		Size:      3,
+		Width:     1,
+	})
+
+	if ok {
+		t.Fatalf("Encode(SubAgentGroupEvent) ok = true, want false")
+	}
+	if kind != "" || data != nil || base != (domain.EventBase{}) {
+		t.Errorf("Encode(SubAgentGroupEvent) = (%q, %+v, %v, false), want zero values", kind, base, data)
 	}
 }
 

@@ -307,6 +307,13 @@ func foldCases() []foldCase {
 			event: domain.AuditEvent{Tool: "terminal", CallID: "1", Decision: "allowed"},
 		},
 		{
+			name: "SubAgentGroupEvent is inert in the transcript",
+			// Nothing yet: the announced size of a reply's delegation group is the Driver's source
+			// for the wave's queued count (ADR 0025, amended 2026-10-05), and it draws no entry of
+			// its own — the members' own tool-call rows are what the transcript shows.
+			event: domain.SubAgentGroupEvent{Size: 3, Width: 1},
+		},
+		{
 			name: "WireEvent is inert in the transcript",
 			// Nothing here, and deliberately: a raw-protocol record is not a transcript entry —
 			// it says nothing about the conversation and must not disturb entry folding. The

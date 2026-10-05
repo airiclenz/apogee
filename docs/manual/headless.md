@@ -257,8 +257,11 @@ moment, and the case difference is the signal.
 | `run_started` | the opening frame — not an event |
 | `run_finished` | the closing frame — not an event |
 
-The Inspector's raw provider protocol is the one thing never written here: putting a wire format on
-a documented stdout contract would make it a public surface.
+Two things the engine reports are never written here. The Inspector's raw provider protocol is
+kept off because putting a wire format on a documented stdout contract would make it a public
+surface. A sub-agent group's announced size (how many delegations a reply's group will run, and
+at what width) is kept off because it only feeds the TUI's queued count: the `tool_call` and
+`sub_agent_phase` lines already show every delegation as the run reaches it.
 
 ### `--seams` — the seam closures, on request
 

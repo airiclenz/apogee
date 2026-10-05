@@ -254,6 +254,122 @@ func TestFanOut_CapOneKeepsTheGroupSerial(t *testing.T) {
 	}
 }
 
+// groupEvents returns every SubAgentGroupEvent the sink saw, in emission order.
+func groupEvents(events []domain.Event) []domain.SubAgentGroupEvent {
+	var out []domain.SubAgentGroupEvent
+	for _, e := range events {
+		if ge, ok := e.(domain.SubAgentGroupEvent); ok {
+			out = append(out, ge)
+		}
+	}
+	return out
+}
+
+// firstEventIndex is the position in events of the first value of type E, or -1.
+func firstEventIndex[E domain.Event](events []domain.Event) int {
+	for i, e := range events {
+		if _, ok := e.(E); ok {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestFanOut_AnnouncesTheGroupBeforeItsFirstCall pins the group announcement (ADR 0025, amended
+// 2026-10-05): a reply of two or more delegations emits ONE SubAgentGroupEvent before the first
+// ToolCallEvent, at width 1 as at a pool width, its Size capped at the fan-out ceiling when rounds
+// set one and the whole group when rounds is 0, its Width the width the group ran at.
+func TestFanOut_AnnouncesTheGroupBeforeItsFirstCall(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                string
+		sessionCap, rounds  int
+		delegations         int
+		wantSize, wantWidth int
+	}{
+		{name: "serial group, no ceiling", sessionCap: 1, rounds: 0, delegations: 3, wantSize: 3, wantWidth: 1},
+		{name: "serial group capped at the ceiling", sessionCap: 1, rounds: 2, delegations: 3, wantSize: 2, wantWidth: 1},
+		{name: "pooled group, no ceiling", sessionCap: 2, rounds: 0, delegations: 3, wantSize: 3, wantWidth: 2},
+		{name: "pooled group capped at the ceiling", sessionCap: 4, rounds: 2, delegations: 10, wantSize: 8, wantWidth: 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			a := manyFanOutParent(t, sink, tc.sessionCap, tc.rounds, tc.delegations)
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			groups := groupEvents(sink.events)
+			if len(groups) != 1 {
+				t.Fatalf("group events = %+v, want exactly one", groups)
+			}
+			got := groups[0]
+			if got.Size != tc.wantSize || got.Width != tc.wantWidth {
+				t.Errorf("group event = {Size %d, Width %d}, want {Size %d, Width %d}", got.Size, got.Width, tc.wantSize, tc.wantWidth)
+			}
+			groupAt := firstEventIndex[domain.SubAgentGroupEvent](sink.events)
+			callAt := firstEventIndex[domain.ToolCallEvent](sink.events)
+			if callAt < groupAt {
+				t.Fatalf("first ToolCallEvent at %d, group event at %d; want the group announced before any call", callAt, groupAt)
+			}
+			first := sink.events[callAt].(domain.ToolCallEvent)
+			if got.EventBase != first.EventBase {
+				t.Errorf("group event base = %+v, want the parent's own stamp %+v, as its first call carries", got.EventBase, first.EventBase)
+			}
+		})
+	}
+}
+
+// TestFanOut_AnnouncesNoGroupForALoneDelegationOrLeaves pins that no SubAgentGroupEvent is emitted
+// for a reply that is no wave: a single delegation, or a reply of leaf tools alone.
+func TestFanOut_AnnouncesNoGroupForALoneDelegationOrLeaves(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a single delegation", func(t *testing.T) {
+		t.Parallel()
+
+		sink := &recordingSink{}
+		a := manyFanOutParent(t, sink, 2, 0, 1)
+		if _, err := a.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if groups := groupEvents(sink.events); len(groups) != 0 {
+			t.Errorf("group events = %+v, want none for a lone delegation", groups)
+		}
+	})
+
+	t.Run("a leaf-only reply", func(t *testing.T) {
+		t.Parallel()
+
+		sink := &recordingSink{}
+		up := newRoutedResponder().
+			route("list things", nil, toolCallScript("l1", "list_dir", `{}`)).
+			route("list things", nil, contentScript("parent done"))
+		cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "list_dir", readOnly: true, result: "a b"})
+		cfg.ParallelAgents = 2
+		a, err := newAgent(cfg, up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		if err := a.Submit(domain.UserInput{Text: "list things"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if _, err := a.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if groups := groupEvents(sink.events); len(groups) != 0 {
+			t.Errorf("group events = %+v, want none for a reply of leaf tools", groups)
+		}
+		if firstEventIndex[domain.ToolCallEvent](sink.events) < 0 {
+			t.Fatal("the leaf call never reached dispatch; the case proved nothing")
+		}
+	})
+}
+
 // TestFanOut_DepthOneStaysSerial pins decision 3: only the top-level agent fans out. A depth-1
 // child that itself emits two delegations runs its grandchildren one at a time even though the
 // cap it inherited says 4. The depth bound is raised to 2 so the grandchildren can exist at all.

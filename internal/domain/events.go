@@ -258,6 +258,34 @@ type SubAgentPhaseEvent struct {
 	CapRequested int
 }
 
+// SubAgentGroupEvent announces a reply's group of sub_agent delegations BEFORE the first of them is
+// prepared — before its ToolCallEvent — so a Driver knows how many members the group will run even
+// while only some of them are drawn. It exists because the delegations' own events cannot say so at
+// every width: a pooled group emits every member's ToolCallEvent before any child runs, but a
+// serial group (width 1, `parallel-agents: 1`) emits each member's only when the dispatch loop
+// reaches it, so a Driver reading those alone sees one member at a time and cannot tell a wave
+// with members still to run from one that is over. The TUI reads it for the queued readout and the
+// armed-esc hint (ADR 0025, amended 2026-10-05).
+//
+// It is emitted once per reply whose group holds two or more delegations (a background sub_agent
+// call is a leaf and is never counted, ADR 0094 D6), at every width, and never for a single
+// delegation or a reply of leaf tools alone. Size is the number of members that will RUN: the
+// group's delegation count, capped at the fan-out ceiling when one is set (a call past it is
+// refused before it starts). Width is the pool width the group runs at, 1 for a serial group.
+//
+// Its EventBase is the EMITTING agent's identity — the one whose reply holds the group — not a
+// child's: Depth 0 for the top-level agent's group, deeper for a delegate's own.
+//
+// It is OBSERVATION ONLY and in-process: delivered to the Driver's sink like every variant, it is
+// never written as an NDJSON line (internal/eventjson), so ADR 0031's wire-silent engine holds and
+// the headless contract is unchanged. An observer that ignores it loses the queued count and
+// nothing else.
+type SubAgentGroupEvent struct {
+	EventBase
+	Size  int
+	Width int
+}
+
 // SubAgentNamedEvent reports that a delegation the model left unnamed has just been GIVEN a name by
 // the out-of-band naming call (ADR 0068). It is emitted exactly once per generated name, and never
 // for a delegation whose sub_agent call named itself: a name the model gave always wins, so there

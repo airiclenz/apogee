@@ -61,6 +61,8 @@ const (
 // (runWorkflowCall), so it never takes a slot in the delegations' pool and the fan-out ceiling
 // never counts it. So does a sub_agent call this Agent runs in the background (ADR 0094 D6,
 // isBackgroundSubAgentCall): it is answered at once, so it is no member of the round either.
+// Between the two, a group of two or more delegations is announced to the Driver
+// (announceSubAgentGroup), so the members a serial group has not reached yet are known from the start.
 //
 // A cancel is answered where it lands, and every answer keeps the Turn whole: dispatchSettled
 // (ADR 0088). One that reaches a leaf call ends the leaf group there — its cancelled call's result
@@ -78,7 +80,25 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 		a.commitNotRun(turn, delegations)
 		return dispatchSettled
 	}
-	return a.dispatchGroup(ctx, turn, a.fanOutWidthFor(delegations), delegations)
+	width := a.fanOutWidthFor(delegations)
+	a.announceSubAgentGroup(turn, len(delegations), width)
+	return a.dispatchGroup(ctx, turn, width, delegations)
+}
+
+// announceSubAgentGroup emits the SubAgentGroupEvent for a reply's delegation group of two or more,
+// before the first of them is prepared, and nothing for a smaller one: a lone delegation is no wave.
+// It is called from dispatchTools alone — never dispatchGroup, which runs the leaf group too — with
+// the very width the group then runs at. size is capped at the fan-out ceiling when one is set
+// (refusePastCeiling refuses every call past it before it starts), so the event counts the members
+// that will run.
+func (a *Agent) announceSubAgentGroup(turn, size, width int) {
+	if size < 2 {
+		return
+	}
+	if ceiling := a.fanOutCeiling(); ceiling > 0 {
+		size = min(size, ceiling)
+	}
+	a.cfg.Events.Emit(domain.SubAgentGroupEvent{EventBase: a.base(turn), Size: size, Width: width})
 }
 
 // partitionDispatch splits a reply's calls into the leaf tools and the sub_agent delegations,

@@ -104,8 +104,13 @@ of "scheduled": queue, and deliver at the first boundary that exists.
 > caught queued reads `stopped by you` — both in the marker tone, no ✓, never the red `error`, while
 > their wire results keep `IsError: true`; a session replay re-derives the verdict from the stored
 > result, so an old session's skipped rows read neutral too. The fan-out ceiling's refusal stays
-> `error`. Ratified 2026-10-05, implemented by `docs/plans/2026-10-05 - 00`; ADR 0039 is amended the
-> same day.
+> `error`. The Driver's source for the queued count is `domain.SubAgentGroupEvent`, which the
+> engine emits once before the first delegation of a reply's group of two or more is prepared,
+> carrying the group's size (capped at the fan-out ceiling) and its run width at every width. A
+> serial group (`parallel-agents: 1`) draws its members one at a time, so its own events alone
+> could never show the members still to run. The event is in-process only and writes no NDJSON
+> line, so the engine stays wire-silent (added by `docs/plans/2026-10-05 - 01`). Ratified
+> 2026-10-05, implemented by `docs/plans/2026-10-05 - 00`; ADR 0039 is amended the same day.
 
 **3. Three parties, split by what each one owns.** The staging is the TUI's, the delivery is the
 worker's, the commit is the engine's — and the split follows ownership, not convenience:
