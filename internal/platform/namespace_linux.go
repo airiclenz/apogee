@@ -56,20 +56,25 @@ import (
 // side-effect-free (a sink, a source, a private scratch mount), a /proc symlink, or the
 // terminal the child already owns, so the exemption widens nothing the box protects — wider
 // than landlock's exact-/dev/null set, and the contract's §2.3 property 2 names this
-// backend's set.
+// backend's set. Only the Console's pty run owns a terminal: a one-shot run starts in a new
+// session with none (below), so its /dev/tty open fails with ENXIO and it has no
+// /dev/console.
 // `--proc /proc` mounts a fresh procfs so the child sees its own process tree.
 //
 // What passes through untouched: cwd (bwrap chdir's to the parent's directory, which the
 // ro-bind of `/` carries), the environment, and the three standard streams — the
 // execution tool's Dir/Env/Stdin/Stdout/Stderr reach the real child exactly as with the
-// other backends. No `--new-session` (it would detach the child from the terminal the
-// tool drives) and no `--unshare-pid` (a PID namespace would hide the child's process
-// group from the teardown kill).
+// other backends. No `--new-session`: the detach it would buy comes from the fork instead —
+// the subprocess funnel starts a confined one-shot run as a new session's leader (Setsid,
+// internal/subprocess session_unix.go), so bwrap and its child hold no controlling terminal
+// to inject keystrokes into with TIOCSTI — while on the Console's pty run it would detach the
+// child from the terminal the tool drives. And no `--unshare-pid` (a PID namespace would hide
+// the child's process group from the teardown kill).
 //
-// Teardown (§2.4) is two-sided: Setpgid puts bwrap and its child in one process group so
-// the execution tool's negative-PID kill reaps both, and `--die-with-parent` makes the
-// kernel deliver SIGKILL to the child the moment bwrap itself dies, so a child that
-// escaped the group cannot outlive its launcher.
+// Teardown (§2.4) is two-sided: Setpgid — Setsid once the run is started as a session —
+// puts bwrap and its child in one process group so the execution tool's negative-PID kill
+// reaps both, and `--die-with-parent` makes the kernel deliver SIGKILL to the child the
+// moment bwrap itself dies, so a child that escaped the group cannot outlive its launcher.
 //
 // Network follows landlock's semantics (ADR 0012): open by default, and a non-empty
 // NetworkAllow opts the box into deny-all via `--unshare-net` — an empty network

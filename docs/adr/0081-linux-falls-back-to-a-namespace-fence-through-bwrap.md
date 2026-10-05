@@ -115,6 +115,16 @@ Never `--new-session` (it would detach the child from the terminal the tool driv
 flag line is a **pure function of the box** and is unit-tested as argv with no process, exactly as
 seatbelt's profile string is.
 
+> **Amended 2026-10-05 — a confined one-shot run starts in a new session.** "It would detach the
+> child from the terminal the tool drives" above held only for the Console's pty run: a one-shot
+> run kept apogee's own controlling terminal, so a confined command could open `/dev/tty` and
+> `TIOCSTI` keystrokes into the operator's terminal (2026-10-05 code audit). The subprocess funnel
+> now starts every confined POSIX run — this backend, landlock and seatbelt — with `Setsid` in place
+> of `Setpgid` (contract §2.4), so the detach comes from the fork, `/dev/tty` fails with `ENXIO`, and
+> bwrap holds no terminal to bind at `/dev/console`. The argv still never carries `--new-session`
+> (the Console keeps its pty as the controlling terminal), and the teardown is unchanged: a session
+> leader's PGID is its PID, the group the negative-PID kill aims at.
+
 **4. The construction probe launches bwrap for real.** "bwrap is installed" is not "bwrap can fence
 here": kernels and profiles that refuse `CLONE_NEWUSER` to an unprivileged process
 (`kernel.apparmor_restrict_unprivileged_userns`, a seccomp filter, `user.max_user_namespaces=0`)

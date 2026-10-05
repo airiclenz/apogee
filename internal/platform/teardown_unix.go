@@ -12,7 +12,10 @@ import (
 //   - SysProcAttr.Setpgid so the child and its descendants share a process group. The
 //     Confiner backend also sets this when it wraps the command (seatbelt / landlock
 //     re-exec); setting it here too is what gives an UNCONFINED subprocess (the lower
-//     modes, or confine-to-workspace=false) the same clean teardown.
+//     modes, or confine-to-workspace=false) the same clean teardown. A confined run the
+//     subprocess funnel starts then trades Setpgid for Setsid (internal/subprocess,
+//     session_unix.go): a new session, so the child holds no controlling terminal, whose
+//     leader's PGID is its PID — the same group this kill aims at.
 //   - cmd.Cancel signals the whole group — SIGKILL to the negative PID (-pgid) — when
 //     the run's context is cancelled or times out, so a cancelled/timed-out command
 //     orphans nothing the group still holds: its children go with it, and when confined
@@ -55,13 +58,13 @@ func NewProcessTeardown(cmd *exec.Cmd) ProcessTeardown {
 	return pgroupTeardown{}
 }
 
-// killProcessGroup SIGKILLs the whole process group. Killing -PID targets the group (Setpgid
-// put the child in its own group whose PGID == its PID), reaping descendants the wrapper
-// spawned. A "process already finished" is benign.
+// killProcessGroup SIGKILLs the whole process group. Killing -PID targets the group (Setpgid —
+// or, on a confined run, Setsid — put the child in its own group whose PGID == its PID),
+// reaping descendants the wrapper spawned. A "process already finished" is benign.
 func killProcessGroup(cmd *exec.Cmd) {
-	// treeHeld is unconditionally true here: Setpgid establishes the group at fork, before
-	// the child can spawn anything, so the group holds every descendant that has not
-	// deliberately left it. A descendant that called setsid/setpgid(0,0) is outside the
+	// treeHeld is unconditionally true here: Setpgid (Setsid on a confined run) establishes
+	// the group at fork, before the child can spawn anything, so the group holds every
+	// descendant that has not deliberately left it. A descendant that called setsid/setpgid(0,0) is outside the
 	// group and outside this kill (see NewProcessTeardown); treeHeld describes the
 	// container, not escape from it. The leader-only rung is Windows', where the job
 	// assignment can be refused.

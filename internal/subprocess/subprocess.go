@@ -182,6 +182,10 @@ type SubprocessResult struct {
 //     the "confine if you can, gate if you can't" runtime net (carried finding #2). The
 //     subprocess is NOT run unconfined when confinement was required and failed — a handle
 //     whose Confiner is nil is that same failure, reported rather than run around.
+//   - On POSIX a confined run starts as the leader of a new session (Setsid in place of
+//     Setpgid), so it has no controlling terminal: a confined command cannot open /dev/tty
+//     and inject keystrokes into the operator's terminal. The teardown is unchanged — the
+//     session leader's PGID is its PID, the group the negative-PID kill aims at.
 //
 // The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back)
 // or a confinement-unavailable demotion; a clean non-zero process exit is a normal result
@@ -271,7 +275,7 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 
 	// Wire the process-tree teardown BEFORE confining: the Confiner only appends to
 	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
-	// two compose. The returned handle is what the teardown needs once the process exists —
+	// two compose — and a confined POSIX run then trades that Setpgid for Setsid below. The returned handle is what the teardown needs once the process exists —
 	// nothing on POSIX, the Job Object assignment on Windows (internal/platform/teardown.go).
 	newTeardown := spec.NewTeardown
 	if newTeardown == nil {
@@ -306,6 +310,12 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		if err := prepare(cmd); err != nil {
 			return SubprocessResult{}, err
 		}
+	}
+	// A confined child starts a new session instead of joining a bare process group, so it
+	// holds no controlling terminal to inject keystrokes into; the group kill still reaches it,
+	// a session leader's PGID being its PID (session_unix.go).
+	if confined {
+		startConfinedSession(cmd)
 	}
 	// The box the run was fenced by rides along on the result: it is what the denial labels
 	// name the writable roots from, and this is the only place it is in hand.

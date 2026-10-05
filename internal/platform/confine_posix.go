@@ -73,6 +73,11 @@ func wrapArgvUnderLauncher(cmd *exec.Cmd, launcher string, prefix ...string) err
 // execution tool's negative-PID kill reaps the whole group (confinement-execution-contract
 // §2.4); the tool sets cmd.Cancel/WaitDelay (P3.8). An existing SysProcAttr is kept rather
 // than replaced — the caller may have set other fields — and only Setpgid is turned on.
+// No production caller runs the child as a bare group: the subprocess funnel upgrades a
+// confined run to a new session (Setsid in place of Setpgid, internal/subprocess
+// session_unix.go) so it holds no controlling terminal, and the Console swaps it for Setsid +
+// Setctty on its own pty. A session leader's PGID is its PID, so the negative-PID kill reaches
+// the same group.
 func setConfinedPgid(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}

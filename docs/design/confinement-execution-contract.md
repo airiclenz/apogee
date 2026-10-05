@@ -224,10 +224,15 @@ cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "-
 The original `Stdin/Stdout/Stderr/Dir/Env` are inherited by `bwrap`, which execs the real child inside
 a user namespace and a mount namespace whose root is a read-only bind of `/` with the box's roots bound
 read-write over it: an out-of-box write fails with **EROFS**. `Setpgid` puts `bwrap` and its child in one
-process group (§2.4) and `--die-with-parent` kills the child when `bwrap` dies. The flag line is a
+process group (§2.4 — on a one-shot run, a new session whose leader's PGID is its PID) and
+`--die-with-parent` kills the child when `bwrap` dies. The flag line is a
 **pure function of the box** and is unit-tested as argv with no process (hermetic), exactly as the
-seatbelt profile is. Never `--new-session` (it would detach the child from the tool's terminal) and never
-`--unshare-pid` (it would hide the child's process group from the teardown kill). The parent process is
+seatbelt profile is. Never `--new-session` and never
+`--unshare-pid` (it would hide the child's process group from the teardown kill). *(Amended 2026-10-05,
+code audit:)* the detach `--new-session` would buy comes from the fork instead — the subprocess funnel
+starts every confined one-shot run as a session leader (§2.4), so bwrap and its child hold no
+controlling terminal to inject keystrokes into with `TIOCSTI` — while on the Console's pty run the flag
+would detach the child from the terminal the tool drives. The parent process is
 never restricted; a backend whose construction probe failed (§5) answers every `Confine` with
 `ErrConfinementUnavailable` carrying the reason — never an unfenced run.
 
@@ -263,7 +268,9 @@ Three properties of the exemption are contract, not incident:
    a private `tmpfs` at `/dev/shm`; and, only when bwrap itself holds a controlling terminal, that
    terminal at `/dev/console`. Each entry is either side-effect-free (a sink, a source, a private
    scratch mount), a symlink into the child's own `/proc` view, or the terminal the child already
-   owns, so the wider set widens nothing the box protects; it is still backend-level (property 1
+   owns *(2026-10-05: only the Console's pty run owns one — a one-shot run starts in a new session
+   with no controlling terminal, §2.4, so its `/dev/tty` open fails with `ENXIO` and it has no
+   `/dev/console`)*, so the wider set widens nothing the box protects; it is still backend-level (property 1
    holds — nothing is synthesised into the box) and any further widening is again a change to this
    contract.
 3. **Reads are untouched.** No backend fences reads (landlock never handles read; the seatbelt
@@ -286,6 +293,15 @@ descendant can do to leave it (the residual below).
 - **Backend obligation (POSIX):** `Confine` sets `cmd.SysProcAttr.Setpgid = true` so the wrapped child
   and its descendants share a process group. The Windows backend sets **no** `SysProcAttr` field other
   than `Token` (§9.2) — its container is owned entirely by the tool, below.
+  **Amended 2026-10-05 (code audit — confined children kept the controlling terminal): a confined
+  one-shot run is a session, not a bare group.** After `Confine`, the subprocess funnel
+  (`internal/subprocess`, `session_unix.go`) replaces `Setpgid` with `Setsid` on every POSIX backend
+  — bwrap, landlock and seatbelt alike — so the child leads a new session with no controlling
+  terminal: `/dev/tty` fails with `ENXIO`, and a confined command cannot `TIOCSTI` keystrokes into the
+  operator's terminal. Replace, never add: Go runs `setpgid` after `setsid` in the child, and
+  `setpgid` on a session leader fails with `EPERM`. The container is unchanged — a session leader's
+  PGID is its PID, the group the negative-PID kill below aims at. The Console's pty run keeps its
+  own `Setsid` + `Setctty` on the pty, the one confined run that owns a terminal.
 - **Tool obligation (P3.8) — POSIX:** the execution tools set `cmd.Cancel` to signal the **negative PID**
   (`syscall.Kill(-cmd.Process.Pid, SIGKILL)`) and set a short `cmd.WaitDelay`, so a ctx cancel / timeout
   reaps the whole group — no orphaned `sandbox-exec`, no orphaned child.

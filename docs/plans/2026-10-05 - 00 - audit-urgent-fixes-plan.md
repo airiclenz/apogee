@@ -204,7 +204,11 @@ NOTES (2026-10-05): landlock_linux.go's header comment and applyLandlock doc com
 
 **Commit:** `fix(platform): lock the OS thread before landlock restrict and exec`
 
-## 7. Start confined non-Console runs in a new session
+## 7. Start confined non-Console runs in a new session — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): consequential edit — internal/subprocess/doc.go: made necessary by adding session_unix.go / session_windows.go (the package's "files, one line each" map).
+NOTES (2026-10-05): the seatbelt.go / landlock_linux.go Confine docs ("sets Setpgid so the caller's process-group kill reaches the wrapped child") stay as they are: Confine still sets Setpgid, and setConfinedPgid's doc now says the funnel upgrades it to a session.
+NOTES (2026-10-05): the auto-mode classifier refused the whole-package `go test -race ./internal/subprocess/` run (machine rule), so the implementer ran only the three new tests under -race (pass); the /dev/tty ENXIO test skips without a controlling tty and was run under `script` (pass, and fails with the call removed). The verifier should run the package suite as the machine rule allows.
 
 **What:** Fixes the audit finding "bwrap-confined children keep the controlling terminal and can inject keystrokes" (TIOCSTI via `/dev/tty`), for every POSIX backend per the ratified call.
 
