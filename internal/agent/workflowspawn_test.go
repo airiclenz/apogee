@@ -734,6 +734,39 @@ func TestReadPromptRefusesASymlinkOutOfTheSkillFolder(t *testing.T) {
 	}
 }
 
+// A fan_out plan's prompt file, read from the workspace, is pinned to the workspace root: a symlink
+// out of it is refused and its bytes never reach the brief, an absolute symlink is refused even
+// when it resolves inside, and a relative in-workspace symlink still reads.
+func TestReadPromptRefusesASymlinkOutOfTheWorkspace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "real.md"), []byte("in the workspace"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for target, name := range map[string]string{
+		writeOutsideSecret(t):               "escaping.md",
+		filepath.Join(workspace, "real.md"): "absolute.md",
+		"real.md":                           "inside.md",
+	} {
+		if err := os.Symlink(target, filepath.Join(workspace, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spawner := &workflowSpawner{parent: &Agent{cfg: domain.Config{WorkspaceDir: workspace}}}
+
+	if body, err := spawner.readPrompt("escaping.md"); err == nil || strings.Contains(body, "HOST SECRET") {
+		t.Errorf("readPrompt(escaping symlink) = %q, %v; want a refusal without the outside bytes", body, err)
+	}
+	if body, err := spawner.readPrompt("absolute.md"); err == nil || !strings.Contains(err.Error(), "absolute.md") {
+		t.Errorf("readPrompt(absolute in-workspace symlink) = %q, %v; want a refusal naming the file", body, err)
+	}
+	if body, err := spawner.readPrompt("inside.md"); err != nil || body != "in the workspace" {
+		t.Errorf("readPrompt(in-workspace symlink) = %q, %v; want the workspace's file", body, err)
+	}
+}
+
 // A disk recipe whose skill folder was removed after discovery fails its prompt read — it never
 // falls back to a same-named file in the workspace.
 func TestReadPromptOfARemovedSkillFolderNeverReadsTheWorkspace(t *testing.T) {

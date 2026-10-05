@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -362,5 +363,137 @@ func (l liveFolder) assertRefused(t *testing.T, answer, lead string, sink *locke
 		if phase, ok := event.(domain.WorkflowPhaseEvent); ok && phase.Workflow == l.id && !phase.Background {
 			t.Errorf("the refused re-issue reported %+v", phase)
 		}
+	}
+}
+
+// TestLaunch_WorkspaceReadsStayInsideTheWorkspaceRoot pins the Runner's workspace to its root
+// (security.RootFS): a fan_out whose source or context file is a symlink out of the workspace, or
+// an absolute symlink even into it, fails naming that source and no child is asked about what lies
+// behind it; a relative symlink that stays inside still reads.
+func TestLaunch_WorkspaceReadsStayInsideTheWorkspaceRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		// arrange lays the workspace out and returns the fan_out's `over` and `context`.
+		arrange func(t *testing.T, workspace string) (over any, contextFiles []string)
+		// want is the text the fan_out answer carries; leaked is a child's routing key that
+		// must never be asked, "" when the case expects the run to read and ask "check alpha".
+		want   string
+		leaked string
+	}{
+		{
+			name: "lines: an escaping symlink",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				mustSymlink(t, writeOutsideSecret(t), filepath.Join(workspace, "items.txt"))
+				return map[string]string{"lines": "items.txt"}, nil
+			},
+			want: "lines: items.txt", leaked: "HOST SECRET",
+		},
+		{
+			name: "lines: an absolute symlink into the workspace",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				writeWorkspaceFile(t, workspace, "real.txt", "alpha")
+				mustSymlink(t, filepath.Join(workspace, "real.txt"), filepath.Join(workspace, "items.txt"))
+				return map[string]string{"lines": "items.txt"}, nil
+			},
+			want: "lines: items.txt", leaked: "check alpha",
+		},
+		{
+			name: "files: a prefix that escapes",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				mustSymlink(t, filepath.Dir(writeOutsideSecret(t)), filepath.Join(workspace, "docs"))
+				return map[string]string{"files": "docs/*.txt"}, nil
+			},
+			want: "files: docs/*.txt", leaked: "secret.txt",
+		},
+		{
+			name: "files: a prefix that is an absolute symlink into the workspace",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				writeWorkspaceFile(t, workspace, "real/a.txt", "a")
+				mustSymlink(t, filepath.Join(workspace, "real"), filepath.Join(workspace, "docs"))
+				return map[string]string{"files": "docs/*.txt"}, nil
+			},
+			want: "files: docs/*.txt", leaked: "docs/a.txt",
+		},
+		{
+			name: "split: a directory that escapes",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				mustSymlink(t, filepath.Dir(writeOutsideSecret(t)), filepath.Join(workspace, "docs"))
+				return map[string]string{"split": "docs"}, nil
+			},
+			want: "split: docs", leaked: "secret.txt",
+		},
+		{
+			name: "a context file that escapes",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				mustSymlink(t, writeOutsideSecret(t), filepath.Join(workspace, "ctx.md"))
+				return []string{"alpha"}, []string{"ctx.md"}
+			},
+			want: `context file "ctx.md"`, leaked: "check alpha",
+		},
+		{
+			name: "lines: a relative symlink inside the workspace",
+			arrange: func(t *testing.T, workspace string) (any, []string) {
+				writeWorkspaceFile(t, workspace, "real.txt", "alpha")
+				mustSymlink(t, "real.txt", filepath.Join(workspace, "items.txt"))
+				return map[string]string{"lines": "items.txt"}, nil
+			},
+			want: "#1 alpha — ok — alpha is fine",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := workflowConfig(t, sink)
+			cfg.Context.MaxContextTokens = 65536 // room for a split: source to size its parts by
+			over, contextFiles := tc.arrange(t, cfg.WorkspaceDir)
+			args, err := json.Marshal(map[string]any{
+				"task": fanOutTask, "over": over, "context": contextFiles,
+				"returns": map[string]string{"count": "int"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			up := (&workflowResponder{}).
+				route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, string(args))).
+				route("please fan out", nil, contentScript("all done")).
+				route("check alpha", nil, finishScript("f1", "alpha is fine"))
+			if tc.leaked != "" && tc.leaked != "check alpha" {
+				up.route(tc.leaked, nil, finishScript("f2", "read it"))
+			}
+
+			runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+			got := callResult(t, sink.events, "fo1")
+			if !strings.Contains(got.Content, tc.want) || strings.Contains(got.Content, "HOST SECRET") {
+				t.Errorf("fan_out answer = %q (error %t), want it to carry %q and never the outside bytes",
+					got.Content, got.IsError, tc.want)
+			}
+			if tc.leaked == "" {
+				if got.IsError || up.askedCount("check alpha") != 1 {
+					t.Errorf("in-root symlink: answer error %t, children asked %d; want the item read and run",
+						got.IsError, up.askedCount("check alpha"))
+				}
+				return
+			}
+			if !got.IsError {
+				t.Errorf("fan_out answer is not an error: %q", got.Content)
+			}
+			if asked := up.askedCount(tc.leaked); asked != 0 {
+				t.Errorf("a child was asked about %q %d times, want never", tc.leaked, asked)
+			}
+		})
+	}
+}
+
+// mustSymlink links name to target, failing the test when the link cannot be made.
+func mustSymlink(t *testing.T, target, name string) {
+	t.Helper()
+	if err := os.Symlink(target, name); err != nil {
+		t.Fatal(err)
 	}
 }

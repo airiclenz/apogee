@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -38,6 +37,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
@@ -395,8 +395,9 @@ func (s *workflowSpawner) task(spec workflow.ItemSpec) (string, error) {
 }
 
 // readPrompt reads a stage's prompt file from the spawner's prompt source, else from the
-// workspace. The path must name a file inside that source: fs.FS refuses an absolute path and
-// every `..` climb.
+// workspace, pinned to its root by security.RootFS. The path must name a file inside that source:
+// fs.FS refuses an absolute path and every `..` climb, and the root refuses a symlink that leaves
+// it, or any absolute one.
 func (s *workflowSpawner) readPrompt(name string) (string, error) {
 	source := s.prompts
 	if source == nil {
@@ -404,7 +405,7 @@ func (s *workflowSpawner) readPrompt(name string) (string, error) {
 		if root == "" {
 			return "", fmt.Errorf("prompt file %q: no workspace to read it from", name)
 		}
-		source = os.DirFS(root)
+		source = security.RootFS(root)
 	}
 	clean := path.Clean(filepath.ToSlash(name))
 	if !fs.ValidPath(clean) {

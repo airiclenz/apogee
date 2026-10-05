@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
@@ -176,8 +176,9 @@ func (a *Agent) launchRunner(launch workflowLaunch) (builtLaunch, error) {
 
 // newLaunchRunner builds the unwired Runner launch runs under, its width and split budget sized for
 // launch's seat: the session's workflow store under its scratch directory, the workspace the items
-// are read from, the split budget a `split:` source cuts to, the dispatch width, the second chances
-// and the Agent's clock (a.now) its folders are stamped by. Width and split budget follow the seat
+// are read from (pinned to its root by security.RootFS, so a symlink out of it reads nothing), the
+// split budget a `split:` source cuts to, the dispatch width, the second chances and the Agent's
+// clock (a.now) its folders are stamped by. Width and split budget follow the seat
 // (workflowWidthOn, workflowContextLimitOn) — the cap and window of the server the children run on,
 // width 1 on a delegate — and the Runner never runs more children than a stage has items, so the
 // width in effect is min(width, N). A recipe's Runner also reads its prompt files from the skill's
@@ -207,7 +208,7 @@ func (a *Agent) newLaunchRunner(launch workflowLaunch, recipe *workflow.Recipe) 
 	split := workflow.NewSplitBudget(a.workflowContextLimitOn(launch.seat))
 	runner := &workflow.Runner{
 		Store:         store,
-		Workspace:     os.DirFS(a.cfg.WorkspaceDir),
+		Workspace:     security.RootFS(a.cfg.WorkspaceDir),
 		Split:         split,
 		Width:         a.workflowWidthOn(launch.seat),
 		Retries:       a.cfg.Workflow.ResolvedRetries(),

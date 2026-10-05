@@ -125,7 +125,10 @@ NOTES (2026-10-05): bite check run — with item 1's internal/agent/background.g
 
 **Commit:** `refactor(security): share an os.Root-pinned workspace FS`
 
-## 4. Pin the workflow runner's workspace and fan_out prompts to the workspace root
+## 4. Pin the workflow runner's workspace and fan_out prompts to the workspace root — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): tests also cover a `split:` directory and a context file that escape, beyond the plan's listed cases, since the Goal names both; the launch test sets a 65536-token window so `split:` reaches its read instead of refusing for want of a budget.
+NOTES (2026-10-05): internal/workflow/stages.go pickEntries still reads the workflow folder through os.DirFS; that is item 5's scope (symlinked scratch reads) and was left untouched.
 
 **What:** Depends on item 3. Fixes the audit finding "Workflow runner reads follow symlinks out of the workspace": `lines:`, `files:`/`split:` walks, context files and fan_out prompt files are read through `os.DirFS`, which follows symlinks out.
 
