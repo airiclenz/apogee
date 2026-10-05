@@ -580,6 +580,46 @@ func TestRunSubprocessCapsAnOversizeStdout(t *testing.T) {
 	}
 }
 
+// TestRunSubprocessReportsTruncatedStdout pins Truncated against the buffer that holds stdout:
+// an oversize stdout sets it on a plain run and on a SplitStdout run (the command-config probe's
+// shape), while an oversize STDERR beside a split stdout does not — the payload a caller parses
+// is whole there — and neither does a run inside the cap.
+func TestRunSubprocessReportsTruncatedStdout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the flag it pins is platform-independent")
+	}
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		script        string
+		isSplit       bool
+		wantTruncated bool
+	}{
+		{name: "plain oversize stdout", script: oversizeStdoutScript, wantTruncated: true},
+		{name: "split oversize stdout", script: oversizeStdoutScript, isSplit: true, wantTruncated: true},
+		{name: "split oversize stderr", script: oversizeStdoutScript + " >&2 ; echo payload", isSplit: true},
+		{name: "plain within the cap", script: "echo payload"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			res, err := RunSubprocess(context.Background(), SubprocessSpec{
+				Argv:        []string{"/bin/sh", "-c", tc.script},
+				SplitStdout: tc.isSplit,
+			})
+
+			if err != nil {
+				t.Fatalf("RunSubprocess err = %v, want nil", err)
+			}
+			if res.Truncated != tc.wantTruncated {
+				t.Errorf("Truncated = %v, want %v", res.Truncated, tc.wantTruncated)
+			}
+		})
+	}
+}
+
 // TestRunSubprocessToStreamsStdoutUncapped pins the streaming variant against the capped one: the
 // SAME oversize payload reaches the caller's writer whole and byte-identical, because a caller
 // splicing a child's stdout into a file has no business receiving a truncation marker in the
@@ -612,6 +652,9 @@ func TestRunSubprocessToStreamsStdoutUncapped(t *testing.T) {
 	}
 	if res.Stdout != "" {
 		t.Errorf("Stdout = %q, want empty — the payload left through the writer", res.Stdout)
+	}
+	if res.Truncated {
+		t.Error("Truncated = true, want false — the streamed payload is never capped")
 	}
 }
 

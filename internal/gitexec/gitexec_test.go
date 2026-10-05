@@ -683,3 +683,125 @@ func TestHost_ZeroValueIsTheOS(t *testing.T) {
 		}
 	}
 }
+
+// TestHost_RefusesAnIncompleteCommandConfigProbe pins that the probe fails closed: a probe call
+// that timed out, wedged its drain or overran the output cap refuses both Capture (a failed
+// outcome) and Run (an error) with a sentence naming the incomplete call, and launches no
+// command. The next call, with git answering cleanly, probes afresh and passes — the incomplete
+// answer was never memoised either way.
+func TestHost_RefusesAnIncompleteCommandConfigProbe(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		call   string
+		broken subprocess.SubprocessResult
+		step   string
+	}{
+		{
+			name:   "listing timed out",
+			call:   " config --local ",
+			broken: subprocess.SubprocessResult{TimedOut: true, ExitCode: -1, Stdout: "file:.git/config\x00user.name\nx\x00"},
+			step:   "git config --local timed out",
+		},
+		{
+			name:   "listing drain wedged",
+			call:   " config --local ",
+			broken: subprocess.SubprocessResult{DrainWedged: true, ExitCode: -1},
+			step:   "git config --local: output drain wedged",
+		},
+		{
+			name:   "listing truncated",
+			call:   " config --worktree ",
+			broken: subprocess.SubprocessResult{Truncated: true, Stdout: "file:.git/config\x00user.name\nx\x00file:.git/con"},
+			step:   "git config --worktree printed more than",
+		},
+		{
+			name:   "rev-parse timed out with no output",
+			call:   " rev-parse --git-path ",
+			broken: subprocess.SubprocessResult{TimedOut: true, ExitCode: -1},
+			step:   "git rev-parse --git-path timed out",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gitPath, root := outsideGit(t), t.TempDir()
+			isBroken := true
+			host, spawned := fakeHost(gitPath, cleanRepository(func(string) subprocess.SubprocessResult {
+				return subprocess.SubprocessResult{Stdout: "PAYLOAD"}
+			}))
+			clean := host.Spawn
+			host.Spawn = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+				if isBroken && strings.Contains(strings.Join(spec.Argv, " "), tc.call) {
+					*spawned = append(*spawned, spec)
+					return tc.broken, nil
+				}
+				return clean(ctx, spec)
+			}
+
+			captured, captureErr := host.Capture(context.Background(), gitPath, root, testTimeout, "status")
+			_, runErr := host.Run(context.Background(), root, nil, testTimeout, "status")
+			isBroken = false
+			before := len(*spawned)
+			passed, passErr := host.Capture(context.Background(), gitPath, root, testTimeout, "status")
+
+			if captureErr != nil || captured.ExitCode != 1 || !isIncompleteRefusal(captured.CombinedOutput, tc.step) {
+				t.Errorf("Capture = %q (exit %d, err %v), want the incomplete-probe refusal naming %q",
+					captured.CombinedOutput, captured.ExitCode, captureErr, tc.step)
+			}
+			if runErr == nil || !isIncompleteRefusal(runErr.Error(), tc.step) {
+				t.Errorf("Run err = %v, want the incomplete-probe refusal naming %q", runErr, tc.step)
+			}
+			for _, spec := range (*spawned)[:before] {
+				if strings.HasSuffix(strings.Join(spec.Argv, " "), " status") {
+					t.Errorf("the refused command was launched: %q", spec.Argv)
+				}
+			}
+			if passErr != nil || passed.ExitCode != 0 || passed.Stdout != "PAYLOAD" {
+				t.Errorf("Capture after a clean probe = %+v (err %v), want the command's own outcome", passed, passErr)
+			}
+			if !launchedProbe(*spawned, before) {
+				t.Error("the clean call launched no probe — an incomplete answer was memoised")
+			}
+		})
+	}
+}
+
+// isIncompleteRefusal reports whether text is the incomplete-probe refusal and names step.
+func isIncompleteRefusal(text, step string) bool {
+	return strings.HasPrefix(text, "git refused:") && strings.Contains(text, "did not complete") &&
+		strings.Contains(text, step)
+}
+
+// launchedProbe reports whether any spec launched from index from on is the probe's rev-parse.
+func launchedProbe(spawned []subprocess.SubprocessSpec, from int) bool {
+	for _, spec := range spawned[from:] {
+		if strings.Contains(strings.Join(spec.Argv, " "), " rev-parse --git-path ") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestHost_CapturePassesAWorktreeListingThatExits128 pins the pass case the fail-closed probe
+// keeps: a --worktree listing git finishes with exit 128 (the scope does not apply) is a clean
+// answer, not an incomplete one, so the command runs.
+func TestHost_CapturePassesAWorktreeListingThatExits128(t *testing.T) {
+	t.Parallel()
+	gitPath := outsideGit(t)
+	host, _ := fakeHost(gitPath, func(argv string) subprocess.SubprocessResult {
+		switch {
+		case strings.Contains(argv, " config --worktree "):
+			return subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: --worktree cannot be used"}
+		case strings.Contains(argv, " rev-parse --git-path "), strings.Contains(argv, " config --local "):
+			return subprocess.SubprocessResult{}
+		}
+		return subprocess.SubprocessResult{CombinedOutput: "PAYLOAD"}
+	})
+
+	res, err := host.Capture(context.Background(), gitPath, t.TempDir(), testTimeout, "status")
+
+	if err != nil || res.ExitCode != 0 || res.CombinedOutput != "PAYLOAD" {
+		t.Errorf("Capture = %+v (err %v), want the command's own outcome", res, err)
+	}
+}

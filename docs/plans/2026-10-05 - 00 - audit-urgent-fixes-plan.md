@@ -235,7 +235,10 @@ NOTES (2026-10-05): the auto-mode classifier refused the whole-package `go test 
 
 **Commit:** `fix(subprocess): detach confined runs from the controlling terminal`
 
-## 8. Make the git command-config probe fail closed
+## 8. Make the git command-config probe fail closed — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the incomplete state travels as an unexported error (errIncompleteProbe) that probeGit returns for a TimedOut / DrainWedged / Truncated result, rather than as an extra return value on repoLocalCommandConfig and configFiles. Both already propagate probeGit's error unchanged, and probeCommandConfig never caches an error. probeCommandConfig now returns the refusal sentence ("" = pass) instead of the key names, so Capture and queryDiagnosed share one rendering via commandConfigProbe.refusal / CommandConfigIncompleteRefusal (exported, "git refused:" prefix).
+NOTES (2026-10-05): SubprocessResult.Truncated is read through a new unexported CappedBuffer.overran() (under the buffer's mutex). TestRunSubprocessToStreamsStdoutUncapped gained a Truncated == false assertion for RunSubprocessTo. Whole-package runs were made without -race (gitexec, subprocess: ok). The new and touched tests passed under -race via -run. golangci-lint on both packages: 0 issues.
 
 **What:** Depends on item 7. Fixes the audit finding "Git command-config probe fails open on truncation, timeout or wedged drain".
 

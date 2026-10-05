@@ -250,14 +250,17 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // The probe behind that refusal is memoised per repository (commandConfigProbes) and re-run
 // only when a file that decided its answer changes, so it costs its three subprocesses once per
 // config rather than on every git call. A root no repository reaches is never memoised: it is
-// probed afresh on every call, so a `git init` made mid-session is seen by the next one.
+// probed afresh on every call, so a `git init` made mid-session is seen by the next one. A probe
+// that could not complete — a call timed out, wedged its drain or overran the output cap — is
+// refused the same way ([CommandConfigIncompleteRefusal]) and never memoised: an answer git did
+// not finish giving is never read as a clean one.
 func (h Host) Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	drivers, err := h.probeCommandConfig(ctx, gitPath, root, nil)
+	refusal, err := h.probeCommandConfig(ctx, gitPath, root, nil)
 	if err != nil {
 		return subprocess.SubprocessResult{}, err
 	}
-	if len(drivers) > 0 {
-		return subprocess.SubprocessResult{CombinedOutput: CommandConfigRefusal(drivers), ExitCode: 1}, nil
+	if refusal != "" {
+		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, nil
 	}
 	return h.CaptureUnchecked(ctx, gitPath, root, nil, timeout, args...)
 }
@@ -382,12 +385,12 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 	if len(args) == 0 {
 		return "", "", errors.New("apogee: gitexec: no git subcommand")
 	}
-	drivers, err := h.probeCommandConfig(ctx, gitPath, dir, env)
+	refusal, err := h.probeCommandConfig(ctx, gitPath, dir, env)
 	if err != nil {
 		return "", "", err
 	}
-	if len(drivers) > 0 {
-		return "", "", errors.New(CommandConfigRefusal(drivers))
+	if refusal != "" {
+		return "", "", errors.New(refusal)
 	}
 
 	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, args...)
@@ -500,6 +503,15 @@ func (p commandConfigProbe) holds() bool {
 	return true
 }
 
+// refusal renders the answer as the call's refusal: [CommandConfigRefusal] naming
+// the command-valued keys, or "" when the repository carries none.
+func (p commandConfigProbe) refusal() string {
+	if len(p.names) == 0 {
+		return ""
+	}
+	return CommandConfigRefusal(p.names)
+}
+
 // fileprint is the identity of one file the probe's answer depends on, as os.Stat reports it:
 // size, modification time, mode, the inode/device pair os.SameFile compares and — where the
 // platform exposes it (changeTime) — the inode change time — so an edit in place, a rename over
@@ -551,40 +563,85 @@ func sameChangeTime(then, now os.FileInfo) bool {
 	return thenOK == nowOK && thenCtime.Equal(nowCtime)
 }
 
-// probeCommandConfig returns repoLocalCommandConfig's answer for the repository the run at root
-// under env would actually reach, going to git only when the (gitPath, root, env) triple has no
-// memoised answer or a file that decided the memoised one has changed since.
+// probeCommandConfig answers whether the run at root under env may go ahead: "" when the
+// repository it would actually reach passes repoLocalCommandConfig's check, otherwise the
+// model-facing refusal sentence — [CommandConfigRefusal] naming the command-valued keys, or
+// [CommandConfigIncompleteRefusal] when the probe could not complete. It goes to git only when
+// the (gitPath, root, env) triple has no memoised answer or a file that decided the memoised one
+// has changed since.
 //
 // A FAILED probe is never cached. Its error is the subprocess contract's — ctx cancellation or a
 // confinement-unavailable demotion — which says nothing about the repository, so caching it
-// would let one cancelled Turn refuse every later git call on that root. Nor is a probe that
-// reached no repository: its empty answer serves the call that ran it only (commandConfigProbes).
+// would let one cancelled Turn refuse every later git call on that root. Nor is an INCOMPLETE
+// one (errIncompleteProbe): a slow or oversized answer refuses the call that ran it, and the next
+// call asks git again. Nor is a probe that reached no repository: its empty answer serves the
+// call that ran it only (commandConfigProbes).
 //
 // The memo key leaves the Host out on purpose (see Host): the answer describes the repository's
 // files, and the fingerprints are what keep it honest.
-func (h Host) probeCommandConfig(ctx context.Context, gitPath, root string, env []string) ([]string, error) {
+func (h Host) probeCommandConfig(ctx context.Context, gitPath, root string, env []string) (string, error) {
 	key := gitPath + "\x00" + root + "\x00" + strings.Join(env, "\x00")
 	if cached, ok := commandConfigProbes.Load(key); ok {
 		if probe := cached.(commandConfigProbe); probe.holds() {
-			return probe.names, nil
+			return probe.refusal(), nil
 		}
 	}
 	probe, err := h.repoLocalCommandConfig(ctx, gitPath, root, env)
+	var incomplete errIncompleteProbe
+	if errors.As(err, &incomplete) {
+		return CommandConfigIncompleteRefusal(incomplete.reason), nil
+	}
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if probe.reached {
 		commandConfigProbes.Store(key, probe)
 	}
-	return probe.names, nil
+	return probe.refusal(), nil
+}
+
+// errIncompleteProbe is the error probeGit returns for a probe call whose answer git did not
+// finish giving; reason names the call and what cut it short. It never leaves the package:
+// probeCommandConfig turns it into a refusal.
+type errIncompleteProbe struct {
+	reason string
+}
+
+// Error returns the reason.
+func (e errIncompleteProbe) Error() string {
+	return e.reason
 }
 
 // probeGit runs one of the probe's own git invocations with stdout split from the diagnostics,
 // so a warning git prints can never pose as a record of the listing. It spawns through the Host,
 // so a fake launcher scripts the probe's answers as it scripts the command's.
+//
+// A run that timed out, wedged its drain or overran the output cap returns errIncompleteProbe:
+// whatever stdout holds is a prefix of git's answer at best, and the key or path that would
+// refuse the call may be exactly the part that is missing. Only a run that finished is an answer,
+// whatever its exit code.
 func (h Host) probeGit(ctx context.Context, gitPath, root string, env []string, args ...string) (subprocess.SubprocessResult, error) {
-	return h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, args...))
+	res, err := h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, args...))
+	if err != nil {
+		return res, err
+	}
+	step := "git " + strings.Join(args[:min(len(args), probeStepWords)], " ")
+	switch {
+	case res.TimedOut:
+		return res, errIncompleteProbe{reason: fmt.Sprintf("%s timed out after %s", step, probeTimeout)}
+	case res.DrainWedged:
+		return res, errIncompleteProbe{reason: step + ": output drain wedged"}
+	case res.Truncated:
+		return res, errIncompleteProbe{reason: fmt.Sprintf(
+			"%s printed more than %d bytes", step, subprocess.MaxSubprocessOutputBytes,
+		)}
+	}
+	return res, nil
 }
+
+// probeStepWords is how many of a probe call's arguments its incomplete-probe reason names —
+// enough to tell `rev-parse --git-path` from `config --local` from `config --worktree`.
+const probeStepWords = 2
 
 // repoLocalCommandConfig lists the repo-local config names whose VALUE is a program git would
 // execute (CommandConfigName) for the repository the run at root under env reaches, together
@@ -602,9 +659,11 @@ func (h Host) probeGit(ctx context.Context, gitPath, root string, env []string, 
 // no repo-local config to list, and the answer comes back unreached so it is never memoised.
 //
 // A non-zero listing exit is the pass case, not an error: git exits 128 when the scope does not
-// apply (--worktree on a git that refuses the option). The error return
-// is the subprocess contract's — ctx cancellation or a confinement-unavailable demotion — and it
-// stops the caller, so a probe that could not run never lets the real command run un-probed.
+// apply (--worktree on a git that refuses the option). The error return is the subprocess
+// contract's — ctx cancellation or a confinement-unavailable demotion — or probeGit's
+// errIncompleteProbe for a call that timed out, wedged its drain or overran the output cap, and
+// either stops the caller, so a probe that could not run or could not finish never lets the real
+// command run un-probed.
 func (h Host) repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []string) (commandConfigProbe, error) {
 	files, top, reached, err := h.configFiles(ctx, gitPath, root, env)
 	if err != nil {
@@ -655,10 +714,12 @@ func (h Host) repoLocalCommandConfig(ctx context.Context, gitPath, root string, 
 // relative to root, and a missing top (that bare store, whose origins are absolute anyway) falls
 // back to root. A git that printed nothing names no file — and so no print, never root itself.
 //
-// reached is false only when rev-parse printed no path AND exited non-zero — root is no
-// repository, or GIT_DIR names a store not yet created. That is the one answer with nothing to
-// fingerprint, so the caller neither lists config for it nor memoises it. A zero exit that printed
-// nothing (a fake git in a test) still counts as reached.
+// reached is false only when rev-parse FINISHED having printed no path AND exited non-zero —
+// root is no repository, or GIT_DIR names a store not yet created. That is the one answer with
+// nothing to fingerprint, so the caller neither lists config for it nor memoises it. A zero exit
+// that printed nothing (a fake git in a test) still counts as reached. A rev-parse that timed out,
+// wedged or overran the cap is no answer at all: its errIncompleteProbe comes back as err, never
+// as an unreached root.
 func (h Host) configFiles(ctx context.Context, gitPath, root string, env []string) (files []string, top string, reached bool, err error) {
 	res, err := h.probeGit(ctx, gitPath, root, env, "rev-parse",
 		"--git-path", "config", "--git-path", "config.worktree", "--git-path", "HEAD", "--show-toplevel")
@@ -700,9 +761,9 @@ type configEntry struct {
 // <origin>\0<key>\0 for a valueless key. Each record is cut at its FIRST newline — a value may
 // hold newlines of its own — and the NUL framing is what keeps an attacker-chosen value from
 // posing as a key. The bytes after the final NUL are never a record: nothing for a complete
-// listing, a partial record plus the capped path's "[output truncated" marker for one that
-// overran subprocess.MaxSubprocessOutputBytes, and a fake git's free-form echo in a test — all
-// dropped, as is an origin that is no file (a `command line:` override).
+// listing and a fake git's free-form echo in a test — both dropped, as is an origin that is no
+// file (a `command line:` override). A listing that overran subprocess.MaxSubprocessOutputBytes
+// never reaches here: probeGit refuses it as incomplete.
 func parseConfigListing(listing string) []configEntry {
 	tokens := strings.Split(listing, "\x00")
 	tokens = tokens[:len(tokens)-1]
@@ -777,4 +838,15 @@ func CommandConfigRefusal(names []string) string {
 	return fmt.Sprintf("git refused: this repository's own config names a program git would execute (%s%s). "+
 		"Repo-local command-valued keys are refused for every git tool; the operator's global git config is untouched and still applies.",
 		strings.Join(shown, ", "), extra)
+}
+
+// CommandConfigIncompleteRefusal is the model-facing sentence for a call whose command-config
+// probe could not complete — reason names the probe call and what cut it short. It shares
+// [CommandConfigRefusal]'s "git refused:" prefix and is a refusal, not a pass: the part of the
+// answer git never delivered may be exactly the key that names a program. It is never memoised,
+// so the next call probes afresh.
+func CommandConfigIncompleteRefusal(reason string) string {
+	return fmt.Sprintf("git refused: the check of this repository's own config for programs git would execute did not complete (%s). "+
+		"No git tool runs on a repository that check could not finish; the next git call checks again.",
+		reason)
 }

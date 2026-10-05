@@ -21,7 +21,9 @@
 //     boundary and still applies. The probe behind the refusal is memoised per
 //     (git binary, root, environment) and re-probed when the config's files change — the scope
 //     files, HEAD and every include they name are fingerprinted and re-stat-ed on each call. A
-//     root no repository reaches is never memoised, so a mid-session `git init` is seen. The
+//     root no repository reaches is never memoised, so a mid-session `git init` is seen. A probe
+//     that could not complete — a call that timed out, wedged its drain or overran the output
+//     cap — refuses the call too ([CommandConfigIncompleteRefusal]) and is never memoised. The
 //     pattern's source string is internal/security's
 //     ([security.GitCommandConfigNameSource]), which the shell write view widens with
 //     core.hooksPath to name .git/config for a `git config` line that sets such a key.

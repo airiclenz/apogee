@@ -130,6 +130,12 @@ type SubprocessResult struct {
 	// short and killed what was left. The captured output may be missing its tail, and the run
 	// is not a success however cleanly the leader itself exited.
 	DrainWedged bool
+	// Truncated reports that the buffer holding the child's standard output overran
+	// MaxSubprocessOutputBytes and discarded the rest — Stdout under SplitStdout, CombinedOutput
+	// otherwise. The kept text then ends in the cap's truncation marker rather than in what the
+	// child printed, so a caller parsing it as data must not read it as the whole answer. A
+	// RunSubprocessTo run never sets it: its stdout went to the caller's writer uncapped.
+	Truncated bool
 	// Confined reports that the run actually executed inside the confinement fence — a
 	// Confinement handle was on ctx and its Confiner wrapped the cmd before it started.
 	// A caller's denial rendering keys on it to label a likely OS denial (EPERM-shaped output on
@@ -359,6 +365,14 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 
 	res := SubprocessResult{CombinedOutput: out.String(), Stdout: stdoutOnly.String(), Confined: confined, Box: box}
 	res.TimedOut = runCtx.Err() == context.DeadlineExceeded
+	// A streamed stdout went to the caller's writer uncapped, so only the capped paths truncate.
+	if streamStdout == nil {
+		stdoutHolder := &out
+		if spec.SplitStdout {
+			stdoutHolder = &stdoutOnly
+		}
+		res.Truncated = stdoutHolder.overran()
+	}
 	res.ExitCode = exitCodeOf(cmd, runErr)
 	// exec.ErrWaitDelay is not an *exec.ExitError, so exitCodeOf falls through to the leader's
 	// own status — 0 whenever the leader exited cleanly and only its descendants wedged the
@@ -477,6 +491,13 @@ func (b *CappedBuffer) Write(p []byte) (int, error) {
 	}
 	// Always report the full length written so the process is never blocked on a short write.
 	return len(p), nil
+}
+
+// overran reports whether the buffer discarded any bytes past its limit.
+func (b *CappedBuffer) overran() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.discarded > 0
 }
 
 // String returns the captured output, with a truncation marker appended when output was
