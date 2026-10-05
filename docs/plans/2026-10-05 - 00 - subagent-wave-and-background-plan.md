@@ -220,7 +220,12 @@ internal/workflow/store.go — RunStatus, PlanHash; internal/agent/background.go
 - `go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(workflow): a workflow item may run the sub_agent path`
 
-## 9. Dispatch launches a background sub_agent
+## 9. Dispatch launches a background sub_agent — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the background check is `offersBackgroundSubAgent` (top-level Agent, the sub_agent tool's own `OffersBackground()`, a scratch dir and a workspace) plus the pure `isBackgroundSubAgentCall(call, offered)` / `isDelegationCall(call, offered)`. `partitionDispatch` takes the `offered` answer as a parameter, and prepareCall (run id, pre-emption, ceiling) and resolutionInput (`backgroundSubAgent` → resolve row 3's Workflow verdict) read the same predicate. Folding scratch and workspace into the predicate is what makes Plan with no scratch dir run blocking, not hit the `fanOutNoScratch` refusal.
+NOTES (2026-10-05): consequential edit — internal/agent/fanout_test.go: made necessary by `partitionDispatch` gaining its `backgroundOffered` parameter (the one existing call site passes false).
+NOTES (2026-10-05): background.go needed no change, because `startBackground` is reused as is. All the item's tests landed in internal/agent/workflowcall_test.go beside the fan_out background and `TestWorkflowControl_*` tests, so background_test.go is untouched. `backgroundCallResult`'s body became `backgroundStartedResult`, which both tools share through a `backgroundWording`. The sub_agent hint names status and stop, as fan_out's does.
+NOTES (2026-10-05): the call-id salt sits in the one stage's `Task` ("the sub_agent call <id>"). The spawner never renders it, because the item runs `Stage.SubAgent`. The plan and its one item are named `delegationLabel` (the call's name, else the task's first line). The salt relies on upstream call ids being unique: a server that re-sends the same id for an identical task in a later Turn would make that call resume the finished folder.
 
 **What:**
 **Goal:** On a host that offers it, `sub_agent` with `background:true` returns at once with a handle (workflow id and name) and runs as a one-item background workflow; it is neither pooled, nor preempted, nor counted against the fan-out ceiling; `continue` with `background:true` is refused; where the switch is not offered (headless, daemon, delegates) the call runs blocking.

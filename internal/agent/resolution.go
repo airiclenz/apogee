@@ -97,9 +97,9 @@ const (
 	resolveRefuse
 	// resolveDelegate drives the sub_agent recursion point (a nested Agent), not a leaf tool.
 	resolveDelegate
-	// resolveWorkflow runs the Workflow a fan_out call asks for (runWorkflowCall): its item
-	// children are spawned through the same recursion point, not a leaf tool. A `workflow` control
-	// call takes it too: dispatch answers it itself (runWorkflowCall), over the workflows it steers.
+	// resolveWorkflow runs the Workflow a fan_out call — or a background sub_agent call — asks for
+	// (runWorkflowCall): its item children are spawned through the same recursion point, not a leaf
+	// tool. A `workflow` control call takes it too: dispatch answers it itself (runWorkflowCall), over the workflows it steers.
 	resolveWorkflow
 )
 
@@ -278,6 +278,10 @@ type resolutionInput struct {
 	// to name.
 	atDepthBound bool
 	maxDepth     int
+	// backgroundSubAgent is true for a sub_agent call this Agent runs as a one-item background
+	// workflow (isBackgroundSubAgentCall, ADR 0094): row 3 answers it with a Workflow verdict, as it
+	// answers a fan_out call, instead of a Delegate.
+	backgroundSubAgent bool
 	// wrapUpOutput is the ONE path the step-cap wrap-up Turn may write — the delegation's
 	// `output_path` as its spawning call spelled it (Agent.outputPath) — and "" for every call
 	// outside a wrap-up that kept write_file for a spawn-named path (turnLifecycle.wrapUp,
@@ -313,7 +317,10 @@ type resolutionInput struct {
 //     At the depth bound the delegation is refused defensively (mirrors runSubAgent). A fan_out
 //     call takes the same row as a Workflow verdict: its item children are spawned through the
 //     same recursion point, and at the depth bound it is refused with the same reason, so no
-//     child starts a nested workflow past `delegate-max-depth` (ADR 0087). A `workflow` control
+//     child starts a nested workflow past `delegate-max-depth` (ADR 0087). A sub_agent call run in
+//     the background (backgroundSubAgent, ADR 0094) is a Workflow verdict on the same terms. Its
+//     Plan scratch-dir rule is not this row's: with no scratch dir it is never run in the
+//     background (offersBackgroundSubAgent), so it is Delegated, blocking. A `workflow` control
 //     call (ADR 0089 D4) is a Workflow verdict too, but spawns nothing, so no depth bound applies.
 //     In Plan with no session scratch dir, a fan_out or workflow call is refused first with
 //     fanOutNoScratch's text: the workflow folder lives in the scratch dir (ADR 0087 D4), so there
@@ -372,7 +379,7 @@ func resolve(in resolutionInput) resolution {
 			}
 		}
 		kind := resolveDelegate
-		if isFanOutCall(in.call) {
+		if isFanOutCall(in.call) || in.backgroundSubAgent {
 			kind = resolveWorkflow
 		}
 		return resolution{

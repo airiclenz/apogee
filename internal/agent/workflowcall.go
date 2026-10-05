@@ -29,6 +29,14 @@ package agent
 // runs blocking, as if the switch were unset, because with no conversation to go on there is
 // nothing for a background workflow to run beside.
 //
+// A sub_agent call setting `background` (ADR 0094) takes the same road: where this Agent may
+// launch it (offersBackgroundSubAgent) dispatch keeps it out of the reply's delegations — it is
+// never pooled, pre-empted or counted against the fan-out ceiling — and resolves it as a Workflow,
+// and it runs here as a one-item background workflow whose one item runs the blocking sub_agent path
+// (backgroundSubAgentPlan; its item spawned by workflowspawn.go), answered at once with the
+// workflow's id and name. Everywhere the switch is not offered, or the session cannot keep the
+// workflow, it runs blocking as an ordinary delegation.
+//
 // The WORKFLOW CONTROL CALL (ADR 0089 D4) is answered here too: `workflow{action}` is a placeholder
 // dispatch answers itself (resolve's Workflow verdict, spawning nothing) — status reads the session's
 // workflow folders (Agent.Workflows), stop is Agent.StopWorkflow, and message queues a note for one
@@ -86,6 +94,48 @@ const (
 	fanOutBackgroundStatus  = "status: %s"
 	fanOutBackgroundHint    = "You are woken with its result when it ends. Meanwhile " +
 		`workflow{action: "status", id: "%[1]s"} checks on it and workflow{action: "stop", id: "%[1]s"} stops it.`
+)
+
+// The answer a background sub_agent call gets at once (ADR 0094): the fan_out answer's shape —
+// the workflow's id and the delegation's name, started or queued, its status path, how the model
+// hears of it again — worded for the one delegation it runs.
+const (
+	subAgentBackgroundStarted = "sub_agent started in the background as workflow %s: %s"
+	subAgentBackgroundQueued  = "sub_agent queued in the background as workflow %s, behind another workflow on its server: %s"
+	subAgentBackgroundHint    = "You are woken with its report when it ends. Meanwhile " +
+		`workflow{action: "status", id: "%[1]s"} checks on it and workflow{action: "stop", id: "%[1]s"} stops it.`
+)
+
+// The refusals a background sub_agent call can take before its workflow starts, each the whole tool
+// error. The arguments and task ones are worded as the blocking call's own (runDelegate), so a
+// model reads one refusal for one mistake whichever way the call was to run.
+const (
+	subAgentBackgroundArguments = "invalid sub_agent arguments: "
+	subAgentBackgroundNoTask    = "sub_agent requires a non-empty task"
+	subAgentBackgroundContinue  = "sub_agent was not run: continue runs the delegation it names blocking, so it cannot be combined with background; call it again without background"
+	subAgentBackgroundFailed    = "sub_agent could not start in the background: %v"
+)
+
+// The one-item plan a background sub_agent call runs as (backgroundSubAgentPlan): its one fanout
+// stage's name, and the brief that stage carries — never rendered for a child, because the item
+// runs the call's own arguments (workflow.Stage.SubAgent), but naming the call, which salts the
+// plan hash (ADR 0094 D8) so the same task asked again is a new run, never a resume of a finished
+// one.
+const (
+	subAgentStageName       = "sub_agent"
+	subAgentStageTaskFormat = "the sub_agent call %s"
+)
+
+// backgroundWording is how one tool words the answer a background launch gets at once: its started
+// and queued lead lines (each over the workflow's id and name) and its hint (over the id).
+type backgroundWording struct {
+	started, queued, hint string
+}
+
+// The two tools that launch a background workflow, and how each words its answer.
+var (
+	fanOutBackgroundWording   = backgroundWording{started: fanOutBackgroundStarted, queued: fanOutBackgroundQueued, hint: fanOutBackgroundHint}
+	subAgentBackgroundWording = backgroundWording{started: subAgentBackgroundStarted, queued: subAgentBackgroundQueued, hint: subAgentBackgroundHint}
 )
 
 // workflowStatusFileName is the file a workflow's folder keeps its status in — the store's own
@@ -204,9 +254,9 @@ func isWorkflowControlCall(call domain.ToolCall) bool {
 	return call.Tool == tools.WorkflowToolName
 }
 
-// asksBackground reports whether a fan_out call's arguments set `background` true. Arguments that
-// are not an object, or a `background` that is not a boolean, ask for nothing: the call runs
-// blocking, and parseFanOutPlan reports what it cannot read.
+// asksBackground reports whether a fan_out or sub_agent call's arguments set `background` true.
+// Arguments that are not an object, or a `background` that is not a boolean, ask for nothing: the
+// call runs blocking, and its blocking path reports what it cannot read.
 func asksBackground(raw json.RawMessage) bool {
 	var args struct {
 		Background bool `json:"background"`
@@ -231,6 +281,92 @@ func (a *Agent) offersBackground() bool {
 	return ok && fanOut.OffersBackground()
 }
 
+// offersBackgroundSubAgent reports whether a sub_agent call on this Agent may run as a one-item
+// background workflow (ADR 0094): this is the top-level Agent, the sub_agent on its menu published
+// the switch — which only fan_out's gate lets it do (tools.HostTools.OffersBackground and a roster
+// that lifts workflow; ADR 0094 D1), whether or not fan_out itself is lifted — and the session can
+// keep the workflow: a scratch directory to keep its folder in and a workspace to run it over.
+// Anywhere else a `background: true` runs blocking, as if the switch were unset (ADR 0094 D7) —
+// never refused for a workflow the session cannot keep.
+func (a *Agent) offersBackgroundSubAgent() bool {
+	if a.isDelegate() || a.ScratchDir() == "" || a.cfg.WorkspaceDir == "" {
+		return false
+	}
+	tool, ok := a.lookupTool(tools.SubAgentToolName)
+	if !ok {
+		return false
+	}
+	spawner, ok := tool.(*tools.SubAgent)
+	return ok && spawner.OffersBackground()
+}
+
+// isBackgroundSubAgentCall reports whether call is a sub_agent call that runs as a one-item
+// background workflow: the call asks for the background and offered — this Agent's
+// offersBackgroundSubAgent, read by the caller — says it may have it. It is a pure function of its
+// inputs, so dispatch's partition (partitionDispatch) stays one.
+func isBackgroundSubAgentCall(call domain.ToolCall, offered bool) bool {
+	return offered && isSubAgentCall(call) && asksBackground(call.Arguments)
+}
+
+// isDelegationCall reports whether call is a delegation of the reply's tool round: a sub_agent call
+// that does not run in the background. Only such a call gets a run id before its head event, is
+// pooled, may be pre-empted by a waiting message, and counts against the fan-out ceiling (ADR 0094
+// D6).
+func isDelegationCall(call domain.ToolCall, offered bool) bool {
+	return isSubAgentCall(call) && !isBackgroundSubAgentCall(call, offered)
+}
+
+// backgroundSubAgentResult starts the one-item background workflow a background sub_agent call asks
+// for and answers it at once (ADR 0094). The arguments are checked first, so a call that could
+// never run costs no workflow folder: a continuation is refused (it runs blocking, D4), and an empty
+// task, an unreadable seat or an unknown roster are refused in the blocking call's own words. The
+// seat the call names sizes and queues the workflow (startBackground); the child resolves it again
+// from the same arguments as it starts.
+func (a *Agent) backgroundSubAgentResult(turn int, call domain.ToolCall) domain.ToolResult {
+	var args tools.SubAgentArgs
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return errorToolResult(call.ID, subAgentBackgroundArguments+err.Error())
+	}
+	if args.Continue != "" {
+		return errorToolResult(call.ID, subAgentBackgroundContinue)
+	}
+	if args.Task == "" {
+		return errorToolResult(call.ID, subAgentBackgroundNoTask)
+	}
+	seat := seatConfigured
+	if publishesSeatChoice(a.tools) {
+		asked, err := parseDelegationSeat(args.RunOn)
+		if err != nil {
+			return errorToolResult(call.ID, err.Error())
+		}
+		seat = asked
+	}
+	if _, err := a.requestedChildTools(args.Tools); err != nil {
+		return errorToolResult(call.ID, err.Error())
+	}
+	id, err := a.startBackground(workflowLaunch{plan: backgroundSubAgentPlan(call, args), seat: seat, turn: turn, call: call})
+	if err != nil {
+		return errorToolResult(call.ID, fmt.Sprintf(subAgentBackgroundFailed, err))
+	}
+	return a.backgroundStartedResult(call.ID, id, subAgentBackgroundWording)
+}
+
+// backgroundSubAgentPlan is the one-item plan a background sub_agent call runs as: one fanout stage
+// whose one item, labelled with the delegation's name (or its task's first line), runs the call's
+// own arguments on the blocking sub_agent path (workflow.Stage.SubAgent). The plan is named as the
+// item is, so /workflows lists it under the delegation's name, and the stage's brief names the call,
+// salting the plan hash with its id (ADR 0094 D8).
+func backgroundSubAgentPlan(call domain.ToolCall, args tools.SubAgentArgs) workflow.Plan {
+	label := delegationLabel(delegationName(args.Name), call)
+	return workflow.Plan{Name: label, Stages: []workflow.Stage{{
+		Name:     subAgentStageName,
+		Kind:     workflow.StageFanout,
+		Task:     fmt.Sprintf(subAgentStageTaskFormat, call.ID),
+		Over:     &workflow.ItemSource{List: []string{label}},
+		SubAgent: call.Arguments,
+	}}}
+}
+
 // backgroundCallResult answers a fan_out call whose workflow was handed to the background manager:
 // the workflow's id and name, whether it started or waits in line, its status path and how the model
 // hears of it again — or, when it could not start, why.
@@ -238,9 +374,16 @@ func (a *Agent) backgroundCallResult(callID, id string, err error) domain.ToolRe
 	if err != nil {
 		return errorToolResult(callID, fmt.Sprintf(fanOutBackgroundFailed, err))
 	}
-	lead := fanOutBackgroundStarted
+	return a.backgroundStartedResult(callID, id, fanOutBackgroundWording)
+}
+
+// backgroundStartedResult answers a call whose workflow id the background manager took, in the
+// launching tool's wording: the workflow's id and name, whether it started or waits in line, its
+// status path, and how the model hears of it again.
+func (a *Agent) backgroundStartedResult(callID, id string, wording backgroundWording) domain.ToolResult {
+	lead := wording.started
 	if queued, live := a.background.liveStates()[id]; live && queued {
-		lead = fanOutBackgroundQueued
+		lead = wording.queued
 	}
 	name, statusPath := "", ""
 	if store, err := workflow.NewStore(a.ScratchDir()); err == nil {
@@ -255,12 +398,13 @@ func (a *Agent) backgroundCallResult(callID, id string, err error) domain.ToolRe
 	if statusPath != "" {
 		lines = append(lines, fmt.Sprintf(fanOutBackgroundStatus, statusPath))
 	}
-	lines = append(lines, fmt.Sprintf(fanOutBackgroundHint, id))
+	lines = append(lines, fmt.Sprintf(wording.hint, id))
 	return domain.ToolResult{CallID: callID, Content: strings.Join(lines, "\n")}
 }
 
-// runWorkflowCall runs the Workflow one fan_out call asks for and answers the call: the formatted
-// result lines when it ran, a tool error the model can act on when it could not. The outcome is
+// runWorkflowCall runs the Workflow one fan_out call (or background sub_agent call) asks for and
+// answers the call: the formatted result lines when it ran, a tool error the model can act on when
+// it could not. The outcome is
 // dispatchCancelled exactly when the user's cancel reached the dispatch — the answer is then the
 // stopped result (or the not-run text, for a call the cancel reached before it started), which
 // dispatch commits as it settles the Turn (settleCancelledLeaf) — and dispatchDone otherwise, the
@@ -280,11 +424,15 @@ func (a *Agent) runWorkflowCall(ctx context.Context, turn int, slot *dispatchSlo
 }
 
 // workflowCallResult parses, checks and runs one fan_out call's Workflow and renders its answer —
-// or, for a workflow control call, answers that. A fan_out call asking for the background where it
-// may have it is started there and answered at once.
+// or, for a workflow control call, answers that, and for a background sub_agent call starts its
+// one-item workflow and answers at once. A fan_out call asking for the background where it may
+// have it is started there and answered at once.
 func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
 	if isWorkflowControlCall(call) {
 		return a.workflowControlResult(call)
+	}
+	if isSubAgentCall(call) {
+		return a.backgroundSubAgentResult(turn, call)
 	}
 	seat, refusal := a.fanOutSeat(call.Arguments)
 	if refusal != "" {

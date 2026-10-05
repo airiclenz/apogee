@@ -1772,6 +1772,335 @@ func TestWorkflowControl_ADelegateIsRefused(t *testing.T) {
 	}
 }
 
+// The background sub_agent (ADR 0094): a parent whose sub_agent publishes `background` and whose
+// menu carries the workflow tool — and no fan_out, which the roster need not lift — runs the one
+// delegation as a one-item background workflow beside its conversation.
+
+// backgroundSubAgentConfig is a parent Config whose sub_agent publishes `background`, with the
+// workflow control tool and one read-only tool on its menu, a scratch dir and a workspace.
+func backgroundSubAgentConfig(t *testing.T, sink domain.EventSink) domain.Config {
+	t.Helper()
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewSubAgentWith(tools.SubAgentOptions{Background: true}))
+	_ = reg.Register(tools.NewWorkflow())
+	_ = reg.Register(fakeTool{name: "read_thing", readOnly: true, result: "package main"})
+	cfg.Tools = reg
+	cfg.ScratchDir = t.TempDir()
+	cfg.WorkspaceDir = t.TempDir()
+	return cfg
+}
+
+// subAgentTask is the task every background sub_agent test delegates — the key its child's
+// script is routed by.
+const subAgentTask = "survey the repo"
+
+// backgroundSubAgentArgsJSON is a sub_agent call's arguments delegating subAgentTask with
+// `background` set, plus extra keys.
+func backgroundSubAgentArgsJSON(extra map[string]any) string {
+	args := map[string]any{"task": subAgentTask, "background": true}
+	for key, value := range extra {
+		args[key] = value
+	}
+	b, _ := json.Marshal(args)
+	return string(b)
+}
+
+// toolCallEventFor is the depth-0 ToolCallEvent that opened callID.
+func toolCallEventFor(t *testing.T, events []domain.Event, callID string) domain.ToolCallEvent {
+	t.Helper()
+	for _, e := range events {
+		if ce, ok := e.(domain.ToolCallEvent); ok && ce.Depth == 0 && ce.Call.ID == callID {
+			return ce
+		}
+	}
+	t.Fatalf("no ToolCallEvent opened %s", callID)
+	return domain.ToolCallEvent{}
+}
+
+func TestWorkflowCall_BackgroundSubAgentAnswersAtOnceAndRunsBesideTheConversation(t *testing.T) {
+	t.Parallel()
+
+	const report = "The repo holds three modules."
+	sink := newLockedSink()
+	cfg := backgroundSubAgentConfig(t, sink)
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, backgroundSubAgentArgsJSON(map[string]any{"name": "surveyor"}))).
+		route("please delegate", nil, contentScript("started it")).
+		route(subAgentTask, signalThenWait(started, release), contentScript(report))
+	a := newBackgroundParent(t, cfg, up)
+
+	res := runSubmitted(t, context.Background(), a, "please delegate")
+	awaitClosed(t, started, "the background child")
+
+	if res.Status == domain.StatusCancelled {
+		t.Fatalf("parent result = %+v, want a completed Exchange", res)
+	}
+	id := soleWorkflowID(t, a)
+	events := lockedEvents(sink)
+	got := callResult(t, events, "sa1")
+	for _, want := range []string{
+		"sub_agent started in the background as workflow " + id + ": surveyor",
+		"status: " + filepath.Join(cfg.ScratchDir, "workflows", id, "status.json"),
+		"You are woken with its report when it ends",
+		`workflow{action: "status", id: "` + id + `"}`,
+	} {
+		if got.IsError || !strings.Contains(got.Content, want) {
+			t.Errorf("sub_agent answer lacks %q (error %v):\n%s", want, got.IsError, got.Content)
+		}
+	}
+	if head := toolCallEventFor(t, events, "sa1"); head.SpawnRunID != "" {
+		t.Errorf("head event SpawnRunID = %q, want none — the call opens no delegation of the round", head.SpawnRunID)
+	}
+	info := workflowInfo(t, a, id)
+	if !info.Background {
+		t.Errorf("after the Exchange ended the workflow is %+v, want it still running in the background", info)
+	}
+	if info.Status.Name != "surveyor" || info.Status.Origin != workflow.OriginSubAgent {
+		t.Errorf("workflow name, origin = %q, %q; want surveyor, %q", info.Status.Name, info.Status.Origin, workflow.OriginSubAgent)
+	}
+
+	close(release)
+	a.background.waitAll()
+
+	if ends := workflowEnds(sink, id); !slices.Equal(ends, []domain.WorkflowPhase{domain.WorkflowFinished}) {
+		t.Errorf("workflow ends = %v, want one finished", ends)
+	}
+	if phases := itemPhases(workflowInfo(t, a, id)); phases["surveyor"] != workflow.PhaseDone {
+		t.Errorf("item phases = %v, want surveyor done", phases)
+	}
+}
+
+// TestWorkflowCall_BackgroundSubAgentRunsBlockingWhereItCannotRunInTheBackground pins ADR 0094 D7:
+// a sub_agent that did not publish `background` — a headless run's, a daemon firing's — and a
+// session that cannot keep the workflow both run a `background: true` call as an ordinary blocking
+// delegation, its report the call's own result, never a refusal.
+func TestWorkflowCall_BackgroundSubAgentRunsBlockingWhereItCannotRunInTheBackground(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		shape func(*domain.Config)
+	}{
+		{"the switch is not offered", func(cfg *domain.Config) {
+			reg := domain.NewToolRegistry()
+			_ = reg.Register(tools.NewSubAgent())
+			_ = reg.Register(fakeTool{name: "read_thing", readOnly: true, result: "package main"})
+			cfg.Tools = reg
+		}},
+		{"Plan with no scratch dir", func(cfg *domain.Config) {
+			cfg.Mode = domain.ModePlan
+			cfg.ScratchDir = ""
+		}},
+		{"no workspace", func(cfg *domain.Config) { cfg.WorkspaceDir = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			const report = "Surveyed: three modules."
+			sink := &recordingSink{}
+			cfg := backgroundSubAgentConfig(t, sink)
+			tc.shape(&cfg)
+			up := (&workflowResponder{}).
+				route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, backgroundSubAgentArgsJSON(nil))).
+				route("please delegate", nil, contentScript("all done")).
+				route(subAgentTask, nil, contentScript(report))
+
+			a, _ := runWorkflowParent(t, context.Background(), cfg, up, "please delegate")
+
+			got := callResult(t, sink.events, "sa1")
+			if got.IsError || !strings.Contains(got.Content, report) || strings.Contains(got.Content, "in the background") {
+				t.Errorf("sub_agent answer = %q (error %v), want the blocking child's report", got.Content, got.IsError)
+			}
+			if infos, err := a.Workflows(); err != nil || len(infos) != 0 {
+				t.Errorf("Workflows = %+v, %v; want none — the call ran no workflow", infos, err)
+			}
+		})
+	}
+}
+
+func TestWorkflowCall_ABackgroundSubAgentIsRefusedBeforeItStartsAWorkflow(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, args, want string
+	}{
+		{"a continuation", backgroundSubAgentArgsJSON(map[string]any{"continue": "surveyor"}), subAgentBackgroundContinue},
+		{"an empty task", `{"task":"","background":true}`, subAgentBackgroundNoTask},
+		{"an unknown roster", backgroundSubAgentArgsJSON(map[string]any{"tools": []string{"no_such_tool"}}), "no_such_tool"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := newLockedSink()
+			cfg := backgroundSubAgentConfig(t, sink)
+			up := (&workflowResponder{}).
+				route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, tc.args)).
+				route("please delegate", nil, contentScript("understood"))
+			a := newBackgroundParent(t, cfg, up)
+
+			runSubmitted(t, context.Background(), a, "please delegate")
+
+			if got := callResult(t, lockedEvents(sink), "sa1"); !got.IsError || !strings.Contains(got.Content, tc.want) {
+				t.Errorf("sub_agent answer = %q (error %v), want a refusal naming %q", got.Content, got.IsError, tc.want)
+			}
+			if infos, err := a.Workflows(); err != nil || len(infos) != 0 {
+				t.Errorf("Workflows = %+v, %v; want none — a refused call starts no workflow", infos, err)
+			}
+		})
+	}
+}
+
+// TestWorkflowCall_TwoIdenticalBackgroundSubAgentsBothRun pins ADR 0094 D6 and D8: two calls of
+// one reply delegating the same task are two runs (the plan hash is salted with the call id), and
+// neither is a member of the reply's tool round — with a message waiting the whole time and a
+// fan-out ceiling of one, neither is skipped and neither is refused.
+func TestWorkflowCall_TwoIdenticalBackgroundSubAgentsBothRun(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundSubAgentConfig(t, sink)
+	cfg.Delegation.FanOutRounds = 1
+	cfg.InterjectionPending = func() bool { return true }
+	args := backgroundSubAgentArgsJSON(nil)
+	reply := append(slices.Clone(toolCallScript("sa1", tools.SubAgentToolName, args)[:1]),
+		toolCallScript("sa2", tools.SubAgentToolName, args)...)
+	up := (&workflowResponder{}).
+		route("please delegate", nil, reply).
+		route("please delegate", nil, contentScript("started both")).
+		route(subAgentTask, nil, contentScript("first survey")).
+		route(subAgentTask, nil, contentScript("second survey"))
+	a := newBackgroundParent(t, cfg, up)
+
+	runSubmitted(t, context.Background(), a, "please delegate")
+	a.background.waitAll()
+
+	events := lockedEvents(sink)
+	for _, callID := range []string{"sa1", "sa2"} {
+		if got := callResult(t, events, callID); got.IsError || !strings.Contains(got.Content, "in the background as workflow") {
+			t.Errorf("%s answer = %q (error %v), want a background start", callID, got.Content, got.IsError)
+		}
+	}
+	infos, err := a.Workflows()
+	if err != nil || len(infos) != 2 {
+		t.Fatalf("Workflows = %+v, %v; want two runs of the one task", infos, err)
+	}
+	for _, info := range infos {
+		if info.Status.Phase != workflow.PhaseDone {
+			t.Errorf("workflow %s phase = %s, want done", info.Status.ID, info.Status.Phase)
+		}
+	}
+	if asked := up.askedCount(subAgentTask); asked != 2 {
+		t.Errorf("children asked = %d, want both delegations run", asked)
+	}
+}
+
+func TestWorkflowControl_StatusMessageAndStopReachABackgroundSubAgent(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundSubAgentConfig(t, sink)
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, backgroundSubAgentArgsJSON(map[string]any{"name": "surveyor"}))).
+		route("please delegate", nil, contentScript("started it")).
+		route(subAgentTask, signalThenWait(started, nil), cancelledScript())
+	a := newBackgroundParent(t, cfg, up)
+	runSubmitted(t, context.Background(), a, "please delegate")
+	awaitClosed(t, started, "the background child")
+	id := soleWorkflowID(t, a)
+
+	if got := controlCall(a, `{"action":"status","id":"`+id+`"}`); got.IsError || !strings.Contains(got.Content, "surveyor") {
+		t.Errorf("status = %q (error %v), want the running surveyor listed", got.Content, got.IsError)
+	}
+	message := `{"action":"message","id":"` + id + `","item":"surveyor","text":"read the tests too"}`
+	if got := controlCall(a, message); got.IsError || !strings.Contains(got.Content, "message queued for surveyor") {
+		t.Errorf("message = %q (error %v), want it queued for the surveyor", got.Content, got.IsError)
+	}
+	got := controlCall(a, `{"action":"stop","id":"`+id+`"}`)
+	a.background.waitAll()
+
+	if got.IsError || !strings.Contains(got.Content, id+" is stopping") {
+		t.Errorf("stop = %q (error %v), want the stopping answer", got.Content, got.IsError)
+	}
+	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("after the stop = %+v, want a stopped workflow no longer live", info)
+	}
+}
+
+func TestPartitionDispatch_ABackgroundSubAgentIsALeafWhereOffered(t *testing.T) {
+	t.Parallel()
+
+	calls := []domain.ToolCall{
+		{ID: "s1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{"task":"a","background":true}`)},
+		{ID: "s2", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{"task":"b"}`)},
+	}
+	for _, tc := range []struct {
+		offered             bool
+		leaves, delegations []string
+	}{
+		{true, []string{"s1"}, []string{"s2"}},
+		{false, nil, []string{"s1", "s2"}},
+	} {
+		leaves, delegations := partitionDispatch(calls, tc.offered)
+		if ids := callIDs(leaves); !slices.Equal(ids, tc.leaves) {
+			t.Errorf("offered %t: leaves = %v, want %v", tc.offered, ids, tc.leaves)
+		}
+		if ids := callIDs(delegations); !slices.Equal(ids, tc.delegations) {
+			t.Errorf("offered %t: delegations = %v, want %v", tc.offered, ids, tc.delegations)
+		}
+	}
+}
+
+// callIDs is the ids of calls, in order.
+func callIDs(calls []domain.ToolCall) []string {
+	var ids []string
+	for _, call := range calls {
+		ids = append(ids, call.ID)
+	}
+	return ids
+}
+
+func TestOffersBackgroundSubAgent_OnlyTheTopLevelAgentOfASessionThatKeepsWorkflows(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		shape func(*domain.Config)
+		depth int
+		want  bool
+	}{
+		{"the switch published", func(*domain.Config) {}, 0, true},
+		{"a delegate", func(*domain.Config) {}, 1, false},
+		{"no scratch dir", func(cfg *domain.Config) { cfg.ScratchDir = "" }, 0, false},
+		{"no workspace", func(cfg *domain.Config) { cfg.WorkspaceDir = "" }, 0, false},
+		{"the plain sub_agent", func(cfg *domain.Config) {
+			reg := domain.NewToolRegistry()
+			_ = reg.Register(tools.NewSubAgent())
+			_ = reg.Register(tools.NewWorkflow())
+			cfg.Tools = reg
+		}, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := backgroundSubAgentConfig(t, &recordingSink{})
+			tc.shape(&cfg)
+			a, err := newAgent(cfg, &workflowResponder{})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.depth = tc.depth
+
+			if got := a.offersBackgroundSubAgent(); got != tc.want {
+				t.Errorf("offersBackgroundSubAgent = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWorkflowState_MapsTheEngineState(t *testing.T) {
 	t.Parallel()
 

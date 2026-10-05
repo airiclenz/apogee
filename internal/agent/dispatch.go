@@ -59,7 +59,8 @@ const (
 // child depends on lands before any child starts, and the model maps results back by call ID
 // either way. A fan_out call stays in the leaf group: it runs a whole Workflow at its own width
 // (runWorkflowCall), so it never takes a slot in the delegations' pool and the fan-out ceiling
-// never counts it.
+// never counts it. So does a sub_agent call this Agent runs in the background (ADR 0094 D6,
+// isBackgroundSubAgentCall): it is answered at once, so it is no member of the round either.
 //
 // A cancel is answered where it lands, and every answer keeps the Turn whole: dispatchSettled
 // (ADR 0088). One that reaches a leaf call ends the leaf group there — its cancelled call's result
@@ -70,7 +71,7 @@ const (
 // denied call, a tool error, a recovered tool panic — becomes an error tool-result the
 // model sees on the next Turn, and dispatch continues to the next call (ADR 0007).
 func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
-	leaves, delegations := partitionDispatch(calls)
+	leaves, delegations := partitionDispatch(calls, a.offersBackgroundSubAgent())
 	if a.dispatchGroup(ctx, turn, 1, leaves) == dispatchSettled {
 		// A leaf took the cancel, so no delegation of this reply ever started: each is answered
 		// not-run, in emitted order, and the Turn is kept whole.
@@ -82,11 +83,13 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 
 // partitionDispatch splits a reply's calls into the leaf tools and the sub_agent delegations,
 // each group keeping its emitted order (ADR 0039 decision 11). It is a pure function of the
-// call list: nothing about the bound server, the depth, or the cap reaches it, so the dispatch
-// ORDER a reply produces is fixed even when the fan-out width is not.
-func partitionDispatch(calls []domain.ToolCall) (leaves, delegations []domain.ToolCall) {
+// call list and backgroundOffered — whether this Agent may run a sub_agent call in the background
+// (offersBackgroundSubAgent), answered by the caller: nothing about the bound server, the depth, or
+// the cap reaches it, so the dispatch ORDER a reply produces is fixed even when the fan-out width is
+// not. A sub_agent call that runs in the background is a leaf (isDelegationCall, ADR 0094 D6).
+func partitionDispatch(calls []domain.ToolCall, backgroundOffered bool) (leaves, delegations []domain.ToolCall) {
 	for _, call := range calls {
-		if isSubAgentCall(call) {
+		if isDelegationCall(call, backgroundOffered) {
 			delegations = append(delegations, call)
 			continue
 		}
@@ -193,7 +196,7 @@ type dispatchSlot struct {
 	tool    domain.Tool
 	verdict resolution
 	// runID is the run id of the delegation this slot holds — minted by prepareCall before the
-	// ToolCallEvent of a call named sub_agent, or by runDelegation for a call a pre-tool-exec
+	// ToolCallEvent of a sub_agent call that is not run in the background (isDelegationCall), or by runDelegation for a call a pre-tool-exec
 	// Reaction redirected into sub_agent — and "" for every leaf call. Every event about the
 	// delegation carries it: the head ToolCallEvent and the ToolResultEvent (SpawnRunID), the
 	// lifecycle phases, and, as the child's EventBase.RunID, everything the child emits.
@@ -368,7 +371,7 @@ func (a *Agent) prepareCall(
 	// A delegation's run id is minted BEFORE its head event, so the ToolCallEvent that opens the
 	// delegation already carries the id every later event about it will (dispatchSlot.runID).
 	var runID string
-	if isSubAgentCall(call) {
+	if isDelegationCall(call, a.offersBackgroundSubAgent()) {
 		runID = a.runIDs.mint()
 	}
 	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call), SpawnRunID: runID})
@@ -423,7 +426,8 @@ func (a *Agent) prepareCall(
 }
 
 // preemptDelegation is the one rule by which a queued user message pre-empts a delegation that
-// has not started: when the slot is a sub_agent call and a message is waiting for this Agent's
+// has not started: when the slot is a delegation (isDelegationCall — a background sub_agent call
+// is answered at once and never skipped, ADR 0094 D6) and a message is waiting for this Agent's
 // boundary (interjectionPending), the slot takes the skip result and its finished phase at once
 // (skipDelegation), its run flag is cleared so commitCall books no audit record for a child that
 // never ran, and true is returned. A leaf tool is never pre-empted — it runs to its result
@@ -431,7 +435,7 @@ func (a *Agent) prepareCall(
 // again: a child that has started is never affected, and a slot skipped stays skipped even if the
 // message is withdrawn.
 func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
-	if !isSubAgentCall(slot.call) || !a.interjectionPending() {
+	if !isDelegationCall(slot.call, a.offersBackgroundSubAgent()) || !a.interjectionPending() {
 		return false
 	}
 	slot.run = false
@@ -440,7 +444,8 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 }
 
 // refusePastCeiling is the one rule by which a reply's fan-out is bounded (ADR 0039, amended
-// 2026-09-20): when the slot is a sub_agent call sitting at or past the fan-out ceiling in its
+// 2026-09-20, and by ADR 0094 D6): when the slot is a delegation (isDelegationCall — a background
+// sub_agent call is never counted) sitting at or past the fan-out ceiling in its
 // group — index counts from 0, so the first `ceiling` delegations in emitted order run as they
 // always have — the slot takes the ceiling refusal and its finished phase at once
 // (skipDelegation's path: no started phase, no audit record, the run flag cleared), and true is
@@ -455,7 +460,7 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // a scratch dir set) is read here too, so the pointer to it is offered only to a model that can
 // act on it.
 func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
-	if !isSubAgentCall(slot.call) {
+	if !isDelegationCall(slot.call, a.offersBackgroundSubAgent()) {
 		return false
 	}
 	rounds, width := a.cfg.Delegation.FanOutRounds, a.statedDelegationWidth()
@@ -496,8 +501,9 @@ func (a *Agent) recordCeilingRefusal(slot *dispatchSlot) {
 // call order.
 //
 // resolve() answers a sub_agent call with Delegate or Refuse and nothing else (its row 2: a
-// Tier-2 force is deliberately not applied to a delegation), so the leaf arms below never see one;
-// it answers a fan_out call with Workflow or Refuse on the same row. A Workflow runs in the leaf
+// Tier-2 force is deliberately not applied to a delegation) — Workflow for one run in the
+// background — so the leaf arms below never see one; it answers a fan_out call with Workflow or
+// Refuse on the same row. A Workflow runs in the leaf
 // group, on the dispatching goroutine, and books its own audit record as a leaf arm does.
 func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	if !slot.run {
@@ -1019,6 +1025,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeTarget:            target.real,
 		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= a.maxDepth(),
+		backgroundSubAgent:     isBackgroundSubAgentCall(call, a.offersBackgroundSubAgent()),
 		maxDepth:               a.maxDepth(),
 		wrapUpOutput:           a.wrapUpOutput(),
 		writesWrapUpOutput:     tool.Name() == tools.WriteFileToolName && target.real == a.outputTarget,
