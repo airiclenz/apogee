@@ -269,7 +269,7 @@ func TestInterjectChild_TopLevelRunNeverDrains(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.mailbox.add(domain.UserInput{Text: "never delivered"})
+	a.mailbox.add(domain.UserInput{Text: "never delivered"}, false)
 	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -430,10 +430,11 @@ func TestInterjectChild_ReachesAGrandchild(t *testing.T) {
 }
 
 // TestInterjectChild_PendingMailboxSkipsAGrandchild pins the depth > 0 half of the pre-emption
-// rule: a message queued for a running child (its mailbox) waits on that child's grandchildren
-// exactly as the human's queued message waits on its children. The child's reply delegates while
-// the remark is queued, so the grandchild is never started — the child commits the skip result for
-// it, reaches its boundary, and the remark lands there as an ordinary interjection.
+// rule: a message sent NOW to a running child (InterjectChildNow, its mailbox) waits on that
+// child's grandchildren exactly as the human's now message waits on its children. The child's
+// reply delegates while the remark is queued, so the grandchild is never started — the child
+// commits the skip result for it, reaches its boundary, and the remark lands there as an ordinary
+// interjection.
 func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 	const remark = "stop, change of plan"
 
@@ -455,8 +456,8 @@ func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 		if call != 1 {
 			return
 		}
-		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
-			t.Errorf("InterjectChild while the child runs: %v", err)
+		if err := a.InterjectChildNow(firstRunID, domain.UserInput{Text: remark}); err != nil {
+			t.Errorf("InterjectChildNow while the child runs: %v", err)
 		}
 	}
 	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
@@ -506,6 +507,77 @@ func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 		t.Errorf("ChildInterjectionEvents = %+v, want exactly one, Landed, for c1", events)
 	}
 	msgs := responder.requests[2].Messages
+	if last := msgs[len(msgs)-1]; last.Role != string(domain.RoleUser) || last.Content != remark {
+		t.Errorf("child's second request ends with %+v, want the queued remark %q", last, remark)
+	}
+}
+
+// TestInterjectChild_OrdinaryMessageLetsAGrandchildRun is the other half of that rule: an ordinary
+// message (InterjectChild) queued while the child is about to delegate pre-empts nothing. The
+// grandchild starts and finishes, the child commits its real answer, and the remark lands at the
+// child's next boundary — after the wave — as an ordinary interjection.
+func TestInterjectChild_OrdinaryMessageLetsAGrandchildRun(t *testing.T) {
+	const remark = "also check the docs"
+
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.Delegation.MaxDepth = 2 // the child may delegate, so the grandchild genuinely runs
+
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "level 1"), // [0] parent → child
+		subAgentCallScript("c2", "level 2"), // [1] child Turn 1 delegates — with the remark already queued
+		contentScript("grandchild done"),    // [2] the grandchild runs regardless
+		contentScript("child done"),         // [3] child Turn 2 — carries the remark
+		contentScript("parent done"),        // [4] parent finishes
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
+	responder.before = func(call int) {
+		if call != 1 {
+			return
+		}
+		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
+			t.Errorf("InterjectChild while the child runs: %v", err)
+		}
+	}
+	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if responder.calls != 5 {
+		t.Fatalf("model calls = %d, want 5 (parent, child, grandchild, child, parent) — an ordinary message must not skip the grandchild", responder.calls)
+	}
+	if got := lastUserText(responder.requests[2]); got != "level 2" {
+		t.Errorf("third request's last user text = %q, want the grandchild's task %q", got, "level 2")
+	}
+
+	// The child's history holds the grandchild's real answer for c2, not the skip result.
+	var result *domain.ToolResult
+	for _, e := range sink.events {
+		if re, ok := e.(domain.ToolResultEvent); ok && re.Depth == 1 && re.Result.CallID == "c2" {
+			r := re.Result
+			result = &r
+		}
+	}
+	if result == nil {
+		t.Fatal("no depth-1 tool result for c2; the grandchild's answer must commit")
+	}
+	if result.IsError || result.Content == skippedDelegationContent || !strings.Contains(result.Content, "grandchild done") {
+		t.Errorf("c2 result = %+v, want the grandchild's answer, not the skip result", *result)
+	}
+
+	// The remark lands at the child's boundary after the wave, exactly once.
+	events := childInterjections(sink.events)
+	if len(events) != 1 || !events[0].Landed || events[0].CallID != "c1" {
+		t.Errorf("ChildInterjectionEvents = %+v, want exactly one, Landed, for c1", events)
+	}
+	msgs := responder.requests[3].Messages
 	if last := msgs[len(msgs)-1]; last.Role != string(domain.RoleUser) || last.Content != remark {
 		t.Errorf("child's second request ends with %+v, want the queued remark %q", last, remark)
 	}

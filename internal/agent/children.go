@@ -692,10 +692,12 @@ func delegationCause(content string) string {
 // in the order they were queued. It is the handover between the goroutine a message is typed on
 // and the goroutine driving the child's Steps: adding is non-blocking and safe from anywhere,
 // draining happens only on the driving goroutine, at a between-Steps boundary where Interject is
-// legal (ADR 0025's caller rule). Between the two, a queued message is also a PREDICATE the
-// child's dispatch reads (hasPending): a grandchild not yet started is skipped rather than run
-// while a message waits for the boundary, exactly as a top-level agent's queued message skips
-// its unstarted children through Config.InterjectionPending.
+// legal (ADR 0025's caller rule). Between the two, a message queued as sent NOW
+// (InterjectChildNow) is also a PREDICATE the child's dispatch reads (hasNowPending): a grandchild
+// not yet started is skipped rather than run while that message waits for the boundary, exactly
+// as a top-level agent's now message skips its unstarted children through
+// Config.InterjectionPending. An ordinary message (InterjectChild) waits for the grandchildren's
+// whole wave and pre-empts nothing (ADR 0025, amended 2026-10-05).
 //
 // It closes exactly once, when the child's run ends, and refuses everything after: a message that
 // cannot be delivered must be refused at the door rather than accepted into a mailbox nothing will
@@ -704,37 +706,52 @@ func delegationCause(content string) string {
 // The zero value is ready to use.
 type childMailbox struct {
 	mu     sync.Mutex
-	queued []domain.UserInput
+	queued []mailboxRow
 	closed bool
 }
 
-// add queues in and reports whether the mailbox accepted it. A closed mailbox accepts nothing.
-func (m *childMailbox) add(in domain.UserInput) bool {
+// mailboxRow is one queued message and whether it was sent NOW — the only kind that skips the
+// child's unstarted grandchildren while it waits (hasNowPending).
+type mailboxRow struct {
+	in  domain.UserInput
+	now bool
+}
+
+// add queues in — marked as sent now when now is set — and reports whether the mailbox accepted
+// it. A closed mailbox accepts nothing.
+func (m *childMailbox) add(in domain.UserInput, now bool) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return false
 	}
-	m.queued = append(m.queued, in)
+	m.queued = append(m.queued, mailboxRow{in: in, now: now})
 	return true
 }
 
-// hasPending reports whether a message is queued and not yet drained — the child-side answer to
-// Config.InterjectionPending, read by the dispatch that is about to start a grandchild
-// (Agent.interjectionPending). A closed mailbox holds nothing deliverable and reports false.
-func (m *childMailbox) hasPending() bool {
+// hasNowPending reports whether a message sent NOW is queued and not yet drained — the child-side
+// answer to Config.InterjectionPending, read by the dispatch that is about to start a grandchild
+// (Agent.interjectionPending). An ordinary message alone answers false: it waits for the wave. A
+// closed mailbox holds nothing deliverable and reports false.
+func (m *childMailbox) hasNowPending() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return !m.closed && len(m.queued) > 0
+	if m.closed {
+		return false
+	}
+	for _, row := range m.queued {
+		if row.now {
+			return true
+		}
+	}
+	return false
 }
 
-// drain takes everything queued so far, leaving the mailbox open for more.
+// drain takes everything queued so far, in queue order, leaving the mailbox open for more.
 func (m *childMailbox) drain() []domain.UserInput {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	queued := m.queued
-	m.queued = nil
-	return queued
+	return m.takeLocked()
 }
 
 // close takes everything still queued and refuses every later add. The returned messages never
@@ -743,9 +760,22 @@ func (m *childMailbox) close() []domain.UserInput {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closed = true
-	queued := m.queued
+	return m.takeLocked()
+}
+
+// takeLocked empties the queue and returns its messages in queue order; the now marks end with
+// the queue. The caller holds m.mu.
+func (m *childMailbox) takeLocked() []domain.UserInput {
+	if len(m.queued) == 0 {
+		m.queued = nil
+		return nil
+	}
+	taken := make([]domain.UserInput, len(m.queued))
+	for i, row := range m.queued {
+		taken[i] = row.in
+	}
 	m.queued = nil
-	return queued
+	return taken
 }
 
 // InterjectChild queues a user message for the RUNNING sub-agent whose run id is runID, anywhere
@@ -764,12 +794,31 @@ func (m *childMailbox) close() []domain.UserInput {
 // finished, was cancelled, or never existed — and that refusal is the message's whole account:
 // nothing was queued, so no ChildInterjectionEvent follows. On success exactly one
 // ChildInterjectionEvent will report the message's fate, Landed either way.
+//
+// It is the ORDINARY send: while the message waits, the child's unstarted grandchildren still
+// start, so it lands once their whole wave is in (ADR 0025, amended 2026-10-05). InterjectChildNow
+// is the send that skips them.
 func (a *Agent) InterjectChild(runID string, in domain.UserInput) error {
+	return a.interjectChild(runID, in, false)
+}
+
+// InterjectChildNow is InterjectChild for a message sent NOW (the human's ctrl+g): while it waits
+// in the child's mailbox, the child's dispatch skips every grandchild not yet started — exactly as
+// a top-level now message skips the human's queued delegations — and the message lands at the
+// child's next boundary like any other. Its contract, refusal and delivery event are
+// InterjectChild's.
+func (a *Agent) InterjectChildNow(runID string, in domain.UserInput) error {
+	return a.interjectChild(runID, in, true)
+}
+
+// interjectChild is the one tree walk both sends share: the child registered under runID here,
+// else — recursively — one under a child of this Agent. now marks the queued row (childMailbox).
+func (a *Agent) interjectChild(runID string, in domain.UserInput, now bool) error {
 	if runID == "" {
 		return domain.ErrNoSuchChild
 	}
 	if child, ok := a.children.lookup(runID); ok {
-		if child.mailbox.add(in) {
+		if child.mailbox.add(in, now) {
 			return nil
 		}
 		// Registered but already closing: the child ended between the lookup and the add, so it
@@ -777,7 +826,7 @@ func (a *Agent) InterjectChild(runID string, in domain.UserInput) error {
 		return domain.ErrNoSuchChild
 	}
 	for _, child := range a.children.all() {
-		if err := child.InterjectChild(runID, in); err == nil {
+		if err := child.interjectChild(runID, in, now); err == nil {
 			return nil
 		}
 	}

@@ -323,6 +323,16 @@ func (e *lateEngine) InterjectChild(runID string, in apogee.UserInput) error {
 	return agent.InterjectChild(runID, in)
 }
 
+// InterjectChildNow queues a message sent now for a running sub-agent; unbound, the refusal is
+// errNoServerBound for InterjectChild's reason.
+func (e *lateEngine) InterjectChildNow(runID string, in apogee.UserInput) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.InterjectChildNow(runID, in)
+}
+
 // StopChild stops one running sub-agent; unbound there is no tree to reach into, and the refusal
 // is errNoServerBound for InterjectChild's reason.
 func (e *lateEngine) StopChild(runID string) error {

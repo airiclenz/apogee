@@ -337,7 +337,8 @@ func childNotRunningNote(name string) string {
 // screen rather than to the conversation the view is opened from (ADR 0063). It queues into that
 // child's engine-side mailbox ([Engine.InterjectChild]) and lands at the child's next between-Steps
 // boundary as an ordinary interjection, with the child's own tools, mode and confinement unchanged
-// — addressing a child grants it nothing (ADR 0005).
+// — addressing a child grants it nothing (ADR 0005). It is the ordinary send: the child's own
+// unstarted grandchildren still run first ([Engine.InterjectChildNow] is the send that skips them).
 //
 // It is stageInterjection's shape with one seam swapped, and deliberately so: the parse is the same
 // ([promptEditor.submitParse]), so a message to a child carries its @file references and its skill

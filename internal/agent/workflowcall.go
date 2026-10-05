@@ -898,7 +898,9 @@ func (a *Agent) workflowStopResult(callID, id string) domain.ToolResult {
 // Two items may share a short name (/a/x.go and /b/x.go both read x.go); the full label or the run
 // id then tells them apart. It rides the
 // item child's mailbox exactly as a human Interjection does (InterjectChild, ADR 0063): the message
-// lands at the child's next between-Steps boundary and grants it nothing.
+// lands at the child's next between-Steps boundary and grants it nothing. It is always the ordinary
+// send, never InterjectChildNow, so the model never pre-empts the child's grandchildren (ADR 0025,
+// amended 2026-10-05).
 func (a *Agent) workflowMessageResult(callID string, args workflowControlArgs) domain.ToolResult {
 	if args.Item == "" || strings.TrimSpace(args.Text) == "" {
 		return errorToolResult(callID, workflowControlNeedsItem)

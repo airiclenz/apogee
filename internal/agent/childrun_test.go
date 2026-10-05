@@ -94,7 +94,7 @@ func TestChildRun_AHumanStopWithFoldOnFoldsAndReturnsTheLeftover(t *testing.T) {
 	responder := &stopResponder{block: map[int]bool{0: true}}
 	sub, sink := newChildRunSub(t, responder)
 	responder.before = func(int) {
-		if !sub.mailbox.add(domain.UserInput{Text: childRunNote}) {
+		if !sub.mailbox.add(domain.UserInput{Text: childRunNote}, false) {
 			t.Error("the running child's mailbox refused a message")
 		}
 		if !registry.stop("r1") {
@@ -119,7 +119,7 @@ func TestChildRun_AHumanStopWithFoldOnFoldsAndReturnsTheLeftover(t *testing.T) {
 	if len(leftover) != 1 || leftover[0].Text != childRunNote {
 		t.Errorf("stop leftover = %+v, want the one queued message", leftover)
 	}
-	if sub.mailbox.add(domain.UserInput{Text: "late"}) {
+	if sub.mailbox.add(domain.UserInput{Text: "late"}, false) {
 		t.Error("the mailbox still accepts after the stop closed it")
 	}
 	if got := reapChild(&registry, "r1", sub); len(got) != 0 {
@@ -139,7 +139,7 @@ func TestChildRun_AParentCancelWithFoldOffLeavesTheLeftoverToTheReap(t *testing.
 	responder := &stopResponder{block: map[int]bool{0: true}}
 	sub, sink := newChildRunSub(t, responder)
 	responder.before = func(int) {
-		sub.mailbox.add(domain.UserInput{Text: childRunNote})
+		sub.mailbox.add(domain.UserInput{Text: childRunNote}, false)
 		cancel()
 	}
 	_, stopped, leftover, err := runChild(ctx, childRun{registry: &registry, runID: "r1", sub: sub})

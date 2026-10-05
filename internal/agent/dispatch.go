@@ -794,11 +794,12 @@ func fanOutCeilingResult(callID string, group, rounds, width int, fanOutOffered 
 // interjectionPending answers whether a user message is waiting for this Agent's next boundary —
 // the one predicate that decides a delegation about to start is skipped instead. It is one rule
 // for every depth: at the top level it is the host's Config.InterjectionPending seam (nil ⇒ never),
-// and on a delegate (isDelegate) it is this child's own mailbox (children.go), because a message queued for a child
-// waits on that child's grandchildren exactly as the human's waits on its children.
+// and on a delegate (isDelegate) it is this child's own mailbox (children.go) holding a message
+// sent now (InterjectChildNow), because such a message waits on that child's grandchildren exactly
+// as the human's now message waits on its children; an ordinary one waits for the wave.
 func (a *Agent) interjectionPending() bool {
 	if a.isDelegate() {
-		return a.mailbox.hasPending()
+		return a.mailbox.hasNowPending()
 	}
 	if a.cfg.InterjectionPending == nil {
 		return false

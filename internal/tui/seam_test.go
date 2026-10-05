@@ -204,10 +204,12 @@ type workflowPromptAnswer struct {
 	answer domain.WorkflowPromptAnswer
 }
 
-// childInterjection is one recorded InterjectChild call: the run it addressed and the message.
+// childInterjection is one recorded InterjectChild or InterjectChildNow call: the run it addressed,
+// the message, and whether it was sent now.
 type childInterjection struct {
 	runID string
 	input domain.UserInput
+	now   bool
 }
 
 // fakeEngine satisfies the narrow Engine seam the worker drives.
@@ -366,8 +368,19 @@ func (f *fakeEngine) interjections() []domain.UserInput {
 // refused — and unlike Interject it is called from the Update goroutine, so it takes the same mutex
 // every other fake seam does.
 func (f *fakeEngine) InterjectChild(runID string, in domain.UserInput) error {
+	return f.recordChildInterjection(runID, in, false)
+}
+
+// InterjectChildNow is InterjectChild's recording for a message sent now: the same log, marked now,
+// and the same scripted answer.
+func (f *fakeEngine) InterjectChildNow(runID string, in domain.UserInput) error {
+	return f.recordChildInterjection(runID, in, true)
+}
+
+// recordChildInterjection logs one addressed message and answers with the scripted refusal, if any.
+func (f *fakeEngine) recordChildInterjection(runID string, in domain.UserInput, now bool) error {
 	f.mu.Lock()
-	f.childInterjected = append(f.childInterjected, childInterjection{runID: runID, input: in})
+	f.childInterjected = append(f.childInterjected, childInterjection{runID: runID, input: in, now: now})
 	fn := f.interjectChildFn
 	f.mu.Unlock()
 	if fn != nil {

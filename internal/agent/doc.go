@@ -113,7 +113,9 @@
 // between-Steps boundary, and TakeWorkflowNotes hands a Driver the held finish notes to commit
 // there the same way. children.go is that same door one level down: the registry a parent
 // publishes its RUNNING sub-agents in, the mailbox each child drains at its own between-Steps
-// boundaries, and InterjectChild, which addresses a child by its run id (ADR 0063, ADR 0086).
+// boundaries, and InterjectChild and InterjectChildNow, which address a child by its run id (ADR
+// 0063, ADR 0086) — the second as a message sent now, which skips the child's unstarted
+// grandchildren while it waits (ADR 0025, amended 2026-10-05).
 // childrun.go is the one lifecycle a child's run goes through on that registry — register, arm,
 // Run, disarm, the stop verdict and an optional fold of a stopped child — and its teardown,
 // reapChild; sub_agent delegation (runSubAgent) runs its child on it with fold on, the workflow

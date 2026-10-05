@@ -833,8 +833,8 @@ type DelegationHost interface {
 // are driven from the Update goroutine but only at idle, when no worker runs — so the
 // single-driver contract holds (phase-2 detail plan §3 C1). Four calls stand outside it
 // deliberately, and all are engine-side-guarded rather than boundary-guarded: AbortExchange,
-// SettleExchange, InterjectChild and StopChild, which the Update goroutine may make while a worker
-// drives.
+// SettleExchange, InterjectChild (with its now sibling, InterjectChildNow) and StopChild, which the
+// Update goroutine may make while a worker drives.
 type Engine interface {
 	// Submit enqueues user input to begin or continue an Exchange.
 	Submit(domain.UserInput) error
@@ -878,6 +878,12 @@ type Engine interface {
 	// one such event reports the message's fate, Landed either way, and the fold turns it into the
 	// delivered block inside the run or the note that it never got there (transcript.apply).
 	InterjectChild(runID string, in domain.UserInput) error
+	// InterjectChildNow is InterjectChild for a message sent NOW (ctrl+g): while it waits in the
+	// child's mailbox, the child skips every grandchild delegation not yet started, as the human's
+	// own now message skips queued members at the top level (ADR 0025, amended 2026-10-05). An
+	// ordinary InterjectChild waits for that wave instead. Its contract, refusal and delivery
+	// event are InterjectChild's.
+	InterjectChildNow(runID string, in domain.UserInput) error
 	// StopChild stops the ONE delegation whose run id is runID, anywhere in the engine's tree,
 	// while the Turn that spawned it goes on: the child's work is folded into a partial result
 	// its parent reads like any other tool result, and a pooled delegation still waiting for a

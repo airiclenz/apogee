@@ -113,7 +113,12 @@ CONTEXT.md — sub-agent skip paragraph, InterjectChild mailbox paragraph; docs/
 - `grep -n "ctrl+g" CONTEXT.md`
 **Commit:** `docs(adr): amend ADR 0025 — a message waits for the wave unless sent now`
 
-## 4. Engine: a child mailbox preempts only for a "now" message
+## 4. Engine: a child mailbox preempts only for a "now" message — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): `childMailbox.hasPending` renamed to `hasNowPending`, because it now answers only for a row sent now; `childMailbox.add` gained a `now bool` parameter, and the queue holds `mailboxRow{in, now}` rows. `drain`/`close` still return `[]domain.UserInput`.
+NOTES (2026-10-05): consequential edit — internal/agent/childrun_test.go: made necessary by `childMailbox.add` gaining its `now` parameter (three call sites pass `false`; one more in children_test.go).
+NOTES (2026-10-05): consequential edit — internal/agent/doc.go: made necessary by adding `InterjectChildNow` beside `InterjectChild` in the package's door map.
+NOTES (2026-10-05): the new `TestInterjectChild_OrdinaryMessageLetsAGrandchildRun` sets `Delegation.MaxDepth = 2` so the child really holds `sub_agent`; the existing now-test keeps the default depth, as before (its skip runs before the tool lookup). `internal/agent/fanout_test.go` needed no change: its `InterjectChild` call steers a depth-1 child that has no grandchildren.
 
 **What:**
 **Goal:** A child's mailbox reports a pending interjection to its grandchild dispatch only while it holds a message marked "now"; an ordinary message to a running child still lands at the child's next boundary.

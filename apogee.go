@@ -942,7 +942,7 @@ var (
 	// mirror of ErrInputPending. Match with errors.Is.
 	ErrNoOpenExchange = domain.ErrNoOpenExchange
 
-	// ErrNoSuchChild is returned by Agent.InterjectChild and Agent.StopChild when the run id
+	// ErrNoSuchChild is returned by Agent.InterjectChild, Agent.InterjectChildNow and Agent.StopChild when the run id
 	// names no RUNNING sub-agent in this agent tree — the child finished, was cancelled, or never
 	// existed. Addressing a child is inherently racy, so this is a normal outcome a Driver
 	// reports rather than a fault; nothing was queued. Match with errors.Is.
