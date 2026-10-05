@@ -9,6 +9,18 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- Fixed: `/clear` or switching sessions while a background workflow was running could freeze apogee for good. The stopped workflow is now cancelled without waiting for it to finish; it shows as stopped once it has wound down, and its finish note no longer reaches the new conversation.
+
+- **Workflows no longer read through a symlink out of the workspace.** A `fan_out` or recipe whose `lines:` file, `files:` or `split:` directory, context file, or (for a `fan_out` plan) prompt file is a symlink pointing outside the workspace now fails with an error naming that source, instead of reading the host file behind it. An absolute symlink is refused too, even when it resolves inside the workspace, the same rule `read_file` and `@file` already follow; a relative symlink that stays inside the workspace still works.
+
+- **A workflow no longer hangs on a named pipe, and a pick stage stays inside its folder.** A `lines:` file or context file that is not a regular file (a named pipe, a device, a socket or a directory) now fails with an error naming that source instead of blocking the run forever; a `files:` glob whose leading directory is a file is refused; and a pick stage's `file:` that is a symlink pointing out of the workflow folder fails the stage instead of reading the file behind it. A glob under a missing directory still yields no items.
+
+- Fixed: the Linux landlock launcher now locks its OS thread before it sets no_new_privs and restricts itself, so the confined command is always exec'd from the thread that carries the landlock domain. Both calls bind to the calling thread only, and without the lock the Go scheduler could move the launcher between them and the exec, starting the command unconfined.
+
+- Fixed: a confined command (bwrap, landlock or seatbelt) no longer keeps apogee's controlling terminal. Every confined one-shot run on Linux and macOS now starts in a new session, so opening `/dev/tty` fails and the command cannot inject keystrokes into your terminal. A timeout still kills the whole process tree. The Console keeps its own pseudo-terminal as before.
+
+- Fixed: git tools no longer run when apogee's safety check of the repository's own git config does not finish. If that check times out, stalls, or gets more output than apogee keeps, the git call is now refused with a message saying the check did not complete. Before, the call went ahead as if the config were clean. The next git call runs the check again.
+
 - **A background sub_agent's retained child survives an aborted Exchange.** A named child that a background sub_agent left retained on the session while one of your Exchanges was open is no longer lost when that Exchange is aborted; it stays continuable by name. A blocking delegation retained inside the aborted Exchange is still rolled back with it.
 
 - **A background `sub_agent` call with a re-used call id starts a fresh run.** The one-item plan a background `sub_agent` runs as was salted with the upstream's call id alone, so a server that handed the same id to the same task in a later turn would have resumed the earlier, finished run instead of delegating again. The plan is now salted with the call id plus a run id the engine mints for the call; a crash resume or a `/workflows` re-run still reads the plan back from its own folder and drives that run (ADR 0094 D8, amended 2026-10-05).
