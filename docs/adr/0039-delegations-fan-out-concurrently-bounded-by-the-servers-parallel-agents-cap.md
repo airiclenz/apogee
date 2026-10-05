@@ -194,6 +194,11 @@ cancel during child 2 already discards child 1.
 > runs its items in waves of the Parallel-agents width with no ceiling, because each item hands back
 > a one-line Receipt rather than a full report; when `fan_out` is enabled, the refusal names it.
 
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D6).** "Every later `sub_agent` call" in the
+> 2026-09-20 note no longer covers a `sub_agent` call carrying `background: true`. It returns at once
+> and runs as a one-item Background workflow outside the reply's tool round, so it is neither counted
+> against the ceiling nor refused by it; its capacity is ADR 0089 D2's.
+
 > **Amended 2026-09-20 (`apogee-60x`, [ADR 0082](0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).**
 > "Failures are independent: a child's error, breaker trip, or denied approval becomes that
 > child's tool result" — the independence stands (siblings run to completion, the parent's next

@@ -159,7 +159,12 @@ internal/tui/model.go — handleKey `case "enter"`, escStopHintSkipsFormat; inte
 **Closes:** apogee-subagent-preempt-wave
 **Commit:** `feat(tui): a message waits for the sub-agent wave unless sent with ctrl+g`
 
-## 6. ADR 0094: sub_agent may run in the background
+## 6. ADR 0094: sub_agent may run in the background — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): ADR 0087 is amended beyond its "exactly two sources" lead — D2 ("`sub_agent` is unchanged"), D9 ("workflow children do not delegate") and D10's entry points are each made false by the background child mode, so each gains a dated blockquote and the Amends line names them.
+NOTES (2026-10-05): ADR 0089 is also amended at D5 (save-as-recipe "any workflow" — a sub_agent-origin workflow offers none), beside the lead, D1 and D3 the item names; ADR 0094 records the plan's header calls as D1–D10 (gate, child mode, finish note, retention/continue refusal, capacity, outside the tool round, headless/daemon blocking, call-id-salted plan hash, `/workflows` origin, ADR 0031/bench).
+NOTES (2026-10-05): consequential edit — CONTEXT.md Receipt entry: made necessary by ADR 0094 D2 (a background sub_agent's item child carries no `finish`; the engine builds its Receipt), beyond the Workflow, Background workflow and Sub-agent entries the item names.
+NOTES (2026-10-05): retry — ADR 0094 D3 and the ADR 0089 D3 amendment put the transcript path on the `sub_agent <name> <outcome> — transcript: <path>` lead line (named only when one was written) with the report under it, per the run's decision.
 
 **What:**
 **Goal:** `docs/adr/0094-*.md` records sub_agent's `background` switch as a one-item background workflow behind ADR 0089's gate, with every header call for background sub_agent as a numbered decision; ADR 0086, 0087 and 0089 carry dated amendment blockquotes linking it; CONTEXT.md speaks it.

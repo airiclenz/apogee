@@ -22,6 +22,10 @@ the agent a full control tool.
 note reaches the agent — and wakes it if it is idle.** `sub_agent` stays blocking; ADR 0086's
 rejection of async *delegation* stands for it.
 
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md)).** `sub_agent` no longer stays blocking without exception: on the
+> classes this ADR's gate opens for, a `sub_agent` call may carry `background: true` and runs as a
+> one-item Background workflow. ADR 0086's rejection of a spawn/message/wait tool family stands.
+
 **D1 — Two launchers.**
 - **The user** launches a recipe skill in the background.
 - **The model** launches one through `fan_out`'s `background` switch.
@@ -30,6 +34,11 @@ The switch, and the `workflow` tool (D4), are shown only to model classes the be
 Every other class sees `fan_out` as blocking-only, as it sees `fan_out` itself only where ADR 0087
 D8's gate is open. Headless and daemon runs offer no background: with no conversation to go on, a
 workflow there blocks.
+
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D1, D7).** A third launcher: **the model** through `sub_agent`'s
+> `background` switch, shown behind the same gate as `fan_out`'s (the class is bench-approved and the
+> tool policy lifts `workflow`). Headless and daemon runs never show it, and a background `sub_agent`
+> the engine cannot keep runs blocking.
 
 **D2 — Capacity.** A background workflow runs at the server's Parallel-agents width minus one, so
 one slot stays free for the conversation. On a width-1 server it has to share that one slot: the
@@ -57,6 +66,12 @@ an engine note as well as a user message.
 > verdict count the same item set. The note's text is unchanged. A blocking re-issue of a workflow
 > whose folder this background run still drives is refused (ADR 0087 D4, amended 2026-09-30).
 
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D3).** "The note it carries is one line" binds a `fan_out` or
+> Recipe workflow. A background `sub_agent`'s note opens on the lead line
+> `sub_agent <name> <outcome> — transcript: <path>`, with no item counts and the transcript part
+> only when one was written, and carries the child's multi-line report under it, under the blocking
+> result's 64 KiB cap. Delivery and the wake are unchanged.
+
 **D4 — The `workflow` control tool.** A model shown the background switch also gets `workflow`, with
 three actions:
 - **status:** every workflow in the session, or one in detail (stages, item counts, receipts so far);
@@ -72,6 +87,9 @@ three actions:
   folders.
 - The user inspects, stops, re-runs failed items of, and saves-as-recipe any workflow from the
   `/workflows` view.
+
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D9).** A background `sub_agent` lists with a `sub_agent` origin and
+> offers no save-as-recipe: one delegation is not a recipe.
 
 ## Considered options
 

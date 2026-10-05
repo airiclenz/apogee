@@ -33,6 +33,13 @@ Receipt — and the parent reads one line per item plus a report path.** A workf
 sources, and in both the work is *asked for*: the top-level model's `fan_out` call, or a Recipe a
 human wrote.
 
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md)).** A workflow now has three sources, and in all three the work
+> is still asked for: a `fan_out` call, a Recipe, and a `sub_agent` call carrying `background: true`,
+> which runs as a one-item Background workflow. That item's child is a `sub_agent` child: it hands
+> back a prose report and never calls `finish`, and the engine records the item's Receipt itself.
+> "Each item done by a fresh child that hands back a Receipt" holds for `fan_out` and Recipe items.
+> D10's entry points gain that `sub_agent` call as a fifth.
+
 **D1 — The model describes one fan-out; recipes describe everything bigger.** A `fan_out` call
 carries a brief template (with `{item}` / `{out}` placeholders), the list to fan out over, the
 receipt fields it wants back, a per-item output path, shared context files, an optional tool
@@ -48,6 +55,10 @@ in result shape (one prose report against one line per item plus a report path),
 against "many helpers over a list" is a verb choice a small model gets right. Keeping `sub_agent`
 byte-identical keeps today's behaviour and gives the bench a clean arm. `fan_out` also starts a
 named Recipe: `fan_out{recipe, inputs}`, where the model fills in only the recipe's declared inputs (for `audit`: scope and focus).
+
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D1).** `sub_agent` stays byte-identical wherever ADR 0089's
+> background gate is closed. Where it is open, `sub_agent` gains one optional `background` field;
+> its blocking result shape is unchanged.
 
 **D3 — A receipt is a `finish` tool call the engine checks on the spot.** Only workflow children
 carry `finish`. Its schema is a fixed core — `status: ok | partial | blocked` and a one-line
@@ -120,6 +131,10 @@ user invokes them.
 2026-09-15). `verify` and `merge` are sibling stages the engine runs, never grandchildren. A
 child's privileges stay bounded by the parent's (ADR 0005). A stage may run on the other Delegation
 seat under the existing `sub-agents-choice` gate (ADR 0069).
+
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D2).** This binds `fan_out` and Recipe items. A background
+> `sub_agent`'s child keeps `sub_agent`'s own depth rule, so it may delegate wherever a blocking
+> child may.
 
 **D10 — The workflow engine is a Driver-free library.** It lives in its own engine package, is
 re-exported through the root facade for the bench, and is started by four entry points: the

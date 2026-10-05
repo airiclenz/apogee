@@ -38,6 +38,14 @@ The parent itself still cannot stop a running child — it is not running while 
 > conversation goes on, and its end wakes the agent with a one-line note (ADR 0089 D1–D3); the
 > `workflow` tool lets the model check, stop or message it (D4).
 
+> **Amended 2026-10-05 ([ADR 0094](0094-sub-agent-may-run-as-a-one-item-background-workflow.md)).** The blocking model is now `sub_agent`'s default, not its
+> only shape. On a model class the bench approved for ADR 0089's background switch, a `sub_agent`
+> call may carry `background: true`: the engine runs that one delegation as a one-item Background
+> workflow and answers the call at once, and the child's report arrives in the finish note. While
+> such a child runs, the parent is running too, and it can stop the child with the `workflow` tool.
+> A named background child is retained on finish as D1 says; continuing it runs blocking, and a
+> call carrying both `continue` and `background: true` is refused.
+
 **D1 — A named delegation stays continuable for the whole session.** A delegation that completed
 normally is retained when the `sub_agent` call **named** it; naming is the parent's own opt-in, so
 no new text reaches the model and nothing changes for a model that never names. A name the

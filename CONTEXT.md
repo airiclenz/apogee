@@ -193,7 +193,12 @@ spawn ids) over a **shared, read-only
 dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded by the
 `delegate-max-depth` key (`Config.Delegation.MaxDepth`), default **1**: the top-level agent
 delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
-(ADR 0013 decision 4, superseded 2026-09-15). A `max_steps` ask above `delegate-max-steps` is
+(ADR 0013 decision 4, superseded 2026-09-15). A delegation blocks its parent's Turn by default; where
+`fan_out`'s background gate is open, a call may carry `background: true` and run as a one-item
+**Background workflow** instead — the same child, its report delivered in the finish note; a call
+carrying both `continue` and `background: true` is refused, and headless and daemon runs never offer
+the switch ([ADR 0094](docs/adr/0094-sub-agent-may-run-as-a-one-item-background-workflow.md),
+2026-10-05). A `max_steps` ask above `delegate-max-steps` is
 applied as the cap and the delegation's result says so in one appended line. A delegation the
 engine capped at a **Step cap** (or its token or time sibling), whose Exchange **faulted**
 (ADR 0082), that the human **stopped** (**Stop (a delegation)**), or that completed under a name its
@@ -496,12 +501,15 @@ _Avoid_: "stage run" (a stage is not a run — its items are), "sub-view", "work
 
 **Workflow**:
 One engine-run orchestration of **Sub-agent** runs: an ordered list of **stages**, each covering a
-list of **items**, where every item is done by a fresh child **run** that hands back a **Receipt**
-while its detail goes to a file. The engine, never the parent, runs the stages — fanning out in
+list of **items**, where every item is done by a fresh child **run** whose detail goes to a file and
+whose outcome comes back as a **Receipt** — handed back by the child itself, except for a background
+`sub_agent`'s one item, whose child writes a prose report and whose Receipt the engine builds. The engine, never the parent, runs the stages — fanning out in
 waves, retrying, verifying and merging — and the parent reads back one line per item plus a report
-path, so the orchestration costs its context almost nothing. A workflow has two sources: the
+path, so the orchestration costs its context almost nothing. A workflow has three sources: the
 top-level model's `fan_out` call (one fan-out stage, optionally followed by a verify and a merge
-stage) and a human-written **Recipe** (any number of stages). The model asks for the fan-out; the
+stage), a human-written **Recipe** (any number of stages), and a `sub_agent` call carrying
+`background: true` (one item, run as a **Background workflow**; 2026-10-05,
+[ADR 0094](docs/adr/0094-sub-agent-may-run-as-a-one-item-background-workflow.md)). The model asks for the fan-out; the
 engine never plans work on its behalf (the distinction from the retired **Guided decomposition**).
 A workflow lives in a folder under the session's **Scratch dir**, so it survives `esc`, a crash and
 a resume: cancel stops it and keeps every finished item, and asking again with the same task,
@@ -550,22 +558,31 @@ for (a count, a verdict) — delivered by calling the `finish` tool only workflo
 The engine checks it on the spot and bounces a malformed one back to the child to fix; routing
 between stages reads receipts alone, never the detail files. Ratified 2026-09-27
 ([ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D3).
+A background `sub_agent`'s one item is the exception: its child is a `sub_agent` child that writes a
+prose report and never carries `finish`, and the engine builds that item's Receipt itself
+([ADR 0094](docs/adr/0094-sub-agent-may-run-as-a-one-item-background-workflow.md) D2, 2026-10-05).
 _Avoid_: "result" (a `sub_agent` call's full prose report), "summary" (one field of the receipt),
 "report" (the detail file, or the workflow's final merge).
 
 **Background workflow**:
 A **Workflow** that runs while the conversation goes on — launched by the user (a **Recipe**'s
-skill run in the background) or by the top-level model through `fan_out`'s background switch,
-which model classes see only where the bench has shown it helps. It keeps one server slot free
-for the conversation; a second one on the same server waits in line. When it finishes, a one-line
-note reaches the parent — at the next pause between tool calls if a reply is under way, otherwise
+skill run in the background) or by the top-level model through `fan_out`'s background switch or
+`sub_agent`'s, which model classes see only where the bench has shown it helps. A background
+`sub_agent` is one delegation run as a one-item workflow: its child works exactly as a blocking
+`sub_agent` child does, the call is answered at once, and the child's report comes back in the
+finish note, under the blocking result's cap and with its transcript path; a named one is retained
+on finish as a **Retained delegation**, and continuing it runs blocking
+([ADR 0094](docs/adr/0094-sub-agent-may-run-as-a-one-item-background-workflow.md), 2026-10-05).
+It keeps one server slot free
+for the conversation; a second one on the same server waits in line. When it finishes, a note —
+one line, or a background `sub_agent`'s report — reaches the parent — at the next pause between tool calls if a reply is under way, otherwise
 by apogee **waking** the agent with a reply of its own, bounded by the **Mode** as any reply is.
 Quitting apogee stops it; resuming the session resumes it. While it is still driving its folder, a
 blocking launch of the same workflow — a `fan_out`, a typed `/<id>` or a foreground recipe — is
 refused rather than run beside it (2026-09-30). Ratified 2026-09-27
 ([ADR 0089](docs/adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md); [ADR 0087](docs/adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)).
-_Avoid_: "async delegation" (ADR 0086's rejected option A — a spawn/message/wait tool family),
-"detached run".
+_Avoid_: "async delegation" (ADR 0086's rejected option A — a spawn/message/wait tool family; a
+background `sub_agent` adds a switch to the one tool, not that family), "detached run".
 
 **Inspector**:
 The **Driver**-side view of what the loop actually put on the **Upstream** connection — the request
