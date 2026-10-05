@@ -1,0 +1,5 @@
+
+*
+!.gitignore
+!config.toml
+!hooks.json
