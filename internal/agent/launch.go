@@ -268,7 +268,7 @@ func (a *Agent) runBlocking(ctx context.Context, launch workflowLaunch) (result 
 func (a *Agent) wireLaunch(launch workflowLaunch, built builtLaunch, call domain.ToolCall) *workflowObserver {
 	host, runner := built.host, built.runner
 	spawner := host.newWorkflowSpawner(launch.turn, call, built.prompts)
-	spawner.children = &a.children
+	spawner.children, spawner.retained = &a.children, &a.retained
 	spawner.seat = launch.seat
 	runner.Spawner = spawner
 	if scripts, ok := runner.Scripts.(*recipeScripts); ok {

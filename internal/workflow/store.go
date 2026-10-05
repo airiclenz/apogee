@@ -91,9 +91,13 @@ const (
 // every stage's and item's phase with the receipts inline, so a reader (the /workflows view, a
 // resume, a re-run) never opens an item's own files.
 type RunStatus struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name,omitempty"`
-	Recipe   string        `json:"recipe,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Recipe string `json:"recipe,omitempty"`
+	// Origin is what launched the workflow when that is not a recipe or a fan_out: OriginSubAgent
+	// for a background sub_agent's one-item workflow (ADR 0094), "" otherwise and in every
+	// status.json written before it existed. Create stamps it from the plan (originOf).
+	Origin   string        `json:"origin,omitempty"`
 	PlanHash string        `json:"plan_hash"`
 	Phase    Phase         `json:"phase"`
 	Created  time.Time     `json:"created"`
@@ -176,7 +180,7 @@ func (s *Store) Create(plan Plan, planHash string, now time.Time) (RunStatus, er
 	}
 
 	status := RunStatus{
-		ID: id, Name: plan.Name, PlanHash: planHash, Phase: PhasePending,
+		ID: id, Name: plan.Name, Origin: originOf(plan), PlanHash: planHash, Phase: PhasePending,
 		Created: now, Updated: now, Stages: make([]StageStatus, 0, len(plan.Stages)),
 	}
 	for _, stage := range plan.Stages {
@@ -189,6 +193,21 @@ func (s *Store) Create(plan Plan, planHash string, now time.Time) (RunStatus, er
 		return RunStatus{}, err
 	}
 	return status, nil
+}
+
+// OriginSubAgent is the RunStatus.Origin of a workflow whose plan runs the sub_agent path: a
+// background sub_agent's one-item workflow (ADR 0094).
+const OriginSubAgent = "sub_agent"
+
+// originOf is the Origin a workflow folder of plan is created with: OriginSubAgent when one of its
+// stages runs the sub_agent path, else none.
+func originOf(plan Plan) string {
+	for _, stage := range plan.Stages {
+		if stage.RunsSubAgent() {
+			return OriginSubAgent
+		}
+	}
+	return ""
 }
 
 // mkdirUnique creates the folder base, or base-2, base-3… on a collision, and returns its id.
@@ -417,9 +436,9 @@ func ReadItemTranscript(dir, key string) (messages []domain.Message, found bool,
 // ItemOutputPath is where the item key, labelled label, of the stage named stage in the workflow
 // folder dir was told to write its detail output — read from the folder's plan.json: the stage's
 // `out:` with {item} rendered as the label, exactly as the child was handed it (a relative path is
-// the workspace's), or output.md inside the item's own folder when the stage sets no `out:`. A stage
-// the plan does not name has no `out:` of its own. ErrInvalidKey refuses a key that is not an item
-// key.
+// the workspace's), or output.md inside the item's own folder when the stage sets no `out:` or runs
+// the sub_agent path (outputPath). A stage the plan does not name has no `out:` of its own.
+// ErrInvalidKey refuses a key that is not an item key.
 func ItemOutputPath(dir, stage, key, label string) (string, error) {
 	if !isValidKey(key) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidKey, key)
@@ -429,7 +448,7 @@ func ItemOutputPath(dir, stage, key, label string) (string, error) {
 		return "", err
 	}
 	for _, candidate := range plan.Stages {
-		if candidate.Name == stage && candidate.Out != "" {
+		if candidate.Name == stage && candidate.Out != "" && !candidate.RunsSubAgent() {
 			return strings.ReplaceAll(candidate.Out, placeholderItem, label), nil
 		}
 	}

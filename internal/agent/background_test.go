@@ -1329,3 +1329,56 @@ func TestBackground_AnItemChildStoppedThroughTheRootEndsStopped(t *testing.T) {
 		t.Errorf("item phases = %v, want alpha done and beta stopped", phases)
 	}
 }
+
+func TestBackground_ANamedSubAgentChildIsRetainedOnTheRootAndContinued(t *testing.T) {
+	t.Parallel()
+
+	const firstReport = "The survey found three modules."
+	sink := &recordingSink{}
+	upstream := scriptedResponder(t, contentTurn(firstReport), contentTurn("Counted: forty tests."))
+	a := newBackgroundParent(t, workflowConfig(t, sink), upstream)
+	built, err := a.buildLaunch(workflowLaunch{
+		plan: subAgentWorkflowPlan(`{"task":"survey the repo","name":"surveyor"}`),
+		mode: launchModeBackground,
+	})
+	if err != nil {
+		t.Fatalf("buildLaunch: %v", err)
+	}
+
+	result, err := built.runner.Run(context.Background(), built.plan)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if built.host == a {
+		t.Fatal("the background launch ran off the root, not its launch-time host")
+	}
+	if receipt := result.Stages[0].Items[0].Receipt; receipt == nil || receipt.Status != workflow.StatusOK {
+		t.Fatalf("receipt = %+v, want ok", receipt)
+	}
+	if names := a.retained.names(); !slices.Equal(names, []string{"surveyor"}) {
+		t.Errorf("root retained = %v, want the named background child", names)
+	}
+	if names := built.host.retained.names(); len(names) != 0 {
+		t.Errorf("host retained = %v, want none — the snapshot keeps nothing", names)
+	}
+
+	continued, _ := a.runSubAgent(context.Background(), domain.ToolCall{
+		ID: "c2", Tool: tools.SubAgentToolName,
+		Arguments: json.RawMessage(`{"continue":"surveyor","task":"now count the tests"}`),
+	}, a.runIDs.mint())
+
+	if continued.IsError {
+		t.Fatalf("continue result = %q, want the continued child's report", continued.Content)
+	}
+	requests := upstream.requests()
+	if len(requests) != 2 {
+		t.Fatalf("upstream requests = %d, want the background child's and the continuation's", len(requests))
+	}
+	seeded := false
+	for _, message := range requests[1].Messages {
+		seeded = seeded || strings.Contains(message.Content, firstReport)
+	}
+	if !seeded {
+		t.Errorf("continuation request = %+v, want it seeded with the background child's report", requests[1].Messages)
+	}
+}

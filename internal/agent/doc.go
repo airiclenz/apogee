@@ -83,7 +83,9 @@
 // delegation value the constructor copies once. workflowspawn.go is that same recursion point for
 // a Workflow's items (ADR 0087): the workflow.Spawner whose children report through a checked
 // `finish` receipt, carry the finish block in the delegate report block's place, close a capped
-// run on finish alone, and book no ledger row, retention entry or generated name. workflowcall.go
+// run on finish alone, and book no ledger row, retention entry or generated name — all but an item
+// on the sub_agent path (ADR 0094), which runs the blocking sub_agent path itself (runDelegate,
+// subagent.go) and is retained on the top-level Agent like a blocking child. workflowcall.go
 // is the blocking fan_out call that runs them: the call's arguments made a checked plan, run over
 // the session's workflow store at the dispatch width, and answered with one line per item — or,
 // under a cancel, with how many finished and the listing written so far (ADR 0088 D3) — or, where

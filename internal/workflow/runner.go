@@ -101,7 +101,8 @@ type Round struct {
 
 // Outcome is how one child ended: its Ending, the receipt its `finish` call handed back (nil when
 // it never called it), a report the engine kept of the run (the closing text or fold of a capped
-// child, the cause of a fault), and the child's conversation for the item's transcript.
+// child, the cause of a fault; for a child on the sub_agent path, its delegation result), and the
+// child's conversation for the item's transcript.
 type Outcome struct {
 	Ending     Ending
 	Receipt    *Receipt
@@ -853,6 +854,9 @@ func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, ind
 		}
 		last = outcome
 
+		if stage.RunsSubAgent() {
+			return s.finishSubAgentItem(stageIndex, stage, index, job, result, round, outcome)
+		}
 		if isFinal(outcome) {
 			return s.finishItem(stageIndex, stage, index, job, result, round, *outcome.Receipt)
 		}
@@ -876,7 +880,8 @@ func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, ind
 // isFinal reports whether an outcome ends the item as it stands: the receipt of a child that
 // completed, or a capped child's receipt that is not partial (it finished the work, or declared it
 // blocked, in its closing Turn). A capped partial receipt, a missing receipt and a fault all ask
-// for a second chance.
+// for a second chance. An item on the sub_agent path never reaches it, nor exhaustedReceipt: it is
+// final on any ending but a stop (finishSubAgentItem).
 func isFinal(outcome Outcome) bool {
 	if outcome.Receipt == nil {
 		return false
@@ -910,6 +915,40 @@ func exhaustedReceipt(last Outcome, attempts int) Receipt {
 		Status:  StatusBlocked,
 		Summary: clampWords(fmt.Sprintf("after %d attempts, %s", attempts, cause), SummaryMaxWords),
 	}
+}
+
+// finishSubAgentItem ends an item that ran the sub_agent path (Stage.SubAgent) on its first run
+// that was not stopped: such a child calls no finish, so nothing a retry or continuation could add
+// is ever missing, and the blocking sub_agent path it runs never re-spawns a delegation on its own.
+// The child's report — its delegation result, after the blocking cap — is written to the item's
+// output file, the copy a reader of the folder takes it from, and the receipt it ends on is the one
+// subAgentReceipt reads off its ending, so the tally and every item line count it like any other.
+func (s *runState) finishSubAgentItem(stageIndex int, stage Stage, index int, job itemJob, result ItemResult, round int, outcome Outcome) (ItemResult, error) {
+	if outcome.Report != "" {
+		if err := atomicWrite(result.Output, []byte(outcome.Report)); err != nil {
+			return result, err
+		}
+	}
+	return s.finishItem(stageIndex, stage, index, job, result, round, subAgentReceipt(outcome))
+}
+
+// subAgentReceipt is the receipt a sub_agent-path item ends on, synthesized from how its child
+// ended: ok for a completed child, partial for one stopped at its bound, blocked for a fault or a
+// refusal. Its summary is the report's first line, clamped as a child's own would be, else a line
+// naming the ending.
+func subAgentReceipt(outcome Outcome) Receipt {
+	status, fallback := StatusBlocked, "the sub-agent faulted"
+	switch outcome.Ending {
+	case EndCompleted:
+		status, fallback = StatusOK, "the sub-agent completed"
+	case EndCapped:
+		status, fallback = StatusPartial, "the sub-agent reached its bound"
+	}
+	summary := clampWords(FirstLine(outcome.Report), SummaryMaxWords)
+	if summary == "" {
+		summary = fallback
+	}
+	return Receipt{Status: status, Summary: summary}
 }
 
 // finishItem stores the item's receipt and marks it done; round is the round it ended in.
@@ -1049,9 +1088,10 @@ func readStagePrompt(stage Stage, prompts fs.FS) (string, error) {
 }
 
 // outputPath is where an item's child writes its detail output: the stage's `out:` with {item}
-// rendered as the item's label, or output.md inside the item's own folder.
+// rendered as the item's label, or output.md inside the item's own folder — always the folder's for
+// a stage on the sub_agent path, whose report the Runner writes there itself (finishSubAgentItem).
 func outputPath(store *Store, id string, stage Stage, item Item, key string) (string, error) {
-	if stage.Out != "" {
+	if stage.Out != "" && !stage.RunsSubAgent() {
 		return strings.ReplaceAll(stage.Out, placeholderItem, item.Label), nil
 	}
 	return store.Path(id, itemsDirName+"/"+key+"/"+outputName)

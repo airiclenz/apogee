@@ -197,7 +197,15 @@ internal/agent/subagent.go — withoutSeatChoice, publishesSeatChoice, publishes
 - `go test -race -count=1 -run 'TestSubAgent|Seat' ./internal/agent/`
 **Commit:** `feat(tools): sub_agent offers background behind the workflow gate`
 
-## 8. Workflow items gain a sub_agent mode
+## 8. Workflow items gain a sub_agent mode — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the stage carries the sub_agent call's arguments verbatim as `Stage.SubAgent json.RawMessage` (`json:"sub_agent,omitempty" yaml:"-"`) rather than a typed `SubAgentArgs` — internal/tools imports internal/workflow, so workflow cannot import tools.SubAgentArgs; the spawner decodes the raw arguments through the same runDelegate path a sub_agent call takes. ItemSpec gains no field: it already carries the Stage.
+NOTES (2026-10-05): the receipt synthesis, the report write to the item's Output file and the never-retry rule live in the Runner (`finishSubAgentItem`, `subAgentReceipt`, branch ahead of `isFinal`), not the spawner; the spawner returns Ending + Report (the blocking delegation result, after its cap) + Transcript. A sub_agent-path stage's Output is always the item folder's output.md (`outputPath`, and `ItemOutputPath` to match) so the Runner never writes a workspace-relative `out:`.
+NOTES (2026-10-05): decision taken per the item text — a sub_agent-path item books NO delegate-ledger row (the ledger is the open Exchange's account; the workflow folder is the background child's record), but does run the out-of-band namer like the blocking path.
+NOTES (2026-10-05): runSubAgent's body became `runDelegate(ctx, call, runID, delegateSite, *delegateEnd)`; `delegateSite` carries the Turn (read live), children registry, retained set and optional ledger. `foldStoppedChild` and `startDelegationNaming` now take the registry / Turn explicitly so a background host stamps and arms on the top-level Agent's.
+NOTES (2026-10-05): consequential edit — internal/agent/launch.go: made necessary by the spawner's new `retained` handle (wireLaunch sets it to the top-level Agent's, beside `children`).
+NOTES (2026-10-05): consequential edit — internal/agent/doc.go: made necessary by workflowspawn's item children no longer all booking "no ledger row, retention entry or generated name".
+NOTES (2026-10-05): a sub_agent-path child that fell back from the Sub-agent server sets the spawner's `fellBack` AND its delegation result already carries SeatFallbackNote, so a finish note could repeat it — item 10 ("SeatFallbackNote once") owns the de-duplication.
 
 **What:**
 **Goal:** A workflow plan can carry one item that runs the blocking sub_agent path (prose report, `max_steps`, roster incl. `read-only`, `output_path`, delegation at the configured depth, ledger row, retention of a named child), and its run status records a sub_agent origin that survives `plan.json`/`status.json` round trips.

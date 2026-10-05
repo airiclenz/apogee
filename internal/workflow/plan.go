@@ -119,7 +119,20 @@ type Stage struct {
 	// Repeat names the earlier stage a repeat stage re-runs; Max bounds the rounds.
 	Repeat string `yaml:"repeat,omitempty" json:"repeat,omitempty"`
 	Max    int    `yaml:"max,omitempty" json:"max,omitempty"`
+
+	// SubAgent, when set on a fanout stage, makes its item run the blocking sub_agent path (ADR
+	// 0094) instead of a receipt-reporting item child: it holds that sub_agent call's arguments
+	// verbatim, for the Spawner to decode exactly as a sub_agent call's are. Only the engine sets it
+	// (a background sub_agent's one-item plan), so it has no yaml spelling a recipe could write, and
+	// it is left out of the JSON when unset, which keeps the PlanHash of every plan without it as it
+	// was. Such an item calls no finish: the Runner synthesizes its receipt from how the child ended
+	// (subAgentReceipt), writes the child's report to the item's output file, and never retries or
+	// continues it (runItem).
+	SubAgent json.RawMessage `yaml:"-" json:"sub_agent,omitempty"`
 }
+
+// RunsSubAgent reports whether the stage's items run the blocking sub_agent path (Stage.SubAgent).
+func (s Stage) RunsSubAgent() bool { return len(s.SubAgent) > 0 }
 
 // ItemSource is where a fanout stage's items come from. Exactly one of List, Files, Lines, Split
 // and Stage is set; Batch groups the resulting items that many per child.

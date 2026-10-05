@@ -997,3 +997,59 @@ func TestRunnerNamesAnItemByItsShortNameAndKeepsItOnResume(t *testing.T) {
 		t.Errorf("find's status.json lines = %+v, want the folder item named find, the part named part-a", lines)
 	}
 }
+
+func TestRunnerEndsASubAgentItemOnItsFirstRun(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		outcome    Outcome
+		err        error
+		wantStatus Status
+		wantReport string
+	}{
+		{"completed", Outcome{Ending: EndCompleted, Report: "three modules found\nthe detail"}, nil,
+			StatusOK, "three modules found\nthe detail"},
+		{"capped", Outcome{Ending: EndCapped, Report: "[partial — step cap]\nthe fold"}, nil,
+			StatusPartial, "[partial — step cap]\nthe fold"},
+		{"faulted", Outcome{Ending: EndFaulted, Report: "sub-agent faulted: 500"}, nil,
+			StatusBlocked, "sub-agent faulted: 500"},
+		{"spawn error", Outcome{}, errors.New("spawn refused"), StatusBlocked, "spawn refused"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spawner := &recordingSpawner{script: func(context.Context, ItemSpec) (Outcome, error) {
+				return tc.outcome, tc.err
+			}}
+			runner := newTestRunner(t, spawner)
+			runner.Retries, runner.Continuations = 2, 3
+
+			result := runPlan(t, runner, context.Background(), subAgentPlan())
+			stage := onlyStage(t, result)
+			item := stage.Items[0]
+			report, readErr := os.ReadFile(item.Output)
+			listed, listErr := ItemOutputPath(result.Dir, stage.Name, item.Key, item.Label)
+
+			if spawns := len(spawner.specsFor("surveyor")); spawns != 1 {
+				t.Errorf("spawns = %d, want 1 — a sub_agent item is never retried or continued", spawns)
+			}
+			if item.Receipt == nil || item.Receipt.Status != tc.wantStatus || item.Receipt.Summary != FirstLine(tc.wantReport) {
+				t.Fatalf("receipt = %+v, want %s / %q", item.Receipt, tc.wantStatus, FirstLine(tc.wantReport))
+			}
+			if problems := (ReceiptSpec{}).Check(*item.Receipt); len(problems) > 0 {
+				t.Errorf("the synthesized receipt is malformed: %v", problems)
+			}
+			if want := filepath.Join(result.Dir, "items", item.Key, "output.md"); item.Output != want || listed != want || listErr != nil {
+				t.Errorf("output = %q, listed %q (%v); want the item's own folder %q, the stage's out: unread", item.Output, listed, listErr, want)
+			}
+			if readErr != nil || string(report) != tc.wantReport {
+				t.Errorf("output file = %q, %v; want the child's report %q", report, readErr, tc.wantReport)
+			}
+			tally := TallyOf(result)
+			counted := map[Status]int{StatusOK: tally.OK, StatusPartial: tally.Partial, StatusBlocked: tally.Blocked}
+			if counted[tc.wantStatus] != 1 || tally.Total() != 1 {
+				t.Errorf("tally = %+v, want the one item counted %s", tally, tc.wantStatus)
+			}
+		})
+	}
+}

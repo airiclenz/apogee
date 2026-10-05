@@ -14,6 +14,14 @@ package agent
 // (toolMenu, wrapUpCalls, wrapUpDirective). And the workflow folder is the record: an item child
 // books no delegate-ledger row, no retention entry, and runs no out-of-band namer — the item's
 // own label is its name.
+//
+// The one exception is an item on the sub_agent path (workflow.Stage.SubAgent, ADR 0094): a
+// background sub_agent's one item, which runs the blocking sub_agent path itself (runDelegate) —
+// its prose report, max_steps, roster, output_path, delegation depth, namer and retention, a named
+// child retained on the top-level Agent so a later `continue` finds it — and differs only in
+// delivery. It gets no finish tool; the Runner synthesizes its receipt and writes its report to the
+// item's output file. It books no ledger row either: the ledger is the open Exchange's account of
+// its own delegations, and a background child ends outside it.
 
 import (
 	"context"
@@ -183,12 +191,17 @@ type workflowSpawner struct {
 	// SeatFallbackNote line on (workflowAnswer, finishNote). Items spawn concurrently, so it is
 	// atomic.
 	fellBack atomic.Bool
+	// retained is the set an item on the sub_agent path retains its child in and continues one
+	// from (delegateSite.retained): the parent's own, except for a background workflow, whose
+	// spawner holds the top-level Agent's as it holds its children registry — a pointer, never a
+	// copy of the set's mutex.
+	retained *retainedDelegates
 }
 
 // newWorkflowSpawner returns the Spawner for one workflow this Agent runs under call, in turn, on
 // seatConfigured; a caller whose call named a seat sets it on the returned spawner.
 func (a *Agent) newWorkflowSpawner(turn int, call domain.ToolCall, prompts fs.FS) *workflowSpawner {
-	return &workflowSpawner{parent: a, turn: turn, call: call, prompts: prompts, children: &a.children}
+	return &workflowSpawner{parent: a, turn: turn, call: call, prompts: prompts, children: &a.children, retained: &a.retained}
 }
 
 var _ workflow.Spawner = (*workflowSpawner)(nil)
@@ -199,6 +212,9 @@ var _ workflow.Spawner = (*workflowSpawner)(nil)
 // unreadable prompt file, an unknown tool name, a failed construction — which the Runner treats
 // as a fault; a cancel of ctx before the child starts is EndStopped with no child built.
 func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (outcome workflow.Outcome, err error) {
+	if spec.Stage.RunsSubAgent() {
+		return s.spawnSubAgent(ctx, spec), nil
+	}
 	a := s.parent
 	if a.depth >= a.maxDepth() {
 		return workflow.Outcome{}, errors.New(depthLimitReason(a.maxDepth()))
@@ -273,6 +289,60 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	outcome.Transcript = sub.conv.Messages()
 	ending = outcome.Ending
 	return outcome, nil
+}
+
+// spawnSubAgent runs an item on the sub_agent path (workflow.Stage.SubAgent, ADR 0094): the stage's
+// sub_agent arguments run through runDelegate exactly as the blocking call's do, under the
+// spawner's call and on its registry and retained set, bracketed by the same started/finished pair
+// runDelegation emits, its finished phase carrying the delegation result the blocking parent would
+// have read. Every refusal and fault is that result, never an error, and its recover boundary is
+// runDelegate's. A cancel before the child starts is EndStopped, as Spawn's is.
+func (s *workflowSpawner) spawnSubAgent(ctx context.Context, spec workflow.ItemSpec) workflow.Outcome {
+	a := s.parent
+	if ctx.Err() != nil {
+		return workflow.Outcome{Ending: workflow.EndStopped}
+	}
+	call := domain.ToolCall{ID: s.call.ID, Tool: tools.SubAgentToolName, Arguments: spec.Stage.SubAgent}
+	runID := a.runIDs.mint()
+	if s.observer != nil {
+		s.observer.itemStarted(spec, runID)
+	}
+	applied, requested := a.stepCapFor(call)
+	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{
+		Phase:        domain.SubAgentStarted,
+		StepCap:      applied,
+		CapRequested: requested,
+	})
+	var end delegateEnd
+	site := delegateSite{turn: func() int { return s.turn }, children: s.children, retained: s.retained}
+	result, dispatched := a.runDelegate(ctx, call, runID, site, &end)
+	if dispatched == dispatchCancelled {
+		result = errorToolResult(s.call.ID, cancelledQueuedDelegationContent)
+	}
+	if end.seatFallback {
+		s.fellBack.Store(true)
+	}
+	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
+	ending := subAgentEnding(end.outcome)
+	if ending == workflow.EndStopped {
+		return workflow.Outcome{Ending: ending, Transcript: end.transcript}
+	}
+	return workflow.Outcome{Ending: ending, Report: result.Content, Transcript: end.transcript}
+}
+
+// subAgentEnding is the workflow Ending of a delegation that ended as ended: a cancel or a stop is
+// stopped, a refusal a fault.
+func subAgentEnding(ended delegationOutcome) workflow.Ending {
+	switch ended {
+	case delegationCompleted:
+		return workflow.EndCompleted
+	case delegationCapped:
+		return workflow.EndCapped
+	case delegationCancelled, delegationStopped:
+		return workflow.EndStopped
+	default:
+		return workflow.EndFaulted
+	}
 }
 
 // task composes an item child's opening task: the spec's brief, the stage's prompt file rendered

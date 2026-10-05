@@ -881,7 +881,8 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // runs LAST: after the reaping defer below has unregistered the child, closed its mailbox and
 // released its resources, and still around it, so a panic raised inside that teardown is caught
 // here too. The ErrorEvent is stamped with this Agent's current Turn — the same value dispatchTools
-// carries as `turn` — read live because the signature stays the shared `(ctx, call)` one.
+// carries as `turn` — read live through its delegateSite (ownDelegateSite), because the signature
+// stays the shared `(ctx, call)` one.
 //
 // That same defer is the ONE site the delegate ledger is written from for a call that REACHES this
 // frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
@@ -899,9 +900,64 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // never the unresolved argument. It is also where the messages the child's mailbox still held at
 // the end are reported undelivered, after the ledger row, because the reason each carries is that
 // same classification (undeliveredReason).
-func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (result domain.ToolResult, outcome dispatchOutcome) {
+func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (domain.ToolResult, dispatchOutcome) {
+	return a.runDelegate(ctx, call, runID, a.ownDelegateSite(), nil)
+}
+
+// delegateSite is where a delegation's parent keeps what the run touches beyond the child itself:
+// the Turn its events are stamped with (turn, read as each one is emitted), the registry the
+// running child is addressable and stoppable through, the set a retained child is kept in and a
+// continuation taken from, and the delegate ledger its row is booked in. A sub_agent call's site is its own Agent's (ownDelegateSite). A
+// background workflow's item on the sub_agent path runs off a launch-time snapshot (backgroundHost)
+// whose own registry and retained set nobody reads, so its spawner hands in the top-level Agent's —
+// pointers, never copies of their mutexes — and no ledger: the ledger is the open Exchange's
+// account of its own delegations, and the workflow folder is the background child's record.
+type delegateSite struct {
+	turn     func() int
+	children *childRegistry
+	retained *retainedDelegates
+	ledger   *delegationLedger // nil books no row
+}
+
+// ownDelegateSite is the site of a delegation this Agent's own sub_agent call spawns, stamped with
+// its current Turn, read live.
+func (a *Agent) ownDelegateSite() delegateSite {
+	return delegateSite{
+		turn:     func() int { return a.turns.index },
+		children: &a.children, retained: &a.retained, ledger: &a.delegations,
+	}
+}
+
+// openRow takes the delegation's spawn index from the site's ledger; 0 when it keeps none.
+func (s delegateSite) openRow(callID string) int {
+	if s.ledger == nil {
+		return 0
+	}
+	return s.ledger.open(callID)
+}
+
+// recordRow books the delegation's row in the site's ledger, when it keeps one.
+func (s delegateSite) recordRow(r delegationRecord) {
+	if s.ledger != nil {
+		s.ledger.record(r)
+	}
+}
+
+// delegateEnd is what a caller of runDelegate reads beyond the result: how the delegation ended
+// (classifyDelegation's word), the child's conversation, and whether the child fell back from the
+// Sub-agent server to the session's (Agent.seatFallback).
+type delegateEnd struct {
+	outcome      delegationOutcome
+	transcript   []domain.Message
+	seatFallback bool
+}
+
+// runDelegate is runSubAgent's body: the one blocking sub_agent path, run against site, which a
+// workflow item on the sub_agent path (workflowSpawner.spawnSubAgent, ADR 0094) runs too. end, when
+// non-nil, is filled as the call returns, after the ledger's classification.
+func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID string, site delegateSite, end *delegateEnd) (result domain.ToolResult, outcome dispatchOutcome) {
 	var (
-		spawnIndex   = a.delegations.open(call.ID)
+		spawnIndex   = site.openRow(call.ID)
 		ledgerName   string
 		ledgerTarget string
 		ran          bool
@@ -913,6 +969,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		// stopLeftover is what the child's mailbox held when a stopped run's result was rendered:
 		// the result lists it, and the reaping defer still reports it undelivered.
 		stopLeftover []domain.UserInput
+		// transcript and seatFallback are what end reports beyond the classification, read off the
+		// child once its run is over.
+		transcript   []domain.Message
+		seatFallback bool
 		// reportLeftover is set by the reaping defer below and called here, once the delegation
 		// is classified: that defer runs FIRST, before any outcome exists, so it only takes what
 		// the closed mailbox still held and leaves the reporting — which says why it never
@@ -922,7 +982,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	defer func() {
 		if r := recover(); r != nil {
 			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: a.base(a.turns.index),
+				EventBase: a.base(site.turn()),
 				Source:    call.Tool,
 				Err:       fmt.Sprintf("panic: %v", r),
 			})
@@ -930,7 +990,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 			outcome = dispatchDone
 		}
 		ended, cause := classifyDelegation(result, outcome, ran, stopped, res)
-		a.delegations.record(delegationRecord{
+		if end != nil {
+			*end = delegateEnd{outcome: ended, transcript: transcript, seatFallback: seatFallback}
+		}
+		site.recordRow(delegationRecord{
 			spawnIndex: spawnIndex,
 			callID:     call.ID,
 			name:       delegationLabel(ledgerName, call),
@@ -984,12 +1047,12 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	giveBack := func() {}
 	if args.Continue != "" {
 		var ok bool
-		prior, ok = a.retained.take(args.Continue)
+		prior, ok = site.retained.take(args.Continue)
 		if !ok {
-			return errorToolResult(call.ID, unknownContinueResult(args.Continue, a.retained.names())), dispatchDone
+			return errorToolResult(call.ID, unknownContinueResult(args.Continue, site.retained.names())), dispatchDone
 		}
 		continuing = true
-		giveBack = func() { a.retained.retain(prior) }
+		giveBack = func() { site.retained.retain(prior) }
 		task = continuationTask(prior, args.Task)
 		if delegationName(args.Name) == "" {
 			args.Name, inheritedName = prior.name, prior.name
@@ -1043,6 +1106,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		giveBack()
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
+	seatFallback = sub.seatFallback
 	// Applied to the child's own registry rather than threaded through construction: the spawn
 	// signatures stay as they are, and a per-spawn field on the PARENT would race across the
 	// siblings a fan-out builds at once (ADR 0039). Subset over the set the child was built with is
@@ -1099,7 +1163,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2). The
 		// report itself waits for the outer defer, which alone knows how the run ended and so why
 		// the message did not land — this defer runs before a recovered panic is even classified.
-		leftover, turn := append(stopLeftover, reapChild(&a.children, runID, sub)...), sub.turns.index
+		leftover, turn := append(stopLeftover, reapChild(site.children, runID, sub)...), sub.turns.index
 		reportLeftover = func(reason domain.UndeliveredReason) {
 			sub.reportUndelivered(turn, leftover, reason)
 		}
@@ -1122,7 +1186,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// where something cut the Run short and that something is the human's stop or the cancel of the
 	// parent's whole Turn (childRunStopped, ADR 0088 D2).
 	res, stopped, stopLeftover, err = runChild(ctx, childRun{
-		registry: &a.children,
+		registry: site.children,
 		runID:    runID,
 		sub:      sub,
 		onArmed: func(context.Context) {
@@ -1132,13 +1196,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 			// already wears. It is the one rename that is not the namer's (ADR 0068), and it reaches
 			// the same readers by the same event, stamped with the child's identity as every rename is.
 			if inheritedName != "" {
-				a.emitSubAgentNamed(a.turns.index, call.ID, sub.runID, inheritedName)
+				a.emitSubAgentNamed(site.turn(), call.ID, sub.runID, inheritedName)
 			}
 			// Named CONCURRENTLY with the run it names, and only once the child is addressable: the
 			// name is worth having while the delegation is still on screen, so waiting for a
 			// completion before starting the work would buy a better label at the price of the
 			// thing it labels.
-			stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
+			stopNaming = a.startDelegationNaming(ctx, site.turn(), call.ID, sub, &naming)
 			// The LAST act before Run: a panic anywhere earlier reads as a refused delegation.
 			ran = true
 		},
@@ -1160,12 +1224,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 			// closes the mailbox after it, so the result can list what the human wrote to the child
 			// that never reached it; the reaping defer still reports each one undelivered.
 			stopped = true
-			a.foldStoppedChild(ctx, runID, sub)
+			a.foldStoppedChild(ctx, site.children, runID, sub)
 		},
 	})
 	if stopped {
 		sub.stoppedByUser, sub.stopUndelivered = true, stopLeftover
 	}
+	transcript = sub.conv.Messages()
 	result, outcome = sub.delegationResult(call.ID, res, err)
 	// A child the engine stopped at a bound is RETAINED for the rest of the session (P6; ADR 0086
 	// D1) — the fold and closing text the result carried as its first round, and everything the
@@ -1202,15 +1267,16 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		if continuing {
 			round.instructions = args.Task
 		}
-		a.retained.retain(entry.withRound(round))
+		site.retained.retain(entry.withRound(round))
 	}
 	return result, outcome
 }
 
 // foldStoppedChild writes the engine fold of a child a stop cut short — the human's stop
 // (StopChild, ADR 0086 D4) or the cancel of the parent's whole Turn (ADR 0088 D2) — into the
-// child's capFold (finishAtStop), under a context of its own armed as the run's stop handle, so a
-// second stop skips it (secondStopFoldCause). The receiver is the PARENT; ctx is the parent's.
+// child's capFold (finishAtStop), under a context of its own armed as the run's stop handle in
+// registry — the one the child is listed in (delegateSite.children) — so a second stop skips it
+// (secondStopFoldCause). The receiver is the PARENT; ctx is the parent's.
 //
 // The human's stop folds under the child's Config.StreamIdleTimeout bound, as a fault's fold does.
 // A cancel of the parent's Turn has already ended ctx, so that fold runs past it — on a context
@@ -1220,7 +1286,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 // shutdown) folds nothing and returns at once, on the unavailable marker naming it. A human's
 // stop whose fold the Turn's cancel then cut short keeps the marker naming that cancel, and a fold
 // the second stop skipped the one naming the second stop (secondStopFoldCause).
-func (a *Agent) foldStoppedChild(ctx context.Context, runID string, sub *Agent) {
+func (a *Agent) foldStoppedChild(ctx context.Context, registry *childRegistry, runID string, sub *Agent) {
 	if errors.Is(context.Cause(ctx), domain.ErrShuttingDown) {
 		sub.capFold = fmt.Sprintf(engineFoldUnavailableFormat, shutdownFoldCause)
 		return
@@ -1237,9 +1303,9 @@ func (a *Agent) foldStoppedChild(ctx context.Context, runID string, sub *Agent) 
 		}
 	}
 	foldCtx, stopFold := context.WithCancelCause(parent)
-	a.children.arm(runID, foldCtx, stopFold)
+	registry.arm(runID, foldCtx, stopFold)
 	sub.finishAtStop(foldCtx, bound)
-	a.children.disarm(runID)
+	registry.disarm(runID)
 	stopFold(nil)
 	if sub.capFold == "" {
 		// The only fold that ends empty is a human's stop's, cut short by the cancel of the whole
@@ -1376,16 +1442,15 @@ func delegationLabel(name string, call domain.ToolCall) string {
 //
 // The child inherits Config.Namer verbatim through the whole-Config copy newChildAgent takes, so a
 // grandchild the child leaves unnamed is named the same way, one level further down.
-func (a *Agent) startDelegationNaming(ctx context.Context, callID string, sub *Agent, wg *sync.WaitGroup) context.CancelFunc {
+func (a *Agent) startDelegationNaming(ctx context.Context, turn int, callID string, sub *Agent, wg *sync.WaitGroup) context.CancelFunc {
 	if a.cfg.Namer == nil || sub.displayName() != "" {
 		return nil
 	}
 	// Everything the goroutine reads, read HERE on the dispatch goroutine: the request the namer is
-	// handed, and the Turn the event is stamped with. The goroutine below then touches nothing of
+	// handed, and the Turn the event is stamped with (turn, the delegation's site's). The goroutine below then touches nothing of
 	// this Agent's or the child's loop state — it writes one field through the child's lock and
 	// emits one event.
 	req := domain.DelegationNaming{Task: sub.task, Routed: sub.ownsUpstream}
-	turn := a.turns.index
 	runID := sub.runID
 	nctx, cancel := context.WithCancel(ctx)
 	wg.Add(1)

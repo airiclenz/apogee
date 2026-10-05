@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -804,5 +806,117 @@ func TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped(t *testing.T) {
 	}
 	if _, ok := a.children.lookup(runID); ok {
 		t.Error("the stopped item's child is still addressable")
+	}
+}
+
+// subAgentItemSpec is an item on the sub_agent path running a sub_agent call with args (ADR 0094).
+func subAgentItemSpec(args string) workflow.ItemSpec {
+	spec := itemSpec("surveyor", nil)
+	spec.Stage.SubAgent = json.RawMessage(args)
+	return spec
+}
+
+// subAgentWorkflowPlan is a one-item plan on the sub_agent path running a sub_agent call with args.
+func subAgentWorkflowPlan(args string) workflow.Plan {
+	return workflow.Plan{Name: "survey", Stages: []workflow.Stage{{
+		Name: "sub_agent", Kind: workflow.StageFanout, Task: "survey the repo",
+		Over:     &workflow.ItemSource{List: []string{"surveyor"}},
+		SubAgent: json.RawMessage(args),
+	}}}
+}
+
+func TestWorkflowSpawn_ASubAgentItemRunsTheBlockingSubAgentPath(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a completed child hands back its prose report", func(t *testing.T) {
+		t.Parallel()
+		const report = "The repo holds three modules: agent, tools and workflow."
+		sink := &recordingSink{}
+		a, upstream := newWorkflowParent(t, sink, domain.ModeAskBefore, nil, contentTurn(report))
+
+		outcome := spawnItem(t, a, subAgentItemSpec(subAgentArgs("survey the repo")))
+
+		if outcome.Ending != workflow.EndCompleted || outcome.Receipt != nil {
+			t.Fatalf("outcome = %+v, want completed with no receipt — the child calls no finish", outcome)
+		}
+		if !strings.Contains(outcome.Report, report) {
+			t.Errorf("report = %q, want the child's own report %q", outcome.Report, report)
+		}
+		menu := upstream.requests()[0].Tools
+		if slices.Contains(menu, tools.FinishToolName) || !slices.Contains(menu, "read_thing") {
+			t.Errorf("child menu = %v, want the blocking child's tools and no finish", menu)
+		}
+		if len(outcome.Transcript) == 0 {
+			t.Error("no transcript kept for the item's folder")
+		}
+		if rows := a.delegations.rows(); len(rows) != 0 {
+			t.Errorf("ledger rows = %+v, want none — the workflow folder is the record", rows)
+		}
+	})
+
+	t.Run("max_steps bounds the child as it bounds a blocking one", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		scripts := append(narratedChildTurns(2), contentTurn(childFoldSummary), contentTurn(childClosingReport))
+		a, upstream := newWorkflowParent(t, sink, domain.ModeAskBefore,
+			func(cfg *domain.Config) { cfg.Delegation.MaxSteps = 3 }, scripts...)
+
+		outcome := spawnItem(t, a, subAgentItemSpec(subAgentArgsCapped("trawl the repo", 2)))
+
+		if outcome.Ending != workflow.EndCapped {
+			t.Fatalf("ending = %q, want capped", outcome.Ending)
+		}
+		if want := fmt.Sprintf(stepCapResultFormat, 2); !strings.HasPrefix(outcome.Report, want+"\n") {
+			t.Errorf("report = %q, want it to open with %q", outcome.Report, want)
+		}
+		if got := upstream.calls(); got != len(scripts) {
+			t.Errorf("upstream requests = %d, want %d — two steps, the fold and the wrap-up", got, len(scripts))
+		}
+		var started []domain.SubAgentPhaseEvent
+		for _, event := range sink.events {
+			if phase, ok := event.(domain.SubAgentPhaseEvent); ok && phase.Phase == domain.SubAgentStarted {
+				started = append(started, phase)
+			}
+		}
+		if len(started) != 1 || started[0].StepCap != 2 || started[0].CallID != fanOutCall.ID {
+			t.Errorf("started phases = %+v, want one under %s announcing the 2-step cap", started, fanOutCall.ID)
+		}
+	})
+}
+
+func TestWorkflowSpawn_ACompletedSubAgentItemRunsOnceAndTalliesOK(t *testing.T) {
+	t.Parallel()
+
+	const report = "The survey is done: three modules, all tested."
+	sink := &recordingSink{}
+	a, upstream := newWorkflowParent(t, sink, domain.ModeAskBefore, nil, contentTurn(report))
+	store, err := workflow.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	runner := &workflow.Runner{
+		Spawner: a.newWorkflowSpawner(0, fanOutCall, nil), Store: store, Workspace: fstest.MapFS{},
+		Retries: 2, Continuations: 2,
+	}
+
+	result, err := runner.Run(context.Background(), subAgentWorkflowPlan(subAgentArgs("survey the repo")))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := upstream.calls(); got != 1 {
+		t.Errorf("upstream requests = %d, want 1 — the item is spawned once", got)
+	}
+	if tally := workflow.TallyOf(result); tally.OK != 1 || tally.Total() != 1 {
+		t.Errorf("tally = %+v, want the one item ok", tally)
+	}
+	item := result.Stages[0].Items[0]
+	data, err := os.ReadFile(item.Output)
+	if err != nil || !strings.Contains(string(data), report) {
+		t.Errorf("output file %s = %q, %v; want the child's report", item.Output, data, err)
+	}
+	status, err := store.ReadStatus(filepath.Base(result.Dir))
+	if err != nil || status.Origin != workflow.OriginSubAgent {
+		t.Errorf("status origin = %q, %v; want %q", status.Origin, err, workflow.OriginSubAgent)
 	}
 }

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -560,5 +561,71 @@ func assertNoTempFiles(t *testing.T, root string) {
 	})
 	if err != nil {
 		t.Fatalf("walk %s: %v", root, err)
+	}
+}
+
+// subAgentArgs is the sub_agent call a subAgentPlan's item runs, compact as plan.json keeps it.
+const subAgentArgs = `{"task":"survey the repo","name":"surveyor"}`
+
+// subAgentPlan is a one-item plan on the sub_agent path, as a background sub_agent's is (ADR 0094).
+// Its stage sets an `out:`, which the sub_agent path leaves unread: the item's report is kept in
+// its own folder.
+func subAgentPlan() Plan {
+	return Plan{Name: "survey", Stages: []Stage{{
+		Name: "sub_agent", Kind: StageFanout, Task: "survey the repo", Out: "notes/{item}.md",
+		Over:     &ItemSource{List: []string{"surveyor"}},
+		SubAgent: json.RawMessage(subAgentArgs),
+	}}}
+}
+
+func TestRunStatusOriginRoundTripsAndStaysOffOtherFolders(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+
+	created, err := store.Create(subAgentPlan(), "hash-sub", storeClock)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	gotStatus, statusErr := store.ReadStatus(created.ID)
+	gotPlan, planErr := store.ReadPlan(created.ID)
+	other := createWorkflow(t, store, "audit", "hash-1", storeClock)
+	otherDir, _ := store.Dir(other.ID)
+	otherRaw, otherErr := os.ReadFile(filepath.Join(otherDir, "status.json"))
+
+	if created.Origin != OriginSubAgent {
+		t.Errorf("created origin = %q, want %q", created.Origin, OriginSubAgent)
+	}
+	if statusErr != nil || !reflect.DeepEqual(gotStatus, created) {
+		t.Errorf("ReadStatus = %+v, %v; want %+v", gotStatus, statusErr, created)
+	}
+	// plan.json is written indented, so the arguments come back re-laid but the same JSON.
+	var gotArgs bytes.Buffer
+	if planErr != nil || len(gotPlan.Stages) != 1 || json.Compact(&gotArgs, gotPlan.Stages[0].SubAgent) != nil || gotArgs.String() != subAgentArgs {
+		t.Errorf("ReadPlan = %+v, %v; want the stage's sub_agent arguments %s back", gotPlan, planErr, subAgentArgs)
+	}
+	if other.Origin != "" || otherErr != nil || strings.Contains(string(otherRaw), `"origin"`) {
+		t.Errorf("a plan off the sub_agent path: origin %q, status.json %s (%v); want no origin at all", other.Origin, otherRaw, otherErr)
+	}
+}
+
+func TestPlanHashOfAPlanOffTheSubAgentPathIsUnchanged(t *testing.T) {
+	t.Parallel()
+	item := Item{Label: "/w/wf-1/part-a", Units: []string{"/w/wf-1/part-a"}}
+	withSubAgent := samplePlan("audit")
+	withSubAgent.Stages[0].SubAgent = json.RawMessage(subAgentArgs)
+
+	got, err := PlanHash(samplePlan("audit"), nil, []Item{item})
+	changed, changedErr := PlanHash(withSubAgent, nil, []Item{item})
+	canonical, marshalErr := json.Marshal(samplePlan("audit"))
+
+	// Pinned at the base before Stage.SubAgent existed: a plan that leaves it unset hashes as it did.
+	if want := "e51ae7d97917f094ec4d2e4440bf95263c2ed47f6817ddf6fc432bdc1761a65d"; err != nil || got != want {
+		t.Errorf("PlanHash = %q, %v; want %q", got, err, want)
+	}
+	if changedErr != nil || changed == got {
+		t.Errorf("a plan on the sub_agent path hashed %q (%v), the same as the plan without it", changed, changedErr)
+	}
+	if marshalErr != nil || strings.Contains(string(canonical), "sub_agent") {
+		t.Errorf("plan JSON = %s (%v); want no sub_agent key when it is unset", canonical, marshalErr)
 	}
 }
