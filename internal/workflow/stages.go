@@ -599,7 +599,7 @@ func (s *runState) pickEntries(stage Stage, result *Result) ([]string, string) {
 		if err != nil {
 			return nil, fmt.Sprintf("cannot open the workflow folder: %v", err)
 		}
-		defer root.Close()
+		defer func() { _ = root.Close() }()
 		lines, err := nonBlankLines(root.FS(), path.Clean(stage.File))
 		if err != nil {
 			return nil, fmt.Sprintf("cannot read %s in the workflow folder: %v", stage.File, err)
