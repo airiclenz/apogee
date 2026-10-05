@@ -288,6 +288,10 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 // hand all of them a host carrying fakes.
 func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 	mounts := host.ReadMounts
+	// background is the one gate sub_agent's and fan_out's `background` arguments share (ADR 0089
+	// D1, ADR 0094 D1): the Driver offers background workflows, and a configuration rung lifts the
+	// workflow tool that checks on and stops them.
+	background := host.OffersBackground && host.rosterDeltas().lifts(WorkflowToolName)
 	return []domain.Tool{
 		NewReadFile(root, mounts),
 		NewWriteFile(root),
@@ -314,7 +318,9 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
-		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice}),
+		// sub_agent publishes `run_on` under the seat-choice gate and `background` under fan_out's
+		// (ADR 0094 D1); with neither it is the plain variant every other session sees.
+		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice, Background: background}),
 		// fan_out (ADR 0087) is registered DEFAULT-OFF beside the recursion point it spawns through,
 		// so it reaches no default menu. It publishes `run_on` under the same seat-choice gate as
 		// sub_agent, and `background` only where the workflow tool is offered (ADR 0089): the Driver
@@ -322,11 +328,11 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		// default-off too.
 		NewFanOutWith(FanOutOptions{
 			SeatChoice: host.SubAgentSeatChoice,
-			Background: host.OffersBackground && host.rosterDeltas().lifts(WorkflowToolName),
+			Background: background,
 		}),
-		// workflow (ADR 0089 D4) is the control over what fan_out's `background` starts: DEFAULT-OFF
-		// like it, built whoever the host is (so KnownToolNames spells it), and dropped by backedTools
-		// where the Driver offers no background workflows.
+		// workflow (ADR 0089 D4) is the control over what fan_out's and sub_agent's `background`
+		// starts: DEFAULT-OFF like fan_out, built whoever the host is (so KnownToolNames spells it),
+		// and dropped by backedTools where the Driver offers no background workflows.
 		NewWorkflow(),
 		// task_list (ADR 0072) is the last DEFAULT-ON slot: it holds the model's own checklist as
 		// engine state, so it is offered to every model and `tools.disabled:` is what turns it off.

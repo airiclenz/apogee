@@ -14,8 +14,9 @@ import (
 // WorkflowToolName is the stable name of the background-workflow control tool. The dispatch layer
 // (internal/agent) recognises it and answers the call itself, so the tool's own Execute is never
 // reached on the real path; it is exported so dispatch can key on it without re-declaring the
-// spelling. fan_out publishes its `background` argument only where this tool is offered, because a
-// workflow started in the background is one the model can only check on or stop through it.
+// spelling. fan_out and sub_agent publish their `background` argument only where this tool is
+// offered, because a workflow started in the background is one the model can only check on or stop
+// through it.
 const WorkflowToolName = "workflow"
 
 // The three actions the tool publishes (ADR 0089 D4), exported so dispatch reads the same spellings
@@ -39,7 +40,7 @@ const workflowSchema = `{
   "required": ["action"],
   "properties": {
     "action": {"type": "string", "enum": ["status", "stop", "message"], "description": "status lists every workflow of this session, or one in detail when id is set; stop stops the workflow id and keeps its finished items; message sends text to one running item's helper."},
-    "id": {"type": "string", "description": "The workflow's id, as fan_out or status gave it. Optional for status, required for stop; for message it narrows item to that workflow."},
+    "id": {"type": "string", "description": "The workflow's id, as fan_out, sub_agent or status gave it. Optional for status, required for stop; for message it narrows item to that workflow."},
     "item": {"type": "string", "description": "For message: the running item's run id or name, as status lists it."},
     "text": {"type": "string", "description": "For message: what to tell the item's helper. It reaches the helper between its steps, as a note from the user would."}
   }
@@ -47,7 +48,7 @@ const workflowSchema = `{
 
 var workflowSpec = toolSpec{
 	name: WorkflowToolName,
-	description: "Check on, stop or message the workflows you started with fan_out in the " +
+	description: "Check on, stop or message the workflows you started with fan_out or sub_agent in the " +
 		"background. status lists them with their items; stop ends one and keeps its " +
 		"finished items; message sends a note to one running item's helper. You are woken " +
 		"with a workflow's result when it ends, so you need not poll.",
@@ -63,8 +64,8 @@ var workflowSpec = toolSpec{
 // It is registered DEFAULT-OFF (domain.DefaultOffTool): like fan_out it is lifted per model by
 // `tools.enabled:` or a model profile's roster. And it is offered only where the Driver offers
 // background workflows at all (HostTools.OffersBackground) — the TUI, never a headless run or a
-// daemon firing (ADR 0089 D1) — because it travels with fan_out's `background` switch: a tool that
-// controls background workflows means nothing where none can start.
+// daemon firing (ADR 0089 D1) — because it travels with fan_out's and sub_agent's `background`
+// switch: a tool that controls background workflows means nothing where none can start.
 //
 // Execute returns an error result so a misconfigured wiring fails loudly rather than silently.
 type Workflow struct {

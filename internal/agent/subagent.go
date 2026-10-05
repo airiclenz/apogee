@@ -2044,10 +2044,11 @@ func isRecursionTool(name string) bool {
 }
 
 // withoutSeatChoice returns roster with its sub_agent tool swapped for the PLAIN variant when the
-// one it holds publishes `run_on`, and its fan_out tool for the PLAIN variant when that one
-// publishes `run_on` or `background` — the depth-0-only rule of ADR 0069 decision 3, applied where
-// a child's tool set is built, and ADR 0089 D1's for `background`: a background workflow belongs
-// to the top-level Agent, so on a delegate the argument would run blocking (offersBackground).
+// one it holds publishes `run_on` or `background`, and its fan_out tool for the PLAIN variant when
+// that one publishes `run_on` or `background` — the depth-0-only rule of ADR 0069 decision 3,
+// applied where a child's tool set is built, and ADR 0089 D1's for `background` (ADR 0094 D1 for
+// sub_agent's): a background workflow belongs to the top-level Agent, so on a delegate the argument
+// would run blocking (offersBackground).
 // Below the first hop a delegation keeps the seat it landed on and runs its fan_outs in the
 // foreground, so the child is never offered either parameter: removing it from the schema rather
 // than accepting and discarding it is the honest form, because a schema advertising a knob the
@@ -2060,7 +2061,7 @@ func isRecursionTool(name string) bool {
 // back as it went in.
 func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
 	fanOutChoice := publishesFanOutChoice(roster)
-	if !publishesSeatChoice(roster) && !fanOutChoice {
+	if !publishesSubAgentChoice(roster) && !fanOutChoice {
 		return roster
 	}
 	plain := domain.NewToolRegistry()
@@ -2099,15 +2100,37 @@ func publishesFanOutChoice(roster *domain.ToolRegistry) bool {
 	return seatChoice || (fanOut != nil && fanOut.OffersBackground())
 }
 
+// publishesSubAgentChoice reports whether roster's sub_agent tool published an argument that only
+// the top-level Agent honours — `run_on` or `background` — so a child's roster must carry the plain
+// variant instead. It is withoutSeatChoice's question alone: publishesSeatChoice stays the one
+// that gates the seat bullet, the reading of `run_on` and the width, so a `sub-agents-choice:
+// fixed` session that lifts the workflow tool still reads no seat. A nil roster, one without
+// sub_agent and a foreign tool under the name report false.
+func publishesSubAgentChoice(roster *domain.ToolRegistry) bool {
+	if publishesSeatChoice(roster) {
+		return true
+	}
+	if roster == nil {
+		return false
+	}
+	t, ok := roster.Lookup(tools.SubAgentToolName)
+	if !ok {
+		return false
+	}
+	spawner, ok := t.(*tools.SubAgent)
+	return ok && spawner.OffersBackground()
+}
+
 // publishesSeatChoice reports whether roster's sub_agent tool published the `run_on` argument —
-// the ONE question that decides both whether a spawn reads the seat a call names and whether the
-// child's own roster must be narrowed. Asking the tool rather than tracking a flag on the Agent is
-// what keeps the two answers from ever disagreeing: the published schema is the only thing the
-// model was actually told, and a mid-session SwapTools moves it.
+// the ONE question that decides whether a spawn reads the seat a call names, and half of whether the
+// child's own roster must be narrowed (publishesSubAgentChoice adds `background`). Asking the tool
+// rather than tracking a flag on the Agent is what keeps the answers from ever disagreeing: the
+// published schema is the only thing the model was actually told, and a mid-session SwapTools moves
+// it.
 //
 // A nil roster, a roster without sub_agent, and a foreign tool registered under the name all report
-// false — none of them published the argument, and the false answer is the safe one in both
-// callers (the seat is ignored, the child's roster is left alone).
+// false — none of them published the argument, and the false answer is the safe one in every
+// caller (the seat is ignored, the child's roster is left alone).
 func publishesSeatChoice(roster *domain.ToolRegistry) bool {
 	if roster == nil {
 		return false

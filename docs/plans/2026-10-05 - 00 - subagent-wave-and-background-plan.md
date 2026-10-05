@@ -179,7 +179,10 @@ docs/adr/0039-*.md — 2026-09-20 ceiling amendment; CONTEXT.md — Workflow, Ba
 - `grep -n "^Amends:" docs/adr/0094-*.md`
 **Commit:** `docs(adr): ADR 0094 — sub_agent may run as a one-item background workflow`
 
-## 7. sub_agent publishes background behind fan_out's gate
+## 7. sub_agent publishes background behind fan_out's gate — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the gate tests landed in internal/tools/sub_agent_test.go beside the existing sub_agent schema pins (`TestSubAgent_RegistryGates`, `TestSubAgentSchema_EachGateAddsOnlyItsProperty`), so internal/tools/registry_test.go is untouched; the registry hoists the shared gate into one local `background` that both sub_agent and fan_out read.
+NOTES (2026-10-05): the workflow tool's `id` property description now reads "as fan_out, sub_agent or status gave it", beside the tool description the item names — same model-facing fact, same tool.
 
 **What:**
 **Goal:** The `sub_agent` schema has a `background` property exactly when the host offers background and the tools lift `workflow`; elsewhere, and for every delegate, the schema is byte-identical to today's.

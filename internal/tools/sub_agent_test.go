@@ -540,3 +540,174 @@ func TestSubAgentArgsParsesTheOptionalRunOn(t *testing.T) {
 		})
 	}
 }
+
+// TestSubAgentSchema_EachGateAddsOnlyItsProperty pins the variants as TestFanOutSchema pins
+// fan_out's: each option adds exactly its one property, every shared property stays byte-identical
+// to the plain variant's, and the Offers* answers match what was published.
+func TestSubAgentSchema_EachGateAddsOnlyItsProperty(t *testing.T) {
+	t.Parallel()
+
+	plain := fanOutProperties(t, NewSubAgent().Schema())
+	cases := []struct {
+		name  string
+		opts  SubAgentOptions
+		added []string
+	}{
+		{name: "seat choice", opts: SubAgentOptions{SeatChoice: true}, added: []string{"run_on"}},
+		{name: "background", opts: SubAgentOptions{Background: true}, added: []string{"background"}},
+		{name: "both", opts: SubAgentOptions{SeatChoice: true, Background: true}, added: []string{"background", "run_on"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool := NewSubAgentWith(tc.opts)
+			properties := fanOutProperties(t, tool.Schema())
+			var added []string
+			for name, body := range properties {
+				base, shared := plain[name]
+				if !shared {
+					added = append(added, name)
+					continue
+				}
+				if string(base) != string(body) {
+					t.Errorf("shared property %q differs from the plain variant's", name)
+				}
+			}
+			slices.Sort(added)
+			if !slices.Equal(added, tc.added) {
+				t.Errorf("added properties = %v, want %v", added, tc.added)
+			}
+			if tool.OffersSeatChoice() != tc.opts.SeatChoice || tool.OffersBackground() != tc.opts.Background {
+				t.Errorf("Offers* = (%v, %v), want (%v, %v)",
+					tool.OffersSeatChoice(), tool.OffersBackground(), tc.opts.SeatChoice, tc.opts.Background)
+			}
+		})
+	}
+}
+
+// TestSubAgentSchema_BackgroundIsOptionalAndSaysContinueRunsBlocking pins the published property:
+// an optional boolean (task stays the only required argument), whose description names the
+// workflow tool — the only control over a running background delegation — and says a continuation
+// does not combine with it (ADR 0094 D4).
+func TestSubAgentSchema_BackgroundIsOptionalAndSaysContinueRunsBlocking(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Required   []string                  `json:"required"`
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewSubAgentWith(SubAgentOptions{Background: true}).Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	if !slices.Equal(schema.Required, []string{"task"}) {
+		t.Errorf("required = %v, want [task] — background must stay optional", schema.Required)
+	}
+	prop := schema.Properties["background"]
+	if prop["type"] != "boolean" {
+		t.Errorf("background type = %v, want boolean", prop["type"])
+	}
+	desc, _ := prop["description"].(string)
+	for _, want := range []string{WorkflowToolName, "continue"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("background description = %q, want it to name %q", desc, want)
+		}
+	}
+}
+
+// TestSubAgent_RegistryGates pins where the assembly reads sub_agent's `background` gate: fan_out's
+// own — the Driver's opt-in AND the roster ladder's verdict for the workflow tool, global and
+// profile rungs alike (ADR 0094 D1). Every other host builds the plain schema, byte for byte.
+func TestSubAgent_RegistryGates(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name           string
+		host           HostTools
+		wantRunOn      bool
+		wantBackground bool
+	}{
+		{name: "plain host", host: HostTools{}},
+		{name: "background offered without the workflow tool", host: HostTools{OffersBackground: true}},
+		{name: "seat choice", host: HostTools{SubAgentSeatChoice: true}, wantRunOn: true},
+		{
+			name:           "workflow on the global roster",
+			host:           HostTools{Enabled: []string{WorkflowToolName}, OffersBackground: true},
+			wantBackground: true,
+		},
+		{
+			name: "workflow on the profile roster",
+			host: HostTools{
+				ProfileRoster:    domain.ToolRosterDelta{Enabled: []string{WorkflowToolName}},
+				OffersBackground: true,
+			},
+			wantBackground: true,
+		},
+		{
+			name: "the profile keeps off what the global rung lifted",
+			host: HostTools{
+				Enabled:          []string{WorkflowToolName},
+				ProfileRoster:    domain.ToolRosterDelta{Disabled: []string{WorkflowToolName}},
+				OffersBackground: true,
+			},
+		},
+		{
+			name: "a Driver that offers no background publishes none whatever the roster says",
+			host: HostTools{Enabled: []string{WorkflowToolName}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool := subAgentOn(t, tc.host)
+			if tool.OffersSeatChoice() != tc.wantRunOn || tool.OffersBackground() != tc.wantBackground {
+				t.Errorf("Offers* = (%v, %v), want (%v, %v)",
+					tool.OffersSeatChoice(), tool.OffersBackground(), tc.wantRunOn, tc.wantBackground)
+			}
+			properties := fanOutProperties(t, tool.Schema())
+			if _, got := properties["run_on"]; got != tc.wantRunOn {
+				t.Errorf("run_on published = %v, want %v", got, tc.wantRunOn)
+			}
+			if _, got := properties["background"]; got != tc.wantBackground {
+				t.Errorf("background published = %v, want %v", got, tc.wantBackground)
+			}
+			if !tc.wantRunOn && !tc.wantBackground && string(tool.Schema()) != wantPlainSubAgentSchema {
+				t.Errorf("an ungated host built a sub_agent schema other than the plain one:\n%s", tool.Schema())
+			}
+		})
+	}
+}
+
+// subAgentOn returns the sub_agent tool a registry assembled from host offers, failing when none does.
+func subAgentOn(t *testing.T, host HostTools) *SubAgent {
+	t.Helper()
+	for _, tool := range DefaultToolsWithHost(t.TempDir(), host) {
+		if subAgent, ok := tool.(*SubAgent); ok {
+			return subAgent
+		}
+	}
+	t.Fatalf("no sub_agent on the menu for host %+v", host)
+	return nil
+}
+
+// TestSubAgentArgsParsesTheOptionalBackground proves the argument crosses the JSON boundary, and
+// that a call without it — every call against a variant that never published it — decodes to false.
+func TestSubAgentArgsParsesTheOptionalBackground(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		payload string
+		want    bool
+	}{
+		{`{"task":"summarise the repo","background":true}`, true},
+		{`{"task":"summarise the repo","background":false}`, false},
+		{`{"task":"summarise the repo"}`, false},
+	} {
+		var args SubAgentArgs
+		if err := json.Unmarshal([]byte(tc.payload), &args); err != nil {
+			t.Fatalf("unmarshal %s: %v", tc.payload, err)
+		}
+		if args.Background != tc.want {
+			t.Errorf("%s: Background = %v, want %v", tc.payload, args.Background, tc.want)
+		}
+	}
+}

@@ -5761,3 +5761,88 @@ func TestDelegationLedgerNoteNeverReachesTheRecord(t *testing.T) {
 		t.Errorf("snapshot carries the delegations note: %s", snap.State)
 	}
 }
+
+// TestSubAgent_ChildRosterDropsTheBackgroundArgument is ADR 0094 D1 where it is enforced: a
+// background delegation belongs to the top-level Agent, so the sub_agent a child is handed is the
+// PLAIN variant — byte-identical to the schema this tool published before either gate existed —
+// whether the parent's published `background` alone or beside `run_on`. The parent keeps its own.
+func TestSubAgent_ChildRosterDropsTheBackgroundArgument(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		opts tools.SubAgentOptions
+	}{
+		{"a background sub_agent", tools.SubAgentOptions{Background: true}},
+		{"a background sub_agent with seat choice", tools.SubAgentOptions{SeatChoice: true, Background: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := configWithTools(&recordingSink{}, tools.NewSubAgentWith(tc.opts), fakeTool{name: "w"})
+			cfg.Delegation.MaxDepth = 2 // the child keeps sub_agent only under a bound above the default
+			parent, err := newAgent(cfg, scriptedResponder(t))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			roster := parent.defaultSubAgentTools()
+
+			inherited, ok := roster.Lookup(tools.SubAgentToolName)
+			if !ok {
+				t.Fatal("the child's roster has no sub_agent below the bound; the case would be vacuous")
+			}
+			spawner, ok := inherited.(*tools.SubAgent)
+			if !ok {
+				t.Fatalf("the child's sub_agent is a %T, want *tools.SubAgent", inherited)
+			}
+			if spawner.OffersBackground() || spawner.OffersSeatChoice() {
+				t.Error("the child's sub_agent offers background or seat choice, want the plain variant")
+			}
+			if want := string(tools.NewSubAgent().Schema()); string(spawner.Schema()) != want {
+				t.Errorf("the child's sub_agent schema = %s, want the plain schema %s", spawner.Schema(), want)
+			}
+			parentTool, _ := parent.tools.Lookup(tools.SubAgentToolName)
+			if !schemaHasProperty(t, parentTool.Schema(), "background") {
+				t.Error("narrowing the child's roster took background off the PARENT's tool too")
+			}
+			if _, hasLeaf := roster.Lookup("w"); !hasLeaf {
+				t.Error("the child's roster lost a leaf tool while its sub_agent was swapped")
+			}
+		})
+	}
+}
+
+// TestSubAgent_BackgroundAloneOffersNoSeat is the regression guard on the seat gate: a
+// `sub-agents-choice: fixed` session that lifts the workflow tool publishes sub_agent's `background`
+// but no `run_on`, and publishesSeatChoice — the one question behind the Delegations seat bullet,
+// the reading of `run_on` and the delegation width — must stay false. Widening it would hand that
+// session a seat bullet and read a `run_on` the model was never offered.
+func TestSubAgent_BackgroundAloneOffersNoSeat(t *testing.T) {
+	t.Parallel()
+
+	cfg := configWithTools(&recordingSink{}, tools.NewSubAgentWith(tools.SubAgentOptions{Background: true}))
+	a, err := newAgent(cfg, scriptedResponder(t))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.SetDelegationTarget(routedTarget())
+
+	if publishesSeatChoice(a.tools) {
+		t.Error("publishesSeatChoice = true for a sub_agent that published background alone")
+	}
+	if got := a.delegationSeats(); got != "" {
+		t.Errorf("delegationSeats = %q, want no seat bullet without run_on", got)
+	}
+	args, err := json.Marshal(tools.SubAgentArgs{Task: "summarise the repo", RunOn: tools.RunOnSession})
+	if err != nil {
+		t.Fatalf("marshal the call arguments: %v", err)
+	}
+	calls := []domain.ToolCall{
+		{ID: "c1", Tool: tools.SubAgentToolName, Arguments: args},
+		{ID: "c2", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{"task":"summarise the docs"}`)},
+	}
+	if a.seatsAreSplit(calls, routedTarget()) {
+		t.Error("seatsAreSplit read a run_on the background-only variant never published")
+	}
+}

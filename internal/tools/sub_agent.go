@@ -32,11 +32,12 @@ const (
 	RunOnSubAgentsServer = "sub-agents-server"
 )
 
-// subAgentSchemaTemplate is the sub_agent schema with ONE hole: the optional `run_on` property the
-// seat-choice variant fills and the plain variant leaves empty. Keeping both variants in one
-// literal is what keeps the plain schema byte-identical across the two constructors — a second
-// literal would be a second thing to keep in step, and the plain variant is prefill on every
-// request of every session that never enables the choice.
+// subAgentSchemaTemplate is the sub_agent schema with TWO holes: the optional `run_on` property the
+// seat-choice variant fills, and the optional `background` property the background variant fills
+// (ADR 0094 D1 — only where the workflow tool is offered, exactly as on fan_out). The plain variant
+// leaves both empty. Keeping every variant in one literal is what keeps the plain schema
+// byte-identical across the constructors — a second literal would be a second thing to keep in
+// step, and the plain variant is prefill on every request of every session that enables neither.
 //
 // The two floors — `minLength` on task, `minimum` on max_steps — are SCHEMA TEXT the model reads,
 // not a validator the engine runs: nothing in apogee refuses a call over them (the recursion point
@@ -76,7 +77,7 @@ const subAgentSchemaTemplate = `{
     "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns — see the Delegation bounds line of the host orientation for the configured cap; a request above it is clamped and the result says so."},
     "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."},
     "continue": {"type": "string", "description": "optional; the name of a delegation earlier in this session — one you named, or one that was capped, faulted or stopped. The sub-agent restarts from its task and earlier reports with a fresh step cap; task says what to do next."},
-    "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}%s
+    "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}%s%s
   }
 }`
 
@@ -94,14 +95,25 @@ const SubAgentToolsReadOnly = "read-only"
 const subAgentRunOnProperty = `,
     "run_on": {"type": "string", "enum": ["session", "sub-agents-server"], "description": "Optional; where this delegation runs — see the Delegations line of the host orientation. Leave unset for the configured default."}`
 
-// subAgentSchema renders the published schema for one variant: with seatChoice the `run_on`
-// property is offered, without it the schema is exactly what it was before seat choice existed.
-func subAgentSchema(seatChoice bool) json.RawMessage {
-	runOn := ""
-	if seatChoice {
+// subAgentBackgroundProperty is the property the background variant adds (ADR 0094). It is
+// published only where the workflow tool (WorkflowToolName) is offered, as fan_out's is: a
+// background delegation ends by waking the agent with its report, and the workflow tool is the only
+// way the model can check on or stop it meanwhile. A continuation runs blocking (ADR 0094 D4), so
+// the description says `continue` does not combine with it.
+const subAgentBackgroundProperty = `,
+    "background": {"type": "boolean", "description": "Optional; true runs this delegation in the background and answers at once. You are woken with its report when it ends; use the workflow tool to check on it or stop it meanwhile. Not with continue."}`
+
+// subAgentSchema renders the published schema for one variant: each option adds exactly its one
+// property, and with neither set the schema is exactly what it was before seat choice existed.
+func subAgentSchema(opts SubAgentOptions) json.RawMessage {
+	runOn, background := "", ""
+	if opts.SeatChoice {
 		runOn = subAgentRunOnProperty
 	}
-	return json.RawMessage(fmt.Sprintf(subAgentSchemaTemplate, runOn))
+	if opts.Background {
+		background = subAgentBackgroundProperty
+	}
+	return json.RawMessage(fmt.Sprintf(subAgentSchemaTemplate, runOn, background))
 }
 
 var subAgentSpec = toolSpec{
@@ -112,7 +124,7 @@ var subAgentSpec = toolSpec{
 		"You may call sub_agent several times in a single reply; sibling delegations run " +
 		"concurrently, so dispatch independent sub-tasks together in one reply rather than " +
 		"one per turn. If the task names a file the sub-agent must write, pass it as output_path.",
-	schema: subAgentSchema(false),
+	schema: subAgentSchema(SubAgentOptions{}),
 }
 
 // SubAgentArgs is the sub_agent tool's argument shape: a self-contained task string plus an
@@ -161,6 +173,12 @@ var subAgentSpec = toolSpec{
 // wherever this call leaves them unset. A name nothing is
 // retained under is refused with a result listing the retained names. Empty is an ordinary spawn.
 // Like Name it is prose for the child, never privilege, and never a key the engine serialises.
+//
+// Background asks for this ONE delegation to run as a one-item background workflow and the call
+// to be answered at once (ADR 0094). It changes only the delivery — the child runs the blocking
+// path, and its report arrives on the workflow's finish note — so it is never privilege either.
+// It is only ever OFFERED where the host offers background and lifts the workflow tool
+// (NewSubAgentWith), so a call against any other variant decodes to false: run blocking.
 type SubAgentArgs struct {
 	Task       string         `json:"task"`
 	Name       string         `json:"name"`
@@ -169,6 +187,7 @@ type SubAgentArgs struct {
 	Tools      SubAgentRoster `json:"tools"`
 	Continue   string         `json:"continue"`
 	OutputPath string         `json:"output_path"`
+	Background bool           `json:"background"`
 }
 
 // SubAgentRoster is the decoded `tools` argument of a sub_agent call — the one argument whose wire
@@ -243,6 +262,7 @@ func (r *SubAgentRoster) UnmarshalJSON(b []byte) error {
 type SubAgent struct {
 	toolSpec
 	seatChoice bool
+	background bool
 }
 
 // SubAgentOptions carries the host's choices about WHICH sub_agent variant this build offers. It
@@ -254,6 +274,10 @@ type SubAgentOptions struct {
 	// the whole of `sub-agents-choice: fixed` — publishes the schema unchanged, so a model that
 	// never gets the choice is never told about a seat it cannot pick.
 	SeatChoice bool
+	// Background publishes `background` (ADR 0094 D1): set under fan_out's gate — the Driver offers
+	// background workflows (HostTools.OffersBackground) and the roster lifts the workflow tool.
+	// False publishes the schema unchanged.
+	Background bool
 }
 
 // NewSubAgent returns the plain sub_agent placeholder tool — no seat choice, the schema this tool
@@ -263,20 +287,25 @@ type SubAgentOptions struct {
 func NewSubAgent() *SubAgent { return NewSubAgentWith(SubAgentOptions{}) }
 
 // NewSubAgentWith returns the sub_agent placeholder tool in the variant opts asks for. Only the
-// published schema and OffersSeatChoice differ between variants: the name, the description and the
-// recursion point are one tool, so nothing downstream keys on which variant it holds.
+// published schema, OffersSeatChoice and OffersBackground differ between variants: the name, the
+// description and the recursion point are one tool, so nothing downstream keys on which variant it
+// holds.
 func NewSubAgentWith(opts SubAgentOptions) *SubAgent {
 	spec := subAgentSpec
-	if opts.SeatChoice {
-		spec.schema = subAgentSchema(true)
+	if opts != (SubAgentOptions{}) {
+		spec.schema = subAgentSchema(opts)
 	}
-	return &SubAgent{toolSpec: spec, seatChoice: opts.SeatChoice}
+	return &SubAgent{toolSpec: spec, seatChoice: opts.SeatChoice, background: opts.Background}
 }
 
 // OffersSeatChoice reports whether this tool published the `run_on` argument. It exists so the
 // engine can ask, at spawn, whether the choice was ever offered: a seat named against a variant
 // that published no `run_on` is a value the model could not have been told about.
 func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
+
+// OffersBackground reports whether this tool published the `background` argument, so the engine
+// can tell a background the model was offered from one it could not have been told about.
+func (t *SubAgent) OffersBackground() bool { return t.background }
 
 // ArgRoles declares `task`, `name` and `continue` as delegation prompts (domain.ArgRolePrompt):
 // all three carry prose written FOR the nested agent, never an action this host performs. The
@@ -287,8 +316,8 @@ func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
 // same prose that rode `name`, and a name the capped or faulted result itself told the model to
 // repeat, so a guard tripping on it ("audit .git/config") would refuse the very call the engine
 // asked for.
-// `max_steps`, `run_on` and `tools` are NOT declared: none of them carries prose, so none needs an
-// exemption from a guard that matches rules against text.
+// `max_steps`, `run_on`, `tools` and `background` are NOT declared: none of them carries prose, so
+// none needs an exemption from a guard that matches rules against text.
 func (t *SubAgent) ArgRoles() map[string]domain.ArgRole {
 	return map[string]domain.ArgRole{
 		"task":     domain.ArgRolePrompt,
