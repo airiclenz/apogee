@@ -121,7 +121,13 @@ internal/eventjson/encode_test.go — TestEncodeSkipsTheWireEvent; internal/tui/
 - `go test -count=1 -run TestEveryDomainEventVariantIsAliased .`
 **Commit:** `feat(agent): announce a sub-agent group's size to the Driver`
 
-## 5. A serial wave shows the queued and esc hints
+## 5. A serial wave shows the queued and esc hints — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): an announced group is over only once every announced member is drawn AND the last of them is paired, not once any member is paired — the guard states the "short of its size" half; the other half keeps a serial group running its LAST member after earlier ones finished in flight, so its esc hint reads "keeps N finished …" as a pooled group's does (test case "a serial group running its last member keeps the finished ones"). A group no announcement anchors keeps the old any-member-paired rule unchanged.
+NOTES (2026-10-05): "drop it on a new Turn" is implemented as: a depth-0 ToolCallEvent whose Turn differs from the announcing Turn drops the wave (transcript.anchorWave); "a different group heads" is answered at read time — the wave counts only when its anchor head is in the group of the most recent depth-0 head (transcript.announcedMembers), and members are counted from the anchor onward. The anchor is the head's call id plus spawned run id.
+NOTES (2026-10-05): the delegate-group and next-Turn tests are new functions in model_test.go named TestFanOutCountIgnoresADelegatesGroup and TestFanOutCountDropsAnAnnouncedGroupOnTheNextTurn, so the acceptance `-run 'TestFanOut'` pattern picks them up.
+NOTES (2026-10-05): consequential edit — layout.md: made necessary by the serial readout; its queued-readout paragraph said the hint shows only for "a pooled group, the one whose queued members have rows".
+NOTES (2026-10-05): the waveReadout constant's comment in cmd/apogee/e2e_subagent_preempt_test.go said only the pooled journey could show the hint, and the escStopHint* constant comments in model.go said "pooled fan-out". Both were reworded alongside the item's own edits to those files.
 
 **What:**
 **Goal:** With `parallel-agents: 1`, a message staged while a sub_agent group still has members to run shows `after the wave · ctrl+g sends now` in the queued readout, and an armed esc names what a second esc does, the same as in a pooled group; a finished serial member counts toward the esc hint's finished count.

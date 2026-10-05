@@ -116,6 +116,31 @@ type transcript struct {
 	// takes the write. parked is deliberately outside it — the painter reads the live buffer alone —
 	// and so is the paint cache, which is a memo of the paint and not an input to it.
 	generation uint64
+	// wave is the top-level delegation group the engine last ANNOUNCED (domain.SubAgentGroupEvent):
+	// how many members it will run, and which drawn head it opens. It is what lets inFlightFanOut
+	// count the members a serial group has not drawn yet ([transcript.inFlightFanOut]). It is
+	// conversation state outside the paint — no renderView input, so no write to it touches — and
+	// reset drops it with the entries it was anchored to.
+	wave announcedWave
+}
+
+// announcedWave is the one top-level sub_agent group the engine has announced and the transcript
+// still holds: its size, the Turn that announced it, and — once its first member's head is placed —
+// that head's identity. A delegation's call id can collide (domain.EventBase), so the anchor is the
+// call id together with the run id the engine minted for it; a hand-built stream that carries no
+// run id still tells its heads apart by call id alone.
+type announcedWave struct {
+	set      bool   // a group is announced and not yet dropped
+	size     int    // the members the group will run (domain.SubAgentGroupEvent.Size)
+	turn     int    // the Turn that announced it
+	anchored bool   // its first member's head has been placed
+	callID   string // that head's call id
+	runID    string // that head's spawned run id
+}
+
+// anchors reports whether e is the head the announced group is anchored to.
+func (w announcedWave) anchors(e entry) bool {
+	return w.anchored && e.callID == w.callID && e.spawnRunID == w.runID
 }
 
 // touch marks the paint's input as moved: the one bump every writer of a field renderView reads
@@ -1029,6 +1054,7 @@ func (t *transcript) reset() {
 	t.streaming = false
 	t.pendingRun = runRef{}
 	t.parked = nil
+	t.wave = announcedWave{}
 	// The block-paint cache is keyed by ENTRY INDEX, and this is the one path that makes an index
 	// mean something else: the caller re-fills the list (a fresh start-up box, a replayed
 	// scrollback) before anything renders again, so pruning against the entry count at the next
@@ -1275,8 +1301,10 @@ func presentedStatus(v presentedView) string {
 // ReactionFired is surfaced only in the debug view — a reaction correcting the model's own
 // failure, or shaping what it sees, is engine behaviour rather than user news (addReaction);
 // a Prune says, in one host note, that the
-// engine dropped stale tool results from the conversation it keeps (addPrune). It renders only —
-// no agent logic (C5).
+// engine dropped stale tool results from the conversation it keeps (addPrune); a SubAgentGroup
+// appends none either — it records how many members a top-level delegation group will run, as
+// state the wave hints read (announceWave), and the depth-0 ToolCall that follows anchors it to
+// the group's first head (anchorWave). It renders only — no agent logic (C5).
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
 	case domain.TokenEvent:
@@ -1289,6 +1317,7 @@ func (t *transcript) apply(e domain.Event) {
 		run := runOf(e.EventBase)
 		t.finalizeNarration(run)
 		t.addToolCall(e.Call, e.ResolvedPath, e.SpawnRunID, run)
+		t.anchorWave(e)
 	case domain.ToolResultEvent:
 		t.addToolResult(e.Result, e.SpawnRunID, runOf(e.EventBase))
 	case domain.SubAgentPhaseEvent:
@@ -1314,6 +1343,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addRefClipped(e, runOf(e.EventBase))
 	case domain.WorkflowPhaseEvent:
 		t.addWorkflowPhase(e)
+	case domain.SubAgentGroupEvent:
+		t.announceWave(e)
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
@@ -2515,19 +2546,28 @@ func (e entry) neverStarted() bool {
 	return len(lines) > 0 && strings.HasPrefix(lines[0].Text, unstartedDelegationPrefix)
 }
 
-// inFlightFanOut counts the open Turn's POOLED delegations by what a stop would do to them: the
-// members that have finished and handed their report back (their result not yet paired; a stop
-// keeps it, ADR 0088), and the members still queued behind the Parallel agents cap
-// (a queued user message would skip those instead of stopping the run — preemptDelegation). ok
-// is false wherever no such group is in flight: no top-level delegation at all, a lone one (the
-// group floor is two, as everywhere — ownGroup), or a group whose result burst has already
-// landed on any member (done) — that group is over and belongs to a finished Turn.
+// inFlightFanOut counts the open Turn's delegation group by what a stop would do to its members:
+// the members that have finished and handed their report back (a stop keeps it, ADR 0088), and
+// the members still queued behind the Parallel agents cap (a queued user message would skip those
+// instead of stopping the run — preemptDelegation). ok is false wherever no such group is in
+// flight: no top-level delegation at all, a lone one (the group floor is two, as everywhere —
+// ownGroup), or a group that is over and belongs to a finished Turn.
 //
 // The group is the one the most recent top-level run head belongs to (subAgentGroupAt) — a
 // fan-out is one reply's calls, adjacent at depth 0 — and the count reads each head's phase
 // exactly as the row does (subAgentReported, subAgentScheduled): finished is the FINISHED phase,
 // queued is no phase at all. A head whose child never started ([entry.neverStarted]) is neither,
 // and is left out of both.
+//
+// A group the engine ANNOUNCED (domain.SubAgentGroupEvent, [transcript.announcedMembers]) is
+// counted against its announced size, which is what makes a serial group (`parallel-agents: 1`)
+// countable at all: it draws each member only when the dispatch reaches it, and commits each
+// member's result before drawing the next. Its members not drawn yet are queued too, its lone
+// first member is a group, and a member whose result is paired is finished work like any other.
+// It is over once every member it announced is drawn and the last of them is paired — never
+// because one member is. A group no announcement anchors keeps the pooled rule: it is over once its
+// result burst has landed on any member, since a pooled group pairs no result before every child
+// has joined.
 func (t *transcript) inFlightFanOut() (finished, queued int, ok bool) {
 	head := -1
 	for i := len(t.entries) - 1; i >= 0; i-- {
@@ -2539,26 +2579,89 @@ func (t *transcript) inFlightFanOut() (finished, queued int, ok bool) {
 	if head < 0 {
 		return 0, 0, false
 	}
-	group, _, ok := subAgentGroupAt(t.entries, head)
-	if !ok {
-		return 0, 0, false
+	members, size, announced := t.announcedMembers(head)
+	if !announced {
+		group, _, grouped := subAgentGroupAt(t.entries, head)
+		if !grouped {
+			return 0, 0, false
+		}
+		members = group
 	}
-	for _, member := range group {
+	undrawn := max(0, size-len(members))
+	for _, member := range members {
 		e := &t.entries[member.at]
-		if e.done {
+		if e.done && !announced {
 			return 0, 0, false
 		}
 		if e.neverStarted() {
 			continue
 		}
-		switch e.phase {
-		case domain.SubAgentFinished:
+		switch {
+		case e.phase == domain.SubAgentFinished:
 			finished++
-		case "":
+		case e.phase == "" && !e.done:
 			queued++
 		}
 	}
-	return finished, queued, true
+	if announced && undrawn == 0 && t.entries[members[len(members)-1].at].done {
+		return 0, 0, false
+	}
+	return finished, queued + undrawn, true
+}
+
+// announceWave records a top-level delegation group's announced size (domain.SubAgentGroupEvent),
+// replacing any group announced before it; the head it opens is not placed yet, so it stands
+// unanchored until anchorWave sees that head. A delegate's own group (Depth > 0) reaches this sink
+// too, because delegates share the parent's: it is no wave the human's message waits for, and it
+// folds nothing.
+func (t *transcript) announceWave(e domain.SubAgentGroupEvent) {
+	if e.Depth != 0 {
+		return
+	}
+	t.wave = announcedWave{set: true, size: e.Size, turn: e.Turn}
+}
+
+// anchorWave ties the announced wave to the first top-level sub_agent head placed after it, and
+// drops it once a top-level call belongs to a later Turn — that reply is past the group, whatever
+// it calls. A background sub_agent call is a leaf (backgroundSubAgentCall) and never anchors it; a
+// head of a different group is answered where the wave is read ([transcript.announcedMembers]).
+func (t *transcript) anchorWave(e domain.ToolCallEvent) {
+	if !t.wave.set || e.Depth != 0 {
+		return
+	}
+	if e.Turn != t.wave.turn {
+		t.wave = announcedWave{}
+		return
+	}
+	if t.wave.anchored || e.Call.Tool != subAgentToolName ||
+		backgroundSubAgentCall(e.Call.Tool, e.Call.Arguments, e.SpawnRunID) {
+		return
+	}
+	t.wave.anchored = true
+	t.wave.callID = e.Call.ID
+	t.wave.runID = e.SpawnRunID
+}
+
+// announcedMembers is the announced wave's members drawn so far — the group head belongs to, from
+// the wave's anchor onward — and the size it was announced at. ok is false when no anchored wave
+// stands in that group: none was announced, its anchor was dropped, or head opens a different
+// group. Here alone the group floor of two is lifted, because a serial group draws its members one
+// at a time and its first member stands alone until the second is reached; the painter's group
+// (ownGroup, subAgentGroupAt) keeps the floor.
+func (t *transcript) announcedMembers(head int) (members []groupBlock, size int, ok bool) {
+	if !t.wave.anchored {
+		return nil, 0, false
+	}
+	group, _, grouped := subAgentGroupAt(t.entries, head)
+	if !grouped {
+		group = []groupBlock{{at: head, span: subAgentSpan(t.entries, head)}}
+	}
+	for k, member := range group {
+		if t.wave.anchors(t.entries[member.at]) {
+			return group[k:], t.wave.size, true
+		}
+	}
+	return nil, 0, false
 }
 
 // prevSibling is the index of the entry standing at entries[i]'s own depth immediately before it —

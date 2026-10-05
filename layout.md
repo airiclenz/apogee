@@ -1704,8 +1704,8 @@ what is trimmed around it (`⣾ read… · 5 queued` at 20 columns), because on 
 the band has been dropped that count is the only thing the whole frame says about the queue. Below
 two columns of room the phrase goes whole, separator and all, rather than reading as an ellipsis.
 While a message staged with `⏎` waits out a sub-agent group's members still queued behind the cap
-(a pooled group, the one whose queued members have rows), the count carries when it lands and how
-to send it sooner — `1 queued · after the wave · ctrl+g sends now` — and is kept whole the same way;
+(a pooled group's queued members have rows; a serial group's, not drawn yet, are counted off the
+size the engine announces for the group), the count carries when it lands and how to send it sooner — `1 queued · after the wave · ctrl+g sends now` — and is kept whole the same way;
 a message sent with `ctrl+g` skips those members, so the count says nothing more (ADR 0025, amended
 2026-10-05).
 While the context gauge holds the right slot the width the slot is composed to is the window less

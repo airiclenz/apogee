@@ -588,7 +588,9 @@ func TestInterjectNowInARunViewSendsTheChildANowMessage(t *testing.T) {
 // 2026-10-05): while the open Turn's delegation group still has members queued behind the cap, an
 // ordinary ⏎ row waits for them, and the readout says so and names the key that sends it now. A
 // now row among the staged ones takes the hint away — the queued members are skipped, not waited
-// for — and with no queued member there is no wave to wait for.
+// for — and with no queued member there is no wave to wait for. A serial group (`parallel-agents:
+// 1`) reads the same: the members it has not drawn yet are queued, counted off the size the engine
+// announced, whether its first member is still running or already done.
 func TestInterjectQueuedReadoutNamesTheWave(t *testing.T) {
 	t.Parallel()
 	const hinted = "1 queued · " + queuedWaveHint
@@ -602,6 +604,10 @@ func TestInterjectQueuedReadoutNamesTheWave(t *testing.T) {
 		{"ctrl+g during a wave with queued members", fanOutOf(0, 1, 2), stageNowRow, false},
 		{"enter with every member started", fanOutOf(0, 3, 0), stageRow, false},
 		{"enter with nothing delegated", func(*transcript) {}, stageRow, false},
+		{"enter during a serial wave with member 1 done and no member 2 row", serialWaveOf(2, 1, false), stageRow, true},
+		{"enter during a serial wave with member 1 running and no member 2 row", serialWaveOf(2, 0, true), stageRow, true},
+		{"ctrl+g during a serial wave with a member to run", serialWaveOf(2, 0, true), stageNowRow, false},
+		{"enter while a serial wave runs its last member", serialWaveOf(2, 1, true), stageRow, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

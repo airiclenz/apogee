@@ -1212,6 +1212,29 @@ func fanOutOf(finished, running, queued int) func(tr *transcript) {
 	}
 }
 
+// serialWaveOf builds one top-level group the engine announced at size members and runs serially
+// (`parallel-agents: 1`): the announcement, then the members already done — each reported and its
+// result paired before the next is drawn, as the width-1 dispatch commits them — then, when
+// running, the next member started and unpaired. No row stands for a member the dispatch has not
+// reached yet.
+func serialWaveOf(size, done int, running bool) func(tr *transcript) {
+	return func(tr *transcript) {
+		tr.apply(domain.SubAgentGroupEvent{Size: size, Width: 1})
+		for i := 1; i <= done; i++ {
+			id := fmt.Sprintf("s%d", i)
+			subAgentCall(tr, id, "survey", 0)
+			subAgentStarted(tr, id, 1)
+			subAgentPhaseFinished(tr, id, "done")
+			subAgentReport(tr, id, "done", 0)
+		}
+		if running {
+			id := fmt.Sprintf("s%d", done+1)
+			subAgentCall(tr, id, "survey", 0)
+			subAgentStarted(tr, id, 1)
+		}
+	}
+}
+
 // TestEscStopHintNamesWhatASecondEscDoes pins the armed-esc hint's three wordings: while a pooled
 // fan-out holds finished delegations the hint says how many reports a second esc keeps and that it
 // stops the rest (a cancel settles, ADR 0088 — it announces no drop); while it holds only queued
@@ -1235,6 +1258,14 @@ func TestEscStopHintNamesWhatASecondEscDoes(t *testing.T) {
 		{"finished 0 / queued 0 is the plain hint", fanOutOf(0, 3, 0), "press esc again to cancel"},
 		{"a lone delegation is the plain hint", fanOutOf(0, 0, 1), "press esc again to cancel"},
 		{"an idle model is the plain hint", func(*transcript) {}, "press esc again to cancel"},
+		{"a serial group with member 1 done and member 2 not drawn keeps the one", serialWaveOf(2, 1, false),
+			"press esc again to cancel — keeps 1 finished delegation, stops the rest"},
+		{"a serial group with member 1 running and member 2 not drawn reads the skips wording", serialWaveOf(2, 0, true),
+			"press esc again to cancel — ctrl+g a message instead skips the 1 queued"},
+		{"a serial group running its last member keeps the finished ones", serialWaveOf(3, 2, true),
+			"press esc again to cancel — keeps 2 finished delegations, stops the rest"},
+		{"a serial group with every member paired is the plain hint", serialWaveOf(2, 2, false),
+			"press esc again to cancel"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1270,6 +1301,50 @@ func TestEscStopHintNamesWhatASecondEscDoes(t *testing.T) {
 			t.Errorf("statusRight = %q, want the plain hint once the group's results are paired", got)
 		}
 	})
+}
+
+// TestFanOutCountIgnoresADelegatesGroup proves the wave count reads the top-level group alone: a
+// delegate's own group shares the parent's sink, and its announcement (Depth 1) neither lifts a lone
+// top-level delegation into a wave nor adds members to a pooled group's queued count.
+func TestFanOutCountIgnoresADelegatesGroup(t *testing.T) {
+	t.Parallel()
+	delegates := domain.SubAgentGroupEvent{EventBase: domain.EventBase{Depth: 1, CallID: "r1"}, Size: 5, Width: 1}
+
+	lone := &transcript{}
+	lone.apply(delegates)
+	fanOutOf(0, 1, 0)(lone)
+	if finished, queued, ok := lone.inFlightFanOut(); ok {
+		t.Errorf("a lone delegation under a delegate's announcement counts (%d, %d, true); want no wave", finished, queued)
+	}
+
+	pooled := &transcript{}
+	fanOutOf(0, 1, 1)(pooled)
+	pooled.apply(delegates)
+	if finished, queued, ok := pooled.inFlightFanOut(); !ok || finished != 0 || queued != 1 {
+		t.Errorf("inFlightFanOut = (%d, %d, %v), want (0, 1, true): a delegate's group adds nothing", finished, queued, ok)
+	}
+}
+
+// TestFanOutCountDropsAnAnnouncedGroupOnTheNextTurn proves a finished announced group stops
+// counting once a later Turn calls: a lone delegation the next reply makes, drawn right beside the
+// group's members with no text between them, keeps the plain hint — it is no member of the wave
+// the announcement counted, and the paired members are over.
+func TestFanOutCountDropsAnAnnouncedGroupOnTheNextTurn(t *testing.T) {
+	t.Parallel()
+	m := armedEscModel(t, 200, func(tr *transcript) {
+		serialWaveOf(2, 2, false)(tr)
+		tr.apply(domain.ToolCallEvent{
+			EventBase: domain.EventBase{Turn: 1},
+			Call:      domain.ToolCall{ID: "lone", Tool: "sub_agent", Arguments: []byte(`{"task":"survey"}`)},
+		})
+		subAgentStarted(tr, "lone", 1)
+	})
+	if finished, queued, ok := m.transcript.inFlightFanOut(); ok {
+		t.Errorf("inFlightFanOut = (%d, %d, true) for a lone delegation after a finished wave; want no wave", finished, queued)
+	}
+	if got := plainSlot(m.statusRight(m.width)); got != "press esc again to cancel" {
+		t.Errorf("statusRight = %q, want the plain hint", got)
+	}
 }
 
 // TestEscStopHintFallsBackWhereTheLongFormDoesNotFit proves the long form is composed only where

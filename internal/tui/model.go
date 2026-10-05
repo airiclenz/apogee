@@ -4257,32 +4257,34 @@ func (m Model) runningPhrase(view runRef, now time.Time, quiet bool) string {
 }
 
 // escStopHintPlain is the armed-esc hint as it always read: a second press inside escStopWindow
-// stops the run. It is the whole hint wherever nothing pooled is in flight, and the fallback of the
+// stops the run. It is the whole hint wherever no delegation group is in flight, and the fallback of the
 // two longer forms below where the row has no room for them.
 const escStopHintPlain = "press esc again to cancel"
 
-// escStopHintKeepsFormat is the armed-esc hint while a pooled fan-out holds finished delegations
+// escStopHintKeepsFormat is the armed-esc hint while a delegation group holds finished delegations
 // (its arguments: the count, and `delegation` or `delegations` for it): what a second esc does to
 // the group — the finished reports stay with the settled Turn and the members still working are
 // stopped, each folded to a partial result, the queued ones never started (ADR 0088 D2).
 const escStopHintKeepsFormat = "press esc again to cancel — keeps %d finished %s, stops the rest"
 
-// escStopHintSkipsFormat is the armed-esc hint while a pooled fan-out holds no finished delegation
+// escStopHintSkipsFormat is the armed-esc hint while a delegation group holds no finished delegation
 // yet but does hold QUEUED ones (its argument: how many): a message sent now with ctrl+g pre-empts
 // those instead of stopping anything (preemptDelegation), which is the alternative the human is
 // choosing against with a second esc. It names ctrl+g, not ⏎: an ordinary ⏎ message waits for the
 // whole wave and skips nothing (ADR 0025, amended 2026-10-05).
 const escStopHintSkipsFormat = "press esc again to cancel — ctrl+g a message instead skips the %d queued"
 
-// escStopHint words the armed-esc hint for the room the slot has. While a pooled sub_agent group
-// is in flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would do
+// escStopHint words the armed-esc hint for the room the slot has. While a sub_agent group is in
+// flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would do
 // to it: with members finished, that their reports are kept and the rest stopped (a cancel settles,
 // ADR 0088); with none finished but some queued, that a message sent now with ctrl+g skips those
 // instead. It
 // says so only where the whole sentence fits: a long form the slot would drop whole (statusLine)
 // or the row would truncate to "keeps 3 fin…" states neither fact, so a row too tight for it falls
 // back to the plain hint, exactly as the quiet qualifier falls back to the plain running phrase
-// (statusLeft). At width 1 the queued form can name a single queued head; that is true there too.
+// (statusLeft). A serial group (width 1) reads the same as a pooled one: its members not drawn yet
+// are queued, counted off the size the engine announced, and a member whose report is already
+// paired is a finished one a second esc keeps.
 func (m Model) escStopHint(room int) string {
 	finished, queued, ok := m.transcript.inFlightFanOut()
 	if !ok {

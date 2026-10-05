@@ -307,10 +307,13 @@ func foldCases() []foldCase {
 			event: domain.AuditEvent{Tool: "terminal", CallID: "1", Decision: "allowed"},
 		},
 		{
-			name: "SubAgentGroupEvent is inert in the transcript",
-			// Nothing yet: the announced size of a reply's delegation group is the Driver's source
-			// for the wave's queued count (ADR 0025, amended 2026-10-05), and it draws no entry of
-			// its own — the members' own tool-call rows are what the transcript shows.
+			name: "SubAgentGroupEvent records the wave and appends no entry",
+			// The announced size of a top-level delegation group is the transcript's source for the
+			// wave's queued count (ADR 0025, amended 2026-10-05; transcript.announceWave): it is
+			// held as state the queued readout and the armed-esc hint read, and it draws no entry of
+			// its own — the members' own tool-call rows are what the transcript shows. What the
+			// count then reads is pinned beside the hints (TestEscStopHintNamesWhatASecondEscDoes,
+			// TestInterjectQueuedReadoutNamesTheWave).
 			event: domain.SubAgentGroupEvent{Size: 3, Width: 1},
 		},
 		{

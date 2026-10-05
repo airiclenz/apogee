@@ -62,10 +62,11 @@ const (
 	waveMessage = "Also review the docs once both halves are in."
 	waveWrapUp  = "Message received after both halves."
 	waveReport  = "The beta half is the test suite."
-	// waveReadout is the queued readout while a ⏎ message waits out a pooled wave's queued member:
-	// the count, when it lands, and the key that would send it now instead (internal/tui's
-	// queuedWaveHint). A serial wave draws no row for a member it has not started, so only the pooled
-	// journey can show it (TestE2EQueuedMessageWaitsForAPooledWaveAndSaysSo).
+	// waveReadout is the queued readout while a ⏎ message waits out a wave's queued member: the
+	// count, when it lands, and the key that would send it now instead (internal/tui's
+	// queuedWaveHint). A pooled wave shows its queued member as a `scheduled` row; a serial wave draws
+	// no row for a member it has not started, and the readout counts that member off the size the
+	// engine announced for the group — so both journeys show it.
 	waveReadout = "1 queued · after the wave · ctrl+g sends now"
 
 	// The engine's whole account of the skipped delegation — internal/agent/dispatch.go's
@@ -152,8 +153,10 @@ func TestE2EQueuedMessagePreemptsTheScheduledSubAgents(t *testing.T) {
 
 // TestE2EQueuedMessageWaitsForTheWholeWave is the default send's journey (ADR 0025, amended
 // 2026-10-05): the same two delegations at `parallel-agents: 1`, a message sent with ⏎ while the
-// first child runs — and the second child is NOT skipped: it is asked and reports, and the parent's
-// next request carries both reports, in call order, and then the message.
+// first child runs — and the readout says the message waits for the wave and names the key that
+// would not, though the second delegation has no row yet. The second child is NOT skipped: it is
+// asked and reports, and the parent's next request carries both reports, in call order, and then
+// the message.
 func TestE2EQueuedMessageWaitsForTheWholeWave(t *testing.T) {
 	t.Parallel()
 
@@ -164,9 +167,9 @@ func TestE2EQueuedMessageWaitsForTheWholeWave(t *testing.T) {
 	submit(drv, preemptPrompt)
 	drv.WaitText("alpha")
 
-	// ⏎ while running stages an ordinary message, and the readout counts it.
+	// ⏎ while running stages an ordinary message, and the readout counts it and names the wave.
 	submit(drv, waveMessage)
-	drv.WaitText(preemptQueuedReadout)
+	drv.WaitText(waveReadout)
 
 	stub.Release(preemptChildGate)
 	drv.WaitText(waveWrapUp)
