@@ -244,10 +244,10 @@ func TestBridgeNotifyHookLandsAsAnEphemeralNote(t *testing.T) {
 // TestBridgeInterjectionPendingFollowsTheLiveBox pins the engine's pre-emption seam
 // (domain.Config.InterjectionPending, ADR 0025) to the mailbox the Model registers: it is a
 // predicate over the LIVE box and nothing else. No box, or a nil registration — finishWorker and
-// the /compact worker — answers false; a staged row answers true; the two ways a row leaves the
-// box, the Backspace pop (withdraw) and the worker's drain (drainAll), answer false again; and a
-// re-registered box supersedes the old one, so a row left in a dead Exchange's box is never read
-// as pending for the next.
+// the /compact worker — answers false; a row staged now (ctrl+g) answers true; the two ways a row
+// leaves the box, the Backspace pop (withdraw) and the worker's drain (drainAll), answer false
+// again; and a re-registered box supersedes the old one, so a row left in a dead Exchange's box is
+// never read as pending for the next. The ⏎ half is TestBridgeInterjectionPendingIgnoresAnOrdinaryRow.
 func TestBridgeInterjectionPendingFollowsTheLiveBox(t *testing.T) {
 	t.Parallel()
 	b := NewBridge()
@@ -262,7 +262,7 @@ func TestBridgeInterjectionPendingFollowsTheLiveBox(t *testing.T) {
 		t.Fatal("InterjectionPending() = true over an empty box; want false")
 	}
 
-	box.push(queuedInterjection{id: 1, raw: "also check the tests"})
+	box.push(queuedInterjection{id: 1, raw: "also check the tests", now: true})
 	if !b.InterjectionPending() {
 		t.Fatal("InterjectionPending() = false after push; want true")
 	}
@@ -273,7 +273,7 @@ func TestBridgeInterjectionPendingFollowsTheLiveBox(t *testing.T) {
 		t.Error("InterjectionPending() = true after withdraw emptied the box; want false")
 	}
 
-	box.push(queuedInterjection{id: 2, raw: "and the docs"})
+	box.push(queuedInterjection{id: 2, raw: "and the docs", now: true})
 	if !b.InterjectionPending() {
 		t.Fatal("InterjectionPending() = false after a second push; want true")
 	}
@@ -285,13 +285,13 @@ func TestBridgeInterjectionPendingFollowsTheLiveBox(t *testing.T) {
 	}
 
 	// A row left behind in a box the Model has moved on from is not the next Exchange's.
-	box.push(queuedInterjection{id: 3, raw: "stale"})
+	box.push(queuedInterjection{id: 3, raw: "stale", now: true})
 	fresh := newInterjectBox()
 	b.setMailbox(fresh)
 	if b.InterjectionPending() {
 		t.Error("InterjectionPending() = true over a fresh box while the OLD one holds a row; want false")
 	}
-	fresh.push(queuedInterjection{id: 4, raw: "live"})
+	fresh.push(queuedInterjection{id: 4, raw: "live", now: true})
 	if !b.InterjectionPending() {
 		t.Error("InterjectionPending() = false with a row in the re-registered box; want true")
 	}
@@ -300,5 +300,34 @@ func TestBridgeInterjectionPendingFollowsTheLiveBox(t *testing.T) {
 	b.setMailbox(nil)
 	if b.InterjectionPending() {
 		t.Error("InterjectionPending() = true after registering nil; want false")
+	}
+}
+
+// TestBridgeInterjectionPendingIgnoresAnOrdinaryRow is the seam's ⏎ half (ADR 0025, amended
+// 2026-10-05): a row staged with ⏎ lets a running sub_agent wave finish, so it never raises the
+// pre-emption predicate however many wait; a now row beside it does, and withdrawing that now row
+// lowers it again while the ordinary row is still staged.
+func TestBridgeInterjectionPendingIgnoresAnOrdinaryRow(t *testing.T) {
+	t.Parallel()
+	b := NewBridge()
+	box := newInterjectBox()
+	b.setMailbox(box)
+
+	box.push(queuedInterjection{id: 1, raw: "after the wave"})
+	box.push(queuedInterjection{id: 2, raw: "and this too"})
+	if b.InterjectionPending() {
+		t.Fatal("InterjectionPending() = true over ordinary ⏎ rows; want false — they wait for the wave")
+	}
+
+	box.push(queuedInterjection{id: 3, raw: "stop the wave", now: true})
+	if !b.InterjectionPending() {
+		t.Fatal("InterjectionPending() = false with a now row staged; want true")
+	}
+
+	if !box.withdraw(3) {
+		t.Fatal("withdraw(3) = false; want the now row back")
+	}
+	if b.InterjectionPending() {
+		t.Error("InterjectionPending() = true after the now row was withdrawn; want false — only ordinary rows remain")
 	}
 }

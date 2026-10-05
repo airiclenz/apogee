@@ -1658,8 +1658,8 @@ from `esc×2 cancel` exactly as a reading does, and never from `enter dismiss`; 
 nor an estimate the slot falls through to its hint. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
 sub-agent group is in flight in the open Turn it says what the second press would do: `press esc
 again to cancel — keeps 3 finished delegations, stops the rest` where members have already
-reported (`1 finished delegation` for one), or `press esc again to cancel — ⏎ a message instead skips
-the 5 queued` where none has and members are still queued behind the cap. Either long form is
+reported (`1 finished delegation` for one), or `press esc again to cancel — ctrl+g a message instead
+skips the 5 queued` where none has and members are still queued behind the cap. Either long form is
 composed only where the row has room for the whole sentence — a row too tight for it falls back to
 the plain line, never to a clipped one — and a delegation the engine settled before it started (its
 result opens `sub-agent not started:`) counts as neither finished nor queued. Whichever one is showing, it
@@ -1703,6 +1703,11 @@ exactly as a pane's title row is: the **count** is the last thing it gives up an
 what is trimmed around it (`⣾ read… · 5 queued` at 20 columns), because on the short windows where
 the band has been dropped that count is the only thing the whole frame says about the queue. Below
 two columns of room the phrase goes whole, separator and all, rather than reading as an ellipsis.
+While a message staged with `⏎` waits out a sub-agent group's members still queued behind the cap
+(a pooled group, the one whose queued members have rows), the count carries when it lands and how
+to send it sooner — `1 queued · after the wave · ctrl+g sends now` — and is kept whole the same way;
+a message sent with `ctrl+g` skips those members, so the count says nothing more (ADR 0025, amended
+2026-10-05).
 While the context gauge holds the right slot the width the slot is composed to is the window less
 the gauge's room, so the phrase is also what gives way to the gauge — never the count, and never an
 idle or trail-only slot, beside which the gauge is dropped instead.

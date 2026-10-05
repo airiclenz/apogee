@@ -44,6 +44,9 @@ const (
 	// CtrlX is the stop of one delegation: inside a run view, or on a delegation's row under the
 	// block cursor (ADR 0086 D5).
 	CtrlX Key = "\x18"
+	// CtrlG is the now send: while a turn runs it stages a message that skips a sub_agent group's
+	// members not yet started, where ⏎'s waits for the wave (ADR 0025, amended 2026-10-05).
+	CtrlG Key = "\x07"
 
 	// F1–F4 are SS3 sequences and F5 upwards are CSI ~ sequences — the historical split every
 	// terminal still carries.

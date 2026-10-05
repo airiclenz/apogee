@@ -1,12 +1,13 @@
-# The upstream TestE2EQueuedMessagePreemptsTheScheduledSubAgents talks to: one reply that issues
-# two delegations, the first child held on a gate while the human queues a message, and the parent's
-# wrap-up once the message has landed (ADR 0025 — a queued message pre-empts the sub-agents that
-# have not started).
+# The upstream TestE2EQueuedMessagePreemptsTheScheduledSubAgents and
+# TestE2EQueuedMessageWaitsForTheWholeWave talk to: one reply that issues two delegations, the first
+# child held on a gate while the human queues a message, and the parent's wrap-up once the message
+# has landed (ADR 0025, amended 2026-10-05 — a message sent now with ctrl+g pre-empts the sub-agents
+# that have not started; one sent with ⏎ waits for the whole wave).
 #
 # The run is pinned to `parallel-agents: 1`, so the two delegations are dispatched SERIALLY: the
-# first child runs while the second waits its turn, and a message staged in that window is what
-# skips the second. There is deliberately no turn for the second child — it must never be asked —
-# so a request carrying its task falls to the fallback below, and the request log says so.
+# first child runs while the second waits its turn, and a message sent now in that window is what
+# skips the second. The second child's turn serves the wave journey alone, whose ⏎ message lets it
+# run; the pre-empt journey asserts no request ever carries its task.
 model: preempt-model
 turns:
     # The session title, matched before the prompt's own turn (see smoke.yaml): `auto-title:` is on
@@ -30,6 +31,11 @@ turns:
         last_message: ^Also check the tests
       repeat: true
       text: Message received; the beta half was not started.
+    # The wave journey's wrap-up, matched on ITS ⏎ message: both children's reports stand above it.
+    - when:
+        last_message: ^Also review the docs
+      repeat: true
+      text: Message received after both halves.
     # The first child. Its answer is held on the `staged` gate until the test has SEEN the queued
     # row: the pre-emption is decided when the engine is about to start the SECOND delegation, which
     # is after this child reports, so the message has to be in the mailbox before that. Holding the
@@ -39,7 +45,11 @@ turns:
       repeat: true
       await: staged
       text: The alpha half is two files and a README.
-    # Anything neither the parent nor the first child claims — the second child, if it were ever
-    # asked, lands here, and the request log then names it.
+    # The second child, asked only in the wave journey: a ⏎ message lets the whole wave run.
+    - when:
+        last_message: beta half of the workspace
+      repeat: true
+      text: The beta half is the test suite.
+    # Anything neither the parent nor a child claims lands here, and the request log then names it.
     - repeat: true
       text: Nothing else to add.

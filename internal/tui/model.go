@@ -1832,25 +1832,29 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.escGen++
 		gen := m.escGen
 		return m, tea.Tick(escStopWindow, func(time.Time) tea.Msg { return escStopResetMsg{gen: gen} })
+	case "ctrl+g":
+		// The NOW send (ADR 0025, amended 2026-10-05). While a worker runs it stages the message as ⏎
+		// does, marked now: a running sub_agent group skips its members not yet started instead of
+		// letting the whole wave finish first — in the main prompt and, addressed to the child on
+		// screen, in a run view. At idle there is no wave to cut short, so it submits exactly as ⏎
+		// does. Under a pane — an approval, a question, an error — it does nothing: the box belongs
+		// to the decision in front of it, and there is no message to send now.
+		switch m.state {
+		case stateIdle:
+			return m.sendAtIdle()
+		case stateRunning:
+			return m.stageWhileRunning(true)
+		default:
+			return m, nil
+		}
 	case "enter":
 		switch m.state {
 		case stateIdle:
-			// Inside a run view the box addresses the CHILD on screen, not the conversation the
-			// view was opened from (ADR 0063) — at idle as much as while a worker runs, because
-			// the view outlives the run it was opened on and ⏎ there must not silently start an
-			// Exchange the reader thought they were steering a delegate with.
-			if m.inRunView() {
-				return m.stageChildMessage()
-			}
-			return m.submit()
+			return m.sendAtIdle()
 		case stateRunning:
-			if m.inRunView() {
-				return m.stageChildMessage()
-			}
-			// The single-worker invariant stands — this launches nothing. What the human typed is
-			// STAGED as an interjection and delivered into the running Exchange at the next
-			// between-Steps boundary (ADR 0025).
-			return m.stageInterjection()
+			// Staged, never launched (stageWhileRunning); an ordinary ⏎ row lets a running
+			// sub_agent wave finish before it lands — ctrl+g is the send that skips its queued members.
+			return m.stageWhileRunning(false)
 		case stateAwaitingAsk:
 			// Submit the typed answer back to the blocked ask_user tool (P3.11).
 			//
@@ -4264,15 +4268,17 @@ const escStopHintPlain = "press esc again to cancel"
 const escStopHintKeepsFormat = "press esc again to cancel — keeps %d finished %s, stops the rest"
 
 // escStopHintSkipsFormat is the armed-esc hint while a pooled fan-out holds no finished delegation
-// yet but does hold QUEUED ones (its argument: how many): a queued message pre-empts those
-// instead of stopping anything (preemptDelegation), which is the alternative the human is choosing
-// against with a second esc.
-const escStopHintSkipsFormat = "press esc again to cancel — ⏎ a message instead skips the %d queued"
+// yet but does hold QUEUED ones (its argument: how many): a message sent now with ctrl+g pre-empts
+// those instead of stopping anything (preemptDelegation), which is the alternative the human is
+// choosing against with a second esc. It names ctrl+g, not ⏎: an ordinary ⏎ message waits for the
+// whole wave and skips nothing (ADR 0025, amended 2026-10-05).
+const escStopHintSkipsFormat = "press esc again to cancel — ctrl+g a message instead skips the %d queued"
 
 // escStopHint words the armed-esc hint for the room the slot has. While a pooled sub_agent group
 // is in flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would do
 // to it: with members finished, that their reports are kept and the rest stopped (a cancel settles,
-// ADR 0088); with none finished but some queued, that queuing a message skips those instead. It
+// ADR 0088); with none finished but some queued, that a message sent now with ctrl+g skips those
+// instead. It
 // says so only where the whole sentence fits: a long form the slot would drop whole (statusLine)
 // or the row would truncate to "keeps 3 fin…" states neither fact, so a row too tight for it falls
 // back to the plain hint, exactly as the quiet qualifier falls back to the plain running phrase

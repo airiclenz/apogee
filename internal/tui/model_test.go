@@ -89,6 +89,7 @@ func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 func keyEsc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEscape} }
 func keySpace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "} }
 func keyCtrlC() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl} }
+func keyCtrlG() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl} }
 
 // ctrlCQuit drives the two-press Ctrl+C quit gesture: the first press arms it (its disarm
 // tick is discarded by step), the second — landing microseconds later, well inside
@@ -1214,7 +1215,8 @@ func fanOutOf(finished, running, queued int) func(tr *transcript) {
 // TestEscStopHintNamesWhatASecondEscDoes pins the armed-esc hint's three wordings: while a pooled
 // fan-out holds finished delegations the hint says how many reports a second esc keeps and that it
 // stops the rest (a cancel settles, ADR 0088 — it announces no drop); while it holds only queued
-// ones it says a queued message skips them instead; and a lone delegation, or a model with nothing
+// ones it says a message sent now with ctrl+g skips them instead — never ⏎, whose message waits for
+// the wave (ADR 0025, amended 2026-10-05); and a lone delegation, or a model with nothing
 // delegated, keeps the plain hint.
 func TestEscStopHintNamesWhatASecondEscDoes(t *testing.T) {
 	t.Parallel()
@@ -1229,7 +1231,7 @@ func TestEscStopHintNamesWhatASecondEscDoes(t *testing.T) {
 		{"finished 1 reads the singular", fanOutOf(1, 2, 0),
 			"press esc again to cancel — keeps 1 finished delegation, stops the rest"},
 		{"finished 0 / queued 5 reads the skips wording", fanOutOf(0, 2, 5),
-			"press esc again to cancel — ⏎ a message instead skips the 5 queued"},
+			"press esc again to cancel — ctrl+g a message instead skips the 5 queued"},
 		{"finished 0 / queued 0 is the plain hint", fanOutOf(0, 3, 0), "press esc again to cancel"},
 		{"a lone delegation is the plain hint", fanOutOf(0, 0, 1), "press esc again to cancel"},
 		{"an idle model is the plain hint", func(*transcript) {}, "press esc again to cancel"},

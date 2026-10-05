@@ -1,14 +1,18 @@
 # The upstream TestE2EQueuedMessagePreemptsAPooledSubAgentAndItsRowOpensInPlace talks to: one reply
 # that issues THREE delegations at `parallel-agents: 2`, so the first two run at once and the third
-# waits for a worker. A message the human queues while both run is what skips the third at its
-# dequeue (ADR 0025) — and since the first child is still held when that happens, the skipped row
-# stands on screen BEFORE its group's results burst, which is the window the test expands it in.
+# waits for a worker. A message the human sends now (ctrl+g) while both run is what skips the third
+# at its dequeue (ADR 0025, amended 2026-10-05) — and since the first child is still held when that
+# happens, the skipped row stands on screen BEFORE its group's results burst, which is the window
+# the test expands it in.
 #
 # Two gates order the journey. `staged` holds the second child until the queued readout is on
 # screen, so its worker dequeues the third delegation with the message already pending. `held`
 # holds the first child until the test has expanded the skipped row, so the group is still
-# unjoined while it does. There is deliberately no turn for the third child — it must never be
-# asked — so a request carrying its task falls to the fallback below.
+# unjoined while it does. There is deliberately no turn for the third child — that journey must
+# never ask it — so a request carrying its task falls to the fallback below.
+#
+# TestE2EQueuedMessageWaitsForAPooledWaveAndSaysSo reuses the script with a message sent with ⏎,
+# which waits for the whole wave: the third child IS asked there, and the fallback answers it.
 model: preempt-model
 turns:
     # The session title, matched before the prompt's own turn (see smoke.yaml): `auto-title:` is on

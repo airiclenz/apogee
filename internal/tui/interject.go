@@ -16,7 +16,7 @@ import (
 
 // queuedInterjection is one message the human typed while the model was working, staged for
 // delivery into the running Exchange — or, inside a run view, one addressed to the child on screen
-// (ADR 0063). It carries seven things because different consumers need different halves of it:
+// (ADR 0063). It carries eight things because different consumers need different halves of it:
 //
 //   - id names the row across the two copies of the queue — the Model's display slice and the
 //     mailbox the worker drains — so the delivery fold can remove exactly the rows that landed
@@ -46,6 +46,12 @@ import (
 //     report on ([Model.foldChildDelivery]). It is kept apart from run.id because a view opened on
 //     a redirected head holds a ref whose id is still "" after the head adopts one at its started
 //     phase, and the band's label is resolved from run, not from this.
+//   - now marks a row sent with ctrl+g rather than ⏎ (ADR 0025, amended 2026-10-05): only a now
+//     row raises the engine's pre-emption seam ([interjectBox.pendingNow]), so only it skips a
+//     sub_agent group's members that have not started; an ordinary row waits for the whole wave.
+//     A child's now row went out through [Engine.InterjectChildNow], which is where the engine
+//     learns it; on a display row for the human's own conversation the flag also shapes the queued
+//     readout ([Model.waitsForWave]).
 //
 // A child row therefore only ever waits out the window between the ⏎ and the child's own account
 // of it, and that window closes strictly inside the Exchange: the delegation's scope reports every
@@ -60,13 +66,14 @@ type queuedInterjection struct {
 	spawn      string
 	run        runRef
 	runID      string
+	now        bool
 }
 
 // interjectBox is the per-Exchange mailbox: the Update goroutine pushes staged rows into it and
 // the worker goroutine drains them between Steps, which is the ONE place the two goroutines
 // touch the same state — and the one place a third party touches it: the engine's dispatching
 // goroutine and, under a fan-out, its pool workers read the box through the Bridge as a yes/no
-// (pending, the Config.InterjectionPending seam) to skip the sub-agents they have not started,
+// (pendingNow, the Config.InterjectionPending seam) to skip the sub-agents they have not started,
 // never as rows. Everywhere else the split is clean — the Model owns the display rows,
 // the worker owns the engine — so this mutex is the whole of the concurrency in the interjection
 // path (the engine needs none for the commit: Agent.Interject is called at the between-Steps
@@ -95,7 +102,7 @@ func newInterjectBox() *interjectBox {
 // installBox registers the worker value's mailbox with the Bridge, called in the same step as each
 // worker verb that changes it (worker.start in enterRunning, worker.finish in finishWorker), so the
 // two readers of the mailbox — the worker that drains it and the engine's pre-emption seam that
-// asks whether it holds anything (Bridge.InterjectionPending) — always see the SAME box: the live
+// asks whether it holds a now row (Bridge.InterjectionPending) — always see the SAME box: the live
 // Exchange's, or nil when there is none (finishWorker, the /compact worker). It is the one place
 // the worker's box reaches the Bridge, which is what keeps the seam from ever reading a box no
 // worker drains.
@@ -117,11 +124,10 @@ func (b *interjectBox) push(it queuedInterjection) {
 	b.items = append(b.items, it)
 }
 
-// pending answers whether the mailbox holds at least one staged row — the engine's pre-emption
-// question (domain.Config.InterjectionPending), asked through the Bridge from the dispatching
-// goroutine and, under a fan-out, from its pool workers at once, which is why it takes the lock. It
-// is a predicate and nothing more: it reads no row, drains nothing, and commits nothing — the
-// message itself still lands only at the boundary drainAll serves. A nil box holds nothing.
+// pending answers whether the mailbox holds at least one staged row of either kind. It is no
+// longer the engine's question — that is [interjectBox.pendingNow] — and stays the plain "is
+// anything waiting in the box" a caller asks when the kind of row does not matter. A nil box holds
+// nothing.
 func (b *interjectBox) pending() bool {
 	if b == nil {
 		return false
@@ -129,6 +135,27 @@ func (b *interjectBox) pending() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.items) > 0
+}
+
+// pendingNow answers whether the mailbox holds at least one row sent NOW (ctrl+g) — the engine's
+// pre-emption question (domain.Config.InterjectionPending), asked through the Bridge from the
+// dispatching goroutine and, under a fan-out, from its pool workers at once, which is why it takes
+// the lock. An ordinary ⏎ row does not count: it waits for the whole sub_agent wave, queued members
+// included (ADR 0025, amended 2026-10-05). It is a predicate and nothing more: it reads no message,
+// drains nothing, and commits nothing — the message itself still lands only at the boundary
+// drainAll serves. A nil box holds nothing.
+func (b *interjectBox) pendingNow() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, it := range b.items {
+		if it.now {
+			return true
+		}
+	}
+	return false
 }
 
 // withdraw takes one staged row back out of the mailbox before the worker can deliver it, and
@@ -183,9 +210,36 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // Staging — the Update-goroutine half: type, queue, take back, and record on arrival
 // ----------------------------------------------------------------------------
 
-// stageInterjection is what ⏎ does while a worker runs: it turns the editor's contents into a
-// staged row and empties the box, launching nothing (the single-worker invariant is untouched —
-// the running worker delivers the row at its next between-Steps boundary, ADR 0025).
+// sendAtIdle is what ⏎ — and ctrl+g, which submits exactly like it at idle — does with no worker
+// running. Inside a run view the box addresses the CHILD on screen, not the conversation the view
+// was opened from (ADR 0063) — at idle as much as while a worker runs, because the view outlives
+// the run it was opened on and a send there must not silently start an Exchange the reader thought
+// they were steering a delegate with. Everywhere else it submits.
+func (m Model) sendAtIdle() (tea.Model, tea.Cmd) {
+	if m.inRunView() {
+		return m.stageChildMessage(false)
+	}
+	return m.submit()
+}
+
+// stageWhileRunning is what ⏎ (now unset) and ctrl+g (now set) do while a worker runs. The
+// single-worker invariant stands — this launches nothing: what the human typed is STAGED, for the
+// child on screen inside a run view and as an interjection into the running Exchange everywhere
+// else, delivered at the next between-Steps boundary (ADR 0025). now picks whether it waits for a
+// running sub_agent wave or skips the wave's members not yet started (amended 2026-10-05).
+func (m Model) stageWhileRunning(now bool) (tea.Model, tea.Cmd) {
+	if m.inRunView() {
+		return m.stageChildMessage(now)
+	}
+	return m.stageInterjection(now)
+}
+
+// stageInterjection is what ⏎ — or ctrl+g, with now set — does while a worker runs: it turns the
+// editor's contents into a staged row and empties the box, launching nothing (the single-worker
+// invariant is untouched — the running worker delivers the row at its next between-Steps boundary,
+// ADR 0025). now is the only difference between the two keys: a now row raises the engine's
+// pre-emption seam, so a running sub_agent group skips its members not yet started, while an
+// ordinary row lets the whole wave finish first (ADR 0025, amended 2026-10-05).
 //
 // Six outcomes, and the input's fate is the difference between them: a REPORTING /command runs on
 // the spot — /version, /skills, /confine status answer while the model works, because they touch no
@@ -200,7 +254,7 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // editor text for the Backspace restore, and the parsed input the engine consumes, whose @file
 // references deliberately stay unresolved until delivery, so the model reads the file as it stands
 // then.
-func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
+func (m Model) stageInterjection(now bool) (tea.Model, tea.Cmd) {
 	// The line verbatim, before anything empties the box: an interjection is an input the human sent,
 	// so it is recorded for ↑ exactly as a submitted message is (recall.go, decision 3). Read here for
 	// submit's reason — only the paths that queue or run reach the record; the refusals below leave
@@ -233,6 +287,7 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 		// prepends the bodies exactly as the loop does at open).
 		input:      domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs},
 		skillSpans: parsed.skillSpans,
+		now:        now,
 	}
 	// The display copy and the mailbox are written together, which is what makes the two halves
 	// reconcilable: the row exists for the human the moment it exists for the worker.
@@ -337,8 +392,10 @@ func childNotRunningNote(name string) string {
 // screen rather than to the conversation the view is opened from (ADR 0063). It queues into that
 // child's engine-side mailbox ([Engine.InterjectChild]) and lands at the child's next between-Steps
 // boundary as an ordinary interjection, with the child's own tools, mode and confinement unchanged
-// — addressing a child grants it nothing (ADR 0005). It is the ordinary send: the child's own
-// unstarted grandchildren still run first ([Engine.InterjectChildNow] is the send that skips them).
+// — addressing a child grants it nothing (ADR 0005). With now unset it is the ordinary send
+// ([Engine.InterjectChild], ⏎): the child's own unstarted grandchildren still run first. With now
+// set it is ctrl+g's send ([Engine.InterjectChildNow]), which skips them (ADR 0025, amended
+// 2026-10-05).
 //
 // It is stageInterjection's shape with one seam swapped, and deliberately so: the parse is the same
 // ([promptEditor.submitParse]), so a message to a child carries its @file references and its skill
@@ -354,7 +411,7 @@ func childNotRunningNote(name string) string {
 // engine reports (ErrNoSuchChild): the child ended between the frame that invited the message and
 // the keypress that sent it, and a draft silently swallowed there would be the one outcome worse
 // than a refusal. A stage level is not a run at all and takes none either ([Model.refuseStageMessage]).
-func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
+func (m Model) stageChildMessage(now bool) (tea.Model, tea.Cmd) {
 	// The line verbatim, before anything empties the box — stageInterjection's reading, for
 	// stageInterjection's reason (recall.go, decision 3): only the paths that send or run record it.
 	sent := m.input.Value()
@@ -391,7 +448,11 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	// that never learned one sends "", which the engine refuses as no such child.
 	// Called from the Update goroutine, which the seam is written for: InterjectChild only appends
 	// to a guarded mailbox and never touches the child's conversation (tui.go, agent/children.go).
-	if err := m.eng.InterjectChild(head.spawnRunID, in); err != nil {
+	send := m.eng.InterjectChild
+	if now {
+		send = m.eng.InterjectChildNow
+	}
+	if err := send(head.spawnRunID, in); err != nil {
 		return m.refuseChildMessage(childGoneNote(usageAgentName(head)))
 	}
 	m.interjectSeq++
@@ -405,6 +466,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 		spawn:      spawn,
 		run:        run,
 		runID:      head.spawnRunID,
+		now:        now,
 	})
 	m.spendSkillHints() // the line has left the human's hands: the suggestion band is spent as at idle
 	m.promptEditor.reset()
@@ -897,19 +959,52 @@ func queuedRowText(raw string) string {
 	return strings.Join(strings.Fields(raw), " ")
 }
 
+// queuedWaveHint is what the queued readout adds while a staged message is waiting out a sub_agent
+// group's queued members ([Model.waitsForWave]): when it will land, and the key that sends it now
+// instead (ADR 0025, amended 2026-10-05).
+const queuedWaveHint = "after the wave · ctrl+g sends now"
+
 // queuedSegment is the status line's "N queued" readout, rendered whenever anything is waiting to
 // go out — including at idle, where a queue held over from a stop or an error must keep saying so.
 // It counts both kinds of staged row, the messages and the queued commands (stagedRowCount): the
-// band it stands in for on a short window seats both. afterPhrase asks for the " · " separator,
-// for the states whose slot already carries words.
+// band it stands in for on a short window seats both. While a staged message waits for a sub_agent
+// wave it adds [queuedWaveHint], so the human learns the message is not cutting the wave short and
+// how to make it. afterPhrase asks for the " · " separator, for the states whose slot already
+// carries words.
 func (m Model) queuedSegment(afterPhrase bool) string {
 	n := m.stagedRowCount()
 	if n == 0 {
 		return ""
 	}
 	text := fmt.Sprintf("%d queued", n)
+	if m.waitsForWave() {
+		text += " · " + queuedWaveHint
+	}
 	if afterPhrase {
 		text = " · " + text
 	}
 	return m.th.statusBar.Render(text)
+}
+
+// waitsForWave reports whether a staged message is waiting out a sub_agent wave: the open Turn's
+// delegation group still has members queued behind the cap (transcript.inFlightFanOut), and the
+// staged messages for the human's own conversation are all ordinary ⏎ rows. One now row among them
+// answers false — it raises the pre-emption seam, so the queued members are skipped rather than
+// waited for and "after the wave" would be untrue. A child's row and a queued command never wait
+// for this group, so they neither raise the hint nor cancel it.
+func (m Model) waitsForWave() bool {
+	if _, queued, ok := m.transcript.inFlightFanOut(); !ok || queued == 0 {
+		return false
+	}
+	waiting := false
+	for _, row := range m.pendingInterjections {
+		if row.spawn != "" {
+			continue
+		}
+		if row.now {
+			return false
+		}
+		waiting = true
+	}
+	return waiting
 }

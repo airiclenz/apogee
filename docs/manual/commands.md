@@ -29,7 +29,7 @@ a typo is visible before you send.
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
 | `/skills` | List the discovered skills — id, name, summary, any declared `triggers:`, and where each came from; `/skills export <id>` copies a skill apogee [ships](configuration.md#skills-apogee-ships--use-shipped-skills) into `~/.apogee/skills/<id>/` so you can edit it | ✅ listing only |
 | `/version` | Show the apogee version | ✅ |
-| `/help` | List every command with its one-line summary, then the key legend — `⏎ send`, the newline chord your terminal delivers (`⌥⏎`, or `⇧⏎/⌥⏎` once the enhanced keyboard protocol is negotiated), `↑/↓ recall`, `esc×2 cancel`, `^x stop`, `⌃c quit`, `⇧⇥ mode`, `PgUp/PgDn scroll` — as a transcript note | ✅ |
+| `/help` | List every command with its one-line summary, then the key legend — `⏎ send`, `ctrl+g send now`, the newline chord your terminal delivers (`⌥⏎`, or `⇧⏎/⌥⏎` once the enhanced keyboard protocol is negotiated), `↑/↓ recall`, `esc×2 cancel`, `^x stop`, `⌃c quit`, `⇧⇥ mode`, `PgUp/PgDn scroll` — as a transcript note | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, one per workflow (named for it; a `fan_out`, a recipe or a background workflow, its item runs and the runs they spawned summed), and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache, a `cost` column joins them once a call ran on a server with a `price:` — the amount in your `currency:` label (in a resumed session priced under another label, that session's own label, and the calls it makes after the resume count as unpriced, since their price was reckoned in yours), `—` on a row whose calls were all unpriced, and `≥` before an amount that covers only some of its calls — and a `served:` line above the rows names the models the server actually answered with once a reply has carried one | ✅ |
 | `/inspect` | The request and response traffic of the recent model calls, **readable** by default — each request summarised as `N messages · N tools · model …` (`system + N messages` when the wire hoists the system prompt), each response as the passages its stream spells, thinking and reply as wrapped prose and every tool call named — on the anthropic wire also the served model, the stop reason and the token counts, which arrive as events of their own; `ctrl+r` flips the pane to the raw pretty-printed protocol and back. It opens on the newest record and follows it, so traffic arriving while the pane is open is shown until you scroll up off the end. With a sub-agent's run view open the pane shows that run's traffic alone and names it in its title — close the view for the whole ring. Armed by `ui.inspector` (off by default) | ✅ |
 | `/thinking` | The model's thinking as plain text — the reasoning it streams beside its answer, one record per completed turn, newest last, with no protocol and no prefixes. Opens on the newest record and follows it, so reasoning arriving while the pane is open is shown until you scroll up off the end; with a sub-agent's run view open it shows that run's thinking alone and names it in its title, and at the top level the main agent's alone. Always recorded, nothing to arm, nothing saved with the session — emptied at `/clear`, `/new`, a `/sessions` resume and `/fork` | ✅ |
@@ -110,8 +110,11 @@ refused in the status line, and a clipboard image on a server without `vision: t
 refused there too, with the same reason an `@` reference to an image gives.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
-the model works, and a queued message does not wait for sub-agents that have not started yet:
-those are skipped — their rows read `not started · your message` — the model is told so, and your message lands once the running ones finish.
+the model works, and a queued message waits for a running group of sub-agents to finish, the ones
+still waiting for a slot included, then lands; while one is still waiting the status line reads
+`1 queued · after the wave · ctrl+g sends now`. `ctrl+g` sends **now** instead: the sub-agents that
+have not started yet are skipped — their rows read `not started · your message` — the model is told
+so, and your message lands once the running ones finish. At idle `ctrl+g` sends exactly as `⏎` does.
 A command that needs a quiet engine queues the same way — `⏎` on `/clear` mid-run stages a
 `queued command: /clear` row above the box, below any queued messages, and the queued commands
 run in the order you typed them the moment the model is idle, **before** any queued message is
@@ -142,10 +145,10 @@ rest at once. Nothing a cancel does reverts a file: what the run wrote stays wri
 of delegations is running the first `esc`'s hint says what the second would do and names the
 alternative — `press esc again to cancel — keeps 3 finished delegations, stops the rest` (or
 `1 finished delegation`), or, when none has finished yet and some are still waiting for a
-slot, `press esc again to cancel — ⏎ a message instead skips the 5 queued`. Either long form
+slot, `press esc again to cancel — ctrl+g a message instead skips the 5 queued`. Either long form
 shows only where the status line has room for the whole sentence; on a row too narrow for it
 the hint falls back to the plain `press esc again to cancel`, never a truncated half. Sending a message
-instead of the second `esc` lets the running sub-agents finish: the ones not yet
+with `ctrl+g` instead of the second `esc` lets the running sub-agents finish: the ones not yet
 started are skipped and the model is told so, and your message lands once the running ones
 finish — the queue rule above. To end **one** delegation and let the rest of the turn go on,
 stop it with `^x` instead (see the run view below). A cancel that lands before the model's first
@@ -203,7 +206,8 @@ On a run that is already over, `^x` does nothing, and the header drops the `^x s
 Inside the view of a run that is
 still working the prompt box addresses **that sub-agent** — the box reads
 `Message scout…` and `⏎` sends your message to the delegate, which picks it up between its
-own steps, exactly as a message to the main agent is picked up between its. A run that has
+own steps, exactly as a message to the main agent is picked up between its — after the delegate's
+own sub-agents still waiting for a slot have run, unless you send it with `ctrl+g`, which skips them. A run that has
 already finished (or has not started yet) opens read-only and says so in the box. Nothing
 else changes: the sub-agent keeps the tools, the mode and the confinement it was given, and
 a message to it never widens any of that. When a reply asked for more delegations than

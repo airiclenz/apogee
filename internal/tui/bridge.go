@@ -116,11 +116,13 @@ func (b *Bridge) setMailbox(box *interjectBox) {
 }
 
 // InterjectionPending is the composition root's Config.InterjectionPending: true while the
-// registered mailbox holds at least one staged message, so the engine skips the delegations of
-// the running group that have not started and the message lands when the running ones finish
-// (ADR 0025, internal/agent/dispatch.go). It is a predicate over the LIVE box — a Backspace pop
-// (withdraw) or the worker's drain empties it, and it answers false again — and reads nothing else:
-// no message, no queue, no commit. With no box registered (idle, /compact) it answers false.
+// registered mailbox holds at least one message sent NOW (ctrl+g), so the engine skips the
+// delegations of the running group that have not started and the message lands when the running
+// ones finish (ADR 0025, internal/agent/dispatch.go). A message staged with ⏎ does not raise it: it
+// waits for the whole wave, queued members included (ADR 0025, amended 2026-10-05). It is a
+// predicate over the LIVE box — a Backspace pop (withdraw) or the worker's drain takes the now row
+// out, and it answers false again — and reads nothing else: no message, no queue, no commit. With no
+// box registered (idle, /compact) it answers false.
 //
 // It is goroutine-safe by construction — the pointer under its own lock, the box under the box's —
 // because the engine asks from the dispatching goroutine and, under a fan-out, from the pool workers.
@@ -128,7 +130,7 @@ func (b *Bridge) InterjectionPending() bool {
 	b.mailboxMu.Lock()
 	box := b.mailbox
 	b.mailboxMu.Unlock()
-	return box.pending()
+	return box.pendingNow()
 }
 
 // Bind connects the live program. Run calls it once, before the program processes any

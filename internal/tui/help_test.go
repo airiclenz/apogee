@@ -9,7 +9,8 @@ import (
 // row is a "/name — summary" line, a blank line separates the list from the legend, and the legend
 // trailer spells the newline chord as the idle legend for THAT terminal does — ⌥⏎ alone until key
 // disambiguation is confirmed, ⇧⏎/⌥⏎ after — the stop as the running legend does, and the one-run
-// stop as a run view's header does. Each copied
+// stop as a run view's header does, and the now send's key as the queued readout and the armed-esc
+// hint do. Each copied
 // cell is asserted against the prompteditor.go constant it copies, so /help can never teach a
 // spelling the box has stopped showing.
 func TestHelpNoteListsEveryVerb(t *testing.T) {
@@ -45,7 +46,7 @@ func TestHelpNoteListsEveryVerb(t *testing.T) {
 			// The legend trailer names the fixed cells, with the newline chord this terminal delivers.
 			legend := lines[len(lines)-1]
 			if want := helpLegendPrefix + strings.Join([]string{
-				helpKeySend, c.wantNewline, helpKeyRecall, helpKeyStop, helpKeyStopRun, helpKeyQuit, helpKeyMode, helpKeyScroll,
+				helpKeySend, helpKeySendNow, c.wantNewline, helpKeyRecall, helpKeyStop, helpKeyStopRun, helpKeyQuit, helpKeyMode, helpKeyScroll,
 			}, helpCellSeparator); legend != want {
 				t.Errorf("legend = %q, want %q", legend, want)
 			}
@@ -60,6 +61,12 @@ func TestHelpNoteListsEveryVerb(t *testing.T) {
 			}
 			if !strings.HasSuffix(breadcrumbStopHint, helpCellSeparator+helpKeyStopRun) {
 				t.Errorf("one-run stop cell %q is not spelled by the run view's hint %q", helpKeyStopRun, breadcrumbStopHint)
+			}
+			nowKey := strings.Fields(helpKeySendNow)[0]
+			for _, spelled := range []string{queuedWaveHint, escStopHintSkipsFormat} {
+				if !strings.Contains(spelled, nowKey+" ") {
+					t.Errorf("now-send key %q is not spelled by %q", nowKey, spelled)
+				}
 			}
 		})
 	}

@@ -134,7 +134,16 @@ internal/agent/workflowcall.go — workflow message action; internal/agent/child
 - `go test -race -count=1 -run 'TestInterjectChild|TestFanOut_PendingInterjection|TestDispatchSerially_Pending' ./internal/agent/`
 **Commit:** `feat(agent): a child's mailbox preempts grandchildren only for a now message`
 
-## 5. TUI: finish the wave by default, ctrl+g sends now
+## 5. TUI: finish the wave by default, ctrl+g sends now — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): `interjectBox.pending()` is kept, and the now-only sibling `pendingNow()` is added; `Bridge.InterjectionPending` reads `pendingNow()`. `pending()` now has a single caller, the existing `TestRecipeLineWhileRunningIsRefused` in workflowblock_test.go. ⏎ and ctrl+g share two new helpers, `sendAtIdle` and `stageWhileRunning(now)`, in interject.go.
+NOTES (2026-10-05): `TestEnterWhileRunningRaisesThePendingSeam` is renamed to `TestInterjectNowRaisesThePendingSeam`. Its claim is reversed by this item (⏎ no longer raises the seam; ctrl+g does), so the old name would be false.
+NOTES (2026-10-05): the wave hint (`queuedWaveHint`, `Model.waitsForWave`) shows only while a top-level message staged with ⏎ waits. A now row, a child's row or a queued command does not show it, and a now row hides it, because "after the wave" would then be untrue.
+NOTES (2026-10-05): the serial journey `TestE2EQueuedMessageWaitsForTheWholeWave` (`parallel-agents: 1`) asserts the behaviour and `1 queued`, but not the hint text. A serial wave draws no row for a member it has not started, so the TUI cannot see the queued member. The hint is asserted on screen by a new pooled journey, `TestE2EQueuedMessageWaitsForAPooledWaveAndSaysSo`, which reuses subagent-preempt-pool.yaml. The pool journey that already existed now sends its message with ctrl+g.
+NOTES (2026-10-05): the /help cell is spelled `ctrl+g send now`, matching the readout's and the esc hint's `ctrl+g` (pinned in TestHelpNoteListsEveryVerb). It is not spelled `⌃g`.
+NOTES (2026-10-05): consequential edit — internal/tuitest/driver_test.go: made necessary by adding `CtrlG` to keys.go (TestKeysDecodeAsIntended pins every key).
+NOTES (2026-10-05): consequential edit — cmd/apogee/testdata/stubllm/subagent-preempt-pool.yaml: made necessary by the pool journey now sending with ctrl+g and the new ⏎ pooled journey reusing the script (header comment only).
+NOTES (2026-10-05): consequential edit — layout.md: made necessary by rewording `escStopHintSkipsFormat` and adding the queued readout's wave hint.
 
 **What:**
 **Goal:** While a turn runs, ⏎ stages a message that lets the running sub_agent wave finish, queued members included, before it lands; `ctrl+g` stages one that skips the queued members (today's behaviour), in the main prompt and in a run view; the queued readout shows `after the wave · ctrl+g sends now` while a group has queued members; idle, `ctrl+g` submits like ⏎.

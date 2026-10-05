@@ -412,12 +412,14 @@ func TestEnterWhileRunningStagesRow(t *testing.T) {
 	}
 }
 
-// TestEnterWhileRunningRaisesThePendingSeam is the Model's half of the pre-emption seam: a row
-// staged in stateRunning is a row the Bridge can see, because launchExchange installs the
-// Exchange's box through installBox, which registers it (Bridge.setMailbox) — and the worker's end
-// (finishWorker) registers nil, so the seam reads no dead box. The engine reads the Bridge's
-// predicate and never the Model, which is value-copied on every Update (ADR 0011).
-func TestEnterWhileRunningRaisesThePendingSeam(t *testing.T) {
+// TestInterjectNowRaisesThePendingSeam is the Model's half of the pre-emption seam: a row staged
+// in stateRunning is a row the Bridge can see, because launchExchange installs the Exchange's box
+// through installBox, which registers it (Bridge.setMailbox) — and the worker's end (finishWorker)
+// registers nil, so the seam reads no dead box. Only a row sent NOW raises it (ADR 0025, amended
+// 2026-10-05): ⏎ stages a row that waits for the sub_agent wave and leaves the seam down, ctrl+g
+// stages one that skips the wave's queued members. The engine reads the Bridge's predicate and
+// never the Model, which is value-copied on every Update (ADR 0011).
+func TestInterjectNowRaisesThePendingSeam(t *testing.T) {
 	t.Parallel()
 	br := NewBridge()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
@@ -432,26 +434,192 @@ func TestEnterWhileRunningRaisesThePendingSeam(t *testing.T) {
 		t.Fatal("InterjectionPending() = true before anything was staged; want false")
 	}
 
-	m = stageRow(t, m, "also check the tests")
-	if !br.InterjectionPending() {
-		t.Fatal("InterjectionPending() = false after ⏎ staged a row while running; want true")
+	m = stageRow(t, m, "after the wave")
+	if br.InterjectionPending() {
+		t.Fatal("InterjectionPending() = true after ⏎ staged a row; want false — an ordinary row waits for the wave")
 	}
 
-	// The Backspace pop takes the row back out of the mailbox, and the seam follows.
+	m = stageNowRow(t, m, "also check the tests")
+	if !br.InterjectionPending() {
+		t.Fatal("InterjectionPending() = false after ctrl+g staged a row while running; want true")
+	}
+
+	// The Backspace pop takes the newest row — the now one — back out of the mailbox, and the seam follows.
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if br.InterjectionPending() {
-		t.Error("InterjectionPending() = true after the Backspace pop withdrew the row; want false")
+		t.Error("InterjectionPending() = true after the Backspace pop withdrew the now row; want false")
 	}
 
 	// A row the worker never drained dies with the Exchange: the Model lets go of the box and
 	// the Bridge with it, so the row held for the next ⏎ is not read as pending for it.
-	m = stageRow(t, m, "held for the next send")
+	m = stageNowRow(t, m, "held for the next send")
 	m.finishWorker(stateIdle)
 	if m.worker.box != nil {
 		t.Fatal("finishWorker left the mailbox on the Model")
 	}
 	if br.InterjectionPending() {
 		t.Error("InterjectionPending() = true after finishWorker; want false — the box is dead")
+	}
+}
+
+// stageNowRow types text and presses ctrl+g — the now send — at whatever state the model is in.
+func stageNowRow(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	m.input.SetValue(text)
+	return step(t, m, keyCtrlG())
+}
+
+// TestInterjectNowStagesARowMarkedNow pins what ctrl+g stages while a worker runs: the same row ⏎
+// stages — on the display queue and in the mailbox, the editor emptied, nothing launched — marked
+// now, where ⏎'s row is not.
+func TestInterjectNowStagesARowMarkedNow(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		key     tea.KeyPressMsg
+		wantNow bool
+	}{
+		{"enter waits for the wave", keyEnter(), false},
+		{"ctrl+g sends now", keyCtrlG(), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := runningModel(t)
+			box := m.worker.box
+
+			m.input.SetValue("also check the tests")
+			next, cmd := stepCmd(t, m, tc.key)
+
+			if next.state != stateRunning || cmd != nil {
+				t.Fatalf("state = %v, cmd = %v; want still running and nothing launched", next.state, cmd)
+			}
+			if got := next.input.Value(); got != "" {
+				t.Errorf("input = %q; want an emptied editor after staging", got)
+			}
+			staged := box.drainAll()
+			if len(staged) != 1 || len(next.pendingInterjections) != 1 || staged[0].id != next.pendingInterjections[0].id {
+				t.Fatalf("mailbox = %+v, display = %+v; want the one staged row in both", staged, next.pendingInterjections)
+			}
+			if staged[0].now != tc.wantNow || next.pendingInterjections[0].now != tc.wantNow {
+				t.Errorf("row now = %v (display %v); want %v", staged[0].now, next.pendingInterjections[0].now, tc.wantNow)
+			}
+		})
+	}
+}
+
+// TestInterjectNowAtIdleSubmitsLikeEnter pins ctrl+g at idle: there is no wave to cut short, so it
+// submits the box exactly as ⏎ does — one Exchange opened on the typed line.
+func TestInterjectNowAtIdleSubmitsLikeEnter(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+
+	m.input.SetValue("survey the repo")
+	next, _ := stepCmd(t, m, keyCtrlG())
+
+	if next.state != stateRunning {
+		t.Fatalf("state = %v; want running — ctrl+g at idle submits", next.state)
+	}
+	if got := next.input.Value(); got != "" {
+		t.Errorf("input = %q; want the editor emptied by the submit", got)
+	}
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d; want none — an idle send is a submit, not a staged row", n)
+	}
+}
+
+// TestInterjectNowUnderAPaneDoesNothing pins ctrl+g where the box belongs to a decision: under an
+// approval or a question it sends nothing, stages nothing and leaves the typed line alone.
+func TestInterjectNowUnderAPaneDoesNothing(t *testing.T) {
+	t.Parallel()
+	for _, state := range []uiState{stateAwaitingApproval, stateAwaitingAsk} {
+		m := runningModel(t)
+		m.state = state
+		m.input.SetValue("not a message")
+
+		next, cmd := stepCmd(t, m, keyCtrlG())
+
+		if next.state != state || cmd != nil {
+			t.Errorf("state %v: got state %v, cmd %v; want the pane untouched", state, next.state, cmd)
+		}
+		if n := len(next.pendingInterjections); n != 0 || next.worker.box.pending() {
+			t.Errorf("state %v: staged %d rows; want none", state, n)
+		}
+	}
+}
+
+// TestInterjectNowInARunViewSendsTheChildANowMessage pins the run view's two sends (ADR 0063, ADR
+// 0025 amended 2026-10-05): ⏎ addresses the child on screen with the ordinary send, which lets the
+// child's own unstarted grandchildren run first, and ctrl+g with the now send, which skips them.
+func TestInterjectNowInARunViewSendsTheChildANowMessage(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	head := stampedDelegation(&m.transcript, runRef{}, "s1", "run-a", "scout")
+	stampedPhase(&m.transcript, head, domain.SubAgentStarted, "")
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	if got := m.viewedRun(); got.id != "run-a" {
+		t.Fatalf("setup: the view is open on run %+v; want run-a", got)
+	}
+
+	m = stageRow(t, m, "check the tests too")
+	m = stageNowRow(t, m, "stop delegating")
+
+	got := eng.childInterjections()
+	if len(got) != 2 {
+		t.Fatalf("InterjectChild calls = %+v; want the two messages typed in the view", got)
+	}
+	if got[0].now || got[0].input.Text != "check the tests too" {
+		t.Errorf("⏎ sent %+v; want the ordinary send of the first message", got[0])
+	}
+	if !got[1].now || got[1].input.Text != "stop delegating" {
+		t.Errorf("ctrl+g sent %+v; want the now send of the second message", got[1])
+	}
+	if n := len(m.pendingInterjections); n != 2 || !m.pendingInterjections[1].now {
+		t.Errorf("staged rows = %+v; want both, the second marked now", m.pendingInterjections)
+	}
+}
+
+// TestInterjectQueuedReadoutNamesTheWave pins the queued readout's wave hint (ADR 0025, amended
+// 2026-10-05): while the open Turn's delegation group still has members queued behind the cap, an
+// ordinary ⏎ row waits for them, and the readout says so and names the key that sends it now. A
+// now row among the staged ones takes the hint away — the queued members are skipped, not waited
+// for — and with no queued member there is no wave to wait for.
+func TestInterjectQueuedReadoutNamesTheWave(t *testing.T) {
+	t.Parallel()
+	const hinted = "1 queued · " + queuedWaveHint
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		stage func(t *testing.T, m Model, text string) Model
+		want  bool
+	}{
+		{"enter during a wave with queued members", fanOutOf(0, 1, 2), stageRow, true},
+		{"ctrl+g during a wave with queued members", fanOutOf(0, 1, 2), stageNowRow, false},
+		{"enter with every member started", fanOutOf(0, 3, 0), stageRow, false},
+		{"enter with nothing delegated", func(*transcript) {}, stageRow, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := runningModel(t)
+			m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
+			tc.build(&m.transcript)
+
+			m = tc.stage(t, m, "after this")
+
+			status := ansi.Strip(m.statusLine())
+			if !strings.Contains(status, "1 queued") {
+				t.Fatalf("status line %q lacks the queued count", status)
+			}
+			if got := strings.Contains(status, hinted); got != tc.want {
+				t.Errorf("status line %q carries the wave hint = %v; want %v", status, got, tc.want)
+			}
+		})
 	}
 }
 
