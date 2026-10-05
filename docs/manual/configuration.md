@@ -1124,18 +1124,19 @@ applies at the next start.
 
 **A workflow gives each item two kinds of second chance**, and two file-only keys bound
 them. A workflow — a fan-out your agent asks for, or a recipe a skill ships — runs one
-sub-agent per item. A sub-agent that runs out of room before it reports is *continued*: a
-fresh one picks the item up, seeded with the rounds before it, up to
-`workflow-continuations:` times (default **2**). Past that, or after a fault or an ending
-with no report, the item *starts over* with a fresh sub-agent, up to `workflow-retries:`
-times (default **1**). An item out of both ends on the best it has, marked as such, and
-the rest of the workflow runs on. `0` switches either second chance off; a negative count
-reads as the default. `workflow-wake:` (a file-only key, `on` or `off`, default **on**)
-decides what happens when a workflow you sent to the background ends: `on` gives your
-agent a turn of its own to read the result, `off` shows you that it finished and lets the
-result ride on your next message instead. It takes the two words only — `true` is
-refused. All three are read when the session is built, so an edit applies at the next
-start.
+sub-agent per item. (A [background `sub_agent`](workflows.md#a-background-sub_agent) is a
+workflow of one item that runs once and takes neither second chance.) A sub-agent that runs
+out of room before it reports is *continued*: a fresh one picks the item up, seeded with
+the rounds before it, up to `workflow-continuations:` times (default **2**). Past that, or
+after a fault or an ending with no report, the item *starts over* with a fresh sub-agent,
+up to `workflow-retries:` times (default **1**). An item out of both ends on the best it
+has, marked as such, and the rest of the workflow runs on. `0` switches either second
+chance off; a negative count reads as the default. `workflow-wake:` (a file-only key, `on`
+or `off`, default **on**) decides what happens when a workflow you sent to the background
+ends: `on` gives your agent a turn of its own to read the result, `off` shows you that it
+finished and lets the result ride on your next message instead. It takes the two words only
+— `true` is refused. All three are read when the session is built, so an edit applies at
+the next start.
 
 ## How hard a model thinks — effort
 

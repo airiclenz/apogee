@@ -244,7 +244,8 @@ A delegation the group has **not started** when an **Interjection** is staged **
 parent — sent with `ctrl+g` while the turn runs, in the main prompt or a Run view — is
 **skipped**, not run; a message sent with ⏎ instead waits for the whole wave, queued members
 included, and lands once every member has finished (ADR 0025, amended 2026-10-05). A skipped
-delegation commits, in call order, the tool result `sub-agent not started: the user sent a message while this group was running; delegate again if the task is still needed` with a
+delegation commits, in call order, the tool result `sub-agent not started: the user sent a
+message while this group was running; delegate again if the task is still needed` with a
 finished phase and no started one, so the model is told and may delegate again; the TUI paints that
 row with the neutral `not started · your message` verdict in the marker tone, no ✓ (never `scheduled`,
 never the red `error`: the skip is the human's act, not a failure), and opens it onto the skip's own

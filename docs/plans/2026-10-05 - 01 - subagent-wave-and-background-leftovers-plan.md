@@ -187,7 +187,9 @@ layout.md — the background `sub_agent` paragraph (ADR 0094)
 **Commit:** `feat(tui): word a background sub_agent's finish line by its origin`
 **Closes:** apogee-finish-line-origin-wording
 
-## 8. Manual and CONTEXT name the one-item background workflow
+## 8. Manual and CONTEXT name the one-item background workflow — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): configuration.md's "Workflow retries" paragraph was rewrapped (~91 columns) around the added sentence; wording outside the new sentence is unchanged. The prose guard's second hit, workflows.md:397 ("starting the same workflow blocking …"), already says a background `sub_agent` never resumes (item 3), so it was left as is.
 
 **What:**
 **Goal:** `docs/manual/configuration.md`'s "Workflow retries" section says a background `sub_agent`'s one item runs once and takes neither second chance; `docs/manual/workflows.md` says starting the same `fan_out` or recipe again skips done items while a background `sub_agent` call always starts a fresh run; CONTEXT.md's skip tool-result line is wrapped like its neighbours (~100 columns).

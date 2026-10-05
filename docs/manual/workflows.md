@@ -18,7 +18,9 @@ nothing on its own:
   [A background `sub_agent`](#a-background-sub_agent)).
 
 Every finished item is kept on disk as it lands. A cancel, a quit or a crash loses only the items
-that were still running, and starting the same workflow again skips the ones already done.
+that were still running, and starting the same `fan_out` call or recipe again skips the ones
+already done. A background `sub_agent` call never picks up where an earlier one left off: each
+call always starts a fresh run.
 
 ## Turning it on
 
