@@ -1,5 +1,5 @@
 ---
-Status: accepted; two rejected options superseded for child agents by ADR 0063
+Status: accepted; two rejected options superseded for child agents by ADR 0063; the 2026-09-14 pre-empt narrowed to a message sent now (`ctrl+g`) by its own 2026-10-05 amendment
 ---
 > Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 
@@ -83,14 +83,38 @@ of "scheduled": queue, and deliver at the first boundary that exists.
 > ([ADR 0033](0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md) D7 stands).
 > Ratified 2026-09-14, implemented by `docs/plans/2026-09-14 - 01`; ADR 0039 is amended the same day.
 
+> **Amended 2026-10-05 — a message waits for the wave unless it is sent *now*.** The 2026-09-14
+> amendment above is narrowed, not reversed. A message staged with ⏎ while a `sub_agent` wave runs
+> no longer pre-empts anything: it waits for the **whole wave** — the members still queued behind
+> the `parallel-agents` cap included — and lands at the boundary the wave's results close, as an
+> ordinary Interjection. Only a message staged with **`ctrl+g`** — the *now* send, offered while a
+> turn runs in the main prompt and in a Run view (idle, `ctrl+g` submits like ⏎) — keeps the
+> pre-empt: the queued members it finds are skipped exactly as that amendment describes, and the
+> running ones still finish untouched. The seam keeps its shape: `Config.InterjectionPending` stays
+> a yes/no the Driver answers ([ADR 0031](0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md):
+> the engine never reads the queue, nor learns which key staged a row), and the TUI's Bridge now
+> answers yes only while a *now* row is staged. The rule holds at every depth: a child's own mailbox
+> makes its serial dispatch skip its unstarted grandchildren only while it holds a message sent now
+> — `Agent.InterjectChildNow(runID, in)`, a sibling of `Agent.InterjectChild(runID, in)`, which
+> stays the ordinary send — and the `workflow` tool's `message` action, the model's own send to a
+> running child, is never a now send, so the model never pre-empts. What the human sees: while a
+> group has queued members the queued readout adds `after the wave · ctrl+g sends now`, and the
+> armed-esc hint offers `ctrl+g`, not ⏎, as the way to skip the queued members. A member a now
+> message skipped reads the neutral `not started · your message` verdict, and one a turn cancel
+> caught queued reads `stopped by you` — both in the marker tone, no ✓, never the red `error`, while
+> their wire results keep `IsError: true`; a session replay re-derives the verdict from the stored
+> result, so an old session's skipped rows read neutral too. The fan-out ceiling's refusal stays
+> `error`. Ratified 2026-10-05, implemented by `docs/plans/2026-10-05 - 00`; ADR 0039 is amended the
+> same day.
+
 **3. Three parties, split by what each one owns.** The staging is the TUI's, the delivery is the
 worker's, the commit is the engine's — and the split follows ownership, not convenience:
 
 - **The TUI stages.** Display rows, the hold-on-stop rule, the Backspace pop back into the editor,
   the `N queued` readout: all of it is UI. The engine never reads a message before it is
   delivered — since the 2026-09-14 amendment above it may ask whether one is *pending*
-  (`Config.InterjectionPending`, a yes/no the Bridge answers over the live mailbox), and that
-  answer is all it learns; the message itself stays the TUI's until the worker delivers it.
+  (`Config.InterjectionPending`, a yes/no the Bridge answers over the live mailbox — since the
+  2026-10-05 amendment, yes only for a message sent *now*), and that answer is all it learns; the message itself stays the TUI's until the worker delivers it.
 - **The worker drains.** A per-Exchange mailbox (`interjectBox`) is written by the Update goroutine
   and read by the worker between Steps. It is the ONE place the two goroutines touch shared state
   — and, since 2026-09-14, the one place the engine's dispatching goroutine and its pool workers

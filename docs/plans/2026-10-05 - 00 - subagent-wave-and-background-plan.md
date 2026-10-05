@@ -94,7 +94,10 @@ internal/tui/subagentblock.go — subAgentVerdictWord; internal/tui/transcriptbr
 - `go test -race -count=1 -run TestE2EQueuedMessage ./cmd/apogee/`
 **Commit:** `fix(tui): show skipped and cancelled delegations in a neutral verdict`
 
-## 3. ADR 0025 amendment: finish the wave, ctrl+g sends now
+## 3. ADR 0025 amendment: finish the wave, ctrl+g sends now — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): ADR 0025 decision 3's predicate sentence also gained a "since 2026-10-05, yes only for a message sent now" clause (the plan's Read first named decision 3); docs/manual/commands.md's queue rule is left for item 5, which owns it and the behaviour change.
+NOTES (2026-10-05): the amendment describes the reworded armed-esc hint only as offering `ctrl+g` instead of ⏎, without quoting it — item 5 settles its exact text.
 
 **What:**
 **Goal:** ADR 0025 carries an `Amended 2026-10-05` block stating that a staged message waits for the whole sub_agent wave, queued members included, unless it was sent with `ctrl+g`, and CONTEXT.md's Interjection entry says the same.

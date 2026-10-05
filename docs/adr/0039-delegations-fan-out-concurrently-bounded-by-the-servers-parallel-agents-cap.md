@@ -142,6 +142,16 @@ cancel during child 2 already discards child 1.
 > and it still rolls the whole parent Turn back. Firings keep waiting for a quiescent host
 > (ADR 0033 D7). Implemented by `docs/plans/2026-09-14 - 01`.
 
+> **Amended 2026-10-05 — only a message sent *now* takes the queued slots.** The note above is
+> superseded in part: a staged message no longer skips the queued slots by being staged. A message
+> sent with ⏎ waits for the whole group, queued slots included, and lands at the boundary their
+> results close; only one sent with `ctrl+g` (the *now* send) makes `Config.InterjectionPending`
+> answer yes, and only then does a dequeuing pool worker skip its slot as described above. One
+> level down the same holds: a child's mailbox skips its unstarted grandchildren only while it
+> holds a message sent now (`Agent.InterjectChildNow`), and the `workflow` tool's `message` action
+> never does. The rule, the stage hint and the neutral skip verdicts are recorded in
+> [ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md)'s amendment of the same day.
+
 > **Amended 2026-09-20 — a reply's fan-out is bounded by a ceiling.** A reply is no longer free to
 > fan out every `sub_agent` call it emits, the calls past the width queuing until a worker frees:
 > the first `delegate-fanout-rounds × width` `sub_agent` calls in emitted order run as before (a

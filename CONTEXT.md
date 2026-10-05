@@ -235,16 +235,19 @@ does; the parent's call and result carry the same run id, which is how a run is 
 block it answers
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md),
 amended 2026-09-24).
-A delegation the group has **not started** when an **Interjection** is staged for its parent is
-**skipped**, not run: it commits, in call order, the tool result `sub-agent not started: the user
-sent a message while this group was running; delegate again if the task is still needed` with a
+A delegation the group has **not started** when an **Interjection** is staged **now** for its
+parent — sent with `ctrl+g` while the turn runs, in the main prompt or a Run view — is
+**skipped**, not run; a message sent with ⏎ instead waits for the whole wave, queued members
+included, and lands once every member has finished (ADR 0025, amended 2026-10-05). A skipped
+delegation commits, in call order, the tool result `sub-agent not started: the user sent a message while this group was running; delegate again if the task is still needed` with a
 finished phase and no started one, so the model is told and may delegate again; the TUI paints that
 row with the neutral `not started · your message` verdict in the marker tone, no ✓ (never `scheduled`,
 never the red `error`: the skip is the human's act, not a failure), and opens it onto the skip's own
 words, like a refusal at the depth bound. A delegation a turn cancel caught queued reads `stopped by
 you` the same way. The children already running finish untouched — a message never
-cancels anything — and a child holding a message in its own mailbox skips its unstarted
-grandchildren the same way (ADR 0039, amended 2026-09-14). Headless runs and Firings have no
+cancels anything — and a child holding a message sent now in its own mailbox skips its unstarted
+grandchildren the same way, while an ordinary message, or the model's own `workflow message`,
+skips nothing (ADR 0039, amended 2026-09-14 and 2026-10-05). Headless runs and Firings have no
 queue, so nothing is ever skipped there.
 What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
 call gave — an optional `name` argument on the `sub_agent` call, normalised to a trimmed first
@@ -253,7 +256,9 @@ first line. It is display identity — and, for a retained delegation, the handl
 `continue` spells back — never privilege.
 A **running** child is **addressable**, and by the handle it already has: its engine-minted **run
 id**, which never repeats where a call-ID may (ADR 0086 D5, `apogee-interject-by-run-id`).
-`Agent.InterjectChild(runID, in)` appends a message to that child's engine-side **mailbox**,
+`Agent.InterjectChild(runID, in)` appends a message to that child's engine-side **mailbox** — its
+sibling `Agent.InterjectChildNow(runID, in)` appends one sent *now*, the only kind that makes the
+child skip its unstarted grandchildren —
 recursing into registered children so a grandchild is reachable from the top-level agent and
 answering `domain.ErrNoSuchChild` when no such child is running; the goroutine driving that child
 pops the mailbox before every Step after the first and delivers each message through
@@ -1047,12 +1052,17 @@ boundary), and a queue left standing by Esc or a loop error is **held** (nothing
 a stop; the next ⏎ sends it, Backspace on an empty box pops the newest back into the editor, and
 with nothing queued drops the newest pending image — an image attached for the next idle send, which
 a staged message never takes).
-A staged message also **pre-empts** the **Sub-agents** of a running delegation group that have
-not started yet: the engine reads the staging as a predicate (`Config.InterjectionPending`, the
-host's mailbox answering yes/no) the instant it is about to start one, skips it with an explicit
-tool result instead, lets the children already running finish, and lands the message at the
-boundary their results close — the boundary is unmoved, it just comes sooner (ADR 0025, amended
-2026-09-14; a `/schedule` Firing keeps waiting for a quiescent host, ADR 0033 D7).
+A staged message **waits for the wave**: one sent with ⏎ while a **Sub-agent** delegation group
+runs lets every member finish, the ones still queued behind the cap included, and lands at the
+boundary their results close. Only a message staged **now** — with `ctrl+g` while a turn runs, in
+the main prompt or a **Run view** (idle, `ctrl+g` submits like ⏎) — **pre-empts** the members not
+started yet: the engine reads the staging as a predicate (`Config.InterjectionPending`, the host's
+mailbox answering yes only while a now row is staged) the instant it is about to start one, skips
+it with an explicit tool result instead, lets the children already running finish, and lands the
+message at the boundary their results close — the boundary is unmoved, it just comes sooner. While
+a group has queued members the queued readout says `after the wave · ctrl+g sends now` (ADR 0025,
+amended 2026-09-14 and 2026-10-05; a `/schedule` Firing keeps waiting for a quiescent host, ADR
+0033 D7).
 Staged and held rows are session-ephemeral — sessions record what was committed (ADR 0022).
 Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the rows into ONE
 **unmarked** message, because exactly one unmarked user message opens an Exchange. A **Skill** or
