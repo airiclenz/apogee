@@ -60,9 +60,10 @@ func NewSplitBudget(contextLimit int) SplitBudget {
 // list in its written order, `files:` matches and `split:` parts in lexical path order, `lines:`
 // in file order. source.Batch groups the entries that many per item (0 or 1: one each). budget
 // is read by `split:` alone. Every error names the source: a source with no or several kinds set,
-// an absolute or `..` path, a malformed glob, an unreadable file, a `split:` with a budget of 0 or
-// less, an expansion that yields nothing, and a `stage:` source — whose items exist only once
-// that pick stage has run.
+// an absolute or `..` path, a malformed glob, a `files:` walk root that is not a directory, an
+// unreadable file or one that is not a regular file, a `split:` with a budget of 0 or less, an
+// expansion that yields nothing, and a `stage:` source — whose items exist only once that pick
+// stage has run.
 func Expand(source ItemSource, fsys fs.FS, budget SplitBudget) ([]Item, error) {
 	kind, value, err := sourceKind(source)
 	if err != nil {
@@ -273,11 +274,19 @@ func matchSegments(pattern, name []string) bool {
 }
 
 // walkFiles calls visit for every regular file under root in lexical order, never entering a
-// skippedDirs directory below root. A root that does not exist has no files; any other walk
-// error is returned. Symlinks are passed over, so a walk never leaves the tree it was given.
+// skippedDirs directory below root. A root that does not exist has no files; a root that exists
+// but is not a directory is refused; any other walk error is returned. Symlinks below root are
+// passed over, so a walk never leaves the tree it was given.
 func walkFiles(fsys fs.FS, root string, visit func(name string, entry fs.DirEntry) error) error {
-	if _, err := fs.Stat(fsys, root); errors.Is(err, fs.ErrNotExist) {
+	info, err := fs.Stat(fsys, root)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", root)
 	}
 	return fs.WalkDir(fsys, root, func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -296,9 +305,26 @@ func walkFiles(fsys fs.FS, root string, visit func(name string, entry fs.DirEntr
 	})
 }
 
-// nonBlankLines returns the file's lines that hold more than whitespace, trimmed, in file order.
+// errNotRegularFile refuses a source that is a FIFO, a device, a socket or a directory: reading a
+// FIFO with no writer would block the run forever.
+var errNotRegularFile = errors.New("not a regular file")
+
+// readRegularFile reads name whole, refusing anything but a regular file before it is opened.
+func readRegularFile(fsys fs.FS, name string) ([]byte, error) {
+	info, err := fs.Stat(fsys, name)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errNotRegularFile
+	}
+	return fs.ReadFile(fsys, name)
+}
+
+// nonBlankLines returns the regular file's lines that hold more than whitespace, trimmed, in file
+// order.
 func nonBlankLines(fsys fs.FS, name string) ([]string, error) {
-	content, err := fs.ReadFile(fsys, name)
+	content, err := readRegularFile(fsys, name)
 	if err != nil {
 		return nil, err
 	}

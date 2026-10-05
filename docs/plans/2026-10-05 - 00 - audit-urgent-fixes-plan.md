@@ -152,7 +152,10 @@ NOTES (2026-10-05): internal/workflow/stages.go pickEntries still reads the work
 
 **Commit:** `fix(agent): pin workflow workspace reads to the workspace root`
 
-## 5. Refuse non-regular workflow sources and symlinked scratch reads
+## 5. Refuse non-regular workflow sources and symlinked scratch reads — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the pick-stage symlink test sits in internal/workflow/recipe_stages_test.go beside TestPickFromAFileInTheWorkflowFolder (the plan's Read-first anchor) rather than in stages_test.go; store_test.go is untouched because the context-file FIFO case lives in items_fifo_unix_test.go as the Tests line asks.
+NOTES (2026-10-05): splitParts already refused a root that is not a directory ("split takes a directory"); unchanged. The whole-package run used `GOMEMLIMIT=2GiB go test -count=1 ./internal/workflow/` (no -race, per the machine's memory rule); -race ran on the new and touched tests only.
 
 **What:** Depends on item 4. Completes the symlink finding: `os.Root` does not refuse FIFOs or devices, a relative symlinked walk root is still followed in-root, and the pick stage reads its `file:` through `os.DirFS` on the workflow folder.
 

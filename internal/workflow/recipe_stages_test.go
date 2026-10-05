@@ -118,6 +118,40 @@ func TestPickFromAFileInTheWorkflowFolder(t *testing.T) {
 	}
 }
 
+func TestPickRefusesAFileSymlinkedOutOfTheWorkflowFolder(t *testing.T) {
+	t.Parallel()
+	outside := filepath.Join(t.TempDir(), "secrets.txt")
+	if err := os.WriteFile(outside, []byte("leaked\n"), 0o600); err != nil {
+		t.Fatalf("write the outside file: %v", err)
+	}
+	scripts := scriptFunc(func(_ context.Context, spec ScriptSpec) (ScriptOutput, error) {
+		if err := os.Symlink(outside, filepath.Join(spec.Dir, "parts.txt")); err != nil {
+			return ScriptOutput{}, err
+		}
+		return ScriptOutput{Stdout: "parts=1\n"}, nil
+	})
+	spawner := okSpawner()
+	runner := newTestRunner(t, spawner)
+	runner.Scripts = scripts
+	plan := Plan{Name: "split", Stages: []Stage{
+		{Name: "split", Kind: StageScript, Run: "sh split.sh", Returns: ReceiptSpec{"parts": "int"}},
+		{Name: "parts", Kind: StagePick, File: "parts.txt"},
+		{Name: "each", Kind: StageFanout, Task: "audit {item}", Over: &ItemSource{Stage: "parts"}},
+	}}
+
+	result := runPlan(t, runner, context.Background(), plan)
+
+	if split := stageNamed(t, result, "split"); split.Phase != PhaseDone {
+		t.Skipf("the script stage could not plant the symlink: %s %q", split.Phase, split.Note)
+	}
+	if pick := stageNamed(t, result, "parts"); pick.Phase != PhaseFailed || !strings.Contains(pick.Note, "cannot read parts.txt") {
+		t.Errorf("pick = %s %q, want failed refusing the symlink out of the workflow folder", pick.Phase, pick.Note)
+	}
+	if len(spawner.specs) != 0 {
+		t.Errorf("%d children spawned, want none: the outside file must not become items", len(spawner.specs))
+	}
+}
+
 func TestPickOfAMissingFileFailsTheStageAndTheWorkflowGoesOn(t *testing.T) {
 	t.Parallel()
 	spawner := okSpawner()
