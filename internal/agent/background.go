@@ -40,7 +40,8 @@ package agent
 // workflow that skips every item whose receipt is ok or partial, so only its blocked and faulted
 // items run again;
 // Agent.Close stops them all, on the top-level Agent only (a finishing delegate's Close must never
-// reach them); ClearContext and RestoreSession stop the outgoing session's set too — unless the
+// reach them), and waits for them to end; ClearContext and RestoreSession stop the outgoing
+// session's set too, without waiting — unless the
 // Driver called Agent.KeepWorkflows just before, the human's "keep them" answer, when that one
 // boundary leaves the set and its held notes running into the new conversation. The live set rides
 // the session snapshot as the additive `workflows` key — identifiers only (workflowEntryJSON), with
@@ -48,6 +49,14 @@ package agent
 // current one — which a restore loads and validates without starting anything;
 // Agent.ResumeWorkflows starts it once the Driver has bound the engine (it reads the live scratch
 // directory and recipe catalog, which a Resume has not re-supplied yet when restoreState runs).
+//
+// A whole-set stop (stopAllBackground) never waits on its caller's goroutine. That goroutine is the
+// Driver's — the TUI's Update — and a running workflow's last phase event may be blocked delivering
+// to that very Driver, so waiting there would deadlock. The stop cancels each running workflow and
+// RETIRES it: it leaves the live set at once — no snapshot lists it, no listing marks it live, and
+// the finish note it leaves is never held — but keeps its server busy until its Runner settles, so
+// ADR 0089 D2's one workflow per server holds through the retiring window. Its folder reaches
+// Stopped once the Runner settles; Close is the one stop that then waits for every run (waitAll).
 //
 // Finish notes and the wake (ADR 0089 D3). A background workflow's end — finished, stopped or
 // failed — leaves a note for the parent (finishNote): one line for a fan_out or recipe workflow, a
@@ -179,8 +188,9 @@ type workflowEntryJSON struct {
 // restore loaded and ResumeWorkflows has not started or adopted yet, the questions and approvals
 // the running ones wait on, the finish notes of the ended ones no one has taken yet, oldest first,
 // every workflow launched since the set was last stopped whole with the store its folder is in (so
-// one kept across a session boundary stays listed after it ends), and whether the next session
-// boundary keeps the set (KeepWorkflows).
+// one kept across a session boundary stays listed after it ends), whether the next session
+// boundary keeps the set (KeepWorkflows), and the retiring runs: the ones a whole-set stop
+// cancelled (stopAllBackground) whose Runner has not settled yet.
 // The zero value is ready to use; mu guards every field, and is never held while a workflow runs.
 type backgroundManager struct {
 	mu            sync.Mutex
@@ -193,6 +203,7 @@ type backgroundManager struct {
 	delivered     []string // the notes taken into the open Exchange, or the input a Wake queued
 	launched      []keptRun
 	keep          bool
+	retiring      []*backgroundRun
 }
 
 // backgroundRun is one live background workflow. Everything but running and cancel is fixed at
@@ -541,7 +552,7 @@ func (a *Agent) startBackground(launch workflowLaunch) (string, error) {
 	m := &a.background
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.liveLocked(run.id) != nil {
+	if m.liveLocked(run.id) != nil || m.retiringLocked(run.id) != nil {
 		return "", fmt.Errorf(workflowAlreadyRunningFormat, run.id)
 	}
 	m.runs = append(m.runs, run)
@@ -566,15 +577,17 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 
 // driveBackground runs one background workflow to its end, reporting its phases through its host as
 // a blocking workflow's are reported, then hands its server to the next in line. The finish note is
-// held before the end is reported, so a Driver that wakes on that event finds it.
+// held before the end is reported, so a Driver that wakes on that event finds it — unless a
+// whole-set stop retired the run, whose note belongs to the session that stop ended (holdFinish).
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	result, err := run.runner.Run(ctx, run.plan)
-	a.background.hold(finishNote(workflow.OriginOf(run.plan), run.plan.Name, result, err, seatFellBack(run.runner)))
+	a.background.holdFinish(run, finishNote(workflow.OriginOf(run.plan), run.plan.Name, result, err, seatFellBack(run.runner)))
 	run.observer.end(result, err)
 	a.endBackground(run)
 }
 
-// endBackground retires a run that ended and starts the next workflow queued on its server.
+// endBackground retires a run that ended — a live one, or one a whole-set stop retired — and starts
+// the next workflow queued on its server.
 func (a *Agent) endBackground(run *backgroundRun) {
 	m := &a.background
 	m.mu.Lock()
@@ -590,38 +603,35 @@ func (a *Agent) endBackground(run *backgroundRun) {
 }
 
 // stopAllBackground stops every background workflow — the queued ones dropped and marked stopped,
-// the running ones cancelled — and waits for them all to end. Their finished items are kept.
+// the running ones cancelled and retired (see the file comment) — and returns without waiting for
+// them to end: each retired run's folder reaches Stopped once its Runner settles, and a caller that
+// must outlast them (Close) waits with waitAll. Their finished items are kept.
 func (a *Agent) stopAllBackground() {
 	m := &a.background
 	m.mu.Lock()
 	var dropped []*backgroundRun
-	var ending []chan struct{}
 	for _, run := range slices.Clone(m.runs) {
 		if run.running {
 			run.cancel()
-			ending = append(ending, run.done)
+			m.runs = slices.DeleteFunc(m.runs, func(live *backgroundRun) bool { return live == run })
+			m.retiring = append(m.retiring, run)
 			continue
 		}
 		m.dropLocked(run)
 		dropped = append(dropped, run)
 	}
+	// The whole set stops only when its session ends (Close, and a ClearContext or RestoreSession not
+	// told to keep it), so the notes held for that session have no one left to read them; the notes
+	// the retired runs leave are never held (holdFinish), which is also what leaves a Driver that
+	// wakes on those runs' end events nothing to wake on. The record of the notes delivered into an
+	// Exchange still open goes with them: an abort after the stop must not hold again a note of the
+	// session the stop ended.
+	m.notes, m.delivered = nil, nil
+	m.launched = nil
 	m.mu.Unlock()
 	for _, run := range dropped {
 		_ = markStopped(run) // best-effort, like every stop on the way out: nobody is left to tell
 	}
-	for _, done := range ending {
-		<-done
-	}
-	// The whole set stops only when its session ends (Close, and a ClearContext or RestoreSession not
-	// told to keep it), so the notes held for that session — the ones these stops just left included
-	// — have no one left to read them. Taking them here, after every run has ended, is also what
-	// leaves a Driver that wakes on those runs' end events nothing to wake on. The record of the notes
-	// delivered into an Exchange still open goes with them: an abort after the stop must not hold
-	// again a note of the session the stop ended.
-	a.background.dropNotes()
-	m.mu.Lock()
-	m.launched = nil
-	m.mu.Unlock()
 }
 
 // backgroundHost is the snapshot of this top-level Agent a background workflow runs off (see the file
@@ -751,20 +761,36 @@ func (m *backgroundManager) liveStates() map[string]bool {
 	return states
 }
 
-// serverBusyLocked reports whether a background workflow is running on server. The caller holds
-// the lock.
+// serverBusyLocked reports whether a background workflow is running on server — a live one, or one
+// a whole-set stop retired whose Runner has not settled yet. The caller holds the lock.
 func (m *backgroundManager) serverBusyLocked(server string) bool {
-	return slices.ContainsFunc(m.runs, func(run *backgroundRun) bool { return run.running && run.server == server })
+	onServer := func(run *backgroundRun) bool { return run.server == server }
+	return slices.ContainsFunc(m.retiring, onServer) ||
+		slices.ContainsFunc(m.runs, func(run *backgroundRun) bool { return run.running && onServer(run) })
 }
 
-// dropLocked removes run from the live set and closes its done. The caller holds the lock.
+// retiringLocked returns the retiring run id names, or nil. The caller holds the lock.
+func (m *backgroundManager) retiringLocked(id string) *backgroundRun {
+	for _, run := range m.retiring {
+		if run.id == id {
+			return run
+		}
+	}
+	return nil
+}
+
+// dropLocked removes run from the live set, or from the retiring runs, and closes its done. The
+// caller holds the lock.
 func (m *backgroundManager) dropLocked(run *backgroundRun) {
-	index := slices.Index(m.runs, run)
-	if index < 0 {
+	if index := slices.Index(m.runs, run); index >= 0 {
+		m.runs = slices.Delete(m.runs, index, index+1)
+		close(run.done)
 		return
 	}
-	m.runs = slices.Delete(m.runs, index, index+1)
-	close(run.done)
+	if index := slices.Index(m.retiring, run); index >= 0 {
+		m.retiring = slices.Delete(m.retiring, index, index+1)
+		close(run.done)
+	}
 }
 
 // entries is the manager's part of the session snapshot: the live runs in launch order — each with
@@ -808,11 +834,11 @@ func (m *backgroundManager) heldNotes() []string {
 	return append(slices.Clone(m.notes), m.restoredNotes...)
 }
 
-// waitAll waits for every live run to end.
+// waitAll waits for every live run and every retiring one to end.
 func (m *backgroundManager) waitAll() {
 	m.mu.Lock()
-	dones := make([]chan struct{}, 0, len(m.runs))
-	for _, run := range m.runs {
+	dones := make([]chan struct{}, 0, len(m.runs)+len(m.retiring))
+	for _, run := range slices.Concat(m.runs, m.retiring) {
 		dones = append(dones, run.done)
 	}
 	m.mu.Unlock()
@@ -1259,6 +1285,18 @@ func (m *backgroundManager) hold(note string) {
 	m.notes = append(m.notes, note)
 }
 
+// holdFinish holds run's finish note as hold does — unless a whole-set stop retired run: its note
+// belongs to the session that stop ended, so it is never held (stopAllBackground). The check and
+// the hold share one lock, so no stop can fall between them.
+func (m *backgroundManager) holdFinish(run *backgroundRun, note string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if slices.Contains(m.retiring, run) {
+		return
+	}
+	m.notes = append(m.notes, note)
+}
+
 // takeNotes takes every held note, oldest first; nil when none is held.
 func (m *backgroundManager) takeNotes() []string {
 	m.mu.Lock()
@@ -1266,14 +1304,6 @@ func (m *backgroundManager) takeNotes() []string {
 	notes := m.notes
 	m.notes = nil
 	return notes
-}
-
-// dropNotes drops every held note and the record of the notes delivered into the open Exchange, so
-// neither a wake nor an abort (restoreDelivered) brings any of them back (stopAllBackground).
-func (m *backgroundManager) dropNotes() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.notes, m.delivered = nil, nil
 }
 
 // putBack returns notes a taker could not deliver to the front of the held ones, ahead of any held

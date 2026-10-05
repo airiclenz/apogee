@@ -222,7 +222,7 @@ func TestWake_ASnapshotKeepsTheWakeOpenersNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	t.Cleanup(b.stopAllBackground)
+	t.Cleanup(func() { stopBackgroundAndWait(b) })
 
 	openings := exchangeOpenings(&b.conv)
 	if len(openings) != 1 {

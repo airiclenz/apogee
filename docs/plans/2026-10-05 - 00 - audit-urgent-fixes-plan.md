@@ -37,7 +37,10 @@
 - Unconfined runs' process-group setup (`NewProcessTeardown` for userexec, MCP, TUI commands).
 - TUI send-path hold check (audit "A message typed during a session load…").
 
-## 1. Stop background workflows without waiting on the caller's goroutine
+## 1. Stop background workflows without waiting on the caller's goroutine — ✅ DONE (2026-10-05)
+
+NOTES (2026-10-05): the retiring state is a `retiring` slice on backgroundManager; stopAllBackground drops held/delivered notes inline under the same lock, so the now-unused `dropNotes` helper was removed; the finish note goes through a new `holdFinish(run, note)` that skips a retired run under the lock (`hold` stays for state_test)
+NOTES (2026-10-05): the RestoreSession case of the new test is a subtest of TestBackground_AClearDoesNotWaitOnABlockedSink (clear/restore table); the retiring-server test also asserts that relaunching the retiring run's own plan is refused (startBackground's duplicate check)
 
 **What:**
 Fixes the audit's High finding: `/clear` or a session switch with a running background workflow hangs the TUI for good (`stopAllBackground` waits on `done` from `Update`, while the run's final event blocks in `tea.Program.Send`).

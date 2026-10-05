@@ -816,10 +816,12 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // The background workflows are the other live resource it ends (ADR 0089 D5, background.go): on
 // the top-level Agent only — the closeConsoles rule — so a finishing delegate's deferred Close
 // never reaches them. Each is stopped with its finished items kept, and Close waits for them to
-// end; a resumed session starts them again from their folders (ResumeWorkflows).
+// end — the ones an earlier ClearContext or RestoreSession stopped without waiting included — before
+// it closes the Consoles; a resumed session starts them again from their folders (ResumeWorkflows).
 func (a *Agent) Close() error {
 	if !a.isDelegate() {
 		a.stopAllBackground()
+		a.background.waitAll()
 	}
 	a.closeConsoles()
 	return a.closeOwnedUpstream(a.upstream)
@@ -1910,7 +1912,10 @@ func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
 // forgotten conversation delegated, and the new session never delegated it.
 //
 // The background workflows are session-owned live state as well, and are stopped here with their
-// finished items kept and their held finish notes dropped (ADR 0089 D5, background.go) — with two
+// finished items kept and their held finish notes dropped (ADR 0089 D5, background.go): each is
+// cancelled before the call returns — never waited for, so a run whose last event is blocked on the
+// calling Driver cannot hang it — and its folder reaches Stopped once its Runner settles; no note
+// it leaves is held — with two
 // exceptions. When the Driver called KeepWorkflows just before (the human's "keep them" answer to
 // `/clear`), this clear leaves the running set and its held notes untouched, so they run on and
 // their notes reach the new conversation; the mark is consumed even by a refused clear. And when no
@@ -1969,8 +1974,9 @@ func (a *Agent) ClearContext() error {
 // restore (mid-Exchange, or a corrupt/future-version snapshot) leaves the cache untouched
 // along with the conversation.
 //
-// The outgoing session's background workflows are stopped too, after the swap and before the call
-// returns (their finished items kept in the outgoing session's folders, their held notes dropped),
+// The outgoing session's background workflows are stopped too: cancelled after the swap and before
+// the call returns, never waited for, and Stopped once each one's Runner settles (their finished
+// items kept in the outgoing session's folders, their held notes dropped and none they leave held),
 // and the incoming snapshot's set and held notes are only loaded: the Driver starts and adopts them
 // with ResumeWorkflows once it has moved the scratch directory to the incoming session. A REFUSED
 // restore leaves them running. A restore the Driver called KeepWorkflows just before — a `/sessions`

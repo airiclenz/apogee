@@ -41,15 +41,22 @@ func sweepRecipe(id string, items ...string) workflow.Recipe {
 }
 
 // newBackgroundParent builds a parent on cfg over up and stops its background workflows when the
-// test ends.
+// test ends, waiting for every one to end.
 func newBackgroundParent(t *testing.T, cfg domain.Config, up provider.Responder) *Agent {
 	t.Helper()
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	t.Cleanup(a.stopAllBackground)
+	t.Cleanup(func() { stopBackgroundAndWait(a) })
 	return a
+}
+
+// stopBackgroundAndWait stops a's whole background set and waits for every run — the retired ones
+// included — to end, as Close does: stopAllBackground itself never waits.
+func stopBackgroundAndWait(a *Agent) {
+	a.stopAllBackground()
+	a.background.waitAll()
 }
 
 // launchBackground starts the recipe id in the background on a and returns the workflow's id.
@@ -620,7 +627,7 @@ func TestBackground_ASnapshotRoundTripResumesTheWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	t.Cleanup(b.stopAllBackground)
+	t.Cleanup(func() { stopBackgroundAndWait(b) })
 	if b.background.isLive(id) {
 		t.Fatal("the restore started the workflow; only ResumeWorkflows may")
 	}
@@ -657,11 +664,15 @@ func TestBackground_RestoreSessionStopsTheOutgoingSet(t *testing.T) {
 		t.Fatalf("RestoreSession: %v", err)
 	}
 
-	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseStopped {
-		t.Errorf("outgoing workflow = %+v, want it stopped before the restore returned", info)
+	if a.background.isLive(id) {
+		t.Error("the outgoing workflow is still live after the restore returned")
 	}
 	if got := a.background.entries(a.ScratchDir()); len(got) != 1 || got[0] != incoming[0] {
 		t.Errorf("entries after the restore = %+v, want the incoming set loaded", got)
+	}
+	a.background.waitAll()
+	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("outgoing workflow = %+v, want it stopped once its Runner settled", info)
 	}
 }
 
@@ -914,7 +925,7 @@ func TestBackground_AResumeReplaysAnAnsweredQuestion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	t.Cleanup(b.stopAllBackground)
+	t.Cleanup(func() { stopBackgroundAndWait(b) })
 	sink.agent.Store(b)
 	again := "yes"
 	sink.autoAnswer.Store(&again)
@@ -945,13 +956,19 @@ func TestBackground_AResumeReplaysAnAnsweredQuestion(t *testing.T) {
 // named like a session's, and returns it, its request log and the channel slow's child closes.
 func newBoundaryParent(t *testing.T) (*Agent, *requestLog, chan struct{}) {
 	t.Helper()
+	return newBoundaryParentOn(t, newLockedSink())
+}
+
+// newBoundaryParentOn is newBoundaryParent with its events on sink.
+func newBoundaryParentOn(t *testing.T, sink domain.EventSink) (*Agent, *requestLog, chan struct{}) {
+	t.Helper()
 	started := make(chan struct{})
 	up := (&workflowResponder{}).
 		route("sweep alpha", nil, finishScript("f1", "alpha is fine")).
 		route("sweep gamma", signalThenWait(started, nil), cancelledScript()).
 		route("sweep gamma", nil, finishScript("f2", "gamma is fine")).
 		route(wakeUserText, nil, contentScript("done"))
-	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("pair", "alpha"), sweepRecipe("slow", "gamma"))
+	cfg := recipeConfig(t, sink, sweepRecipe("pair", "alpha"), sweepRecipe("slow", "gamma"))
 	cfg.ScratchDir = sessionScratch(t, filepath.Dir(cfg.ScratchDir), "20260928T100000Z-0a0a0a0a")
 	log := &requestLog{inner: up}
 	return newBackgroundParent(t, cfg, log), log, started
@@ -988,14 +1005,158 @@ func TestBackground_AClearStopsTheSetAndDropsItsNotes(t *testing.T) {
 		t.Fatalf("ClearContext: %v", err)
 	}
 
-	if info := workflowInfo(t, a, slow); info.Background || info.Status.Phase != workflow.PhaseStopped {
-		t.Errorf("slow after the clear = %+v, want it stopped before the clear returned", info)
+	if a.background.isLive(slow) {
+		t.Error("slow is still live after the clear returned")
 	}
 	if notes := a.background.takeNotes(); len(notes) != 0 {
 		t.Errorf("held notes after the clear = %q, want none: a stopped set leaves nothing behind", notes)
 	}
 	if woke, err := a.Wake(context.Background()); err != nil || woke {
 		t.Errorf("Wake after the clear = %v, %v; want nothing to wake on", woke, err)
+	}
+	a.background.waitAll()
+	if info := workflowInfo(t, a, slow); info.Background || info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("slow after the clear = %+v, want it stopped once its Runner settled", info)
+	}
+	if notes := a.background.heldNotes(); len(notes) != 0 {
+		t.Errorf("held notes once slow settled = %q, want none: a retired run's note is never held", notes)
+	}
+}
+
+// blockingPhaseSink records every event and, once armed for a workflow, blocks each phase event of
+// that workflow in Emit until released: the Driver whose one goroutine is busy elsewhere — the TUI's
+// tea.Program.Send while its Update runs a /clear or a session switch. blocked closes when the first
+// armed Emit blocks.
+type blockingPhaseSink struct {
+	*lockedSink
+	target      atomic.Pointer[string]
+	blocked     chan struct{}
+	release     chan struct{}
+	blockOnce   sync.Once
+	releaseOnce sync.Once
+}
+
+func newBlockingPhaseSink() *blockingPhaseSink {
+	return &blockingPhaseSink{lockedSink: newLockedSink(), blocked: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (s *blockingPhaseSink) Emit(e domain.Event) {
+	s.lockedSink.Emit(e)
+	phase, ok := e.(domain.WorkflowPhaseEvent)
+	target := s.target.Load()
+	if !ok || target == nil || phase.Workflow != *target {
+		return
+	}
+	s.blockOnce.Do(func() { close(s.blocked) })
+	<-s.release
+}
+
+// arm makes every later phase event of the workflow id block until unblock.
+func (s *blockingPhaseSink) arm(id string) { s.target.Store(&id) }
+
+// unblock releases every blocked Emit and lets every later one through.
+func (s *blockingPhaseSink) unblock() { s.releaseOnce.Do(func() { close(s.release) }) }
+
+// returnsWithin fails the test unless call returns, without an error, within five seconds.
+func returnsWithin(t *testing.T, what string, call func() error) {
+	t.Helper()
+	returned := make(chan error, 1)
+	go func() { returned <- call() }()
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s did not return while a stopped workflow's event sink was blocked", what)
+	}
+}
+
+// startBlockedBoundaryRun builds a boundary parent over a blocking sink, ends "pair" so its note is
+// held, starts "slow" and, once slow's child runs, arms the sink for slow. The sink is released
+// when the test ends, before the parent's cleanup waits for the runs.
+func startBlockedBoundaryRun(t *testing.T) (*Agent, *blockingPhaseSink, string) {
+	t.Helper()
+	sink := newBlockingPhaseSink()
+	a, _, started := newBoundaryParentOn(t, sink)
+	t.Cleanup(sink.unblock)
+	slow := holdPairNoteThenRunSlow(t, a, started)
+	sink.arm(slow)
+	return a, sink, slow
+}
+
+// TestBackground_AClearDoesNotWaitOnABlockedSink pins the deadlock fix: a session boundary that
+// stops the set returns while a stopped run's last phase event is blocked on the Driver, leaves
+// nothing of that run live or held, and the run's folder reaches Stopped once it settles.
+func TestBackground_AClearDoesNotWaitOnABlockedSink(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		boundary func(t *testing.T, a *Agent) error
+	}{
+		{"clear", func(_ *testing.T, a *Agent) error { return a.ClearContext() }},
+		{"restore", func(t *testing.T, a *Agent) error {
+			return a.RestoreSession(cutFixtureSession(t, agentState{Conversation: domain.NewConversation(nil)}))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, sink, slow := startBlockedBoundaryRun(t)
+
+			returnsWithin(t, tc.name, func() error { return tc.boundary(t, a) })
+
+			if a.background.isLive(slow) {
+				t.Errorf("slow is still live after the %s returned", tc.name)
+			}
+			if got := a.background.entries(a.ScratchDir()); len(got) != 0 {
+				t.Errorf("snapshot entries after the %s = %+v, want no stopped run listed", tc.name, got)
+			}
+			awaitClosed(t, sink.blocked, "slow's end event to block on the sink")
+			if notes := a.background.heldNotes(); len(notes) != 0 {
+				t.Errorf("held notes while slow's end is blocked = %q, want none: a retired run's note is never held", notes)
+			}
+			if woke, err := a.Wake(context.Background()); err != nil || woke {
+				t.Errorf("Wake after the %s = %v, %v; want nothing to wake on", tc.name, woke, err)
+			}
+
+			sink.unblock()
+			a.background.waitAll()
+			if info := workflowInfo(t, a, slow); info.Background || info.Status.Phase != workflow.PhaseStopped {
+				t.Errorf("slow once it settled = %+v, want it stopped and no longer live", info)
+			}
+			if notes := a.background.heldNotes(); len(notes) != 0 {
+				t.Errorf("held notes once slow settled = %q, want none", notes)
+			}
+		})
+	}
+}
+
+// TestBackground_ARetiringRunKeepsItsServerUntilItEnds pins ADR 0089 D2 through the retiring
+// window: a workflow launched onto the server of a run a clear stopped, but which has not settled
+// yet, waits in line until that run ends — and the stopped run's own plan cannot be launched twice.
+func TestBackground_ARetiringRunKeepsItsServerUntilItEnds(t *testing.T) {
+	t.Parallel()
+
+	a, sink, slow := startBlockedBoundaryRun(t)
+	returnsWithin(t, "clear", a.ClearContext)
+	awaitClosed(t, sink.blocked, "slow's end event to block on the sink")
+
+	if _, err := a.StartRecipe(context.Background(), RecipeLaunch{SkillID: "slow", Background: true}); err == nil {
+		t.Error("relaunching the retiring workflow's plan was accepted, want it refused as already running")
+	}
+	pair := launchBackground(t, a, "pair")
+	if queued, live := a.background.liveStates()[pair]; !live || !queued {
+		t.Errorf("pair launched beside the retiring slow: live %v, queued %v; want it queued on the busy server", live, queued)
+	}
+
+	sink.unblock()
+	a.background.waitAll()
+	if info := workflowInfo(t, a, slow); info.Status.Phase != workflow.PhaseStopped {
+		t.Errorf("slow = %+v, want it stopped", info)
+	}
+	if info := workflowInfo(t, a, pair); info.Background || info.Status.Phase != workflow.PhaseDone {
+		t.Errorf("pair = %+v, want it run to its end once slow ended", info)
 	}
 }
 
@@ -1091,7 +1252,7 @@ func TestBackground_AHeldNoteSurvivesASnapshotAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	t.Cleanup(b.stopAllBackground)
+	t.Cleanup(func() { stopBackgroundAndWait(b) })
 	if err := b.ResumeWorkflows(); err != nil {
 		t.Fatalf("ResumeWorkflows: %v", err)
 	}
@@ -1136,7 +1297,7 @@ func TestBackground_AWorkflowKeptAcrossAScratchMoveIsListedAndResumesFromItsHome
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	t.Cleanup(b.stopAllBackground)
+	t.Cleanup(func() { stopBackgroundAndWait(b) })
 	if err := b.ResumeWorkflows(); err != nil {
 		t.Fatalf("ResumeWorkflows: %v", err)
 	}
