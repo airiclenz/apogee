@@ -121,7 +121,9 @@ type SubprocessResult struct {
 	// RunSubprocessTo run, whose stdout went to the caller's own writer.
 	Stdout string
 	// ExitCode is the process exit status; 0 on success, the child's code on a clean
-	// non-zero exit, and -1 when the process was killed by a signal (e.g. a timeout).
+	// non-zero exit, and -1 when the process was killed by a signal (e.g. a timeout), when it
+	// never started, or when exec's copy of its input or output failed on an uncancelled run —
+	// the last two with the cause appended to CombinedOutput as one line.
 	ExitCode int
 	// TimedOut reports that the run was cut short by its own timeout (vs the model's ctx).
 	TimedOut bool
@@ -382,6 +384,19 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	if res.DrainWedged && res.ExitCode == 0 {
 		res.ExitCode = -1
 	}
+	// A run that failed for a reason other than the child's own status — the program never
+	// started (a missing binary, a bad working directory) or exec's copy of its input or output
+	// broke (a caller's writer failing mid-stream) — says so on the result: the cause joins the
+	// diagnostics the model reads, and the exit status 0 a child may still have reported is no
+	// success. A cancelled runCtx (the timeout, a denial-watch kill) is left alone: TimedOut and
+	// DenialStopped already report it, and a run that finished cleanly before the cancel landed
+	// keeps its success result (the DenialStopped contract).
+	if runCtx.Err() == nil && isRunFailure(runErr) {
+		res.CombinedOutput = appendDiagnostic(res.CombinedOutput, runFailureLine(cmd, runErr))
+		if res.ExitCode == 0 {
+			res.ExitCode = -1
+		}
+	}
 	// Either watch's kill is a denial stop: a merged-stdout kill must render the same
 	// stopped-by-confinement label a stderr kill does.
 	res.DenialStopped = (denialWatch != nil && denialWatch.Detected()) ||
@@ -451,12 +466,50 @@ func exitCodeOf(cmd *exec.Cmd, runErr error) int {
 	if errors.As(runErr, &exitErr) {
 		return exitErr.ExitCode() // -1 if signalled, the child's code otherwise
 	}
-	// A non-ExitError (e.g. the program could not be started) — report -1 and let the
-	// caller surface the message from combined output / the error itself.
+	// A non-ExitError (the program could not be started, or an input/output copy broke): the
+	// process status when there is one, -1 otherwise. run names the cause in the diagnostics
+	// and forces a 0 read here to -1 (isRunFailure).
 	if cmd.ProcessState != nil {
 		return cmd.ProcessState.ExitCode()
 	}
 	return -1
+}
+
+// isRunFailure reports whether runErr is a failure of the run itself rather than a status the
+// child reported: not nil, not an *exec.ExitError (the child's own exit or signal, which the
+// exit code already carries) and not exec.ErrWaitDelay (a wedged drain, which DrainWedged
+// carries). What remains is a start failure or a broken input/output copy.
+func isRunFailure(runErr error) bool {
+	if runErr == nil || errors.Is(runErr, exec.ErrWaitDelay) {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return !errors.As(runErr, &exitErr)
+}
+
+// runFailureLine is the one diagnostics line naming a run failure (isRunFailure): whether the
+// program never started or the run broke after it did, and the error's own text. A start failure
+// names the working directory too, because exec blames a directory that is not there on the
+// program ("fork/exec /bin/sh: no such file or directory").
+func runFailureLine(cmd *exec.Cmd, runErr error) string {
+	switch {
+	case cmd.Process == nil && cmd.Dir != "":
+		return fmt.Sprintf("apogee: the command could not be started in working directory %s: %v", cmd.Dir, runErr)
+	case cmd.Process == nil:
+		return fmt.Sprintf("apogee: the command could not be started: %v", runErr)
+	case cmd.ProcessState != nil:
+		return fmt.Sprintf("apogee: copying the command's input or output failed: %v", runErr)
+	default:
+		return fmt.Sprintf("apogee: the command's run failed: %v", runErr)
+	}
+}
+
+// appendDiagnostic adds line to the end of diagnostics, on a line of its own.
+func appendDiagnostic(diagnostics, line string) string {
+	if diagnostics != "" && !strings.HasSuffix(diagnostics, "\n") {
+		diagnostics += "\n"
+	}
+	return diagnostics + line + "\n"
 }
 
 // CappedBuffer is an io.Writer that accumulates up to Limit bytes and silently discards the

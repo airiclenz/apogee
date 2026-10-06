@@ -135,7 +135,10 @@ internal/tui/sessions.go — acceptBrowser, resumeLoaded
 **Acceptance:** `go build ./internal/tui/ && go test -count=1 -run 'TestSendDuring|TestContinueDuring' ./internal/tui/`
 **Commit:** `fix(tui): hold a typed message while a session load or /bg launch runs`
 
-## 6. Subprocess start and copy failures reach the result
+## 6. Subprocess start and copy failures reach the result — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): The start-failure cause line also names the working directory when the spec sets one. exec blames a missing directory on the program ("fork/exec <program>: no such file or directory"), so without the directory the model would be told the wrong thing. Copy failures and other post-start failures get their own wording (runFailureLine).
+NOTES (2026-10-06): TestRunSubprocessLateCancelKeepsACleanExit runs on Linux only (it skips elsewhere). It reads /proc to hold Contain until the child is a zombie, and its teardown constructor stubs cmd.Cancel so the run's deadline is counted as delivered after the clean exit. This test passes on the pre-item tree too, by design: it pins the guard. The start-failure and copy-failure tests fail on the pre-item tree.
 
 **What:** Fixes audit Medium "Run errors from subprocesses are swallowed, so a start failure looks like a signal kill".
 **Regression guard.** Adopt the reviewer's guard as binding — leave runErr untouched (no forced -1, no cause line) whenever runCtx.Err() != nil (timeout and denial-watch paths, already reported by TimedOut/DenialStopped); the new rule applies only to start failures and output-copy errors on an uncancelled run; the item yields to the DenialStopped contract at subprocess.go (a run that finished cleanly keeps its success result) and adds a test for a cancel landing after a clean exit keeping ExitCode 0

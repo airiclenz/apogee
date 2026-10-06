@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // fakeConfiner is a caps-injected Confiner for the core's own tests. It records each Confine
@@ -655,6 +656,133 @@ func TestRunSubprocessToStreamsStdoutUncapped(t *testing.T) {
 	}
 	if res.Truncated {
 		t.Error("Truncated = true, want false — the streamed payload is never capped")
+	}
+}
+
+// TestRunSubprocessReportsAStartFailure pins the start-failure half of the run-failure rule: a
+// program that cannot be launched — missing, or asked to start in a directory that is not there —
+// is a failed result whose diagnostics name the cause, not a bare -1 the model reads as a signal
+// kill with no output to explain it.
+func TestRunSubprocessReportsAStartFailure(t *testing.T) {
+	t.Parallel()
+
+	missingDir := filepath.Join(t.TempDir(), "gone")
+	missingProgram := filepath.Join(t.TempDir(), "no-such-binary")
+	cases := []struct {
+		name      string
+		spec      SubprocessSpec
+		wantCause string
+	}{
+		{name: "a missing program", spec: SubprocessSpec{Argv: []string{missingProgram}}, wantCause: missingProgram},
+		{name: "a missing working directory", spec: SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^$"}, Dir: missingDir}, wantCause: missingDir},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := RunSubprocess(context.Background(), tc.spec)
+			if err != nil {
+				t.Fatalf("RunSubprocess err = %v, want nil (a failed start is a result, not a Go error)", err)
+			}
+			if res.ExitCode == 0 {
+				t.Errorf("ExitCode = 0 for a command that never started")
+			}
+			if !strings.Contains(res.CombinedOutput, "could not be started") || !strings.Contains(res.CombinedOutput, tc.wantCause) {
+				t.Errorf("CombinedOutput = %q, want the start failure naming %q", res.CombinedOutput, tc.wantCause)
+			}
+		})
+	}
+}
+
+// failingWriter is a stdout writer that refuses every write with its error, the shape of a
+// caller's file or archive sink that runs out of room mid-stream.
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+// TestRunSubprocessToReportsACopyFailure pins the copy-failure half of the run-failure rule and
+// the promise RunSubprocessTo's doc makes: a caller's writer that fails mid-stream surfaces
+// through the exit code and the diagnostics, even though the child itself exited 0 — the payload
+// never arrived, so the run is no success.
+func TestRunSubprocessToReportsACopyFailure(t *testing.T) {
+	t.Parallel()
+
+	// The child lists this test's own name: one short line written in one write, so it lands in
+	// the pipe whole and the child exits 0 however early the copy gives up.
+	spec := SubprocessSpec{Argv: []string{os.Args[0], "-test.list=^TestRunSubprocessToReportsACopyFailure$"}}
+	res, err := RunSubprocessTo(context.Background(), spec, failingWriter{err: errors.New("sink is full")})
+	if err != nil {
+		t.Fatalf("RunSubprocessTo err = %v, want nil (a broken copy is a result, not a Go error)", err)
+	}
+	if res.ExitCode == 0 {
+		t.Errorf("ExitCode = 0 for a run whose payload the writer refused")
+	}
+	if !strings.Contains(res.CombinedOutput, "copying the command's input or output failed: sink is full") {
+		t.Errorf("CombinedOutput = %q, want the copy failure named", res.CombinedOutput)
+	}
+}
+
+// zombieWaitTeardown is a platform.ProcessTeardown whose Contain holds the run between Start and
+// Wait until the child has EXITED (a zombie not yet reaped) and the run's own deadline has passed,
+// so the deadline's cancel lands after a clean exit — the ordering the DenialStopped contract
+// speaks to, made deterministic. Linux-only: it reads the child's state off /proc.
+type zombieWaitTeardown struct {
+	t     *testing.T
+	after time.Duration
+}
+
+func (z zombieWaitTeardown) Contain(cmd *exec.Cmd) {
+	stat := filepath.Join("/proc", strconv.Itoa(cmd.Process.Pid), "stat")
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		raw, err := os.ReadFile(stat)
+		if err != nil {
+			z.t.Errorf("read %s: %v", stat, err)
+			return
+		}
+		// The state letter follows the parenthesised command name: "pid (comm) Z ...".
+		if i := strings.LastIndexByte(string(raw), ')'); i >= 0 && i+2 < len(raw) && raw[i+2] == 'Z' {
+			time.Sleep(z.after)
+			return
+		}
+	}
+	z.t.Errorf("child %d never exited", cmd.Process.Pid)
+}
+
+func (zombieWaitTeardown) Reap(*exec.Cmd) {}
+
+func (zombieWaitTeardown) Release() {}
+
+// TestRunSubprocessLateCancelKeepsACleanExit pins the guard on the run-failure rule: a cancel of
+// the run's context that lands after the child already exited 0 makes exec report the context's
+// error, and that is not a run failure — the run keeps ExitCode 0 and gains no cause line.
+func TestRunSubprocessLateCancelKeepsACleanExit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads the child's state off /proc; the guard it pins is platform-independent")
+	}
+	t.Parallel()
+
+	const timeout = 500 * time.Millisecond
+	spec := SubprocessSpec{
+		Argv:    []string{"/bin/sh", "-c", "true"},
+		Timeout: timeout,
+		// Well past the hold below, so the drain timer the cancel starts cannot win the race
+		// against copiers that finished when the child exited.
+		WaitDelay: 30 * time.Second,
+		NewTeardown: func(cmd *exec.Cmd) platform.ProcessTeardown {
+			// The group kill a real teardown sends a zombie's group succeeds, so exec counts the
+			// cancel as delivered and hands Wait the context's error.
+			cmd.Cancel = func() error { return nil }
+			return zombieWaitTeardown{t: t, after: 2 * timeout}
+		},
+	}
+	res, err := RunSubprocess(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("RunSubprocess err = %v, want nil", err)
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0 — the child exited cleanly before the cancel landed", res.ExitCode)
+	}
+	if strings.Contains(res.CombinedOutput, "apogee:") {
+		t.Errorf("CombinedOutput = %q, want no cause line on a cancelled run", res.CombinedOutput)
 	}
 }
 
