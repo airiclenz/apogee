@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -270,4 +271,124 @@ func TestProviderRequestImageProjection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestProviderRequestFoldsPastCallsIntoContent pins the "never double-tell" rule on the history:
+// a prompted-format profile's past calls ride in their message's content in the profile's own
+// format with no native tool calls — on an empty-menu request too, which renders no instruction
+// block — while a native profile's calls stay native. The tool result is left to the codec.
+func TestProviderRequestFoldsPastCallsIntoContent(t *testing.T) {
+	t.Parallel()
+
+	menu := []domain.ToolDef{{
+		Name:   "read_file",
+		Schema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer"}}}`),
+	}}
+	call := domain.ToolCall{ID: "text_call_1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"a.go","start_line":3}`)}
+	fenced := "```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\na.go\n\nBEGIN_ARG\nstart_line\nEND_ARG\n3\n```"
+	cases := []struct {
+		name    string
+		profile domain.ModelProfile
+		menu    []domain.ToolDef
+		want    provider.Message
+	}{
+		{
+			name:    "markdown-fenced with a menu",
+			profile: domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced},
+			menu:    menu,
+			want:    provider.Message{Role: "assistant", Content: "Reading it.\n\n" + fenced},
+		},
+		{
+			name:    "markdown-fenced on an empty-menu request",
+			profile: domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced},
+			want:    provider.Message{Role: "assistant", Content: "Reading it.\n\n" + fenced},
+		},
+		{
+			name: "custom-regex",
+			profile: domain.ModelProfile{
+				ToolCallFormat: domain.FormatCustomRegex,
+				Pattern:        `<call name="(?<name>\w+)">(?<args>.*?)</call>`,
+			},
+			menu: menu,
+			want: provider.Message{Role: "assistant", Content: "Reading it.\n\n" + `<call name="read_file">{"path":"a.go","start_line":3}</call>`},
+		},
+		{
+			name:    "native keeps its calls native",
+			profile: domain.ModelProfile{ToolCallFormat: domain.FormatNative},
+			menu:    menu,
+			want: provider.Message{Role: "assistant", Content: "Reading it.", ToolCalls: []provider.ToolCall{{
+				ID:       "text_call_1",
+				Type:     "function",
+				Function: provider.FunctionCall{Name: "read_file", Arguments: string(call.Arguments)},
+			}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := wireTestAgent(t, tc.profile)
+			msgs := []domain.Message{
+				{Role: domain.RoleUser, Content: "the ask"},
+				{Role: domain.RoleAssistant, Content: "Reading it.", ToolCalls: []domain.ToolCall{call}},
+				{Role: domain.RoleTool, ToolCallID: call.ID, Content: "contents"},
+			}
+			req := domain.NewRequest("test-model", msgs, tc.menu, domain.Budget{}, 0)
+
+			got := a.toProviderRequest(req)
+
+			assistant := got.Messages[len(got.Messages)-2]
+			if !reflect.DeepEqual(assistant, tc.want) {
+				t.Errorf("assistant message = %+v, want %+v", assistant, tc.want)
+			}
+			if result := got.Messages[len(got.Messages)-1]; result.Role != "tool" || result.ToolCallID != call.ID {
+				t.Errorf("tool result = %+v, want it untouched", result)
+			}
+		})
+	}
+}
+
+// TestProviderRequestFoldsPastCallsRoundTrip pins the folded call as one the model's own format
+// reads back: the fold's render, parsed by the profile's parser and decoded against the menu the
+// way a recovered call is (decodeTextCallArgs), yields the very arguments history holds.
+func TestProviderRequestFoldsPastCallsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	menu := []domain.ToolDef{{
+		Name: "edit_file",
+		Schema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},` +
+			`"new_text":{"type":"string"},"line":{"type":"integer"}}}`),
+	}}
+	args := `{"line":12,"new_text":"\n\tfunc main() {}\n","path":"main.go"}`
+	call := domain.ToolCall{ID: "text_call_4", Tool: "edit_file", Arguments: json.RawMessage(args)}
+	profile := domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+	a := wireTestAgent(t, profile)
+	msgs := []domain.Message{{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{call}}}
+
+	folded := a.toProviderRequest(domain.NewRequest("test-model", msgs, menu, domain.Budget{}, 0)).Messages
+	parsed, found := a.textParser.ParseToolCall(folded[len(folded)-1].Content)
+
+	if !found || parsed.Tool != call.Tool {
+		t.Fatalf("parsed call = %+v (found %v), want tool %s", parsed, found, call.Tool)
+	}
+	var got, want any
+	if err := json.Unmarshal(decodeTextCallArgs(parsed, menu), &got); err != nil {
+		t.Fatalf("decode round-tripped arguments: %v", err)
+	}
+	if err := json.Unmarshal([]byte(args), &want); err != nil {
+		t.Fatalf("decode history arguments: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round-tripped arguments = %v, want %v", got, want)
+	}
+}
+
+// wireTestAgent builds the minimal Agent the fold tests project through: profile bound with the
+// text parser ParserFor selects for it, exactly as construction and SetProfile bind the pair.
+func wireTestAgent(t *testing.T, profile domain.ModelProfile) *Agent {
+	t.Helper()
+	parser, _, err := processing.ParserFor(profile)
+	if err != nil {
+		t.Fatalf("ParserFor: %v", err)
+	}
+	return &Agent{cfg: domain.Config{Model: "test-model", Profile: profile}, textParser: parser}
 }

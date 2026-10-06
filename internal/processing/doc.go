@@ -70,6 +70,8 @@
 // The emit side. instructions.go renders what we TELL a non-native model — the text tool menu and
 // the format-specific markup instructions, with the example call picked out of the menu — from the
 // same profile knobs and defaults the parsers read, so the two halves of the contract cannot drift.
+// render.go writes a past call back in the profile's format — RenderToolCall, the parsers'
+// inverse — so a prompted-format request carries its history's calls as text, never as native calls.
 //
 // And doc.go this map.
 package processing

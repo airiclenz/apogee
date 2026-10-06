@@ -45,7 +45,7 @@ func TestOpenAICodecBodyIsUnchanged(t *testing.T) {
 			want: `{"model":"served-model","messages":[{"role":"user","content":"list"},{"role":"assistant","content":null,"tool_calls":[{"id":"tc_1","type":"function","function":{"name":"ls","arguments":"{\"p\":\".\"}"}}]},{"role":"tool","content":"a b","tool_call_id":"tc_1"}],"stream":true,"stream_options":{"include_usage":true},"temperature":0.2,"top_p":0.9,"top_k":40,"repeat_penalty":1.1,"max_tokens":512,"tools":[{"type":"function","function":{"name":"ls","description":"list","parameters":{"type":"object"}}}]}`,
 		},
 		{
-			name: "no tools degrades the tool result, logprobs and kwargs effort",
+			name: "no tools renders the call as text, degrades the tool result, logprobs and kwargs effort",
 			req: Request{
 				Messages: []Message{
 					{Role: "assistant", Content: "", ToolCalls: []ToolCall{{ID: "tc_1", Type: "function", Function: FunctionCall{Name: "ls", Arguments: `{}`}}}},
@@ -53,7 +53,15 @@ func TestOpenAICodecBodyIsUnchanged(t *testing.T) {
 				},
 				LogProbs: true, ThinkingEffort: EffortHigh, EffortDialect: EffortDialectKwargs,
 			},
-			want: `{"model":"served-model","messages":[{"role":"assistant","content":null},{"role":"user","content":"a b"}],"stream":false,"logprobs":true,"top_logprobs":5,"chat_template_kwargs":{"reasoning_effort":"high"}}`,
+			want: `{"model":"served-model","messages":[{"role":"assistant","content":"ls({})"},{"role":"user","content":"a b"}],"stream":false,"logprobs":true,"top_logprobs":5,"chat_template_kwargs":{"reasoning_effort":"high"}}`,
+		},
+		{
+			name: "no tools appends every call after the assistant's text",
+			req: Request{Messages: []Message{{Role: "assistant", Content: "checking", ToolCalls: []ToolCall{
+				{ID: "tc_1", Type: "function", Function: FunctionCall{Name: "ls", Arguments: `{"p":"."}`}},
+				{ID: "tc_2", Type: "function", Function: FunctionCall{Name: "cat", Arguments: `{"p":"a`}},
+			}}}},
+			want: `{"model":"served-model","messages":[{"role":"assistant","content":"checking\nls({\"p\":\".\"})\ncat({\"p\":\"a)"}],"stream":false}`,
 		},
 		{
 			name: "off on the zero dialect switches thinking off",

@@ -37,9 +37,17 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 		msgs = domain.MergeSystem(msgs, block)
 		tools = nil
 	}
+	// The same rule covers the history: a non-native profile's past calls ride in their message's
+	// content in the profile's own format (foldedToolCalls), never as native tool calls the
+	// request offers no tools for. It is keyed on the profile format, not on the block above — an
+	// empty-menu request (a wrap-up Turn) renders no block yet still carries its history's calls.
+	foldCalls := !processing.IsNative(a.textParser)
 
 	messages := make([]provider.Message, 0, len(msgs))
 	for _, m := range msgs {
+		if foldCalls {
+			m = a.foldedToolCalls(m)
+		}
 		content, images := a.projectedImages(m)
 		messages = append(messages, provider.Message{
 			Role:           string(m.Role),
@@ -210,6 +218,37 @@ func (a *Agent) toolInstructions(menu []domain.ToolDef) string {
 	}
 	return block
 }
+
+// foldedToolCalls returns m with its tool calls written into its content in the bound profile's
+// format (processing.RenderToolCall), one call after another and a blank line apart from the
+// text, and its ToolCalls cleared — the projection the "never double-tell" rule asks of a
+// prompted-format request, whose model learned its calls as text and is offered no native tools.
+// The fold is wire-only: it works on the State() copy, so history keeps the calls. A message
+// without calls, or a profile that renders nothing (native or zero — a defensively-caught render
+// error included, unreachable once ParserFor accepted the profile), comes back unchanged.
+func (a *Agent) foldedToolCalls(m domain.Message) domain.Message {
+	if len(m.ToolCalls) == 0 {
+		return m
+	}
+	parts := make([]string, 0, len(m.ToolCalls)+1)
+	if m.Content != "" {
+		parts = append(parts, m.Content)
+	}
+	for _, call := range m.ToolCalls {
+		text, err := processing.RenderToolCall(a.cfg.Profile, call)
+		if err != nil || text == "" {
+			return m
+		}
+		parts = append(parts, text)
+	}
+	m.Content = strings.Join(parts, foldedCallSeparator)
+	m.ToolCalls = nil
+	return m
+}
+
+// foldedCallSeparator is the blank line foldedToolCalls sets a folded call apart from the
+// message's text and from the call before it.
+const foldedCallSeparator = "\n\n"
 
 // toProviderToolCalls maps domain tool calls onto the provider's "function" wire shape so
 // an assistant message's tool calls survive the round-trip back to the Upstream (nil ⇒ nil).

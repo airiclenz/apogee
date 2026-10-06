@@ -182,12 +182,18 @@ func isNamedEffort(e Effort) bool {
 
 // formatMessage renders one seam Message onto the wire schema. Without native tools a
 // tool-result degrades to a user message (the model never sees a bare "tool" role it was
-// not told to produce); with native tools the tool linkage is preserved. content is null
-// when an assistant message carries only tool calls (OpenAI's convention), and an array of
-// parts when the message carries images (chatParts).
+// not told to produce) and an assistant message's tool calls are rendered as text after its
+// content (toolCallsAsText) — a request offering no tools, the compaction summariser's, must
+// neither drop them nor send a content-less assistant turn a validating server refuses. With
+// native tools the tool linkage is preserved, and content is null when an assistant message
+// carries only tool calls (OpenAI's convention). content is an array of parts when the
+// message carries images (chatParts).
 func formatMessage(m Message, hasTools bool) chatMessage {
 	if !hasTools && m.Role == "tool" {
 		return chatMessage{Role: "user", Content: chatText(m.Content)}
+	}
+	if !hasTools && len(m.ToolCalls) > 0 {
+		m.Content = toolCallsAsText(m.Content, m.ToolCalls)
 	}
 
 	out := chatMessage{Role: m.Role}
@@ -204,6 +210,20 @@ func formatMessage(m Message, hasTools bool) chatMessage {
 		out.ToolCalls = m.ToolCalls
 	}
 	return out
+}
+
+// toolCallsAsText is content with each call appended on a line of its own in the prose form the
+// anthropic codec gives a tool-less request (anthropicToolCallText), so both wires tell a
+// tool-less model about a past call in the same words.
+func toolCallsAsText(content string, calls []ToolCall) string {
+	lines := make([]string, 0, len(calls)+1)
+	if content != "" {
+		lines = append(lines, content)
+	}
+	for _, tc := range calls {
+		lines = append(lines, anthropicToolCallText(tc))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // chatText is the plain-string content member.
