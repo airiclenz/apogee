@@ -204,14 +204,29 @@ func fieldByYAMLTag(v reflect.Value, tag string) (reflect.Value, bool) {
 // rename, so an interrupted write leaves the old config intact rather than a truncated one. The
 // existing file mode is carried over: a config may hold endpoint details, so a rewrite must never
 // widen its permissions.
+//
+// A path that is a symlink (a dotfiles or home-manager link) is written THROUGH: the link is
+// resolved first, and the temp file, the rename and the carried-over mode all belong to the file it
+// points at, so the link stays a link and its target takes the new bytes atomically. Renaming onto
+// the link itself would swap it for a regular file and quietly detach the config from the copy the
+// user manages.
+//
+// Errors: a wrapped error naming the path when it cannot be resolved or stat'd; a wrapped error
+// naming the RESOLVED target when the temp file cannot be made beside it — a link into a read-only
+// directory (a /nix/store target, say) is refused there and never falls back to replacing the link
+// with a regular file; a wrapped error when the write, the mode or the rename fails.
 func writeConfigAtomically(path string, data []byte) error {
-	info, err := os.Stat(path)
+	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("apogee: stat config %q: %w", path, err)
+		return fmt.Errorf("apogee: resolve config %q: %w", path, err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	info, err := os.Stat(target)
 	if err != nil {
-		return fmt.Errorf("apogee: create a temporary config beside %q: %w", path, err)
+		return fmt.Errorf("apogee: stat config %q: %w", target, err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".*")
+	if err != nil {
+		return fmt.Errorf("apogee: create a temporary config beside %q%s: %w", target, linkedFrom(path, target), err)
 	}
 	name := tmp.Name()
 	defer func() { _ = os.Remove(name) }() // a no-op once the rename below has moved it into place
@@ -224,12 +239,22 @@ func writeConfigAtomically(path string, data []byte) error {
 		return fmt.Errorf("apogee: close %q: %w", name, err)
 	}
 	if err := os.Chmod(name, info.Mode().Perm()); err != nil {
-		return fmt.Errorf("apogee: preserve the mode of %q: %w", path, err)
+		return fmt.Errorf("apogee: preserve the mode of %q: %w", target, err)
 	}
-	if err := os.Rename(name, path); err != nil {
-		return fmt.Errorf("apogee: replace %q: %w", path, err)
+	if err := os.Rename(name, target); err != nil {
+		return fmt.Errorf("apogee: replace %q: %w", target, err)
 	}
 	return nil
+}
+
+// linkedFrom is the clause an error about a resolved config target adds when the configured path is
+// a link to it, so the message names both the file that could not be written and the path the user
+// knows it by. It is empty when the two are the same file.
+func linkedFrom(path, target string) string {
+	if path == target {
+		return ""
+	}
+	return fmt.Sprintf(" (the target of the link %q)", path)
 }
 
 const (

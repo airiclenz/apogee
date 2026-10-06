@@ -316,7 +316,9 @@ internal/config/configmigrate_test.go — TestMigrateLegacyConfigRefusesBothList
 **Acceptance:** `go build ./internal/config/ && go test -count=1 -run 'Fold|RefusesBothLists' ./internal/config/`
 **Commit:** `fix(config): compare the reactions fold against existing reactions`
 
-## 17. Config saves write through a symlinked config.yaml
+## 17. Config saves write through a symlinked config.yaml — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): read-only target directory outcome per DECISION: the save is refused with an error naming the resolved target (plus the link path when they differ, via the new linkedFrom helper); no fallback to replacing the link. backUpConfig left unchanged, as the item's regression guard says: it already reads and stats through the link.
 
 **What:** Fixes audit Medium "Config saves replace a symlinked `config.yaml` with a regular file".
 **Regression guard.** A symlink whose target sits in a read-only directory (e.g. a home-manager link into /nix/store) saves today; the item states and tests its outcome — refuse with an error naming the resolved target, or fall back to today's replace-the-link. The backup clause is out of the item: `backUpConfig` (configmigrate.go) already follows the link. The new tests are `TestWriteConfigAtomically…` in the new configsplice_test.go and skip when `os.Symlink` fails.
