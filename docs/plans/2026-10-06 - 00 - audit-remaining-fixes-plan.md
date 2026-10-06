@@ -72,7 +72,10 @@ internal/agent/restoresession_test.go — TestRestoreSession_RejectsCorruptPaylo
 **Acceptance:** `go build ./internal/agent/ && go test -count=1 -run 'TestDecodeState' ./internal/agent/`
 **Commit:** `fix(agent): restore an empty conversation when the payload carries none`
 
-## 2. Scheduler.Add cannot race Close on the WaitGroup
+## 2. Scheduler.Add cannot race Close on the WaitGroup — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): tick's `wg.Add` (after its unlock, on the counted loop goroutine) left untouched as the item's regression guard binds; the Goal's "every `wg.Add`" wording is read through that guard.
+NOTES (2026-10-06): TestSchedulerAddCloseRace does fail on the pre-item tree under -race (race reported on the WaitGroup), beyond the plan's "regression guard only" expectation.
 
 **What:** Fixes audit Medium "`Scheduler.Add` can race `Close` on the WaitGroup".
 **Regression guard.** The Goal binds `Scheduler.Add` only: Add takes its WaitGroup slot while `s.mu` is held and `closed` is false; `tick`'s `wg.Add` after its unlock (safe on the counted loop goroutine) stays untouched. "No `EventCreated` after `Close` returns" is the observable half. No seam sits between Add's unlock and its `wg.Add`, so the race test guards against regressions and is never claimed red on the pre-item tree, unless a test-only hook between unlock and `wg.Add` makes it so.

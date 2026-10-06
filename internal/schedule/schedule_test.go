@@ -400,6 +400,63 @@ func TestCloseIsIdempotentAndJoinsEveryGoroutine(t *testing.T) {
 	}
 }
 
+// TestSchedulerAddCloseRace races Add against Close: an Add that wins is joined by Close, so
+// its EventCreated lands before Close returns, and an Add that loses is refused — no loop
+// starts, and no Event arrives, once Close has returned. A regression guard: no seam sits
+// between Add's unlock and its loop start, so the pre-fix race only shows under -race.
+func TestSchedulerAddCloseRace(t *testing.T) {
+	t.Parallel()
+
+	const rounds = 200
+	var late atomic.Int64
+	for round := range rounds {
+		var closeReturned atomic.Bool
+		var created atomic.Int64
+		s, err := New(Config{
+			Fire: func(context.Context, Firing) (Outcome, error) { return Outcome{}, nil },
+			Notify: func(e Event) {
+				if closeReturned.Load() {
+					late.Add(1)
+					return
+				}
+				if e.Kind == EventCreated {
+					created.Add(1)
+				}
+			},
+			Clock: newFakeClock(),
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		added := make(chan error, 1)
+		go func() {
+			_, addErr := s.Add(testSpec("racing"))
+			added <- addErr
+		}()
+		s.Close()
+		closeReturned.Store(true)
+
+		addErr := <-added
+		switch {
+		case addErr == nil:
+			if got := created.Load(); got != 1 {
+				t.Fatalf("round %d: Add won the race but Close returned after %d EventCreated, want 1", round, got)
+			}
+		case errors.Is(addErr, ErrClosed):
+			if got := created.Load(); got != 0 {
+				t.Fatalf("round %d: Add was refused but %d EventCreated arrived", round, got)
+			}
+		default:
+			t.Fatalf("round %d: Add = %v, want nil or ErrClosed", round, addErr)
+		}
+	}
+
+	if got := late.Load(); got != 0 {
+		t.Errorf("%d Events arrived after Close returned", got)
+	}
+}
+
 // The status surface
 
 // TestListReportsNextFireAndCounts pins what the bare `/schedule` surface reads: the cycle's

@@ -345,12 +345,15 @@ func (s *Scheduler) Add(spec Spec) (string, error) {
 	e.stopCtx, e.stopCancel = context.WithCancel(s.ctx)
 	s.entries[e.id] = e
 	s.order = append(s.order, e.id)
+	// The slot is taken while closed is still false under the lock, so a Close that follows
+	// waits for this loop, and a Close that came first refused the Add above: the counter is
+	// never raised from zero while Close's Wait may be running.
+	s.wg.Add(1)
 	s.mu.Unlock()
 
 	// EventCreated is emitted by the loop rather than here, so that Add returns without ever
 	// entering the Notify seam on its caller's goroutine (Config.Notify). It is still every
 	// Schedule's first Event: the loop emits it before it can observe a tick.
-	s.wg.Add(1)
 	go s.loop(e)
 	return e.id, nil
 }
