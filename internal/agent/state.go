@@ -307,14 +307,20 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 // underneath the incoming session's file — a half-restore with no error for the caller to see, and
 // one the /sessions flow would then redirect saves into. What an empty payload MEANS is a
 // never-stepped Agent, so the zero agentState — with an empty conversation — is what it decodes to.
-// apogee's own Snapshot never writes one (encodeState always emits a conversation); a hand-edited,
-// truncated or foreign session file can, and this is the seam that reads it.
+// A payload whose `conversation` key is absent or null means the same: it decodes to an empty
+// conversation too, so restoreState swaps the conversation together with the Turn counters rather
+// than keeping the outgoing history under the incoming counters. apogee's own Snapshot never
+// writes either (encodeState always emits a conversation); a hand-edited, truncated or foreign
+// session file can, and this is the seam that reads it.
 func decodeState(state json.RawMessage) (agentState, error) {
 	var st agentState
-	if len(state) == 0 {
+	if len(state) > 0 {
+		if err := json.Unmarshal(state, &st); err != nil {
+			return agentState{}, fmt.Errorf("apogee: decode session state: %w", err)
+		}
+	}
+	if st.Conversation == nil {
 		st.Conversation = domain.NewConversation(nil)
-	} else if err := json.Unmarshal(state, &st); err != nil {
-		return agentState{}, fmt.Errorf("apogee: decode session state: %w", err)
 	}
 	if err := checkRestoredShape(st.Conversation); err != nil {
 		return agentState{}, err

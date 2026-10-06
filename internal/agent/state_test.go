@@ -609,6 +609,41 @@ func TestRestore_AnEmptyPayloadClearsTheLiveSession(t *testing.T) {
 	}
 }
 
+// TestDecodeStateMissingConversation: a payload that is not empty but carries no `conversation`
+// key — or a null one — restores the same single state an empty payload does. Before decodeState
+// filled the nil conversation in, restoreState skipped the conversation swap and applied the rest,
+// so the outgoing session's history stood underneath the incoming session's Turn counters.
+func TestDecodeStateMissingConversation(t *testing.T) {
+	tests := []struct {
+		name      string
+		payload   string
+		wantIndex int
+	}{
+		{name: "empty object", payload: `{}`, wantIndex: 0},
+		{name: "counters only", payload: `{"turnIndex":3}`, wantIndex: 3},
+		{name: "null conversation", payload: `{"conversation":null,"turnIndex":2}`, wantIndex: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newSnapshotAgent(t)
+			a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the outgoing session's history"})
+			a.turns.restore(turnSnapshot{index: 7})
+
+			snap := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(tt.payload)}
+			if err := a.RestoreSession(snap); err != nil {
+				t.Fatalf("RestoreSession(%s): %v", tt.payload, err)
+			}
+
+			if msgs := a.conv.Messages(); len(msgs) != 0 {
+				t.Errorf("the conversation after restoring %s = %d messages, want 0", tt.payload, len(msgs))
+			}
+			if a.turns.index != tt.wantIndex {
+				t.Errorf("the Turn index after restoring %s = %d, want %d", tt.payload, a.turns.index, tt.wantIndex)
+			}
+		})
+	}
+}
+
 // TestRestoreSessionClearsCompactionLatches: the two automatic-fold latches judged the OUTGOING
 // conversation — a fold that faulted against it, a fold that could not bring it under the
 // allocation — so a session restored over a stood-down Agent must not stay stood down. Before

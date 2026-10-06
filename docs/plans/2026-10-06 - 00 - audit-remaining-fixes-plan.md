@@ -58,7 +58,9 @@
 - round 3 — 11: guard folded (decision: one nested-fence close rule; indented and glued closes; info-string scope, bare-opener limit)
 - round 3 — 15: guard folded (decision: adds processing.RenderToolCall; fold keyed on the profile format; encode assertion in wire_openai_test.go)
 
-## 1. A session payload with no conversation restores to one state
+## 1. A session payload with no conversation restores to one state — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): the test also covers `{"conversation":null,"turnIndex":2}`, because the Goal names a null key as well as an absent one; the now-unreachable `st.Conversation != nil` guards in restoreState, CutSession and checkRestoredStructure were left in place (out of scope, harmless).
 
 **What:** Fixes audit Medium "A session payload with no `conversation` key half-restores".
 **Goal:** `decodeState` yields a non-nil empty conversation for every payload whose `conversation` key is absent or null, so `restoreState` always swaps the conversation together with the counters.
