@@ -59,8 +59,11 @@
 // marker-based fallback for a model that emitted the markers but forgot the fence. custom_regex.go
 // is the user-supplied named-group regex escape hatch, including the JavaScript (?<name>…) → Go
 // (?P<name>…) rewrite and the never-match parser an invalid pattern degrades to. args.go is what
-// those two share: value coercion (valid JSON kept as a JSON value, anything else a JSON string)
-// and sorted-key argument marshalling, so an encoding is deterministic rather than map-ordered.
+// those two share: value coercion (custom regex keeps valid JSON as a JSON value, anything else a
+// JSON string; markdown-fenced keeps every value a verbatim JSON string), sorted-key argument
+// marshalling, so an encoding is deterministic rather than map-ordered, and DecodeSchemaTypedArgs,
+// which the loop runs on a text-format call to decode a string value into the type its tool's
+// schema names when that schema does not admit a string.
 //
 // The thinking channels. thinking.go is the delimited pair — ThinkingConfig, StripThinking, and
 // the IsThinking mid-span guard a streaming consumer holds emission on. harmony.go is the gpt-oss
