@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,107 @@ func TestQualifyToolName(t *testing.T) {
 	}
 	if got := qualifyToolName("", "search"); got != "search" {
 		t.Errorf("qualifyToolName with empty alias = %q; want search", got)
+	}
+}
+
+// providerToolNamePattern is the tool-name pattern the model providers enforce.
+var providerToolNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// TestModelToolName covers the sanitise rule: a name inside the provider pattern is unchanged, and
+// any other name comes out inside it, carrying the hash suffix that keeps it distinct.
+func TestModelToolName(t *testing.T) {
+	t.Parallel()
+	long := "srv__" + strings.Repeat("a", 75)
+	cases := []struct {
+		name      string
+		qualified string
+		wantExact string // "" = only the pattern and prefix are asserted
+		wantStart string
+	}{
+		{name: "valid name unchanged", qualified: "github__search", wantExact: "github__search"},
+		{name: "valid hyphenated name unchanged", qualified: "a-b__c-d", wantExact: "a-b__c-d"},
+		{name: "exactly 64 valid unchanged", qualified: strings.Repeat("b", 64), wantExact: strings.Repeat("b", 64)},
+		{name: "dot replaced and hashed", qualified: "files.read", wantStart: "files_read_"},
+		{name: "non-ASCII replaced per character", qualified: "srv__größe", wantStart: "srv__gr__e_"},
+		{name: "80 characters truncated and hashed", qualified: long, wantStart: "srv__aaaa"},
+		{name: "65 valid characters truncated and hashed", qualified: strings.Repeat("c", 65), wantStart: "ccc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := modelToolName(tc.qualified)
+			if !providerToolNamePattern.MatchString(got) {
+				t.Fatalf("modelToolName(%q) = %q; outside the provider pattern", tc.qualified, got)
+			}
+			if tc.wantExact != "" && got != tc.wantExact {
+				t.Errorf("modelToolName(%q) = %q; want %q", tc.qualified, got, tc.wantExact)
+			}
+			if tc.wantStart != "" && !strings.HasPrefix(got, tc.wantStart) {
+				t.Errorf("modelToolName(%q) = %q; want prefix %q", tc.qualified, got, tc.wantStart)
+			}
+			if again := modelToolName(tc.qualified); again != got {
+				t.Errorf("modelToolName(%q) is unstable: %q then %q", tc.qualified, got, again)
+			}
+		})
+	}
+}
+
+// TestServerToolNameDispatchesRemoteName asserts a tool whose qualified name had to be sanitised is
+// offered under a valid name yet forwards the call under the server's own tool name.
+func TestServerToolNameDispatchesRemoteName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		alias  string
+		remote string
+	}{
+		{name: "dotted name", alias: "files", remote: "files.read"},
+		{name: "80-character qualified name", alias: "srv", remote: strings.Repeat("x", 75)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			caller := &fakeCaller{result: &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}}
+			tool := newServerTool(tc.alias, &mcpsdk.Tool{Name: tc.remote}, caller, nil)
+			if !providerToolNamePattern.MatchString(tool.Name()) {
+				t.Fatalf("Name() = %q; outside the provider pattern", tool.Name())
+			}
+			if _, err := tool.Execute(context.Background(), domain.ToolCall{ID: "c", Tool: tool.Name()}); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if caller.gotParams == nil || caller.gotParams.Name != tc.remote {
+				t.Fatalf("forwarded tool name = %v; want the server's own name %q", caller.gotParams, tc.remote)
+			}
+		})
+	}
+}
+
+// TestServerToolNameDistinct asserts remote tools whose qualified names sanitise alike still get
+// distinct model-facing names: two tools on one server, and one tool behind two aliases.
+func TestServerToolNameDistinct(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		aliasA, toolA string
+		aliasB, toolB string
+	}{
+		{name: "one server, dotted and underscored tool", aliasA: "files", toolA: "files.read", aliasB: "files", toolB: "files_read"},
+		{name: "two servers, aliases a.b and a_b", aliasA: "a.b", toolA: "search", aliasB: "a_b", toolB: "search"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := newServerTool(tc.aliasA, &mcpsdk.Tool{Name: tc.toolA}, nil, nil)
+			b := newServerTool(tc.aliasB, &mcpsdk.Tool{Name: tc.toolB}, nil, nil)
+			for _, tool := range []serverTool{a, b} {
+				if !providerToolNamePattern.MatchString(tool.Name()) {
+					t.Fatalf("Name() = %q; outside the provider pattern", tool.Name())
+				}
+			}
+			if a.Name() == b.Name() {
+				t.Errorf("both tools are offered as %q; want distinct model-facing names", a.Name())
+			}
+		})
 	}
 }
 

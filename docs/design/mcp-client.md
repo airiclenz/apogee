@@ -181,7 +181,15 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   package variable — `internal/mcp` holds none (2026-10-01).
 - **Tool naming** qualifies each server tool as `<server-name>__<tool>` so two servers advertising
   the same tool name never collide in the single flat registry, and the human approving a call sees
-  which server it reaches.
+  which server it reaches. The qualified name is then sanitised to the providers' tool-name pattern
+  `^[a-zA-Z0-9_-]{1,64}$` (`modelToolName`, `internal/mcp/tool.go`): a name already inside it is
+  offered unchanged; any other has each character outside `[a-zA-Z0-9_-]` replaced with `_`, is cut
+  to fit, and gets `_` plus the first 8 hex digits of the full qualified name's SHA-256 appended.
+  The hash is appended whenever sanitising changed the name, not only past 64 characters — a
+  per-name rule with no cross-server state — so names that sanitise alike stay distinct
+  (`files.read` / `files_read` on one server, aliases `a.b` / `a_b` across servers). The model and
+  the registry use the sanitised name; dispatch keeps the server's own tool name and sends that in
+  `CallTool` (2026-10-06).
 - **Resume reconnects FRESH (ADR 0008).** The Client holds no serializable state; a resumed Session
   simply calls `Connect` again from the same config. No server-side state is restored — there is no
   server-side-state promise. (`cmd/apogee/wire_live.go` establishes the connection on every launch,
@@ -199,7 +207,7 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   `ConnectWith`, `Host`, `ServerConfig`, `Transport`.
 - `cmd/apogee` owns the wiring: `config.yaml`'s `mcp-servers:` block (config-file-only, default-
   empty) → `mcp.ServerConfig` values → `mcp.ConnectWith` → `registryWithMCP` registers the discovered
-  tools on top of the default registry → `Config.Tools`. A discovered tool whose qualified name
+  tools on top of the default registry → `Config.Tools`. A discovered tool whose model-facing name
   collides with a built-in is dropped with a stderr notice (the built-in wins).
 - The disposition's `tools.ClassMCP` gating is proven in `internal/agent/dispatch_test.go`; this package's
   tests prove a **real** surfaced tool reports `EffectMCP` (the property the gate keys on) and

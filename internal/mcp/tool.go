@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +38,7 @@ const toolNameSeparator = "__"
 // addresses), and the session caller it forwards the call through. It is stateless across
 // Turns (ADR 0008): it holds no per-call state, only the live session handle the Client owns.
 type serverTool struct {
-	name        string                   // registry-qualified: "<serverAlias>__<remoteName>"
+	name        string                   // model-facing: "<serverAlias>__<remoteName>", sanitised by modelToolName
 	remoteName  string                   // the server's own tool name (what CallTool addresses)
 	alias       string                   // the server alias this tool was qualified with ("" = unnamed server)
 	description string                   // the server's advertised description (untrusted presentation)
@@ -54,7 +56,9 @@ type toolCaller interface {
 }
 
 // newServerTool builds a surfaced tool from a server's advertised tool, qualifying its name
-// with the server alias and normalising its input schema to JSON for the model. A tool whose
+// with the server alias, sanitising that to the provider tool-name pattern (modelToolName), and
+// normalising its input schema to JSON for the model. The server's own name is kept as remoteName,
+// so a call by the model-facing name still reaches the tool the server advertised. A tool whose
 // schema does not marshal (an exotic server value) still surfaces, with an empty-object schema
 // — the call can still be made; only the model's argument hint is degraded, never the tool lost.
 // The description is clipped at maxMCPToolDescriptionBytes, so one server cannot flood the
@@ -62,7 +66,7 @@ type toolCaller interface {
 // nil for stdio.
 func newServerTool(serverAlias string, t *mcpsdk.Tool, caller toolCaller, redactor *security.OriginRedactor) serverTool {
 	return serverTool{
-		name:        qualifyToolName(serverAlias, t.Name),
+		name:        modelToolName(qualifyToolName(serverAlias, t.Name)),
 		remoteName:  t.Name,
 		alias:       serverAlias,
 		description: clipText(t.Description, maxMCPToolDescriptionBytes, mcpDescriptionTruncatedMarker),
@@ -81,6 +85,54 @@ func qualifyToolName(serverAlias, remoteName string) string {
 		return remoteName
 	}
 	return serverAlias + toolNameSeparator + remoteName
+}
+
+// maxModelToolNameLen is the longest tool name the providers accept: their shared pattern is
+// ^[a-zA-Z0-9_-]{1,64}$.
+const maxModelToolNameLen = 64
+
+// toolNameHashLen is how many hex digits of the qualified name's SHA-256 modelToolName appends.
+const toolNameHashLen = 8
+
+// modelToolName turns a qualified name into the name the model is offered, which must match the
+// providers' ^[a-zA-Z0-9_-]{1,64}$. A name already inside the pattern is returned unchanged. Any
+// other name has each character outside [a-zA-Z0-9_-] replaced with '_', is cut so the suffix
+// fits, and gets "_" plus a short stable hash of the full qualified name appended. The hash is
+// appended whenever sanitising changed the name, not only past 64 characters, so names that
+// sanitise alike stay distinct: "files.read" and "files_read" on one server, or the aliases "a.b"
+// and "a_b" across servers. The rule is per-name, with no state shared across servers.
+func modelToolName(qualified string) string {
+	var b strings.Builder
+	b.Grow(len(qualified))
+	changed := false
+	for _, r := range qualified {
+		if isModelToolNameRune(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+		changed = true
+	}
+	sanitised := b.String()
+	if !changed && len(sanitised) <= maxModelToolNameLen {
+		return sanitised
+	}
+	sum := sha256.Sum256([]byte(qualified))
+	suffix := "_" + hex.EncodeToString(sum[:])[:toolNameHashLen]
+	if keep := maxModelToolNameLen - len(suffix); len(sanitised) > keep {
+		sanitised = sanitised[:keep]
+	}
+	return sanitised + suffix
+}
+
+// isModelToolNameRune reports whether r is inside the providers' tool-name alphabet [a-zA-Z0-9_-].
+func isModelToolNameRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	default:
+		return r == '_' || r == '-'
+	}
 }
 
 // normaliseSchema renders a server's input schema (an arbitrary JSON-marshalable value the SDK
@@ -102,7 +154,8 @@ func normaliseSchema(input any) json.RawMessage {
 // with no usable advertised schema is still presented as callable.
 var emptyObjectSchema = json.RawMessage(`{"type":"object"}`)
 
-// Name returns the registry-qualified identifier the model calls and the registry keys on.
+// Name returns the model-facing identifier the model calls and the registry keys on: the
+// qualified name sanitised by modelToolName. Execute addresses the server by remoteName instead.
 func (t serverTool) Name() string { return t.name }
 
 // ServerAlias returns the alias this tool's MCP server was registered under — the grain the

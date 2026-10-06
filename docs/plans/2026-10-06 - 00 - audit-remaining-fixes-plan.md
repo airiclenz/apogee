@@ -253,7 +253,10 @@ internal/mcp/tool.go — normaliseSchema; internal/tools/read_file.go, list_dir.
 **Acceptance:** `go build ./internal/agent/ ./internal/processing/ && go test -count=1 -run 'SchemaTyped' ./internal/agent/ && go test -count=1 -run 'MarkdownFenced' ./internal/processing/`
 **Commit:** `fix(agent): decode schema-typed text-format arguments against the tool menu`
 
-## 13. MCP tool names fit the provider pattern
+## 13. MCP tool names fit the provider pattern — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): internal/mcp/client.go left unchanged — listServerTools/newServerTool already kept the server's own name as serverTool.remoteName and Execute already sends it in CallTool, so the map-back needed no new code; the sanitise step lives in tool.go (modelToolName, applied in newServerTool after qualifyToolName).
+NOTES (2026-10-06): docs/design/mcp-client.md §4 "A discovered tool whose qualified name collides with a built-in" now reads "model-facing name", since the registry now keys on the sanitised name.
 
 **What:** Fixes audit Medium "MCP tool names are passed to the model without checking the provider name pattern". Ratified call: sanitise and map back.
 **Regression guard.** A short stable hash of the full qualified name is appended whenever sanitising changed the name (a per-name rule, no cross-server state), not only past 64 characters, so `files.read`/`files_read` on one server and aliases `a.b`/`a_b` across servers stay distinct; the Approach states this rule. docs/design/mcp-client.md's "Tool naming" bullet states the sanitise + hash rule and that dispatch keeps the remote name.
