@@ -236,7 +236,11 @@ internal/processing/markdown_fenced_test.go — TestMarkdownFenced_PortedOracleV
 **Acceptance:** `go build ./internal/processing/ && go test -count=1 -run 'MarkdownFenced' ./internal/processing/`
 **Commit:** `fix(processing): keep markdown-fenced argument values verbatim`
 
-## 12. Text-format tool-call arguments decode against the tool menu's schema types
+## 12. Text-format tool-call arguments decode against the tool menu's schema types — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): re-derived from "item 11's JSON branch lives in parseBlock": the branch is in internal/processing/args.go verbatimValue (parseBlock only calls it), so verbatimValue now always returns the verbatim string and internal/processing/markdown_fenced.go is unchanged.
+NOTES (2026-10-06): item 11's TestMarkdownFenced_TypedParamsKeepDecoding is renamed TestMarkdownFenced_TypedParamsStayVerbatim, and TestMarkdownFenced_JSONValueKeepsTryParseValue is renamed TestMarkdownFenced_JSONValueStaysVerbatim. Both now expect the verbatim string, and the old names would describe behaviour this item removes.
+NOTES (2026-10-06): the decode runs for every recovered text-format call, custom-regex included, as the Goal says. custom_regex.go's own coercion (tryParseValue for the "raw" fallback) is untouched (out of scope). A property schema that names no type, does not parse, or matches two properties under the folded key counts as admitting a string, so its value stays verbatim. An object with duplicate keys is re-encoded with the duplicates kept, so dispatch's repeated-key refusal still sees them.
 
 **What:** Split from item 11 at the regression check (2026-10-06): the typed half of audit Medium "Markdown-fenced tool-call format truncates and mangles argument values". Ratified call: schema-typed decode. Depends on item 11.
 **Regression guard.** Decode when the property schema does not ADMIT string (its `type`, a type list, or `anyOf`/`oneOf` members — MCP schemas pass verbatim, `normaliseSchema`, so FastMCP's `{"anyOf":[{"type":"integer"},{"type":"null"}]}` must decode); keep verbatim only where string is admitted. Look up the schema property by `domain.FoldArgumentKey(name)` against folded property names, so `START_LINE` reaches `start_line` as the tool's case-insensitive decode does. The item replaces item 11's JSON coercion in `parseBlock`: every fenced value becomes the verbatim string, and string-typed params stay verbatim even when they look like JSON.

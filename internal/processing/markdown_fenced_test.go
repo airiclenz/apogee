@@ -247,7 +247,7 @@ func TestMarkdownFenced_StripKeepsTrailingProseFence(t *testing.T) {
 	}
 }
 
-func TestMarkdownFenced_JSONValueKeepsTryParseValue(t *testing.T) {
+func TestMarkdownFenced_JSONValueStaysVerbatim(t *testing.T) {
 	t.Parallel()
 	packageJSON := "{\n  \"name\": \"demo\",\n  \"private\": true\n}"
 	raw := "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\npackage.json\nBEGIN_ARG\ncontent\nEND_ARG\n" + packageJSON + "\n```"
@@ -261,12 +261,16 @@ func TestMarkdownFenced_JSONValueKeepsTryParseValue(t *testing.T) {
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		t.Fatalf("arguments are not a JSON object: %v (%s)", err, call.Arguments)
 	}
-	if want := tryParseValue(packageJSON); string(args["content"]) != string(want) {
-		t.Errorf("content = %s, want tryParseValue's %s", args["content"], want)
+	var content string
+	if err := json.Unmarshal(args["content"], &content); err != nil {
+		t.Fatalf("content is not a JSON string: %v (%s)", err, args["content"])
+	}
+	if content != packageJSON {
+		t.Errorf("content = %q, want the verbatim %q", content, packageJSON)
 	}
 }
 
-func TestMarkdownFenced_TypedParamsKeepDecoding(t *testing.T) {
+func TestMarkdownFenced_TypedParamsStayVerbatim(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
@@ -274,14 +278,14 @@ func TestMarkdownFenced_TypedParamsKeepDecoding(t *testing.T) {
 		want string
 	}{
 		{
-			name: "read_file start_line decodes to a number",
+			name: "read_file start_line stays the string 42",
 			raw:  "```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nmain.go\nBEGIN_ARG\nstart_line\nEND_ARG\n42\n```",
-			want: `{"path":"main.go","start_line":42}`,
+			want: `{"path":"main.go","start_line":"42"}`,
 		},
 		{
-			name: "ask_user choices decodes to an array",
+			name: "ask_user choices stays the array's text",
 			raw:  "```tool\nTOOL_NAME\nask_user\nBEGIN_ARG\nquestion\nEND_ARG\nWhich one?\nBEGIN_ARG\nchoices\nEND_ARG\n[\"red\", \"blue\"]\n```",
-			want: `{"choices":["red", "blue"],"question":"Which one?"}`,
+			want: `{"choices":"[\"red\", \"blue\"]","question":"Which one?"}`,
 		},
 	}
 	p := defaultFencedParser()

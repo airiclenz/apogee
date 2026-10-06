@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // cancelOnResetSink cancels the Step's context the instant the loop announces a re-stream. The
@@ -803,4 +805,110 @@ func TestImageVisionRidesTheServerBinding(t *testing.T) {
 	if child := spawn(t, parent); !child.cfg.Vision {
 		t.Error("a child routed to a vision target did not take the target's opt-in")
 	}
+}
+
+// TestAssembleResponseDecodesSchemaTypedArgs: a recovered markdown-fenced call carries every
+// value as a verbatim string, and assembleResponse decodes those whose property in the tool
+// menu's schema does not admit a string — integer, boolean, array, and an MCP-style
+// anyOf integer/null — while a string-typed param keeps its text even when it reads as JSON. The
+// property is found through the folded key, so START_LINE reaches start_line.
+func TestAssembleResponseDecodesSchemaTypedArgs(t *testing.T) {
+	root := t.TempDir()
+	menuTools := []domain.Tool{
+		tools.NewReadFile(root, domain.ReadMounts{}),
+		tools.NewListDir(root, domain.ReadMounts{}),
+		tools.NewAskUser(nil),
+		tools.NewWriteFile(root),
+	}
+	menu := make([]domain.ToolDef, 0, len(menuTools)+1)
+	for _, tool := range menuTools {
+		menu = append(menu, domain.ToolDef{Name: tool.Name(), Schema: tool.Schema()})
+	}
+	menu = append(menu, domain.ToolDef{
+		Name:   "fetch",
+		Schema: []byte(`{"type":"object","properties":{"limit":{"anyOf":[{"type":"integer"},{"type":"null"}]}}}`),
+	})
+	view := domain.NewRequest(testModel, nil, menu, domain.Budget{}, 0).View()
+	cfg := baseConfig(&recordingSink{})
+	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+	a := newProfileAgent(t, cfg, echoResponder(t, ""))
+	fenced := func(tool string, args ...string) string {
+		var b strings.Builder
+		b.WriteString("```tool\nTOOL_NAME\n" + tool + "\n")
+		for i := 0; i+1 < len(args); i += 2 {
+			b.WriteString("BEGIN_ARG\n" + args[i] + "\nEND_ARG\n" + args[i+1] + "\n")
+		}
+		b.WriteString("```")
+		return b.String()
+	}
+	packageJSON := "{\n  \"name\": \"demo\",\n  \"private\": true\n}"
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "integer params decode to numbers",
+			content: fenced("read_file", "path", "main.go", "start_line", "42", "max_lines", "10"),
+			want:    `{"max_lines":10,"path":"main.go","start_line":42}`,
+		},
+		{
+			name:    "boolean param decodes",
+			content: fenced("list_dir", "path", ".", "recursive", "true"),
+			want:    `{"path":".","recursive":true}`,
+		},
+		{
+			name:    "array param decodes",
+			content: fenced("ask_user", "question", "Which one?", "choices", `["red", "blue"]`),
+			want:    `{"choices":["red", "blue"],"question":"Which one?"}`,
+		},
+		{
+			name:    "string param holding 123 stays a string",
+			content: fenced("read_file", "path", "123"),
+			want:    `{"path":"123"}`,
+		},
+		{
+			name:    "string content holding package.json stays a string",
+			content: fenced("write_file", "path", "package.json", "content", packageJSON),
+			want:    `{"content":` + mustQuote(t, packageJSON) + `,"path":"package.json"}`,
+		},
+		{
+			name:    "anyOf integer/null param decodes to a number",
+			content: fenced("fetch", "limit", "5"),
+			want:    `{"limit":5}`,
+		},
+		{
+			name:    "folded key spelling decodes",
+			content: fenced("read_file", "path", "main.go", "START_LINE", "42"),
+			want:    `{"START_LINE":42,"path":"main.go"}`,
+		},
+		{
+			name:    "a value that does not decode stays the string",
+			content: fenced("read_file", "path", "main.go", "start_line", "forty"),
+			want:    `{"path":"main.go","start_line":"forty"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := a.assembleResponse(0, view, completion{content: tc.content, finish: domain.FinishStop}, nil)
+
+			calls := resp.ToolCalls()
+			if len(calls) != 1 {
+				t.Fatalf("ToolCalls = %d, want 1", len(calls))
+			}
+			if got := string(calls[0].Arguments); got != tc.want {
+				t.Errorf("Arguments = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// mustQuote JSON-encodes s as a string literal.
+func mustQuote(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal %q: %v", s, err)
+	}
+	return string(b)
 }

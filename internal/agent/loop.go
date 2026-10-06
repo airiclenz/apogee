@@ -781,8 +781,9 @@ func (a *Agent) emptyReplyFault(resp *domain.Response, retriedAt int) string {
 // visible content (collectCompletion); this drops the native calls the loop could not dispatch
 // (dispatchableCalls), and — only when the structured native path produced no usable calls —
 // recovers a text-format tool call from that stripped content, removing the call's markup from the
-// committed text and assigning it a deterministic Turn-derived ID (so snapshot/resume and tests
-// stay stable, unlike the oracle's wall-clock ID). The model's reasoning (the Upstream-split
+// committed text, assigning it a deterministic Turn-derived ID (so snapshot/resume and tests
+// stay stable, unlike the oracle's wall-clock ID) and decoding its schema-typed arguments against
+// the tool menu (decodeTextCallArgs). The model's reasoning (the Upstream-split
 // channel — `reasoning_content` or its `reasoning` alias — joined with any stripped inline
 // channel) rides on the Response so assistantMessage can preserve it in history, and so do the
 // reply's opaque signed reasoning blocks with the model they are bound to. For a native,
@@ -799,6 +800,7 @@ func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep completion,
 		if call, found := a.textParser.ParseToolCall(visible); found {
 			visible = a.textParser.StripToolCall(visible)
 			call.ID = fmt.Sprintf("text_call_%d", turn)
+			call.Arguments = decodeTextCallArgs(call, view.Tools())
 			calls = []domain.ToolCall{call}
 		}
 	}
@@ -808,6 +810,21 @@ func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep completion,
 		resp.SetThinkingBlocks(rep.requested, rep.thinkingBlocks)
 	}
 	return resp
+}
+
+// decodeTextCallArgs returns a recovered text-format call's arguments with each string value
+// JSON-decoded whose property in the called tool's menu schema does not admit a string
+// (processing.DecodeSchemaTypedArgs): a text format carries every value as text, so the schema
+// is the only place `42` the integer differs from `42` the string. A call naming a tool the menu
+// does not offer keeps its arguments untouched; native calls never come here, their wire already
+// typed them.
+func decodeTextCallArgs(call domain.ToolCall, menu []domain.ToolDef) json.RawMessage {
+	for _, def := range menu {
+		if def.Name == call.Tool {
+			return processing.DecodeSchemaTypedArgs(call.Arguments, def.Schema)
+		}
+	}
+	return call.Arguments
 }
 
 // dispatchableCalls drops the native tool calls the loop cannot run — an entry missing the tool
