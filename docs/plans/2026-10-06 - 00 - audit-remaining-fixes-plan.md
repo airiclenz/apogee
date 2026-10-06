@@ -207,7 +207,10 @@ docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-d
 **Acceptance:** `go build ./internal/security/ && go test -count=1 -run 'ShellWrite|WriteTargets' ./internal/security/`
 **Commit:** `fix(security): scan interpreter heredoc bodies for shell writes`
 
-## 10. Shell-write guard: cd joins later relative targets
+## 10. Shell-write guard: cd joins later relative targets — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): a `cd` in a pipeline stage (`cd .git | …`) or a background job (`cd .git & …`) is still treated as moving the later commands — the shell runs those in a subshell, so the view over-joins there (stricter, never laxer); left as is.
+NOTES (2026-10-06): a later operand only partly built from a substitution (`rm x$(y)`) keeps its literal remainder and is joined; only the `cd` operand itself carries the per-word substitution mark.
 
 **What:** Fixes the last part of audit Medium "Shell-write guard misses writes to `.git/hooks`". Depends on item 9.
 **Regression guard.** The existing TestWriteTargetsOf row `cd .git/hooks && rm -rf pre-commit` (want ".git/hooks pre-commit") is updated to the prefixed target. A tracked `cd` is dropped at the close of a `( … )` subshell and never carried out of a `$( … )`/backtick body, so `(cd .git && ls); echo x > config.yaml` and `g=$(cd .git && pwd); echo x > config.yaml` stay allowed. The item yields to ADR 0049's "Nothing is synthesised" (docs/adr/0049-…md, "The shell write view"): the prefix only joins a literal `cd` operand with a later literal operand the line names; no path is inferred from a verb.

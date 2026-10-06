@@ -117,7 +117,24 @@ func TestWriteTargetsOf(t *testing.T) {
 		{"a script-file operand makes the heredoc its input", "bash ./install.sh <<EOF\n.git/hooks\nEOF", "./install.sh"},
 		{"a -c string makes the heredoc its input", "bash -c 'cat > notes.md' <<'EOF'\nsee .git/hooks/x\nEOF", "cat > notes.md"},
 		{"a subshell's members are judged", "(cat x && rm -rf .git/hooks)", ".git/hooks"},
-		{"cd fails closed: it moves every later operand", "cd .git/hooks && rm -rf pre-commit", ".git/hooks pre-commit"},
+		{"cd fails closed: it moves every later operand", "cd .git/hooks && rm -rf pre-commit", ".git/hooks .git/hooks/pre-commit"},
+		{"cd moves a later redirect target", "cd .git && echo x > hooks/pre-commit", ".git .git/hooks/pre-commit"},
+		{"a dotted cd target is cleaned when joined", "cd ./.git/hooks; rm pre-commit", "./.git/hooks .git/hooks/pre-commit"},
+		{"a later cd joins the earlier one", "cd .git || cd hooks && rm x", ".git .git/hooks .git/hooks/x"},
+		{"cd's options are not its directory", "cd -P -- .git && rm hooks/x", ".git .git/hooks/x"},
+		{"cd .. climbs back to the start", "cd .git && cd .. && rm x", ".git . x"},
+		{"an absolute later target is not joined", "cd .git && rm /tmp/x", ".git /tmp/x"},
+		{"an absolute cd target is joined", "cd /repo/.git && rm hooks/x", "/repo/.git /repo/.git/hooks/x"},
+		{"a variable cd target joins nothing", "cd $GIT_DIR && rm hooks/x", "$GIT_DIR hooks/x"},
+		{"a substituted cd target joins nothing", "cd $(git rev-parse --git-dir)/x && rm hooks/x", "/x hooks/x"},
+		{"a bare cd goes home and joins nothing", "cd .git; cd; rm hooks/x", ".git hooks/x"},
+		{"a relative cd after a lost one joins nothing", "cd ~; cd .git && rm hooks/x", "~ .git hooks/x"},
+		{"a later variable operand is not joined", "cd .git && rm $f", ".git $f"},
+		{"a subshell's cd ends with it", "(cd .git && ls); echo x > config.yaml", ".git config.yaml"},
+		{"a cd inside a subshell moves its later members", "(cd .git && rm hooks/x)", ".git .git/hooks/x"},
+		{"a substitution's cd stays in it", "g=$(cd .git && pwd); echo x > config.yaml", " .git config.yaml"},
+		{"a substitution starts where its host stands", "cd .git && echo $(rm hooks/x)", ".git .git/hooks/x"},
+		{"an interpreter's heredoc script starts where its host stands", "cd .git && bash <<EOF\nrm hooks/x\nEOF", ".git .git/hooks/x"},
 		{"export fails closed", "export GIT_DIR=.git/modules/x", "GIT_DIR=.git/modules/x"},
 		{"a bare assignment feeds its value: a later operand resolves through it", "d=.git/hooks; rm -rf $d", ".git/hooks $d"},
 		{"a brace group's members are judged", "{ cat a; rm -rf .git/hooks; }", ".git/hooks"},
@@ -173,6 +190,43 @@ func TestShellWriteViewRefusesOutputWrites(t *testing.T) {
 		{"grep -o x .git/config", TierNone, ""},
 		{"grep -rn -- --output .git/hooks", TierNone, ""},
 		{"sed -n '/worktree/p' .git/config", TierNone, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.command, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), shellTool, nil)
+
+			if d.Tier != tc.wantTier || d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) = tier %d rule %q, want tier %d rule %q",
+					tc.command, d.Tier, d.RuleID, tc.wantTier, tc.wantRule)
+			}
+		})
+	}
+}
+
+// TestShellWriteViewJoinsCdTargets pins the shell write view's reading of a `cd`: a later
+// relative write target is resolved against the directory a literal `cd` moved the line to,
+// so a write into the git control plane named through it is hard-refused, while a `cd`
+// elsewhere, one closed in a subshell or held in a substitution, moves nothing into it.
+func TestShellWriteViewJoinsCdTargets(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		command  string
+		wantTier Tier
+		wantRule string
+	}{
+		{"cd .git && echo x > hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"cd .git; echo x > hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"cd .git || echo x > hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"cd ./.git/hooks && echo x > pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"cd .git && rm config", TierHardRefuse, "write-git-control-plane"},
+		{"cd docs && echo x > notes.md", TierNone, ""},
+		{"(cd .git && ls); echo x > config.yaml", TierNone, ""},
+		{"g=$(cd .git && pwd); echo x > config.yaml", TierNone, ""},
 	}
 
 	for _, tc := range cases {

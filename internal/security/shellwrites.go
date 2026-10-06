@@ -42,24 +42,103 @@ import (
 // bash, dash, zsh, ksh) reading its script on stdin (no `-c`, no script-file operand), whose
 // body is shell: it is split into simple commands of its own and judged as a substitution
 // body is, appended after its host (owner decision, 2026-10-06).
+// A literal `cd <dir>` moves every later command of the line (workDir): a later relative
+// literal target is joined onto it, so `cd .git && echo x > hooks/pre-commit` names
+// `.git/hooks/pre-commit`. The move ends with the `( … )` subshell it was made in and never
+// leaves a substitution body or an interpreter's heredoc script, which start where their host
+// stands; a `cd` whose directory is not literal (a variable, a substitution, `~`, `-`, a bare
+// `cd`) leaves every later target as written. Only words the line names are joined — no path
+// is inferred.
 //
 // It is a footgun-guard reading (ADR 0012), not an obfuscation-resistant one: `cat .git/config`
 // is a read and `echo x > .git/config` a write, and a line built to look like the former while
 // doing the latter is the adversary game this guard does not play.
 func writeTargetsOf(command string) string {
 	var targets []string
-	for _, cmd := range splitSimpleCommands(command) {
-		targets = append(targets, cmd.redirectTargets...)
-		targets = append(targets, operandTargets(cmd.words)...)
+	for _, cmd := range splitSimpleCommands(command, workDir{}) {
+		for _, t := range cmd.redirectTargets {
+			targets = append(targets, cmd.dir.resolve(t))
+		}
+		for _, t := range operandTargets(cmd.words) {
+			targets = append(targets, cmd.dir.resolve(t))
+		}
 	}
 	return strings.Join(targets, " ")
 }
 
 // simpleCommand is one pipeline stage or chain member of a command line: its words in order
-// (leader first, quotes already removed) and the output redirect targets found beside them.
+// (leader first, quotes already removed), the output redirect targets found beside them, and
+// the directory the line's earlier `cd`s left it in.
 type simpleCommand struct {
 	words           []string
 	redirectTargets []string
+	// substituted marks, index for index with words, the words a command substitution was
+	// lifted out of: what is left of them is not the word the shell will see.
+	substituted []bool
+	dir         workDir
+}
+
+// workDir is where a command line's literal `cd`s have moved it, relative to where the line
+// started. The zero value is that start. Once a `cd` names a directory the view cannot read
+// literally, the place is lost and only an absolute literal `cd` finds it again.
+type workDir struct {
+	path string // "" while no cd has moved the line
+	lost bool
+}
+
+// cd returns the directory a `cd target` moves d to; literal is false when a substitution
+// was lifted out of target.
+func (d workDir) cd(target string, literal bool) workDir {
+	switch {
+	case !literal || !isLiteralPath(target):
+		return workDir{lost: true}
+	case path.IsAbs(target):
+		return workDir{path: path.Clean(target)}
+	case d.lost:
+		return d
+	}
+	joined := path.Join(d.path, target)
+	if joined == "." {
+		joined = ""
+	}
+	return workDir{path: joined}
+}
+
+// resolve joins a relative literal target onto d; an absolute or non-literal target, and
+// every target while d is the start or lost, is returned as written.
+func (d workDir) resolve(target string) string {
+	if d.lost || d.path == "" || !isLiteralPath(target) || path.IsAbs(target) {
+		return target
+	}
+	return path.Join(d.path, target)
+}
+
+// isLiteralPath reports whether w names the same path wherever the shell expands it: no
+// parameter left in it, no home (`~`) and not `cd -`'s previous directory.
+func isLiteralPath(w string) bool {
+	return w != "" && w != "-" && !strings.HasPrefix(w, "~") && !strings.Contains(w, "$")
+}
+
+// cdTarget reports whether cmd is a `cd` (after wrapper and assignment stripping) and, if so,
+// the directory it names and whether that word is free of substitutions; a bare `cd` (home)
+// names none and reports a non-literal empty target.
+func cdTarget(cmd simpleCommand) (target string, literal, isCd bool) {
+	words := stripWrappers(cmd.words)
+	if len(words) == 0 || path.Base(words[0]) != "cd" {
+		return "", false, false
+	}
+	offset := len(cmd.words) - len(words)
+	i := 1
+	for i < len(words) && strings.HasPrefix(words[i], "-") && words[i] != "-" {
+		i++
+		if words[i-1] == "--" {
+			break
+		}
+	}
+	if i == len(words) {
+		return "", false, true
+	}
+	return words[i], !cmd.substituted[offset+i], true
 }
 
 // pendingWord says where the tokenizer routes the next word it completes: to the command's
@@ -82,14 +161,20 @@ type shellTokenizer struct {
 	current  simpleCommand
 	word     strings.Builder
 	inWord   bool
-	pending  pendingWord
-	heredocs []heredoc // the heredocs whose bodies follow the next newline, in order
+	// wordSubstituted records that a command substitution was lifted out of the word in progress.
+	wordSubstituted bool
+	pending         pendingWord
+	heredocs        []heredoc // the heredocs whose bodies follow the next newline, in order
 	// boundHeredocs counts the heredocs already bound to the command that opened them; the
 	// rest belong to the command in progress, which binds them when it closes.
 	boundHeredocs int
 	// flushAfter holds the commands a substitution nested in the current command; they
 	// are emitted right after it so a reader sees the host before its guests.
 	flushAfter []simpleCommand
+	// dir is where the line's `cd`s have moved the command in progress; dirStack holds the
+	// directory each open `( … )` subshell restores when it closes.
+	dir      workDir
+	dirStack []workDir
 }
 
 // heredoc is one pending `<<` body: the delimiter line that ends it, and whether its host
@@ -98,12 +183,13 @@ type shellTokenizer struct {
 type heredoc struct {
 	delimiter string
 	script    bool
+	dir       workDir // where the host stands: a script body starts there
 }
 
-// splitSimpleCommands tokenizes command into its simple commands; nested command
-// substitutions are appended after the command that hosts them.
-func splitSimpleCommands(command string) []simpleCommand {
-	tk := &shellTokenizer{}
+// splitSimpleCommands tokenizes command, starting in dir, into its simple commands; nested
+// command substitutions are appended after the command that hosts them.
+func splitSimpleCommands(command string, dir workDir) []simpleCommand {
+	tk := &shellTokenizer{dir: dir}
 	tk.scan(command)
 	tk.endCommand()
 	return tk.commands
@@ -134,8 +220,17 @@ func (tk *shellTokenizer) scan(s string) {
 		case r == '\n':
 			tk.endCommand()
 			i = tk.skipHeredocBodies(runes, i)
-		case r == ';' || r == '|' || r == '(' || r == ')':
+		case r == ';' || r == '|':
 			tk.endCommand()
+		case r == '(':
+			tk.endCommand()
+			tk.dirStack = append(tk.dirStack, tk.dir)
+		case r == ')':
+			tk.endCommand()
+			if n := len(tk.dirStack); n > 0 {
+				tk.dir = tk.dirStack[n-1]
+				tk.dirStack = tk.dirStack[:n-1]
+			}
 		case r == '{' || r == '}':
 			// A brace is a group delimiter only as a word of its own (`{ cmd; }`); inside a
 			// word it is text — find's `{}` above all.
@@ -240,9 +335,11 @@ func (tk *shellTokenizer) scanDollar(runes []rune, i int) int {
 }
 
 // nest tokenizes a command substitution's body as commands of its own, appended after the
-// hosting command's own entry once that closes.
+// hosting command's own entry once that closes. The body starts where its host stands, and
+// a `cd` inside it moves no command outside it.
 func (tk *shellTokenizer) nest(body string) {
-	tk.flushAfter = append(tk.flushAfter, splitSimpleCommands(body)...)
+	tk.wordSubstituted = true
+	tk.flushAfter = append(tk.flushAfter, splitSimpleCommands(body, tk.dir)...)
 }
 
 // scanOutputRedirect consumes a `>`-family operator starting at runes[i] (`>`, `>>`, `>|`,
@@ -330,7 +427,7 @@ func (tk *shellTokenizer) skipHeredocBodies(runes []rune, i int) int {
 			body = append(body, line)
 		}
 		if doc.script {
-			tk.commands = append(tk.commands, splitSimpleCommands(strings.Join(body, "\n"))...)
+			tk.commands = append(tk.commands, splitSimpleCommands(strings.Join(body, "\n"), doc.dir)...)
 		}
 	}
 	tk.heredocs = nil
@@ -349,8 +446,10 @@ func (tk *shellTokenizer) endWord() {
 		return
 	}
 	w := tk.word.String()
+	substituted := tk.wordSubstituted
 	tk.word.Reset()
 	tk.inWord = false
+	tk.wordSubstituted = false
 	switch {
 	case w == "": // a word that was only a substitution: its commands were nested, nothing is left
 	case tk.pending == pendingRedirectTarget:
@@ -360,6 +459,7 @@ func (tk *shellTokenizer) endWord() {
 	case tk.pending == pendingSkip:
 	default:
 		tk.current.words = append(tk.current.words, w)
+		tk.current.substituted = append(tk.current.substituted, substituted)
 	}
 	tk.pending = pendingOperand
 }
@@ -367,16 +467,22 @@ func (tk *shellTokenizer) endWord() {
 // endCommand closes the simple command in progress, keeping it only when it has words or
 // redirect targets, followed by any substitutions it hosted. The heredocs it opened are
 // bound to it here, once its words are complete: each body is a script exactly when this
-// command reads one on stdin.
+// command reads one on stdin. The command stands where the earlier `cd`s left the line; a
+// `cd` moves the commands after it.
 func (tk *shellTokenizer) endCommand() {
 	tk.endWord()
 	tk.pending = pendingOperand
+	tk.current.dir = tk.dir
 	if tk.boundHeredocs < len(tk.heredocs) {
 		script := readsStdinScript(tk.current.words)
 		for i := tk.boundHeredocs; i < len(tk.heredocs); i++ {
 			tk.heredocs[i].script = script
+			tk.heredocs[i].dir = tk.dir
 		}
 		tk.boundHeredocs = len(tk.heredocs)
+	}
+	if target, literal, isCd := cdTarget(tk.current); isCd {
+		tk.dir = tk.dir.cd(target, literal)
 	}
 	if len(tk.current.words) > 0 || len(tk.current.redirectTargets) > 0 {
 		tk.commands = append(tk.commands, tk.current)
