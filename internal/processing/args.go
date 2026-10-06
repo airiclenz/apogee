@@ -18,6 +18,31 @@ func tryParseValue(value string) json.RawMessage {
 	return json.RawMessage(encoded)
 }
 
+// verbatimValue is the markdown-fenced value coercion: a value whose trimmed form is valid JSON
+// keeps tryParseValue's JSON value, and every other value is encoded as a JSON string verbatim
+// — indentation and inner blank lines intact — less one leading and one trailing line break,
+// the breaks that separate the value from its END_ARG marker and from what follows it.
+func verbatimValue(value string) json.RawMessage {
+	if trimmed := strings.TrimSpace(value); trimmed != "" && json.Valid([]byte(trimmed)) {
+		return tryParseValue(value)
+	}
+	encoded, _ := json.Marshal(trimOneLineBreak(value)) // a string always marshals
+	return json.RawMessage(encoded)
+}
+
+// trimOneLineBreak drops at most one line break (\n or \r\n) from each end of value.
+func trimOneLineBreak(value string) string {
+	if rest, ok := strings.CutPrefix(value, "\r\n"); ok {
+		value = rest
+	} else {
+		value = strings.TrimPrefix(value, "\n")
+	}
+	if rest, ok := strings.CutSuffix(value, "\r\n"); ok {
+		return rest
+	}
+	return strings.TrimSuffix(value, "\n")
+}
+
 // marshalArgs assembles a JSON object from per-argument JSON values. Keys are emitted in
 // sorted order so the encoding is deterministic (the map iteration order is not). An empty
 // map encodes to "{}" — the no-argument call shape.

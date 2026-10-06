@@ -42,11 +42,12 @@ func (c MarkdownFencedConfig) withDefaults() MarkdownFencedConfig {
 }
 
 // MarkdownFencedParser extracts a tool call from a markdown-fenced code block, falling back
-// to marker-based detection when no clean fence is present. It is a faithful port of
-// apogee-code's MarkdownFencedParser oracle; the one deliberate divergence is the fence-close
-// search, which Go's RE2 (no negative lookahead) expresses as an explicit scan instead of the
-// TS `(?!fence)` lookahead — the matched behaviour is identical (a closing ``` that does not
-// reopen the same fence language). The parser is stateless and safe for concurrent use.
+// to marker-based detection when no clean fence is present. It started as a port of
+// apogee-code's MarkdownFencedParser oracle and now diverges from it where the oracle loses
+// argument text: the block closes on a line that is exactly ``` (nested fences opened with an
+// info string, such as ```bash, are tracked so they do not close it), the block's lines lose
+// the opener line's indentation, and a value is kept verbatim (see verbatimValue) rather than
+// trimmed. The parser is stateless and safe for concurrent use.
 type MarkdownFencedParser struct {
 	cfg           MarkdownFencedConfig
 	fenceStart    *regexp.Regexp
@@ -93,15 +94,15 @@ func (p *MarkdownFencedParser) StripToolCall(raw string) string {
 
 // strictParse parses the last fenced tool block, if any.
 func (p *MarkdownFencedParser) strictParse(text string) (domain.ToolCall, bool) {
-	_, blockStart, ok := p.lastFenceBounds(text)
+	openStart, blockStart, ok := p.lastFenceBounds(text)
 	if !ok {
 		return domain.ToolCall{}, false
 	}
-	closeIdx, ok := p.fenceClose(text, blockStart)
+	blockEnd, _, ok := p.fenceClose(text, blockStart)
 	if !ok {
 		return domain.ToolCall{}, false
 	}
-	block := strings.TrimSpace(text[blockStart:closeIdx])
+	block := dedentLines(text[blockStart:blockEnd], openerIndent(text, openStart))
 	return p.parseBlock(block)
 }
 
@@ -112,9 +113,9 @@ func (p *MarkdownFencedParser) strictStrip(text string) (string, bool) {
 		return "", false
 	}
 	endIdx := len(text)
-	if closeIdx, found := p.fenceClose(text, blockStart); found {
+	if _, closeIdx, found := p.fenceClose(text, blockStart); found {
 		// Advance past the three closing backticks the close scan points at.
-		endIdx = closeIdx + len("```")
+		endIdx = closeIdx + len(codeFence)
 	}
 	return strings.TrimSpace(text[:openStart] + text[endIdx:]), true
 }
@@ -130,23 +131,102 @@ func (p *MarkdownFencedParser) lastFenceBounds(text string) (openStart, blockSta
 	return last[0], last[1], true
 }
 
-// fenceClose finds the first closing ``` at or after blockStart that does not reopen the
-// fence language — the RE2-safe equivalent of the oracle's ```(?!<lang>) lookahead.
-func (p *MarkdownFencedParser) fenceClose(text string, blockStart int) (int, bool) {
+// fenceClose finds where the tool block that begins at blockStart ends. blockEnd is the end of
+// the block body (exclusive) and closeIdx the index of the closing ```.
+//
+// Walking the lines from blockStart, a line whose trimmed form is ``` followed by an info
+// string (```bash) opens a nested fence, and a line that is exactly ``` closes the innermost
+// open nested fence, or the tool block when none is open; blockEnd is then the start of that
+// close line, so the block keeps the line break before it. Only when no line closes the block
+// does the scan fall back to the first ``` anywhere that does not reopen the fence language —
+// the close glued to a value's last line (src/main.ts```) — where blockEnd and closeIdx
+// coincide.
+//
+// A nested fence opened bare (``` with no info string) cannot be told from the tool block's
+// own close, so its opener closes the block: the documented limit of the format.
+func (p *MarkdownFencedParser) fenceClose(text string, blockStart int) (blockEnd, closeIdx int, ok bool) {
+	if end, at, found := closeLine(text, blockStart); found {
+		return end, at, true
+	}
+	return p.gluedClose(text, blockStart)
+}
+
+// closeLine walks the lines from blockStart for the line-level close fenceClose documents.
+func closeLine(text string, blockStart int) (blockEnd, closeIdx int, ok bool) {
+	depth := 0
+	for lineStart := blockStart; lineStart < len(text); {
+		lineEnd := indexFrom(text, "\n", lineStart)
+		if lineEnd == -1 {
+			lineEnd = len(text)
+		}
+		trimmed := strings.TrimSpace(text[lineStart:lineEnd])
+		switch {
+		case trimmed == codeFence && depth == 0:
+			return lineStart, lineStart + strings.Index(text[lineStart:lineEnd], codeFence), true
+		case trimmed == codeFence:
+			depth--
+		case opensNestedFence(trimmed):
+			depth++
+		}
+		lineStart = lineEnd + 1
+	}
+	return 0, 0, false
+}
+
+// opensNestedFence reports whether a trimmed line opens a fence with an info string (```bash).
+// A run of four or more backticks carries a backtick in its "info string" and is not counted.
+func opensNestedFence(trimmed string) bool {
+	info, ok := strings.CutPrefix(trimmed, codeFence)
+	return ok && info != "" && !strings.Contains(info, "`")
+}
+
+// gluedClose is fenceClose's fallback: the first ``` at or after blockStart that does not
+// reopen the fence language — the RE2-safe equivalent of the oracle's ```(?!<lang>) lookahead.
+func (p *MarkdownFencedParser) gluedClose(text string, blockStart int) (blockEnd, closeIdx int, ok bool) {
 	rest := text[blockStart:]
 	from := 0
 	for {
-		i := strings.Index(rest[from:], "```")
+		i := strings.Index(rest[from:], codeFence)
 		if i == -1 {
-			return 0, false
+			return 0, 0, false
 		}
 		at := from + i
-		after := rest[at+len("```"):]
+		after := rest[at+len(codeFence):]
 		if !strings.HasPrefix(after, p.cfg.FenceLanguage) {
-			return blockStart + at, true
+			return blockStart + at, blockStart + at, true
 		}
-		from = at + len("```")
+		from = at + len(codeFence)
 	}
+}
+
+// openerIndent returns the indentation ahead of the fence opener at openStart — the run of
+// spaces and tabs between the line start and the opener — or "" when other text precedes the
+// opener on its line (prose glued to the fence is not indentation).
+func openerIndent(text string, openStart int) string {
+	lineStart := strings.LastIndexByte(text[:openStart], '\n') + 1
+	prefix := text[lineStart:openStart]
+	if strings.TrimLeft(prefix, " \t") != "" {
+		return ""
+	}
+	return prefix
+}
+
+// dedentLines removes up to len(indent) leading spaces and tabs from every line of block, the
+// CommonMark rule for a fenced block opened at that indentation (a list item's block, say):
+// deeper indentation inside a value survives, shallower lines lose what they have.
+func dedentLines(block, indent string) string {
+	if indent == "" {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		cut := 0
+		for cut < len(indent) && cut < len(line) && (line[cut] == ' ' || line[cut] == '\t') {
+			cut++
+		}
+		lines[i] = line[cut:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ─── fallback (marker-based) ────────────────────────────────────────────────
@@ -164,7 +244,7 @@ func (p *MarkdownFencedParser) fallbackParse(text string) (domain.ToolCall, bool
 	if !ok {
 		return domain.ToolCall{}, false
 	}
-	block := toolName + "\n" + strings.TrimSpace(text[firstArgStart:])
+	block := toolName + "\n" + text[firstArgStart:]
 	return p.parseBlock(block)
 }
 
@@ -278,7 +358,7 @@ func (p *MarkdownFencedParser) parseBlock(block string) (domain.ToolCall, bool) 
 					valueParts = append(valueParts, lines[i])
 					i++
 				}
-				args[argName] = tryParseValue(strings.Join(valueParts, "\n"))
+				args[argName] = verbatimValue(strings.Join(valueParts, "\n"))
 				continue
 			}
 		}
@@ -290,6 +370,9 @@ func (p *MarkdownFencedParser) parseBlock(block string) (domain.ToolCall, bool) 
 	}
 	return domain.ToolCall{Tool: toolName, Arguments: marshalArgs(args)}, true
 }
+
+// codeFence is the three-backtick run that opens and closes a markdown code fence.
+const codeFence = "```"
 
 var (
 	// backtickNoise matches 1–4 backticks plus an optional fence info word (e.g. ```tool).

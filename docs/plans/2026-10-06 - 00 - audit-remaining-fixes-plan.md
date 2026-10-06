@@ -223,7 +223,7 @@ internal/security/dangerous.go — Inspect, shellWriteText
 **Acceptance:** `go build ./internal/security/ && go test -count=1 -run 'ShellWrite|WriteTargets' ./internal/security/`
 **Commit:** `fix(security): resolve relative shell writes against a preceding cd`
 
-## 11. Markdown-fenced tool calls keep argument values verbatim
+## 11. Markdown-fenced tool calls keep argument values verbatim — ✅ DONE (2026-10-06)
 
 **What:** Recast at the regression check (2026-10-06). Fixes audit Medium "Markdown-fenced tool-call format truncates and mangles argument values". Ratified call: verbatim strings.
 **Regression guard.** Processing-only; schema-typed decode is item 12's. Close rule: walking the lines after `blockStart`, a line whose TrimSpace is ```<info> opens a nested fence, one whose TrimSpace is exactly ``` closes the innermost open nested fence, else closes the tool block (a doubled close leaves its stray ``` in the stripped text, as today); with no such close line, today's mid-line ``` close (`src/main.ts```) is the fallback. The block's lines lose the opener line's indentation (CommonMark) and the block-level TrimSpace in strictParse/fallbackParse is dropped (trim only ahead of the name line / first marker). Value coercion: a value whose trimmed form is valid JSON keeps `tryParseValue`; every other value is the verbatim string less one leading and one trailing line break (no TrimSpace). A nested fence opened bare (```\nx\n```) cannot be told from trailing prose: the documented limit. Supersedes the `MarkdownFencedParser` type doc ("faithful port ... identical") and the `fenceClose` doc (internal/processing/markdown_fenced.go); both rewritten.

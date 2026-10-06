@@ -126,8 +126,8 @@ func TestMarkdownFenced_PortedOracleVectors(t *testing.T) {
 		if got := argString(t, call.Arguments, "path"); got != "wishes.txt" {
 			t.Errorf("path = %q, want wishes.txt", got)
 		}
-		if got := argString(t, call.Arguments, "content"); !strings.Contains(got, "Hello world") {
-			t.Errorf("content = %q, want to contain Hello world", got)
+		if got := argString(t, call.Arguments, "content"); got != "Hello world" {
+			t.Errorf("content = %q, want exactly Hello world", got)
 		}
 	})
 
@@ -149,6 +149,156 @@ func TestMarkdownFenced_PortedOracleVectors(t *testing.T) {
 			t.Errorf("content = %q, want to contain 2 and 11", content)
 		}
 	})
+}
+
+func TestMarkdownFenced_ValuesStayVerbatim(t *testing.T) {
+	t.Parallel()
+
+	readme := "# Demo\n\nBuild it:\n\n```bash\nmake build\n```\n\nThen run it."
+	python := "    def area(self, r):\n        if r < 0:\n            raise ValueError(r)\n        return 3.14 * r * r"
+	cases := []struct {
+		name string
+		raw  string
+		key  string
+		want string
+	}{
+		{
+			name: "a README holding its own bash fence keeps the whole value",
+			raw:  "Writing it.\n\n```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nREADME.md\nBEGIN_ARG\ncontent\nEND_ARG\n" + readme + "\n```",
+			key:  "content",
+			want: readme,
+		},
+		{
+			name: "prose after the block holding a bash fence leaves the value unchanged",
+			raw:  "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nnotes.txt\nBEGIN_ARG\ncontent\nEND_ARG\nplain notes\n```\n\nAfterwards run:\n```bash\nls\n```",
+			key:  "content",
+			want: "plain notes",
+		},
+		{
+			name: "a list-item block loses the opener's indentation",
+			raw:  "Steps:\n\n1. Edit it.\n   ```tool\n   TOOL_NAME\n   edit_file\n   BEGIN_ARG\n   path\n   END_ARG\n   main.py\n   BEGIN_ARG\n   new_string\n   END_ARG\n   if ok:\n       run()\n   ```",
+			key:  "new_string",
+			want: "if ok:\n    run()",
+		},
+		{
+			name: "a close glued to the last line still closes the block",
+			raw:  "```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nsrc/main.ts```",
+			key:  "path",
+			want: "src/main.ts",
+		},
+		{
+			name: "an indented block with a glued close yields the unindented value",
+			raw:  "- Read it:\n  ```tool\n  TOOL_NAME\n  read_file\n  BEGIN_ARG\n  path\n  END_ARG\n  src/main.ts```",
+			key:  "path",
+			want: "src/main.ts",
+		},
+		{
+			// The documented limit: a bare ``` opener cannot be told from the block's close.
+			name: "a nested fence opened bare closes the block",
+			raw:  "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nout.txt\nBEGIN_ARG\ncontent\nEND_ARG\nintro\n```\nx\n```\n```",
+			key:  "content",
+			want: "intro",
+		},
+		{
+			name: "a last argument keeps its trailing text less one line break",
+			raw:  "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nout.txt\nBEGIN_ARG\ncontent\nEND_ARG\n  first\nsecond  \n\n```",
+			key:  "content",
+			want: "  first\nsecond  \n",
+		},
+		{
+			name: "a Python new_string keeps its indentation",
+			raw:  "```tool\nTOOL_NAME\nedit_file\nBEGIN_ARG\npath\nEND_ARG\ngeo.py\nBEGIN_ARG\nnew_string\nEND_ARG\n" + python + "\n```",
+			key:  "new_string",
+			want: python,
+		},
+		{
+			name: "a value between two arguments drops one line break each side",
+			raw:  "```tool\nTOOL_NAME\nedit_file\nBEGIN_ARG\nold_string\nEND_ARG\n\n    x = 1\n\nBEGIN_ARG\npath\nEND_ARG\na.py\n```",
+			key:  "old_string",
+			want: "    x = 1",
+		},
+	}
+	p := defaultFencedParser()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			call, ok := p.ParseToolCall(tc.raw)
+
+			if !ok {
+				t.Fatal("expected a parsed call")
+			}
+			if got := argString(t, call.Arguments, tc.key); got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMarkdownFenced_StripKeepsTrailingProseFence(t *testing.T) {
+	t.Parallel()
+	raw := "Saving.\n\n```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nnotes.txt\nBEGIN_ARG\ncontent\nEND_ARG\nplain notes\n```\n\nAfterwards run:\n```bash\nls\n```"
+
+	got := defaultFencedParser().StripToolCall(raw)
+
+	want := "Saving.\n\n\n\nAfterwards run:\n```bash\nls\n```"
+	if got != want {
+		t.Errorf("strip = %q, want %q", got, want)
+	}
+}
+
+func TestMarkdownFenced_JSONValueKeepsTryParseValue(t *testing.T) {
+	t.Parallel()
+	packageJSON := "{\n  \"name\": \"demo\",\n  \"private\": true\n}"
+	raw := "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\npackage.json\nBEGIN_ARG\ncontent\nEND_ARG\n" + packageJSON + "\n```"
+
+	call, ok := defaultFencedParser().ParseToolCall(raw)
+
+	if !ok {
+		t.Fatal("expected a parsed call")
+	}
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		t.Fatalf("arguments are not a JSON object: %v (%s)", err, call.Arguments)
+	}
+	if want := tryParseValue(packageJSON); string(args["content"]) != string(want) {
+		t.Errorf("content = %s, want tryParseValue's %s", args["content"], want)
+	}
+}
+
+func TestMarkdownFenced_TypedParamsKeepDecoding(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "read_file start_line decodes to a number",
+			raw:  "```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nmain.go\nBEGIN_ARG\nstart_line\nEND_ARG\n42\n```",
+			want: `{"path":"main.go","start_line":42}`,
+		},
+		{
+			name: "ask_user choices decodes to an array",
+			raw:  "```tool\nTOOL_NAME\nask_user\nBEGIN_ARG\nquestion\nEND_ARG\nWhich one?\nBEGIN_ARG\nchoices\nEND_ARG\n[\"red\", \"blue\"]\n```",
+			want: `{"choices":["red", "blue"],"question":"Which one?"}`,
+		},
+	}
+	p := defaultFencedParser()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			call, ok := p.ParseToolCall(tc.raw)
+
+			if !ok {
+				t.Fatal("expected a parsed call")
+			}
+			if string(call.Arguments) != tc.want {
+				t.Errorf("Arguments = %s, want %s", call.Arguments, tc.want)
+			}
+		})
+	}
 }
 
 func TestMarkdownFenced_StripRemovesBlock(t *testing.T) {
