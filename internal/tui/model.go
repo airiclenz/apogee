@@ -415,12 +415,12 @@ type Model struct {
 	// derived by engineHolds), each set and cleared through hold/release:
 	//   - holdSessionLoad marks a /sessions load in flight — the record is being read off the loop,
 	//     and the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held
-	//     until it lands.
+	//     until it lands, and a typed message, /continue and /compact are refused (loadHoldNote).
 	//   - holdBgLaunch marks a /bg launch in flight (runBg sets it, foldBgStarted releases it): the
 	//     launch reads the Agent off the loop where the idle-only mutators must not run
 	//     (StartRecipe's launch-time snapshot), so until it lands a heartbeat's rebind is stashed
-	//     (observeBinding), a wake is held (canWake), and an idle-only command is queued rather
-	//     than run (commandRunnable).
+	//     (observeBinding), a wake is held (canWake), an idle-only command is queued rather
+	//     than run (commandRunnable), and a typed message is refused (loadHoldNote).
 	//
 	// resumePending says a restored session's background workflows are still to be started from
 	// their folders (Engine.ResumeWorkflows): set by a --resume start and by every /sessions switch
@@ -2104,6 +2104,13 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// (preboundRefusal).
 		return m.preboundRefusal()
 	}
+	if note, held := m.loadHoldNote(); held {
+		// A session load or a /bg launch is reading the Agent off the loop, and an Exchange opened
+		// now would be a second goroutine on it. The line stays in the box — and a held queue stays
+		// held — so ⏎ sends the very same message once the load lands.
+		m.transcript.addNote(note)
+		return m, nil
+	}
 	if m.actuation.inFlight {
 		// A launcher verb owns the server this message would go to (ADR 0029 D5). Refuse it exactly
 		// as an offline upstream is refused, and for the same reason: the typed line stays in the box
@@ -2160,6 +2167,28 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	nameCmd := m.maybeAutoTitle(in.Text)
 	next, cmd := m.launchExchange(in)
 	return next, tea.Batch(cmd, nameCmd, record)
+}
+
+// The notes an Exchange opener answers with while an off-loop load holds the engine
+// ([Model.loadHoldNote]): each names the hold it waits out.
+const (
+	sessionLoadHoldNote = "still loading a session — send once it has loaded"
+	bgLaunchHoldNote    = "still starting a /bg launch — send once it has started"
+)
+
+// loadHoldNote reports whether a session load (holdSessionLoad) or a /bg launch (holdBgLaunch) is
+// reading the Agent off the loop, with the note naming which. Every Exchange opener — the typed
+// message and the held-queue flush in submit, the completion flush (flushInterjections), /continue
+// and /compact — asks it before starting a worker: a worker started now would drive the Agent
+// beside the goroutine still reading it, so the opener refuses and nothing moves.
+func (m Model) loadHoldNote() (string, bool) {
+	switch {
+	case m.holds.has(holdSessionLoad):
+		return sessionLoadHoldNote, true
+	case m.holds.has(holdBgLaunch):
+		return bgLaunchHoldNote, true
+	}
+	return "", false
 }
 
 // submitLine parses the editor's contents for a send: the chat mini-language's parse

@@ -286,8 +286,9 @@ func TestReleaseEngine_FoldActuationDone(t *testing.T) {
 	})
 }
 
-// A /bg launch landing applies a rebind stashed under it, and withholds it while a worker a message
-// opened beside the launch still drives the engine.
+// A /bg launch landing applies a rebind stashed under it, and withholds it while a worker still drives
+// the engine. A typed message no longer opens one under the launch (submit refuses it), so the worker
+// is forced here to pin releaseEngine's own deferral.
 func TestReleaseEngine_FoldBgStarted(t *testing.T) {
 	t.Parallel()
 	t.Run("alone", func(t *testing.T) {

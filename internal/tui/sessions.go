@@ -106,6 +106,9 @@ const interruptedNote = "this session was interrupted mid-task — /continue pic
 // finished before the interruption stand, and the new message continues from them.
 const interruptedSettledNote = "closed the interrupted work — its finished steps stand; continuing from your message"
 
+// resumeBusyNote is resumeLoaded's answer to a record that lands while a worker drives the engine.
+const resumeBusyNote = "session not loaded — the agent is busy; resume it from /sessions once it is idle"
+
 // progressSavedNote is the transcript note appended when a resumed record was written while a
 // delegation was still running (the progress save, ADR 0022's 2026-08-25 addendum) — the replay found
 // tool calls still open and closed them as interrupted (closeInterruptedCalls). It says what the ✓-less
@@ -573,6 +576,10 @@ func (m Model) loadSession(id string, keep bool) tea.Cmd {
 // fold's own and stay persistent: they belong to the session that stays live, and they record
 // something that happened rather than something re-derived.
 //
+// A record landing while a worker drives the engine is not restored at all (resumeBusyNote): the
+// restore takes the engine at idle, and submit refuses to open an Exchange while the load is in flight
+// (loadHoldNote), so this is the guard behind that guard — /fork reaches here past its own (foldFork).
+//
 // The title is untrusted disk input — no codec sanitizes a record's Meta on the way back in, which
 // is why sessionRowCells strips it too — and it needs no wrapping here: both addNote and
 // addEphemeralNote escape-strip at the seam.
@@ -583,6 +590,13 @@ func (m Model) loadSession(id string, keep bool) tea.Cmd {
 // own set is resumed once the Activate queued below has moved the scratch directory to it
 // (resumePending, resumeAfterFold).
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
+	if m.busy() {
+		// A worker drives the engine, and RestoreSession would swap the conversation out from under
+		// it. Nothing is restored, activated or repainted; the record stays where it was, for
+		// /sessions to reach once the work ends.
+		m.transcript.addNote(resumeBusyNote)
+		return nil
+	}
 	if msg.err != nil {
 		m.transcript.addNote("could not load session: " + msg.err.Error())
 		return nil

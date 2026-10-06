@@ -679,7 +679,14 @@ func (m Model) drainThenFlush(done tea.Cmd) (tea.Model, tea.Cmd) {
 // It reads the editor NOT AT ALL. A completion can land while the human is mid-sentence, and a
 // half-typed line is not something they asked to send — it stays in the box, and the staged rows
 // (which they did press ⏎ on) are what goes.
+//
+// A session load or /bg launch in flight holds the flush (loadHoldNote): the rows stay staged, as a
+// held queue, for the ⏎ that sends them once the load lands.
 func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
+	if note, held := m.loadHoldNote(); held {
+		m.transcript.addNote(note)
+		return m, nil
+	}
 	in, spans := m.joinedInterjections(parsedInput{})
 	m.pendingInterjections = nil
 	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does

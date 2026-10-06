@@ -2441,3 +2441,84 @@ func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 		}
 	})
 }
+
+// loadingBrowserModel opens the browser over one seeded record and presses ⏎ on it, returning the
+// model with the load in flight (holdSessionLoad) and the Load Cmd still unrun.
+func loadingBrowserModel(t *testing.T, eng *fakeEngine) (Model, tea.Cmd) {
+	t.Helper()
+	host := &fakeSessionHost{}
+	host.seed(session.Record{
+		Meta:    session.Meta{ID: "sess-1", Title: "loaded", Workspace: "/ws/a", UpdatedAt: time.Now()},
+		Session: domain.Session{Version: domain.SessionVersion, State: []byte(`{"k":1}`)},
+	})
+	m := openBrowser(t, newBrowserModel(t, eng, host, "/ws/a"))
+	m, loadCmd := stepCmd(t, m, keyEnter())
+	if loadCmd == nil || !m.holds.has(holdSessionLoad) {
+		t.Fatal("enter on the browser started no load")
+	}
+	return m, loadCmd
+}
+
+// A message sent between the browser's accept and the record landing opens no Exchange: the restore
+// is still to come, and a worker started now would drive the Agent beside it. The line stays in the
+// box with the load's note, and ⏎ once the record has landed sends it.
+func TestSendDuringSessionLoad(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m, loadCmd := loadingBrowserModel(t, eng)
+
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+
+	if m.state != stateIdle || m.busy() {
+		t.Fatalf("state = %v, want idle — no Exchange opened during the load", m.state)
+	}
+	if got := m.input.Value(); got != "hello" {
+		t.Errorf("input = %q, want the typed line left in the box", got)
+	}
+	assertLastNote(t, m, sessionLoadHoldNote)
+
+	m = foldResume(t, m, loadCmd)
+	if len(eng.restores()) != 1 {
+		t.Fatalf("RestoreSession calls = %d, want the load to restore once", len(eng.restores()))
+	}
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+	if !m.busy() {
+		t.Error("⏎ after the load landed opened no Exchange")
+	}
+}
+
+// /continue during a session load starts no worker either: it answers with the load's note.
+func TestContinueDuringSessionLoad(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m, _ := loadingBrowserModel(t, eng)
+
+	m.input.SetValue("/continue")
+	m = step(t, m, keyEnter())
+
+	if m.state != stateIdle || m.busy() {
+		t.Fatalf("state = %v, want idle — /continue started no worker during the load", m.state)
+	}
+	assertLastNote(t, m, sessionLoadHoldNote)
+}
+
+// A record that lands while a worker drives the engine is not restored: the restore would swap the
+// conversation out from under the running Exchange.
+func TestResumeLoadedWhileBusy(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m, loadCmd := loadingBrowserModel(t, eng)
+	startStubWorker(t, &m) // forced: a worker running when the record lands
+
+	m = step(t, m, cmdMsg(loadCmd))
+
+	if got := eng.restores(); len(got) != 0 {
+		t.Errorf("RestoreSession calls = %v, want none while a worker runs", got)
+	}
+	if m.holds.has(holdSessionLoad) {
+		t.Error("the load hold outlived the landed record")
+	}
+	assertLastNote(t, m, resumeBusyNote)
+}

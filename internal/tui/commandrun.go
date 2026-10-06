@@ -550,7 +550,15 @@ func actuationVerb(verb string) commandRun {
 // left standing in the box is still a DRAFT — it carries its own tokens when it is eventually sent,
 // and nothing is silently borrowed from it here. The order is the typed prompt's: follow-the-tail
 // re-armed, then the user block, then the launch.
+//
+// A session load in flight refuses it with the load's note (loadHoldNote): the record is still being
+// read off the loop, and the worker this verb starts would drive the Agent beside that restore. A
+// /bg launch never reaches here — /continue is idle-only and waits for it in the queue.
 func (m Model) runContinue() (tea.Model, tea.Cmd) {
+	if note, held := m.loadHoldNote(); held {
+		m.transcript.addNote(note)
+		return m, nil
+	}
 	m.takeContextEstimate() // on this goroutine, before either worker below owns the engine
 	if m.eng.InExchange() {
 		box := newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
@@ -577,7 +585,14 @@ func (m Model) runContinue() (tea.Model, tea.Cmd) {
 // live through a compaction too — the row simply waits for the terminal fold — so the legend,
 // derived from stateRunning at paint, says "queue" here as well; and compaction emits no Events
 // until it lands, so the phrase the verb sets is the one that stands until then.
+//
+// A session load in flight refuses it exactly as it refuses /continue (loadHoldNote): no worker
+// starts while the restore is still to come.
 func (m Model) runCompact() (tea.Model, tea.Cmd) {
+	if note, held := m.loadHoldNote(); held {
+		m.transcript.addNote(note)
+		return m, nil
+	}
 	cmd, cancel := startCompact(m.parent, m.eng)
 	batch := m.enterRunning(cmd, cancel, nil, actCompacting)
 	return m, batch
@@ -657,7 +672,8 @@ type bgStartedMsg struct {
 // launch is latched until its answer folds (holdBgLaunch, released by foldBgStarted) the way a
 // /sessions load is: while the Cmd reads the Agent, a heartbeat's rebind is stashed, a wake is held
 // and every idle-only command — a second /bg among them — is queued, so no idle-only mutator runs
-// beside the launch-time snapshot.
+// against the launch-time snapshot; a typed message is refused with the launch's note (loadHoldNote),
+// so no Exchange opens while the launch reads the Agent either.
 func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 	token, text := cutToken(rest)
 	id, named := strings.CutPrefix(token, "/")
@@ -681,9 +697,10 @@ func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 // foldBgStarted notes what a /bg launch came to: the id it started under, or the engine's refusal
 // exactly as the engine worded it. It releases the launch latch first, and — the engine being the
 // loop's again — binds a rebind a beat stashed meanwhile (releaseEngine, unless a worker or an
-// actuation still holds the engine) and runs the commands queued behind the launch, in order;
-// either waits on for a worker a message opened meanwhile (finishWorker). A held wake is tried by
-// the Update tail (wakeAfterFold).
+// actuation still holds the engine) and runs the commands queued behind the launch, in order. No
+// worker can have started meanwhile — a typed message is refused while the launch holds the engine
+// (submit, loadHoldNote) — though releaseEngine and the drain still defer to one (finishWorker). A
+// held wake is tried by the Update tail (wakeAfterFold).
 func (m Model) foldBgStarted(msg bgStartedMsg) (tea.Model, tea.Cmd) {
 	m.holds.release(holdBgLaunch)
 	if msg.err != nil {

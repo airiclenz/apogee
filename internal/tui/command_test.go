@@ -1086,7 +1086,7 @@ func TestBgMissingInputIsRefusedNotAsked(t *testing.T) {
 }
 
 // A /bg launch reads the Agent off the loop, so it is latched until its answer folds: a heartbeat
-// that observes a new model meanwhile stashes the rebind instead of driving it beside the launch,
+// that observes a new model meanwhile stashes the rebind instead of driving it while the launch reads,
 // and the rebind lands at foldBgStarted. The launch Cmd really runs on its own goroutine here, as
 // the program runs it, and both sides touch one unguarded binding — so under -race a rebind driven
 // during the launch is a reported race, not merely a wrong count.
@@ -1217,8 +1217,10 @@ func TestBgLaunchHoldsAWakeUntilItLands(t *testing.T) {
 }
 
 // An Exchange that ends while a /bg launch is in flight is not the boundary a stashed rebind waits
-// for: a message can open one beside the launch, and finishWorker driving the rebind there would
-// meet the launch-time snapshot still reading the Agent. The stash stands until the launch lands.
+// for: finishWorker driving the rebind there would meet the launch-time snapshot still reading the
+// Agent. A typed message no longer opens such an Exchange — submit refuses it under the launch
+// (TestSendDuringBgLaunch) — so the overlap is forced here to pin finishWorker's own deferral. The
+// stash stands until the launch lands.
 func TestBgLaunchKeepsARebindStashedPastAnExchangeEnd(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{startRecipeFn: func(context.Context, domain.RecipeLaunch) (string, error) {
@@ -1233,7 +1235,7 @@ func TestBgLaunchKeepsARebindStashedPastAnExchangeEnd(t *testing.T) {
 
 	m.input.SetValue("/bg /audit internal/")
 	m, _ = stepCmd(t, m, keyEnter()) // the launch Cmd is held: the launch is still in flight
-	startStubWorker(t, &m)           // a message opened an Exchange beside the launch
+	startStubWorker(t, &m)           // forced: a worker driving the engine while the launch is in flight
 	m = foldBeatMsg(t, m, upBeat("new-model", 16384))
 	m = step(t, m, exchangeDoneMsg{})
 
@@ -1280,5 +1282,38 @@ func TestBgLaunchKeepsARebindStashedPastAnActuationEnd(t *testing.T) {
 	}
 	if m.hb.pendingRebind != nil {
 		t.Errorf("pendingRebind = %+v after the launch landed, want it cleared by the apply", m.hb.pendingRebind)
+	}
+}
+
+// A message sent while a /bg launch reads the Agent off the loop opens no Exchange beside it: the line
+// stays in the box with the launch's note, and ⏎ once the launch has landed sends it.
+func TestSendDuringBgLaunch(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{startRecipeFn: func(context.Context, domain.RecipeLaunch) (string, error) {
+		return testWorkflowID, nil
+	}}
+	m := newTestModelEng(t, eng, recipeOpts())
+	m.input.SetValue("/bg /audit internal/")
+	m, _ = stepCmd(t, m, keyEnter()) // the launch Cmd is held: the launch is still in flight
+	if !m.holds.has(holdBgLaunch) {
+		t.Fatal("/bg took no launch hold")
+	}
+
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+
+	if m.state != stateIdle || m.busy() {
+		t.Fatalf("state = %v, want idle — no Exchange opened during the launch", m.state)
+	}
+	if got := m.input.Value(); got != "hello" {
+		t.Errorf("input = %q, want the typed line left in the box", got)
+	}
+	assertLastNote(t, m, bgLaunchHoldNote)
+
+	m = step(t, m, bgStartedMsg{id: testWorkflowID})
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+	if !m.busy() {
+		t.Error("⏎ after the launch landed opened no Exchange")
 	}
 }
