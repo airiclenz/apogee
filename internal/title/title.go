@@ -455,9 +455,14 @@ const (
 // stripThinking drops a leading <think>…</think> block and returns what follows. An unterminated
 // block means the reply is all reasoning and no answer, so everything is dropped and Sanitize
 // reports failure — which is correct: there was no title in it.
+//
+// The tags are matched in an ASCII-only lower-cased copy, never a strings.ToLower one: Unicode
+// lower-casing changes the byte length of some runes (İ shrinks, Ⱥ grows), so an index found in
+// such a copy would slice the original at the wrong offset — a garbled title or an out-of-range
+// panic. Both tags are pure ASCII, so the ASCII fold matches them exactly as before.
 func stripThinking(s string) string {
 	trimmed := strings.TrimSpace(s)
-	lower := strings.ToLower(trimmed)
+	lower := lowerASCII(trimmed)
 	if !strings.HasPrefix(lower, thinkOpen) {
 		return trimmed
 	}
@@ -466,6 +471,18 @@ func stripThinking(s string) string {
 		return ""
 	}
 	return strings.TrimSpace(trimmed[end+len(thinkClose):])
+}
+
+// lowerASCII lower-cases only the ASCII letters A–Z and leaves every other byte as it is, so the
+// result has the same length as s and every byte offset in it is an offset into s.
+func lowerASCII(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
 }
 
 // firstContentLine returns the first line carrying something other than whitespace or a code

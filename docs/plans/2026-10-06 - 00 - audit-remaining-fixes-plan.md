@@ -88,7 +88,7 @@ internal/schedule/harness_test.go — newFakeClock, newRecorder
 **Acceptance:** `go build ./internal/schedule/ && go test -race -count=1 -run 'TestSchedulerAddCloseRace' ./internal/schedule/`
 **Commit:** `fix(schedule): take the WaitGroup slot under the lock in Add`
 
-## 3. stripThinking searches and slices the same string
+## 3. stripThinking searches and slices the same string — ✅ DONE (2026-10-06)
 
 **What:** Fixes audit Medium "`stripThinking` slices with an index taken from a lower-cased copy".
 **Regression guard.** The new cases live in a new `TestStripThinking`, a table over `stripThinking` directly, so the Acceptance run matches them. The Goal reads "inside a leading block, before its close tag": only a leading block is stripped (title.go doc), so a text whose leading `İ` fails the `<think>` prefix is returned whole, as today. Go's `ToLower` shrinks `İ` to 1 byte and grows `Ⱥ` to 3; the table covers both directions.

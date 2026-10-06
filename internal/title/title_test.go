@@ -821,6 +821,70 @@ func TestSanitize(t *testing.T) {
 	}
 }
 
+// stripThinking finds the close tag in a lower-cased copy and slices the original with that index,
+// so the copy must keep every byte offset. Unicode lower-casing does not: İ (2 bytes) lowers to
+// i (1 byte) and Ⱥ (2 bytes) lowers to ⱥ (3 bytes), so a run of either inside the block would
+// shift the index — a garbled title one way, an out-of-range slice panic the other.
+func TestStripThinking(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "shrinking runes before a lower-case close tag",
+			raw:  "<think>İİİİİİİİ</think>Add retry to the uploader",
+			want: "Add retry to the uploader",
+		},
+		{
+			name: "shrinking runes before an upper-case close tag",
+			raw:  "<THINK>İİİİİİİİ</THINK>Add retry to the uploader",
+			want: "Add retry to the uploader",
+		},
+		{
+			name: "growing runes before a lower-case close tag",
+			raw:  "<think>ȺȺȺȺȺȺȺȺ</think>Add retry",
+			want: "Add retry",
+		},
+		{
+			name: "growing runes before an upper-case close tag",
+			raw:  "<Think>ȺȺȺȺȺȺȺȺ</THINK> Add retry",
+			want: "Add retry",
+		},
+		{
+			name: "growing runes past the end of the reply",
+			raw:  "<think>ȺȺȺȺȺȺȺȺȺȺȺȺ</think>X",
+			want: "X",
+		},
+		{
+			name: "mixed runes in the block and in the title",
+			raw:  "<think>İȺİȺ reasoning ȺİȺİ</think>\nİstanbul Ⱥrchive notes",
+			want: "İstanbul Ⱥrchive notes",
+		},
+		{
+			name: "leading İ fails the open-tag prefix and the text is returned whole",
+			raw:  "İ<think>reasoning</think>Title",
+			want: "İ<think>reasoning</think>Title",
+		},
+		{
+			name: "unterminated block with length-changing runes leaves nothing",
+			raw:  "<think>İȺİȺ still reasoning",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := stripThinking(tt.raw); got != tt.want {
+				t.Errorf("stripThinking(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
 // A title is the one piece of model-authored text that is SAVED and comes back out onto a browsable
 // list, so a bidirectional formatting character in the reply would reorder a session-browser row —
 // and the stored title, read later by something else, would not say what the row said. The strip
