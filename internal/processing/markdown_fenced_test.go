@@ -193,6 +193,18 @@ func TestMarkdownFenced_ValuesStayVerbatim(t *testing.T) {
 			want: "src/main.ts",
 		},
 		{
+			name: "a glued close wins over a later bare fence in prose",
+			raw:  "```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nsrc/main.ts```\n\nThen:\n```",
+			key:  "path",
+			want: "src/main.ts",
+		},
+		{
+			name: "a four-backtick fence inside a value does not close the block",
+			raw:  "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nout.md\nBEGIN_ARG\ncontent\nEND_ARG\n````md\nx\n````\n```",
+			key:  "content",
+			want: "````md\nx\n````",
+		},
+		{
 			// The documented limit: a bare ``` opener cannot be told from the block's close.
 			name: "a nested fence opened bare closes the block",
 			raw:  "```tool\nTOOL_NAME\nwrite_file\nBEGIN_ARG\npath\nEND_ARG\nout.txt\nBEGIN_ARG\ncontent\nEND_ARG\nintro\n```\nx\n```\n```",
@@ -242,6 +254,18 @@ func TestMarkdownFenced_StripKeepsTrailingProseFence(t *testing.T) {
 	got := defaultFencedParser().StripToolCall(raw)
 
 	want := "Saving.\n\n\n\nAfterwards run:\n```bash\nls\n```"
+	if got != want {
+		t.Errorf("strip = %q, want %q", got, want)
+	}
+}
+
+func TestMarkdownFenced_StripGluedCloseKeepsLaterProse(t *testing.T) {
+	t.Parallel()
+	raw := "Reading.\n\n```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nsrc/main.ts```\n\nThen:\n```"
+
+	got := defaultFencedParser().StripToolCall(raw)
+
+	want := "Reading.\n\n\n\nThen:\n```"
 	if got != want {
 		t.Errorf("strip = %q, want %q", got, want)
 	}

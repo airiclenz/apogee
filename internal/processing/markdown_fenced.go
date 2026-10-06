@@ -137,10 +137,11 @@ func (p *MarkdownFencedParser) lastFenceBounds(text string) (openStart, blockSta
 // Walking the lines from blockStart, a line whose trimmed form is ``` followed by an info
 // string (```bash) opens a nested fence, and a line that is exactly ``` closes the innermost
 // open nested fence, or the tool block when none is open; blockEnd is then the start of that
-// close line, so the block keeps the line break before it. Only when no line closes the block
-// does the scan fall back to the first ``` anywhere that does not reopen the fence language —
-// the close glued to a value's last line (src/main.ts```) — where blockEnd and closeIdx
-// coincide.
+// close line, so the block keeps the line break before it. Outside any nested fence, a line
+// that ends in ``` after other text closes the block there too — the close glued to a value's
+// last line (src/main.ts```) — and it wins over any later ``` line, where blockEnd and
+// closeIdx coincide. Only when no line closes the block does the scan fall back to the first
+// ``` anywhere that does not reopen the fence language.
 //
 // A nested fence opened bare (``` with no info string) cannot be told from the tool block's
 // own close, so its opener closes the block: the documented limit of the format.
@@ -167,10 +168,20 @@ func closeLine(text string, blockStart int) (blockEnd, closeIdx int, ok bool) {
 			depth--
 		case opensNestedFence(trimmed):
 			depth++
+		case depth == 0 && endsInGluedClose(trimmed):
+			at := lineStart + len(strings.TrimRight(text[lineStart:lineEnd], " \t\r")) - len(codeFence)
+			return at, at, true
 		}
 		lineStart = lineEnd + 1
 	}
 	return 0, 0, false
+}
+
+// endsInGluedClose reports whether a trimmed line ends in a ``` glued to other text
+// (src/main.ts```). A line of four or more backticks is a longer fence, not a glued close.
+func endsInGluedClose(trimmed string) bool {
+	body, ok := strings.CutSuffix(trimmed, codeFence)
+	return ok && body != "" && !strings.HasSuffix(body, "`")
 }
 
 // opensNestedFence reports whether a trimmed line opens a fence with an info string (```bash).
