@@ -745,8 +745,8 @@ type workflowObserver struct {
 
 	mu sync.Mutex
 	id string // the Workflow's id, once started was emitted
-	// runs is each item's runs so far, keyed by its place — never by its Key, which two items of
-	// one stage can share.
+	// runs is each item's runs so far, keyed by its place — never by its Label, which two items of
+	// one stage can share (a batch's derived label can spell a literal entry).
 	runs map[itemPlace]itemRuns
 }
 

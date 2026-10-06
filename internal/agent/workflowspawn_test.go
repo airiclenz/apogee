@@ -490,7 +490,11 @@ func assertAttempts(t *testing.T, phases []domain.WorkflowPhaseEvent, status str
 	}
 }
 
-func TestWorkflowSpawn_ItemsSharingAKeyEachNameTheirOwnRun(t *testing.T) {
+// TestWorkflowSpawn_ItemsSharingALabelEachNameTheirOwnRun runs two distinct items that carry one
+// label: a batch of three, labelled by its first and last entries and their count, and a literal
+// entry spelled the same. A source never repeats an entry, so no two items share a key, but a label
+// can still collide — and each item must still name its own run.
+func TestWorkflowSpawn_ItemsSharingALabelEachNameTheirOwnRun(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingSink{}
@@ -498,12 +502,19 @@ func TestWorkflowSpawn_ItemsSharingAKeyEachNameTheirOwnRun(t *testing.T) {
 		finishTurn("f1", `{"status":"ok","summary":"first"}`),
 		finishTurn("f2", `{"status":"ok","summary":"second"}`),
 	)
+	plan := fanoutPlan("a.go", "b.go", "c.go", "a.go … c.go (3)")
+	plan.Stages[0].Over.Batch = 3
 
-	phases := observedRun(t, a, sink, fanoutPlan("a.go", "a.go"), 0, 0)
+	phases := observedRun(t, a, sink, plan, 0, 0)
 
 	runs := map[int]string{}
+	labels := map[int]string{}
 	for _, phase := range phasesAt(phases, domain.WorkflowItemStarted) {
 		runs[phase.Index] = phase.Run
+		labels[phase.Index] = phase.Item
+	}
+	if len(labels) != 2 || labels[0] != labels[1] {
+		t.Fatalf("item labels = %v, want the two items to share one label", labels)
 	}
 	if len(runs) != 2 || runs[0] == runs[1] {
 		t.Fatalf("item runs = %v, want one run for each of the two items", runs)
