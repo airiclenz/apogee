@@ -95,7 +95,8 @@
 // (global may add or remove, project may only add — ADR 0012) — the merge seam that ADR fixes,
 // called by no config key today (apogee-089 would wire it). shellwrites.go is the shell
 // write view those two lean on: writeTargetsOf, the verb-aware reading of a command line that
-// keeps its redirect targets and the operands of mutating or unknown leaders and drops what a
+// keeps its redirect targets, the operands of mutating or unknown leaders and the files an output
+// option or verb writes (`--output=file`, `uniq in out`, `sed 'w file'`) and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
 // its command-line argument (domain.ArgRoleShellCommand).
 //

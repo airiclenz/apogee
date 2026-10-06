@@ -170,7 +170,13 @@ internal/agent/treesnapshot_test.go — TestTreeSnapshot_GitRunsThroughTheFunnel
 **Acceptance:** `go build ./internal/agent/ && go test -count=1 -run 'TreeSnapshot' ./internal/agent/`
 **Commit:** `fix(agent): diff tree snapshots on per-path content identity`
 
-## 8. Shell-write guard: writing leaders and output options
+## 8. Shell-write guard: writing leaders and output options — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): consequential edit — internal/security/doc.go: made necessary by read leaders now contributing an output option's or output verb's file (the package doc said the view drops what a read leader names)
+NOTES (2026-10-06): consequential edit — docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md: made necessary by read leaders now contributing an output option's or output verb's file (the ADR said a read leader contributes nothing); sentence amended, dated
+NOTES (2026-10-06): the hard-refuse half of the Tests line is pinned by a new TestShellWriteViewRefusesOutputWrites in shellwrites_test.go (guard-level, via DefaultDangerousActionGuard) rather than by rows in dangerous_test.go, which the item's Files line does not list
+NOTES (2026-10-06): xxd value options also accept their long spellings (-cols, -groupsize, -len, -offset, -seek, -name), which xxd's own parser treats as the same options; uniq short bundles ending in f/s/w consume the next word as getopt does
+NOTES (2026-10-06): pre-existing debt, not changed: sed's `e` command and `s///e` flag execute a shell command yet sed without -i stays a read leader; GNU long-option abbreviations (`--out=`) and tree bundles (`-ao file`) are not read as output options; a `-f` sed script file is not seen
 
 **What:** Recast at the regression check (2026-10-06). Fixes part of audit Medium "Shell-write guard misses writes to `.git/hooks`": ordinary verbs judged writeless.
 **Regression guard.** uniq/xxd/tree stay in `readLeaders`, with cases in `operandTargets` ahead of `readLeaders[leader]` (like `ddTargets`) and the map doc's "on any option" claim rewritten to name them. uniq/xxd contribute their 2nd positional operand, skipping the value word of xxd -c/-g/-l/-o/-s/-n and uniq -f/-s/-w/--skip-fields/--skip-chars/--check-chars, option parsing stopped at `--`; tree contributes only its -o value. A bare `-o <word>` writes only for tree. The generic `--output=`/`--output <word>` value is read only on branches that do not return `valueOperands` today (read leaders, sed without -i, find without a writing predicate, `gitTargets`' read-verb branch, dd, the new handlers), so `frobnicate --output=.git/config` is emitted once; that scan stops at `--` and skips echo/printf and a grep/rg `-e` value. A sed target is only the filename after a w/W command or an s///w flag, never sed's file operands.

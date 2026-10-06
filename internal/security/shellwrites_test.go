@@ -74,6 +74,34 @@ func TestWriteTargetsOf(t *testing.T) {
 		// --- dd ----------------------------------------------------------------------------
 		{"dd writes only its of=", "dd if=.git/config of=/tmp/x bs=1", "/tmp/x"},
 
+		// --- output-writing verbs and options ---------------------------------------------
+		{"uniq writes its second operand", "uniq in .git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"uniq's -f value is not an operand", "uniq -f 1 in .git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"uniq's bundle ending in a value letter consumes the next word", "uniq -cs 2 in out", "out"},
+		{"uniq's options stop at --", "uniq -- -in out", "out"},
+		{"uniq with one operand writes nothing", "uniq in", ""},
+		{"xxd -r writes its second operand", "xxd -r in .git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"xxd's -l value is not an operand", "xxd -l 64 in .git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"xxd with one operand writes nothing", "xxd -l 64 .git/config", ""},
+		{"tree's -o value", "tree -o .git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"tree's operands are what it lists", "tree .git/hooks", ""},
+		{"a bare -o writes only for tree", "ls -o .git/hooks", ""},
+		{"sed's w command", "sed -n 'w .git/hooks/pre-commit' in", ".git/hooks/pre-commit"},
+		{"sed's W command after a regex address", "sed -n '/x/W .git/hooks/pre-commit' in", ".git/hooks/pre-commit"},
+		{"sed's s///w flag", "sed 's/a/b/w .git/hooks/pre-commit' in", ".git/hooks/pre-commit"},
+		{"sed's s///gw flag in an -e script", "sed -e 's/a/b/gw .git/hooks/pre-commit' in", ".git/hooks/pre-commit"},
+		{"sed's w in a later -e script, after a chained command", "sed -n -e p -e 'p;$w out' in", "out"},
+		{"sed's w in a regex is not a command", "sed -n '/worktree/p' .git/config", ""},
+		{"sed's r reads its file", "sed 'r .git/hooks/x' in", ""},
+		{"sed's operands are read, not written", "sed -n 's/a/b/p' .git/config", ""},
+		{"git diff --output= writes its value", "git diff --output=.git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"git log --output writes the next word", "git log --output .git/hooks/pre-commit", ".git/hooks/pre-commit"},
+		{"a read leader's --output writes", "cat --output .git/hooks/pre-commit x", ".git/hooks/pre-commit"},
+		{"the --output scan stops at --", "grep -rn -- --output .git/hooks", ""},
+		{"grep's -e value is a pattern", "grep -e --output .git/config", ""},
+		{"echo prints --output", "echo --output .git/config", ""},
+		{"an unknown leader's --output word is emitted once", "frobnicate --output .git/config", ".git/config"},
+
 		// --- substitutions and heredocs --------------------------------------------------
 		{"a substitution's read contributes nothing", "cat $(find .git/hooks -name x)", ""},
 		{"a substitution's write contributes", "echo $(rm -rf .git/hooks)", ".git/hooks"},
@@ -98,6 +126,56 @@ func TestWriteTargetsOf(t *testing.T) {
 
 			if got != tc.want {
 				t.Errorf("writeTargetsOf(%q) = %q, want %q", tc.command, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShellWriteViewRefusesOutputWrites pins what the shell write view hands the guard for the
+// verbs and options that write a file without naming it as a mutating verb's operand: each
+// spelling aimed at the git control plane is hard-refused, while the same leaders reading it,
+// and the look-alike flags of other leaders, pass.
+func TestShellWriteViewRefusesOutputWrites(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		command  string
+		wantTier Tier
+		wantRule string
+	}{
+		{"uniq in .git/hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"xxd -r in .git/hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"tree -o .git/hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"sed -n 'w .git/hooks/pre-commit' in", TierHardRefuse, "write-git-control-plane"},
+		{"sed -n '/x/W .git/hooks/pre-commit' in", TierHardRefuse, "write-git-control-plane"},
+		{"sed 's/a/b/w .git/hooks/pre-commit' in", TierHardRefuse, "write-git-control-plane"},
+		{"git diff --output=.git/hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"git log --output .git/hooks/pre-commit", TierHardRefuse, "write-git-control-plane"},
+		{"cat --output=.git/config x", TierHardRefuse, "write-git-control-plane"},
+		{"frobnicate --output=.git/config", TierHardRefuse, "write-git-control-plane"},
+		{"uniq in", TierNone, ""},
+		{"tree", TierNone, ""},
+		{"tree .git/hooks", TierNone, ""},
+		{"xxd .git/config", TierNone, ""},
+		{"uniq .git/config", TierNone, ""},
+		{"xxd -l 64 .git/config", TierNone, ""},
+		{"uniq -f 1 .git/config", TierNone, ""},
+		{"ls -o .git/hooks", TierNone, ""},
+		{"grep -o x .git/config", TierNone, ""},
+		{"grep -rn -- --output .git/hooks", TierNone, ""},
+		{"sed -n '/worktree/p' .git/config", TierNone, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.command, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), shellTool, nil)
+
+			if d.Tier != tc.wantTier || d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) = tier %d rule %q, want tier %d rule %q",
+					tc.command, d.Tier, d.RuleID, tc.wantTier, tc.wantRule)
 			}
 		})
 	}

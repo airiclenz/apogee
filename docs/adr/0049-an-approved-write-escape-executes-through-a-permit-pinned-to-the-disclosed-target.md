@@ -214,7 +214,10 @@ tool), and a rule that opts in (`Rule.ShellWriteView`) judges that argument by w
 WRITE (`internal/security/shellwrites.go`, `writeTargetsOf`): its output-redirect targets and the
 operands of leaders that mutate (`rm`, `mv`, `cp`, `tee`, `sed -i`, a `git` verb that writes, …)
 or that the guard does not know — an unknown leader fails closed — while a read leader (`ls`,
-`cat`, `cmp`, `grep`, a `git` read verb, `find` without `-delete`/`-exec`, …) contributes nothing.
+`cat`, `cmp`, `grep`, a `git` read verb, `find` without `-delete`/`-exec`, …) contributes nothing
+but the file it is told to write: an `--output=file` / `--output file` value (`git diff
+--output=…` included), the second operand of `uniq` and `xxd`, `tree`'s `-o` value, and the file
+a `sed` script's `w` / `W` command or `s///w` flag names (amended 2026-10-06).
 Pipelines, `&&` / `||` / `;` chains and command substitutions are split first; a heredoc body is
 payload. A builtin that moves what a LATER command's operands resolve to — `cd`, `export`, `set`,
 `unset` — is not a read leader: `cd .git/hooks && rm -rf pre-commit` names the control plane only

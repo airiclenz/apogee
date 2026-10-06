@@ -21,9 +21,12 @@ import (
 //   - every OUTPUT redirect target (`>`, `>>`, `>|`, `&>`, `<>`; a heredoc delimiter, a
 //     here-string and an fd dup such as `2>&1` name no file and contribute nothing),
 //   - nothing for a READ leader — ls, cat, head, tail, less, cmp, diff, stat, wc, grep,
-//     file, a `git` read subcommand, `find` without `-delete` / `-exec`, `sed` and `perl`
-//     without an in-place flag, and the like (readLeaders): its operands are what it reads,
-//   - only the `of=` values for `dd`,
+//     file, a `git` read subcommand, `find` without `-delete` / `-exec`, `sed` without an
+//     in-place flag, and the like (readLeaders): its operands are what it reads — except
+//     the file an output option names (`--output=file`, `--output file`; outputOptionValues),
+//     the second operand of `uniq` and `xxd` (`uniq in out`, `xxd -r in out`), `tree`'s `-o`
+//     value and the file a `sed` script's `w` / `W` command or `s///w` flag writes,
+//   - only the `of=` values (and an output option's file) for `dd`,
 //   - and every operand of any OTHER leader — a mutating one (rm, mv, cp, install, ln,
 //     chmod, chown, touch, mkdir, rmdir, truncate, tee, `sed -i`, `perl -i`, a `git`
 //     subcommand that writes) or an unknown one, which fails closed: a leader this file
@@ -357,9 +360,12 @@ func (tk *shellTokenizer) endCommand() {
 // ----------------------------------------------------------------------------
 
 // readLeaders are the commands whose operands name what they READ, never what they write:
-// their simple command contributes nothing beyond its redirect targets. Membership is a
-// claim that the program writes to no file its operands name, on any option — so `sort`
-// (`-o`) and `awk` (a program may redirect) are deliberately absent and fail closed. So are
+// their simple command contributes nothing beyond its redirect targets and the file an
+// output option names (`--output=file`, outputOptionValues). Membership is a claim that the
+// program writes to no other file its operands name, on any option — save three members
+// operandTargets judges ahead of this map: `uniq` and `xxd` write their second operand
+// (secondPositional) and `tree` its `-o` value (treeOutputTargets). `sort` (`-o`) and `awk`
+// (a program may redirect) are deliberately absent and fail closed. So are
 // the builtins that change what a LATER command's operands resolve to — `cd` (the working
 // directory), `export` / `set` / `unset` (the environment): `cd .git/hooks && rm -rf
 // pre-commit` writes under the control plane while naming it only in the `cd`, so those
@@ -447,31 +453,336 @@ func operandTargets(words []string) []string {
 		return assignmentValues(all)
 	}
 	leader, operands := path.Base(words[0]), words[1:]
+	// A branch that returns valueOperands already keeps an output option's file; every other
+	// branch adds it from outputs, so the file is emitted once either way.
+	outputs := outputOptionValues(leader, operands)
 	switch {
 	case leader == "git":
 		return gitTargets(operands)
 	case leader == "dd":
-		return ddTargets(operands)
+		return append(ddTargets(operands), outputs...)
+	case leader == "uniq":
+		return append(secondPositional(operands, uniqOptionTakesValue), outputs...)
+	case leader == "xxd":
+		return append(secondPositional(operands, xxdOptionTakesValue), outputs...)
+	case leader == "tree":
+		return append(treeOutputTargets(operands), outputs...)
 	case leader == "find":
 		if !hasAny(operands, findWritingPredicates) {
-			return nil
+			return outputs
 		}
 	case leader == "sed":
 		if !hasInPlaceFlag(operands) {
-			return nil
+			return append(sedWriteTargets(operands), outputs...)
 		}
 	case leader == "perl":
 		if !hasInPlaceFlag(operands) {
 			return valueOperands(operands) // arbitrary code: fail closed like an unknown leader
 		}
 	case readLeaders[leader]:
-		return nil
+		return outputs
 	}
 	return valueOperands(operands)
 }
 
-// gitTargets judges a git command by its subcommand: a read verb contributes nothing, any
-// other verb's operands (the global options before it included) are write targets. A `config`
+// outputOptionValues returns the files a leader's output options name: the value of every
+// `--output=file` and the word after every bare `--output`, the spelling any leader (`git diff
+// --output=…` included) uses to write its result to a file. Option parsing stops at `--`;
+// `echo` / `printf` print their operands rather than parse them, and a grep / rg `-e` value is
+// a pattern, so neither is read as an option.
+func outputOptionValues(leader string, operands []string) []string {
+	if leader == "echo" || leader == "printf" {
+		return nil
+	}
+	takesPattern := leader == "grep" || leader == "egrep" || leader == "fgrep" || leader == "rg"
+	var targets []string
+	for i := 0; i < len(operands); i++ {
+		w := operands[i]
+		switch {
+		case w == "--":
+			return targets
+		case takesPattern && w == "-e":
+			i++
+		case w == "--output":
+			if i+1 < len(operands) {
+				i++
+				targets = append(targets, operands[i])
+			}
+		default:
+			if v, ok := strings.CutPrefix(w, "--output="); ok && v != "" {
+				targets = append(targets, v)
+			}
+		}
+	}
+	return targets
+}
+
+// secondPositional returns the second positional operand of an option list — the output file
+// of `uniq in out` and `xxd -r in out` — as a one-element slice, or nil when there is none. An
+// option word for which takesValue reports true consumes the word after it; after `--` every
+// word is positional.
+func secondPositional(operands []string, takesValue func(string) bool) []string {
+	const outputPosition = 2
+	position, optionsDone := 0, false
+	for i := 0; i < len(operands); i++ {
+		w := operands[i]
+		if !optionsDone && w == "--" {
+			optionsDone = true
+			continue
+		}
+		if !optionsDone && strings.HasPrefix(w, "-") && w != "-" {
+			if takesValue(w) {
+				i++
+			}
+			continue
+		}
+		position++
+		if position == outputPosition {
+			return []string{w}
+		}
+	}
+	return nil
+}
+
+// uniqValueOptions are uniq's long options that take the next word as their value.
+var uniqValueOptions = map[string]bool{
+	"--skip-fields": true, "--skip-chars": true, "--check-chars": true,
+}
+
+// uniqOptionTakesValue reports whether a uniq option word consumes the word after it: one of
+// uniqValueOptions, or a short bundle whose first value letter (`f`, `s`, `w`) ends it — a
+// value letter earlier in the bundle takes the bundle's rest as its value instead.
+func uniqOptionTakesValue(w string) bool {
+	if strings.HasPrefix(w, "--") {
+		return uniqValueOptions[w]
+	}
+	letters := w[1:]
+	if at := strings.IndexAny(letters, "fsw"); at >= 0 {
+		return at == len(letters)-1
+	}
+	return false
+}
+
+// xxdValueOptions are xxd's options that take the next word as their value; xxd parses no
+// bundles, and a value glued to the option (`-l64`) consumes nothing.
+var xxdValueOptions = map[string]bool{
+	"-c": true, "-cols": true, "-g": true, "-groupsize": true, "-l": true, "-len": true,
+	"-o": true, "-offset": true, "-s": true, "-seek": true, "-n": true, "-name": true,
+}
+
+// xxdOptionTakesValue reports whether an xxd option word consumes the word after it.
+func xxdOptionTakesValue(w string) bool {
+	return xxdValueOptions[w]
+}
+
+// treeOutputTargets returns the files tree's `-o` option writes its listing to. A bare `-o`
+// writes only for tree: `ls -o` and `grep -o` are formatting flags. Option parsing stops at `--`.
+func treeOutputTargets(operands []string) []string {
+	var targets []string
+	for i := 0; i < len(operands); i++ {
+		switch {
+		case operands[i] == "--":
+			return targets
+		case operands[i] == "-o" && i+1 < len(operands):
+			i++
+			targets = append(targets, operands[i])
+		}
+	}
+	return targets
+}
+
+// sedWriteTargets returns the files a sed invocation without an in-place flag writes: the
+// filenames its scripts' `w` / `W` commands and `s///w` flags name (sedScriptWriteTargets),
+// never its file operands, which it reads. A script sed reads from a file (`-f`) is not seen.
+func sedWriteTargets(operands []string) []string {
+	var targets []string
+	for _, script := range sedScripts(operands) {
+		targets = append(targets, sedScriptWriteTargets(script)...)
+	}
+	return targets
+}
+
+// sedScripts returns the scripts a sed option list runs: every `-e` / `--expression` value,
+// or — when it has none and no `-f` / `--file` — its first non-option operand.
+func sedScripts(operands []string) []string {
+	var scripts []string
+	firstOperand, hasOperand, hasScriptFile := "", false, false
+	for i := 0; i < len(operands); i++ {
+		w := operands[i]
+		if w == "--" {
+			if !hasOperand && i+1 < len(operands) {
+				firstOperand, hasOperand = operands[i+1], true
+			}
+			break
+		}
+		option, value, needsNext := sedOption(w)
+		if needsNext && i+1 < len(operands) {
+			i++
+			value = operands[i]
+		}
+		switch option {
+		case "":
+			if !hasOperand {
+				firstOperand, hasOperand = w, true
+			}
+		case "e":
+			scripts = append(scripts, value)
+		case "f":
+			hasScriptFile = true
+		}
+	}
+	if len(scripts) > 0 || hasScriptFile || !hasOperand {
+		return scripts
+	}
+	return []string{firstOperand}
+}
+
+// sedLongValueOptions maps sed's value-taking long options to their short letters.
+var sedLongValueOptions = map[string]string{
+	"--expression": "e", "--file": "f", "--line-length": "l",
+}
+
+// sedOption classifies one sed word: option "" for an operand, "e" / "f" / "l" for the
+// value-taking `-e` (`--expression`), `-f` (`--file`) and `-l` (`--line-length`), and "-" for
+// any other option. value is a value glued to the option (`-es/a/b/`, `--file=x`); needsNext
+// says the value is the next word instead. In a short bundle (`-ne`) the first value letter
+// takes the bundle's rest.
+func sedOption(w string) (option, value string, needsNext bool) {
+	if !strings.HasPrefix(w, "-") || w == "-" {
+		return "", "", false
+	}
+	if strings.HasPrefix(w, "--") {
+		name, rest, hasValue := strings.Cut(w, "=")
+		short, takesValue := sedLongValueOptions[name]
+		if !takesValue {
+			return "-", "", false
+		}
+		return short, rest, !hasValue
+	}
+	letters := w[1:]
+	at := strings.IndexAny(letters, "efl")
+	if at < 0 {
+		return "-", "", false
+	}
+	return letters[at : at+1], letters[at+1:], at == len(letters)-1
+}
+
+// sedScriptWriteTargets returns the filenames a sed script writes: the rest of the line after
+// a `w` / `W` command or after an `s` command's `w` flag. Addresses, regexes, the `s` and `y`
+// operands, labels and the text of `a` / `i` / `c` / `r` / `e` / `#` are skipped, so a `w`
+// inside them (`/worktree/p`) is never read as a command.
+func sedScriptWriteTargets(script string) []string {
+	var targets []string
+	runes := []rune(script)
+	for i := skipSedAddresses(runes, 0); i < len(runes); i = skipSedAddresses(runes, i) {
+		command := runes[i]
+		i++
+		switch command {
+		case 'w', 'W':
+			var file string
+			file, i = sedRestOfLine(runes, i)
+			targets = appendNonEmpty(targets, file)
+		case 's':
+			i = skipSedDelimited(runes, i, 2)
+			var file string
+			file, i = sedSubstituteFlags(runes, i)
+			targets = appendNonEmpty(targets, file)
+		case 'y':
+			i = skipSedDelimited(runes, i, 2)
+		case 'a', 'i', 'c', 'r', 'R', 'e', '#':
+			_, i = sedRestOfLine(runes, i)
+		case ':', 'b', 't', 'T':
+			for i < len(runes) && runes[i] != ';' && runes[i] != '\n' {
+				i++
+			}
+		}
+	}
+	return targets
+}
+
+// skipSedAddresses returns the index of the next sed command character at or after i,
+// stepping over separators (blanks, `;`, `{`, `}`), negation and the addresses before a
+// command: line numbers, `$`, `first~step`, `addr,+N`, and `/regex/` or `\cregexc`.
+func skipSedAddresses(runes []rune, i int) int {
+	for i < len(runes) {
+		r := runes[i]
+		switch {
+		case unicode.IsSpace(r) || unicode.IsDigit(r) || strings.ContainsRune(";{}!,~+$", r):
+			i++
+		case r == '/':
+			i = skipSedRegex(runes, i+1, '/')
+		case r == '\\' && i+1 < len(runes):
+			i = skipSedRegex(runes, i+2, runes[i+1])
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// skipSedRegex returns the index just past the delimiter that closes a sed regex or
+// replacement starting at i, honouring backslash escapes.
+func skipSedRegex(runes []rune, i int, delimiter rune) int {
+	for i < len(runes) && runes[i] != delimiter {
+		if runes[i] == '\\' {
+			i++
+		}
+		i++
+	}
+	return min(i+1, len(runes))
+}
+
+// skipSedDelimited steps over the delimiter at i and the parts of an `s` or `y` command it
+// opens (`/re/repl/` is two parts), returning the index just past the last closing delimiter.
+func skipSedDelimited(runes []rune, i, parts int) int {
+	if i >= len(runes) {
+		return i
+	}
+	delimiter := runes[i]
+	i++
+	for range parts {
+		i = skipSedRegex(runes, i, delimiter)
+	}
+	return i
+}
+
+// sedSubstituteFlags reads the flags after an `s` command (`g`, `p`, a number, `i`, `m`, `e`,
+// `w file`), returning the file a `w` flag names ("" for none) and the index past the flags.
+func sedSubstituteFlags(runes []rune, i int) (string, int) {
+	for i < len(runes) && (unicode.IsLetter(runes[i]) || unicode.IsDigit(runes[i])) {
+		if runes[i] == 'w' {
+			return sedRestOfLine(runes, i+1)
+		}
+		i++
+	}
+	return "", i
+}
+
+// sedRestOfLine returns the text from i to the end of the line, leading and trailing blanks
+// trimmed, and the index of the newline that ends it; a backslash-escaped newline continues
+// the text (`a\` then the appended line).
+func sedRestOfLine(runes []rune, i int) (string, int) {
+	start := i
+	for i < len(runes) && runes[i] != '\n' {
+		if runes[i] == '\\' {
+			i++
+		}
+		i++
+	}
+	i = min(i, len(runes))
+	return strings.TrimSpace(string(runes[start:i])), i
+}
+
+// appendNonEmpty appends w to words unless it is empty.
+func appendNonEmpty(words []string, w string) []string {
+	if w == "" {
+		return words
+	}
+	return append(words, w)
+}
+
+// gitTargets judges a git command by its subcommand: a read verb contributes only the file an
+// output option names (`git diff --output=file`; outputOptionValues), any other verb's operands (the global options before it included) are write targets. A `config`
 // write of a command-valued key into the repository's own config additionally names
 // `.git/config`, the file it lands in — its operands alone (`filter.x.clean cmd`) never spell
 // the control-plane path the write-git-control-plane rule matches, so the approval would not
@@ -485,12 +796,12 @@ func gitTargets(operands []string) []string {
 			continue
 		}
 		if strings.HasPrefix(rest[0], "--") && gitReadSubcommands[rest[0]] {
-			return nil
+			return outputOptionValues("git", operands)
 		}
 		rest = rest[1:]
 	}
 	if len(rest) == 0 || gitReadSubcommands[rest[0]] {
-		return nil
+		return outputOptionValues("git", operands)
 	}
 	targets := make([]string, 0, len(operands))
 	for _, w := range operands {
