@@ -38,7 +38,10 @@ import (
 // a command that is nothing but assignments (`d=.git/hooks; rm -rf $d`) contributes their
 // values, since a later command's operands resolve through them.
 // The heredoc body a `<<` opens is skipped up to its delimiter line: it is the payload the
-// redirect carries, not a command.
+// redirect carries, not a command — save when its host command is a shell interpreter (sh,
+// bash, dash, zsh, ksh) reading its script on stdin (no `-c`, no script-file operand), whose
+// body is shell: it is split into simple commands of its own and judged as a substitution
+// body is, appended after its host (owner decision, 2026-10-06).
 //
 // It is a footgun-guard reading (ADR 0012), not an obfuscation-resistant one: `cat .git/config`
 // is a read and `echo x > .git/config` a write, and a line built to look like the former while
@@ -80,10 +83,21 @@ type shellTokenizer struct {
 	word     strings.Builder
 	inWord   bool
 	pending  pendingWord
-	heredocs []string // delimiters whose bodies follow the next newline, in order
+	heredocs []heredoc // the heredocs whose bodies follow the next newline, in order
+	// boundHeredocs counts the heredocs already bound to the command that opened them; the
+	// rest belong to the command in progress, which binds them when it closes.
+	boundHeredocs int
 	// flushAfter holds the commands a substitution nested in the current command; they
 	// are emitted right after it so a reader sees the host before its guests.
 	flushAfter []simpleCommand
+}
+
+// heredoc is one pending `<<` body: the delimiter line that ends it, and whether its host
+// command reads it as a shell script (readsStdinScript), which makes the body commands of
+// its own rather than payload.
+type heredoc struct {
+	delimiter string
+	script    bool
 }
 
 // splitSimpleCommands tokenizes command into its simple commands; nested command
@@ -253,7 +267,8 @@ func (tk *shellTokenizer) scanOutputRedirect(runes []rune, i int) int {
 
 // scanInputRedirect consumes a `<`-family operator: `<` and `<<<` name what is READ (their
 // word is skipped), `<<` / `<<-` open a heredoc whose delimiter word is recorded so the body
-// can be skipped at the next newline, and `<>` opens read-write and counts as a write.
+// can be skipped — or, for an interpreter's stdin script, read — at the next newline, and
+// `<>` opens read-write and counts as a write.
 // Returns the index of the last rune consumed.
 func (tk *shellTokenizer) scanInputRedirect(runes []rune, i int) int {
 	tk.dropFdWord()
@@ -296,23 +311,30 @@ func (tk *shellTokenizer) dropFdWord() {
 }
 
 // skipHeredocBodies advances past every pending heredoc body: line by line from runes[i]
-// (a newline) until each delimiter appears on a line of its own, in order. Returns the
-// index of the last rune consumed.
+// (a newline) until each delimiter appears on a line of its own, in order. A body its host
+// reads as a shell script is tokenized as commands of its own, appended after the commands
+// already closed — its host among them. Returns the index of the last rune consumed.
 func (tk *shellTokenizer) skipHeredocBodies(runes []rune, i int) int {
-	for _, delimiter := range tk.heredocs {
+	for _, doc := range tk.heredocs {
+		var body []string
 		for i+1 < len(runes) {
 			end := i + 1
 			for end < len(runes) && runes[end] != '\n' {
 				end++
 			}
-			line := strings.TrimSpace(string(runes[i+1 : end]))
+			line := string(runes[i+1 : end])
 			i = end
-			if line == delimiter {
+			if strings.TrimSpace(line) == doc.delimiter {
 				break
 			}
+			body = append(body, line)
+		}
+		if doc.script {
+			tk.commands = append(tk.commands, splitSimpleCommands(strings.Join(body, "\n"))...)
 		}
 	}
 	tk.heredocs = nil
+	tk.boundHeredocs = 0
 	return i
 }
 
@@ -334,7 +356,7 @@ func (tk *shellTokenizer) endWord() {
 	case tk.pending == pendingRedirectTarget:
 		tk.current.redirectTargets = append(tk.current.redirectTargets, w)
 	case tk.pending == pendingHeredocDelimiter:
-		tk.heredocs = append(tk.heredocs, w)
+		tk.heredocs = append(tk.heredocs, heredoc{delimiter: w})
 	case tk.pending == pendingSkip:
 	default:
 		tk.current.words = append(tk.current.words, w)
@@ -343,10 +365,19 @@ func (tk *shellTokenizer) endWord() {
 }
 
 // endCommand closes the simple command in progress, keeping it only when it has words or
-// redirect targets, followed by any substitutions it hosted.
+// redirect targets, followed by any substitutions it hosted. The heredocs it opened are
+// bound to it here, once its words are complete: each body is a script exactly when this
+// command reads one on stdin.
 func (tk *shellTokenizer) endCommand() {
 	tk.endWord()
 	tk.pending = pendingOperand
+	if tk.boundHeredocs < len(tk.heredocs) {
+		script := readsStdinScript(tk.current.words)
+		for i := tk.boundHeredocs; i < len(tk.heredocs); i++ {
+			tk.heredocs[i].script = script
+		}
+		tk.boundHeredocs = len(tk.heredocs)
+	}
 	if len(tk.current.words) > 0 || len(tk.current.redirectTargets) > 0 {
 		tk.commands = append(tk.commands, tk.current)
 	}
@@ -445,10 +476,7 @@ var findWritingPredicates = map[string]bool{
 // LATER command's operands resolve through, so its values feed the view as `export`'s would.
 func operandTargets(words []string) []string {
 	all := words
-	words = stripAssignments(words)
-	for len(words) > 0 && wrapperLeaders[path.Base(words[0])] {
-		words = stripAssignments(stripBareOptions(words[1:]))
-	}
+	words = stripWrappers(words)
 	if len(words) == 0 {
 		return assignmentValues(all)
 	}
@@ -870,6 +898,68 @@ func hasAny(words []string, set map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// stripWrappers drops a simple command's leading `NAME=value` assignments and wrapper
+// leaders (with their bare options), so the wrapped leader comes first; it returns nothing
+// for a command that is only assignments.
+func stripWrappers(words []string) []string {
+	words = stripAssignments(words)
+	for len(words) > 0 && wrapperLeaders[path.Base(words[0])] {
+		words = stripAssignments(stripBareOptions(words[1:]))
+	}
+	return words
+}
+
+// shellInterpreters are the leaders whose heredoc body, when it is the script they read on
+// stdin, is shell the view reads for write targets (readsStdinScript).
+var shellInterpreters = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true,
+}
+
+// interpreterLongOptionsTakingValue are the long options of the shell interpreters whose
+// value is the next word, never a script-file operand.
+var interpreterLongOptionsTakingValue = map[string]bool{
+	"--rcfile": true, "--init-file": true, "--emulate": true,
+}
+
+// readsStdinScript reports whether a simple command, after wrapper and assignment stripping,
+// is a shell interpreter (shellInterpreters) that reads its script from stdin: its operands
+// are options only, or `-s` (whose following words are the script's arguments). A `-c`
+// string or a script-file operand is the script instead, and the stdin a heredoc feeds is
+// then the script's input, payload like any other. An `-o` / `+o` / `-O` / `+O` option and
+// interpreterLongOptionsTakingValue consume the next word as their value.
+func readsStdinScript(words []string) bool {
+	words = stripWrappers(words)
+	if len(words) == 0 || !shellInterpreters[path.Base(words[0])] {
+		return false
+	}
+	operands := words[1:]
+	for i := 0; i < len(operands); i++ {
+		w := operands[i]
+		switch {
+		case w == "--" || w == "-":
+			return i == len(operands)-1
+		case strings.HasPrefix(w, "--"):
+			if interpreterLongOptionsTakingValue[w] {
+				i++
+			}
+		case len(w) > 1 && (w[0] == '-' || w[0] == '+'):
+			flags := w[1:]
+			if w[0] == '-' && strings.ContainsRune(flags, 'c') {
+				return false
+			}
+			if w[0] == '-' && strings.ContainsRune(flags, 's') {
+				return true
+			}
+			if last := flags[len(flags)-1]; last == 'o' || last == 'O' {
+				i++
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // stripAssignments drops the leading `NAME=value` words of a simple command — environment

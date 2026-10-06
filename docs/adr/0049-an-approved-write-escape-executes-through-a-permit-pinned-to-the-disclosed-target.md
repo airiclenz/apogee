@@ -219,7 +219,13 @@ but the file it is told to write: an `--output=file` / `--output file` value (`g
 --output=…` included), the second operand of `uniq` and `xxd`, `tree`'s `-o` value, and the file
 a `sed` script's `w` / `W` command or `s///w` flag names (amended 2026-10-06).
 Pipelines, `&&` / `||` / `;` chains and command substitutions are split first; a heredoc body is
-payload. A builtin that moves what a LATER command's operands resolve to — `cd`, `export`, `set`,
+payload — except when its host command is a shell interpreter (`sh`, `bash`, `dash`, `zsh`,
+`ksh`, after wrapper and assignment stripping) reading its script on stdin (options only, or
+`-s`; no `-c` string, no script-file operand): that body is shell, split into simple commands and
+judged as a substitution body is, so `bash <<EOF` / `chmod +x .git/hooks/pre-commit` / `EOF` is
+refused while `cat <<EOF > notes.md` and `bash ./install.sh <<EOF` keep their bodies as payload
+(amended 2026-10-06, owner decision: supersedes "a heredoc body is payload" for those leaders).
+A builtin that moves what a LATER command's operands resolve to — `cd`, `export`, `set`,
 `unset` — is not a read leader: `cd .git/hooks && rm -rf pre-commit` names the control plane only
 in the `cd`, so those operands feed the view too (owner decision, 2026-09-15), and a command that
 is nothing but a `NAME=value` assignment (`d=.git/hooks; rm -rf $d`) feeds its value the same

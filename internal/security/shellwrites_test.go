@@ -108,6 +108,14 @@ func TestWriteTargetsOf(t *testing.T) {
 		{"a backtick substitution's write contributes", "echo `rm -rf .git/hooks`", ".git/hooks"},
 		{"a heredoc body is payload, its redirect a write", "cat > .git/hooks/pre-commit <<'EOF'\nrm -rf /\nEOF\nls", ".git/hooks/pre-commit"},
 		{"a heredoc body naming a path is not a command", "cat > notes.md <<EOF\nsee .git/config\nEOF", "notes.md"},
+		{"an interpreter's stdin heredoc is shell", "bash <<EOF\nchmod +x .git/hooks/pre-commit\nEOF", "+x .git/hooks/pre-commit"},
+		{"an interpreter's stdin heredoc redirect writes", "sh <<EOF\necho x > .git/hooks/pre-commit\nEOF", ".git/hooks/pre-commit"},
+		{"an interpreter's stdin heredoc read contributes nothing", "bash <<EOF\ncat .git/config\nEOF", ""},
+		{"a wrapped interpreter with -s reads its heredoc", "sudo bash -e -s arg <<'EOF'\nrm -rf .git/hooks\nEOF", "arg .git/hooks"},
+		{"an interpreter's -o value is no script file", "bash -o pipefail <<EOF\nrm .git/config\nEOF", "pipefail .git/config"},
+		{"each delimiter binds to its own host", "cat <<A; bash <<B\nsee .git/config\nA\nrm .git/hooks/x\nB", ".git/hooks/x"},
+		{"a script-file operand makes the heredoc its input", "bash ./install.sh <<EOF\n.git/hooks\nEOF", "./install.sh"},
+		{"a -c string makes the heredoc its input", "bash -c 'cat > notes.md' <<'EOF'\nsee .git/hooks/x\nEOF", "cat > notes.md"},
 		{"a subshell's members are judged", "(cat x && rm -rf .git/hooks)", ".git/hooks"},
 		{"cd fails closed: it moves every later operand", "cd .git/hooks && rm -rf pre-commit", ".git/hooks pre-commit"},
 		{"export fails closed", "export GIT_DIR=.git/modules/x", "GIT_DIR=.git/modules/x"},
@@ -165,6 +173,43 @@ func TestShellWriteViewRefusesOutputWrites(t *testing.T) {
 		{"grep -o x .git/config", TierNone, ""},
 		{"grep -rn -- --output .git/hooks", TierNone, ""},
 		{"sed -n '/worktree/p' .git/config", TierNone, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.command, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), shellTool, nil)
+
+			if d.Tier != tc.wantTier || d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) = tier %d rule %q, want tier %d rule %q",
+					tc.command, d.Tier, d.RuleID, tc.wantTier, tc.wantRule)
+			}
+		})
+	}
+}
+
+// TestShellWriteViewReadsInterpreterHeredocs pins the one heredoc body the shell write view
+// reads as shell: the script a shell interpreter reads on stdin. Aimed at the git control
+// plane it is hard-refused; a read in it passes, and every other host's body — a read leader's,
+// a mutating leader's, an interpreter running a script file or a `-c` string — stays payload.
+func TestShellWriteViewReadsInterpreterHeredocs(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		command  string
+		wantTier Tier
+		wantRule string
+	}{
+		{"bash <<EOF\nchmod +x .git/hooks/pre-commit\nEOF", TierHardRefuse, "write-git-control-plane"},
+		{"sh <<EOF\necho x > .git/hooks/pre-commit\nEOF", TierHardRefuse, "write-git-control-plane"},
+		{"bash <<EOF\ncat .git/config\nEOF", TierNone, ""},
+		{"cat <<EOF > notes.md\ncp x .git/hooks/pre-commit\nEOF", TierNone, ""},
+		{"git commit -F - <<'EOF'\nfix: guard .git/hooks/pre-commit\nEOF", TierNone, ""},
+		{"tee -a notes.md <<'EOF'\nrm -rf .git/hooks\nEOF", TierNone, ""},
+		{"bash ./install.sh <<EOF\n.git/hooks\nEOF", TierNone, ""},
+		{"bash -c 'cat > notes.md' <<'EOF'\nsee .git/hooks/x\nEOF", TierNone, ""},
 	}
 
 	for _, tc := range cases {
