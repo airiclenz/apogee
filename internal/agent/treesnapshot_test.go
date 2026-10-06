@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -256,28 +257,185 @@ func TestTreeSnapshot_CapListsTenPathsAndTail(t *testing.T) {
 	}
 }
 
+func TestTreeSnapshot_PreModifiedFileRewrittenGetsWarning(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	root, tracked := newGitWorkspace(t)
+	if err := os.WriteFile(tracked, []byte("dirty before the call\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newWorkspaceAgent(t, root)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		run:        func() error { return os.WriteFile(tracked, []byte("rewritten by the call\n"), 0o644) },
+		result:     domain.ToolResult{Content: "ok"},
+	})
+
+	want := "[warning: this command changed workspace files: tracked.txt]"
+	if !strings.Contains(result.Content, want) {
+		t.Fatalf("result content %q missing %q", result.Content, want)
+	}
+}
+
+func TestTreeSnapshot_NewFileInUntrackedDirGetsWarning(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	root, _ := newGitWorkspace(t)
+	dir := filepath.Join(root, "scratch")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "old.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newWorkspaceAgent(t, root)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		run: func() error {
+			return os.WriteFile(filepath.Join(dir, "new.txt"), []byte("y\n"), 0o644)
+		},
+		result: domain.ToolResult{Content: "ok"},
+	})
+
+	want := "[warning: this command changed workspace files: scratch/new.txt]"
+	if !strings.Contains(result.Content, want) {
+		t.Fatalf("result content %q missing %q", result.Content, want)
+	}
+}
+
+func TestTreeSnapshot_UntouchedDirtyFileGetsNoWarning(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	root, tracked := newGitWorkspace(t)
+	if err := os.WriteFile(tracked, []byte("dirty before the call\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newWorkspaceAgent(t, root)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		run: func() error {
+			return os.WriteFile(filepath.Join(root, "other.txt"), []byte("z\n"), 0o644)
+		},
+		result: domain.ToolResult{Content: "ok"},
+	})
+
+	want := "[warning: this command changed workspace files: other.txt]"
+	if !strings.Contains(result.Content, want) {
+		t.Fatalf("result content %q missing %q (the untouched dirty tracked.txt must not be named)", result.Content, want)
+	}
+}
+
+func TestTreeSnapshot_UntrackedSymlinkToDevZeroDoesNotStall(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	root, _ := newGitWorkspace(t)
+	if err := os.Symlink("/dev/zero", filepath.Join(root, "zero")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	a := newWorkspaceAgent(t, root)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		result:     domain.ToolResult{Content: "ok"},
+	})
+
+	if strings.Contains(result.Content, "[warning:") {
+		t.Fatalf("an untouched symlink gained a warning: %q", result.Content)
+	}
+}
+
+func TestTreeSnapshot_WorkspaceBelowRepoTopResolvesRepoPaths(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	root, _ := newGitWorkspace(t)
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inner := filepath.Join(sub, "inner.txt")
+	if err := os.WriteFile(inner, []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "sub/inner.txt")
+	mustGit(t, root, "-c", "user.email=test@test", "-c", "user.name=test", "commit", "-q", "-m", "inner")
+	if err := os.WriteFile(inner, []byte("dirty before the call\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newWorkspaceAgent(t, sub)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		run:        func() error { return os.WriteFile(inner, []byte("rewritten by the call\n"), 0o644) },
+		result:     domain.ToolResult{Content: "ok"},
+	})
+
+	want := "[warning: this command changed workspace files: sub/inner.txt]"
+	if !strings.Contains(result.Content, want) {
+		t.Fatalf("result content %q missing %q", result.Content, want)
+	}
+}
+
 func TestTreeSnapshot_DiffHelpers(t *testing.T) {
 	t.Parallel()
 
-	t.Run("rename line yields the destination path", func(t *testing.T) {
+	snapshotOf := func(listing string, digests map[string]string) treeSnapshot {
+		snap := make(treeSnapshot)
+		for _, entry := range parsePorcelainZ(listing) {
+			snap[entry.path] = pathIdentity{status: entry.status, stat: "s", digest: digests[entry.path]}
+		}
+		return snap
+	}
+
+	t.Run("rename record yields the destination path and drops the source field", func(t *testing.T) {
 		t.Parallel()
-		paths := porcelainDiffPaths("", "R  old.txt -> new.txt\n")
-		if len(paths) != 1 || paths[0] != "new.txt" {
-			t.Fatalf("paths = %v, want [new.txt]", paths)
+		entries := parsePorcelainZ("R  new.txt\x00old.txt\x00 M a.txt\x00")
+		want := []porcelainEntry{{status: "R ", path: "new.txt"}, {status: " M", path: "a.txt"}}
+		if !slices.Equal(entries, want) {
+			t.Fatalf("entries = %v, want %v", entries, want)
 		}
 	})
 
 	t.Run("status deepening reports the path once", func(t *testing.T) {
 		t.Parallel()
-		paths := porcelainDiffPaths(" M a.txt\n", "MM a.txt\n")
-		if len(paths) != 1 || paths[0] != "a.txt" {
+		paths := treeSnapshotDiffPaths(snapshotOf(" M a.txt\x00", nil), snapshotOf("MM a.txt\x00", nil))
+		if !slices.Equal(paths, []string{"a.txt"}) {
 			t.Fatalf("paths = %v, want [a.txt]", paths)
+		}
+	})
+
+	t.Run("same status with a new digest reports the path", func(t *testing.T) {
+		t.Parallel()
+		before := snapshotOf(" M a.txt\x00 M b.txt\x00", map[string]string{"a.txt": "1", "b.txt": "2"})
+		after := snapshotOf(" M a.txt\x00 M b.txt\x00", map[string]string{"a.txt": "9", "b.txt": "2"})
+		if paths := treeSnapshotDiffPaths(before, after); !slices.Equal(paths, []string{"a.txt"}) {
+			t.Fatalf("paths = %v, want [a.txt]", paths)
+		}
+	})
+
+	t.Run("a path hashed on one side only compares by its Lstat identity", func(t *testing.T) {
+		t.Parallel()
+		before := snapshotOf(" M a.txt\x00", map[string]string{"a.txt": "1"})
+		after := snapshotOf(" M a.txt\x00", nil)
+		if paths := treeSnapshotDiffPaths(before, after); len(paths) != 0 {
+			t.Fatalf("paths = %v, want empty", paths)
+		}
+	})
+
+	t.Run("a path listed on one side only is reported", func(t *testing.T) {
+		t.Parallel()
+		paths := treeSnapshotDiffPaths(snapshotOf(" M gone.txt\x00", nil), snapshotOf("?? new.txt\x00", nil))
+		if !slices.Equal(paths, []string{"gone.txt", "new.txt"}) {
+			t.Fatalf("paths = %v, want [gone.txt new.txt]", paths)
 		}
 	})
 
 	t.Run("identical snapshots yield nothing", func(t *testing.T) {
 		t.Parallel()
-		if paths := porcelainDiffPaths(" M a.txt\n", " M a.txt\n"); len(paths) != 0 {
+		snap := snapshotOf(" M a.txt\x00", map[string]string{"a.txt": "1"})
+		if paths := treeSnapshotDiffPaths(snap, snap); len(paths) != 0 {
 			t.Fatalf("paths = %v, want empty", paths)
 		}
 	})
@@ -307,7 +465,7 @@ func (l *specLog) all() []subprocess.SubprocessSpec {
 }
 
 // gitCommand returns the git invocation spec carries with the binary and the hardening `-c`
-// options stripped — "status --porcelain" — so a fake Spawn can answer by subcommand.
+// options stripped — "status --porcelain -uall -z" — so a fake Spawn can answer by subcommand.
 func gitCommand(spec subprocess.SubprocessSpec) string {
 	args := spec.Argv[1:]
 	for len(args) >= 2 && args[0] == "-c" {
@@ -316,8 +474,8 @@ func gitCommand(spec subprocess.SubprocessSpec) string {
 	return strings.Join(args, " ")
 }
 
-// scriptedGit returns a Host whose Look answers gitPath and whose Spawn answers every command
-// from answer, recording each spec it was handed. The command-config probe is answered as a
+// scriptedGit returns a Host whose Look answers gitPath and whose Spawn and SpawnTo answer every
+// command from answer, recording each spec it was handed. The command-config probe is answered as a
 // clean repository — its rev-parse names no file, every scope listing passes — so answer sees
 // only the commands themselves. Nothing is executed.
 func scriptedGit(gitPath string, answer func(command string) subprocess.SubprocessResult) (gitexec.Host, *specLog) {
@@ -334,6 +492,17 @@ func scriptedGit(gitPath string, answer func(command string) subprocess.Subproce
 				return subprocess.SubprocessResult{ExitCode: 1}, nil
 			}
 			return answer(command), nil
+		},
+		// A streamed run hands answer's Stdout to the caller's writer; a writer that refuses it
+		// fails the run as exec's broken copy would.
+		SpawnTo: func(_ context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+			log.add(spec)
+			res := answer(gitCommand(spec))
+			if _, err := io.WriteString(stdout, res.Stdout); err != nil {
+				return subprocess.SubprocessResult{ExitCode: -1, CombinedOutput: err.Error()}, nil
+			}
+			res.Stdout = ""
+			return res, nil
 		},
 	}
 	return host, log
@@ -357,8 +526,8 @@ func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("APOGEE_API_KEY", "shhh-secret")
 	host, log := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
-		if command == "rev-parse --is-inside-work-tree" {
-			return subprocess.SubprocessResult{Stdout: "true\n"}
+		if command == "rev-parse --is-inside-work-tree --show-toplevel" {
+			return subprocess.SubprocessResult{Stdout: "true\n" + root + "\n"}
 		}
 		return subprocess.SubprocessResult{}
 	})
@@ -379,10 +548,10 @@ func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
 	if len(argvs) == 0 {
 		t.Fatal("the floor spawned no git at all")
 	}
-	if !slices.Contains(argvs, "-c core.hooksPath= -c core.fsmonitor=false rev-parse --is-inside-work-tree") {
+	if !slices.Contains(argvs, "-c core.hooksPath= -c core.fsmonitor=false rev-parse --is-inside-work-tree --show-toplevel") {
 		t.Errorf("argvs = %q, want the probe hardened", argvs)
 	}
-	if !slices.Contains(argvs, "-c core.hooksPath= -c core.fsmonitor=false status --porcelain") {
+	if !slices.Contains(argvs, "-c core.hooksPath= -c core.fsmonitor=false status --porcelain -uall -z") {
 		t.Errorf("argvs = %q, want the snapshots hardened", argvs)
 	}
 	for i, env := range envs {
@@ -394,6 +563,45 @@ func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
 				t.Errorf("run %q env carries %q, want the allowlist to have dropped APOGEE_API_KEY", argvs[i], kv)
 			}
 		}
+	}
+}
+
+// TestTreeSnapshot_OverrunListingSkipsTheCheck pins the output bound: a status listing past
+// subprocess.MaxSubprocessOutputBytes would be a silently truncated picture of the tree, so the
+// floor skips the check for that call rather than diffing half a listing.
+func TestTreeSnapshot_OverrunListingSkipsTheCheck(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	var statusRuns int
+	var mu sync.Mutex
+	host, _ := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
+		switch command {
+		case "rev-parse --is-inside-work-tree --show-toplevel":
+			return subprocess.SubprocessResult{Stdout: "true\n" + root + "\n"}
+		case "status --porcelain -uall -z":
+			mu.Lock()
+			defer mu.Unlock()
+			statusRuns++
+			if statusRuns == 1 {
+				return subprocess.SubprocessResult{Stdout: "?? a.txt\x00"}
+			}
+			return subprocess.SubprocessResult{Stdout: strings.Repeat("?? b.txt\x00", subprocess.MaxSubprocessOutputBytes/9+1)}
+		}
+		return subprocess.SubprocessResult{}
+	})
+	a := newWorkspaceAgent(t, root)
+	withEngineGit(host)(a)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		result:     domain.ToolResult{Content: "ok"},
+	})
+
+	if result.IsError || result.Content != "ok" {
+		t.Fatalf("an overrun listing changed the result: %+v", result)
+	}
+	if statusRuns != 2 {
+		t.Fatalf("status ran %d times, want the before and after snapshots", statusRuns)
 	}
 }
 

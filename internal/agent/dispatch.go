@@ -1647,7 +1647,8 @@ func (a *Agent) executeToolDemotable(ctx context.Context, turn int, tool domain.
 	// result can name the workspace files the command changed. Best-effort by contract:
 	// a non-repo workspace, a git error or a timeout skips the check for this call
 	// silently, and the floor never turns a clean result into an error.
-	preTree, watchTree := "", false
+	var preTree treeSnapshot
+	watchTree := false
 	if domain.IsSubprocessTool(tool) {
 		preTree, watchTree = a.tree.beforeCall(floorCtx)
 	}

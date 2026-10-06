@@ -212,7 +212,14 @@ pre-check, which ADR 0080 had taken from this decision. That pre-check now runs 
 budget (`commitSecretsTimeout`) across all four shadow runs, and an expired budget or a git
 failure after the repository resolved forces the approval look instead of skipping — "not a
 repository" still skips (ADR 0080, Amendment 2026-09-23). The snapshot's 2 s timeout and silent
-skip stand.
+skip stand. **Amended 2026-10-06:** the snapshot is no longer the porcelain text but a per-path
+content identity — `git status --porcelain -uall -z` plus, for every listed path, its status code
+and a content digest (a regular file's SHA-256, a symlink's target string) — and the diff is on
+path → (status, identity), so a file already dirty before the call and rewritten by it, and a new
+file inside an already-untracked directory, are both named. The bounds keep the 2 s contract: a
+listing past the subprocess output cap skips the check, and the hashing holds a per-file cap and
+a whole-snapshot byte budget inside the same 2 s, falling back past them to the file's Lstat
+identity; only regular files are opened (non-blocking, fenced to the repository).
 
 **5. Relation to ADR 0012 — extended, not superseded.** The posture stands: a subprocess
 escape is OS-blocked with no Approval prompt. Two refinements land back into its documents:
