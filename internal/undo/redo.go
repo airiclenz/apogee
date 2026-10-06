@@ -45,8 +45,8 @@ func (j *Journal) RedoPreview() (Step, bool) {
 // generation is the stamp [Journal.RedoPreview] carried: it refuses with [ErrStaleGeneration],
 // touching nothing, when the journal has moved since, so a human always confirms the step
 // they were shown (ADR 0051 decision 7, which ADR 0074 decision 6 extends to this command).
-// The check lives here rather than in the caller because a redo has no second reader between
-// the preview and the act.
+// The check lives here, in the same hold as the pop, exactly as it does for [Journal.Revert],
+// so nothing can move the journal between the compare and the step it guards.
 //
 // It re-applies in the order the writes originally happened — the reverse of the order an
 // undo takes them away — so a file lands after the directory its sibling created. Skipped

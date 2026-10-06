@@ -74,7 +74,7 @@ func TestSaveLoad_RoundTrip_PreservesOrdinalsGenerationAndBothStacks(t *testing.
 
 	exchange(t, journal, func() { subprocessWrite(t, root, "one.txt", "first") })
 	exchange(t, journal, func() { subprocessWrite(t, root, "two.txt", "second") })
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestClose_EarlyExitAfterARecordClearedTheRedoStack_StillWritesTheIndex(t *t
 
 			// One exchange, reverted: the index on disk now carries a redo stack.
 			exchange(t, journal, func() { subprocessWrite(t, root, "one.txt", "first") })
-			if _, err := journal.Revert(); err != nil {
+			if _, err := journal.Revert(journal.Generation()); err != nil {
 				t.Fatalf("Revert: %v", err)
 			}
 			if before := readIndex(t, path); len(before.Redo) != 1 {

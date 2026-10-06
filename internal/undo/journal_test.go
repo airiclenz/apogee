@@ -158,7 +158,7 @@ func TestRevert_CreatedFile_IsDeleted(t *testing.T) {
 	journal.BeginGroup()
 	created := funnelWrite(t, journal, root, "new.txt", "fresh")
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
@@ -179,7 +179,7 @@ func TestRevert_DeletedFile_RestoresTheBytes(t *testing.T) {
 	journal.BeginGroup()
 	removed := funnelDelete(t, journal, root, "sub/gone.txt")
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
@@ -197,7 +197,7 @@ func TestRevert_OverwrittenFile_RestoresThePreImage(t *testing.T) {
 	journal.BeginGroup()
 	funnelWrite(t, journal, root, "notes.md", "after")
 
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestRevert_MoveRecordedAsTwoRecords_RoundTrips(t *testing.T) {
 	journal.BeginGroup()
 	source, destination := funnelMove(t, journal, root, "src.txt", "nested/dst.txt")
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
@@ -246,7 +246,7 @@ func TestRecord_SamePathTwiceInOneGroup_KeepsFirstPreImageAndLastPostState(t *te
 		t.Errorf("action = %v, want restore (the last post-state must still match on disk)", step.Changes[0].Action)
 	}
 
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestRevert_FileHandEditedAfterTheAgentWroteIt_IsSkippedWhileSiblingsRestore
 	if err := os.WriteFile(handEdited, []byte("the human's own edit"), 0o644); err != nil {
 		t.Fatalf("hand edit: %v", err)
 	}
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
@@ -293,7 +293,7 @@ func TestRevert_SameFileAcrossThreeExchanges_WalksBackOneExchangeAtATime(t *test
 	}
 
 	for _, want := range []string{"v2", "v1"} {
-		report, err := journal.Revert()
+		report, err := journal.Revert(journal.Generation())
 		if err != nil {
 			t.Fatalf("Revert to %s: %v", want, err)
 		}
@@ -303,14 +303,55 @@ func TestRevert_SameFileAcrossThreeExchanges_WalksBackOneExchangeAtATime(t *test
 		assertContent(t, walked, want)
 	}
 
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("final Revert: %v", err)
 	}
 	assertAbsent(t, walked)
 
-	if _, err := journal.Revert(); !errors.Is(err, ErrNothingToUndo) {
+	if _, err := journal.Revert(journal.Generation()); !errors.Is(err, ErrNothingToUndo) {
 		t.Errorf("a fourth Revert returned %v, want ErrNothingToUndo", err)
 	}
+}
+
+// TestRevertStaleGeneration pins the staleness guard inside the journal: a Record landing
+// between the preview and the Revert that quotes its stamp is refused, and the refusal touches
+// nothing — no file, no stack, no stamp.
+func TestRevertStaleGeneration(t *testing.T) {
+	root := t.TempDir()
+	journal := New()
+	journal.BeginGroup()
+	first := funnelWrite(t, journal, root, "first.txt", "first")
+
+	previewed, ok := journal.Preview()
+	if !ok {
+		t.Fatal("Preview reported nothing to undo after a write")
+	}
+
+	journal.BeginGroup()
+	second := funnelWrite(t, journal, root, "second.txt", "second")
+	moved, _ := journal.Preview()
+
+	_, err := journal.Revert(previewed.Generation)
+
+	if !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("Revert at the pre-record stamp = %v, want ErrStaleGeneration", err)
+	}
+	assertContent(t, first, "first")
+	assertContent(t, second, "second")
+	after, ok := journal.Preview()
+	if !ok || after.Ordinal != moved.Ordinal || after.Generation != moved.Generation {
+		t.Errorf("after the refusal Preview = (ordinal %d, generation %d, %v), want (ordinal %d, generation %d, true)",
+			after.Ordinal, after.Generation, ok, moved.Ordinal, moved.Generation)
+	}
+	if _, ok := journal.RedoPreview(); ok {
+		t.Error("a refused revert left a redo behind, want none")
+	}
+
+	if _, err := journal.Revert(after.Generation); err != nil {
+		t.Fatalf("Revert at the fresh stamp: %v", err)
+	}
+	assertAbsent(t, second)
+	assertContent(t, first, "first")
 }
 
 func TestBeginGroup_WithNoWritesAfterIt_AddsNoStep(t *testing.T) {
@@ -413,7 +454,7 @@ func TestGeneration_RecordAndRevert_BothAdvanceTheStamp(t *testing.T) {
 	afterFirstRecord := journal.Generation()
 	funnelWrite(t, journal, root, "two.txt", "b")
 	afterSecondRecord := journal.Generation()
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	afterRevert := journal.Generation()
@@ -528,7 +569,7 @@ func TestRevert_PathThatEscapedTheFence_IsSkippedWithTheRefusal(t *testing.T) {
 		PostExists: false,
 	})
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
@@ -575,7 +616,7 @@ func TestRevertThroughTheRecordedFence(t *testing.T) {
 		PostExists: true,
 	})
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
@@ -656,7 +697,7 @@ func TestRevert_WhileItWalks_AnswersRecordAndGeneration(t *testing.T) {
 	entered := gate.arm()
 	reverted := make(chan Report, 1)
 	go func() {
-		report, _ := journal.Revert()
+		report, _ := journal.Revert(journal.Generation())
 		reverted <- report
 	}()
 	waitOn(t, entered, "the revert to park inside the image source")
@@ -707,7 +748,7 @@ func TestRevert_RecordArrivingMidWalk_DoesNotDisturbTheRestore(t *testing.T) {
 	entered := gate.arm()
 	reverted := make(chan Report, 1)
 	go func() {
-		report, _ := journal.Revert()
+		report, _ := journal.Revert(journal.Generation())
 		reverted <- report
 	}()
 	waitOn(t, entered, "the revert to park inside the image source")
@@ -735,7 +776,7 @@ func TestRedo_WhileItWalks_ReappliesUnderAGroupOpenedMidWalk(t *testing.T) {
 	journal, gate, root := gatedJournal(t)
 	tracked, funnelled := parkableExchange(t, journal, root)
 
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, tracked, "human")
@@ -789,7 +830,7 @@ func TestReportLines_OrdinalOfARevertAndARedo_CountsFromTheOldestGroup(t *testin
 		funnelWrite(t, journal, root, name, "agent")
 	}
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
 	}

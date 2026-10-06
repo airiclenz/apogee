@@ -1389,20 +1389,17 @@ func (a *Agent) UndoPreview() (undo.Step, bool) {
 // shown rather than whatever the journal happens to hold by the time they answer. A journal with
 // nothing left to undo answers [undo.ErrNothingToUndo].
 //
-// It carries UndoPreview's boundary rule for the same reason, and more sharply: the generation is
-// read and the revert runs as two calls, so only a quiescent engine makes the pair atomic. Paths
-// whose current content no longer matches what the agent wrote are SKIPPED with a reason rather
-// than overwritten — the human's own edit outranks the undo — and the group is popped either way,
-// so a repeated undo walks further back instead of retrying a skip.
+// The generation check lives in the journal, in the same hold that pops the group, so nothing
+// can move the journal between the compare and the revert — the shape [Agent.RedoRevert] shares.
+// It carries UndoPreview's boundary rule for the same reason. Paths whose current content no
+// longer matches what the agent wrote are SKIPPED with a reason rather than overwritten — the
+// human's own edit outranks the undo — and the group is popped either way, so a repeated undo
+// walks further back instead of retrying a skip.
 func (a *Agent) UndoRevert(generation uint64) (undo.Report, error) {
 	if a.journal == nil {
 		return undo.Report{}, undo.ErrNothingToUndo
 	}
-	if live := a.journal.Generation(); live != generation {
-		return undo.Report{}, fmt.Errorf("%w: previewed at generation %d, journal is at %d",
-			undo.ErrStaleGeneration, generation, live)
-	}
-	return a.journal.Revert()
+	return a.journal.Revert(generation)
 }
 
 // WroteFiles lists the files this engine's writes have touched, whole run: every path the undo
@@ -1443,10 +1440,9 @@ func (a *Agent) RedoPreview() (undo.Step, bool) {
 // moved since refuses with [undo.ErrStaleGeneration] having touched nothing, so a human always
 // confirms the step they were shown. An empty redo stack answers [undo.ErrNothingToRedo].
 //
-// The generation check lives in the journal for this call rather than here — a redo has no second
-// reader between the preview and the act — which is the one shape it does not share with
-// [Agent.UndoRevert]. Everything else it does: quiescent boundary only, a path the human has
-// edited since is SKIPPED with its reason rather than overwritten, and the group moves either way.
+// It is [Agent.UndoRevert]'s mirror: the generation check lives in the journal, under its lock,
+// quiescent boundary only, a path the human has edited since is SKIPPED with its reason rather
+// than overwritten, and the group moves either way.
 func (a *Agent) RedoRevert(generation uint64) (undo.Report, error) {
 	if a.journal == nil {
 		return undo.Report{}, undo.ErrNothingToRedo

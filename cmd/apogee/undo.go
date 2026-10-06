@@ -219,32 +219,38 @@ func previewUndoVerb(cmd *cobra.Command, journal *undo.Journal, id string) error
 // it left alone with the reason. generation is the stamp the preview printed: a journal that has
 // moved past it is refused with undo.ErrStaleGeneration and the fresh preview is printed in its
 // place, so what the human reads next is the step a confirm would now apply — the shape
-// Agent.UndoRevert gives `/undo confirm`. An empty journal answers "nothing to undo" BEFORE the
-// stamp is compared, as the TUI's confirm does: there is no step for a stamp to be stale against.
+// Agent.UndoRevert gives `/undo confirm`. The stamp is compared by Journal.Revert itself, under
+// the journal's lock, so no write can land between the compare and the revert. An empty journal
+// answers "nothing to undo" whatever the stamp, as the TUI's confirm does: there is no step for
+// a stamp to be stale against.
 // A failure is returned rather than printed: a confirmation that appears to do nothing must not
 // be indistinguishable from one that reverted nothing.
 func applyUndoVerb(cmd *cobra.Command, journal *undo.Journal, id string, generation uint64) error {
-	step, ok := journal.Preview()
-	if !ok {
-		return undoNothingToDo(id)
-	}
-	if live := journal.Generation(); live != generation {
-		printUndoLines(cmd, append([]string{undoVerbMovedLead},
-			undoVerbNote("apogee undo "+id, undo.PreviewLines(step), undoVerbHint(id, step.Generation))...))
-		return fmt.Errorf("%w: previewed at generation %d, journal is at %d",
-			undo.ErrStaleGeneration, generation, live)
-	}
-
-	report, err := journal.Revert()
+	report, err := journal.Revert(generation)
 	switch {
 	case errors.Is(err, undo.ErrNothingToUndo):
 		return undoNothingToDo(id)
+	case errors.Is(err, undo.ErrStaleGeneration):
+		return undoVerbMoved(cmd, journal, id, err)
 	case err != nil:
 		return fmt.Errorf("undo failed: %w", err)
 	}
 
 	printUndoLines(cmd, undoVerbNote("undone", undo.ReportLines(report), ""))
 	return nil
+}
+
+// undoVerbMoved answers a confirm the journal refused as stale: the moved-lead line, then the
+// fresh preview with the stamp a confirm now needs, then the refusal itself as the error. A
+// journal that emptied since the refusal answers "nothing to undo" instead.
+func undoVerbMoved(cmd *cobra.Command, journal *undo.Journal, id string, stale error) error {
+	step, ok := journal.Preview()
+	if !ok {
+		return undoNothingToDo(id)
+	}
+	printUndoLines(cmd, append([]string{undoVerbMovedLead},
+		undoVerbNote("apogee undo "+id, undo.PreviewLines(step), undoVerbHint(id, step.Generation))...))
+	return stale
 }
 
 // printUndoLines writes the composed listing to stdout, one line at a time. Stdout, because the

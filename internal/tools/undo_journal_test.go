@@ -163,7 +163,7 @@ func TestWriteFunnelJournalsEveryContentVerb(t *testing.T) {
 				t.Fatalf("previewed action = %v (%s), want %v", change.Action, change.Reason, tc.wantAction)
 			}
 
-			report, err := journal.Revert()
+			report, err := journal.Revert(journal.Generation())
 			if err != nil {
 				t.Fatalf("Revert: %v", err)
 			}
@@ -208,7 +208,7 @@ func TestWriteFunnelKeepsOneRecordPerPath(t *testing.T) {
 		t.Fatalf("previewed action = %v (%s), want restore", step.Changes[0].Action, step.Changes[0].Reason)
 	}
 
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	if got, _ := readOrAbsent(t, path); got != "original" {
@@ -342,7 +342,7 @@ func assertChange(t *testing.T, changes []undo.Change, i int, path string, actio
 func revertCleanly(t *testing.T, journal *undo.Journal) undo.Report {
 	t.Helper()
 
-	report, err := journal.Revert()
+	report, err := journal.Revert(journal.Generation())
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
 	}

@@ -340,8 +340,9 @@ func (j *Journal) openGroup() *group {
 
 // Generation returns the journal's state stamp. It changes on every record and on every
 // revert, and it is the whole of the staleness protocol: a caller that showed a human a
-// preview passes the generation it read back with the confirmation, and a mismatch means
-// the journal moved under the human and the preview they answered is no longer true.
+// preview passes the generation it read back to [Journal.Revert] or [Journal.Redo] with the
+// confirmation, which compare it under the journal's lock — a mismatch means the journal
+// moved under the human and the preview they answered is no longer true.
 func (j *Journal) Generation() uint64 {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -516,9 +517,17 @@ func runStep(w walk, d direction) Report {
 // Record, Generation, BeginGroup, Wrote and Save are answered mid-walk; a second Revert, a
 // Redo, a preview or a snapshot call waits for this walk to land first (see [Journal]).
 //
-// It returns [ErrNothingToUndo], and does nothing, when no group remains.
-func (j *Journal) Revert() (Report, error) {
-	step, err := j.takeTop()
+// generation is the stamp [Journal.Preview] carried: it refuses with [ErrStaleGeneration],
+// touching nothing, when the journal has moved since, so a human always confirms the step
+// they were shown (ADR 0051 decision 7). The check lives here, in the same hold as the pop,
+// exactly as it does for [Journal.Redo]: compared by a caller before the call, a
+// [Journal.Record] could land between the compare and the pop and the step taken would not
+// be the one previewed.
+//
+// It returns [ErrNothingToUndo], and does nothing, when no group remains — whatever the
+// stamp, since there is no step for it to be stale against.
+func (j *Journal) Revert(generation uint64) (Report, error) {
+	step, err := j.takeTop(generation)
 	if err != nil {
 		return Report{}, err
 	}
@@ -528,16 +537,21 @@ func (j *Journal) Revert() (Report, error) {
 	return report, j.landReverted(step)
 }
 
-// takeTop pops the top un-undone group and freezes its step, or reports that there is none
-// to take. It is [Journal.Revert]'s whole first hold, entered only once any earlier walk has
-// landed, so it pops from the stack that walk left.
-func (j *Journal) takeTop() (walk, error) {
+// takeTop refuses a stale or empty revert and otherwise pops the top un-undone group,
+// freezing its step. It is [Journal.Revert]'s whole first hold, entered only once any earlier
+// walk has landed, so it pops from the stack that walk left and the generation it checks is
+// the one that walk left.
+func (j *Journal) takeTop(generation uint64) (walk, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	_ = j.awaitWalk(context.Background())
 	if len(j.groups) == 0 {
 		return walk{}, ErrNothingToUndo
+	}
+	if j.generation != generation {
+		return walk{}, fmt.Errorf("%w: previewed at generation %d, journal is at %d",
+			ErrStaleGeneration, generation, j.generation)
 	}
 	ordinal := len(j.groups)
 	top := j.groups[ordinal-1]

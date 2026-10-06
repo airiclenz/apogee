@@ -321,7 +321,7 @@ func TestClose_SubprocessWriteTheFunnelNeverSaw_BecomesADiffScopedStep(t *testin
 	if change.Path != written || change.Action != ActionDelete {
 		t.Fatalf("Preview = %+v, want a delete of %s", change, written)
 	}
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertAbsent(t, written)
@@ -336,12 +336,12 @@ func TestRevert_ThreeSnapshotBackedExchanges_WalkBackOneAtATime(t *testing.T) {
 	}
 
 	for _, want := range []string{"v2", "v1", "v0"} {
-		if _, err := journal.Revert(); err != nil {
+		if _, err := journal.Revert(journal.Generation()); err != nil {
 			t.Fatalf("Revert back to %s: %v", want, err)
 		}
 		assertContent(t, path, want)
 	}
-	if _, err := journal.Revert(); !errors.Is(err, ErrNothingToUndo) {
+	if _, err := journal.Revert(journal.Generation()); !errors.Is(err, ErrNothingToUndo) {
 		t.Errorf("fourth Revert = %v, want ErrNothingToUndo", err)
 	}
 }
@@ -358,7 +358,7 @@ func TestRevert_FunnelPathTheDiffOmits_RestoresFromItsPreImage(t *testing.T) {
 	if change.Path != path || change.Action != ActionRestore {
 		t.Fatalf("Preview = %+v, want a restore of the funnel's own record", change)
 	}
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, path, "before")
@@ -377,7 +377,7 @@ func TestRevert_PathBothCapturePathsSaw_IsRevertedOnce_FromTheFunnelPreImage(t *
 	if len(step.Changes) != 1 {
 		t.Fatalf("Preview listed %d changes, want the one funnel entry: %+v", len(step.Changes), step.Changes)
 	}
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, path, "before")
@@ -402,7 +402,7 @@ func TestClose_GroupWhoseCaptureFailed_IsKeptAsAFunnelOnlyStep(t *testing.T) {
 	if change.Action != ActionRestore {
 		t.Fatalf("Preview = %+v, want the funnel-only group to revert as it always did", change)
 	}
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, path, "before")
@@ -420,7 +420,7 @@ func TestRevert_DiffPathEditedAfterTheAgentWroteIt_IsSkippedWithTheReason(t *tes
 	if change.Action != ActionSkip || change.Reason != "changed since the agent wrote it" {
 		t.Fatalf("Preview = %+v, want a skip naming the human's edit", change)
 	}
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, written, "the human's own edit")
@@ -435,7 +435,7 @@ func TestRedo_ReappliesThePostImageOfTheRevertedExchange(t *testing.T) {
 	path := seedFile(t, root, "notes.md", "before")
 
 	exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "after") })
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, path, "before")
@@ -460,7 +460,7 @@ func TestRedo_PathEditedAfterTheUndo_IsSkippedWithTheReason(t *testing.T) {
 	path := seedFile(t, root, "notes.md", "before")
 
 	exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "after") })
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	subprocessWrite(t, root, "notes.md", "the human's own edit")
@@ -485,7 +485,7 @@ func TestRedo_StaleGenerationOrEmptyStack_IsRefused(t *testing.T) {
 	}
 
 	exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "after") })
-	if _, err := journal.Revert(); err != nil {
+	if _, err := journal.Revert(journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	step, ok := journal.RedoPreview()
@@ -506,7 +506,7 @@ func TestRedo_MaterialisedGroupClearsTheStack_BareBeginGroupDoesNot(t *testing.T
 		journal, _, root := snapshotJournal(t)
 		seedFile(t, root, "notes.md", "before")
 		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "after") })
-		if _, err := journal.Revert(); err != nil {
+		if _, err := journal.Revert(journal.Generation()); err != nil {
 			t.Fatalf("Revert: %v", err)
 		}
 
@@ -524,7 +524,7 @@ func TestRedo_MaterialisedGroupClearsTheStack_BareBeginGroupDoesNot(t *testing.T
 		journal, _, root := snapshotJournal(t)
 		seedFile(t, root, "notes.md", "before")
 		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "after") })
-		if _, err := journal.Revert(); err != nil {
+		if _, err := journal.Revert(journal.Generation()); err != nil {
 			t.Fatalf("Revert: %v", err)
 		}
 
@@ -539,7 +539,7 @@ func TestRedo_MaterialisedGroupClearsTheStack_BareBeginGroupDoesNot(t *testing.T
 		journal, _, root := snapshotJournal(t)
 		seedFile(t, root, "notes.md", "before")
 		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "after") })
-		if _, err := journal.Revert(); err != nil {
+		if _, err := journal.Revert(journal.Generation()); err != nil {
 			t.Fatalf("Revert: %v", err)
 		}
 
@@ -557,7 +557,7 @@ func TestClose_ExchangeThatOpenedNoGroup_ClosesNone(t *testing.T) {
 		seedFile(t, root, "notes.md", "v0")
 		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "v1") })
 		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "v2") })
-		if _, err := journal.Revert(); err != nil {
+		if _, err := journal.Revert(journal.Generation()); err != nil {
 			t.Fatalf("Revert: %v", err)
 		}
 		before := journal.Generation()
@@ -593,7 +593,7 @@ func TestClose_ExchangeThatOpenedNoGroup_ClosesNone(t *testing.T) {
 		if got := journal.groups[0].touched; len(got) != 1 || got[0] != "a.md" {
 			t.Errorf("touched = %v, want [a.md]", got)
 		}
-		if _, err := journal.Revert(); err != nil {
+		if _, err := journal.Revert(journal.Generation()); err != nil {
 			t.Fatalf("Revert: %v", err)
 		}
 		assertContent(t, agentFile, "a-before")
@@ -643,7 +643,7 @@ func TestEscape_RevertsAndRedoes_WithAndWithoutASnapshotter(t *testing.T) {
 				write()
 			}
 
-			if _, err := journal.Revert(); err != nil {
+			if _, err := journal.Revert(journal.Generation()); err != nil {
 				t.Fatalf("Revert: %v", err)
 			}
 			assertContent(t, outside, "before")
@@ -751,7 +751,7 @@ func parkRevert(t *testing.T, journal *Journal, gate *gatedSnapshotter) <-chan R
 	entered := gate.arm()
 	reverted := make(chan Report, 1)
 	go func() {
-		report, _ := journal.Revert()
+		report, _ := journal.Revert(journal.Generation())
 		reverted <- report
 	}()
 	waitOn(t, entered, "the revert to park inside the image source")

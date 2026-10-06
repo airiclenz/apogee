@@ -91,7 +91,7 @@ func TestUndoGroupsFollowTheExchange(t *testing.T) {
 	}
 	assertChangedPaths(t, top.Changes, []string{filepath.Join(root, "c.txt")}, "the second Exchange")
 
-	if _, err := a.journal.Revert(); err != nil {
+	if _, err := a.journal.Revert(a.journal.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 

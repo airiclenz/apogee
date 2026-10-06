@@ -100,7 +100,11 @@ internal/schedule/harness_test.go — newFakeClock, newRecorder
 **Acceptance:** `go build ./internal/title/ && go test -count=1 -run 'TestStripThinking' ./internal/title/`
 **Commit:** `fix(title): match the thinking close tag without shifting offsets`
 
-## 4. Undo's staleness guard runs under the journal lock
+## 4. Undo's staleness guard runs under the journal lock — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): `Journal.Revert(generation)` checks emptiness before the stamp, as `takeRedoTop` does, so `Agent.UndoRevert` on an empty journal now answers `undo.ErrNothingToUndo` whatever the stamp (it answered `ErrStaleGeneration` for a mismatched stamp before); `applyUndoVerb` and the TUI already answered "nothing to undo" first.
+NOTES (2026-10-06): the stale branch of `applyUndoVerb` moved into a new helper `undoVerbMoved` (cmd/apogee/undo.go), which re-Previews after the refusal and prints `undoVerbMovedLead` plus the fresh preview; the error returned is the journal's own `ErrStaleGeneration`-wrapping refusal, same message format as before.
+NOTES (2026-10-06): test callers were updated mechanically to `X.Revert(X.Generation())`.
 
 **What:** Fixes audit Medium "Undo's staleness guard is checked by each caller, outside the journal lock".
 **Regression guard.** In `applyUndoVerb`, an `errors.Is(err, undo.ErrStaleGeneration)` from `journal.Revert(generation)` re-Previews and prints `undoVerbMovedLead` plus the fresh preview, as today. Every `.Revert()` test caller is updated, the five outside internal/undo/journal_test.go included. This supersedes the RedoRevert doc's caller-side asymmetry (internal/agent/agent.go, "the one shape it does not share with [Agent.UndoRevert]"): every comment that puts the undo stamp compare in a caller or contrasts Redo with Revert on it is rewritten — `grep -rn -i 'generation' internal/undo/journal.go internal/undo/redo.go internal/agent/agent.go cmd/apogee/undo.go`.

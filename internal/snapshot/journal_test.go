@@ -521,7 +521,7 @@ func requireUndoKeepsWhatTheCaptureCouldNotRead(t *testing.T, home, workspace st
 	}
 	requireNoDelete("reopened preview", step)
 
-	if _, err := reopened.Revert(); err != nil {
+	if _, err := reopened.Revert(reopened.Generation()); err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
 	for rel, want := range survivors {
