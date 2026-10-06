@@ -299,20 +299,100 @@ func TestAnthropicCodecNoEffortShapePerModel(t *testing.T) {
 	}
 }
 
-// TestAnthropicCodecEncodeRejectsNonObjectArguments pins that a tool call whose arguments are
-// not a JSON object is an encode error naming the call — the wire cannot carry it as input.
-func TestAnthropicCodecEncodeRejectsNonObjectArguments(t *testing.T) {
+// TestAnthropicCodecEncodeEmptiesNonObjectArguments pins that a tool call whose arguments are
+// not a JSON object still encodes: its tool_use input is the empty object, and its paired
+// tool_result goes unchanged — one odd history entry never fails the request.
+func TestAnthropicCodecEncodeEmptiesNonObjectArguments(t *testing.T) {
 	t.Parallel()
+	for name, args := range map[string]string{
+		"not json":  `not json`,
+		"truncated": `{"q":`,
+		"array":     `[1,2]`,
+		"string":    `"x"`,
+		"null":      `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			codec := &anthropicCodec{}
+			req := Request{Model: "m", Tools: []ToolSpec{{Name: "ls", Parameters: []byte(`{}`)}}, Messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", ToolCalls: []ToolCall{{ID: "tc_bad", Function: FunctionCall{Name: "ls", Arguments: args}}}},
+				{Role: "tool", Content: "a b", ToolCallID: "tc_bad"},
+			}}
+
+			body, _, err := codec.encode(req)
+
+			if err != nil {
+				t.Fatalf("encode error = %v, want nil", err)
+			}
+			assertAnthropicToolTurn(t, body, "tc_bad", `{}`, "a b")
+		})
+	}
+}
+
+// TestAnthropicCodecTruncatedStreamedCallRoundTrips pins that a reply cut off mid-arguments by
+// max_tokens goes back on the next request: the streamed call's partial input decodes as it
+// arrived, and re-encoding the history carries that call with an empty input beside its result.
+func TestAnthropicCodecTruncatedStreamedCallRoundTrips(t *testing.T) {
+	t.Parallel()
+	stream := `data: {"type":"message_start","message":{"model":"claude-x"}}
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"grep","input":{}}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"q\":"}}
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":9}}
+data: {"type":"message_stop"}
+`
+	var calls []ToolCall
+	for _, d := range parseAnthropicSSE(t, stream) {
+		if d.Kind == DeltaToolCall {
+			calls = append(calls, *d.ToolCall)
+		}
+	}
+	if len(calls) != 1 || calls[0].Function.Arguments != `{"q":` {
+		t.Fatalf("streamed calls = %+v, want one carrying the truncated input", calls)
+	}
 	codec := &anthropicCodec{}
-	req := Request{Model: "m", Tools: []ToolSpec{{Name: "ls", Parameters: []byte(`{}`)}}, Messages: []Message{
-		{Role: "user", Content: "go"},
-		{Role: "assistant", ToolCalls: []ToolCall{{ID: "tc_bad", Function: FunctionCall{Name: "ls", Arguments: `not json`}}}},
+	req := Request{Model: "m", Tools: []ToolSpec{{Name: "grep", Parameters: []byte(`{}`)}}, Messages: []Message{
+		{Role: "user", Content: "find x"},
+		{Role: "assistant", ToolCalls: calls},
+		{Role: "tool", Content: "bad arguments", ToolCallID: "toolu_1"},
 	}}
 
-	_, _, err := codec.encode(req)
+	body, _, err := codec.encode(req)
 
-	if err == nil || !strings.Contains(err.Error(), "tc_bad") {
-		t.Fatalf("encode error = %v, want one naming tc_bad", err)
+	if err != nil {
+		t.Fatalf("encode error = %v, want nil", err)
+	}
+	assertAnthropicToolTurn(t, body, "toolu_1", `{}`, "bad arguments")
+}
+
+// assertAnthropicToolTurn checks an encoded body's second and third messages: the assistant's one
+// tool_use block with id and input, then the user's one tool_result for it with result.
+func assertAnthropicToolTurn(t *testing.T, body []byte, id, input, result string) {
+	t.Helper()
+	var got struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type      string          `json:"type"`
+				ID        string          `json:"id"`
+				Input     json.RawMessage `json:"input"`
+				ToolUseID string          `json:"tool_use_id"`
+				Content   string          `json:"content"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(got.Messages) != 3 || len(got.Messages[1].Content) != 1 || len(got.Messages[2].Content) != 1 {
+		t.Fatalf("messages = %s, want user, one tool_use, one tool_result", body)
+	}
+	use, res := got.Messages[1].Content[0], got.Messages[2].Content[0]
+	if use.Type != "tool_use" || use.ID != id || string(use.Input) != input {
+		t.Errorf("tool_use = %+v (input %s), want id %s input %s", use, use.Input, id, input)
+	}
+	if res.Type != "tool_result" || res.ToolUseID != id || res.Content != result {
+		t.Errorf("tool_result = %+v, want %s for %s", res, result, id)
 	}
 }
 

@@ -269,7 +269,10 @@ cmd/apogee/wire_tools.go — registryWithMCP; docs/design/mcp-client.md — Tool
 **Acceptance:** `go build ./internal/mcp/ && go test -count=1 -run 'ToolName' ./internal/mcp/`
 **Commit:** `fix(mcp): sanitise qualified tool names to the provider pattern`
 
-## 14. Anthropic wire encodes unparsable tool-call arguments as {}
+## 14. Anthropic wire encodes unparsable tool-call arguments as {} — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): `anthropicToolInput` also maps the literal `null` arguments string to `{}` — it unmarshals into a nil map without error and would otherwise have gone out as `input: null`, which is not a JSON object either; the new pin covers it alongside not-json, truncated, array and string arguments.
+NOTES (2026-10-06): `TestAnthropicCodecEncodeRejectsNonObjectArguments` renamed to `TestAnthropicCodecEncodeEmptiesNonObjectArguments` (table-driven) as its rewrite; added `TestAnthropicCodecTruncatedStreamedCallRoundTrips` (stream cut by max_tokens mid-input_json, history re-encodes) and the `assertAnthropicToolTurn` helper; added the `anthropicEmptyInput` constant.
 
 **What:** Fixes the Anthropic half of audit Medium "Provider wires can fail an entire request on one odd history entry". Ratified call: `{}`.
 **Regression guard.** `TestAnthropicCodecEncodeRejectsNonObjectArguments` is rewritten into the new pin: encode succeeds, `tc_bad`'s input is `{}`, its tool_result unchanged. This supersedes the documented encode error (internal/provider/wire_anthropic.go, `assistantBlocks` / `anthropicToolInput` docs): every comment in internal/provider/wire_anthropic*.go stating the non-object encode error is rewritten — `grep -n 'encode error\|not a JSON object' internal/provider/wire_anthropic*.go`.

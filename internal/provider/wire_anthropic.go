@@ -56,6 +56,8 @@ const (
 	// anthropicThinkingBetweenTools is the thinking mode a no-effort request asks for on a model
 	// that refuses disabled but accepts thinking confined to the gaps between tool calls.
 	anthropicThinkingBetweenTools = "between_tools"
+	// anthropicEmptyInput is the tool_use `input` of a call whose arguments carry no JSON object.
+	anthropicEmptyInput = `{}`
 )
 
 // anthropicNoEffortShape is the thinking shape a request whose effort resolves below low sends.
@@ -379,7 +381,7 @@ func textBlocks(content string) []anthropicBlock {
 
 // assistantBlocks renders an assistant message: its text, then one tool_use block per call whose
 // `input` is the call's argument string re-marshalled as an object — an argument string that is
-// not valid JSON is an encode error naming the call, since the wire cannot carry it — with its
+// not a JSON object goes as the empty object (anthropicToolInput) — with its
 // thinking blocks put back among them where the reply had them. When the carried entries hold the
 // reply's layout and it still fits the message, the text is split back into the reply's own text
 // blocks and every block goes back in its original place (anthropicReplyLayout.blocks); otherwise
@@ -408,15 +410,11 @@ func assistantBlocks(m Message, hasTools bool, prefix anthropicReplayPrefix) ([]
 
 	calls := make([]anthropicBlock, 0, len(m.ToolCalls))
 	for _, tc := range m.ToolCalls {
-		input, err := anthropicToolInput(tc)
-		if err != nil {
-			return nil, err
-		}
 		calls = append(calls, anthropicBlock{
 			Type:  "tool_use",
 			ID:    tc.ID,
 			Name:  tc.Function.Name,
-			Input: input,
+			Input: anthropicToolInput(tc),
 		})
 	}
 	if blocks, ok := layout.blocks(m.Content, calls, entries); ok {
@@ -751,21 +749,20 @@ func runeBoundary(s string, at int) bool {
 
 // anthropicToolInput re-marshals a call's raw argument string as the object `input` carries:
 // the wire wants a JSON object, and an empty argument string — what some models emit for a
-// no-argument call — is the empty object.
-func anthropicToolInput(tc ToolCall) (json.RawMessage, error) {
+// no-argument call — is the empty object. So is an argument string that is not a JSON object
+// (a reply cut off mid-arguments, a model's stray non-JSON): the call and its paired result stay
+// in history as they were, and one odd entry never fails every later request of the session.
+func anthropicToolInput(tc ToolCall) json.RawMessage {
 	args := strings.TrimSpace(tc.Function.Arguments)
-	if args == "" {
-		return json.RawMessage(`{}`), nil
-	}
 	var object map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(args), &object); err != nil {
-		return nil, fmt.Errorf("apogee: tool call %s: arguments are not a JSON object: %w", tc.ID, err)
+	if err := json.Unmarshal([]byte(args), &object); err != nil || object == nil {
+		return json.RawMessage(anthropicEmptyInput)
 	}
 	compact := &bytes.Buffer{}
 	if err := json.Compact(compact, []byte(args)); err != nil {
-		return nil, fmt.Errorf("apogee: tool call %s: arguments are not a JSON object: %w", tc.ID, err)
+		return json.RawMessage(anthropicEmptyInput)
 	}
-	return json.RawMessage(compact.Bytes()), nil
+	return json.RawMessage(compact.Bytes())
 }
 
 // anthropicToolCallText is the prose form of a tool call for a request that offers no tools —
