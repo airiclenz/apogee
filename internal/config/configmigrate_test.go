@@ -988,6 +988,36 @@ func TestMigrateLegacyConfigFoldsTheHooksBlock(t *testing.T) {
 			want: "mode: plan\n" +
 				"context-window: 8000\n",
 		},
+		{
+			name: "a hand-written reactions: list stays when a leftover mechanisms: key goes",
+			given: "reactions:\n" +
+				"  - id: bell\n" +
+				"    on: [error]\n" +
+				"    run: [\"true\"]\n" +
+				"mechanisms:\n" +
+				"  decompose: true\n" +
+				"mode: plan\n",
+			want: "reactions:\n" +
+				"  - id: bell\n" +
+				"    on: [error]\n" +
+				"    run: [\"true\"]\n" +
+				"mode: plan\n",
+		},
+		{
+			name: "a hand-written reactions: list stays when the validated-sets: block goes",
+			given: "validated-sets:\n" +
+				"  enable: false\n" +
+				"reactions:\n" +
+				"  - id: bell\n" +
+				"    on: [turn-finished]\n" +
+				"    run: [notify-send, done]\n" +
+				"    timeout: 5s\n",
+			want: "reactions:\n" +
+				"  - id: bell\n" +
+				"    on: [turn-finished]\n" +
+				"    run: [notify-send, done]\n" +
+				"    timeout: 5s\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

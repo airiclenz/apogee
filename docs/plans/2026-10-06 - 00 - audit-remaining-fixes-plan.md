@@ -303,7 +303,7 @@ internal/processing/instructions.go — InstructionsFor, extractRegexDelimiters;
 **Acceptance:** `go build ./internal/processing/ ./internal/provider/ ./internal/agent/ && go test -count=1 -run 'RenderToolCall' ./internal/processing/ && go test -count=1 -run 'OpenAI' ./internal/provider/ && go test -count=1 -run 'TestProviderRequestFoldsPastCalls' ./internal/agent/`
 **Commit:** `fix(provider): render tool calls as text on a tool-less OpenAI request`
 
-## 16. The legacy config fold accepts an existing reactions list
+## 16. The legacy config fold accepts an existing reactions list — ✅ DONE (2026-10-06)
 
 **What:** Fixes audit Medium "Legacy config fold refuses to run when a `reactions:` list already exists".
 **Regression guard.** `bothListsRefusal` and `TestMigrateLegacyConfigRefusesBothLists` stay: the item yields to `bothListsRefusal` (internal/config/configmigrate.go: two lists under two names is a hand migration in progress). The "reactions plus `hooks:`" test and Goal clause are dropped — with `hooks:` present the existing reactions are always null, so the expected list is the folded hooks. Tests cover reactions-only plus `mechanisms:` and plus `validated-sets:`.

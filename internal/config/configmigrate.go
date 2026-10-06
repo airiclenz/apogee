@@ -1188,7 +1188,14 @@ func foldLegacyReactions(data []byte) ([]byte, reactionsFold, error) {
 		return spliceReactionsFold(data, entries, &fold)
 	}
 	verify := func(before, after fileConfig, updated []byte) error {
-		return verifyReactionsFold(before, after, updated, want)
+		// The rewritten block must fire what the file fired before: a hand-written `reactions:`
+		// list the file already carries, then the folded hooks. A file carrying both non-empty is
+		// refused before this point (bothListsRefusal), so one side or the other is empty here.
+		existing, err := toReactions(before.Reactions)
+		if err != nil {
+			return fmt.Errorf("the existing reactions: block would not resolve: %w", err)
+		}
+		return verifyReactionsFold(before, after, updated, append(existing, want...))
 	}
 	updated, err := verifiedEdit(data, splice, verify)
 	switch {
@@ -1296,8 +1303,8 @@ func strippedMechanismIDs(rc legacyReactionsConfig) []string {
 
 // verifyReactionsFold is the gate this migration passes before anything reaches the disk: the
 // rewritten file must carry neither retired key anywhere, its `reactions:` block must resolve to
-// exactly the list the `hooks:` block resolved to, and it must agree with the original on every
-// OTHER setting.
+// exactly want — the reactions the original file already listed plus the ones its `hooks:` block
+// resolved to — and it must agree with the original on every OTHER setting.
 //
 // The retired keys are read out of the edited BYTES, because they are what fileConfig has no field
 // for: the parsed after says nothing about a `hooks:` the fold was supposed to take away.
