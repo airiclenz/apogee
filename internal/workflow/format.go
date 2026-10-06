@@ -231,7 +231,7 @@ func totalsLine(tally Tally) string {
 // noteLine renders what a stage came to when its items are not listed, or "" when there is
 // nothing to say: `<kind> <stage>: ` then a failed merge's reason, a script's or ask's receipt, and
 // the stage's note (a skip, a pick's count, an ask's default taken, a repeat's rounds, the
-// finished items a stage redid). The kind
+// duplicate entries a source dropped, the finished items a stage redid). The kind
 // leads so a stage named `report` or `items` never reads as the `report:` or `items:` line.
 func noteLine(stage StageResult, result Result) string {
 	var parts []string

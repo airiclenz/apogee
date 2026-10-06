@@ -100,7 +100,8 @@ type Stage struct {
 	// (default: the nearest earlier fanout), or the stage whose receipt `list` field a pick takes.
 	From string `yaml:"from,omitempty" json:"from,omitempty"`
 	// Field is the `list` receipt field a pick takes its items from; File is an output file in the
-	// workflow folder (a path local to it) whose non-blank lines a pick takes instead. Exactly one.
+	// workflow folder (a path local to it) whose non-blank lines a pick takes instead, each line
+	// once at its first occurrence. Exactly one.
 	Field string `yaml:"field,omitempty" json:"field,omitempty"`
 	File  string `yaml:"file,omitempty" json:"file,omitempty"`
 	// Cap keeps at most this many picked items (0: all); Batch groups them this many per child.
@@ -137,11 +138,11 @@ func (s Stage) RunsSubAgent() bool { return len(s.SubAgent) > 0 }
 // ItemSource is where a fanout stage's items come from. Exactly one of List, Files, Lines, Split
 // and Stage is set; Batch groups the resulting items that many per child.
 type ItemSource struct {
-	// List is the items written out literally.
+	// List is the items written out literally; an entry written twice is one item.
 	List []string `yaml:"list,omitempty" json:"list,omitempty"`
 	// Files is a workspace-relative glob (`**` allowed); every match is an item.
 	Files string `yaml:"files,omitempty" json:"files,omitempty"`
-	// Lines is a file whose non-blank lines are the items.
+	// Lines is a file whose non-blank lines are the items; a repeated line is one item.
 	Lines string `yaml:"lines,omitempty" json:"lines,omitempty"`
 	// Split is a directory cut into contiguous parts sized to fit a child's context window.
 	Split string `yaml:"split,omitempty" json:"split,omitempty"`

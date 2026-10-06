@@ -69,7 +69,7 @@ not offered, whatever the roster says. A delegate — a `sub_agent` child or a w
 | Argument | What it is |
 |---|---|
 | `task` | The brief every helper gets. `{item}` is replaced by the helper's item, `{out}` by the file it writes its detail to. Each helper starts fresh, so the brief has to stand on its own |
-| `over` | The items: a list of strings, or one of `files` (a workspace glob, `**` allowed — each match is an item), `lines` (a file whose non-blank lines are the items) or `split` (a folder cut into contiguous parts, each sized to fit one helper's context window) |
+| `over` | The items: a list of strings, or one of `files` (a workspace glob, `**` allowed — each match is an item), `lines` (a file whose non-blank lines are the items) or `split` (a folder cut into contiguous parts, each sized to fit one helper's context window). An entry a list or a `lines` file repeats runs once, at its first occurrence, and the stage says how many it dropped in its result and in `/workflows`: `fanout <stage>: dropped <n> duplicate entry/entries: each entry runs once` |
 | `batch` | How many items one helper gets (default 1) |
 | `context` | Files every helper reads before its item |
 | `returns` | The typed fields each helper reports beside its status and summary, as `name: type` — see [Receipts](#receipts--what-each-helper-hands-back) |
@@ -227,7 +227,7 @@ ignored.
 | `fanout` | One fresh helper per item (or per batch), each handing back a receipt | `over` (`list`, `files`, `lines`, `split`, or `stage` — the items of an earlier `pick`; plus `batch`), `task` or `prompt`, `returns`, `out`, `context`, `tools` |
 | `verify` | One adversarial helper per item of an earlier fan-out, trying to refute its receipt; its verdict — `confirmed`, `refuted` or `unclear` — is folded into the item. `when:` picks the items, reading each item's receipt | `from` (default: the nearest earlier fan-out), optional `task` or `prompt` (apogee's own refute-it brief always leads), `context`, `tools` |
 | `merge` | One helper over a manifest of every item's receipt, verdict and output, which writes `report.md` in the workflow folder | `from`, `task` or `prompt`, `returns`, `context`, `tools` |
-| `pick` | Turns a `list` field of an earlier stage's receipts, or the non-blank lines of a file in the workflow folder, into items for a later fan-out. No helper | `from` + `field`, or `file`; `cap` (keep at most this many), `batch` |
+| `pick` | Turns a `list` field of an earlier stage's receipts, or the non-blank lines of a file in the workflow folder (a repeated line once), into items for a later fan-out. No helper | `from` + `field`, or `file`; `cap` (keep at most this many), `batch` |
 | `script` | Runs a command and reads its `KEY=value` stdout lines as the stage's receipt. No helper | `run`, `returns` |
 | `ask` | Puts a question to you and stores the answer in the stage's `answer` field. No helper | `question`, `options`, `default` (required — it is the answer taken where no one can be asked) |
 | `repeat` | Runs an earlier stage again while its `when:` holds, at most `max:` rounds (10 at most) | `repeat` (the stage's name), `max` |

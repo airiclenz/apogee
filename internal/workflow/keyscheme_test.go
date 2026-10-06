@@ -166,7 +166,7 @@ func TestKeySchemeCurrentIsTheKeyARunWrites(t *testing.T) {
 	runner.Workspace = goldenWorkspace()
 	stage := goldenStage()
 	stage.Task = "" // a runnable stage takes its brief from either task or prompt, never both
-	items, err := Expand(*stage.Over, runner.Workspace, runner.Split)
+	items, _, err := Expand(*stage.Over, runner.Workspace, runner.Split)
 	if err != nil {
 		t.Fatalf("Expand: %v", err)
 	}

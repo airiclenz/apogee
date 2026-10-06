@@ -36,7 +36,7 @@ type Item struct {
 	// entries and their count when a split part or a batch gives the child several.
 	Label string `json:"label"`
 	// Units are the source's entries, in source order: literal items, non-blank lines, or
-	// workspace-relative file paths.
+	// workspace-relative file paths — a repeated literal item or line only at its first occurrence.
 	Units []string `json:"units"`
 }
 
@@ -58,29 +58,32 @@ func NewSplitBudget(contextLimit int) SplitBudget {
 
 // Expand yields a fanout's items from source over the workspace fsys, in a stable order: a literal
 // list in its written order, `files:` matches and `split:` parts in lexical path order, `lines:`
-// in file order. source.Batch groups the entries that many per item (0 or 1: one each). budget
-// is read by `split:` alone. Every error names the source: a source with no or several kinds set,
+// in file order. A `list:` or `lines:` source that repeats an entry yields it once, at its first
+// occurrence, compared by its exact text, so no two items share an `items/<key>/` folder; dropped
+// counts the repeats left out. source.Batch groups the entries that many per item (0 or 1: one
+// each), after the repeats are dropped. budget is read by `split:` alone. Every error names the
+// source: a source with no or several kinds set,
 // an absolute or `..` path, a malformed glob, a `files:` walk root that is not a directory, an
 // unreadable file or one that is not a regular file, a `split:` with a budget of 0 or less, an
 // expansion that yields nothing, and a `stage:` source — whose items exist only once that pick
 // stage has run.
-func Expand(source ItemSource, fsys fs.FS, budget SplitBudget) ([]Item, error) {
+func Expand(source ItemSource, fsys fs.FS, budget SplitBudget) (items []Item, dropped int, err error) {
 	kind, value, err := sourceKind(source)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if source.Batch < 0 {
-		return nil, fmt.Errorf("%s: %s: batch is negative; set it to how many items one child gets", kind, value)
+		return nil, 0, fmt.Errorf("%s: %s: batch is negative; set it to how many items one child gets", kind, value)
 	}
 
-	groups, err := expandGroups(kind, value, source.List, fsys, budget)
+	groups, dropped, err := expandGroups(kind, value, source.List, fsys, budget)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %s: %w", kind, value, err)
+		return nil, 0, fmt.Errorf("%s: %s: %w", kind, value, err)
 	}
 	if len(groups) == 0 {
-		return nil, fmt.Errorf("%s: %s: the source yields no items", kind, value)
+		return nil, 0, fmt.Errorf("%s: %s: the source yields no items", kind, value)
 	}
-	return batchItems(groups, source.Batch), nil
+	return batchItems(groups, source.Batch), dropped, nil
 }
 
 // sourceKind names the one kind source sets and its value as an error quotes it.
@@ -110,29 +113,52 @@ func sourceKind(source ItemSource) (string, string, error) {
 }
 
 // expandGroups yields the source's entries as groups: one group per entry, except a split part,
-// which is one group of the part's files.
-func expandGroups(kind, value string, list []string, fsys fs.FS, budget SplitBudget) ([][]string, error) {
+// which is one group of the part's files. A list or lines entry that repeats an earlier one is
+// dropped (uniqueEntries), and dropped counts them.
+func expandGroups(kind, value string, list []string, fsys fs.FS, budget SplitBudget) ([][]string, int, error) {
 	switch kind {
 	case "list":
-		return singletons(list), nil
+		unique, dropped := uniqueEntries(list)
+		return singletons(unique), dropped, nil
 	case "stage":
-		return nil, errors.New("a pick stage's items exist only once it has run; the runner takes them from its receipt")
+		return nil, 0, errors.New("a pick stage's items exist only once it has run; the runner takes them from its receipt")
 	}
 
 	cleaned, err := workspacePath(value)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	switch kind {
 	case "files":
 		matches, err := globFiles(fsys, cleaned)
-		return singletons(matches), err
+		return singletons(matches), 0, err
 	case "lines":
 		lines, err := nonBlankLines(fsys, cleaned)
-		return singletons(lines), err
+		if err != nil {
+			return nil, 0, err
+		}
+		unique, dropped := uniqueEntries(lines)
+		return singletons(unique), dropped, nil
 	default:
-		return splitParts(fsys, cleaned, budget)
+		parts, err := splitParts(fsys, cleaned, budget)
+		return parts, 0, err
 	}
+}
+
+// uniqueEntries keeps each entry's first occurrence, compared by its exact text, in order, and
+// counts the repeats it dropped. It trims nothing: an entry is kept verbatim.
+func uniqueEntries(entries []string) (unique []string, dropped int) {
+	unique = make([]string, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if seen[entry] {
+			dropped++
+			continue
+		}
+		seen[entry] = true
+		unique = append(unique, entry)
+	}
+	return unique, dropped
 }
 
 // workspacePath cleans a workspace-relative path or glob (dropping `./` and a trailing `/`) and
@@ -322,7 +348,7 @@ func readRegularFile(fsys fs.FS, name string) ([]byte, error) {
 }
 
 // nonBlankLines returns the regular file's lines that hold more than whitespace, trimmed, in file
-// order.
+// order — a repeated line every time it occurs; the caller drops repeats (uniqueEntries).
 func nonBlankLines(fsys fs.FS, name string) ([]string, error) {
 	content, err := readRegularFile(fsys, name)
 	if err != nil {

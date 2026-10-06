@@ -24,6 +24,13 @@ const outputName = "output.md"
 // finished (redidNote): the count, then "item" or "items".
 const redidFormat = "redid %d finished %s: their inputs changed since they ran"
 
+// droppedFormat is the note a stage carries when its source repeated entries (droppedNote): the
+// count of repeats Expand or a pick file dropped, then "entry" or "entries".
+const droppedFormat = "dropped %d duplicate %s: each entry runs once"
+
+// noteSeparator joins a stage's notes when it has more than one to say.
+const noteSeparator = "; "
+
 // The brief placeholders a stage's task is rendered with.
 const (
 	placeholderItem = "{item}"
@@ -64,7 +71,8 @@ type ItemSpec struct {
 	// A verify child's Returns is the engine's `verdict` field, never the author's.
 	Stage Stage
 	// Item is the child's share of the stage, and Key the item's folder name. Two items of one
-	// stage may share a Key (a fanout list is not deduplicated); Index tells them apart.
+	// stage never share a Key: a source's repeated entries are dropped before they become items
+	// (Expand, a pick file).
 	Item Item
 	Key  string
 	// Name is the item's short name (ItemName), the one a Driver names its child by; Item.Label
@@ -228,8 +236,9 @@ func (r Result) Stopped() bool { return r.Phase == PhaseStopped }
 // that ended blocked, or a pick that could not read its file. A script or ask stage has one item,
 // labelled with the stage's name, carrying its receipt; a pick has none (its items are the next
 // fanout's). Note says in one line what the stage came to when its items do not — why it was
-// skipped, what a pick picked, that an ask took its default, how many finished items a
-// child-running stage redid because their inputs changed. Round is the repeat round the result
+// skipped, what a pick picked, that an ask took its default, how many duplicate entries a fanout's
+// source or a pick's file repeated and were dropped, how many finished items a child-running stage
+// redid because their inputs changed. Round is the repeat round the result
 // comes from: 0 for the stage's own run, n for a repeat stage's n-th re-run of it.
 type StageResult struct {
 	Name  string
@@ -324,7 +333,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Scripts == nil && slices.ContainsFunc(plan.Stages, func(stage Stage) bool { return stage.Kind == StageScript }) {
 		return Result{}, errors.New("workflow: the plan has a script stage and the runner has no ScriptRunner")
 	}
-	status, found, stageItems, err := r.openFolder(plan, "")
+	status, found, stageItems, dropped, err := r.openFolder(plan, "")
 	if err != nil {
 		return Result{}, err
 	}
@@ -342,7 +351,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		return Result{}, err
 	}
 
-	state := &runState{runner: r, status: status, prior: prior, replay: replay, dir: dir}
+	state := &runState{runner: r, status: status, prior: prior, replay: replay, dir: dir, dropped: dropped}
 	result := Result{ID: status.ID, Dir: dir, Phase: PhaseDone, Stages: make([]StageResult, 0, len(plan.Stages))}
 	for index := range plan.Stages {
 		if ctx.Err() != nil {
@@ -373,22 +382,27 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 // expandStages expands every fanout's items up front, so an unreadable source fails the run before
 // a folder exists and the PlanHash covers the work. It returns them per stage index and flattened.
 // Only a fanout with a source of its own is expanded here: a fanout over a pick stage's items gets
-// them when the pick has run, and every other kind works over earlier stages' results.
-func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
+// them when the pick has run, and every other kind works over earlier stages' results. dropped is
+// how many repeated entries each stage index's source dropped, for a stage that dropped any.
+func (r *Runner) expandStages(plan Plan) (map[int][]Item, map[int]int, []Item, error) {
 	perStage := make(map[int][]Item, len(plan.Stages))
+	dropped := make(map[int]int)
 	var all []Item
 	for index, stage := range plan.Stages {
 		if stage.Kind != StageFanout || stage.Over.Stage != "" {
 			continue
 		}
-		items, err := Expand(*stage.Over, r.Workspace, r.Split)
+		items, repeats, err := Expand(*stage.Over, r.Workspace, r.Split)
 		if err != nil {
-			return nil, nil, fmt.Errorf("workflow: stage %q: %w", stage.Name, err)
+			return nil, nil, nil, fmt.Errorf("workflow: stage %q: %w", stage.Name, err)
 		}
 		perStage[index] = items
+		if repeats > 0 {
+			dropped[index] = repeats
+		}
 		all = append(all, items...)
 	}
-	return perStage, all, nil
+	return perStage, dropped, all, nil
 }
 
 // Open finds or creates the workflow folder Run will run plan in, the way Run does: the plan
@@ -400,43 +414,44 @@ func (r *Runner) expandStages(plan Plan) (map[int][]Item, []Item, error) {
 // whose hash leads anywhere else — no folder, or another one — is refused with ErrFolderMoved
 // before anything is created.
 func (r *Runner) Open(plan Plan, folder string) (RunStatus, error) {
-	status, _, _, err := r.openFolder(plan, folder)
+	status, _, _, _, err := r.openFolder(plan, folder)
 	return status, err
 }
 
 // openFolder is the folder open Run and Open share: it validates plan, expands its items
 // (expandStages), and finds the newest folder with the plan's PlanHash, or — unless folder names
 // one the hash must lead to — creates one stamped by Now. found reports a folder that already
-// existed; stageItems are the expanded items per stage index.
-func (r *Runner) openFolder(plan Plan, folder string) (status RunStatus, found bool, stageItems map[int][]Item, err error) {
+// existed; stageItems are the expanded items per stage index, and dropped how many repeated
+// entries each one's source dropped (expandStages).
+func (r *Runner) openFolder(plan Plan, folder string) (status RunStatus, found bool, stageItems map[int][]Item, dropped map[int]int, err error) {
 	if r.Store == nil || r.Workspace == nil {
-		return RunStatus{}, false, nil, errors.New("workflow: runner needs a Store and a Workspace")
+		return RunStatus{}, false, nil, nil, errors.New("workflow: runner needs a Store and a Workspace")
 	}
 	if problems := Validate(plan); len(problems) > 0 {
-		return RunStatus{}, false, nil, fmt.Errorf("workflow: invalid plan: %s", joinProblems(problems))
+		return RunStatus{}, false, nil, nil, fmt.Errorf("workflow: invalid plan: %s", joinProblems(problems))
 	}
-	stageItems, allItems, err := r.expandStages(plan)
+	stageItems, dropped, allItems, err := r.expandStages(plan)
 	if err != nil {
-		return RunStatus{}, false, nil, err
+		return RunStatus{}, false, nil, nil, err
 	}
 	planHash, err := PlanHash(plan, nil, allItems)
 	if err != nil {
-		return RunStatus{}, false, nil, err
+		return RunStatus{}, false, nil, nil, err
 	}
 	status, found, err = r.Store.Find(planHash)
 	if err != nil {
-		return RunStatus{}, false, nil, err
+		return RunStatus{}, false, nil, nil, err
 	}
 	if folder != "" && (!found || status.ID != folder) {
-		return RunStatus{}, false, nil, ErrFolderMoved
+		return RunStatus{}, false, nil, nil, ErrFolderMoved
 	}
 	if !found {
 		status, err = r.Store.Create(plan, planHash, r.now())
 		if err != nil {
-			return RunStatus{}, false, nil, err
+			return RunStatus{}, false, nil, nil, err
 		}
 	}
-	return status, found, stageItems, nil
+	return status, found, stageItems, dropped, nil
 }
 
 // resetStatus readies the folder openFolder opened for a run: its stages reset to pending, its
@@ -489,6 +504,9 @@ type runState struct {
 	prior  []StageStatus
 	replay bool
 	dir    string
+	// dropped is how many repeated entries each fanout's own source dropped, by stage index
+	// (expandStages); endStage notes it.
+	dropped map[int]int
 }
 
 // runFanout runs one fanout stage's items in the given repeat round and returns the stage's result.
@@ -564,14 +582,15 @@ func (s *runState) runItems(ctx context.Context, stageIndex int, stage Stage, dr
 
 // endStage settles a stage whose items have run: stopped when a cancel left an item unfinished,
 // else finished — the phase the caller judged the stage to end in (done, or failed for a merge
-// that left no report). It records the phase and the stage's note — the finished items it redid
-// (redidNote), "" when none — and returns the stage's result with its tally and that note.
+// that left no report). It records the phase and the stage's note — the duplicate entries its
+// source dropped (droppedNote) and the finished items it redid (redidNote), joined when it has
+// both, "" when neither — and returns the stage's result with its tally and that note.
 func (s *runState) endStage(ctx context.Context, stageIndex int, stage Stage, results []ItemResult, finished Phase) (StageResult, error) {
 	phase := finished
 	if ctx.Err() != nil && hasUnfinished(results) {
 		phase = PhaseStopped
 	}
-	note := redidNote(results)
+	note := joinNotes(droppedNote(s.dropped[stageIndex]), redidNote(results))
 	s.mu.Lock()
 	s.status.Stages[stageIndex].Note = note
 	s.mu.Unlock()
@@ -598,6 +617,29 @@ func redidNote(results []ItemResult) string {
 		noun = "item"
 	}
 	return fmt.Sprintf(redidFormat, redid, noun)
+}
+
+// droppedNote says how many repeated entries a stage's source dropped, or "" when it dropped none.
+func droppedNote(dropped int) string {
+	if dropped == 0 {
+		return ""
+	}
+	noun := "entries"
+	if dropped == 1 {
+		noun = "entry"
+	}
+	return fmt.Sprintf(droppedFormat, dropped, noun)
+}
+
+// joinNotes joins the non-empty notes with noteSeparator, in order; "" when every one is empty.
+func joinNotes(notes ...string) string {
+	kept := make([]string, 0, len(notes))
+	for _, note := range notes {
+		if note != "" {
+			kept = append(kept, note)
+		}
+	}
+	return strings.Join(kept, noteSeparator)
 }
 
 // itemDraft is an item before it is keyed: the item, the stage's repeat round, the text its key

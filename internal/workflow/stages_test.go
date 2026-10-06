@@ -208,3 +208,33 @@ func TestMergeFailureLeavesItemResultsIntact(t *testing.T) {
 		})
 	}
 }
+
+func TestPickFileDedupesEntries(t *testing.T) {
+	t.Parallel()
+	scripts := scriptFunc(func(_ context.Context, spec ScriptSpec) (ScriptOutput, error) {
+		if err := os.WriteFile(filepath.Join(spec.Dir, "parts.txt"), []byte("p1\np2\n  p1  \np3\np2\n"), 0o600); err != nil {
+			return ScriptOutput{}, err
+		}
+		return ScriptOutput{Stdout: "parts=3\n"}, nil
+	})
+	spawner := okSpawner()
+	runner := newTestRunner(t, spawner)
+	runner.Width = 1
+	runner.Scripts = scripts
+	plan := Plan{Name: "split", Stages: []Stage{
+		{Name: "split", Kind: StageScript, Run: "sh split.sh", Returns: ReceiptSpec{"parts": "int"}},
+		{Name: "parts", Kind: StagePick, File: "parts.txt"},
+		{Name: "each", Kind: StageFanout, Task: "audit {item}", Over: &ItemSource{Stage: "parts"}},
+	}}
+
+	result := runPlan(t, runner, context.Background(), plan)
+
+	want := [][]string{{"p1"}, {"p2"}, {"p3"}}
+	if got := specUnits(spawner.specsOfStage("each")); !reflect.DeepEqual(got, want) {
+		t.Errorf("each items = %v, want each line once %v", got, want)
+	}
+	wantNote := "picked 3 entries into 3 items; dropped 2 duplicate entries: each entry runs once"
+	if note := result.Stages[1].Note; note != wantNote {
+		t.Errorf("pick note = %q, want %q", note, wantNote)
+	}
+}

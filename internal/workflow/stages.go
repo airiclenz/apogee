@@ -560,15 +560,16 @@ func fanoutItems(plan Plan, index int, stageItems map[int][]Item) []Item {
 }
 
 // runPick turns an earlier stage's `list` receipt field — unioned across a fanout's items, in item
-// order, each entry once — or the non-blank lines of a file in the workflow folder into items for
-// the fanout that reads it: the first `cap:` entries (all when 0), `batch:` to a child. A file that
+// order, each entry once — or the non-blank lines of a file in the workflow folder, each line once
+// at its first occurrence (its note counts the repeats dropped), into items for the fanout that
+// reads it: the first `cap:` entries (all when 0), `batch:` to a child. A file that
 // cannot be read fails the stage with no items; the workflow goes on.
 func (s *runState) runPick(plan Plan, index int, stageItems map[int][]Item, result *Result) (StageResult, error) {
 	stage := plan.Stages[index]
 	if err := s.setStagePhase(index, stage, PhaseRunning, 0); err != nil {
 		return StageResult{}, err
 	}
-	entries, failure := s.pickEntries(stage, result)
+	entries, dropped, failure := s.pickEntries(stage, result)
 	if failure != "" {
 		stageItems[index] = nil
 		return s.settleStage(index, stage, PhaseFailed, failure, nil)
@@ -584,34 +585,38 @@ func (s *runState) runPick(plan Plan, index int, stageItems map[int][]Item, resu
 	if len(picked) < len(entries) {
 		note = fmt.Sprintf("picked %d of %d entries (cap %d) into %d items", len(picked), len(entries), stage.Cap, len(items))
 	}
+	note = joinNotes(note, droppedNote(dropped))
 	return s.settleStage(index, stage, PhaseDone, note, nil)
 }
 
-// pickEntries reads a pick stage's entries, or says why it could not.
-func (s *runState) pickEntries(stage Stage, result *Result) ([]string, string) {
+// pickEntries reads a pick stage's entries, or says why it could not. A file's repeated lines are
+// dropped, its first occurrence kept, so a fanout over the pick cannot put two items in one
+// folder; dropped counts them. The union of a `list` field keeps each entry once by design and
+// counts nothing.
+func (s *runState) pickEntries(stage Stage, result *Result) (entries []string, dropped int, failure string) {
 	if stage.File != "" {
 		dir, err := s.runner.Store.Dir(s.status.ID)
 		if err != nil {
-			return nil, err.Error()
+			return nil, 0, err.Error()
 		}
 		// The folder is opened as an os.Root, so a symlink in it cannot lead the read out of it.
 		root, err := os.OpenRoot(dir)
 		if err != nil {
-			return nil, fmt.Sprintf("cannot open the workflow folder: %v", err)
+			return nil, 0, fmt.Sprintf("cannot open the workflow folder: %v", err)
 		}
 		defer func() { _ = root.Close() }()
 		lines, err := nonBlankLines(root.FS(), path.Clean(stage.File))
 		if err != nil {
-			return nil, fmt.Sprintf("cannot read %s in the workflow folder: %v", stage.File, err)
+			return nil, 0, fmt.Sprintf("cannot read %s in the workflow folder: %v", stage.File, err)
 		}
-		return lines, ""
+		entries, dropped = uniqueEntries(lines)
+		return entries, dropped, ""
 	}
 
 	source := stageResultNamed(result, stage.From)
 	if source == nil {
-		return nil, fmt.Sprintf("stage %s has not run", stage.From)
+		return nil, 0, fmt.Sprintf("stage %s has not run", stage.From)
 	}
-	var entries []string
 	seen := map[string]bool{}
 	for _, item := range source.Items {
 		if item.Phase != PhaseDone || item.Receipt == nil {
@@ -626,7 +631,7 @@ func (s *runState) pickEntries(stage Stage, result *Result) ([]string, string) {
 			entries = append(entries, entry)
 		}
 	}
-	return entries, ""
+	return entries, 0, ""
 }
 
 // stringList reads a list receipt field in either shape it arrives in; anything else is empty.

@@ -115,7 +115,7 @@ func TestExpandYieldsEachSourceKindInStableOrder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			items, err := Expand(tc.source, workspace(), tc.budget)
+			items, _, err := Expand(tc.source, workspace(), tc.budget)
 
 			if err != nil {
 				t.Fatalf("Expand: %v", err)
@@ -127,16 +127,70 @@ func TestExpandYieldsEachSourceKindInStableOrder(t *testing.T) {
 	}
 }
 
+func TestExpandDedupesRepeatedEntries(t *testing.T) {
+	t.Parallel()
+	fsys := workspace()
+	fsys["dup.txt"] = &fstest.MapFile{Data: []byte("a.go\nb.go\n  a.go \nc.go\n")}
+
+	cases := []struct {
+		name        string
+		source      ItemSource
+		want        [][]string
+		wantDropped int
+	}{
+		{
+			name:        "a lines file with a repeated line expands it once",
+			source:      ItemSource{Lines: "dup.txt"},
+			want:        [][]string{{"a.go"}, {"b.go"}, {"c.go"}},
+			wantDropped: 1,
+		},
+		{
+			name:   "distinct lines are unaffected",
+			source: ItemSource{Lines: "todo.txt"},
+			want:   [][]string{{"first item"}, {"second item"}, {"third"}},
+		},
+		{
+			name:        "a list entry is compared and kept verbatim",
+			source:      ItemSource{List: []string{"a.go ", "a.go", "a.go "}},
+			want:        [][]string{{"a.go "}, {"a.go"}},
+			wantDropped: 1,
+		},
+		{
+			name:        "batch groups the entries left after the repeats",
+			source:      ItemSource{List: []string{"a", "a", "b", "c", "b"}, Batch: 2},
+			want:        [][]string{{"a", "b"}, {"c"}},
+			wantDropped: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			items, dropped, err := Expand(tc.source, fsys, 0)
+
+			if err != nil {
+				t.Fatalf("Expand: %v", err)
+			}
+			if got := unitsOf(items); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("units = %q, want %q", got, tc.want)
+			}
+			if dropped != tc.wantDropped {
+				t.Errorf("dropped = %d, want %d", dropped, tc.wantDropped)
+			}
+		})
+	}
+}
+
 func TestExpandSplitsADirectoryAliasAlike(t *testing.T) {
 	t.Parallel()
 
-	want, err := Expand(ItemSource{Split: "internal"}, workspace(), 100)
+	want, _, err := Expand(ItemSource{Split: "internal"}, workspace(), 100)
 	if err != nil {
 		t.Fatalf("Expand internal: %v", err)
 	}
 
 	for _, alias := range []string{"internal/", "./internal", "./internal/"} {
-		got, err := Expand(ItemSource{Split: alias}, workspace(), 100)
+		got, _, err := Expand(ItemSource{Split: alias}, workspace(), 100)
 
 		if err != nil {
 			t.Fatalf("Expand %q: %v", alias, err)
@@ -150,7 +204,7 @@ func TestExpandSplitsADirectoryAliasAlike(t *testing.T) {
 func TestExpandLabelsAnItemByItsEntries(t *testing.T) {
 	t.Parallel()
 
-	items, err := Expand(ItemSource{List: []string{"a", "b", "c", "d"}, Batch: 3}, workspace(), 0)
+	items, _, err := Expand(ItemSource{List: []string{"a", "b", "c", "d"}, Batch: 3}, workspace(), 0)
 
 	if err != nil {
 		t.Fatalf("Expand: %v", err)
@@ -193,7 +247,7 @@ func TestExpandRefusesWithAnErrorNamingTheSource(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			items, err := Expand(tc.source, workspace(), tc.budget)
+			items, _, err := Expand(tc.source, workspace(), tc.budget)
 
 			if err == nil {
 				t.Fatalf("Expand = %q, want an error", unitsOf(items))

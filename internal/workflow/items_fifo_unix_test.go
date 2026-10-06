@@ -53,7 +53,7 @@ func TestExpandRefusesALinesFIFOWithoutBlocking(t *testing.T) {
 	root := fifoWorkspace(t)
 
 	err := errWithin(t, "Expand", func() error {
-		_, err := Expand(ItemSource{Lines: "pipe"}, root.FS(), 100)
+		_, _, err := Expand(ItemSource{Lines: "pipe"}, root.FS(), 100)
 		return err
 	})
 

@@ -331,7 +331,13 @@ internal/filewatch/filewatch.go — Watcher.sample; internal/agent/launch_test.g
 **Acceptance:** `go build ./internal/config/ && go test -count=1 -run 'WriteConfigAtomically' ./internal/config/`
 **Commit:** `fix(config): save through a symlinked config file`
 
-## 18. Workflow sources de-duplicate items
+## 18. Workflow sources de-duplicate items — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): Expand's signature changed to return the dropped count — `([]Item, int, error)` — and its test callers (items_test.go, keyscheme_test.go, items_fifo_unix_test.go) take the extra value; the per-stage counts travel expandStages -> openFolder -> runState.dropped, and endStage joins droppedNote with redidNote by "; " (new joinNotes helper).
+
+NOTES (2026-10-06): de-duplication is applied to `list:` and `lines:` entries (and a pick `file:`'s lines) only; `files:` matches and `split:` parts are unique by construction. A pick's `from:` union already kept each entry once and reports no count.
+
+NOTES (2026-10-06): the dedupe test for Expand is named TestExpandDedupesRepeatedEntries (items_test.go) so it is selected by the Acceptance `-run 'Expand|Dedup'` pattern.
 
 **What:** Recast at the regression check (2026-10-06). Fixes the collision half of audit Medium "Workflow items can collide on one folder". Ratified call: de-duplicate.
 **Regression guard.** Also de-duplicate pick `file:` entries (stages.go pickEntries -> nonBlankLines), first occurrence kept, so a fan_out over a pick file cannot collide on one folder; add a pick-file duplicate test. Entries are compared by their exact unit string and the first is kept verbatim — trim nothing new (lines and pick-file entries are already trimmed by `nonBlankLines`), so only a source that repeats an entry changes its PlanHash — before `batchItems` — equal units give an equal key within a stage (`Expand` cannot compute `ItemKey`). `Expand`'s callers keyscheme_test.go and items_fifo_unix_test.go are updated, or its signature kept with the count exposed separately. `endStage` joins the dedupe note with `redidNote` instead of replacing it. A pre-fix folder whose source repeated entries has a new PlanHash: the item's changelog sidecar entry says a re-run of such a folder is refused and asks for a fresh launch (`ErrFolderMoved`, `rerunMovedFormat`), while a resume or re-issue starts a new folder. This supersedes the `ItemSpec` doc (runner.go, "a fanout list is not deduplicated") and docs/manual/workflows.md's `lines` row; rule: every comment or doc that describes a list/lines/pick-file source's entries or lists what a stage Note carries is updated — find them with `grep -rn 'non-blank lines\|redid\|not deduplicated' internal/workflow docs/manual`.

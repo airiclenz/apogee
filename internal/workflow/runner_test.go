@@ -234,6 +234,50 @@ func TestRunnerNotesTheFinishedItemsItRedid(t *testing.T) {
 	}
 }
 
+func TestRunNotesDedupedItems(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	prompts := fstest.MapFS{"p.md": {Data: []byte("audit {item}")}}
+	runner.Prompts = prompts
+	plan := promptPlan("a", "b", "a")
+	const droppedOne = "dropped 1 duplicate entry: each entry runs once"
+
+	first := runPlan(t, runner, context.Background(), plan)
+	prompts["p.md"] = &fstest.MapFile{Data: []byte("audit {item} for races")}
+	edited := runPlan(t, runner, context.Background(), plan)
+
+	if got := len(onlyStage(t, first).Items); got != 2 {
+		t.Errorf("first run: %d items, want 2 (the repeated entry once)", got)
+	}
+	keys := map[string]bool{}
+	for _, item := range onlyStage(t, first).Items {
+		if keys[item.Key] {
+			t.Errorf("first run: two items share the folder %s", item.Key)
+		}
+		keys[item.Key] = true
+	}
+	if note := onlyStage(t, first).Note; note != droppedOne {
+		t.Errorf("first run: note = %q, want %q", note, droppedOne)
+	}
+	want := droppedOne + "; redid 2 finished items: their inputs changed since they ran"
+	if note := onlyStage(t, edited).Note; note != want {
+		t.Errorf("edited prompt file: note = %q, want %q", note, want)
+	}
+	status, err := runner.Store.ReadStatus(edited.ID)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if note := status.Stages[0].Note; note != want {
+		t.Errorf("status.json note = %q, want %q", note, want)
+	}
+	if line := "fanout find: " + want; !slices.Contains(strings.Split(Format(edited), "\n"), line) {
+		t.Errorf("Format =\n%s\nwant a line %q", Format(edited), line)
+	}
+}
+
 // schemeKey is the key scheme keySchemes[index] gives the item labelled label of promptPlan's stage
 // over prompts, failing the test on error.
 func schemeKey(t *testing.T, index int, label string, prompts fstest.MapFS) string {
