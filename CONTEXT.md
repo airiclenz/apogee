@@ -1603,6 +1603,13 @@ _Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a b
 for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for
 Apogee's production execution).
 
+**Circuit breaker**:
+The always-on backstop that refuses an exact tool call (same tool, same arguments) once it has
+failed three times back to back with no other call executed in between; the call is allowed again
+as soon as a different call runs, and the refusal tells the model so. Distinct from the
+**tool-loop breaker** Floor guard, which steers a repeated Turn rather than refusing a call.
+_Avoid_: tool-loop breaker (a different guard), "refused forever".
+
 **Dangerous-action guard**:
 A **footgun-guard — *not* a security boundary** — that refuses a small model's obvious
 catastrophic *mistakes* before execution, in **every** mode independent of Confinement (ADR 0012;
