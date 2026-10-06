@@ -155,10 +155,13 @@ func (s *runState) runVerify(ctx context.Context, plan Plan, index, round int, s
 }
 
 // runMerge runs one child over a manifest of every source item — its receipt, verdict and output
-// path — written into the workflow folder, and hands it report.md there as its output. A merge
-// that leaves no report (its child blocked or stopped, or claimed a report it never wrote) ends
-// the stage failed and says why in result.ReportMissing; the items' results are untouched.
+// path — written into the workflow folder, and hands it report.md there as its output; a child
+// that is not resumed starts with no report.md there (runItem). A merge that leaves no report (its
+// child blocked or stopped, or claimed a report it never wrote) ends the stage failed and says why
+// in result.ReportMissing; the items' results are untouched. Each merge round clears both report
+// fields first, so a repeat round or a later merge never announces a report it deleted.
 func (s *runState) runMerge(ctx context.Context, plan Plan, index, round int, result *Result) (StageResult, error) {
+	result.Report, result.ReportMissing = "", ""
 	stage := plan.Stages[index]
 	_, source, err := sourceStage(plan, index, result)
 	if err != nil {
@@ -358,6 +361,16 @@ func reportMissing(item ItemResult, path string) (string, error) {
 		return "", fmt.Errorf("workflow: read the merge report %q: %w", path, err)
 	}
 	return "", nil
+}
+
+// removeReport deletes the report at path before a fresh merge child runs, so a report an earlier
+// merge or round wrote never passes for one this child did not write. path is the absolute
+// report.md under the Store's workflow folder, never a Workspace path; a missing file is no error.
+func removeReport(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("workflow: clear the stale merge report %q: %w", path, err)
+	}
+	return nil
 }
 
 // ScriptRunner runs a script stage's command. The agent implements it under the Mode and approval

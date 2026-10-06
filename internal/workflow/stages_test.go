@@ -238,3 +238,141 @@ func TestPickFileDedupesEntries(t *testing.T) {
 		t.Errorf("pick note = %q, want %q", note, wantNote)
 	}
 }
+
+// mergeReceipt is an ok merge receipt reporting sections report sections.
+func mergeReceipt(sections int) *Receipt {
+	return &Receipt{Status: StatusOK, Summary: "merged", Fields: map[string]any{"sections": sections}}
+}
+
+// writeReport writes a report at a merge child's output path.
+func writeReport(spec ItemSpec) error {
+	return os.WriteFile(spec.Output, []byte("# Report\n"), 0o600)
+}
+
+func TestMergeRerunFailsWhenItsChildWritesNoReport(t *testing.T) {
+	t.Parallel()
+	merges := 0
+	spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		if spec.Stage.Kind != StageMerge {
+			return Outcome{Ending: EndCompleted, Receipt: issuesReceipt(spec.Item.Label, 1)}, nil
+		}
+		merges++
+		if merges == 1 {
+			if err := writeReport(spec); err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Ending: EndCompleted, Receipt: &Receipt{Status: StatusBlocked, Summary: "half done"}}, nil
+		}
+		return Outcome{Ending: EndCompleted, Receipt: &Receipt{Status: StatusOK, Summary: "merged"}}, nil
+	})
+	runner := newTestRunner(t, spawner)
+	plan := countedPlan([]string{"a", "b"}, Stage{Name: "report", Kind: StageMerge, Task: "merge"})
+
+	runPlan(t, runner, context.Background(), plan)
+	second := runPlan(t, runner, context.Background(), plan)
+
+	if merges != 2 {
+		t.Fatalf("merge spawned %d times over two runs, want 2: a blocked merge is never resumed", merges)
+	}
+	if phase := stageNamed(t, second, "report").Phase; phase != PhaseFailed {
+		t.Errorf("second merge phase = %s, want failed: its child wrote no report", phase)
+	}
+	if second.Report != "" || !strings.Contains(second.ReportMissing, "wrote no report") {
+		t.Errorf("report = %q, missing = %q; want the first run's report.md cleared, not announced",
+			second.Report, second.ReportMissing)
+	}
+}
+
+func TestRepeatMergeClearsAStaleReport(t *testing.T) {
+	t.Parallel()
+	spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		if spec.Stage.Kind != StageMerge {
+			return Outcome{Ending: EndCompleted, Receipt: issuesReceipt(spec.Item.Label, 1)}, nil
+		}
+		if spec.RepeatRound == 0 {
+			if err := writeReport(spec); err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Ending: EndCompleted, Receipt: mergeReceipt(0)}, nil
+		}
+		return Outcome{Ending: EndCompleted, Receipt: mergeReceipt(1)}, nil
+	})
+	runner := newTestRunner(t, spawner)
+	plan := countedPlan([]string{"a", "b"},
+		Stage{Name: "report", Kind: StageMerge, Task: "merge", Returns: ReceiptSpec{"sections": "int"}},
+		Stage{Name: "redo", Kind: StageRepeat, Repeat: "report", When: "sections < 1", Max: 1},
+	)
+
+	result := runPlan(t, runner, context.Background(), plan)
+
+	if merge := stageNamed(t, result, "report"); merge.Round != 1 || merge.Phase != PhaseFailed {
+		t.Errorf("merge = round %d phase %s, want the repeat's round 1 failed", merge.Round, merge.Phase)
+	}
+	if result.Report != "" || !strings.Contains(result.ReportMissing, "wrote no report") {
+		t.Errorf("report = %q, missing = %q; want no report announced after round 1 wrote none",
+			result.Report, result.ReportMissing)
+	}
+	if _, err := os.Stat(filepath.Join(result.Dir, reportName)); !os.IsNotExist(err) {
+		t.Errorf("report.md stat = %v, want round 0's report removed", err)
+	}
+	if formatted := Format(result); strings.Contains("\n"+formatted, "\n"+reportPrefix) {
+		t.Errorf("Format announces a report:\n%s", formatted)
+	}
+}
+
+func TestResumedMergeKeepsItsReport(t *testing.T) {
+	t.Parallel()
+	merges := 0
+	spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		if spec.Stage.Kind != StageMerge {
+			return Outcome{Ending: EndCompleted, Receipt: issuesReceipt(spec.Item.Label, 1)}, nil
+		}
+		merges++
+		if err := writeReport(spec); err != nil {
+			return Outcome{}, err
+		}
+		return Outcome{Ending: EndCompleted, Receipt: &Receipt{Status: StatusOK, Summary: "merged"}}, nil
+	})
+	runner := newTestRunner(t, spawner)
+	plan := countedPlan([]string{"a", "b"}, Stage{Name: "report", Kind: StageMerge, Task: "merge"})
+
+	runPlan(t, runner, context.Background(), plan)
+	second := runPlan(t, runner, context.Background(), plan)
+
+	merge := stageNamed(t, second, "report")
+	if merges != 1 || !merge.Items[0].Resumed {
+		t.Fatalf("merge spawned %d times (resumed %v), want once and resumed on the second run", merges, merge.Items[0].Resumed)
+	}
+	if want := filepath.Join(second.Dir, reportName); second.Report != want || second.ReportMissing != "" || merge.Phase != PhaseDone {
+		t.Errorf("report = %q (missing %q, phase %s), want %q kept and done", second.Report, second.ReportMissing, merge.Phase, want)
+	}
+}
+
+func TestMergeContinuationKeepsTheReportItsFirstChildWrote(t *testing.T) {
+	t.Parallel()
+	spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		if spec.Stage.Kind != StageMerge {
+			return Outcome{Ending: EndCompleted, Receipt: issuesReceipt(spec.Item.Label, 1)}, nil
+		}
+		if len(spec.Prior) == 0 {
+			if err := writeReport(spec); err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Ending: EndCapped, Receipt: &Receipt{Status: StatusPartial, Summary: "half"}, Report: "ran out"}, nil
+		}
+		return Outcome{Ending: EndCompleted, Receipt: &Receipt{Status: StatusOK, Summary: "merged"}}, nil
+	})
+	runner := newTestRunner(t, spawner)
+	runner.Continuations = 1
+	plan := countedPlan([]string{"a"}, Stage{Name: "report", Kind: StageMerge, Task: "merge"})
+
+	result := runPlan(t, runner, context.Background(), plan)
+
+	merge := stageNamed(t, result, "report")
+	if merge.Items[0].Continuations != 1 || merge.Phase != PhaseDone {
+		t.Errorf("merge = %d continuations, phase %s; want 1 and done", merge.Items[0].Continuations, merge.Phase)
+	}
+	if want := filepath.Join(result.Dir, reportName); result.Report != want || result.ReportMissing != "" {
+		t.Errorf("report = %q (missing %q), want %q: a continuation keeps the report", result.Report, result.ReportMissing, want)
+	}
+}

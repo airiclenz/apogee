@@ -854,12 +854,20 @@ func (s *runState) priorItem(stageName string, round int, label string) (line It
 }
 
 // runItem runs one item to its end: fresh children and continuations under the Runner's bounds,
-// each child's transcript saved, the final receipt stored. The error is a store failure only; a
-// cancel returns the item stopped.
+// each child's transcript saved, the final receipt stored. A merge item that was not resumed first
+// clears the report an earlier merge left at its output, once before its first child and never
+// per continuation (a capped merge's next round continues the same report), so reportMissing sees
+// only what this item's children wrote. The error is a store failure only; a cancel returns the
+// item stopped.
 func (s *runState) runItem(ctx context.Context, stageIndex int, stage Stage, index int, job itemJob) (ItemResult, error) {
 	runner := s.runner
 	result := job.result
 	repeatRound := s.repeatRound(stageIndex)
+	if stage.Kind == StageMerge && !result.Resumed {
+		if err := removeReport(result.Output); err != nil {
+			return result, err
+		}
+	}
 	var (
 		prior []Round
 		last  Outcome

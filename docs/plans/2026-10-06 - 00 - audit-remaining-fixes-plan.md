@@ -350,7 +350,13 @@ internal/workflow/recipe_stages_test.go — TestPickFromAFileInTheWorkflowFolder
 **Acceptance:** `go build ./internal/workflow/ && go test -count=1 -run 'Expand|Dedup' ./internal/workflow/`
 **Commit:** `fix(workflow): de-duplicate repeated items before they share a folder`
 
-## 19. A merge child never inherits a stale report.md
+## 19. A merge child never inherits a stale report.md — ✅ DONE (2026-10-06)
+
+NOTES (2026-10-06): re-derived from the assumption that the delete lives in stages.go and goes through the workflow's workspace FS — per the item's regression guard it hooks into runner.go `runItem` (once per non-Resumed merge job, before the attempt loop, never per continuation) and removes the absolute Store path with `os.Remove` (helper `removeReport` in stages.go), never `Runner.Workspace`.
+
+NOTES (2026-10-06): `runMerge` resets `result.ReportMissing` alongside `result.Report` at the start of every merge round, so a later round or merge that succeeds does not carry an earlier round's "no report" reason.
+
+NOTES (2026-10-06): extra test `TestMergeContinuationKeepsTheReportItsFirstChildWrote` pins that a capped merge's continuation keeps the report its first child wrote; the plan's "second merge round" test is `TestMergeRerunFailsWhenItsChildWritesNoReport` (a re-run after a blocked merge), the resumed case is `TestResumedMergeKeepsItsReport`.
 
 **What:** Fixes the report half of audit Medium "Workflow items can collide on one folder, and a stale `report.md` passes". Ratified call: delete before spawn. Depends on item 18.
 **Regression guard.** Whenever `runMerge` deletes report.md, or a merge ends failed, `result.Report` is cleared, so a repeat round or a second merge never announces a deleted report (format.go, agent/background.go). The delete hooks into runner.go: once per non-Resumed job before the attempt loop in `runItem`, never per continuation (a capped merge's next round continues the same report.md). It removes the absolute `reportPath` under the Store folder (`os.Remove`, `fs.ErrNotExist` ignored) or goes through a Store method — never `Runner.Workspace`, the user's read-only fs.FS.
