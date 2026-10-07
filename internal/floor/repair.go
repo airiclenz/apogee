@@ -10,8 +10,9 @@ import (
 
 // ToolCallRepair is the tool-call repair guard (the `tool-call-repair` key, ADR 0071): it checks
 // each requested tool call against the tool menu the model was shown (LoopView.Tools()) and against
-// its own arguments — an unknown tool name, empty or malformed JSON arguments, or a missing required
-// parameter — and hands back the correction the engine re-streams the Turn with. ok is false for a
+// its own arguments — an unknown tool name, empty or malformed JSON arguments (a call the parser
+// marked Malformed included, named by its own parse error), or a missing required parameter — and
+// hands back the correction the engine re-streams the Turn with. ok is false for a
 // response with no tool calls, or one whose calls are all well formed: the no-op case, where the
 // response stands exactly as the model wrote it.
 //
@@ -88,7 +89,10 @@ func validateToolCalls(calls []domain.ToolCall, tools []domain.ToolDef) []robust
 }
 
 // validateCall checks one call: a present function name, membership in the tool menu, and valid
-// arguments. A missing name short-circuits the rest (there is nothing left to check).
+// arguments. A missing name short-circuits the rest (there is nothing left to check). A call the
+// parser marked Malformed is reported from its marker — the parse error of the text the model
+// actually sent — and skips validateArguments, whose read of the "{}" stand-in would ask for every
+// required parameter the model may well have sent.
 func validateCall(call domain.ToolCall, tools []domain.ToolDef) []robustnessIssue {
 	if call.Tool == "" {
 		return []robustnessIssue{{message: "tool call missing function name"}}
@@ -101,7 +105,16 @@ func validateCall(call domain.ToolCall, tools []domain.ToolDef) []robustnessIssu
 			context: map[string]string{"available_tools": strings.Join(toolNames(tools), ", ")},
 		})
 	}
+	if call.Malformed != nil {
+		return append(issues, notValidJSONIssue(call.Malformed.Err))
+	}
 	return append(issues, validateArguments(call, tools)...)
+}
+
+// notValidJSONIssue is the issue for arguments that do not parse as a JSON object, in apogee-sim's
+// wording — the one line validateArguments and a Malformed marker share.
+func notValidJSONIssue(parseErr error) robustnessIssue {
+	return robustnessIssue{message: fmt.Sprintf("arguments are not valid JSON: %s", parseErr.Error())}
 }
 
 // validateArguments checks a call's arguments are a JSON object and carry every required
@@ -113,7 +126,7 @@ func validateArguments(call domain.ToolCall, tools []domain.ToolDef) []robustnes
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return []robustnessIssue{{message: fmt.Sprintf("arguments are not valid JSON: %s", err.Error())}}
+		return []robustnessIssue{notValidJSONIssue(err)}
 	}
 
 	required := requiredParams(call.Tool, tools)

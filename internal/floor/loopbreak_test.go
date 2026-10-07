@@ -351,3 +351,59 @@ func TestToolLoopBreakImmediateRepeatIgnoresResults(t *testing.T) {
 		t.Error("ToolLoopBreak returned ok = false on an immediate repeat, want the directive whatever the results")
 	}
 }
+
+// A Malformed call keys on its tool and the raw text it was sent with, not on its "{}" stand-in:
+// identical malformed repeats across Turns fire the breaker, while a well-formed call with "{}"
+// arguments and a malformed call with different raw text are not repeats of it.
+func TestToolLoopBreakKeysAMalformedCallOnItsRaw(t *testing.T) {
+	t.Parallel()
+
+	const raw = `{"path":`
+	cases := []struct {
+		name     string
+		previous domain.ToolCall
+		now      domain.ToolCall
+		want     bool
+	}{
+		{
+			name:     "identical malformed repeat",
+			previous: malformedCall("w1", "write_file", raw, "unexpected end of JSON input"),
+			now:      malformedCall("w2", "write_file", raw, "unexpected end of JSON input"),
+			want:     true,
+		},
+		{
+			name:     "malformed after a well-formed empty-object call",
+			previous: domaintest.Call("w1", "write_file", map[string]string{}),
+			now:      malformedCall("w2", "write_file", raw, "unexpected end of JSON input"),
+			want:     false,
+		},
+		{
+			name:     "well-formed empty-object call after a malformed one",
+			previous: malformedCall("w1", "write_file", raw, "unexpected end of JSON input"),
+			now:      domaintest.Call("w2", "write_file", map[string]string{}),
+			want:     false,
+		},
+		{
+			name:     "malformed with different raw text",
+			previous: malformedCall("w1", "write_file", raw, "unexpected end of JSON input"),
+			now:      malformedCall("w2", "write_file", `{"path":"a.go",`, "unexpected end of JSON input"),
+			want:     false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			history := []domain.Message{
+				domaintest.UserMessage("build the thing"),
+				domaintest.AssistantCallsMessage(tc.previous),
+				domaintest.ToolResultMessage(tc.previous.ID, "result"),
+			}
+			_, ok := ToolLoopBreak(loopResponse(history, tc.now))
+
+			if ok != tc.want {
+				t.Errorf("ToolLoopBreak fired = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}

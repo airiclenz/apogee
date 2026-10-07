@@ -15,7 +15,8 @@ import (
 // which the engine re-streams the Turn with. ok is false — the no-op case — for a response with no
 // tool calls, or one that neither rule matches.
 //
-// Two rules, both on byte-identical keys (name + arguments, computeToolCallKey), no fuzzy match:
+// Two rules, both on byte-identical keys (name + arguments, computeToolCallKey — a Malformed call's
+// arguments being the raw text it was sent with), no fuzzy match:
 //
 //   - the immediate repeat: key(now) == key(-1), whatever the results were — the model has already
 //     seen what that call buys and asked for it again;
@@ -85,12 +86,13 @@ func repeatsToolTurns(turns []toolTurn, now string) bool {
 
 // computeToolCallKey renders an order-independent key for a set of tool calls (apogee-sim
 // computeToolCallKey @pin): entries are sorted by name then arguments, so a reordered-but-identical
-// set of calls produces the same key.
+// set of calls produces the same key. A call's arguments are read through callArgumentsKey, so a
+// Malformed call keys on the text the model sent.
 func computeToolCallKey(calls []domain.ToolCall) string {
 	type entry struct{ name, args string }
 	entries := make([]entry, len(calls))
 	for i, tc := range calls {
-		entries[i] = entry{name: tc.Tool, args: string(tc.Arguments)}
+		entries[i] = entry{name: tc.Tool, args: callArgumentsKey(tc)}
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].name != entries[j].name {
@@ -106,6 +108,19 @@ func computeToolCallKey(calls []domain.ToolCall) string {
 		b.WriteByte(';')
 	}
 	return b.String()
+}
+
+// callArgumentsKey is the arguments half of a call's key. A call the parser marked Malformed keys on
+// its marker's raw text rather than its "{}" stand-in: identical malformed repeats still read as the
+// repeat they are, two malformed calls with different text do not, and a stand-in never matches a
+// well-formed call whose arguments really are "{}" — raw text that parsed as a JSON object would not
+// have been marked. The marker lives on the in-memory call only (json:"-"), so a call reloaded from
+// a session snapshot keys on "{}" like any other.
+func callArgumentsKey(tc domain.ToolCall) string {
+	if tc.Malformed != nil {
+		return tc.Malformed.Raw
+	}
+	return string(tc.Arguments)
 }
 
 // toolTurn is one tool-calling assistant Turn of the Exchange body as the repeat rules read it: the
@@ -172,7 +187,7 @@ func computeToolResultKey(calls []domain.ToolCall, results []domain.Message) str
 		if !ok {
 			continue
 		}
-		entries = append(entries, entry{name: tc.Tool, args: string(tc.Arguments), content: m.Content})
+		entries = append(entries, entry{name: tc.Tool, args: callArgumentsKey(tc), content: m.Content})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].name != entries[j].name {

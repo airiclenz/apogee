@@ -237,6 +237,23 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	}
 
 	calls := resp.ToolCalls()
+	if malformedTwice, ok := a.malformedTwiceFault(calls); ok {
+		// The Two-Turn exit: the previous committed Turn of this Exchange already carried a
+		// malformed call and was answered, and this response, past every repair retry, still
+		// carries one. One malformed Turn is recovered from; two in a row end the Exchange — the
+		// calls are dropped and the Turn reads as a final no-tool reply. Nothing else bounds a
+		// model that keeps sending the same broken call: the tool-loop breaker only re-streams,
+		// capped per Turn. A reply with no text left once its calls are gone has nothing to
+		// commit, so the Exchange ends FAULTED with this as its reason — the outcome an empty
+		// reply has (reviewedOutcome) — and a delegation's parent is told why rather than handed
+		// stale text from an earlier Turn as the answer.
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "processing", Err: malformedTwice})
+		if strings.TrimSpace(resp.Text()) == "" {
+			a.turns.noteFault(malformedTwice)
+			return a.turns.end(t, endAbandoned), nil
+		}
+		calls = nil
+	}
 	if a.turns.wrappingUp() {
 		// The wrap-up Turn (turnLifecycle.wrapUp) keeps at most ONE tool: write_file, and then only
 		// the calls aimed at that tool survive — the first write_file call, or with a spawn-named
@@ -859,6 +876,44 @@ func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.To
 			"a call the loop can dispatch needs both", dropped, len(calls)),
 	})
 	return kept
+}
+
+// malformedTwiceFault reports the Exchange-ending fault of the Two-Turn exit: ok is true when calls
+// carries a Malformed call and so did the previous committed Turn of the current Exchange — its
+// last assistant message. The message names the first malformed call of calls and its parse error.
+//
+// The marker lives on the in-memory committed calls only (json:"-"), so after a session resume the
+// previous Turn reads as well formed and the exit waits one Turn more.
+func (a *Agent) malformedTwiceFault(calls []domain.ToolCall) (string, bool) {
+	current := firstMalformedCall(calls)
+	if current == nil || !a.previousTurnWasMalformed() {
+		return "", false
+	}
+	return fmt.Sprintf("%v: the model sent malformed arguments for %s on two Turns in a row (%v); the Exchange ends here",
+		processing.ErrMalformedToolCall, current.Tool, current.Malformed.Err), true
+}
+
+// previousTurnWasMalformed reports whether the last assistant message committed in the current
+// Exchange carried a Malformed call. The walk runs back from the end to the Exchange boundary and
+// stops at the first assistant message, so an interjection or a tool result in between is passed
+// over and a Turn before the last one is never read.
+func (a *Agent) previousTurnWasMalformed() bool {
+	for i := a.conv.Len() - 1; i >= a.exchangeBoundary(); i-- {
+		if m := a.conv.At(i); m.Role == domain.RoleAssistant {
+			return firstMalformedCall(m.ToolCalls) != nil
+		}
+	}
+	return false
+}
+
+// firstMalformedCall returns the first call of calls the parser marked Malformed, or nil.
+func firstMalformedCall(calls []domain.ToolCall) *domain.ToolCall {
+	for i := range calls {
+		if calls[i].Malformed != nil {
+			return &calls[i]
+		}
+	}
+	return nil
 }
 
 // streamResponse is the Turn's Upstream call: collectCompletion with the observer that makes the

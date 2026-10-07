@@ -2,6 +2,7 @@ package floor
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -171,5 +172,43 @@ func TestToolCallRepairStillCorrectsAroundAWithdrawnTool(t *testing.T) {
 	}
 	if strings.Contains(correction, "shell") {
 		t.Errorf("correction = %q, want no complaint about the withdrawn tool", correction)
+	}
+}
+
+// malformedCall is a call the parser marked Malformed: arguments "{}" standing in for raw, which
+// failed to parse with parseErr.
+func malformedCall(id, tool, raw, parseErr string) domain.ToolCall {
+	return domain.ToolCall{
+		ID:        id,
+		Tool:      tool,
+		Arguments: json.RawMessage(`{}`),
+		Malformed: &domain.MalformedArguments{Err: errors.New(parseErr), Raw: raw},
+	}
+}
+
+// A call the parser marked Malformed is corrected with its own parse error in apogee-sim's wording,
+// and its "{}" stand-in is not read as a call missing every required parameter. A marked call to a
+// tool the model was never shown is still named as unknown.
+func TestToolCallRepairNamesAMalformedCall(t *testing.T) {
+	t.Parallel()
+
+	resp := callResponse(repairMenu(), malformedCall("c1", "write_file", `{"path":`, "unexpected end of JSON input"))
+	correction, ok := ToolCallRepair(resp, nil)
+
+	if !ok {
+		t.Fatal("ToolCallRepair returned ok = false for a malformed call")
+	}
+	if want := "\n- arguments are not valid JSON: unexpected end of JSON input\n"; !strings.Contains(correction, want) {
+		t.Errorf("correction = %q, want the line %q", correction, want)
+	}
+	if strings.Contains(correction, "missing required parameter") {
+		t.Errorf("correction = %q, want no missing-parameter line for the malformed call", correction)
+	}
+
+	unknown := callResponse(repairMenu(), malformedCall("c1", "frobnicate", `[1]`, "not a JSON object"))
+	correction, ok = ToolCallRepair(unknown, nil)
+	if !ok || !strings.Contains(correction, `function "frobnicate" not in the tool set`) ||
+		!strings.Contains(correction, "- arguments are not valid JSON: not a JSON object") {
+		t.Errorf("ToolCallRepair(malformed unknown tool) = (%q, %v), want both the unknown-tool and the JSON lines", correction, ok)
 	}
 }

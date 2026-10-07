@@ -1139,3 +1139,188 @@ func TestFloorGuard_ToolCallSalvageIsSilentOnTheWrapUpTurn(t *testing.T) {
 		t.Errorf("salvage fired %d times on the wrap-up Turn, want 0", n)
 	}
 }
+
+// writeFileSchema is write_file's schema in the malformed-call tests: path and content required, so
+// a correction that read the "{}" stand-in of a malformed call would ask for both.
+const writeFileSchema = `{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`
+
+// truncatedArguments is the malformed argument text the tests send — a JSON object cut short — and
+// truncatedParseError the parse error encoding/json reports for it.
+const (
+	truncatedArguments  = `{"path":`
+	truncatedParseError = "unexpected end of JSON input"
+)
+
+// malformedCallConfig is a tool set of a read tool and a write_file that requires path and
+// content, with run counters for each. Both stubs are read-only so no Approval is asked for.
+func malformedCallConfig(sink *recordingSink, readRan, writeRan *int) domain.Config {
+	return configWithTools(sink,
+		fakeTool{name: "read", readOnly: true, ran: readRan, result: "contents of a"},
+		schemaTool{fakeTool: fakeTool{name: "write_file", readOnly: true, ran: writeRan, result: "ok"}, schema: writeFileSchema},
+	)
+}
+
+// malformedSiblingTurn is one reply carrying a well-formed read and a write_file whose arguments
+// are cut short.
+func malformedSiblingTurn(readID, writeID string) stubllm.Turn {
+	return stubllm.Turn{ToolCalls: []stubllm.ToolCall{
+		{ID: readID, Name: "read", Arguments: `{"path":"a"}`},
+		{ID: writeID, Name: "write_file", Arguments: truncatedArguments},
+	}}
+}
+
+// repeatedTurns is n copies of turn, for a script whose every attempt sends the same reply.
+func repeatedTurns(n int, turn stubllm.Turn) []stubllm.Turn {
+	turns := make([]stubllm.Turn, n)
+	for i := range turns {
+		turns[i] = turn
+	}
+	return turns
+}
+
+// A native reply carrying a malformed call is re-streamed by tool-call repair before anything in
+// it runs: the retried request carries apogee-sim's not-valid-JSON line for the call and no
+// missing-parameter line, and only the corrected reply's calls dispatch.
+func TestFloorGuard_ToolCallRepairReStreamsAMalformedNativeCall(t *testing.T) {
+	sink := &recordingSink{}
+	readRan, writeRan := 0, 0
+	responder := scriptedResponder(t,
+		malformedSiblingTurn("c1", "c2"),
+		stubllm.Turn{ToolCalls: []stubllm.ToolCall{
+			{ID: "c3", Name: "read", Arguments: `{"path":"a"}`},
+			{ID: "c4", Name: "write_file", Arguments: `{"path":"a.go","content":"package a"}`},
+		}},
+		contentTurn("done"),
+	)
+	a, err := newAgent(malformedCallConfig(sink, &readRan, &writeRan), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "write a.go")
+
+	if got := responder.calls(); got != 3 {
+		t.Fatalf("provider was called %d times, want 3 (draft, repair retry, final)", got)
+	}
+	retried := responder.requests()[1].Messages
+	if wireUserIndexContaining(retried, "\n- arguments are not valid JSON: "+truncatedParseError+"\n") < 0 {
+		t.Errorf("retried request carries no not-valid-JSON correction line: %+v", retried)
+	}
+	if wireUserIndexContaining(retried, "missing required parameter") >= 0 {
+		t.Errorf("retried request asks for missing parameters of the malformed call: %+v", retried)
+	}
+	var ids []string
+	for _, call := range dispatchedCalls(sink.events) {
+		ids = append(ids, call.ID)
+	}
+	if !slices.Equal(ids, []string{"c3", "c4"}) {
+		t.Errorf("dispatched calls = %v, want only the corrected reply's [c3 c4]", ids)
+	}
+	if readRan != 1 || writeRan != 1 {
+		t.Errorf("read ran %d times and write_file %d, want 1 each — nothing from the draft runs", readRan, writeRan)
+	}
+}
+
+// With every attempt malformed, the repair retries run out and the last attempt stands: its valid
+// sibling dispatches and the malformed call is answered with its parse error and raw text.
+func TestFloorGuard_MalformedCallFallsBackWhenRetriesAreSpent(t *testing.T) {
+	sink := &recordingSink{}
+	readRan, writeRan := 0, 0
+	turns := append(repeatedTurns(maxPostResponseRetries+1, malformedSiblingTurn("c1", "c2")), contentTurn("done"))
+	responder := scriptedResponder(t, turns...)
+	a, err := newAgent(malformedCallConfig(sink, &readRan, &writeRan), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "write a.go")
+
+	if got, want := responder.calls(), maxPostResponseRetries+2; got != want {
+		t.Fatalf("provider was called %d times, want %d (every repair attempt, then the final reply)", got, want)
+	}
+	if readRan != 1 || writeRan != 0 {
+		t.Errorf("read ran %d times and write_file %d, want the sibling once and the malformed call never", readRan, writeRan)
+	}
+	bad := resultFor(t, sink.events, "c2")
+	if want := malformedArgumentsWant(truncatedParseError, truncatedArguments); !bad.IsError || bad.Content != want {
+		t.Errorf("malformed result = %+v, want the error %q", bad, want)
+	}
+}
+
+// A model that sends the same malformed call Turn after Turn is stopped: the first malformed Turn
+// is answered, and when the next one, past its retries, still carries a malformed call the
+// Exchange ends with a "processing" ErrorEvent saying why. The upstream sees exactly the two Turns'
+// attempts — with tool-call repair on, and off, where only the tool-loop breaker re-streams.
+func TestFloorGuard_MalformedCallTwoTurnsInARowEndTheExchange(t *testing.T) {
+	attemptsPerTurn := maxPostResponseRetries + 1
+	for _, tc := range []struct {
+		name         string
+		repairOff    bool
+		wantRequests int
+	}{
+		{name: "repair on", wantRequests: attemptsPerTurn + attemptsPerTurn},
+		{name: "repair off", repairOff: true, wantRequests: 1 + attemptsPerTurn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			writeRan := 0
+			cfg := malformedCallConfig(sink, nil, &writeRan)
+			cfg.Floor.DisableToolCallRepair = tc.repairOff
+			malformed := toolCallTurn("c1", "write_file", truncatedArguments)
+			malformed.Repeat = true
+			responder := scriptedResponder(t, malformed)
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			res := runExchange(t, a, "write a.go")
+
+			if got := responder.calls(); got != tc.wantRequests {
+				t.Errorf("provider was called %d times, want %d (Turn 1's attempts plus Turn 2's)", got, tc.wantRequests)
+			}
+			if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+				t.Errorf("result = %+v, want a closed Exchange marked faulted — the reply had no text to commit", res)
+			}
+			errs := errorEvents(sink.events)
+			if len(errs) != 1 || errs[0].Source != "processing" || !strings.Contains(errs[0].Err, "two Turns in a row") ||
+				!strings.Contains(errs[0].Err, "write_file") || !strings.Contains(errs[0].Err, truncatedParseError) {
+				t.Errorf("ErrorEvents = %+v, want one from processing naming write_file, the parse error and the two Turns", errs)
+			}
+			if writeRan != 0 {
+				t.Errorf("write_file ran %d times, want never", writeRan)
+			}
+		})
+	}
+}
+
+// One malformed Turn is answered and recovered from: a well-formed tool-call Turn after it runs,
+// the Exchange goes on to its final reply, and no ErrorEvent is emitted.
+func TestFloorGuard_MalformedCallThenWellFormedContinues(t *testing.T) {
+	sink := &recordingSink{}
+	writeRan := 0
+	turns := append(repeatedTurns(maxPostResponseRetries+1, toolCallTurn("c1", "write_file", truncatedArguments)),
+		toolCallTurn("c2", "write_file", `{"path":"a.go","content":"package a"}`),
+		contentTurn("done"),
+	)
+	responder := scriptedResponder(t, turns...)
+	a, err := newAgent(malformedCallConfig(sink, nil, &writeRan), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	res := runExchange(t, a, "write a.go")
+
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("result = %+v, want a completed, unfaulted Exchange", res)
+	}
+	if writeRan != 1 {
+		t.Errorf("write_file ran %d times, want the well-formed call once", writeRan)
+	}
+	if msg, ok := lastMessageEvent(sink.events); !ok || msg.Text != "done" {
+		t.Errorf("last MessageEvent = %+v, want the final reply %q", msg, "done")
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %+v, want none", errs)
+	}
+}
