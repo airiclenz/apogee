@@ -9,18 +9,23 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// fencedProfile and regexProfile are the two prompted-format profiles the render tests bind.
+// fencedProfile and regexProfile are the two prompted-format profiles the render tests bind;
+// argsFirstRegexProfile is a custom-regex profile whose args group precedes its name group.
 var (
 	fencedProfile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
 	regexProfile  = domain.ModelProfile{
 		ToolCallFormat: domain.FormatCustomRegex,
 		Pattern:        `<call name="(?<name>\w+)">(?<args>.*?)</call>`,
 	}
+	argsFirstRegexProfile = domain.ModelProfile{
+		ToolCallFormat: domain.FormatCustomRegex,
+		Pattern:        `<call>(?<args>\{.*?\})@(?<name>\w+)</call>`,
+	}
 )
 
 // TestRenderToolCall pins the text each format writes a past call as: the fenced block in the
-// default markers, the custom-regex pattern's own delimiters, the <tool_call> fallback, and the
-// native profile's empty render.
+// default markers, the custom-regex pattern's own delimiters in its own group order, the
+// <tool_call> fallback, and the native profile's empty render.
 func TestRenderToolCall(t *testing.T) {
 	t.Parallel()
 
@@ -71,6 +76,12 @@ func TestRenderToolCall(t *testing.T) {
 			profile: regexProfile,
 			call:    domain.ToolCall{Tool: "ls", Arguments: json.RawMessage(`[1]`)},
 			want:    `<call name="ls">{}</call>`,
+		},
+		{
+			name:    "custom-regex: an args-first pattern writes the args before the name",
+			profile: argsFirstRegexProfile,
+			call:    domain.ToolCall{Tool: "read_file", Arguments: json.RawMessage(`{"path": "a.go"}`)},
+			want:    `<call>{"path":"a.go"}@read_file</call>`,
 		},
 		{
 			name:    "custom-regex: a pattern with one named group falls back to <tool_call>",
@@ -137,6 +148,7 @@ func TestRenderToolCallRoundTrips(t *testing.T) {
 		{name: "fenced: an empty string", profile: fencedProfile, args: `{"note":"","path":"a.go"}`},
 		{name: "fenced: typed values", profile: fencedProfile, args: `{"opts":{"deep":[1,2]},"start_line":7}`},
 		{name: "custom-regex", profile: regexProfile, args: `{"content":"a\nb","start_line":3}`},
+		{name: "custom-regex: args-first", profile: argsFirstRegexProfile, args: `{"content":"a\nb","start_line":3}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

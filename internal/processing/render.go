@@ -26,9 +26,9 @@ const emptyArgsObject = "{}"
 //     against the tool menu's schema (DecodeSchemaTypedArgs). Argument pairs are separated by a
 //     blank line. A value holding a line that is exactly BEGIN_ARG or ``` cannot be written in
 //     this format and reads back cut at that line — the format's own limit.
-//   - custom-regex: the call in the pattern's literal delimiters (extractRegexDelimiters) with
-//     the compact JSON arguments in the args slot, or <tool_call>name(args)</tool_call> when the
-//     pattern lacks a name or an args group.
+//   - custom-regex: the call in the pattern's literal delimiters (extractRegexDelimiters), the
+//     name and the compact JSON arguments in the order the pattern's groups take, or
+//     <tool_call>name(args)</tool_call> when the pattern lacks a name or an args group.
 //
 // Arguments that are not a JSON object render as no arguments at all. A native or zero profile
 // returns "" with a nil error — its calls travel as native tool calls. An unknown tool-call
@@ -81,7 +81,8 @@ func fencedValue(value json.RawMessage) string {
 	return text
 }
 
-// renderRegexCall writes call in pattern's literal delimiters, or the <tool_call>name(args)
+// renderRegexCall writes call in pattern's literal delimiters and group order — the same
+// regexDelimiters.call the instructions' example is written with — or the <tool_call>name(args)
 // </tool_call> fallback when the pattern lacks a name or an args group (see RenderToolCall).
 func renderRegexCall(pattern string, call domain.ToolCall) string {
 	args := emptyArgsObject
@@ -89,7 +90,7 @@ func renderRegexCall(pattern string, call domain.ToolCall) string {
 		args = compactJSON(call.Arguments)
 	}
 	if d, ok := extractRegexDelimiters(pattern); ok {
-		return d.prefix + call.Tool + d.middle + args + d.suffix
+		return d.call(call.Tool, args)
 	}
 	return fmt.Sprintf("<tool_call>%s(%s)</tool_call>", call.Tool, args)
 }
