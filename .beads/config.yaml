@@ -69,3 +69,9 @@ export:
     auto: true
 sync:
     remote: "git+https://github.com/airiclenz/apogee-beads.git"
+# Push the Dolt database after each write (throttled to one push per 5m by
+# dolt.auto-push-interval). bd ships this off because simultaneous pushes from
+# several writers can strand remote history; this repo has one writer at a time, and
+# .beads/hooks/bd-sync-soft does the pull half (apogee-beads-replica-drift).
+dolt:
+    auto-push: true

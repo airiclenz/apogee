@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+# bd-sync-soft — run one `bd sync` and never fail the caller (apogee-beads-replica-drift).
+#
+# Nothing in bd pulls the Dolt remote on its own: no hook does, and there is no auto-pull
+# key. A replica that only ever `git pull`s therefore drifts — it receives the other
+# machine's .beads/issues.jsonl through git while its database stays behind, and the next
+# write on top of that stale database collides with the remote (2026-10-07: 254 rows).
+# This script is the pull half, run at the moments that drift starts: after `git pull`
+# (post-merge), before `git push` (pre-push) and at Claude Code session start
+# (.claude/settings.json). `dolt.auto-push` in .beads/config.yaml covers the push half.
+#
+# It is soft on purpose: `bd sync` halts on a conflict it cannot settle safely, and that
+# must not block a git pull or push. It reports and exits 0; resolving the conflict is an
+# operator's call (`bd dolt pull --strategy ours|theirs` after inspecting `bd diff`), never
+# something to automate. Set APOGEE_BEADS_NO_SYNC=1 to skip it (offline, or mid-rebase).
+#
+# This file is not a git hook name, so git never runs it directly, and it sits outside
+# bd's managed hook files, so `bd hooks install` leaves it alone.
+
+[ -n "${APOGEE_BEADS_NO_SYNC:-}" ] && exit 0
+# Re-entry guard: should bd's own Dolt push ever run git with this checkout's hooks.
+[ -n "${APOGEE_BEADS_SYNCING:-}" ] && exit 0
+command -v bd >/dev/null 2>&1 || exit 0
+
+# A git hook runs with GIT_DIR and friends pointing at this checkout; bd's Dolt git
+# remote must not inherit them, or its own git calls would act on the code repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
+APOGEE_BEADS_SYNCING=1
+export APOGEE_BEADS_SYNCING
+
+bd sync
+_bd_sync_status=$?
+if [ "$_bd_sync_status" -ne 0 ]; then
+  echo "beads: bd sync exited $_bd_sync_status — this replica's issue database is NOT in sync"
+  echo "beads: with the remote. Resolve before writing issues: inspect with"
+  echo "beads: 'bd diff main origin/main', then 'bd dolt pull --strategy ours|theirs' and 'bd sync'."
+fi
+exit 0

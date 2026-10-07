@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.beads/hooks/bd-sync-soft\"",
+            "timeout": 120,
+            "statusMessage": "Syncing beads with the remote"
+          }
+        ]
+      }
+    ]
+  }
+}

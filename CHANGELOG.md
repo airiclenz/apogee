@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- Changed (development): the beads issue database now stays in sync across clones on its own. `.beads/hooks/bd-sync-soft` runs `bd sync` after every `git pull`, before every `git push` and at the start of a Claude Code session, and `dolt.auto-push` pushes after each write. A sync that stops on a conflict prints a warning and never blocks the git command. The git hooks are also pinned to LF line endings so a Windows clone does not break them (apogee-beads-replica-drift).
+
 - Fixed (tests): on Windows, three `internal/tools` Console tests (`TestConsoleSend_UnconfinedConsoleIsDemotedWhereAConsoleCannotBeConfined`, `TestConsoleOpen_ScrubsCredentials…`, `TestConsoleOpen_StampsTheEngineMintedOwnerKey`) passed their checks but failed cleanup, because Go deleted the temporary directory while `cmd.exe` was still running in it. The shared `consoleTestCtx` helper now creates the test's temporary directory before it registers the Console shutdown, so the directory is removed only after every Console has exited (apogee-windows-console-tempdir-cleanup).
 
 - Fixed: on a custom-regex profile whose `tool-call-pattern:` puts the `args` group before the `name` group (for example `<call>(?<args>\{.*?\})@(?<name>\w+)</call>`), the model's earlier tool calls were written back into the conversation sent to it with the tool name first, an order its own pattern cannot read. Past calls are now written in the pattern's own group order, the same way the example call in the instructions is, so the model sees its history in the format it was taught. A pattern with no `name` or `args` group still gets the `<tool_call>name(args)</tool_call>` form.

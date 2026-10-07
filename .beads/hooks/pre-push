@@ -57,3 +57,9 @@ if command -v bd >/dev/null 2>&1; then
   if [ "$_bd_exit" -ne 0 ]; then exit "$_bd_exit"; fi
 fi
 # --- END BEADS INTEGRATION v1.3.1 ---
+
+# --- beads Dolt sync before git push (apogee-beads-replica-drift) ---
+#
+# Send this replica's issue changes out with the code. Outside the BEGIN/END BEADS
+# INTEGRATION markers so `bd hooks install` preserves it; never blocks the push.
+sh "$(git rev-parse --show-toplevel)/.beads/hooks/bd-sync-soft" </dev/null >&2

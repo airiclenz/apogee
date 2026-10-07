@@ -57,3 +57,10 @@ if command -v bd >/dev/null 2>&1; then
   if [ "$_bd_exit" -ne 0 ]; then exit "$_bd_exit"; fi
 fi
 # --- END BEADS INTEGRATION v1.3.1 ---
+
+# --- beads Dolt pull after git pull (apogee-beads-replica-drift) ---
+#
+# A `git pull` can bring another machine's issues.jsonl while this replica's Dolt
+# database stays behind; sync it now, before anything writes on top of it. Outside the
+# BEGIN/END BEADS INTEGRATION markers so `bd hooks install` preserves it; never fails.
+sh "$(git rev-parse --show-toplevel)/.beads/hooks/bd-sync-soft" </dev/null >&2
