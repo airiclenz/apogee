@@ -1,6 +1,20 @@
 package security
 
-import "github.com/airiclenz/apogee/internal/domain"
+import (
+	"fmt"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
+
+// circuitOpenReasonFormat is the tripped breaker's refusal Reason; %d is the breaker's
+// Threshold, the length of the back-to-back failure streak that tripped it.
+const circuitOpenReasonFormat = "circuit-breaker open: this exact call failed %d times in a row"
+
+// circuitOpenHint is the tripped breaker's way out, shown to the model after the Reason:
+// the re-arm rule (any other executed call re-arms the refused signature), so the model
+// runs a different step instead of retrying the refused call.
+const circuitOpenHint = "run a different step first (fix the cause or change the arguments); " +
+	"the call is allowed again after another call runs"
 
 // ----------------------------------------------------------------------------
 // Guards — the executor-facing guardrail bundle the tool executor threads (D6)
@@ -123,7 +137,8 @@ func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool, exemptPaths [
 	if g.Breaker != nil && g.Breaker.Tripped(call) {
 		return PreCheck{
 			Outcome: GuardRefuse,
-			Reason:  "circuit-breaker open: identical tool call has failed repeatedly",
+			Reason:  fmt.Sprintf(circuitOpenReasonFormat, g.Breaker.Threshold()),
+			Hint:    circuitOpenHint,
 			Audit:   AuditCircuitTripped,
 		}
 	}

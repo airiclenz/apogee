@@ -1308,20 +1308,19 @@ func (a *Agent) executeRefuse(turn int, call domain.ToolCall, verdict resolution
 	return result
 }
 
-// guardRefusalMessage renders the model-facing reason a guardrail refused a call. A rule
+// guardRefusalMessage renders the model-facing reason a guardrail refused a call. A verdict
 // that carries a Hint gets it appended — the way out, so the model reroutes instead of
-// looping on rewrites of a reason it cannot satisfy.
+// looping on rewrites of a reason it cannot satisfy. The circuit-breaker's Reason already
+// names the breaker, so it renders as-is; a dangerous-action Reason is prefixed with the guard.
 func guardRefusalMessage(guard security.PreCheck) string {
-	switch guard.Audit {
-	case security.AuditCircuitTripped:
-		return "circuit-breaker open: this tool call has failed repeatedly with identical arguments and is refused"
-	default:
-		msg := "refused by the dangerous-action guard: " + guard.Reason
-		if guard.Hint != "" {
-			msg += " — " + guard.Hint
-		}
-		return msg
+	msg := guard.Reason
+	if guard.Audit != security.AuditCircuitTripped {
+		msg = "refused by the dangerous-action guard: " + guard.Reason
 	}
+	if guard.Hint != "" {
+		msg += " — " + guard.Hint
+	}
+	return msg
 }
 
 // lookupTool resolves a tool name against the resolved registry (nil registry ⇒ not found).
@@ -2013,8 +2012,8 @@ func (a *Agent) recordExecutedTrip(turn int, call domain.ToolCall, verdict resol
 		a.cfg.Events.Emit(domain.ErrorEvent{
 			EventBase: a.base(turn),
 			Source:    call.Tool,
-			Err: fmt.Sprintf("circuit-breaker tripped: tool %q failed %d times with identical arguments; "+
-				"further identical calls will be refused", call.Tool, a.guards.Breaker.Threshold()),
+			Err: fmt.Sprintf("circuit-breaker tripped: tool %q failed %d times in a row with identical arguments; "+
+				"that exact call is refused until a different call runs", call.Tool, a.guards.Breaker.Threshold()),
 		})
 	}
 }

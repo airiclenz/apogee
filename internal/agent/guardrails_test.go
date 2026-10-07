@@ -224,31 +224,27 @@ func TestGuardrails_NearMissNotBlocked(t *testing.T) {
 	}
 }
 
-// TestGuardrails_CircuitBreakerTrips proves the breaker halts a runaway loop of identical
-// failing calls and surfaces an ErrorEvent (not a crash). The same failing call is issued
-// across enough Turns to reach the threshold, then once more to confirm it is short-
-// circuited.
-func TestGuardrails_CircuitBreakerTrips(t *testing.T) {
-	sink := &recordingSink{}
-	failing := fakeTool{name: "flaky", readOnly: true, execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+// breakerFailingTool is a read-only tool whose every call fails with "boom" — the failing
+// call the circuit-breaker tests repeat.
+func breakerFailingTool() fakeTool {
+	return fakeTool{name: "flaky", readOnly: true, execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 		return domain.ToolResult{CallID: call.ID, Content: "boom", IsError: true}, nil
 	}}
-	cfg := configWithTools(sink, failing)
+}
+
+// driveBreakerTurns runs one Step per tool-call Turn in turns (a final reply follows them in the
+// script) on an Ask-Before agent offering tools, and returns every ToolResultEvent's result in
+// order. The circuit-breaker keys on IDENTICAL repeated calls, which is also what the tool-loop
+// breaker Floor guard answers — and the guard runs first, at the post-response seam, so it would
+// re-stream every Turn before the breaker ever counted one. These tests are about the breaker, so
+// the guard is off for them; the guard's own repeat proof lives in floorguards_test.go.
+func driveBreakerTurns(t *testing.T, sink *recordingSink, tools []domain.Tool, turns ...stubllm.Turn) []domain.ToolResult {
+	t.Helper()
+	cfg := configWithTools(sink, tools...)
 	cfg.Mode = domain.ModeAskBefore
 	cfg.Approver = &fakeApprover{decision: domain.ApprovalAllowForSession}
-
-	// Build scripts: N+1 identical tool-call Turns, then a final reply.
-	const calls = security.DefaultCircuitBreakerThreshold + 1
-	// The circuit-breaker keys on IDENTICAL repeated calls, which is also what the tool-loop
-	// breaker Floor guard answers — and the guard runs first, at the post-response seam, so it would
-	// re-stream every Turn before the breaker ever counted one. This test is about the breaker, so
-	// the guard is off for it; the guard's own repeat proof lives in floorguards_test.go.
 	cfg.Floor.DisableToolLoopBreaker = true
-	scripts := make([]stubllm.Turn, 0, calls+1)
-	for i := 0; i < calls; i++ {
-		scripts = append(scripts, toolCallTurn("c", "flaky", `{"x":"same"}`))
-	}
-	scripts = append(scripts, contentTurn("giving up"))
+	scripts := append(append(make([]stubllm.Turn, 0, len(turns)+1), turns...), contentTurn("giving up"))
 
 	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
@@ -257,25 +253,96 @@ func TestGuardrails_CircuitBreakerTrips(t *testing.T) {
 	if err := a.Submit(domain.UserInput{Text: "loop"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	for i := 0; i < calls; i++ {
+	for i := range turns {
 		if _, err := a.Step(context.Background()); err != nil {
 			t.Fatalf("Step %d: %v", i, err)
 		}
 	}
 
-	// An ErrorEvent naming the circuit-breaker must have been surfaced (not a panic/crash).
-	tripped := false
+	results := make([]domain.ToolResult, 0, len(turns))
 	for _, e := range sink.events {
-		if ee, ok := e.(domain.ErrorEvent); ok && strings.Contains(ee.Err, "circuit-breaker") {
-			tripped = true
+		if tre, ok := e.(domain.ToolResultEvent); ok {
+			results = append(results, tre.Result)
 		}
 	}
-	if !tripped {
-		t.Fatal("circuit-breaker never surfaced an ErrorEvent after identical failing calls")
+	return results
+}
+
+// errorEventsWithPrefix returns the Err text of every ErrorEvent that starts with prefix.
+func errorEventsWithPrefix(events []domain.Event, prefix string) []string {
+	var errs []string
+	for _, e := range events {
+		if ee, ok := e.(domain.ErrorEvent); ok && strings.HasPrefix(ee.Err, prefix) {
+			errs = append(errs, ee.Err)
+		}
+	}
+	return errs
+}
+
+// breakerRefusal is the model-facing tool result of a call the default-threshold breaker refused.
+const breakerRefusal = "circuit-breaker open: this exact call failed 3 times in a row — " +
+	"run a different step first (fix the cause or change the arguments); " +
+	"the call is allowed again after another call runs"
+
+// TestGuardrails_CircuitBreakerTrips proves the breaker halts a runaway loop of identical
+// failing calls and surfaces an ErrorEvent (not a crash). The same failing call is issued
+// across enough Turns to reach the threshold, then once more to confirm it is short-
+// circuited: the trip event states the re-arm rule, and the refused call's tool result tells
+// the model how to get the call back.
+func TestGuardrails_CircuitBreakerTrips(t *testing.T) {
+	sink := &recordingSink{}
+	const calls = security.DefaultCircuitBreakerThreshold + 1
+	turns := make([]stubllm.Turn, 0, calls)
+	for i := 0; i < calls; i++ {
+		turns = append(turns, toolCallTurn("c", "flaky", `{"x":"same"}`))
+	}
+
+	results := driveBreakerTurns(t, sink, []domain.Tool{breakerFailingTool()}, turns...)
+
+	trips := errorEventsWithPrefix(sink.events, "circuit-breaker tripped")
+	wantTrip := `circuit-breaker tripped: tool "flaky" failed 3 times in a row with identical arguments; ` +
+		"that exact call is refused until a different call runs"
+	if len(trips) != 1 || trips[0] != wantTrip {
+		t.Fatalf("trip ErrorEvents = %q, want exactly [%q]", trips, wantTrip)
+	}
+	if len(results) != calls {
+		t.Fatalf("tool results = %d, want %d", len(results), calls)
+	}
+	if last := results[calls-1]; !last.IsError || last.Content != breakerRefusal {
+		t.Errorf("refused call's result = %+v, want the error %q", last, breakerRefusal)
+	}
+	// The user sees the same refusal text the model gets.
+	if refusals := errorEventsWithPrefix(sink.events, "circuit-breaker open"); len(refusals) != 1 || refusals[0] != breakerRefusal {
+		t.Errorf("refusal ErrorEvents = %q, want exactly [%q]", refusals, breakerRefusal)
 	}
 	// The event stream carries an AuditEvent for every call (executed and breaker-blocked alike).
 	if got := len(auditEvents(sink.events)); got < calls {
 		t.Errorf("AuditEvent count = %d, want at least %d", got, calls)
+	}
+}
+
+// TestGuardrails_CircuitBreakerReArmsAfterAnotherCall proves the refusal's promise holds: after
+// the breaker trips on A and refuses it once, a different call B runs, and A then executes again —
+// its result is the tool's own failure, not the breaker's refusal.
+func TestGuardrails_CircuitBreakerReArmsAfterAnotherCall(t *testing.T) {
+	sink := &recordingSink{}
+	callA := toolCallTurn("a", "flaky", `{"x":"same"}`)
+	callB := toolCallTurn("b", "lookup", `{"q":"other"}`)
+	tools := []domain.Tool{breakerFailingTool(), fakeTool{name: "lookup", readOnly: true, result: "found"}}
+
+	results := driveBreakerTurns(t, sink, tools, callA, callA, callA, callA, callB, callA)
+
+	if len(results) != 6 {
+		t.Fatalf("tool results = %d, want 6", len(results))
+	}
+	if refused := results[3]; refused.Content != breakerRefusal {
+		t.Errorf("A after the trip = %q, want the refusal %q", refused.Content, breakerRefusal)
+	}
+	if other := results[4]; other.IsError || other.Content != "found" {
+		t.Errorf("B = %+v, want the successful %q", other, "found")
+	}
+	if again := results[5]; !again.IsError || again.Content != "boom" {
+		t.Errorf("A after B ran = %+v, want the tool's own failure %q", again, "boom")
 	}
 }
 

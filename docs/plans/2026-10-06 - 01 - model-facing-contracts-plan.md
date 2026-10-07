@@ -64,7 +64,10 @@ NOTES (2026-10-07): the breaker's refusal Reason (guard.go PreExecute) and the t
 **Acceptance:** `go build ./internal/security/ && go test -count=1 -run 'TestCircuitBreaker|TestGuards_' ./internal/security/`
 **Commit:** `fix(security): trip the circuit breaker only on back-to-back identical failures`
 
-## 2. The breaker refusal and trip event tell the model how to get the call back
+## 2. The breaker refusal and trip event tell the model how to get the call back — ✅ DONE (2026-10-07)
+
+NOTES (2026-10-07): the re-arm proof is a new test function, TestGuardrails_CircuitBreakerReArmsAfterAnotherCall (matched by the Acceptance `TestGuardrails_CircuitBreaker` pattern), sharing a new driveBreakerTurns helper with TestGuardrails_CircuitBreakerTrips; B is a second, succeeding tool ("lookup").
+NOTES (2026-10-07): guardRefusalMessage now renders the circuit Reason unprefixed plus the shared `" — " + Hint` tail for both guards; the refusal Reason format and Hint live as unexported constants in internal/security/guard.go.
 
 **What:** Model-facing half of the audit Medium breaker finding. Depends on item 1.
 **Goal:** A breaker refusal's tool result is exactly `circuit-breaker open: this exact call failed <N> times in a row — run a different step first (fix the cause or change the arguments); the call is allowed again after another call runs`, with N the breaker's `Threshold()`; the trip ErrorEvent's Err is exactly `circuit-breaker tripped: tool "<tool>" failed <N> times in a row with identical arguments; that exact call is refused until a different call runs`.

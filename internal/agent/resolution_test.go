@@ -433,8 +433,12 @@ func TestResolve_GuardTier1Refuses(t *testing.T) {
 		},
 		{
 			"circuit tripped",
-			security.PreCheck{Outcome: security.GuardRefuse, Reason: "identical failing call", Audit: security.AuditCircuitTripped},
-			"circuit-breaker open: this tool call has failed repeatedly with identical arguments and is refused",
+			security.PreCheck{
+				Outcome: security.GuardRefuse,
+				Reason:  "circuit-breaker open: this exact call failed 3 times in a row",
+				Audit:   security.AuditCircuitTripped,
+			},
+			"circuit-breaker open: this exact call failed 3 times in a row",
 			security.AuditCircuitTripped,
 		},
 	}
@@ -471,7 +475,7 @@ func TestResolve_GuardTier1Refuses(t *testing.T) {
 // TestGuardRefusalMessageAppendsTheHint pins the model-facing rendering: a rule that
 // carries a Hint gets it appended after the reason (the way out, so the model reroutes
 // instead of looping on rewrites), and a hintless rule keeps the exact pre-Hint message —
-// no dangling separator.
+// no dangling separator. The circuit-breaker follows the same rule.
 func TestGuardRefusalMessageAppendsTheHint(t *testing.T) {
 	t.Parallel()
 
@@ -496,15 +500,27 @@ func TestGuardRefusalMessageAppendsTheHint(t *testing.T) {
 		t.Errorf("without hint = %q, want %q", got, want)
 	}
 
-	// The circuit-breaker branch never carries a rule hint — its message is fixed.
+	// The circuit-breaker's Reason renders unprefixed (it names the breaker itself), and its
+	// Hint — the re-arm rule — is appended with the same joiner.
 	tripped := security.PreCheck{
 		Outcome: security.GuardRefuse,
-		Reason:  "identical failing call",
-		Hint:    "must not appear",
+		Reason:  "circuit-breaker open: this exact call failed 3 times in a row",
+		Hint:    "run a different step first",
 		Audit:   security.AuditCircuitTripped,
 	}
-	if got := guardRefusalMessage(tripped); strings.Contains(got, "must not appear") {
-		t.Errorf("circuit-breaker message leaked the hint: %q", got)
+	if got, want := guardRefusalMessage(tripped),
+		"circuit-breaker open: this exact call failed 3 times in a row — run a different step first"; got != want {
+		t.Errorf("circuit with hint = %q, want %q", got, want)
+	}
+
+	trippedWithoutHint := security.PreCheck{
+		Outcome: security.GuardRefuse,
+		Reason:  "circuit-breaker open: this exact call failed 3 times in a row",
+		Audit:   security.AuditCircuitTripped,
+	}
+	if got, want := guardRefusalMessage(trippedWithoutHint),
+		"circuit-breaker open: this exact call failed 3 times in a row"; got != want {
+		t.Errorf("circuit without hint = %q, want %q", got, want)
 	}
 }
 

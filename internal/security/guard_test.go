@@ -2,6 +2,7 @@ package security
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -45,19 +46,42 @@ func TestGuards_PreExecute_SafeCallProceeds(t *testing.T) {
 	}
 }
 
+// TestGuards_PreExecute_TrippedBreakerRefuses pins the tripped breaker's refusal: the Reason
+// names the breaker's own threshold and the Hint states the re-arm rule, word for word.
 func TestGuards_PreExecute_TrippedBreakerRefuses(t *testing.T) {
 	t.Parallel()
-	g := NewDefaultGuards()
-	call := guardCall("terminal", "exit 1")
-
-	// Drive the breaker to its trip via RecordExecution with failing results.
-	failed := domain.ToolResult{IsError: true}
-	for i := 0; i < DefaultCircuitBreakerThreshold; i++ {
-		g.RecordExecution(call, failed)
+	const wantHint = "run a different step first (fix the cause or change the arguments); " +
+		"the call is allowed again after another call runs"
+	cases := []struct {
+		threshold  int
+		wantReason string
+	}{
+		{3, "circuit-breaker open: this exact call failed 3 times in a row"},
+		{2, "circuit-breaker open: this exact call failed 2 times in a row"},
 	}
-	pc := g.PreExecute(call, nil, nil)
-	if pc.Outcome != GuardRefuse || pc.Audit != AuditCircuitTripped {
-		t.Fatalf("tripped breaker precheck = %+v, want refuse/circuit-tripped", pc)
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("threshold %d", c.threshold), func(t *testing.T) {
+			t.Parallel()
+			g := Guards{Breaker: NewCircuitBreaker(c.threshold)}
+			call := guardCall("terminal", "exit 1")
+
+			// Drive the breaker to its trip via RecordExecution with failing results.
+			failed := domain.ToolResult{IsError: true}
+			for i := 0; i < c.threshold; i++ {
+				g.RecordExecution(call, failed)
+			}
+			pc := g.PreExecute(call, nil, nil)
+
+			if pc.Outcome != GuardRefuse || pc.Audit != AuditCircuitTripped {
+				t.Fatalf("tripped breaker precheck = %+v, want refuse/circuit-tripped", pc)
+			}
+			if pc.Reason != c.wantReason {
+				t.Errorf("Reason = %q, want %q", pc.Reason, c.wantReason)
+			}
+			if pc.Hint != wantHint {
+				t.Errorf("Hint = %q, want %q", pc.Hint, wantHint)
+			}
+		})
 	}
 }
 
