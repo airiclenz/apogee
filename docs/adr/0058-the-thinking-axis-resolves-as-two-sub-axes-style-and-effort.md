@@ -1,6 +1,10 @@
 ---
 Status: accepted
 ---
+> Note (2026-10-07): decision 4's "any of the four words" is ADR 0050's `off | low | medium | high`.
+> [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) decision 4 widened the
+> vocabulary to seven (`off | low | medium | high | minimal | xhigh | max`, plus `none` on the
+> `reasoning` dialect); the reasoning here holds for every one of them.
 
 # The thinking axis resolves as two sub-axes: channel style and effort
 

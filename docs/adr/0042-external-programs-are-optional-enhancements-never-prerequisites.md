@@ -4,6 +4,12 @@ Status: accepted
 > Note (2026-10-03): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 >
 > Note (2026-10-03): Decision 4 cites ADR 0004, which ADR 0012 superseded; ADR 0012 is the governing decision for Auto and confinement — read Decision 4's ADR 0004 citation as historical.
+>
+> Note (2026-10-07): Decision 4's "Auto mode requires OS-level confinement" is ADR 0004's rule. Under
+> ADR 0012 Auto runs on a host with no fence: the gate reads `FSWrite` alone and the unfenceable
+> subprocess surface falls back to per-command Approval (`internal/domain/confinement.go:140-146`,
+> `internal/domain/errors.go:10-16`). A missing `sandbox-exec` costs unprompted subprocess runs in
+> Auto, not the mode.
 
 # External programs are optional enhancements, never prerequisites
 

@@ -2,6 +2,11 @@
 Status: accepted
 Amends: ADR 0086 ("we keep the blocking model" — a `sub_agent` call may now ask for the background), ADR 0087 ("exactly two sources" — a third: `sub_agent` background; D2's unchanged `sub_agent`, D9's no-delegation rule and D10's entry points for that third source), ADR 0089 (D1's launchers and the lead's "`sub_agent` stays blocking"; D3's one-line note; D5's save-as-recipe), ADR 0039 (the `Amended 2026-09-20` fan-out ceiling no longer counts a background `sub_agent`)
 ---
+> Note (2026-10-07): D1's gloss is wrong on one name. `OffersBackground` is the Driver's opt-in, not
+> the model-class approval: the TUI sets it, and headless and daemon runs leave it false
+> (`internal/tools/registry.go:102-117`, `internal/domain/config.go:481-492`). The model-class half
+> of the gate is the roster lifting `workflow` (a profile axis or `EnabledTools`). The switch shows
+> only where both hold (`internal/tools/registry.go:294`).
 
 # sub_agent may run as a one-item background workflow
 

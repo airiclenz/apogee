@@ -2,7 +2,7 @@
 
 **Goal:** Close the five beads left by the subagent-wave-and-background run: a background sub_agent child survives an aborted root Exchange, every background sub_agent call starts a fresh run, the unreadable `run_on` refusal is pinned, a serial wave shows the same queued and esc hints as a pooled one, and a background sub_agent's finish line names its origin.
 **Date:** 2026-10-05
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** 41ad57ff
 

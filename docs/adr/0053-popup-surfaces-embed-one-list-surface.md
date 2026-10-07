@@ -1,6 +1,9 @@
 ---
 Status: accepted
 ---
+> Note (2026-10-07): decision 8's "all seven `pickerKind`s" counts the kinds of the day. The picker
+> now has thirteen (`internal/tui/picker.go:83-97`), and every one still embeds the one list surface
+> (`listSurface`, `internal/tui/picker.go:111`).
 
 # Popup surfaces embed one list surface
 

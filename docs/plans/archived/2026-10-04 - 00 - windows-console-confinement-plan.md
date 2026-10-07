@@ -2,7 +2,7 @@
 
 **Goal:** A short-lived ConPTY Console keeps its last painted frame, a Windows Console can run Confined under the restricted Low token (so Auto opens it without a prompt), and the 2uh.6 hands-on check runs as driven Windows-host tests, leaving only a real-TUI tail for the owner.
 **Date:** 2026-10-04
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** 0b03a680
 **Sources:**

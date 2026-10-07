@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 4 superseded by its own 2026-10-02 amendment (thinking is requested whenever an effort resolves)
 Amends: ADR 0036 (a `servers:` entry gains `wire:`); ADR 0060 decision 3 (the `effort-dialect:` key does not compose with `wire: anthropic`)
 ---
 

@@ -4,6 +4,12 @@ Status: accepted; decision 8's catalogued-Mechanism route retired by ADR 0076
 > Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
 >
 > Headless has since shipped (`apogee headless`, ADR 0075).
+>
+> Note (2026-10-07): decision 10 keys its future resolver on ADR 0016's identity system. ADR 0016
+> is superseded (ADR 0076 A9), and `internal/library`, the resolver that produced a fingerprint, is
+> gone (ADR 0021 §3, amended 2026-09-16). The `domain.ModelFingerprint` type and the stamp
+> `apogee probe model` writes survive (`internal/domain/fingerprint.go`). The resolver is still
+> unbuilt; read the ADR 0016 citation as historical.
 
 # The daemon is an in-repo subcommand over a declarative trigger-action file
 

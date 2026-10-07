@@ -2,7 +2,7 @@
 
 **Goal:** Close the 2026-10-05 audit's three model-facing contract findings. The circuit breaker refuses only a call that just failed back to back, and says how to get it back; a malformed tool call is answered on its own while its siblings run; a custom-regex profile only ever shows the model a call its own pattern parses.
 **Date:** 2026-10-06
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** 91103e58
 

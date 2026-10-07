@@ -1,5 +1,16 @@
 # Code Review — whole repository (apogee) — 2026-10-05
 
+> Note (2026-10-07): every finding below is closed. Action-order steps 1–4 landed through
+> `docs/plans/archived/2026-10-05 - 00 - audit-urgent-fixes-plan.md`, step 5's three model-facing
+> findings through `docs/plans/archived/2026-10-06 - 01 - model-facing-contracts-plan.md`, and every
+> other finding through `docs/plans/archived/2026-10-06 - 00 - audit-remaining-fixes-plan.md`;
+> `CHANGELOG.md` carries each fix.
+> Read the report as the record of what was found.
+>
+> Note (2026-10-07): there is no `git_add` or `git_diff` tool. The git-config finding's exposure is
+> any git tool that runs through `internal/gitexec` — `git_status`, `git_diff_range`, `git_log`,
+> `git_show`, `git_branch` and `git_commit` (`internal/tools/git.go`).
+
 **Scope:** the whole repository: the Go module (root facade, `cmd/`, `internal/*`), the demo graphics, the `.github`, `.beads`, `.codex` and `.agents` tooling directories, and `scripts/`. The project's linters (`go vet`, `golangci-lint`) report zero issues. The test suite was only partly run, so coverage figures are not part of this report.
 **Mission:** apogee is a terminal AI coding agent for smaller, locally hosted LLMs (and better with big ones): one embeddable Go engine behind the TUI, headless runner, daemon and bench, with the hard rule that nothing it adds may make a model perform worse than the bare loop.
 **Files reviewed:** 1346

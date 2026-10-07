@@ -2,6 +2,13 @@
 Status: accepted
 ---
 > Note (2026-10-02): the Mechanism layer this ADR refers to was removed; ADR 0076 (Reactions) replaces it. Read the Mechanism-specific parts as historical.
+>
+> Note (2026-10-07): the `apogee headless` runner and the daemon this ADR calls deferred both ship:
+> `apogee headless` over `internal/run` (`cmd/apogee/headless.go`,
+> [ADR 0075](0075-the-headless-event-stream-is-a-versioned-driver-protocol.md)) and `apogee daemon`,
+> which holds the durable schedules (`cmd/apogee/daemon.go`,
+> [ADR 0034](0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md)).
+> Read "deferred" and "the future daemon" as of 2026-08-03.
 
 # The scheduler is a library and the TUI is its first Driver surface
 

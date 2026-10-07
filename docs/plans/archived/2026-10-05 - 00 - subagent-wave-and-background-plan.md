@@ -2,7 +2,7 @@
 
 **Goal:** A skipped sub-agent row reads its reason in place and in a neutral tone; a message staged during a sub_agent wave waits for the whole wave unless sent with `ctrl+g`; on bench-approved classes `sub_agent background:true` runs the delegation as a one-item background workflow so the user's messages reach the model while the child runs.
 **Date:** 2026-10-05
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** db6b5d27
 

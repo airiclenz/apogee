@@ -2,7 +2,7 @@
 
 **Goal:** Fix the four most urgent findings of the 2026-10-05 audit (action order 1–4): the TUI deadlock on `/clear` or a session switch while a background workflow runs, workflow-runner reads that follow symlinks out of the workspace, the two confinement gaps (landlock thread pinning, confined children keeping the controlling tty), and the git command-config probe that fails open.
 **Date:** 2026-10-05
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** fe24e40b
 

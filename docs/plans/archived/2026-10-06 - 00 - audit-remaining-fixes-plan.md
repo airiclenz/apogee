@@ -2,7 +2,7 @@
 
 **Goal:** Close the 2026-10-05 audit's Medium findings left after the urgent-fixes plan, other than the three model-facing contract gaps of its action-order step 5. Each item is one defect fix with a test that fails on the pre-item tree.
 **Date:** 2026-10-06
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** 91103e58
 

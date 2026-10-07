@@ -2,7 +2,7 @@
 
 **Goal:** The approval prompt for a POSIX send to an unconfined Console names the Console and the reopen fix. A vision refusal on an `--endpoint` run gives advice the user can act on. A forked session starts at zero spend, delegate spend included.
 **Date:** 2026-10-04
-**Status:** unexecuted
+**Status:** done (status corrected 2026-10-07)
 **sized for:** ~200k-context host
 **base:** f5497a19
 
