@@ -219,6 +219,7 @@ func TestEmbeddedDefaultConfigDocumentsModelProfiles(t *testing.T) {
 	for _, want := range []string{
 		"# model-profiles:",  // the map itself, as a commented example to uncomment
 		"tool-call-format",   // the tool-call axis
+		"tool-call-example",  // and the example call shown under custom-regex
 		"style: delimited",   // the thinking axis, with a value it actually takes
 		"effort: medium",     // the effort axis, likewise
 		"minimax-m3",         // a shipped pattern: the built-in table is documented, not hidden

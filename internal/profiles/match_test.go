@@ -173,6 +173,23 @@ func TestResolve(t *testing.T) {
 			},
 		},
 		{
+			// The example call rides the same axis: a user entry's example resolves beside the
+			// pattern it was checked against, while the table still supplies the thinking axis.
+			name: "a user entry's tool-call example survives with its pattern", model: "gemma-4-e4b-it-qat",
+			user: []Entry{{Pattern: "gemma", Profile: domain.ModelProfile{
+				ToolCallFormat:  domain.FormatCustomRegex,
+				Pattern:         `<call>(?<name>\w+)\s+(?<args>\{.*\})</call>`,
+				ToolCallExample: `<call>read_file {"path": "a.go"}</call>`,
+			}}},
+			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "gemma",
+			wantProfile: domain.ModelProfile{
+				ToolCallFormat:  domain.FormatCustomRegex,
+				Pattern:         `<call>(?<name>\w+)\s+(?<args>\{.*\})</call>`,
+				ToolCallExample: `<call>read_file {"path": "a.go"}</call>`,
+				Thinking:        domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
+			},
+		},
+		{
 			// An explicitly spelled zero is a word like any other and overrides the tier below —
 			// which for the roster axis is `tools:` written with empty lists, the one axis whose
 			// presence the domain value cannot carry.

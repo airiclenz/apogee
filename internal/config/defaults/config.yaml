@@ -1232,7 +1232,13 @@ ui:
 #                      markdown-fenced      — calls are parsed back out of a fenced block in the reply
 #                      custom-regex         — calls are parsed with tool-call-pattern
 #   tool-call-pattern  the named-group regex custom-regex needs — required by that format, and
-#                      refused under the other two, which never read it
+#                      refused under the other two, which never read it. It needs a name and an
+#                      args group, and a call written in it must parse back through it: a pattern
+#                      that cannot carry a call is a startup error
+#   tool-call-example  one literal call in that pattern's format, shown to the model as-is in place
+#                      of the call apogee writes from the pattern. Custom-regex only, like the
+#                      pattern; an example the pattern does not parse to a tool name and JSON-object
+#                      arguments is a startup error that quotes it
 #   thinking:
 #     style            none (the default) — no inline channel; content passes through untouched
 #                      delimited          — a literal token pair: set start: and end: to what the
@@ -1296,6 +1302,7 @@ ui:
 #   my-xml-model:
 #     tool-call-format: custom-regex
 #     tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'
+#     tool-call-example: '<tool_call>read_file {"path": "src/main.go"}</tool_call>'
 #   my-big-model:                   # a roster of its own, for the model that can carry it
 #     tools:
 #       enabled: [web_search]       # on for this model, wherever the global block leaves it off

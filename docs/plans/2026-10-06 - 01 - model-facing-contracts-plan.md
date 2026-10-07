@@ -156,7 +156,7 @@ NOTES (2026-10-07): pre-existing — renderRegexCall (history fold) composes pre
 **Acceptance:** `go build ./internal/domain/ ./internal/processing/ && go test -count=1 -run 'TestCustomRegexInstructions|TestValidateCustomRegexProfile|TestInstructionsFor|TestCustomRegex' ./internal/processing/`
 **Commit:** `fix(processing): show a custom-regex model only a call its pattern parses`
 
-## 7. A `tool-call-example:` key, and load refuses a profile with no parseable example
+## 7. A `tool-call-example:` key, and load refuses a profile with no parseable example — ✅ DONE (2026-10-07)
 
 **What:** Ratified "`tool-call-example:`". Depends on item 6.
 **Goal:** `model-profiles.<p>.tool-call-example:` reaches `domain.ModelProfile.ToolCallExample` through config and the profile resolver on the tool-call axis; load refuses it under any format but custom-regex, as `tool-call-pattern:` is refused; load refuses a custom-regex profile `processing.ValidateCustomRegexProfile` rejects, naming `model-profiles.<p>.tool-call-pattern` or `.tool-call-example` and quoting the failing example; the manual and the embedded default config document the key with the `my-xml-model` example.

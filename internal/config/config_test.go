@@ -5908,6 +5908,47 @@ func TestApplyConfigBadModelProfileAxisErrors(t *testing.T) {
 			},
 		},
 		{
+			name: "a tool-call-example under a format that never reads one",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: native
+    tool-call-example: '<tool_call>read_file {"path": "a.go"}</tool_call>'
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.tool-call-example",
+				"model-profiles.qwen3.8.tool-call-format", "custom-regex",
+			},
+		},
+		{
+			name: "a custom-regex pattern with no args group",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: custom-regex
+    tool-call-pattern: '\[(?<name>\w+)\]'
+`,
+			wantIn: []string{"model-profiles.qwen3.8.tool-call-pattern", "args"},
+		},
+		{
+			name: "a tool-call-example the pattern does not parse",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: custom-regex
+    tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'
+    tool-call-example: '<call>read_file {"path": "a.go"}</call>'
+`,
+			wantIn: []string{"model-profiles.qwen3.8.tool-call-example", `<call>read_file {\"path\": \"a.go\"}</call>`},
+		},
+		{
+			name: "a tool-call-example beside a pattern with no args group",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: custom-regex
+    tool-call-pattern: '\[(?<name>\w+)\]'
+    tool-call-example: '[read_file]'
+`,
+			wantIn: []string{"model-profiles.qwen3.8.tool-call-pattern", "[read_file]"},
+		},
+		{
 			name: "a thinking style outside the three strippers",
 			configYAML: `model-profiles:
   qwen3.8:
@@ -5995,6 +6036,10 @@ func TestApplyConfigFullyValidModelProfileLoads(t *testing.T) {
       start: "<think>"
       end: "</think>"
       effort: medium
+  my-xml-model:
+    tool-call-format: custom-regex
+    tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'
+    tool-call-example: '<tool_call>read_file {"path": "src/main.go"}</tool_call>'
 `
 	writeConfigHome(t, home, configYAML)
 	opts := Options{ConfigDir: home}
@@ -6003,6 +6048,14 @@ func TestApplyConfigFullyValidModelProfileLoads(t *testing.T) {
 	}
 
 	want := []profiles.Entry{
+		{
+			Pattern: "my-xml-model",
+			Profile: domain.ModelProfile{
+				ToolCallFormat:  domain.FormatCustomRegex,
+				Pattern:         `<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>`,
+				ToolCallExample: `<tool_call>read_file {"path": "src/main.go"}</tool_call>`,
+			},
+		},
 		{
 			Pattern: "qwen3.8",
 			Profile: domain.ModelProfile{

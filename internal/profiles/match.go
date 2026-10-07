@@ -97,8 +97,9 @@ func Resolve(model string, user, shipped []Entry) Decision {
 	toolCall := supplier(Entry.spellsToolCall)
 	style := supplier(Entry.spellsThinkingStyle).Profile.Thinking
 	profile := domain.ModelProfile{
-		ToolCallFormat: toolCall.Profile.ToolCallFormat,
-		Pattern:        toolCall.Profile.Pattern,
+		ToolCallFormat:  toolCall.Profile.ToolCallFormat,
+		Pattern:         toolCall.Profile.Pattern,
+		ToolCallExample: toolCall.Profile.ToolCallExample,
 		Thinking: domain.ThinkingProfile{
 			Style:     style.Style,
 			Start:     style.Start,

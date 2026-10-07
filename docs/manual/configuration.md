@@ -1273,7 +1273,17 @@ than ignoring it. The pattern needs two **named capture groups**: `name`, holdin
 and `args`, holding its JSON arguments. Write them in Go's `(?P<name>…)` spelling or JavaScript's
 `(?<name>…)` — both are accepted, and the JavaScript form is rewritten for you. Dot-matches-newline
 is applied for you as well, so `.` spans the line breaks inside a call without a `(?s)` of your own.
-A pattern that does not compile is a startup error.
+A pattern that does not compile is a startup error, and so is one missing either group — a pattern
+with no `args` group cannot carry a call, so add one. apogee shows the model one call written in
+the pattern's own format, and at startup it writes that call from the pattern and parses it back
+through it; a pattern whose call does not parse back is a startup error too, quoting the call.
+
+**`tool-call-example:`** is that one call, written by you: a literal tool call in the pattern's
+format, shown to the model exactly as you wrote it instead of the one apogee writes from the
+pattern. Reach for it when the model's real format has a shape apogee cannot reconstruct from the
+regex. Like the pattern it is read under `custom-regex` only and refused under the other two
+formats, and it is checked at startup: an example the pattern does not parse to a tool name and
+JSON-object arguments is a startup error naming this key and quoting the example.
 
 **`thinking:`'s `style:`** says how this model's private reasoning arrives, so apogee can strip it
 out of what you are shown and keep it as reasoning in the history. `none` — the default — means
@@ -1310,6 +1320,7 @@ model-profiles:
   my-xml-model:
     tool-call-format: custom-regex
     tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'
+    tool-call-example: '<tool_call>read_file {"path": "src/main.go"}</tool_call>'
 ```
 
 `apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready

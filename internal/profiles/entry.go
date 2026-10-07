@@ -37,8 +37,9 @@ type Entry struct {
 // spellsToolCall reports whether this entry writes the tool-call axis. The domain value answers
 // it alone: "" is the unwritten format and `native` is the spelled zero, so an entry pinning a
 // model back to native tool calls overrides a deeper layer while one that omits the key defers.
-// The pattern is part of this axis rather than one of its own — it is read only under
-// custom-regex, so a pattern from one layer under a format from another could never fire.
+// The pattern and its example call are part of this axis rather than axes of their own — both are
+// read only under custom-regex, so a pattern from one layer under a format from another could never
+// fire, and an example from one layer beside a pattern from another need not parse through it.
 func (e Entry) spellsToolCall() bool { return e.Profile.ToolCallFormat != "" }
 
 // spellsThinkingStyle reports whether this entry writes the channel-style half of the thinking

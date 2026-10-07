@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -2466,8 +2467,11 @@ func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 // mirrors domain.ModelProfile with yaml tags; toModelProfile maps it across so the on-disk shape
 // and the value type stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
 type modelProfileConfig struct {
-	ToolCallFormat  string         `yaml:"tool-call-format"`
-	ToolCallPattern string         `yaml:"tool-call-pattern"`
+	ToolCallFormat  string `yaml:"tool-call-format"`
+	ToolCallPattern string `yaml:"tool-call-pattern"`
+	// ToolCallExample is `tool-call-example:` — one literal call in ToolCallPattern's format, shown
+	// to the model verbatim. Custom-regex only, like the pattern, and checked through it at load.
+	ToolCallExample string         `yaml:"tool-call-example"`
 	Thinking        thinkingConfig `yaml:"thinking"`
 	// Tools is the profile's roster axis (ADR 0057 decision 1) — the same `disabled:`/`enabled:`
 	// pair the global `tools:` block is written with, applied to THIS model. It is the most specific
@@ -2520,8 +2524,9 @@ type thinkingConfig struct {
 // not whether it was written: presence stays on the schema (spellsToolsAxis).
 func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 	return domain.ModelProfile{
-		ToolCallFormat: domain.ToolCallFormat(p.ToolCallFormat),
-		Pattern:        p.ToolCallPattern,
+		ToolCallFormat:  domain.ToolCallFormat(p.ToolCallFormat),
+		Pattern:         p.ToolCallPattern,
+		ToolCallExample: p.ToolCallExample,
 		Thinking: domain.ThinkingProfile{
 			Style:     domain.ThinkingStyle(p.Thinking.Style),
 			Start:     p.Thinking.Start,
@@ -2575,8 +2580,14 @@ func validateToolCallAxes(pattern string, p modelProfileConfig) error {
 				"pattern, so this one can never match — set the format to custom-regex, or drop "+
 				"the pattern", pattern, pattern)
 		}
+		if p.ToolCallExample != "" {
+			return fmt.Errorf("apogee: model-profiles.%s.tool-call-example is set but "+
+				"model-profiles.%s.tool-call-format is not custom-regex: no other format shows the "+
+				"model an example call, so this one is never read — set the format to custom-regex, "+
+				"or drop the example", pattern, pattern)
+		}
 	case domain.FormatCustomRegex:
-		return validateToolCallPattern(pattern, p.ToolCallPattern)
+		return validateToolCallPattern(pattern, p.ToolCallPattern, p.ToolCallExample)
 	default:
 		return fmt.Errorf("apogee: invalid model-profiles.%s.tool-call-format %q: want native, "+
 			"markdown-fenced, or custom-regex, or leave the key out for native", pattern, string(format))
@@ -2588,7 +2599,14 @@ func validateToolCallAxes(pattern string, p modelProfileConfig) error {
 // with: it has to be there, and it has to compile. Neither failure shows itself at runtime — the
 // parser falls back to a regex that matches no rune rather than refusing to build — so a missing or
 // malformed pattern reads on screen as a model that has simply stopped calling tools.
-func validateToolCallPattern(pattern, toolCallPattern string) error {
+//
+// Past that, the profile must be able to show its model a call the pattern parses back — its
+// `tool-call-example:`, or the call derived from the pattern. That rule is processing's
+// (ValidateCustomRegexProfile); this check only names the key its verdict falls on, the pattern
+// for a pattern fault and the example for an example fault; processing's error quotes the
+// pattern and the failing example.
+// An example fault with no example given lies in the pattern the call was derived from.
+func validateToolCallPattern(pattern, toolCallPattern, toolCallExample string) error {
 	if toolCallPattern == "" {
 		return fmt.Errorf("apogee: model-profiles.%s.tool-call-pattern is missing: tool-call-format "+
 			"custom-regex parses every tool call with it, so a profile without one finds no call at "+
@@ -2598,7 +2616,19 @@ func validateToolCallPattern(pattern, toolCallPattern string) error {
 		return fmt.Errorf("apogee: invalid model-profiles.%s.tool-call-pattern %q: %w — a pattern "+
 			"that does not compile parses no tool call at all", pattern, toolCallPattern, err)
 	}
-	return nil
+	err := processing.ValidateCustomRegexProfile(toolCallPattern, toolCallExample)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, processing.ErrCustomRegexExample) && toolCallExample != "":
+		return fmt.Errorf("apogee: invalid model-profiles.%s.tool-call-example: %w — give one "+
+			"literal call the tool-call-pattern parses to a tool name and JSON-object arguments",
+			pattern, err)
+	default:
+		return fmt.Errorf("apogee: invalid model-profiles.%s.tool-call-pattern: %w — the pattern "+
+			"needs a name and an args group, and a call written in it must parse back through it",
+			pattern, err)
+	}
 }
 
 // validateThinkingAxes checks one profile's thinking half: the style against the three strippers the
