@@ -22,6 +22,10 @@ import (
 // engine installs on each dispatch, so this is the whole of the wiring a tool needs.
 func consoleTestCtx(t *testing.T) (context.Context, *console.Registry) {
 	t.Helper()
+	// t.TempDir registers its RemoveAll on the first call only, and cleanups run LIFO: claim it
+	// before CloseAll so every TempDir the test takes is removed after its Consoles have exited —
+	// Windows refuses to delete a directory a running cmd.exe still has as its working directory.
+	t.TempDir()
 	registry := console.New()
 	t.Cleanup(registry.CloseAll)
 	return console.WithRegistry(context.Background(), registry), registry
