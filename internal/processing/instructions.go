@@ -46,7 +46,7 @@ func InstructionsFor(p domain.ModelProfile, menu []domain.ToolDef) (string, erro
 	case FormatMarkdownFenced:
 		instructions = markdownFencedInstructions(MarkdownFencedConfig{}.withDefaults(), menu)
 	case FormatCustomRegex:
-		instructions = customRegexInstructions(p.Pattern, menu)
+		instructions = customRegexInstructions(p, menu)
 	}
 	if instructions != "" {
 		block += "\n\n" + instructions
@@ -122,22 +122,27 @@ func markdownFencedInstructions(cfg MarkdownFencedConfig, menu []domain.ToolDef)
 	return strings.Join(lines, "\n")
 }
 
-// customRegexInstructions renders the "## Tool Call Format" block for the custom-regex format: a
-// single example call in the model's pattern, built by extracting the literal delimiters around the
-// pattern's named groups (falling back to the oracle's <tool_call>…</tool_call> shape). It ports
-// buildCustomRegexInstructions's pattern branch; an empty pattern returns "" (oracle parity — the
-// exampleOutput branch has no profile knob and is intentionally not ported).
-func customRegexInstructions(pattern string, menu []domain.ToolDef) string {
-	if pattern == "" {
+// customRegexInstructions renders the "## Tool Call Format" block for the custom-regex format
+// around the one example call customRegexExample picks for p: its ToolCallExample verbatim, or a
+// call written in the pattern's literal delimiters that the profile's own parser reads back. An
+// empty pattern returns "" (oracle parity). A pattern with no name or args group has no call to
+// derive, so the block carries no example line — config load refuses such a profile, which leaves
+// only an embedder's unvalidated Config.Profile to reach that branch.
+func customRegexInstructions(p domain.ModelProfile, menu []domain.ToolDef) string {
+	if p.Pattern == "" {
 		return ""
 	}
-	ex := pickExampleToolCall(menu)
-
-	var exampleCall string
-	if d, ok := extractRegexDelimiters(pattern); ok {
-		exampleCall = fmt.Sprintf(`%s%s%s{"%s": "%s"}%s`, d.prefix, ex.toolName, d.middle, ex.argName, ex.argValue, d.suffix)
-	} else {
-		exampleCall = fmt.Sprintf(`<tool_call>%s({"%s": "%s"})</tool_call>`, ex.toolName, ex.argName, ex.argValue)
+	// The error is the load check's verdict on the profile; at runtime the shown call, if any,
+	// is all the instructions need — a refused profile never got this far.
+	example, _ := customRegexExample(p.Pattern, p.ToolCallExample, menu)
+	if example == "" {
+		return strings.Join([]string{
+			"## Tool Call Format",
+			"",
+			"To call a tool, output the tool name and a JSON object of arguments.",
+			"",
+			"Arguments MUST be valid JSON. Do NOT use any other format.",
+		}, "\n")
 	}
 
 	lines := []string{
@@ -145,44 +150,171 @@ func customRegexInstructions(pattern string, menu []domain.ToolDef) string {
 		"",
 		"To call a tool, output the tool name and a JSON object of arguments in this format:",
 		"",
-		exampleCall,
+		example,
 		"",
 		"Arguments MUST be valid JSON. Do NOT use any other format.",
 	}
 	return strings.Join(lines, "\n")
 }
 
-// regexNamedGroup matches a JavaScript-style named capture group (?<name>…) up to the first
-// closing paren — the same shape the oracle's extractRegexDelimiters scans for (the profile's
-// patterns are written in the JS form the parser translates).
-var regexNamedGroup = regexp.MustCompile(`\(\?<\w+>[^)]*\)`)
-
-// regexDelimiters are the literal strings surrounding a pattern's first two named groups: the text
-// before the name group, between the name and args groups, and after the args group.
+// regexDelimiters are the literal strings surrounding a pattern's name and args groups: the text
+// before the first of the two, between them, and after the second. argsFirst records that the
+// args group comes first in the pattern.
 type regexDelimiters struct {
-	prefix string
-	middle string
-	suffix string
+	prefix    string
+	middle    string
+	suffix    string
+	argsFirst bool
 }
 
-// extractRegexDelimiters recovers the literal delimiters around the first two named groups so the
-// example call reproduces the pattern's surrounding markup. ok is false when the pattern has fewer
-// than two named groups (the caller then uses the oracle's <tool_call>…</tool_call> fallback).
-// Backslashes are stripped from each delimiter, mirroring the oracle's backslash-removal step.
+// call writes a tool name and its argument text into the delimiters, in the pattern's group order.
+func (d regexDelimiters) call(name, args string) string {
+	if d.argsFirst {
+		return d.prefix + args + d.middle + name + d.suffix
+	}
+	return d.prefix + name + d.middle + args + d.suffix
+}
+
+// extractRegexDelimiters recovers the literal delimiters around the pattern's name and args groups
+// (the CustomRegexConfig default names, in the (?<name>…) or (?P<name>…) spelling, in either
+// order) so an example call reproduces the pattern's surrounding markup. Each delimiter's regex
+// syntax is rewritten to the text it most plausibly matches (literalDelimiter); the rewrite is a
+// best guess that the caller's round-trip through the parser judges. ok is false when either
+// group is missing or one sits inside the other.
 func extractRegexDelimiters(pattern string) (regexDelimiters, bool) {
-	locs := regexNamedGroup.FindAllStringIndex(pattern, -1)
-	if len(locs) < 2 {
+	groups := CustomRegexConfig{}.withDefaults()
+	nameStart, nameEnd, okName := namedGroupSpan(pattern, groups.NameGroup)
+	argsStart, argsEnd, okArgs := namedGroupSpan(pattern, groups.ArgsGroup)
+	if !okName || !okArgs {
+		return regexDelimiters{}, false
+	}
+
+	firstStart, firstEnd, secondStart, secondEnd := nameStart, nameEnd, argsStart, argsEnd
+	argsFirst := argsStart < nameStart
+	if argsFirst {
+		firstStart, firstEnd, secondStart, secondEnd = argsStart, argsEnd, nameStart, nameEnd
+	}
+	if secondStart < firstEnd {
 		return regexDelimiters{}, false
 	}
 	return regexDelimiters{
-		prefix: stripBackslashes(pattern[:locs[0][0]]),
-		middle: stripBackslashes(pattern[locs[0][1]:locs[1][0]]),
-		suffix: stripBackslashes(pattern[locs[1][1]:]),
+		prefix:    literalDelimiter(pattern[:firstStart]),
+		middle:    literalDelimiter(pattern[firstEnd:secondStart]),
+		suffix:    literalDelimiter(pattern[secondEnd:]),
+		argsFirst: argsFirst,
 	}, true
 }
 
-// stripBackslashes removes every backslash from s (the oracle's backslash-removal step).
-func stripBackslashes(s string) string { return strings.ReplaceAll(s, `\`, "") }
+// namedGroupSpan locates the capture group called group — opened as (?<group> or (?P<group> — and
+// returns the byte range from its opening paren to just past its balanced closing paren. Escaped
+// characters and bracket expressions are skipped, so neither \( nor a paren inside [...] counts.
+// ok is false when the pattern has no such group or the group never closes.
+func namedGroupSpan(pattern, group string) (start, end int, ok bool) {
+	openers := []string{"(?<" + group + ">", "(?P<" + group + ">"}
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '[':
+			i = bracketEnd(pattern, i)
+		case '(':
+			if !strings.HasPrefix(pattern[i:], openers[0]) && !strings.HasPrefix(pattern[i:], openers[1]) {
+				continue
+			}
+			closing, closed := closingParen(pattern, i)
+			return i, closing + 1, closed
+		}
+	}
+	return 0, 0, false
+}
+
+// closingParen returns the index of the paren that balances the one at open, skipping escaped
+// characters and bracket expressions. closed is false when the pattern ends first.
+func closingParen(pattern string, open int) (closing int, closed bool) {
+	depth := 0
+	for i := open; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '[':
+			i = bracketEnd(pattern, i)
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// bracketEnd returns the index of the ] closing the bracket expression opened at open: a ] right
+// after the [ or [^ is a literal member, an escaped character never closes it, and a [:class:]
+// inside is skipped whole. An unclosed expression runs to the pattern's last byte.
+func bracketEnd(pattern string, open int) int {
+	i := open + 1
+	if i < len(pattern) && pattern[i] == '^' {
+		i++
+	}
+	if i < len(pattern) && pattern[i] == ']' {
+		i++
+	}
+	for ; i < len(pattern); i++ {
+		switch {
+		case pattern[i] == '\\':
+			i++
+		case pattern[i] == '[' && strings.HasPrefix(pattern[i:], "[:"):
+			if end := strings.Index(pattern[i+2:], ":]"); end >= 0 {
+				i += end + 3
+			}
+		case pattern[i] == ']':
+			return i
+		}
+	}
+	return len(pattern) - 1
+}
+
+// repeatQuantifier matches a counted repetition {n}, {n,} or {n,m} at the start of a string.
+var repeatQuantifier = regexp.MustCompile(`^\{\d+(?:,\d*)?\}`)
+
+// literalDelimiter rewrites the regex text around the name and args groups to the literal text it
+// most plausibly matches: \s* becomes nothing, \s+ and \s one space, \n a newline, \t a tab, and
+// any other escaped character itself; the anchors ^, $, \A and \z and the quantifiers *, +, ?
+// (a lazy ? included), {n}, {n,} and {n,m} are dropped; everything else is kept as written.
+func literalDelimiter(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\\' && i+1 < len(s):
+			i++
+			switch escaped := s[i]; escaped {
+			case 's':
+				if i+1 < len(s) && s[i+1] == '*' {
+					continue // \s* matches nothing; its * is dropped on the next byte
+				}
+				b.WriteByte(' ')
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			case 'A', 'z':
+				// anchors match no text
+			default:
+				b.WriteByte(escaped)
+			}
+		case c == '^' || c == '$' || c == '*' || c == '+' || c == '?':
+			// anchors and quantifiers match no text of their own
+		case c == '{' && repeatQuantifier.MatchString(s[i:]):
+			i += len(repeatQuantifier.FindString(s[i:])) - 1
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
 
 // exampleToolCall is a representative tool call rendered into the format instructions: a tool name
 // with one argument name and a plausible value.
@@ -192,12 +324,23 @@ type exampleToolCall struct {
 	argValue string
 }
 
-// pickExampleToolCall builds a representative example from the first tool, porting the oracle's
+// argsJSON is the example's arguments as the instructions write them: a one-member JSON object
+// with the value as a string (oracle parity).
+func (ex exampleToolCall) argsJSON() string {
+	return fmt.Sprintf(`{"%s": "%s"}`, ex.argName, ex.argValue)
+}
+
+// pickExampleToolCall builds a representative example from the first tool (exampleForTool). The
+// caller guarantees a non-empty menu.
+func pickExampleToolCall(menu []domain.ToolDef) exampleToolCall {
+	return exampleForTool(menu[0])
+}
+
+// exampleForTool builds a representative example call of tool, porting the oracle's
 // pickExampleToolCall: a parameter-less tool becomes input/example; otherwise the first schema
 // property names the argument and its type picks a plausible value (path/command string hints,
-// 1 for numbers, true for booleans, "example" otherwise). The caller guarantees a non-empty menu.
-func pickExampleToolCall(menu []domain.ToolDef) exampleToolCall {
-	tool := menu[0]
+// 1 for numbers, true for booleans, "example" otherwise).
+func exampleForTool(tool domain.ToolDef) exampleToolCall {
 	name, typ, ok := firstProperty(tool.Schema)
 	if !ok {
 		return exampleToolCall{toolName: tool.Name, argName: "input", argValue: "example"}

@@ -2,6 +2,7 @@ package processing
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -189,6 +190,81 @@ func TestCustomRegex_EmptyArgsAreEmptyObject(t *testing.T) {
 			}
 			if call.Malformed != nil {
 				t.Errorf("Malformed = %+v, want nil", call.Malformed)
+			}
+		})
+	}
+}
+
+// manualPattern is the custom-regex pattern docs/manual/configuration.md documents.
+const manualPattern = `<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>`
+
+// TestValidateCustomRegexProfile pins the load check: a pattern lacking a group is a pattern
+// fault, an example the pattern does not read as a tool with JSON-object arguments — given, or
+// derived from the pattern as the probe call — is an example fault, and each error quotes the
+// failing example.
+func TestValidateCustomRegexProfile(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		pattern   string
+		example   string
+		wantErr   error
+		wantQuote string
+	}{
+		{name: "the manual pattern derives a call it parses", pattern: manualPattern},
+		{name: "a given example the pattern parses", pattern: manualPattern, example: `<tool_call>ls {"path": "."}</tool_call>`},
+		{
+			name:      "no args group",
+			pattern:   `<tool_call>(?<name>\w+)</tool_call>`,
+			example:   `<tool_call>ls</tool_call>`,
+			wantErr:   ErrCustomRegexPattern,
+			wantQuote: `<tool_call>ls</tool_call>`,
+		},
+		{
+			name:      "a pattern that does not compile",
+			pattern:   `<tool_call>(?<name>\w+)(?<args>\{.*?\}</tool_call>`,
+			example:   `<tool_call>ls{}</tool_call>`,
+			wantErr:   ErrCustomRegexPattern,
+			wantQuote: `<tool_call>ls{}</tool_call>`,
+		},
+		{
+			name:      "an example the pattern does not parse",
+			pattern:   manualPattern,
+			example:   `bash {"command": "ls"}`,
+			wantErr:   ErrCustomRegexExample,
+			wantQuote: `bash {"command": "ls"}`,
+		},
+		{
+			name:      "an example whose arguments are not a JSON object",
+			pattern:   `<tool_call>(?<name>\w+)\s+(?<args>.*?)</tool_call>`,
+			example:   `<tool_call>bash [1]</tool_call>`,
+			wantErr:   ErrCustomRegexExample,
+			wantQuote: `<tool_call>bash [1]</tool_call>`,
+		},
+		{
+			name:      "a derived call that does not parse back",
+			pattern:   `(?<name>\w+)[:;](?<args>\{.*\})`,
+			wantErr:   ErrCustomRegexExample,
+			wantQuote: `read_file[:;]{"path": "src/main.ts"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateCustomRegexProfile(tc.pattern, tc.example)
+
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("ValidateCustomRegexProfile error = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("ValidateCustomRegexProfile error = %v, want one wrapping %v", err, tc.wantErr)
+			}
+			if quoted := fmt.Sprintf("%q", tc.wantQuote); !strings.Contains(err.Error(), quoted) {
+				t.Errorf("ValidateCustomRegexProfile error = %v, want it to quote %s", err, quoted)
 			}
 		})
 	}

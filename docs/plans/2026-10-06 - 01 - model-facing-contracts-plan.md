@@ -135,7 +135,11 @@ NOTES (2026-10-07): the ported oracle vector "handles non-JSON args gracefully" 
 **Acceptance:** `go build ./internal/processing/ ./internal/agent/ && go test -count=1 -run 'TestCustomRegex' ./internal/processing/ && GOMEMLIMIT=2GiB go test -count=1 -run 'TestFloorGuard_CustomRegexMalformedCall' ./internal/agent/`
 **Commit:** `fix(processing): mark custom-regex arguments that are not a JSON object as malformed`
 
-## 6. Custom-regex instructions show only a call the pattern parses
+## 6. Custom-regex instructions show only a call the pattern parses — ✅ DONE (2026-10-07)
+
+NOTES (2026-10-07): consequential edit — internal/processing/render.go: made necessary by extractRegexDelimiters now finding the name and args groups by name (two doc comments said "fewer than two named groups"); render's code is untouched and now writes the rewritten delimiters (e.g. `\s*` as nothing rather than `s*`).
+NOTES (2026-10-07): ValidateCustomRegexProfile also reports a pattern that does not compile, under ErrCustomRegexPattern; the deep rule lives in custom_regex.go (customRegexExample) beside the parser, the delimiter extraction stays in instructions.go.
+NOTES (2026-10-07): pre-existing — renderRegexCall (history fold) composes prefix+name+middle+args+suffix, so an args-first pattern folds past calls in the wrong order (as it did before this item); regexDelimiters.call composes in group order and could replace it.
 
 **What:** Fixes audit High "Custom-regex tool-call instructions teach the model a call the pattern cannot match". Depends on item 5.
 **Goal:** Under custom-regex, `processing.InstructionsFor` shows the profile's `ToolCallExample` verbatim when set, otherwise only a derived call that `NewCustomRegexParser` for the profile's pattern parses back to the same tool and JSON-equal arguments, or the probe example when no menu tool round-trips; no `<tool_call>name({...})</tool_call>` fallback exists; exported `processing.ValidateCustomRegexProfile(pattern, example string) error` reports a pattern lacking a `name` or `args` group, an example that does not parse to a non-empty tool and a JSON-object argument, or a derived example that does not round-trip, quoting the failing example.

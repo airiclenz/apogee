@@ -28,7 +28,7 @@ const emptyArgsObject = "{}"
 //     this format and reads back cut at that line — the format's own limit.
 //   - custom-regex: the call in the pattern's literal delimiters (extractRegexDelimiters) with
 //     the compact JSON arguments in the args slot, or <tool_call>name(args)</tool_call> when the
-//     pattern has fewer than two named groups.
+//     pattern lacks a name or an args group.
 //
 // Arguments that are not a JSON object render as no arguments at all. A native or zero profile
 // returns "" with a nil error — its calls travel as native tool calls. An unknown tool-call
@@ -82,7 +82,7 @@ func fencedValue(value json.RawMessage) string {
 }
 
 // renderRegexCall writes call in pattern's literal delimiters, or the <tool_call>name(args)
-// </tool_call> fallback when the pattern names fewer than two groups (see RenderToolCall).
+// </tool_call> fallback when the pattern lacks a name or an args group (see RenderToolCall).
 func renderRegexCall(pattern string, call domain.ToolCall) string {
 	args := emptyArgsObject
 	if _, isObject := objectMembers(call.Arguments); isObject {

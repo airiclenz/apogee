@@ -137,6 +137,136 @@ func TestInstructionsFor(t *testing.T) {
 	}
 }
 
+// commandSchema is the one-string-property schema of the bash-like tools the custom-regex
+// instruction tests offer; its "command" property makes the example value "ls -la".
+var commandSchema = json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}}}`)
+
+// regexBlockWith is the byte-exact custom-regex "## Tool Call Format" block showing example.
+func regexBlockWith(example string) string {
+	return strings.Join([]string{
+		"## Tool Call Format",
+		"",
+		"To call a tool, output the tool name and a JSON object of arguments in this format:",
+		"",
+		example,
+		"",
+		"Arguments MUST be valid JSON. Do NOT use any other format.",
+	}, "\n")
+}
+
+// TestCustomRegexInstructions_ManualPatternRoundTrips pins the derived example: it is written in
+// the pattern's own delimiters — named groups in either spelling, in either order, nested parens
+// included — and only a call the profile's parser reads back is shown, the probe call standing in
+// when no menu tool's call does.
+func TestCustomRegexInstructions_ManualPatternRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	bash := domain.ToolDef{Name: "bash", Schema: commandSchema}
+	runIt := domain.ToolDef{Name: "run-it", Schema: commandSchema}
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		menu    []domain.ToolDef
+		want    string
+	}{
+		{name: "the manual pattern", pattern: manualPattern, menu: []domain.ToolDef{bash}, want: `<tool_call>bash{"command": "ls -la"}</tool_call>`},
+		{
+			name:    "the manual pattern in the (?P< spelling",
+			pattern: `<tool_call>\s*(?P<name>[\w.-]+)\s*(?P<args>\{.*?\})\s*</tool_call>`,
+			menu:    []domain.ToolDef{bash},
+			want:    `<tool_call>bash{"command": "ls -la"}</tool_call>`,
+		},
+		{
+			name:    "a name group holding nested parens",
+			pattern: `<call>(?<name>(?:\w|-)+)\((?<args>\{.*\})\)</call>`,
+			menu:    []domain.ToolDef{bash},
+			want:    `<call>bash({"command": "ls -la"})</call>`,
+		},
+		{
+			name:    "the args group first",
+			pattern: `^(?<args>\{.*?\})\s+@(?<name>\w+)$`,
+			menu:    []domain.ToolDef{bash},
+			want:    `{"command": "ls -la"} @bash`,
+		},
+		{
+			name:    "the first menu tool whose call parses back",
+			pattern: `(?<name>[a-z]+)\s+(?<args>\{.*\})`,
+			menu:    []domain.ToolDef{runIt, bash},
+			want:    `bash {"command": "ls -la"}`,
+		},
+		{
+			name:    "the probe call when no menu tool's call parses back",
+			pattern: `(?<name>[a-z]+)\s+(?<args>\{.*\})`,
+			menu:    []domain.ToolDef{runIt},
+			want:    `read_file {"path": "src/main.ts"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			profile := domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex, Pattern: tc.pattern}
+
+			got := customRegexInstructions(profile, tc.menu)
+
+			if want := regexBlockWith(tc.want); got != want {
+				t.Errorf("customRegexInstructions =\n%q\nwant\n%q", got, want)
+			}
+			if tc.want == probeExampleCall.toolName+" "+probeExampleCall.argsJSON() {
+				return // the stand-in is shown whether or not it parses back
+			}
+			call, ok := NewCustomRegexParser(CustomRegexConfig{Pattern: tc.pattern}).ParseToolCall(tc.want)
+			if !ok || call.Tool != "bash" || call.Malformed != nil {
+				t.Errorf("the parser reads the shown call as %+v (found %v), want a well-formed bash call", call, ok)
+			}
+		})
+	}
+}
+
+// TestCustomRegexInstructions_ExampleWinsVerbatim pins the profile's own example: it is shown
+// exactly as given, in place of any derived call.
+func TestCustomRegexInstructions_ExampleWinsVerbatim(t *testing.T) {
+	t.Parallel()
+	const example = `<tool_call> bash {"command": "pwd"} </tool_call>`
+	profile := domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex, Pattern: manualPattern, ToolCallExample: example}
+
+	got, err := InstructionsFor(profile, []domain.ToolDef{{Name: "bash", Schema: commandSchema}})
+
+	if err != nil {
+		t.Fatalf("InstructionsFor error = %v", err)
+	}
+	if !strings.HasSuffix(got, "\n\n"+regexBlockWith(example)) {
+		t.Errorf("InstructionsFor =\n%s\nwant it to end with the block showing %s", got, example)
+	}
+	if strings.Contains(got, "ls -la") {
+		t.Errorf("InstructionsFor shows a derived call beside the profile's example:\n%s", got)
+	}
+}
+
+// TestCustomRegexInstructions_NoExampleWithoutGroups pins the unvalidated-profile rule: a pattern
+// lacking the args group renders the block with no example line, and an empty pattern renders no
+// block at all.
+func TestCustomRegexInstructions_NoExampleWithoutGroups(t *testing.T) {
+	t.Parallel()
+	want := strings.Join([]string{
+		"## Tool Call Format",
+		"",
+		"To call a tool, output the tool name and a JSON object of arguments.",
+		"",
+		"Arguments MUST be valid JSON. Do NOT use any other format.",
+	}, "\n")
+
+	got := customRegexInstructions(domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex, Pattern: `\[(?<name>\w+)\]`}, readFileMenu)
+
+	if got != want {
+		t.Errorf("customRegexInstructions =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "<tool_call>") {
+		t.Errorf("customRegexInstructions shows a <tool_call> call:\n%s", got)
+	}
+	if empty := customRegexInstructions(domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex}, readFileMenu); empty != "" {
+		t.Errorf("customRegexInstructions with an empty pattern = %q, want \"\"", empty)
+	}
+}
+
 // TestMarkdownFencedInstructions_OverriddenKnobs exercises the "fenced with overridden knobs"
 // parity vector at the renderer level: domain.ModelProfile carries no fenced knob fields, so
 // overrides cannot flow through InstructionsFor, but the ported renderer must honour a custom

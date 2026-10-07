@@ -778,6 +778,12 @@ type ModelProfile struct {
 	// finer knobs are unset.
 	Pattern string
 
+	// ToolCallExample is one literal tool call written in Pattern's format, shown to a
+	// custom-regex model verbatim in place of the call derived from the pattern. It is read only
+	// under FormatCustomRegex; empty means the instructions derive their example from Pattern
+	// (processing.InstructionsFor).
+	ToolCallExample string
+
 	// Thinking selects the model's inline reasoning-channel style. A zero Thinking (ThinkingNone)
 	// leaves the Upstream-split reasoning path (`reasoning_content` or its `reasoning` alias)
 	// untouched (the default).

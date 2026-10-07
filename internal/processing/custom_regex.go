@@ -1,6 +1,10 @@
 package processing
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -128,3 +132,106 @@ func goFlagPrefix(flags string) string {
 // jsNamedGroup matches a JavaScript named-capture opener (?<name> so it can be rewritten to
 // Go's (?P<name>. A Go-style group already containing ?P is left untouched.
 var jsNamedGroup = regexp.MustCompile(`\(\?<([a-zA-Z_][a-zA-Z0-9_]*)>`)
+
+// ErrCustomRegexPattern marks a custom-regex profile whose pattern cannot carry a tool call: it
+// does not compile, or it lacks the name or args capture group.
+var ErrCustomRegexPattern = errors.New("unusable custom-regex tool-call pattern")
+
+// ErrCustomRegexExample marks a custom-regex profile with no example call its own pattern parses:
+// the given example does not parse to a tool and a JSON-object argument, or the call derived from
+// the pattern does not parse back to itself.
+var ErrCustomRegexExample = errors.New("no parseable custom-regex tool-call example")
+
+// probeExampleCall is the fixed call the load check derives from a pattern when the profile gives
+// no example, and the call the instructions show when no menu tool's derived call parses back.
+var probeExampleCall = exampleToolCall{toolName: "read_file", argName: "path", argValue: "src/main.ts"}
+
+// ValidateCustomRegexProfile reports whether a custom-regex profile can show its model a call its
+// pattern parses: the pattern must compile and carry a name and an args group, and the example —
+// or, when example is empty, the probe call read_file {"path": "src/main.ts"} written in the
+// pattern's delimiters — must parse back through the pattern to a tool and a JSON-object argument.
+// The error quotes the failing example and wraps ErrCustomRegexPattern or ErrCustomRegexExample.
+func ValidateCustomRegexProfile(pattern, example string) error {
+	_, err := customRegexExample(pattern, example, nil)
+	return err
+}
+
+// customRegexExample is the one home of the custom-regex example rule, read by both the load check
+// and the instructions. It returns the call to show the model and the rule's verdict:
+//
+//   - a non-empty example is shown verbatim; the error reports a pattern fault, or an example the
+//     pattern does not parse to a tool with JSON-object arguments.
+//   - otherwise a pattern that does not compile or lacks a name or args group shows nothing and
+//     reports the pattern fault.
+//   - otherwise the first menu tool (in menu order) whose derived call parses back to the same
+//     tool and JSON-equal arguments is shown; when none does, the probe call is shown, and the
+//     error reports it should it not parse back either.
+func customRegexExample(pattern, example string, menu []domain.ToolDef) (string, error) {
+	cfg := CustomRegexConfig{Pattern: pattern}.withDefaults()
+	compiled, err := compilePattern(cfg.Pattern, cfg.Flags)
+	if err != nil {
+		return example, fmt.Errorf("%w: %q does not compile: %v%s", ErrCustomRegexPattern, pattern, err, quotedExample(example))
+	}
+	delimiters, ok := extractRegexDelimiters(pattern)
+	if !ok {
+		return example, fmt.Errorf("%w: %q needs a (?<%s>...) group and a separate (?<%s>...) group%s",
+			ErrCustomRegexPattern, pattern, cfg.NameGroup, cfg.ArgsGroup, quotedExample(example))
+	}
+
+	parser := &CustomRegexParser{cfg: cfg, pattern: compiled}
+	if example != "" {
+		return example, checkGivenExample(parser, example)
+	}
+	for _, tool := range menu {
+		candidate := exampleForTool(tool)
+		if text := delimiters.call(candidate.toolName, candidate.argsJSON()); parsesBack(parser, text, candidate) {
+			return text, nil
+		}
+	}
+	probe := delimiters.call(probeExampleCall.toolName, probeExampleCall.argsJSON())
+	if !parsesBack(parser, probe, probeExampleCall) {
+		return probe, fmt.Errorf("%w: the call derived from the pattern, %q, does not parse back as %s %s",
+			ErrCustomRegexExample, probe, probeExampleCall.toolName, probeExampleCall.argsJSON())
+	}
+	return probe, nil
+}
+
+// quotedExample is the error suffix naming a given example, or "" when none was given.
+func quotedExample(example string) string {
+	if example == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (example %q)", example)
+}
+
+// checkGivenExample reports whether parser reads example as a call of a named tool whose arguments
+// are a JSON object, the error quoting the example when it does not.
+func checkGivenExample(parser *CustomRegexParser, example string) error {
+	call, found := parser.ParseToolCall(example)
+	if !found {
+		return fmt.Errorf("%w: the pattern reads no tool call from %q", ErrCustomRegexExample, example)
+	}
+	if call.Malformed != nil {
+		return fmt.Errorf("%w: the arguments of %q are not a JSON object: %v", ErrCustomRegexExample, example, call.Malformed.Err)
+	}
+	return nil
+}
+
+// parsesBack reports whether parser reads text as exactly the call want: the same tool, well-formed
+// arguments, and arguments JSON-equal to want's.
+func parsesBack(parser *CustomRegexParser, text string, want exampleToolCall) bool {
+	call, found := parser.ParseToolCall(text)
+	if !found || call.Malformed != nil || call.Tool != want.toolName {
+		return false
+	}
+	return jsonEqual(call.Arguments, json.RawMessage(want.argsJSON()))
+}
+
+// jsonEqual reports whether a and b are valid JSON with the same value, whatever their spacing.
+func jsonEqual(a, b json.RawMessage) bool {
+	var left, right any
+	if json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
+}
