@@ -1,7 +1,6 @@
 package processing
 
 import (
-	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -40,8 +39,10 @@ func (c CustomRegexConfig) withDefaults() CustomRegexConfig {
 }
 
 // CustomRegexParser extracts a tool call by matching a user-supplied regex with named groups.
-// It ports the apogee-code CustomRegexParser oracle. An invalid pattern is non-fatal: the
-// parser compiles to a regex that never matches, so it silently finds no call (the oracle's
+// It ports the apogee-code CustomRegexParser oracle, except for arguments that are not a JSON
+// object: the oracle wrapped them as {"raw": …}, a key the model never sent, while this parser
+// marks the call malformed (ParseToolCall). An invalid pattern is non-fatal: the parser
+// compiles to a regex that never matches, so it silently finds no call (the oracle's
 // console.warn-and-fallback behaviour). The parser is stateless and safe for concurrent use.
 type CustomRegexParser struct {
 	cfg     CustomRegexConfig
@@ -64,7 +65,10 @@ func NewCustomRegexParser(cfg CustomRegexConfig) *CustomRegexParser {
 }
 
 // ParseToolCall extracts a tool call from raw using the configured pattern. found is false
-// when the pattern does not match or the name group is empty.
+// when the pattern does not match or the name group is empty. The args group follows the native
+// argument rule (normalizeArguments): an empty or whitespace-only group is the empty object, a
+// JSON-object group is kept verbatim, and any other group comes back as "{}" marked Malformed —
+// the parse error and the group text — so the loop answers it exactly as a malformed native call.
 func (p *CustomRegexParser) ParseToolCall(raw string) (domain.ToolCall, bool) {
 	match := p.pattern.FindStringSubmatch(raw)
 	if match == nil {
@@ -76,27 +80,13 @@ func (p *CustomRegexParser) ParseToolCall(raw string) (domain.ToolCall, bool) {
 		return domain.ToolCall{}, false
 	}
 
-	args := p.coerceArgs(p.group(match, p.cfg.ArgsGroup))
-	return domain.ToolCall{Tool: name, Arguments: args}, true
+	args, malformed := normalizeArguments(p.group(match, p.cfg.ArgsGroup))
+	return domain.ToolCall{Tool: name, Arguments: args, Malformed: malformed}, true
 }
 
 // StripToolCall returns raw with every match of the pattern removed and trimmed.
 func (p *CustomRegexParser) StripToolCall(raw string) string {
 	return strings.TrimSpace(p.pattern.ReplaceAllString(raw, ""))
-}
-
-// coerceArgs mirrors the oracle: an empty args group yields {}; a valid-JSON-object group is
-// kept verbatim; any other non-empty group becomes {"raw": "<group>"} (the graceful non-JSON
-// path). The result is always a JSON object so it slots into domain.ToolCall.Arguments.
-func (p *CustomRegexParser) coerceArgs(argsStr string) json.RawMessage {
-	if argsStr == "" {
-		return json.RawMessage("{}")
-	}
-	trimmed := strings.TrimSpace(argsStr)
-	if trimmed != "" && trimmed[0] == '{' && json.Valid([]byte(trimmed)) {
-		return json.RawMessage(trimmed)
-	}
-	return marshalArgs(map[string]json.RawMessage{"raw": tryParseValue(argsStr)})
 }
 
 // group returns the named capture group's value, or "" when the group is absent or unmatched.

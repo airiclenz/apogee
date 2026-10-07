@@ -1324,3 +1324,36 @@ func TestFloorGuard_MalformedCallThenWellFormedContinues(t *testing.T) {
 		t.Errorf("ErrorEvents = %+v, want none", errs)
 	}
 }
+
+// A custom-regex args group that is not a JSON object takes the malformed route of a native call:
+// with tool-call repair off, the recovered call is answered with its parse error and the group
+// text, never run, and committed with the empty object rather than a {"raw": …} it was not sent.
+func TestFloorGuard_CustomRegexMalformedCallFallsBack(t *testing.T) {
+	sink := &recordingSink{}
+	bashRan := 0
+	cfg := configWithTools(sink, fakeTool{name: "bash", readOnly: true, ran: &bashRan, result: "ok"})
+	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex, Pattern: `(?<name>\w+)\s+(?<args>.*)`}
+	cfg.Floor.DisableToolCallRepair = true
+	responder := scriptedResponder(t, contentTurn("bash ls -la"), contentTurn("done"))
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "list the files")
+
+	if bashRan != 0 {
+		t.Errorf("bash ran %d times, want never", bashRan)
+	}
+	result := resultFor(t, sink.events, "text_call_0")
+	if want := malformedArgumentsWant("invalid character 'l' looking for beginning of value", "ls -la"); !result.IsError || result.Content != want {
+		t.Errorf("malformed result = %+v, want the error %q", result, want)
+	}
+	var committed []domain.ToolCall
+	for _, msg := range a.conv.Messages() {
+		committed = append(committed, msg.ToolCalls...)
+	}
+	if len(committed) != 1 || committed[0].ID != "text_call_0" || string(committed[0].Arguments) != "{}" {
+		t.Errorf("committed tool calls = %+v, want text_call_0 with arguments {}", committed)
+	}
+}

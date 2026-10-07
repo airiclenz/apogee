@@ -119,7 +119,11 @@ internal/floor/repair_test.go — callResponse, repairMenu
 **Acceptance:** `go build ./internal/floor/ ./internal/agent/ && go test -count=1 -run 'TestToolCallRepair|TestToolLoopBreak' ./internal/floor/ && GOMEMLIMIT=2GiB go test -count=1 -run 'TestFloorGuard_ToolCallRepair|TestFloorGuard_MalformedCall' ./internal/agent/`
 **Commit:** `fix(floor): re-stream a Turn whose response carries a malformed tool call`
 
-## 5. Custom-regex arguments that are not a JSON object take the malformed route
+## 5. Custom-regex arguments that are not a JSON object take the malformed route — ✅ DONE (2026-10-07)
+
+NOTES (2026-10-07): re-derived from "tryParseValue and marshalArgs stay for markdown_fenced.go" — markdown_fenced.go no longer calls tryParseValue (it uses verbatimValue), so retiring the `{"raw": …}` coercion left it with no caller; it is removed from internal/processing/args.go so the `unused` linter stays clean. marshalArgs stays (markdown_fenced.go uses it).
+NOTES (2026-10-07): `coerceArgs` is removed rather than kept as a one-line wrapper: `ParseToolCall` calls `normalizeArguments` directly, and its doc and the `CustomRegexParser` doc now state the rule and the departure from the oracle's `{"raw": …}` shape.
+NOTES (2026-10-07): the ported oracle vector "handles non-JSON args gracefully" is rewritten to assert the marker (raw = the group text, Arguments `{}`). `TestCustomRegex_EmptyArgsGroupYieldsEmptyObject` is kept; the new `TestCustomRegex_EmptyArgsAreEmptyObject` adds the whitespace-only and JSON-object groups. `TestCustomRegex_NonObjectArgsAreMalformed` also covers valid JSON that is not an object (`not a JSON object`).
 
 **What:** Ratified "Custom-regex args"; retires the `{"raw": …}` coercion. Depends on items 3 and 4.
 **Goal:** `CustomRegexParser.ParseToolCall` returns, for an args group that is not empty or whitespace and not a JSON object, a call marked malformed exactly as a native call is (same parse-error text, raw = the group text, `Arguments` `{}`); an empty or whitespace-only group yields unmarked `{}`; a JSON-object group is kept verbatim; no custom-regex call carries a `raw` key it was not sent.

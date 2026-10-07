@@ -9,18 +9,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// tryParseValue mirrors the apogee-code oracle's value coercion: a value that is valid JSON is
-// kept as that JSON value; anything else is the trimmed text, encoded as a JSON string. The
-// result is always a well-formed JSON value, so it slots directly into an arguments object.
-func tryParseValue(value string) json.RawMessage {
-	trimmed := strings.TrimSpace(value)
-	if trimmed != "" && json.Valid([]byte(trimmed)) {
-		return json.RawMessage(trimmed)
-	}
-	encoded, _ := json.Marshal(trimmed) // a string always marshals
-	return json.RawMessage(encoded)
-}
-
 // verbatimValue is the markdown-fenced value coercion: every value is encoded as a JSON string
 // verbatim — indentation and inner blank lines intact, JSON-looking text included — less one
 // leading and one trailing line break, the breaks that separate the value from its END_ARG

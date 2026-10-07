@@ -1,6 +1,7 @@
 package processing
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -52,8 +53,10 @@ func TestCustomRegex_PortedOracleVectors(t *testing.T) {
 		}
 	})
 
-	t.Run("handles non-JSON args gracefully", func(t *testing.T) {
+	t.Run("marks non-JSON args malformed instead of wrapping them as raw", func(t *testing.T) {
 		t.Parallel()
+		// The oracle wrapped non-JSON args as {"raw": "<group>"}; apogee marks the call
+		// malformed so the model is told its arguments were not a JSON object.
 		p := NewCustomRegexParser(CustomRegexConfig{Pattern: `<tool>(?<name>\w+):(?<args>[^<]+)</tool>`})
 		raw := `<tool>read_file:src/main.ts</tool>`
 		call, ok := p.ParseToolCall(raw)
@@ -63,8 +66,11 @@ func TestCustomRegex_PortedOracleVectors(t *testing.T) {
 		if call.Tool != "read_file" {
 			t.Errorf("Tool = %q, want read_file", call.Tool)
 		}
-		if got := argString(t, call.Arguments, "raw"); got != "src/main.ts" {
-			t.Errorf("raw arg = %q, want src/main.ts", got)
+		if string(call.Arguments) != "{}" {
+			t.Errorf("Arguments = %s, want {} — no raw key the model never sent", call.Arguments)
+		}
+		if call.Malformed == nil || call.Malformed.Raw != "src/main.ts" {
+			t.Errorf("Malformed = %+v, want the marker carrying the group text src/main.ts", call.Malformed)
 		}
 	})
 }
@@ -110,5 +116,80 @@ func TestCustomRegex_EmptyArgsGroupYieldsEmptyObject(t *testing.T) {
 	}
 	if string(call.Arguments) != "{}" {
 		t.Errorf("Arguments = %s, want {}", call.Arguments)
+	}
+}
+
+// TestCustomRegex_NonObjectArgsAreMalformed: an args group that is not a JSON object is marked
+// malformed exactly as a native call is — the encoding/json parse error, the group text as raw,
+// and the empty object as Arguments — and valid JSON that is not an object is marked too.
+func TestCustomRegex_NonObjectArgsAreMalformed(t *testing.T) {
+	t.Parallel()
+
+	p := NewCustomRegexParser(CustomRegexConfig{Pattern: `(?<name>\w+)\s+(?<args>.*)`})
+	for _, tc := range []struct {
+		name      string
+		raw       string
+		wantError string
+		wantRaw   string
+	}{
+		{name: "shell words", raw: "bash ls -la", wantError: "invalid character 'l' looking for beginning of value", wantRaw: "ls -la"},
+		{name: "a JSON array", raw: `bash ["ls"]`, wantError: notAJSONObject, wantRaw: `["ls"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call, ok := p.ParseToolCall(tc.raw)
+			if !ok {
+				t.Fatal("expected a parsed call")
+			}
+			if call.Tool != "bash" {
+				t.Errorf("Tool = %q, want bash", call.Tool)
+			}
+			if string(call.Arguments) != "{}" {
+				t.Errorf("Arguments = %s, want {}", call.Arguments)
+			}
+			if call.Malformed == nil {
+				t.Fatal("Malformed = nil, want the marker")
+			}
+			if got := call.Malformed.Err.Error(); got != tc.wantError {
+				t.Errorf("marker error = %q, want %q", got, tc.wantError)
+			}
+			if !errors.Is(call.Malformed.Err, ErrMalformedToolCall) {
+				t.Errorf("marker error %v does not wrap ErrMalformedToolCall", call.Malformed.Err)
+			}
+			if call.Malformed.Raw != tc.wantRaw {
+				t.Errorf("marker raw = %q, want %q", call.Malformed.Raw, tc.wantRaw)
+			}
+		})
+	}
+}
+
+// TestCustomRegex_EmptyArgsAreEmptyObject: an empty or whitespace-only args group is a
+// no-argument call — the unmarked empty object — and a JSON-object group is kept verbatim.
+func TestCustomRegex_EmptyArgsAreEmptyObject(t *testing.T) {
+	t.Parallel()
+
+	p := NewCustomRegexParser(CustomRegexConfig{Pattern: `\[(?<name>\w+)(?<args>[^\]]*)\]`})
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty group", raw: "[refresh]", want: "{}"},
+		{name: "whitespace-only group", raw: "[refresh   ]", want: "{}"},
+		{name: "JSON object group", raw: `[refresh {"all":true}]`, want: `{"all":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call, ok := p.ParseToolCall(tc.raw)
+			if !ok {
+				t.Fatal("expected a parsed call")
+			}
+			if string(call.Arguments) != tc.want {
+				t.Errorf("Arguments = %s, want %s", call.Arguments, tc.want)
+			}
+			if call.Malformed != nil {
+				t.Errorf("Malformed = %+v, want nil", call.Malformed)
+			}
+		})
 	}
 }
