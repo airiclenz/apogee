@@ -164,9 +164,9 @@ stamp, touches nothing and prints the fresh preview with the line that now appli
 again to walk further back; each `confirm` takes one more exchange. A file that no longer holds
 what the agent left is skipped rather than overwritten, so your own edits since the run are
 safe. The verb holds the session for its run, so a session that is open in a live apogee is
-refused with `session <id> is open in another apogee — fork it to work alongside` rather than
-rewritten under it — and so is a headless or daemon run still in flight, which holds its session
-the same way until it finishes. There
+refused with `session <id> is open in another apogee (pid N) — fork it to work alongside` (the
+pid omitted when it is not known) rather than rewritten under it — and so is a headless or daemon
+run still in flight, which holds its session the same way until it finishes. There
 is no `--workspace` flag and it is refused as unknown: the tree the revert belongs to is
 recorded in the session's own snapshot index, and a workspace given on the command line could
 only disagree with it. A session recorded without snapshots has nothing to revert here and says
@@ -306,8 +306,9 @@ are the measured twin — the server's own count for the run's first call, promp
 stay `0` when the run never made one or the server reported no usage. A run refused before its
 session existed carries the zero report, `rows` `null`.
 
-The rule is **exactly one `run_finished` on every exit path** — so stdout is never empty for a
-consumer to interpret. A run refused before it started writes that frame **alone**, with the exit
+The rule is **exactly one `run_finished` on every exit path** but one, the deliberate escape hatch
+of a [second Ctrl-C](#lossless-blocking-and-readers-that-walk-away) — so stdout is never empty for
+a consumer to interpret. A run refused before it started writes that frame **alone**, with the exit
 code the prose path would have given it; a run cancelled by Ctrl-C writes it too, with exit `1`.
 
 Two members are worth reading together with `apogee undo` above: `session` is present exactly
@@ -328,7 +329,7 @@ version living only in a frame is invisible in all four. Within a version, new l
 `data` members may appear in any release, and today's enum values (a Turn's status, an approval's
 phase, a delegation's phase) are open sets. **A consumer must ignore names, members and values it
 does not recognise.** A removal, a rename or a changed meaning bumps `v` and is a CHANGELOG entry.
-v 2 (this release) folded `mechanism_fired` and `floor_guard` into `reaction_fired`.
+v 2 (since 0.22.0) folded `mechanism_fired` and `floor_guard` into `reaction_fired`.
 
 ### What is on that stdout
 

@@ -223,8 +223,9 @@ cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "-
 
 The original `Stdin/Stdout/Stderr/Dir/Env` are inherited by `bwrap`, which execs the real child inside
 a user namespace and a mount namespace whose root is a read-only bind of `/` with the box's roots bound
-read-write over it: an out-of-box write fails with **EROFS**. `Setpgid` puts `bwrap` and its child in one
-process group (§2.4 — on a one-shot run, a new session whose leader's PGID is its PID) and
+read-write over it: an out-of-box write fails with **EROFS**. `Confine` sets `Setpgid`, which the
+subprocess funnel replaces with `Setsid` on a one-shot run (§2.4, amended 2026-10-05) — either way
+`bwrap` and its child share one process group, since a session leader's PGID is its PID — and
 `--die-with-parent` kills the child when `bwrap` dies. The flag line is a
 **pure function of the box** and is unit-tested as argv with no process (hermetic), exactly as the
 seatbelt profile is. Never `--new-session` and never
@@ -353,7 +354,8 @@ non-blocking) preparation and is not the run's lifetime.
   and bakes in capture-only I/O, foreclosing streaming if a later tool wants it. Prepare-in-place keeps
   the tool in control of I/O for one extra obligation (the process-group kill), which the `Setpgid`
   contract makes a two-line idiom. Revisit post-v1 only if a backend appears that cannot express its
-  wrapping as argv-rewrite + `SysProcAttr` (none of landlock/seatbelt/AppContainer do).
+  wrapping as argv-rewrite + `SysProcAttr` (none of landlock/seatbelt/bwrap/the Windows token backend
+  do — the last sets only `SysProcAttr.Token`, §9.2, ADR 0020).
 - **A separate helper binary for the Linux re-exec.** Rejected — §2.3: it breaks the single-artifact
   property for no benefit; the argv-sentinel self-re-exec is standard and self-contained.
 

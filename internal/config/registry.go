@@ -101,7 +101,8 @@ const (
 // key at all — false for every structured kind, and false for the confinement keys, whose
 // acknowledgement interlock stays single-homed in /confine — and, since ADR 0037, it is also
 // whether that surface APPLIES it: a key it writes takes effect in the running session on the
-// same keypress, so no key is gated on a restart and no row says one is. Masked
+// same keypress, except the few read only while a session is wired, whose rows say they take
+// effect at the next start. Masked
 // says the value must not be rendered in full — no row carries it today (the schema's one
 // secret is a `servers:` entry's api-key, nested inside a structured block). Desc is the
 // one-line description a surface shows, condensed from the template's own comments.

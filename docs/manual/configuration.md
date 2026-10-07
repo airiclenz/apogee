@@ -10,7 +10,7 @@ apogee already recommends. Three keys carry all four layers —
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
 model profile, [MCP servers](#external-mcp-servers--mcp-servers), [the web-search
 endpoint](#where-web_search-looks--web-search-endpoint) and the seven Floor-guard
-switches among them. Two raw overrides are not config keys at all — `--endpoint`
+switches among them. Three raw overrides are not config keys at all — `--endpoint`
 / `APOGEE_ENDPOINT` runs one session against a server the file does not list,
 while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
 and model hint or overlay those two fields of the listed entry a session starts
@@ -28,8 +28,9 @@ aside, each such write is a single key: a committed `/settings` edit; the `serve
 `/server` switch records for your next start, and the `sub-agents-server:` line a
 `/sub-agents-server` pick records the same way; the `model:` — or, on a launcher-fronted
 entry, the `launch-profile:` — a `/model` pick writes into that entry when `remember-model:`
-is on; the `ui.task-list-open` flip a click on a task-list card records, and the `ui.tools-open`
-flip a click on a large Tools umbrella records the same way; the consented move
+is on; the `ui.color-scheme` a `/color-scheme <name>` switch saves; the `ui.task-list-open`
+flip a click on a task-list card records, and the `ui.tools-open` flip a click on a large Tools
+umbrella records the same way; the consented move
 of a `servers:` entry's retired `sub-agents: true` flag onto `sub-agents-server:`; and the
 one-time migration of a config still written in the retired schema — which copies the file
 aside first and says so on startup. "Your edits are never overwritten" stands: nothing is
@@ -204,10 +205,10 @@ re-list the ones you still want under `enabled:`.
 
 ## Keys apogee migrates for you
 
-Five keys earlier releases carried have left the schema, beside the retired top-level
+Seven keys earlier releases carried have left the schema, beside the retired top-level
 `endpoint:`/`api-key:`/`host-alias:`/`model:` shape the `servers:` list replaced — that one folds
 itself into a `servers:` entry once and is refused when the fold cannot be made safely, as
-[The servers you run models on](#the-servers-you-run-models-on) describes. Of the five, three
+[The servers you run models on](#the-servers-you-run-models-on) describes. Of the seven, three
 apogee handles for you, and
 none of those three is a reason a saved file stops loading: apogee **rewrites the file for you** on
 the start-up that first reads it — it takes a
@@ -232,7 +233,7 @@ exactly where they were.
   cleared for your model. With the catalogue gone there is no set left for it to name, and there is
   no successor key to point at.
 
-The other two are **refused at startup** rather than rewritten, because what replaces them is a
+Two more are **refused at startup** rather than rewritten, because what replaces them is a
 shape you have to choose, not a fold apogee can make for you. The global **`model-profile:`** block
 gave way to [`model-profiles:`](#model-profiles--model-profiles), where a profile is keyed by a
 pattern the model's name contains: the refusal names the file and the line, and prints the block
@@ -241,6 +242,13 @@ already covers that model. The top-level **`llama-launcher:`** key moved onto th
 it fronts, and its refusal is described under
 [Local servers](#local-servers--llama-launcher). Both run before the fold above reads anything, so
 a file carrying either is refused with nothing written — no rewrite, and no backup either.
+
+The last two are neither rewritten nor refused. A retired `sub-agents: true` flag on a `servers:`
+entry moves onto `sub-agents-server:` only with your consent — start-up offers the move, and a
+declined offer leaves the file as it is (see
+[The servers you run models on](#the-servers-you-run-models-on)). A retired top-level
+`step-budget-notice:` line is simply left where it is, because nothing reads it any more (see
+[Keys apogee does not recognise](#keys-apogee-does-not-recognise)).
 
 A whole rewritten file is verified before it replaces the original — the folded entries must fire
 exactly what the old block fired, and no other setting may have moved — so a fold apogee cannot make
@@ -718,8 +726,9 @@ itself in the session you are already in.
 
 `ui.task-list-open` — on by default — is whether the task-list cards in the transcript start open,
 every task row painted, or folded to their counted `✦ Task List (done/total)` header. It is one
-choice for every task-list card in the session, and it is the one `ui:` key apogee writes as well
-as reads: clicking a card folds — or opens — them all and records the flip in `config.yaml`
+choice for every task-list card in the session, and it is a `ui:` key apogee writes as well as
+reads — as it does `ui.tools-open` below and the `ui.color-scheme` a `/color-scheme <name>` switch
+saves: clicking a card folds — or opens — them all and records the flip in `config.yaml`
 silently, so the next session starts the way you left this one; only a write that fails is
 mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
 
@@ -1324,8 +1333,8 @@ model-profiles:
 ```
 
 `apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready
-to paste here. Editing this block while a session runs swaps the parser on the spot, like every
-other key in this file.
+to paste here. Editing this block while a session runs swaps the parser on the spot: it is not one
+of the sixteen keys, listed at the top of this page, that wait for the next start.
 
 ## Keeping the session store bounded — `sessions:`
 
@@ -2157,7 +2166,10 @@ and when a server first reports its slot count, never when one merely goes down 
 comes back. In **Plan** it carries one bullet more, `Mode: plan — …`, naming what
 the mode withholds — `terminal`, `run_tests`, `python_exec`, `web_fetch`, `web_search`,
 `http_request` and MCP tools — and asking the model to report what it would run instead;
-the other three rungs, which withhold nothing the prompt promises, carry no such line.
+the other three rungs, which withhold nothing the prompt promises, carry no such line. The bullet
+names families, not every tool: the menu leaves off the rest of the subprocess tools with them
+(`diagnostics`, `console_open`, `console_send`, `git_branch`, `git_commit`), and only the hardened
+git reads cross into Plan.
 The bullet is worded from the live Plan tool menu (its "writers into the session scratch
 dir" clause rides exactly when a scratch directory is set), so the announcement and the
 menu never disagree. The embedded default prompt says "run the project's own tests,
@@ -2546,8 +2558,10 @@ What a Console wrote into your *workspace* is inside `/undo`'s reach like any ot
 the exchange's snapshots image the tree however it changed. What it did anywhere else is not — a
 Console that dropped your database table dropped it for real.
 
-**Four at a time.** One apogee process holds at most **4** open Consoles — a fixed number, not a
-setting — and a fifth open is refused, naming the ids that could be closed instead. A program that
+**Four at a time.** One agent session — the main agent together with the sub-agents it starts —
+holds at most **4** open Consoles — a fixed number, not a setting — and a fifth open is refused,
+naming the ids that could be closed instead. In the TUI that is the whole process; the daemon gives
+each firing Schedule its own four, closed when that firing ends. A program that
 has already exited still holds its slot until it is closed, because it still holds an id and the
 output nobody has read yet. The cap is what keeps a forgotten dev server from quietly outliving the
 task that started it.

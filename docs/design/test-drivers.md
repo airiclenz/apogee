@@ -1008,7 +1008,7 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 not re-measured: `go test -race -count=1 -run 'TestE2E' ./cmd/apogee/` — **36 tests** (2026-08-28),
 **all PASS, 121.7 s** of package wall clock (**89.3 s** without `-race`). Roughly 120 s of that is
 test time; the rest is the one-off `go build` every run of the package now pays. The set has grown
-since: the current count is **133** `TestE2E` tests (2026-10-02,
+since: the current count is **141** `TestE2E` tests in `cmd/apogee` (2026-10-07,
 `grep -h '^func TestE2E' cmd/apogee/*_test.go | wc -l`). Per file, under `-race`, on 2026-08-28:
 
 | File | s | File | s |

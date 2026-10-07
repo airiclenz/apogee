@@ -2646,8 +2646,9 @@ Two more retired with the **validated-set surface itself**, deleted in stage 2 o
 
 The rest were canonical in **this** glossary and retired with the mechanism wave of
 [ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md),
-which promoted six catalogue rows to [Floor guards](#floor-guard) and retired the other fourteen
-in **v0.20.0** on ratified verdicts rather than on ADR 0016's older "inert by construction"
+which promoted six catalogue rows to [Floor guards](#floor-guard) (a seventh, `tool-call-salvage`,
+was admitted later by its 2026-09-07 amendment and was never a catalogue row) and retired the other
+fourteen in **v0.20.0** on ratified verdicts rather than on ADR 0016's older "inert by construction"
 precondition. Their source, tests and assets are deleted, and so is the roll that outlived them
 (`internal/mechanisms`, deleted with the `mechanisms:` key itself — ADR 0076 A6); what survives is
 the config migration's successor table (`internal/config/configmigrate.go`), so an old

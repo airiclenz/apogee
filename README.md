@@ -271,7 +271,8 @@ The full tour is in [the manual](docs/manual/README.md).
 - **A settings screen** — `/settings` shows every resolved setting, says where each
   value came from, and writes one key at a time with your comments and layout intact.
 - **A watched config** — edits to `~/.apogee/config.yaml` from anywhere apply to the
-  running session; nothing waits for a restart.
+  running session; a few keys (each marked in the configuration manual) take effect at the
+  next start.
 - **Your own system prompt** — replace apogee's, layer your text onto it, or give one
   model a prompt of its own.
 - **Turn any tool off** — or on — for every model or for one, because a shorter tool

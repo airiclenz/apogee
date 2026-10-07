@@ -627,8 +627,7 @@ the row: the `context-files:` keys are part of the prefix every request is cache
 effect at the next `/clear` — `· applies at next clear`. A few keys are read only while apogee
 starts — `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five
 delegation bounds (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`,
-`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the three
-workflow keys (`workflow-continuations`, `workflow-retries`, `workflow-wake`),
+`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`,
 `sessions.max-age` and `sessions.max-count` — so an edit there is written and takes effect at the
 next start; the row's
 `Description:` says so, and the value cell shows what was written. On a key an environment variable or

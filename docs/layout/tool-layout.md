@@ -399,7 +399,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | web_search | Search | the query | `N results` | result titles + URLs |
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask User | the question | the human's own answer | question + choices + the answer |
-| sub_agent | Sub-Agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed/capped at its step cap/stopped by you/ended without a report` | task text + result summary |
+| sub_agent | Sub-Agent | its name (task head fallback) | `scheduled` before it starts; while it works `N tool calls · <used>/<window> · 80 steps` (`· delegating` before the cap while its newest open call is a sub-agent); once it reports `N tool calls · <used>/<window> · <gist>`, the gist being the report's first line or the verdict (`done` / `capped at its step cap` / `stopped by you` / `ended without a report` / …), and a routed run's model last — see **Grouped Sub-agents** above | task text + result summary |
 | fan_out | Fan-Out | the brief's first line (`task`) | the result's first line | the card's item rows, one delegation-shaped row per item run, each opening its run view |
 | workflow | Workflow | the action (`status` / `stop` / `message`) | the result's first line | — |
 | task_list | Task List (done/total) | — | — | the list, one row per task; collapsed = header only |

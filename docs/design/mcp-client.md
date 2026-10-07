@@ -178,7 +178,9 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   `platform.NewProcessTeardown`); `Host.TerminateDuration` is the shutdown ladder's rung wait
   (non-positive: 5s). The composition root (`cmd/apogee/wire_live.go`, `liveMCPHost`) passes the
   real one through `ConnectWith`; a test injects its own the same way rather than swapping a
-  package variable — `internal/mcp` holds none (2026-10-01).
+  package variable — the Host seams are not package variables (2026-10-01). The one swappable
+  package variable `internal/mcp` does hold is `mcpCallTimeout` (`internal/mcp/tool.go`), the fixed
+  5-minute per-call bound, which only the timeout test shrinks (not in parallel).
 - **Tool naming** qualifies each server tool as `<server-name>__<tool>` so two servers advertising
   the same tool name never collide in the single flat registry, and the human approving a call sees
   which server it reaches. The qualified name is then sanitised to the providers' tool-name pattern

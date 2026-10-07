@@ -717,7 +717,7 @@ count `(N)` belongs to a **type row** inside it rather than to a header. That ho
 alike: a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the block reshapes around its targets rather than under
 them. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
-(`#E0D090` under `dark`) — a role of its own rather than the `code` role inline code and fenced
+(`#aea580` under `dark`) — a role of its own rather than the `code` role inline code and fenced
 blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, and either tone can
 be retuned without dragging the other along. The styling is uniform too: a known friendly label
 ("Read"), an unknown tool's raw name, and `result` all look the same. The
@@ -986,7 +986,7 @@ and only *which* one changes: while the child is still working — queued behind
 included — the row opens that child's **run view** (below), and once the delegation is over it opens
 the prompt in place. A member of a fan-out is therefore a way into its child from the moment it is
 announced, exactly as the same delegation standing alone has always been. The `+N more lines` count is apogee's own word too and is painted as one — the
-`tool-marker` role, a warm orange `#E0B080` under `dark`, no background and no bold weight, the
+`tool-marker` role, a soft blue-gray `#A0B0D0` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
 the outcome slot on the leader row, after the middle dot the typed stats already speak in
