@@ -61,6 +61,25 @@ func TestGuards_PreExecute_TrippedBreakerRefuses(t *testing.T) {
 	}
 }
 
+func TestGuards_PreExecute_RefusalChangesNothing(t *testing.T) {
+	t.Parallel()
+	g := NewDefaultGuards()
+	call := guardCall("terminal", "exit 1")
+
+	failed := domain.ToolResult{IsError: true}
+	for i := 0; i < DefaultCircuitBreakerThreshold; i++ {
+		g.RecordExecution(call, failed)
+	}
+	for i := 0; i < 2*DefaultCircuitBreakerThreshold; i++ {
+		if pc := g.PreExecute(call, nil, nil); pc.Outcome != GuardRefuse || pc.Audit != AuditCircuitTripped {
+			t.Fatalf("refusal #%d precheck = %+v, want refuse/circuit-tripped", i+1, pc)
+		}
+	}
+	if !g.Breaker.Tripped(call) {
+		t.Fatal("repeated refusals re-armed the breaker — a refusal must change nothing")
+	}
+}
+
 func TestGuards_RecordExecution_TripEdge(t *testing.T) {
 	t.Parallel()
 	g := NewDefaultGuards()

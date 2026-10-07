@@ -62,8 +62,8 @@
 //     (Rule.ShellWriteView — write-git-control-plane; shellwrites.go), so `cat .git/config`
 //     is the read it is while `echo x > .git/config` still refuses. Tools that declare
 //     nothing stay fully inspected.
-//   - The circuit-breaker (CircuitBreaker): halts a runaway loop of identical failing
-//     calls, surfacing an ErrorEvent rather than spinning.
+//   - The circuit-breaker (CircuitBreaker): halts a runaway loop of back-to-back identical
+//     failing calls, surfacing an ErrorEvent rather than spinning.
 //   - The audit decision (AuditDecision): how a call was gated. The executor emits it on
 //     a domain.AuditEvent, and the event stream is the call / decision trail.
 //
@@ -108,8 +108,10 @@
 // commit-secrets rule dispatch raises to TierForceApproval on a git_commit that would carry
 // any of it (ADR 0080). Pure by contract: dispatch precomputes the diff and the paths (D6).
 //
-// The runaway halt. circuitbreaker.go trips after DefaultCircuitBreakerThreshold consecutive
-// identical FAILING calls, keyed by a (tool, arguments) signature that any success clears.
+// The runaway halt. circuitbreaker.go trips a (tool, arguments) signature after
+// DefaultCircuitBreakerThreshold back-to-back identical FAILING calls; any executed call of
+// another signature, success or failure, zeroes the streak and re-arms the tripped call, and a
+// refusal is never recorded, so it changes nothing.
 //
 // The filesystem boundary, split check-from-use because the gap between them is the race.
 // pathsafety.go is the CHECK — ResolveInRoot (symlink-aware, traversal-rejecting, validating a

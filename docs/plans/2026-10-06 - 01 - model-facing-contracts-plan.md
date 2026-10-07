@@ -49,7 +49,10 @@
 - 6: guard folded (supersedes the instructions.go:128-129 "not ported" comment)
 - 7: guard folded (args-less pattern refusal ratified by the owner)
 
-## 1. The circuit breaker counts only back-to-back identical failures
+## 1. The circuit breaker counts only back-to-back identical failures — ✅ DONE (2026-10-07)
+
+NOTES (2026-10-07): TestGuards_PreExecute_RefusalChangesNothing lives in internal/security/guard_test.go, a file the item's **Files:** line did not list (guardCall and the other TestGuards_ tests live there).
+NOTES (2026-10-07): the breaker's refusal Reason (guard.go PreExecute) and the trip ErrorEvent / refusal text in internal/agent/dispatch.go still say "identical tool call has failed repeatedly" / "further identical calls will be refused"; item 2 owns that wording, so it is left untouched here.
 
 **What:** Fixes audit Medium "Circuit breaker trips on interleaved failures, then refuses the call forever".
 **Goal:** `security.CircuitBreaker` trips a signature only after `Threshold()` failing `Record` calls of that signature with no other signature recorded between them; a `Record` of any other signature, failed or not, zeroes every streak and clears every tripped signature; a refused call is never recorded, so a refusal changes nothing.

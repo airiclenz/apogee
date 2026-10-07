@@ -68,6 +68,10 @@ func TestCircuitBreaker_SuccessResetsStreak(t *testing.T) {
 	}
 }
 
+// TestCircuitBreaker_SuccessClearsATrippedSignature pins that a success of the tripped
+// signature itself — recorded by a caller that does not consult Tripped first — re-arms it
+// like any other recorded call, and the trip edge comes back only after a fresh run of
+// Threshold back-to-back failures.
 func TestCircuitBreaker_SuccessClearsATrippedSignature(t *testing.T) {
 	t.Parallel()
 	b := NewCircuitBreaker(3)
@@ -83,7 +87,7 @@ func TestCircuitBreaker_SuccessClearsATrippedSignature(t *testing.T) {
 	b.Record(call, false) // the call finally succeeded
 
 	if b.Tripped(call) {
-		t.Fatal("a success after the trip left the signature tripped — the call would be blocked forever")
+		t.Fatal("a success of the tripped call left it tripped")
 	}
 	// The streak restarted too: the trip edge comes back only after a fresh run of 3,
 	// never on the first failure of the new streak.
@@ -97,6 +101,9 @@ func TestCircuitBreaker_SuccessClearsATrippedSignature(t *testing.T) {
 	}
 }
 
+// TestCircuitBreaker_DistinctCallsIndependent pins that distinct signatures never add into
+// one streak: a failure of another call resets the streak instead of extending it, and
+// tripping one signature leaves the other untouched.
 func TestCircuitBreaker_DistinctCallsIndependent(t *testing.T) {
 	t.Parallel()
 	b := NewCircuitBreaker(2)
@@ -108,19 +115,81 @@ func TestCircuitBreaker_DistinctCallsIndependent(t *testing.T) {
 	if b.Tripped(a) || b.Tripped(c) {
 		t.Fatal("distinct signatures should not share a streak")
 	}
+	if b.Record(a, true) {
+		t.Fatal("alpha tripped on a failure that followed charlie — its earlier failure was not back to back")
+	}
 	if !b.Record(a, true) {
-		t.Fatal("signature alpha should trip on its own 2nd failure")
+		t.Fatal("signature alpha should trip on its 2nd back-to-back failure")
 	}
 	if b.Tripped(c) {
 		t.Fatal("tripping alpha must not trip charlie")
 	}
 }
 
+func TestCircuitBreaker_InterleavedFailuresNeverTrip(t *testing.T) {
+	t.Parallel()
+	b := NewCircuitBreaker(3)
+	a := breakerCall("terminal", "alpha")
+	c := breakerCall("terminal", "bravo")
+
+	for i := 0; i < 3; i++ {
+		if b.Record(a, true) {
+			t.Fatalf("alpha tripped on interleaved failure #%d", i+1)
+		}
+		if b.Record(c, true) {
+			t.Fatalf("bravo tripped on interleaved failure #%d", i+1)
+		}
+	}
+	if b.Tripped(a) || b.Tripped(c) {
+		t.Fatal("interleaved failures tripped the breaker — only back-to-back identical failures may")
+	}
+}
+
+func TestCircuitBreaker_DifferentCallReArms(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		otherFailed bool
+	}{
+		{name: "other call succeeds", otherFailed: false},
+		{name: "other call fails", otherFailed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := NewCircuitBreaker(3)
+			a := breakerCall("terminal", "alpha")
+			other := breakerCall("terminal", "bravo")
+
+			for i := 0; i < 3; i++ {
+				b.Record(a, true)
+			}
+			if !b.Tripped(a) {
+				t.Fatal("setup: alpha not tripped after 3 back-to-back failures")
+			}
+
+			b.Record(other, tc.otherFailed)
+
+			if b.Tripped(a) {
+				t.Fatal("alpha still tripped after another call was recorded")
+			}
+			for i := 1; i <= 2; i++ {
+				if b.Record(a, true) {
+					t.Fatalf("alpha tripped again on failure #%d after re-arming, want a fresh run of 3", i)
+				}
+			}
+			if !b.Record(a, true) {
+				t.Fatal("alpha did not trip on the 3rd fresh back-to-back failure")
+			}
+		})
+	}
+}
+
 // TestCircuitBreaker_ConcurrentUse exercises the "safe for concurrent use" guarantee the
 // type's doc comment makes: goroutines interleave Record and Tripped over a signature they
 // all share and one each of them alone drives. Under -race the run itself is the assertion
-// for the shared signature (whose final state is deliberately not deterministic); the
-// private signatures carry the deterministic one.
+// for the concurrent phase (whose final state is deliberately not deterministic — every
+// signature resets the others' streak); a final single-goroutine run carries the
+// deterministic one.
 func TestCircuitBreaker_ConcurrentUse(t *testing.T) {
 	t.Parallel()
 	const goroutines = 8
@@ -128,7 +197,6 @@ func TestCircuitBreaker_ConcurrentUse(t *testing.T) {
 	shared := breakerCall("terminal", "shared")
 	own := func(g int) domain.ToolCall { return breakerCall("terminal", fmt.Sprintf("own-%d", g)) }
 
-	edges := make([]int, goroutines) // edges[g] is written by goroutine g only
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
@@ -139,22 +207,24 @@ func TestCircuitBreaker_ConcurrentUse(t *testing.T) {
 			for i := 0; i < b.Threshold(); i++ {
 				b.Record(shared, g%2 == 0) // half the goroutines fail the shared signature, half succeed
 				b.Tripped(shared)
-				if b.Record(mine, true) {
-					edges[g]++
-				}
+				b.Record(mine, true)
 				b.Tripped(mine)
 			}
 		}(g)
 	}
 	wg.Wait()
 
-	for g := 0; g < goroutines; g++ {
-		if edges[g] != 1 {
-			t.Errorf("signature own-%d saw %d trip edges, want exactly 1", g, edges[g])
+	final := breakerCall("terminal", "final")
+	for i := 1; i < b.Threshold(); i++ {
+		if b.Record(final, true) {
+			t.Fatalf("final signature tripped early on failure #%d", i)
 		}
-		if !b.Tripped(own(g)) {
-			t.Errorf("signature own-%d not tripped after %d identical failures", g, b.Threshold())
-		}
+	}
+	if !b.Record(final, true) {
+		t.Fatalf("final signature did not report the trip edge on failure #%d", b.Threshold())
+	}
+	if !b.Tripped(final) {
+		t.Fatal("final signature not tripped after the trip edge")
 	}
 }
 

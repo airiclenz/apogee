@@ -14,7 +14,7 @@ import "github.com/airiclenz/apogee/internal/domain"
 // emits each call's AuditDecision onto the EventSink as a domain.AuditEvent, and that event
 // stream is the trail.
 //
-// LIVE STATE. Breaker holds MUTABLE pointer-backed state (its failure streaks). A Guards
+// LIVE STATE. Breaker holds MUTABLE pointer-backed state (its failure streak). A Guards
 // value-copy therefore ALIASES that live state through the shared pointer — copying the
 // struct does NOT copy the breaker. Dangerous, by contrast, is read-only after construction
 // (Inspect/Rules only), so sharing its pointer is safe and intended. The split matters when
@@ -144,7 +144,8 @@ func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool, exemptPaths [
 
 // RecordExecution updates the post-execution guardrails after a call ran: it feeds the
 // circuit-breaker the call's failure outcome, returning true on the trip edge so the
-// executor surfaces a single ErrorEvent.
+// executor surfaces a single ErrorEvent. Only executed calls come here — a call PreExecute
+// refused is never recorded, so a refusal leaves the breaker exactly as it was.
 func (g Guards) RecordExecution(call domain.ToolCall, result domain.ToolResult) (tripped bool) {
 	if g.Breaker == nil {
 		return false
