@@ -53,8 +53,9 @@
 // finds nothing, since ParseNativeToolCalls already owns the structured path.
 //
 // The tool-call formats, one file each. toolcall.go is the native/JSON shape: NativeToolCall as an
-// OpenAI-compatible server delivers it, ParseNativeToolCalls, and ErrMalformedToolCall — the
-// sentinel a bad call degrades to a tool-error path through instead of failing the Turn.
+// OpenAI-compatible server delivers it, ParseNativeToolCalls (per call: arguments that are not a
+// JSON object mark that call alone, which the loop answers with the parse error while its siblings
+// dispatch), and ErrMalformedToolCall, the sentinel that marker's error wraps.
 // markdown_fenced.go is the fenced tool block: its config defaults, the strict fence parse, and the
 // marker-based fallback for a model that emitted the markers but forgot the fence. custom_regex.go
 // is the user-supplied named-group regex escape hatch, including the JavaScript (?<name>…) → Go

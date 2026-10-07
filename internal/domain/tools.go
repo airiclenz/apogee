@@ -235,6 +235,24 @@ type ToolCall struct {
 	ID        string
 	Tool      string
 	Arguments json.RawMessage
+	// Malformed marks a call whose model-emitted arguments were not a JSON object; nil for every
+	// well-formed call. A marked call's Arguments is "{}", so history and every wire carry a valid
+	// object for it, and dispatch answers it with the parse error instead of running it. The marker
+	// is json:"-": history, session payloads and event JSON never carry it, so a call reloaded from
+	// a snapshot is an ordinary call with arguments "{}".
+	Malformed *MalformedArguments `json:"-"`
+}
+
+// MalformedArguments is the marker a ToolCall carries when the arguments the model sent could not
+// be parsed as a JSON object. It records what went wrong and what was sent, so the call can be
+// answered on its own while its siblings dispatch.
+type MalformedArguments struct {
+	// Err is the parse failure, worded for the model: the encoding/json syntax-error text, or
+	// "not a JSON object" for valid JSON that is not an object. The parser that sets it makes it
+	// wrap its malformed-call sentinel (processing.ErrMalformedToolCall).
+	Err error
+	// Raw is the argument text exactly as the model sent it.
+	Raw string
 }
 
 // FoldArgumentKey reduces an argument name to the spelling every reader of an argument object

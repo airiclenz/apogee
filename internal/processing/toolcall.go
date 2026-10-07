@@ -3,15 +3,15 @@ package processing
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// ErrMalformedToolCall is the sentinel a tool-call parse failure wraps — a missing tool
-// name, or arguments that are not a JSON object. The loop matches it with errors.Is to
-// degrade a bad call to a tool-error path (ADR 0007) rather than failing the Turn.
+// ErrMalformedToolCall is the sentinel a malformed tool call's marker error wraps — arguments
+// that are not a JSON object (domain.MalformedArguments.Err). The rule is per call: the marked
+// call stays in its batch with arguments "{}" and is answered on its own with the parse error,
+// while its siblings dispatch (ADR 0007). Match it with errors.Is on the marker's Err.
 var ErrMalformedToolCall = errors.New("processing: malformed tool call")
 
 // NativeToolCall is one structured tool call as an OpenAI-compatible server delivers it —
@@ -31,22 +31,19 @@ type NativeToolCall struct {
 	Arguments string
 }
 
-// ParseNativeToolCalls normalises native structured tool calls into domain.ToolCall. Each
-// call must name a tool and carry a well-formed JSON object for arguments; an empty
-// Arguments string is normalised to the empty object "{}". Parsing is atomic: a single
-// malformed call returns an ErrMalformedToolCall-wrapped error and no results, so a
-// partially-parsed batch never reaches dispatch. A malformed call is reported through err,
-// never a panic (the parse-error path the acceptance gate requires).
-func ParseNativeToolCalls(calls []NativeToolCall) ([]domain.ToolCall, error) {
+// ParseNativeToolCalls normalises native structured tool calls into domain.ToolCall, one call at
+// a time, and returns every call in emitted order. An empty Arguments string is normalised to the
+// empty object "{}". A call whose arguments are not a JSON object comes back with arguments "{}"
+// and a Malformed marker carrying the parse error and the raw text (normalizeArguments), so the
+// loop answers that call alone and dispatches its siblings. A call with no name comes back with an
+// empty Tool, for the loop's dispatch filter (WellFormedToolCall) to drop and report. Nothing here
+// fails the batch and nothing panics.
+func ParseNativeToolCalls(calls []NativeToolCall) []domain.ToolCall {
 	parsed := make([]domain.ToolCall, 0, len(calls))
-	for i, call := range calls {
-		one, err := parseNativeToolCall(call)
-		if err != nil {
-			return nil, fmt.Errorf("processing: tool call %d: %w", i, err)
-		}
-		parsed = append(parsed, one)
+	for _, call := range calls {
+		parsed = append(parsed, parseNativeToolCall(call))
 	}
-	return parsed, nil
+	return parsed
 }
 
 // WellFormedToolCall reports whether a native tool call is one a loop could actually
@@ -59,9 +56,9 @@ func ParseNativeToolCalls(calls []NativeToolCall) ([]domain.ToolCall, error) {
 //
 // The predicate lives here so the probe's evidence filter and the loop's dispatch filter
 // cannot drift: what the probe refuses to COUNT as a call is exactly what the loop refuses to
-// RUN. It is deliberately not folded into ParseNativeToolCalls — that parse is atomic (one bad
-// call fails the whole batch, so a half-parsed batch never reaches dispatch), while both
-// callers here drop the unusable entries and keep the rest.
+// RUN. It is deliberately not folded into ParseNativeToolCalls — that parse returns every call,
+// a name-less one with an empty Tool, and leaves the dropping to the callers here, which drop the
+// unusable entries and keep the rest.
 //
 // It takes the two strings rather than a call type because its callers hold different ones:
 // the probe reads the provider's wire shape, which processing must not import (ADR 0010).
@@ -69,34 +66,58 @@ func WellFormedToolCall(name, id string) bool {
 	return name != "" && id != ""
 }
 
-// parseNativeToolCall normalises a single native call, validating its name and arguments.
-func parseNativeToolCall(call NativeToolCall) (domain.ToolCall, error) {
-	name := strings.TrimSpace(call.Name)
-	if name == "" {
-		return domain.ToolCall{}, fmt.Errorf("%w: missing tool name", ErrMalformedToolCall)
+// parseNativeToolCall normalises a single native call: its name trimmed (empty when the server
+// sent none) and its arguments normalised, marked when they are not a JSON object.
+func parseNativeToolCall(call NativeToolCall) domain.ToolCall {
+	args, malformed := normalizeArguments(call.Arguments)
+	return domain.ToolCall{
+		ID:        call.ID,
+		Tool:      strings.TrimSpace(call.Name),
+		Arguments: args,
+		Malformed: malformed,
 	}
-
-	args, err := normalizeArguments(call.Arguments)
-	if err != nil {
-		return domain.ToolCall{}, fmt.Errorf("%w: tool %q: %v", ErrMalformedToolCall, name, err)
-	}
-
-	return domain.ToolCall{ID: call.ID, Tool: name, Arguments: args}, nil
 }
 
-// normalizeArguments validates the model-emitted argument string and returns it as a
-// JSON object. Empty/whitespace becomes "{}"; anything else must be syntactically valid
-// JSON and an object (tool arguments are always an object on the OpenAI wire).
-func normalizeArguments(raw string) (json.RawMessage, error) {
+// notAJSONObject is the parse error a malformed call's marker carries for arguments that are
+// valid JSON but not an object — tool arguments are always an object on the OpenAI wire.
+const notAJSONObject = "not a JSON object"
+
+// normalizeArguments is the one home of the tool-argument rule: it returns the model-emitted
+// argument string as a JSON object, or the empty object "{}" with a Malformed marker when the
+// string is not one. Empty/whitespace is a no-argument call and becomes "{}" unmarked. Anything
+// else must be syntactically valid JSON — the marker's error is the encoding/json syntax-error
+// text otherwise — and an object (notAJSONObject otherwise). The marker keeps the raw text
+// exactly as sent; its error wraps ErrMalformedToolCall.
+func normalizeArguments(raw string) (json.RawMessage, *domain.MalformedArguments) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return json.RawMessage("{}"), nil
 	}
-	if !json.Valid([]byte(trimmed)) {
-		return nil, errors.New("arguments are not valid JSON")
+
+	var probe json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+		return malformedArguments(raw, err.Error())
 	}
 	if trimmed[0] != '{' {
-		return nil, errors.New("arguments are not a JSON object")
+		return malformedArguments(raw, notAJSONObject)
 	}
 	return json.RawMessage(trimmed), nil
 }
+
+// malformedArguments is normalizeArguments' marked result: the empty object, and the marker
+// carrying raw and the parse failure reason.
+func malformedArguments(raw, reason string) (json.RawMessage, *domain.MalformedArguments) {
+	return json.RawMessage("{}"), &domain.MalformedArguments{Err: malformedArgumentsError{reason: reason}, Raw: raw}
+}
+
+// malformedArgumentsError is a Malformed marker's Err: its text is the parse failure alone, the
+// words the model is answered with, and it matches ErrMalformedToolCall under errors.Is.
+type malformedArgumentsError struct {
+	reason string
+}
+
+// Error is the parse failure, worded for the model.
+func (e malformedArgumentsError) Error() string { return e.reason }
+
+// Unwrap ties the failure to ErrMalformedToolCall.
+func (e malformedArgumentsError) Unwrap() error { return ErrMalformedToolCall }

@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -911,4 +915,241 @@ func mustQuote(t *testing.T, s string) string {
 		t.Fatalf("marshal %q: %v", s, err)
 	}
 	return string(b)
+}
+
+// malformedArgumentsWant is the answer a Malformed call gets for raw argument text that is cut
+// short — the JSON error encoding/json reports for it, then raw as sent.
+func malformedArgumentsWant(parseError, raw string) string {
+	return fmt.Sprintf("arguments were not valid JSON (%s); you sent: %s", parseError, raw)
+}
+
+// runMalformedExchange drives cfg against turns to the end of the Exchange, with the tool-call
+// repair Floor guard off so a Malformed call reaches dispatch, and returns the Agent and its
+// upstream for the assertions.
+func runMalformedExchange(t *testing.T, cfg domain.Config, turns ...stubllm.Turn) (*Agent, *scriptedUpstream) {
+	t.Helper()
+	cfg.Floor.DisableToolCallRepair = true
+	upstream := scriptedResponder(t, turns...)
+	a, err := newAgent(cfg, upstream)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "read them"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return a, upstream
+}
+
+// resultFor is the depth-0 tool result committed for callID, failing the test when there is none.
+func resultFor(t *testing.T, events []domain.Event, callID string) domain.ToolResult {
+	t.Helper()
+	for _, result := range subAgentResults(events) {
+		if result.CallID == callID {
+			return result
+		}
+	}
+	t.Fatalf("no tool result for %s", callID)
+	return domain.ToolResult{}
+}
+
+// TestLoopMalformedNativeCallAnsweredSiblingsRun is the audit High's regression: one reply carries
+// a well-formed call and a call whose arguments are cut short. The well-formed sibling runs; the
+// bad one is answered with the parse error and its raw text, committed with arguments {} — and
+// sent back upstream that way — surfaced as a call and audited with the malformed decision, with
+// no ErrorEvent and no pre-tool-exec firing for it.
+func TestLoopMalformedNativeCallAnsweredSiblingsRun(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	var seen []string
+	var mu sync.Mutex
+	cfg := configWithTools(sink, fakeTool{name: "read", readOnly: true, ran: &ran, result: "contents of a"})
+	cfg.Reactions = []domain.Reaction{preToolExecWatcher(&seen, &mu)}
+
+	a, upstream := runMalformedExchange(t, cfg,
+		stubllm.Turn{ToolCalls: []stubllm.ToolCall{
+			{ID: "c1", Name: "read", Arguments: `{"path":"a"}`},
+			{ID: "c2", Name: "read", Arguments: `{"path":`},
+		}},
+		contentTurn("done"),
+	)
+
+	if ran != 1 {
+		t.Errorf("tool ran %d times, want 1 — the valid sibling runs, the malformed call never does", ran)
+	}
+	if good := resultFor(t, sink.events, "c1"); good.IsError || good.Content != "contents of a" {
+		t.Errorf("sibling result = %+v, want the tool's own answer", good)
+	}
+	bad := resultFor(t, sink.events, "c2")
+	if want := malformedArgumentsWant("unexpected end of JSON input", `{"path":`); !bad.IsError || bad.Content != want {
+		t.Errorf("malformed result = %+v, want the error %q", bad, want)
+	}
+	assertCommittedArguments(t, a, "c2", "{}")
+	assertWireArguments(t, upstream, "c2", "{}")
+	if eventIndex(sink.events, "c2") < 0 {
+		t.Error("no ToolCallEvent for the malformed call, want it surfaced like every call")
+	}
+	assertMalformedAudit(t, sink.events, "c2")
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none — the error tool-result row is the surface", errs)
+	}
+	mu.Lock()
+	fired := slices.Clone(seen)
+	mu.Unlock()
+	if !slices.Equal(fired, []string{"c1"}) {
+		t.Errorf("pre-tool-exec fired for %v, want only the well-formed c1", fired)
+	}
+}
+
+// TestLoopMalformedNativeCallLongRawIsCut pins the quote's bound: a 300-rune raw argument text is
+// quoted back as its first 200 runes followed by "…".
+func TestLoopMalformedNativeCallLongRawIsCut(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "read", readOnly: true, result: "unused"})
+	raw := `{"path":"` + strings.Repeat("é", 291)
+
+	runMalformedExchange(t, cfg, toolCallTurn("c1", "read", raw), contentTurn("done"))
+
+	want := malformedArgumentsWant("unexpected end of JSON input", string([]rune(raw)[:200])+"…")
+	if got := resultFor(t, sink.events, "c1"); got.Content != want {
+		t.Errorf("malformed result = %q, want %q", got.Content, want)
+	}
+}
+
+// TestLoopMalformedNativeCallToUnknownToolGetsUnknownToolAnswer pins the order of the dispatch
+// facts: the registry miss is answered first, so an unknown tool with broken arguments gets the
+// unknown-tool answer and no malformed audit record.
+func TestLoopMalformedNativeCallToUnknownToolGetsUnknownToolAnswer(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "read", readOnly: true, result: "unused"})
+
+	a, _ := runMalformedExchange(t, cfg, toolCallTurn("c1", "raed", `{"path":`), contentTurn("done"))
+
+	want := a.unknownToolResult(domain.ToolCall{ID: "c1", Tool: "raed"}).Content
+	if got := resultFor(t, sink.events, "c1"); got.Content != want {
+		t.Errorf("result = %q, want the unknown-tool answer %q", got.Content, want)
+	}
+	if audits := auditEvents(sink.events); len(audits) != 0 {
+		t.Errorf("AuditEvents = %+v, want none for an unknown tool", audits)
+	}
+}
+
+// TestLoopMalformedNativeCallToModeWithdrawnToolGetsTheMalformedAnswer pins that the mode does not
+// pre-empt the parse error: a write tool Plan mode withdraws is still in the registry, so its
+// broken call is answered with the malformed error, not a mode refusal.
+func TestLoopMalformedNativeCallToModeWithdrawnToolGetsTheMalformedAnswer(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink, fakeTool{name: "write", ran: &ran, result: "unused"})
+	cfg.Mode = domain.ModePlan
+
+	runMalformedExchange(t, cfg, toolCallTurn("c1", "write", `[1]`), contentTurn("done"))
+
+	if want := malformedArgumentsWant("not a JSON object", `[1]`); resultFor(t, sink.events, "c1").Content != want {
+		t.Errorf("result = %q, want %q", resultFor(t, sink.events, "c1").Content, want)
+	}
+	if ran != 0 {
+		t.Errorf("tool ran %d times, want 0", ran)
+	}
+}
+
+// TestLoopMalformedNativeCallSubAgentIsALeaf pins that a malformed sub_agent call is no
+// delegation: under a ceiling of two (two rounds × width 1), a reply of [bad, good, good]
+// sub_agent calls answers the bad one with the malformed error, mints it no run id, and runs both
+// good delegations — the bad one took no ceiling index.
+func TestLoopMalformedNativeCallSubAgentIsALeaf(t *testing.T) {
+	sink := &recordingSink{}
+	call := func(id, args string) provider.Delta {
+		return provider.Delta{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: id, Type: "function", Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: args},
+		}}
+	}
+	reply := []provider.Delta{
+		call("c0", `{"task":`),
+		call("c1", subAgentArgs("task one")),
+		call("c2", subAgentArgs("task two")),
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	up := newRoutedResponder().
+		route("delegate two things", nil, reply).
+		route("task one", nil, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("delegate two things", nil, contentScript("parent done"))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 1
+	cfg.Delegation.FanOutRounds = 2
+	cfg.Floor.DisableToolCallRepair = true
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if want := malformedArgumentsWant("unexpected end of JSON input", `{"task":`); resultFor(t, sink.events, "c0").Content != want {
+		t.Errorf("c0 result = %q, want %q", resultFor(t, sink.events, "c0").Content, want)
+	}
+	for id, want := range map[string]string{"c1": "child one done", "c2": "child two done"} {
+		if got := resultFor(t, sink.events, id); got.IsError || !strings.Contains(got.Content, want) {
+			t.Errorf("%s result = %+v, want the child's report %q — the malformed call took a ceiling index", id, got, want)
+		}
+	}
+	for _, e := range sink.events {
+		if ce, ok := e.(domain.ToolCallEvent); ok && ce.Call.ID == "c0" && ce.SpawnRunID != "" {
+			t.Errorf("malformed sub_agent call minted run id %q, want none", ce.SpawnRunID)
+		}
+	}
+}
+
+// assertCommittedArguments checks the committed assistant message carries callID with args.
+func assertCommittedArguments(t *testing.T, a *Agent, callID, args string) {
+	t.Helper()
+	for i := 0; i < a.conv.Len(); i++ {
+		for _, call := range a.conv.At(i).ToolCalls {
+			if call.ID == callID {
+				if string(call.Arguments) != args {
+					t.Errorf("committed %s arguments = %s, want %s", callID, call.Arguments, args)
+				}
+				return
+			}
+		}
+	}
+	t.Errorf("no committed assistant message carries %s", callID)
+}
+
+// assertWireArguments checks the next request upstream echoed callID back with args.
+func assertWireArguments(t *testing.T, upstream *scriptedUpstream, callID, args string) {
+	t.Helper()
+	for _, msg := range upstream.last().Messages {
+		for _, call := range msg.ToolCalls {
+			if call.ID == callID {
+				if call.Arguments != args {
+					t.Errorf("wire %s arguments = %s, want %s", callID, call.Arguments, args)
+				}
+				return
+			}
+		}
+	}
+	t.Errorf("the next request carried no call %s", callID)
+}
+
+// assertMalformedAudit checks callID was audited exactly once, with the malformed decision.
+func assertMalformedAudit(t *testing.T, events []domain.Event, callID string) {
+	t.Helper()
+	var decisions []string
+	for _, audit := range auditEvents(events) {
+		if audit.CallID == callID {
+			decisions = append(decisions, audit.Decision)
+		}
+	}
+	if !slices.Equal(decisions, []string{string(security.AuditMalformedArguments)}) {
+		t.Errorf("%s audit decisions = %v, want exactly [%s]", callID, decisions, security.AuditMalformedArguments)
+	}
 }

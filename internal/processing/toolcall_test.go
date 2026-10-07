@@ -54,10 +54,7 @@ func TestParseNativeToolCalls_ValidCalls_NormaliseToDomain(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := ParseNativeToolCalls([]NativeToolCall{tc.in})
-			if err != nil {
-				t.Fatalf("ParseNativeToolCalls returned error: %v", err)
-			}
+			got := ParseNativeToolCalls([]NativeToolCall{tc.in})
 
 			if len(got) != 1 {
 				t.Fatalf("len(got) = %d, want 1", len(got))
@@ -71,6 +68,9 @@ func TestParseNativeToolCalls_ValidCalls_NormaliseToDomain(t *testing.T) {
 			if string(got[0].Arguments) != tc.wantArgs {
 				t.Errorf("Arguments = %q, want %q", string(got[0].Arguments), tc.wantArgs)
 			}
+			if got[0].Malformed != nil {
+				t.Errorf("Malformed = %+v, want nil on a well-formed call", got[0].Malformed)
+			}
 		})
 	}
 }
@@ -78,13 +78,10 @@ func TestParseNativeToolCalls_ValidCalls_NormaliseToDomain(t *testing.T) {
 func TestParseNativeToolCalls_MultipleCalls_PreserveOrder(t *testing.T) {
 	t.Parallel()
 
-	got, err := ParseNativeToolCalls([]NativeToolCall{
+	got := ParseNativeToolCalls([]NativeToolCall{
 		{ID: "a", Name: "read_file", Arguments: `{"path":"a"}`},
 		{ID: "b", Name: "read_file", Arguments: `{"path":"b"}`},
 	})
-	if err != nil {
-		t.Fatalf("ParseNativeToolCalls returned error: %v", err)
-	}
 
 	if len(got) != 2 {
 		t.Fatalf("len(got) = %d, want 2", len(got))
@@ -97,58 +94,84 @@ func TestParseNativeToolCalls_MultipleCalls_PreserveOrder(t *testing.T) {
 func TestParseNativeToolCalls_EmptyInput_ReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
-	got, err := ParseNativeToolCalls(nil)
-	if err != nil {
-		t.Fatalf("ParseNativeToolCalls returned error: %v", err)
-	}
+	got := ParseNativeToolCalls(nil)
+
 	if len(got) != 0 {
 		t.Errorf("len(got) = %d, want 0", len(got))
 	}
 }
 
+// TestParseNativeToolCalls_MalformedCall_DegradesToParseError pins the per-call marker: arguments
+// that are not a JSON object come back as the empty object with a Malformed marker whose error is
+// the parse failure alone (the words the model is answered with), wraps ErrMalformedToolCall, and
+// keeps the raw text exactly as sent.
 func TestParseNativeToolCalls_MalformedCall_DegradesToParseError(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		in   NativeToolCall
+		name      string
+		arguments string
+		wantError string
 	}{
-		{"missing name", NativeToolCall{ID: "x", Arguments: "{}"}},
-		{"blank name", NativeToolCall{Name: "   ", Arguments: "{}"}},
-		{"invalid json arguments", NativeToolCall{Name: "read_file", Arguments: `{"path":`}},
-		{"non-object arguments", NativeToolCall{Name: "read_file", Arguments: `["a","b"]`}},
-		{"json scalar arguments", NativeToolCall{Name: "read_file", Arguments: `42`}},
+		{"truncated json arguments", `{"path":`, "unexpected end of JSON input"},
+		{"invalid json arguments", ` {path} `, "invalid character 'p' looking for beginning of object key string"},
+		{"array arguments", `["a","b"]`, "not a JSON object"},
+		{"json scalar arguments", `42`, "not a JSON object"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := ParseNativeToolCalls([]NativeToolCall{tc.in})
+			got := ParseNativeToolCalls([]NativeToolCall{{ID: "x", Name: "read_file", Arguments: tc.arguments}})
 
-			if !errors.Is(err, ErrMalformedToolCall) {
-				t.Fatalf("err = %v, want wrapped ErrMalformedToolCall", err)
+			if len(got) != 1 {
+				t.Fatalf("len(got) = %d, want the marked call returned", len(got))
 			}
-			if got != nil {
-				t.Errorf("got = %v, want nil results on a malformed call", got)
+			call := got[0]
+			if call.ID != "x" || call.Tool != "read_file" || string(call.Arguments) != "{}" {
+				t.Errorf("call = {ID:%q Tool:%q Arguments:%s}, want {x read_file {}}", call.ID, call.Tool, call.Arguments)
+			}
+			if call.Malformed == nil {
+				t.Fatal("Malformed = nil, want the marker")
+			}
+			if call.Malformed.Err.Error() != tc.wantError {
+				t.Errorf("marker error = %q, want %q", call.Malformed.Err.Error(), tc.wantError)
+			}
+			if !errors.Is(call.Malformed.Err, ErrMalformedToolCall) {
+				t.Errorf("marker error = %v, want it to wrap ErrMalformedToolCall", call.Malformed.Err)
+			}
+			if call.Malformed.Raw != tc.arguments {
+				t.Errorf("marker raw = %q, want %q verbatim", call.Malformed.Raw, tc.arguments)
 			}
 		})
 	}
 }
 
-func TestParseNativeToolCalls_OneMalformedInBatch_FailsAtomically(t *testing.T) {
+// TestParseNativeToolCalls_MalformedCallIsMarkedSiblingsKept pins that one bad call no longer
+// fails the batch: every call comes back in order — a well-formed sibling untouched, the call
+// with broken arguments marked, and a name-less call with an empty Tool for the loop's dispatch
+// filter to drop.
+func TestParseNativeToolCalls_MalformedCallIsMarkedSiblingsKept(t *testing.T) {
 	t.Parallel()
 
-	got, err := ParseNativeToolCalls([]NativeToolCall{
-		{ID: "good", Name: "read_file", Arguments: "{}"},
-		{ID: "bad", Name: "", Arguments: "{}"},
+	got := ParseNativeToolCalls([]NativeToolCall{
+		{ID: "good", Name: "read_file", Arguments: `{"path":"a"}`},
+		{ID: "bad", Name: "read_file", Arguments: `{"path":`},
+		{ID: "nameless", Name: "  ", Arguments: "{}"},
 	})
 
-	if !errors.Is(err, ErrMalformedToolCall) {
-		t.Fatalf("err = %v, want wrapped ErrMalformedToolCall", err)
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want every call returned", len(got))
 	}
-	if got != nil {
-		t.Errorf("got = %v, want no partial batch to reach dispatch", got)
+	if got[0].ID != "good" || string(got[0].Arguments) != `{"path":"a"}` || got[0].Malformed != nil {
+		t.Errorf("sibling = %+v, want the well-formed call untouched", got[0])
+	}
+	if got[1].ID != "bad" || string(got[1].Arguments) != "{}" || got[1].Malformed == nil {
+		t.Errorf("bad call = %+v, want it marked with arguments {}", got[1])
+	}
+	if got[2].ID != "nameless" || got[2].Tool != "" || got[2].Malformed != nil {
+		t.Errorf("name-less call = %+v, want it returned with an empty Tool", got[2])
 	}
 }
 

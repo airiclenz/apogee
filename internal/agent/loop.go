@@ -526,13 +526,10 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			return nil, turnFailed, ""
 		}
 
-		nativeCalls, err := parseToolCalls(reply.toolCalls)
-		if err != nil {
-			// A malformed tool call degrades to a parse-error path, not a panic: surface
-			// it and treat the Turn as a final no-tool response.
-			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "processing", Err: err.Error()})
-			nativeCalls = nil
-		}
+		// The parse is per call: a call whose arguments are not a JSON object stays in the
+		// Response marked (domain.ToolCall.Malformed) and is answered on its own at dispatch, its
+		// error tool-result row being its surface — no ErrorEvent — while its siblings run.
+		nativeCalls := parseToolCalls(reply.toolCalls)
 
 		resp := a.assembleResponse(turn, req.View(), reply, nativeCalls)
 
@@ -835,11 +832,12 @@ func decodeTextCallArgs(call domain.ToolCall, menu []domain.ToolDef) json.RawMes
 // back as a tool message whose omitempty tool_call_id drops off the wire — a result the server
 // cannot match to any call, on a Turn the model never asked for.
 //
-// A drop is REPORTED, once per reply, as an ErrorEvent from source "processing" — the same source
-// the malformed-parse path uses, because it is the same kind of finding: the server sent a shape
-// the loop could not use, and blaming the model for the silence that follows would misdirect the
-// remedy. No ID is ever synthesised for a native call: an invented id echoed back is an id the
-// server never issued, which is the unusable echo this filter exists to prevent.
+// A drop is REPORTED, once per reply, as an ErrorEvent from source "processing": the server sent a
+// shape the loop could not use, and blaming the model for the silence that follows would misdirect
+// the remedy. No ID is ever synthesised for a native call: an invented id echoed back is an id the
+// server never issued, which is the unusable echo this filter exists to prevent. A call that has
+// both but arguments that are not a JSON object is NOT dropped here: it is kept, marked Malformed,
+// and answered on its own at dispatch (prepareCall).
 //
 // The surviving calls are dispatched as before; a reply whose calls ALL fall here reads to the
 // caller exactly like one that carried none — the text parser gets its turn, then replyFault.
@@ -1056,10 +1054,12 @@ func (a *Agent) emitReasoningDelta(turn int, acc string, reasoned int) int {
 
 // parseToolCalls adapts the provider's wire tool calls onto processing's native shape and
 // parses them into domain.ToolCalls (wire types stay provider-local — ADR 0010). An empty
-// batch is a no-op; a malformed call returns an ErrMalformedToolCall-wrapped error.
-func parseToolCalls(raw []provider.ToolCall) ([]domain.ToolCall, error) {
+// batch is a no-op. Every call comes back: one with arguments that are not a JSON object is
+// marked Malformed (processing.ParseNativeToolCalls), one with no name has an empty Tool for
+// dispatchableCalls to drop.
+func parseToolCalls(raw []provider.ToolCall) []domain.ToolCall {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil
 	}
 	native := make([]processing.NativeToolCall, len(raw))
 	for i, tc := range raw {

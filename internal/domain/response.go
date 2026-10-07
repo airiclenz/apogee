@@ -85,13 +85,15 @@ func (r *Response) SetText(s string) {
 }
 
 // SetToolCallArguments rewrites one tool call's arguments in place — a shape-work
-// reaction writing back repaired/formatted content. An out-of-range
+// reaction writing back repaired/formatted content. It clears the call's Malformed marker:
+// the arguments written are the call's arguments from then on. An out-of-range
 // index is a no-op.
 func (r *Response) SetToolCallArguments(index int, args json.RawMessage) {
 	if index < 0 || index >= len(r.toolCalls) {
 		return
 	}
 	r.toolCalls[index].Arguments = args
+	r.toolCalls[index].Malformed = nil
 	r.revision++
 }
 

@@ -311,9 +311,10 @@ func isBackgroundSubAgentCall(call domain.ToolCall, offered bool) bool {
 // isDelegationCall reports whether call is a delegation of the reply's tool round: a sub_agent call
 // that does not run in the background. Only such a call gets a run id before its head event, is
 // pooled, may be pre-empted by a waiting message, and counts against the fan-out ceiling (ADR 0094
-// D6).
+// D6). A sub_agent call marked Malformed is a leaf, never a delegation: it spawns nothing — it is
+// answered with its parse error (prepareCall) — so it mints no run id and takes no ceiling index.
 func isDelegationCall(call domain.ToolCall, offered bool) bool {
-	return isSubAgentCall(call) && !isBackgroundSubAgentCall(call, offered)
+	return call.Malformed == nil && isSubAgentCall(call) && !isBackgroundSubAgentCall(call, offered)
 }
 
 // backgroundSubAgentResult starts the one-item background workflow a background sub_agent call asks

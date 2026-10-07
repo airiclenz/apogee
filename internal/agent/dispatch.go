@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -106,7 +107,8 @@ func (a *Agent) announceSubAgentGroup(turn, size, width int) {
 // call list and backgroundOffered — whether this Agent may run a sub_agent call in the background
 // (offersBackgroundSubAgent), answered by the caller: nothing about the bound server, the depth, or
 // the cap reaches it, so the dispatch ORDER a reply produces is fixed even when the fan-out width is
-// not. A sub_agent call that runs in the background is a leaf (isDelegationCall, ADR 0094 D6).
+// not. A sub_agent call that runs in the background is a leaf (isDelegationCall, ADR 0094 D6), and
+// so is one marked Malformed, which is answered with its parse error and spawns nothing.
 func partitionDispatch(calls []domain.ToolCall, backgroundOffered bool) (leaves, delegations []domain.ToolCall) {
 	for _, call := range calls {
 		if isDelegationCall(call, backgroundOffered) {
@@ -344,7 +346,9 @@ func settledIfCancelled(ctx context.Context) dispatchOutcome {
 
 // prepareCall carries one call as far as it can go WITHOUT running anything: it surfaces the
 // ToolCallEvent, fires the pre-tool-exec Moment, answers the dispatch facts, and computes the
-// call's Resolution and gate verdict. Everything here touches Agent-wide state (the armed
+// call's Resolution and gate verdict. A call marked Malformed (its arguments were not a JSON
+// object) skips the pre-tool-exec Moment — a reaction would be reshaping arguments the model never
+// managed to send — and is answered as a dispatch fact below. Everything here touches Agent-wide state (the armed
 // Reactions, the guardrails, the loop view), which is why it runs on the dispatching goroutine —
 // for every call of a pooled group before any child starts.
 //
@@ -368,10 +372,13 @@ func settledIfCancelled(ctx context.Context) dispatchOutcome {
 //
 // The dispatch facts answered before resolve() run in this order: the registry miss (an unknown
 // tool is a dispatch fact — short-circuiting it keeps a withheld tool, e.g. sub_agent at the
-// depth bound, resolving as an unknown tool, un-audited; Resolution D8), then arguments whose keys
-// fold together (collidingArgumentKeysResult), then one key answered twice with different values
-// (repeatedArgumentKeysResult). All three produce a final, unaudited slot: the Approver is never
-// consulted, no gate key is ever minted, and nothing runs.
+// depth bound, resolving as an unknown tool, un-audited; Resolution D8), then a Malformed call
+// (malformedArgumentsResult — a tool the mode withdrew still gets this answer, since the lookup is
+// the registry's), then arguments whose keys fold together (collidingArgumentKeysResult), then one
+// key answered twice with different values (repeatedArgumentKeysResult). All four produce a final
+// slot: the Approver is never consulted, no gate key is ever minted, nothing runs, and the
+// circuit-breaker records nothing. The Malformed call is the one audited pre-resolve fact
+// (answerMalformedCall emits its AuditEvent); the other three are unaudited.
 //
 // The Resolution is computed once (resolve(), resolution.go) from the facts resolutionInput
 // gathers — the registry lookup, the always-on guardrails (tightened, for a git_commit, by the
@@ -398,14 +405,17 @@ func (a *Agent) prepareCall(
 
 	// The pre-tool-exec Moment: reactions reshape the pending call through the shared
 	// ToolCallEdit, so their edits compose and the pipeline executes what the cascade left behind.
-	if _, err := a.fire(ctx, domain.MomentPreToolExec, domain.NewToolCallEdit(&call)); err != nil {
-		// A pre-tool-exec reaction faulted: an error result, nothing run, and no postlude, rather
-		// than a call run against a half-applied decision.
-		return dispatchSlot{
-			call:       call,
-			runID:      runID,
-			result:     errorToolResult(call.ID, "pre-tool-exec reaction failed"),
-			hookFailed: true,
+	// A Malformed call never fires it (see the doc above).
+	if call.Malformed == nil {
+		if _, err := a.fire(ctx, domain.MomentPreToolExec, domain.NewToolCallEdit(&call)); err != nil {
+			// A pre-tool-exec reaction faulted: an error result, nothing run, and no postlude, rather
+			// than a call run against a half-applied decision.
+			return dispatchSlot{
+				call:       call,
+				runID:      runID,
+				result:     errorToolResult(call.ID, "pre-tool-exec reaction failed"),
+				hookFailed: true,
+			}
 		}
 	}
 
@@ -420,6 +430,10 @@ func (a *Agent) prepareCall(
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		slot.result = a.unknownToolResult(call)
+		return slot
+	}
+	if call.Malformed != nil {
+		slot.result = a.answerMalformedCall(turn, call)
 		return slot
 	}
 	if result, refused := collidingArgumentKeysResult(call); refused {
@@ -1365,6 +1379,30 @@ func (a *Agent) unknownToolResult(call domain.ToolCall) domain.ToolResult {
 		}
 	}
 	return errorToolResult(call.ID, message)
+}
+
+// malformedRawPreviewRunes is how much of a Malformed call's raw argument text its answer quotes
+// back to the model: enough to see where the JSON broke, without echoing a runaway payload.
+const malformedRawPreviewRunes = 200
+
+// answerMalformedCall answers a call marked Malformed and books its AuditEvent with the
+// AuditMalformedArguments decision, the parse error as the reason. The call is never executed,
+// so the circuit-breaker records nothing for it.
+func (a *Agent) answerMalformedCall(turn int, call domain.ToolCall) domain.ToolResult {
+	result := malformedArgumentsResult(call)
+	a.emitAudit(turn, call, security.AuditMalformedArguments, call.Malformed.Err.Error(), result)
+	return result
+}
+
+// malformedArgumentsResult is the error result a Malformed call is answered with:
+// `arguments were not valid JSON (<parse error>); you sent: <raw>`, raw cut to
+// malformedRawPreviewRunes runes and marked with "…" when cut. The call must carry the marker.
+func malformedArgumentsResult(call domain.ToolCall) domain.ToolResult {
+	raw := call.Malformed.Raw
+	if clamped := sanitize.ClampRunes(raw, malformedRawPreviewRunes); clamped != raw {
+		raw = clamped + "…"
+	}
+	return errorToolResult(call.ID, fmt.Sprintf("arguments were not valid JSON (%s); you sent: %s", call.Malformed.Err, raw))
 }
 
 // approve consults the Approver for a Gate verdict, returning whether the call may run. It

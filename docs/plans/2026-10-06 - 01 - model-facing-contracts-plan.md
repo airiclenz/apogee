@@ -79,7 +79,12 @@ NOTES (2026-10-07): guardRefusalMessage now renders the circuit Reason unprefixe
 **Acceptance:** `go build ./internal/security/ ./internal/agent/ && go test -count=1 -run 'TestGuards_PreExecute' ./internal/security/ && GOMEMLIMIT=2GiB go test -count=1 -run 'TestGuardrails_CircuitBreaker|TestResolve_GuardTier1Refuses|TestGuardRefusalMessage' ./internal/agent/`
 **Commit:** `fix(agent): word the circuit-breaker refusal and trip event by the re-arm rule`
 
-## 3. A malformed native tool call is answered on its own; its siblings dispatch
+## 3. A malformed native tool call is answered on its own; its siblings dispatch — ✅ DONE (2026-10-07)
+
+NOTES (2026-10-07): `processing.ParseNativeToolCalls` now returns `[]domain.ToolCall` with no error result, rather than keeping an error that is always nil: the plan removes loop.go's err branch, and keeping an always-nil error would leave dead code that the loop must not discard with `_`. The "nil error" part of the plan's Tests line is therefore guaranteed by the signature.
+NOTES (2026-10-07): the marker is `domain.ToolCall.Malformed *domain.MalformedArguments{Err, Raw}`. `Err` is a processing-local error type whose text is the plain parse error and which matches `ErrMalformedToolCall` through `Unwrap`, so the answer quotes the parse error without the sentinel's prefix.
+NOTES (2026-10-07): added `TestLoopMalformedNativeCallToModeWithdrawnToolGetsTheMalformedAnswer` (Plan mode, a withdrawn write tool), which covers the ratified design call. The plan's single Tests entry is split into five `TestLoopMalformedNativeCall*` functions, all matched by the Acceptance `-run` pattern.
+NOTES (2026-10-07): with tool-call repair left on (the default), a marked call now reaches the repair Floor guard with arguments `{}`. Making repair name that call is item 4's work.
 
 **What:** Fixes audit High "Malformed tool call discards every sibling call and the model is never told".
 **Goal:** A native reply whose calls include one with a name and an id but arguments that are not a JSON object dispatches every valid sibling and answers that call with the tool result `arguments were not valid JSON (<parse error>); you sent: <raw>` — raw is the first 200 runes of its argument text, then `…` when cut; the committed assistant message carries that call with arguments `{}`; a call with no name or no id is still dropped and reported by `dispatchableCalls`.
