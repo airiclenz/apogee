@@ -616,3 +616,61 @@ func TestCompactOnDemandIgnoresTheStandDownLatch(t *testing.T) {
 		t.Fatalf("summarizer calls = %d, want 1 — the on-demand fold must ignore the stand-down latch", up.summaryCalls())
 	}
 }
+
+// TestSaturationStandDownDoesNotBlockTheEmergencyFold pins the reactive exemption from the
+// saturation latch: with no window known and the predictive guard damped by a saturated fold, a
+// request the server rejects as too large still gets the Turn's one emergency fold — the latch
+// damps the ESTIMATE, and a wire overflow is no estimate.
+func TestSaturationStandDownDoesNotBlockTheEmergencyFold(t *testing.T) {
+	sink := &recordingSink{}
+	up := recoveryResponder(t, "the reply", "SUMMARY", true) // the first main request overflows
+	cfg := baseConfig(sink)                                  // no window known
+	cfg.Context.CompactionEnabled = true
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	calibrate(a)
+	seedSizedOpenTurn(t, a, 4*unknownWindowCeilingChars(a)) // past the ceiling: an undamped guard would fold
+	a.turns.foldSaturated()
+	a.turns.compactSatTokens = 1 << 30 // a baseline the transcript is nowhere near twice of: damped
+
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if len(up.mains()) != 2 {
+		t.Fatalf("main requests = %d, want 2 — the damped guard sends as built, the overflow retries folded", len(up.mains()))
+	}
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — the saturation latch swallowed the emergency fold", up.summaryCalls())
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+}
+
+// TestCompactOnDemandIgnoresTheSaturationLatch pins /compact's exemption from the saturation latch
+// too: the human asking for a fold now is never refused because an automatic one saturated.
+func TestCompactOnDemandIgnoresTheSaturationLatch(t *testing.T) {
+	up := compactSpyResponder(t, "SUMMARY")
+	a, err := newAgent(baseConfig(&recordingSink{}), up) // no window known, where the latch damps the guard
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedFoldable(a)
+	a.turns.foldSaturated()
+	a.turns.compactSatTokens = 1 << 30
+
+	skipped, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if skipped {
+		t.Fatal("Compact skipped; the seeded tail is foldable, so the assertion below would be vacuous")
+	}
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — the on-demand fold must ignore the saturation latch", up.summaryCalls())
+	}
+}

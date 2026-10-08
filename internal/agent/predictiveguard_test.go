@@ -408,3 +408,32 @@ func TestPredictiveGuardMeasuresTheAdvertisedWindow(t *testing.T) {
 		t.Errorf("a request the size of the whole %d-token advertised window did not fold; the hard wall is unguarded", b.Window)
 	}
 }
+
+// TestPredictiveGuardWithAKnownWindowIgnoresTheSaturationLatch pins the scope of the saturation
+// damping: it applies only with no window known, where the guard and the saturation check measure
+// the same transcript against the same ceiling. With a known window the guard measures the whole
+// request against the advertised room, so a saturated latch says nothing about it and a request one
+// character past that room still folds first.
+func TestPredictiveGuardWithAKnownWindowIgnoresTheSaturationLatch(t *testing.T) {
+	sink := &recordingSink{}
+	up := recoveryResponder(t, "the reply", "EMERGENCY-SUMMARY")
+	a, err := newAgent(autoCompactConfig(sink), up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	calibrate(a)
+	seedSizedOpenTurn(t, a, int(float64(workingRoom(a))*a.budget().CharsPerToken)+1)
+	a.turns.foldSaturated()
+	a.turns.compactSatTokens = 1 << 30 // would damp the guard if the window were unknown
+
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — a known-window guard must not read the saturation latch", up.summaryCalls())
+	}
+	if len(up.mains()) != 1 {
+		t.Errorf("main requests = %d, want 1 — the guard folded before the wire", len(up.mains()))
+	}
+}

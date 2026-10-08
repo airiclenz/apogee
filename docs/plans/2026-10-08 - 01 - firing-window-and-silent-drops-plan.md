@@ -87,7 +87,13 @@ The eight goldens rendering the old note are regenerated with `GOMEMLIMIT=2GiB g
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EPopupFramesPrompts|TestE2EPopupFramesLists|TestE2EDelegationStepCap|TestE2EOutcomeCancelledDelegationCarriesTheFailureTone|TestE2EToolsUmbrellaFoldsOverThreshold|TestE2EWorkflowStages' ./cmd/apogee/`
 **Commit:** `fix(notice): say the unknown window bounds requests instead of disabling compaction`
 
-## 3. A saturated fold stops re-folding every Turn
+## 3. A saturated fold stops re-folding every Turn — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): the gate is a new predictiveFoldDue helper at the loop.go call site (requestExceedsWindow, refold, foldOverflow and the foldTable doc are unchanged). The latch is set through latchPredictiveSaturation → noteFoldSaturated, a helper extracted from foldFor that foldFor's estimate row now calls too; the baseline lives in the new turnLifecycle.compactSatTokens, cleared everywhere compactSat clears.
+
+NOTES (2026-10-08): "emitted once per agent" is implemented as once per latch. A re-armed fold that saturates again re-records the baseline without a second notice, but a latch that cleared (history dropped under the ceiling) and saturates again emits a fresh notice, as the estimate row always has. foldSaturated() keeps its signature so the existing compact/state/switchupstream tests are untouched; a manual latch with no baseline (0) is undamped.
+
+NOTES (2026-10-08): the child and root bite tests assert exactly 1 summary call (stronger than the plan's "at most one"). On the base tree they fail with 11 and 10 calls (and 0 notices for the root); the re-arm test and the emergency-fold sibling fail on the base tree too. A re-armed fold that gets under the ceiling leaves the latch in place until autoFoldArmed clears it at the next boundary check (every Turn for a child, the next Exchange opening for the root).
 
 **What:** Recast at the regression check (2026-10-08). Fix for the churn in `apogee-headless-window-compaction-loop`: with no window, the protected prefix plus the summary cannot fit the 3072-token ceiling, the `foldEstimate` row saturates, but the predictive guard's `foldOverflow` row reads no latch and folds again on every Turn of every agent.
 **Goal:** once an agent's fold has saturated (`turnLifecycle.foldSaturated`), the predictive guard and the estimate-driven trigger do not fold again on that agent while no window is known and it has saturated; the give-up message is emitted once per agent; the run continues on its full history.

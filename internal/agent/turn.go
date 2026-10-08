@@ -51,8 +51,17 @@ type turnLifecycle struct {
 
 	// compactSat is the saturation latch (S2): a prior automatic fold could not bring the history
 	// under its allocation (an oversized protected prefix), so further automatic folds stand down
-	// until the estimate drops back under it (foldSaturated / autoFoldArmed, compact.go).
+	// until the estimate drops back under it (foldSaturated / autoFoldArmed, compact.go). With no
+	// window known the predictive guard reads it too and damps rather than re-folding every Turn
+	// (predictiveFoldDue, loop.go).
 	compactSat bool
+
+	// compactSatTokens is the transcript estimate (Agent.transcriptTokens) recorded when compactSat
+	// latched — the damping baseline the predictive guard reads on an unknown window
+	// (Agent.predictiveFoldDue, loop.go): it stays quiet until the transcript grows past
+	// uncalibratedRoomMargin times this figure. Zero means no baseline, so the guard is undamped.
+	// Every site that clears compactSat clears it too.
+	compactSatTokens int
 
 	// compactFailed is the stand-down latch: an automatic fold FAULTED, so the estimate-driven
 	// trigger stands down for the rest of THIS Exchange rather than re-running the identical
@@ -513,6 +522,7 @@ func (l *turnLifecycle) autoFoldArmed(exceedsAllocation func() bool) bool {
 	}
 	if !exceedsAllocation() {
 		l.compactSat = false
+		l.compactSatTokens = 0
 		return false
 	}
 	return !l.compactSat
@@ -526,6 +536,7 @@ func (l *turnLifecycle) autoFoldArmed(exceedsAllocation func() bool) bool {
 // rebind is a quiescent boundary — so this keeps the two latches moving together.
 func (l *turnLifecycle) resetFoldLatches() {
 	l.compactSat = false
+	l.compactSatTokens = 0
 	l.compactFailed = false
 }
 
@@ -581,6 +592,7 @@ func (l *turnLifecycle) restore(s turnSnapshot) {
 	l.exchangeStart = s.exchangeStart
 	l.pendingInput = s.pendingInput
 	l.compactSat = false
+	l.compactSatTokens = 0
 	l.compactFailed = false
 	l.rearmFill()
 }

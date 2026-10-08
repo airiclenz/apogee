@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -243,5 +244,203 @@ func TestKnownWindowIgnoresTheUnknownWindowCeiling(t *testing.T) {
 	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), nil, a.budget(), 0)
 	if a.requestExceedsWindow(req) {
 		t.Error("a request past the assumed ceiling but inside the working room tripped the predictive guard")
+	}
+}
+
+// saturatingBriefAgent is a CALIBRATED Agent with no known window whose scripted model asks for
+// toolTurns small tool calls and then answers, with every fold summarised by a short summary. Its
+// caller submits saturatingBrief as the opening message: that brief is the first user message, so
+// it sits in the protected prefix every fold keeps verbatim, and on its own it is twice the assumed
+// ceiling — no fold can ever bring the transcript under it, which is the saturated shape a long
+// delegation brief gives a child on a server that advertises no window. Calibration matters: the
+// stub's turns report no usage, so an uncalibrated Budget would hold the predictive guard back until
+// twice the ceiling (uncalibratedRoomMargin), and the ceiling in characters is read after it.
+func saturatingBriefAgent(t *testing.T, sink domain.EventSink, toolTurns int) (*Agent, *scriptedUpstream, string) {
+	t.Helper()
+	turns := make([]stubllm.Turn, 0, toolTurns+1)
+	for i := range toolTurns {
+		turns = append(turns, toolCallTurn(fmt.Sprintf("c%d", i), "peek", "{}"))
+	}
+	turns = append(turns, contentTurn("done"))
+	up := scriptedCompactResponder(t, "SUMMARY", turns...)
+
+	cfg := baseConfig(sink) // no MaxContextTokens: neither discovery nor `context-window:` reported one
+	cfg.Context.CompactionEnabled = true
+	reg := domain.NewToolRegistry()
+	if err := reg.Register(fakeTool{name: "peek", readOnly: true, result: "ok"}); err != nil {
+		t.Fatalf("Register(peek): %v", err)
+	}
+	cfg.Tools = reg
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	calibrate(a)
+	return a, up, strings.Repeat("b", 2*unknownWindowCeilingChars(a))
+}
+
+// runSaturatingExchange submits brief and steps the Exchange to its end, failing past maxSteps so a
+// runaway cannot hang the test.
+func runSaturatingExchange(t *testing.T, a *Agent, brief string, maxSteps int) {
+	t.Helper()
+	if err := a.Submit(domain.UserInput{Text: brief}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	for range maxSteps {
+		res, err := a.Step(context.Background())
+		if err != nil {
+			t.Fatalf("Step: %v", err)
+		}
+		if res.Status == domain.StatusExchangeComplete {
+			return
+		}
+	}
+	t.Fatalf("the Exchange did not complete within %d Steps", maxSteps)
+}
+
+// TestUnknownWindowSaturatedFoldStandsDownForAChild is the churn in
+// apogee-headless-window-compaction-loop: a CHILD agent (midExchangeCompaction) on a server that
+// advertises no window, whose delegation brief alone outgrows the assumed ceiling. The Turn-boundary
+// fold saturates and latches — and the predictive guard used to ignore that latch and fold again on
+// every one of the ten tool Turns. Once saturated, the agent folds no more while it has not grown,
+// says so exactly once, and the delegation still runs to its end on its full history.
+func TestUnknownWindowSaturatedFoldStandsDownForAChild(t *testing.T) {
+	sink := &recordingSink{}
+	a, up, brief := saturatingBriefAgent(t, sink, 10)
+	a.midExchangeCompaction = true // what newChildAgent stamps on a delegate
+
+	runSaturatingExchange(t, a, brief, 12)
+
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d, want 1 — a saturated fold re-folded on later Turns", up.summaryCalls())
+	}
+	if n := countCompactionErrors(sink.events); n != 1 {
+		t.Errorf("compaction ErrorEvents = %d, want exactly 1 saturation notice", n)
+	}
+	if !a.turns.compactSat {
+		t.Error("the saturation latch is not set after the delegation ended over the ceiling")
+	}
+}
+
+// TestUnknownWindowSaturatedFoldStandsDownForTheRoot is the same churn at depth 0 (owner call: the
+// stand-down covers every agent, root included). The main agent's estimate-driven trigger waits for
+// the Exchange boundary, so mid-Exchange only the predictive guard folds — and nothing on that path
+// latched, so it folded on every tool Turn and never said why. Now its first saturating fold latches
+// the stand-down with the one notice, and the Exchange runs on unfolded.
+func TestUnknownWindowSaturatedFoldStandsDownForTheRoot(t *testing.T) {
+	sink := &recordingSink{}
+	a, up, brief := saturatingBriefAgent(t, sink, 10)
+
+	runSaturatingExchange(t, a, brief, 12)
+
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d, want 1 — the predictive guard re-folded a saturated history every Turn", up.summaryCalls())
+	}
+	if n := countCompactionErrors(sink.events); n != 1 {
+		t.Errorf("compaction ErrorEvents = %d, want exactly 1 saturation notice", n)
+	}
+	if !a.turns.compactSat {
+		t.Error("a predictive fold that left the transcript over the ceiling did not latch the stand-down")
+	}
+}
+
+// TestUnknownWindowSaturatedGuardReArmsOnGrowth pins the damping half (ADR 0018 §7 — damping, never a
+// gate): a saturated guard stays quiet while the transcript holds near the estimate it latched at,
+// fires exactly once more when the transcript grows past uncalibratedRoomMargin times that estimate,
+// re-records it without a second notice, and is quiet again on the next Turn.
+func TestUnknownWindowSaturatedGuardReArmsOnGrowth(t *testing.T) {
+	sink := &recordingSink{}
+	a, up, brief := saturatingBriefAgent(t, sink, 4)
+	step := func(label string) {
+		t.Helper()
+		if _, err := a.Step(context.Background()); err != nil {
+			t.Fatalf("Step (%s): %v", label, err)
+		}
+	}
+
+	if err := a.Submit(domain.UserInput{Text: brief}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	step("opening — nothing past the prefix to fold")
+	step("first fold — saturates")
+	if up.summaryCalls() != 1 || !a.turns.compactSat {
+		t.Fatalf("setup: summarizer calls = %d, latched %v; want the first fold to saturate", up.summaryCalls(), a.turns.compactSat)
+	}
+	baseline := a.turns.compactSatTokens
+	if baseline <= 0 {
+		t.Fatalf("the latch recorded no transcript estimate (%d); the damping has no baseline", baseline)
+	}
+	step("damped — no growth")
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d after an un-grown Turn, want 1", up.summaryCalls())
+	}
+
+	// Grow the transcript past the margin: an answered read whose result alone carries twice the
+	// recorded estimate, appended where the open Exchange's tool result left the conversation.
+	growth := int(float64(uncalibratedRoomMargin*baseline) * a.budget().CharsPerToken)
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{
+		{ID: "g1", Tool: "peek", Arguments: []byte("{}")},
+	}})
+	a.conv.Append(domain.Message{Role: domain.RoleTool, ToolCallID: "g1", Content: strings.Repeat("y", growth)})
+	if got := a.transcriptTokens(); got <= uncalibratedRoomMargin*baseline {
+		t.Fatalf("setup: transcript estimate %d has not passed %d× the baseline %d", got, uncalibratedRoomMargin, baseline)
+	}
+
+	step("re-armed — grown past the margin")
+	if up.summaryCalls() != 2 {
+		t.Fatalf("summarizer calls = %d after growth past the margin, want 2 — the stand-down must re-arm on growth", up.summaryCalls())
+	}
+	if n := countCompactionErrors(sink.events); n != 1 {
+		t.Errorf("compaction ErrorEvents = %d, want 1 — a re-armed fold re-saturating says nothing new", n)
+	}
+	step("damped again — re-recorded baseline")
+	if up.summaryCalls() != 2 {
+		t.Errorf("summarizer calls = %d on the Turn after the re-armed fold, want 2", up.summaryCalls())
+	}
+}
+
+// TestUnknownWindowFoldThatNeverRanDoesNotLatch pins the other edge of the predictive latch: only a
+// fold that RAN can prove saturation. A fold the reducer skipped (nothing past the protected prefix
+// to fold) and a fold `auto-compact: false` declined both leave the latch clear and say nothing,
+// though the guard fired on a transcript over the ceiling.
+func TestUnknownWindowFoldThatNeverRanDoesNotLatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		disable bool // auto-compact: false — the fold declines
+		steps   int
+	}{
+		{name: "a skipped fold", steps: 1},                 // the opening Turn: the brief is all there is
+		{name: "a declined fold", disable: true, steps: 2}, // the second Turn has a tail, but folding is off
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			a, up, brief := saturatingBriefAgent(t, sink, 2)
+			if tc.disable {
+				a.SetCompactionEnabled(false)
+			}
+			if err := a.Submit(domain.UserInput{Text: brief}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			for range tc.steps {
+				if _, err := a.Step(context.Background()); err != nil {
+					t.Fatalf("Step: %v", err)
+				}
+			}
+
+			if a.transcriptTokens() <= compactUnknownWindowTranscriptTokens {
+				t.Fatal("setup: the transcript is under the assumed ceiling; the guard never fired")
+			}
+			if up.summaryCalls() != 0 {
+				t.Fatalf("summarizer calls = %d, want 0 — the fold was meant not to run", up.summaryCalls())
+			}
+			if a.turns.compactSat {
+				t.Error("a fold that never ran latched the saturation stand-down")
+			}
+			if n := countCompactionErrors(sink.events); n != 0 {
+				t.Errorf("compaction ErrorEvents = %d, want 0", n)
+			}
+		})
 	}
 }

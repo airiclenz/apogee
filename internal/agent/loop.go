@@ -156,16 +156,34 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// to shed, or the summary call itself faulted) the request goes out exactly as it always did
 	// and the reactive path stays the backstop — the estimate is advisory, never a reason to
 	// abandon a Turn on its own.
-	if a.requestExceedsWindow(t.req) {
+	//
+	// With NO window known the guard is DAMPED once a fold has saturated (ADR 0018 §7: damping,
+	// never a gate). There the guard and the saturation check measure the same transcript against
+	// the same conservative ceiling, so a protected prefix and summary that together outgrow the
+	// ceiling make every fold land over it again — and an undamped guard would spend a summary call on every
+	// Turn of every agent, root included, without ever getting under. So a predictive fold whose
+	// result still exceeds the ceiling latches the saturation stand-down (compactSat) the
+	// estimate-driven trigger already honours, and the guard then stays quiet until the transcript
+	// grows past uncalibratedRoomMargin times the estimate recorded at the latch, when it folds
+	// once more and re-records (predictiveFoldDue). The latch persists across Exchanges until the
+	// history drops back under the ceiling (/clear, Rebind, RestoreSession), so the damping lasts
+	// the session. A known window keeps the undamped guard, and the reactive fold below and
+	// /compact never read the latch. The foldOverflow row itself still reads no latch (foldTable,
+	// compact.go): the damping lives at this call site alone.
+	if a.predictiveFoldDue(t.req) {
 		switch a.refold(ctx, t) {
 		case foldCancelled:
 			// A cancel mid-summary: refold re-queued the corrections and left t at its pre-request
 			// boundary, so the cancel exit's truncate-then-restore leaves them queued exactly once.
 			return a.turns.end(t, endCancelled), nil
-		case foldFolded, foldDeclined:
-			// Folded — t is re-derived against the folded history and the Turn's one fold is spent —
-			// or declined, where the request goes out unfolded and the reactive path stays the
-			// backstop. The estimate is advisory: proceed either way.
+		case foldFolded:
+			// Folded — t is re-derived against the folded history and the Turn's one fold is spent.
+			// With no window known, a fold that still left the transcript over the ceiling latches
+			// the stand-down (and says so once). The estimate is advisory: proceed either way.
+			a.latchPredictiveSaturation(t.turn)
+		case foldDeclined:
+			// Declined (or faulted): the request goes out unfolded and the reactive path stays the
+			// backstop. A fold that never ran proves nothing about saturation, so nothing latches.
 		}
 	}
 
@@ -1340,6 +1358,46 @@ func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 		room *= uncalibratedRoomMargin
 	}
 	return b.EstimateTokens(chars) > room
+}
+
+// predictiveFoldDue is the predictive guard's verdict at its call site in step(): whether the
+// request about to be sent must be folded first. It is requestExceedsWindow, damped on an unknown
+// window once a fold has saturated (compactSat): there the guard stays quiet until the transcript
+// estimate grows past uncalibratedRoomMargin times the estimate recorded when the latch was set
+// (compactSatTokens), then fires again, once, and the fold re-records the baseline — damping, never
+// a gate (ADR 0018 §7), so a history that keeps growing is still folded, just not on every Turn.
+// The margin is the estimator's own uncertainty bound (documented on uncalibratedRoomMargin),
+// reused so the damping never re-fires on what is only a re-calibrated ratio. A known window is never damped: there the
+// guard measures the whole request against the advertised room, which the saturation check does
+// not, so the latch says nothing about whether this fold can help.
+func (a *Agent) predictiveFoldDue(req *domain.Request) bool {
+	if !a.requestExceedsWindow(req) {
+		return false
+	}
+	if !a.turns.compactSat || deriveGrowthBounds(a.budget()).windowKnown {
+		return true
+	}
+	return a.transcriptTokens() > uncalibratedRoomMargin*a.turns.compactSatTokens
+}
+
+// latchPredictiveSaturation is the predictive guard's saturation check after a fold that RAN:
+// with no window known, a transcript still over the conservative ceiling means the protected
+// prefix and the summary together cannot fit it, so the stand-down latches (noteFoldSaturated,
+// compact.go — the one notice, emitted once per latch). A known window never latches here: the
+// guard measured the whole request against the advertised room, a different quantity from the
+// allocation the saturation check reads.
+func (a *Agent) latchPredictiveSaturation(turn int) {
+	if deriveGrowthBounds(a.budget()).windowKnown || !a.historyExceedsAllocation() {
+		return
+	}
+	a.noteFoldSaturated(turn)
+}
+
+// transcriptTokens estimates the conversation alone — no tool menu, no standing system content —
+// through the Budget's chars→token ratio: the quantity requestExceedsWindow measures on an unknown
+// window, and the one the saturation latch records as its damping baseline.
+func (a *Agent) transcriptTokens() int {
+	return a.budget().EstimateTokens(domain.PromptChars(a.conv.Messages(), nil))
 }
 
 // maxRefFileBytes caps a single @file reference, mirroring the read_file tool's ceiling

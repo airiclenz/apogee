@@ -320,22 +320,39 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: overflowBridge})
 		a.turns.anchorAtBridge()
 	}
-	// With no window known there IS no allocation — the compare ran against the conservative
-	// unknown-window ceiling — so the remedy is appended for the same reason the overflow give-up
-	// appends it (overflowGiveUpErr): this notice is then the one place the user learns that the
-	// bound biting their session is an assumption apogee had to make, and that a config key
-	// replaces it with the truth.
 	if row.saturates && a.historyExceedsAllocation() {
-		a.turns.foldSaturated()
-		msg := "compaction could not bring the history under its allocation: the protected prefix " +
-			"(system prompt + first user message) and the compaction summary together exceed it; " +
-			"automatic folding is paused until the history estimate drops below the allocation"
-		if a.cfg.Context.MaxContextTokens <= 0 {
-			msg += " — " + unknownWindowRemedy
-		}
-		a.emitCompactionError(turn, msg)
+		a.noteFoldSaturated(turn)
 	}
 	return foldResult{end: foldEndFolded}
+}
+
+// noteFoldSaturated latches the saturation stand-down after a fold that RAN and still left the
+// history over its allocation, records the transcript estimate it latched at (the predictive
+// guard's damping baseline, predictiveFoldDue in loop.go), and emits the saturation notice — once
+// per latch: a fold that re-saturates an already latched agent (the predictive guard's re-armed
+// fold on growth) re-records the baseline silently, so the human hears about a saturated agent one
+// time rather than at every re-arm. It is shared by foldTable's estimate row (foldFor) and the
+// predictive guard's call site (loop.go), which latches only with no window known.
+//
+// With no window known there IS no allocation — the compare ran against the conservative
+// unknown-window ceiling — so the remedy is appended for the same reason the overflow give-up
+// appends it (overflowGiveUpErr): this notice is then the one place the user learns that the
+// bound biting their session is an assumption apogee had to make, and that a config key
+// replaces it with the truth.
+func (a *Agent) noteFoldSaturated(turn int) {
+	isAlreadyLatched := a.turns.compactSat
+	a.turns.foldSaturated()
+	a.turns.compactSatTokens = a.transcriptTokens()
+	if isAlreadyLatched {
+		return
+	}
+	msg := "compaction could not bring the history under its allocation: the protected prefix " +
+		"(system prompt + first user message) and the compaction summary together exceed it; " +
+		"automatic folding is paused until the history estimate drops below the allocation"
+	if a.cfg.Context.MaxContextTokens <= 0 {
+		msg += " — " + unknownWindowRemedy
+	}
+	a.emitCompactionError(turn, msg)
 }
 
 // emitCompactionError is the one site every fold-side notice leaves through: an ErrorEvent from
