@@ -3902,6 +3902,29 @@ func TestHeadlessPrintsThePruneNotice(t *testing.T) {
 	}
 }
 
+// TestHeadlessPrintsTheMalformedChunksNotice pins the `--format text` line for a reply that
+// ended successfully but dropped undecodable stream chunks: the event's own Notice sentence on
+// STDERR, worded as the TUI and the session record word it, and never on stdout, where a
+// pipeline reads the answer. Without it an unattended run whose reply lost text would look clean.
+func TestHeadlessPrintsTheMalformedChunksNotice(t *testing.T) {
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.MalformedChunksEvent{Count: 2})
+	}}
+
+	out, errOut, err := headlessRun(t, stub, "explain this repo")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	const want = "the reply dropped 2 malformed stream chunks — text may be missing"
+	if !slices.Contains(strings.Split(errOut, "\n"), want) {
+		t.Errorf("stderr carries no malformed-chunk notice reading %q:\n%s", want, errOut)
+	}
+	if strings.Contains(out, "malformed") {
+		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
+	}
+}
+
 // TestNarrationSinkForwardsEveryEvent pins the wrap half of the sink: it prints for a prune and
 // hands EVERY Event on to the sink it wraps, its own included. run.Once puts its tap around this
 // one (run.Spec), so a sink that swallowed what it rendered would cost the Firing's record the very

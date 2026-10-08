@@ -182,8 +182,9 @@ func watchSecondInterrupt(sigs <-chan os.Signal, done <-chan struct{}, errOut io
 var prewarmLabelWalk = platform.PrewarmLabelWalk
 
 // narrationSink is the headless Driver's own EventSink: the live view of an unattended run under
-// `--format text`. It prints one stderr line per [domain.PruneEvent], one per tool call and tool
-// result at Depth 0, and one per sub-agent lifecycle boundary — and forwards every Event, its own
+// `--format text`. It prints one stderr line per [domain.PruneEvent] and per
+// [domain.MalformedChunksEvent], one per tool call and tool result at Depth 0, and one per
+// sub-agent lifecycle boundary — and forwards every Event, its own
 // included, to whatever sink it wraps (nil ⇒ nothing to forward to). A zero-value inner is the
 // normal case — a bare headless run composes no sink of its own — and the wrap still matters,
 // because run.Once installs its tap AROUND this one rather than instead of it (run.Spec).
@@ -208,7 +209,9 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 // the engine stamps a phase and a rename with the CHILD's identity (dispatch.go's
 // emitSubAgentPhase), one level below the Depth-0 sub_agent call whose id they carry — so a
 // grandchild's phases are as silent as its calls. The prune line has no depth gate, unchanged: a
-// child's pruning pass shrinks a window the human never sees otherwise.
+// child's pruning pass shrinks a window the human never sees otherwise. Nor has the malformed-chunk
+// line (the event's own Notice sentence): a child's reply that lost text feeds the answer the
+// parent hands back, so the human is owed the line whichever run's stream dropped the chunks.
 //
 // It prints for a prune and NOTHING for a [domain.ReactionFiredEvent], deliberately: a Floor guard
 // repairing the model's own failure is engine behaviour rather than news for the human who is not
@@ -264,6 +267,8 @@ func (s *narrationSink) narrate(e domain.Event) {
 	switch ev := e.(type) {
 	case domain.PruneEvent:
 		_, _ = fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", ev.Results, ev.Tokens)
+	case domain.MalformedChunksEvent:
+		_, _ = fmt.Fprintln(s.out, ev.Notice())
 	case domain.ToolCallEvent:
 		if ev.Depth != 0 {
 			return

@@ -54,6 +54,28 @@ func TestTranscriptFoldRecordsAClippedReference(t *testing.T) {
 	}
 }
 
+// TestTranscriptFoldRecordsAMalformedChunkNote pins the entry a reply that dropped undecodable
+// stream chunks leaves in a record: a NOTE, never an error — the reply was used as delivered —
+// worded by the event itself (MalformedChunksEvent.Notice), so the TUI, the headless stderr and
+// the record spell one drop one way.
+func TestTranscriptFoldRecordsAMalformedChunkNote(t *testing.T) {
+	t.Parallel()
+
+	f := newTranscriptFold("")
+
+	f.fold(domain.MalformedChunksEvent{Count: 2})
+
+	entries := f.entries
+	if len(entries) != 1 {
+		t.Fatalf("the fold wrote %d entries, want the malformed-chunk note alone: %+v", len(entries), entries)
+	}
+	const want = "the reply dropped 2 malformed stream chunks — text may be missing"
+	if entries[0].Kind != session.EntryKindNote || entries[0].Text != want {
+		t.Errorf("malformed entry = %s/%q, want %s reading %q",
+			entries[0].Kind, entries[0].Text, session.EntryKindNote, want)
+	}
+}
+
 // TestTranscriptFoldIgnoresAReactionFiring pins the other half of the prune contract: a Reaction
 // firing contributes NOTHING to a Firing's record. A reaction repairs the model's own failure or
 // shapes what it sees without steering it (ADR 0071, ADR 0076) — engine behaviour the reader of a

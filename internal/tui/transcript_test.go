@@ -3895,6 +3895,70 @@ func TestRefClippedNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 	})
 }
 
+// TestMalformedChunksNoteIsOneHostLineAtItsOwnRun pins what a reply that dropped undecodable stream
+// chunks looks like in the scrollback: one dim host note — never an error entry, the reply was used
+// as delivered — worded by the event itself, placed at the run that emitted it, and saved with the
+// session as a note so a resumed scrollback still says the reply may be missing text.
+func TestMalformedChunksNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
+	t.Parallel()
+
+	const want = "the reply dropped 2 malformed stream chunks — text may be missing"
+
+	t.Run("the note is the event's own sentence", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+
+		tr.apply(domain.MalformedChunksEvent{Count: 2})
+
+		if len(tr.entries) != 1 {
+			t.Fatalf("transcript holds %d entries, want the note alone", len(tr.entries))
+		}
+		got := tr.entries[0]
+		if got.kind != entryNote || got.text != want {
+			t.Errorf("malformed fold = %v/%q, want an entryNote reading %q", got.kind, got.text, want)
+		}
+	})
+
+	t.Run("the note survives a session round-trip", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+		tr.apply(domain.MalformedChunksEvent{Count: 2})
+
+		blob, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		entries, err := decodeTranscript(blob)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(entries) != 1 || entries[0].kind != entryNote || entries[0].text != want {
+			t.Errorf("replayed entries = %+v, want one entryNote reading %q", entries, want)
+		}
+	})
+
+	t.Run("a child's drop lands inside the delegate's run", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentStarted(tr, "s1", 1)
+
+		tr.apply(domain.MalformedChunksEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Count:     1,
+		})
+
+		if len(tr.entries) != 2 {
+			t.Fatalf("transcript holds %d entries, want the head and the note", len(tr.entries))
+		}
+		got := tr.entries[1]
+		if got.kind != entryNote || got.depth != 1 || got.spawnCallID != "s1" {
+			t.Errorf("malformed entry = %v at depth %d/spawn %q, want an entryNote inside s1's run at depth 1",
+				got.kind, got.depth, got.spawnCallID)
+		}
+	})
+}
+
 // TestPruneNoteIsOneHostLineAtItsOwnRun pins what a pruning pass looks like in the scrollback: one
 // dim host note wording the engine's two counts verbatim, placed at the run that emitted it.
 //

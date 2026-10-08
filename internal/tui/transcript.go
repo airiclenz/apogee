@@ -1341,6 +1341,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addPrune(e.Results, e.Tokens, runOf(e.EventBase))
 	case domain.RefClippedEvent:
 		t.addRefClipped(e, runOf(e.EventBase))
+	case domain.MalformedChunksEvent:
+		t.addMalformedChunks(e, runOf(e.EventBase))
 	case domain.WorkflowPhaseEvent:
 		t.addWorkflowPhase(e)
 	case domain.SubAgentGroupEvent:
@@ -2804,6 +2806,20 @@ func (t *transcript) addRefClipped(e domain.RefClippedEvent, run runRef) {
 	t.place(inRun(entry{
 		kind: entryNote,
 		text: stripEscapes(e.Notice()),
+	}, run))
+}
+
+// addMalformedChunks appends the host note for one reply that ended successfully but skipped stream
+// chunks it could not decode (domain.MalformedChunksEvent). A note and not an error: the reply was
+// used as delivered, and the line tells the human that text or a tool call those chunks carried may
+// be missing from it. The sentence is the event's own (Notice), so the TUI, the headless stderr
+// and a session record spell one drop one way.
+//
+// Placed at the run that emitted it, as addRefClipped is: a delegate's reply is the delegate's own.
+func (t *transcript) addMalformedChunks(e domain.MalformedChunksEvent, run runRef) {
+	t.place(inRun(entry{
+		kind: entryNote,
+		text: e.Notice(),
 	}, run))
 }
 

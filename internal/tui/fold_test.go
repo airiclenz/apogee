@@ -291,11 +291,13 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
-			name: "MalformedChunksEvent appends nothing yet and moves nothing else",
-			// A successful reply skipped undecodable stream chunks. The engine emits the note; the
-			// TUI does not render it yet, so the fold is a no-op here — no entry, no gauge, no
-			// progress save.
-			event: domain.MalformedChunksEvent{Count: 2},
+			name: "MalformedChunksEvent appends the host note and moves nothing else",
+			// A successful reply skipped undecodable stream chunks: one dim note in the scrollback,
+			// at the run that emitted it (transcript.addMalformedChunks, pinned in
+			// transcript_test.go), never an error entry — the reply was used as delivered. No
+			// gauge, no phrase, no progress save, as a clipped reference's note.
+			event:       domain.MalformedChunksEvent{Count: 2},
+			wantEntries: 1,
 		},
 		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",

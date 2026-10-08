@@ -131,7 +131,11 @@ The line kind is `malformed_chunks` with data `{"count":N}`, placed before the f
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestHeadlessFormatJSONStreamsEveryEvent|TestManualListsEveryEventLineKind' ./cmd/apogee/`
 **Commit:** `fix(agent): report malformed stream chunks a successful reply dropped`
 
-## 5. Every Driver shows and records the malformed-chunk note
+## 5. Every Driver shows and records the malformed-chunk note — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): consequential edit — docs/manual/headless.md: made necessary by the new `--format text` stderr line in narrationSink.narrate (the manual lists every live narration line)
+
+NOTES (2026-10-08): the headless stderr line carries no depth gate, like the prune line — a child's reply that lost text feeds the parent's answer; the TUI places the note at the emitting run, as addRefClipped does
 
 **What:** Fix for `apogee-malformed-count-unsurfaced`, Driver half. Depends on item 4.
 **Goal:** `MalformedChunksEvent` renders its `Notice()` text as a note in the TUI transcript, the headless text transcript and the headless JSON stream, and is persisted as a session note entry — the same Drivers and routes `RefClippedEvent` takes.

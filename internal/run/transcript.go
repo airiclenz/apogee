@@ -105,6 +105,11 @@ func (f *transcriptFold) fold(e domain.Event) {
 		// ahead, and the reader is told what the model was and was not shown. The event words
 		// the sentence itself (RefClippedEvent.Notice), so every Driver reads alike.
 		f.appendText(session.EntryKindNote, ev.Notice(), ev.EventBase)
+	case domain.MalformedChunksEvent:
+		// A note as well: the reply that dropped undecodable chunks was used as delivered, and the
+		// reader of the record is told it may be missing text. Worded by the event itself
+		// (MalformedChunksEvent.Notice), as the clip above is.
+		f.appendText(session.EntryKindNote, ev.Notice(), ev.EventBase)
 	}
 }
 

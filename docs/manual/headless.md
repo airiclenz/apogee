@@ -101,7 +101,9 @@ boundaries — a delegation your cancel reaches prints `finished` like any other
 the delegating call named it (or as apogee named it while it ran, the moment that name lands).
 A delegation's own calls are not narrated — its `sub-agent` lines stand in for them. A
 pruning pass mid-run prints `pruned N tool results (~T tokens)` in the same stream, at every
-depth. None of this is the run's outcome: the block described next is still composed after
+depth, and a model reply that ended successfully but skipped stream chunks it could not decode
+prints `the reply dropped N malformed stream chunks — text may be missing`, at every depth too.
+None of this is the run's outcome: the block described next is still composed after
 the run, from what it reported, in the wording and order it has always had.
 
 Where the workspace carries context files, that
