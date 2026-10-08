@@ -589,7 +589,9 @@ SSH**, or on a machine with no desktop, open the URL in a browser on your own ma
 after you log in, it lands on a `http://127.0.0.1:…/callback?code=…` address that fails to load,
 because that loopback address is your machine's, not the one apogee runs on. Copy that full
 address out of the browser's address bar and paste it at apogee's prompt. Whichever arrives first,
-the callback or the paste, finishes the login.
+the callback or the paste, finishes the login — but only when it carries the `state` this login
+sent. A callback or a pasted address for any other login, such as one left over from an earlier
+attempt or one another program sends to the listener, is turned away and the login keeps waiting.
 
 **Where the token lives.** apogee keeps one file per server at
 `~/.apogee/mcp-auth/<name>.json` (the directory `0700`, the file `0600`, rewritten atomically),

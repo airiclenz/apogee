@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -97,8 +98,15 @@ func newTestFetcher(t *testing.T, term loginTerminal) (string, func(context.Cont
 	return redirectURL, fetch
 }
 
-// getCallback requests the redirect URL with query, as the browser would after the login.
-func getCallback(t *testing.T, redirectURL string, query url.Values) {
+// testState is the state testAuthorizeURL sends; an authorization response must echo it.
+const testState = "the-state"
+
+// testAuthorizeURL is an authorize URL as a Login builds it, carrying testState.
+const testAuthorizeURL = "https://auth.example/authorize?state=" + testState
+
+// getCallback requests the redirect URL with query, as the browser would after the login, and
+// returns the status the callback answered with.
+func getCallback(t *testing.T, redirectURL string, query url.Values) int {
 	t.Helper()
 	response, err := http.Get(redirectURL + "?" + query.Encode())
 	if err != nil {
@@ -106,6 +114,54 @@ func getCallback(t *testing.T, redirectURL string, query url.Values) {
 	}
 	if err := response.Body.Close(); err != nil {
 		t.Fatalf("close the callback response: %v", err)
+	}
+	return response.StatusCode
+}
+
+// fetchOutcome is what one fetch returned.
+type fetchOutcome struct {
+	code  string
+	state string
+	err   error
+}
+
+// startFetch runs fetch for authorizeURL on its own goroutine and returns once it is waiting on
+// input, by which point it has recorded the login's state; the outcome arrives on the channel.
+func startFetch(
+	t *testing.T,
+	fetch func(context.Context, string) (string, string, error),
+	input *pipeInput,
+	authorizeURL string,
+) <-chan fetchOutcome {
+	t.Helper()
+	outcome := make(chan fetchOutcome, 1)
+	go func() {
+		code, state, err := fetch(context.Background(), authorizeURL)
+		outcome <- fetchOutcome{code: code, state: state, err: err}
+	}()
+	waitFor(t, func() bool { return input.inFlight.Load() == 1 })
+	return outcome
+}
+
+// awaitOutcome waits for a started fetch to return.
+func awaitOutcome(t *testing.T, outcome <-chan fetchOutcome) fetchOutcome {
+	t.Helper()
+	select {
+	case result := <-outcome:
+		return result
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetch did not return")
+		return fetchOutcome{}
+	}
+}
+
+// requireStillWaiting fails if a started fetch has already returned.
+func requireStillWaiting(t *testing.T, outcome <-chan fetchOutcome) {
+	t.Helper()
+	select {
+	case result := <-outcome:
+		t.Fatalf("fetch returned %q, %q, %v; want it still waiting", result.code, result.state, result.err)
+	default:
 	}
 }
 
@@ -127,19 +183,52 @@ func requirePortFree(t *testing.T, redirectURL string) {
 
 func TestMCPLoginFetch_Callback_DeliversCodeAndState(t *testing.T) {
 	t.Parallel()
-	term, _ := testLoginTerminal(t, nil, newPipeInput(), &bytes.Buffer{})
+	input := newPipeInput()
+	term, _ := testLoginTerminal(t, nil, input, &bytes.Buffer{})
 	redirectURL, fetch := newTestFetcher(t, term)
 
 	if !strings.HasPrefix(redirectURL, "http://127.0.0.1:") || !strings.HasSuffix(redirectURL, "/callback") {
 		t.Fatalf("redirect URL = %q, want a loopback /callback", redirectURL)
 	}
-	getCallback(t, redirectURL, url.Values{"code": {"the-code"}, "state": {"the-state"}})
-	code, state, err := fetch(context.Background(), "https://auth.example/authorize")
+	outcome := startFetch(t, fetch, input, testAuthorizeURL)
+	getCallback(t, redirectURL, url.Values{"code": {"the-code"}, "state": {testState}})
+	result := awaitOutcome(t, outcome)
 
-	if err != nil || code != "the-code" || state != "the-state" {
-		t.Fatalf("fetch = %q, %q, %v; want the-code, the-state, nil", code, state, err)
+	if result.err != nil || result.code != "the-code" || result.state != testState {
+		t.Fatalf("fetch = %q, %q, %v; want the-code, %s, nil", result.code, result.state, result.err, testState)
 	}
 	requirePortFree(t, redirectURL)
+}
+
+func TestMCPLoginFetch_Callback_ResponseForAnotherLoginEndsNothing(t *testing.T) {
+	t.Parallel()
+	input := newPipeInput()
+	term, _ := testLoginTerminal(t, nil, input, &bytes.Buffer{})
+	redirectURL, fetch := newTestFetcher(t, term)
+
+	// Sent before the fetch starts: no login is in progress yet, so nothing may be accepted.
+	if status := getCallback(t, redirectURL, url.Values{"code": {"early"}, "state": {testState}}); status != http.StatusBadRequest {
+		t.Errorf("a callback before the fetch answered %d, want %d", status, http.StatusBadRequest)
+	}
+	outcome := startFetch(t, fetch, input, testAuthorizeURL)
+	forged := []url.Values{
+		{"code": {"forged"}, "state": {"another-state"}},
+		{"error": {"access_denied"}},
+		{"error": {"access_denied"}, "state": {"another-state"}},
+	}
+	for _, query := range forged {
+		if status := getCallback(t, redirectURL, query); status != http.StatusBadRequest {
+			t.Errorf("callback %v answered %d, want %d", query, status, http.StatusBadRequest)
+		}
+	}
+	requireStillWaiting(t, outcome)
+
+	getCallback(t, redirectURL, url.Values{"code": {"the-code"}, "state": {testState}})
+	result := awaitOutcome(t, outcome)
+
+	if result.err != nil || result.code != "the-code" || result.state != testState {
+		t.Fatalf("fetch = %q, %q, %v; want the-code, %s, nil", result.code, result.state, result.err, testState)
+	}
 }
 
 // answerPageCase is one authorization response the callback answers, and the page it answers with.
@@ -153,12 +242,12 @@ func answerPageCases() []answerPageCase {
 	return []answerPageCase{
 		{
 			name:     "login received",
-			query:    url.Values{"code": {"the-code"}, "state": {"the-state"}},
+			query:    url.Values{"code": {"the-code"}, "state": {testState}},
 			wantPage: loginReceivedPage,
 		},
 		{
 			name:     "login refused",
-			query:    url.Values{"error": {"access_denied"}},
+			query:    url.Values{"error": {"access_denied"}, "state": {testState}},
 			wantPage: loginFailedPage,
 		},
 	}
@@ -170,10 +259,12 @@ func TestMCPLoginFetch_CallbackHandler_FlushesThePageBeforeDeliveringTheResult(t
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 			results := make(chan loginResult, 1)
+			state := &loginState{}
+			state.expect(testState)
 			writer := &deliveryGuardWriter{t: t, results: results, header: http.Header{}}
 			request := httptest.NewRequest(http.MethodGet, loginCallbackPath+"?"+testCase.query.Encode(), nil)
 
-			callbackHandler(results).ServeHTTP(writer, request)
+			callbackHandler(state, results).ServeHTTP(writer, request)
 
 			if writer.flushed != testCase.wantPage {
 				t.Errorf("flushed %q before the result was delivered, want %q", writer.flushed, testCase.wantPage)
@@ -239,7 +330,7 @@ func callbackPageWhileFetching(t *testing.T, query url.Values) string {
 	returned := make(chan struct{})
 	go func() {
 		defer close(returned)
-		_, _, _ = fetch(context.Background(), "https://auth.example/authorize")
+		_, _, _ = fetch(context.Background(), testAuthorizeURL)
 	}()
 	waitFor(t, func() bool { return input.inFlight.Load() == 1 })
 
@@ -270,27 +361,37 @@ func TestMCPLoginFetch_PastedRedirect_DeliversCodeAndState(t *testing.T) {
 	term, _ := testLoginTerminal(t, nil, input, out)
 	redirectURL, fetch := newTestFetcher(t, term)
 
-	input.typeLines("not a redirect", "  "+redirectURL+"?code=pasted-code&state=pasted-state  ")
-	code, state, err := fetch(context.Background(), "https://auth.example/authorize")
+	input.typeLines(
+		"not a redirect",
+		redirectURL+"?code=stale-code&state=an-earlier-attempt",
+		"  "+redirectURL+"?code=pasted-code&state="+testState+"  ",
+	)
+	code, state, err := fetch(context.Background(), testAuthorizeURL)
 
-	if err != nil || code != "pasted-code" || state != "pasted-state" {
-		t.Fatalf("fetch = %q, %q, %v; want pasted-code, pasted-state, nil", code, state, err)
+	if err != nil || code != "pasted-code" || state != testState {
+		t.Fatalf("fetch = %q, %q, %v; want pasted-code, %s, nil", code, state, err, testState)
 	}
 	if !strings.Contains(out.String(), "not the address the login redirected to") {
 		t.Errorf("a stray line was not answered; output:\n%s", out)
+	}
+	if !strings.Contains(out.String(), "belongs to a different login attempt") {
+		t.Errorf("a pasted redirect for another login was not answered; output:\n%s", out)
 	}
 }
 
 func TestMCPLoginFetch_ErrorRedirect_SurfacesStrippedServerError(t *testing.T) {
 	t.Parallel()
-	term, _ := testLoginTerminal(t, nil, newPipeInput(), &bytes.Buffer{})
+	input := newPipeInput()
+	term, _ := testLoginTerminal(t, nil, input, &bytes.Buffer{})
 	redirectURL, fetch := newTestFetcher(t, term)
 
+	outcome := startFetch(t, fetch, input, testAuthorizeURL)
 	getCallback(t, redirectURL, url.Values{
 		"error":             {"access_denied"},
 		"error_description": {"the user said \x1b[31mno\x1b[0m"},
+		"state":             {testState},
 	})
-	_, _, err := fetch(context.Background(), "https://auth.example/authorize")
+	err := awaitOutcome(t, outcome).err
 
 	if !errors.Is(err, errLoginRefused) {
 		t.Fatalf("fetch error = %v, want errLoginRefused", err)
@@ -311,12 +412,12 @@ func TestMCPLoginFetch_EnterOpensOnlyOnLocalDesktopAndOnlySafeURLs(t *testing.T)
 		authorizeURL string
 		isOpened     bool
 	}{
-		{"desktop https", desktop, "https://auth.example/authorize?a=1&b=2", true},
-		{"desktop loopback http", desktop, "http://127.0.0.1:8080/authorize", true},
-		{"remote https", remote, "https://auth.example/authorize", false},
-		{"desktop plain http", desktop, "http://auth.example/authorize", false},
-		{"desktop file", desktop, "file:///etc/passwd", false},
-		{"desktop https with a space", desktop, "https://auth.example/a b", false},
+		{"desktop https", desktop, "https://auth.example/authorize?a=1&b=2&state=s", true},
+		{"desktop loopback http", desktop, "http://127.0.0.1:8080/authorize?state=s", true},
+		{"remote https", remote, "https://auth.example/authorize?state=s", false},
+		{"desktop plain http", desktop, "http://auth.example/authorize?state=s", false},
+		{"desktop file", desktop, "file:///etc/passwd?state=s", false},
+		{"desktop https with a space", desktop, "https://auth.example/a b?state=s", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -351,7 +452,7 @@ func TestMCPLoginFetch_ContextCancel_ReturnsJoinsInputAndFreesPort(t *testing.T)
 	returned := make(chan error, 1)
 
 	go func() {
-		_, _, err := fetch(ctx, "https://auth.example/authorize")
+		_, _, err := fetch(ctx, testAuthorizeURL)
 		returned <- err
 	}()
 	waitFor(t, func() bool { return input.inFlight.Load() == 1 })
@@ -396,10 +497,45 @@ func TestMCPLoginFetch_SplitTerminalLines_TreatsCRLFAsOneBreak(t *testing.T) {
 		// since the first line is not empty and the second carries the code.
 		_, _ = input.writer.Write([]byte("junk\r\n" + redirectURL + "?code=c&state=s\r"))
 	}()
-	code, _, err := fetch(context.Background(), "https://auth.example/authorize")
+	code, _, err := fetch(context.Background(), "https://auth.example/authorize?state=s")
 
 	if err != nil || code != "c" || len(record.calls) != 0 {
 		t.Fatalf("fetch = %q, %v with opener calls %q; want c, nil and no opener call", code, err, record.calls)
+	}
+}
+
+func TestMCPLoginFetch_AuthorizeURLWithoutState_FailsAndFreesPort(t *testing.T) {
+	t.Parallel()
+	term, _ := testLoginTerminal(t, nil, newPipeInput(), &bytes.Buffer{})
+	redirectURL, fetch := newTestFetcher(t, term)
+
+	_, _, err := fetch(context.Background(), "https://auth.example/authorize")
+
+	if err == nil || !strings.Contains(err.Error(), "carries no state") {
+		t.Fatalf("fetch error = %v, want the authorize URL refused for carrying no state", err)
+	}
+	requirePortFree(t, redirectURL)
+}
+
+func TestMCPLoginFetch_EnterWithoutOpener_SaysToCopyTheURL(t *testing.T) {
+	t.Parallel()
+	input := newPipeInput()
+	out := &bytes.Buffer{}
+	term, record := testLoginTerminal(t, map[string]string{"DISPLAY": ":0"}, input, out)
+	term.look = func(name string) (string, error) { return "", exec.ErrNotFound }
+	redirectURL, fetch := newTestFetcher(t, term)
+
+	input.typeLines("", redirectURL+"?code=c&state="+testState)
+	_, _, err := fetch(context.Background(), testAuthorizeURL)
+
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if len(record.calls) != 0 {
+		t.Errorf("opener calls = %q, want none", record.calls)
+	}
+	if !strings.Contains(out.String(), "No browser opener (xdg-open) on this machine; copy the URL into a browser yourself.") {
+		t.Errorf("the missing opener was not reported; output:\n%s", out)
 	}
 }
 

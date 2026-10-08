@@ -97,8 +97,9 @@ func newLoginFetcher(term loginTerminal) (string, mcpauth.CodeFetcher, func(), e
 	}
 
 	results := make(chan loginResult, 1)
+	state := &loginState{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+loginCallbackPath, callbackHandler(results))
+	mux.HandleFunc("GET "+loginCallbackPath, callbackHandler(state, results))
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: callbackReadHeaderTimeout}
 	served := make(chan struct{})
 	go func() {
@@ -125,7 +126,12 @@ func newLoginFetcher(term loginTerminal) (string, mcpauth.CodeFetcher, func(), e
 	redirectURL := "http://" + listener.Addr().String() + loginCallbackPath
 	fetch := func(ctx context.Context, authorizeURL string) (string, string, error) {
 		defer closeListener()
-		return term.await(ctx, authorizeURL, redirectURL, results)
+		want, err := authorizeState(authorizeURL)
+		if err != nil {
+			return "", "", err
+		}
+		state.expect(want)
+		return term.await(ctx, authorizeURL, redirectURL, state, results)
 	}
 	return redirectURL, fetch, closeListener, nil
 }
@@ -151,12 +157,13 @@ func (term loginTerminal) withDefaults() loginTerminal {
 }
 
 // await prints the authorize URL and waits for whichever comes first: the browser's callback, a
-// pasted redirect URL, or ctx's end. An empty line opens the URL on a local desktop and repeats
-// the paste instruction anywhere else; a line that is not a redirect URL is answered and the wait
-// goes on.
+// pasted redirect URL carrying state's value, or ctx's end. An empty line opens the URL on a local
+// desktop and repeats the paste instruction anywhere else; a line that is not this login's redirect
+// URL is answered and the wait goes on.
 func (term loginTerminal) await(
 	ctx context.Context,
 	authorizeURL, redirectURL string,
+	state *loginState,
 	results <-chan loginResult,
 ) (string, string, error) {
 	isLocalDesktop := present.Locality(term.getenv) == present.Local && present.HasDesktop(term.goos, term.getenv)
@@ -176,7 +183,7 @@ func (term loginTerminal) await(
 				_, _ = fmt.Fprintln(term.out, "Input closed; waiting for the browser to finish the login.")
 				continue
 			}
-			if result, isDone := term.answerLine(line, authorizeURL, redirectURL, isLocalDesktop); isDone {
+			if result, isDone := term.answerLine(line, authorizeURL, redirectURL, state, isLocalDesktop); isDone {
 				return result.code, result.state, result.err
 			}
 		}
@@ -203,8 +210,14 @@ func (term loginTerminal) printPasteInstruction(redirectURL string) {
 		"(it starts with %s; the page itself may fail to load).\n", redirectURL)
 }
 
-// answerLine handles one line of input and reports whether it ended the wait.
-func (term loginTerminal) answerLine(line, authorizeURL, redirectURL string, isLocalDesktop bool) (loginResult, bool) {
+// answerLine handles one line of input and reports whether it ended the wait. A pasted redirect
+// that carries another login's state — an address left over from an earlier attempt — is answered
+// like any other stray line, so it cannot end this login.
+func (term loginTerminal) answerLine(
+	line, authorizeURL, redirectURL string,
+	state *loginState,
+	isLocalDesktop bool,
+) (loginResult, bool) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		if isLocalDesktop {
@@ -218,7 +231,12 @@ func (term loginTerminal) answerLine(line, authorizeURL, redirectURL string, isL
 	pasted, err := url.Parse(line)
 	if err == nil {
 		if result, isRedirect := redirectResult(pasted.Query()); isRedirect {
-			return result, true
+			if state.matches(result.state) {
+				return result, true
+			}
+			_, _ = fmt.Fprintln(term.out, "That address belongs to a different login attempt; paste the "+
+				"address this login redirected to.")
+			return loginResult{}, false
 		}
 	}
 	_, _ = fmt.Fprintf(term.out, "That is not the address the login redirected to; paste the full URL, "+
@@ -320,13 +338,19 @@ func splitTerminalLines() bufio.SplitFunc {
 }
 
 // callbackHandler answers the authorization server's redirect: it tells the browser to return to
-// the terminal and then hands the first authorization response to the waiting fetch. A request
-// that is not an authorization response is refused and ends nothing.
-func callbackHandler(results chan<- loginResult) http.HandlerFunc {
+// the terminal and then hands the first authorization response carrying the login's state to the
+// waiting fetch. Any other request — not an authorization response, or one for another login,
+// which any local process or web page could send — is refused and ends nothing.
+func callbackHandler(state *loginState, results chan<- loginResult) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		result, isRedirect := redirectResult(r.URL.Query())
 		if !isRedirect {
 			http.Error(w, "apogee: this is not an authorization response.", http.StatusBadRequest)
+			return
+		}
+		if !state.matches(result.state) {
+			http.Error(w, "apogee: this authorization response is not for the login in progress.",
+				http.StatusBadRequest)
 			return
 		}
 		page := loginReceivedPage
@@ -348,14 +372,15 @@ func callbackHandler(results chan<- loginResult) http.HandlerFunc {
 
 // redirectResult reads an authorization response out of a redirect's query: an `error` (with its
 // description, escape sequences stripped, since the server is untrusted and the text is printed),
-// or a code with its state. Anything else is not an authorization response.
+// or a code; either with its state, which RFC 6749 §4.1.2 and §4.1.2.1 require on both. Anything
+// else is not an authorization response.
 func redirectResult(query url.Values) (loginResult, bool) {
 	if refusal := query.Get("error"); refusal != "" {
 		detail := sanitize.StripEscapesToLine(refusal)
 		if description := query.Get("error_description"); description != "" {
 			detail += ": " + sanitize.StripEscapesToLine(description)
 		}
-		return loginResult{err: fmt.Errorf("%w: %s", errLoginRefused, detail)}, true
+		return loginResult{state: query.Get("state"), err: fmt.Errorf("%w: %s", errLoginRefused, detail)}, true
 	}
 	code, state := query.Get("code"), query.Get("state")
 	if code == "" || state == "" {
@@ -364,8 +389,44 @@ func redirectResult(query url.Values) (loginResult, bool) {
 	return loginResult{code: code, state: state}, true
 }
 
+// loginState is the state of the login a fetch is waiting on, read from the authorize URL once the
+// fetch has it. A response is accepted only when it carries that state, so until the fetch starts
+// none is.
+type loginState struct {
+	mu   sync.Mutex
+	want string
+}
+
+// expect records the state the login in progress sent with its authorization request.
+func (s *loginState) expect(want string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.want = want
+}
+
+// matches reports whether got is the state of the login in progress.
+func (s *loginState) matches(got string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.want != "" && got == s.want
+}
+
+// authorizeState returns the state an authorize URL carries: the value an authorization response
+// must echo for the fetch to accept it.
+func authorizeState(authorizeURL string) (string, error) {
+	parsed, err := url.Parse(authorizeURL)
+	if err != nil {
+		return "", fmt.Errorf("read the authorize URL: %w", err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		return "", errors.New("the authorize URL carries no state")
+	}
+	return state, nil
+}
+
 // deliver hands result to the waiting fetch unless an earlier one already got there: the first
-// authorization response wins.
+// authorization response for this login wins.
 func deliver(results chan<- loginResult, result loginResult) {
 	select {
 	case results <- result:
