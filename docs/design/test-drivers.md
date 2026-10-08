@@ -369,6 +369,12 @@ instant the last client returned would be short its last turn, with nothing in t
 `Close` holds until every begun request has filed or given up, with a two-second backstop for a
 request whose reply is never coming.
 
+A streamed `data:` event the recorder cannot decode is left out of the turn — the fixture can only
+replay what it read — and said so rather than dropped silently: when the fixture is written, each
+turn that lost events gets one line on stderr, `turn N: K undecodable stream events dropped`, where
+`N` is the turn's 1-based place in the fixture. A clean recording prints nothing, and the fixture
+itself carries no trace of the loss.
+
 Two fixtures in `cmd/apogee/testdata/stubllm/` are hand-written anyway, and say so at the top of the
 file: one documents the format (`example.yaml`), and `cached-usage.yaml` reports a prefix-cache
 share the recorder can only capture from a server that has prefix caching switched on. Re-record it

@@ -523,6 +523,91 @@ func (g *gzipResponse) Flush() {
 	}
 }
 
+// TestRecorderWarnsAboutUndecodableStreamEvents pins that a recording which lost part of a reply
+// says so. The recorder skips a data event it cannot decode — the fixture can only replay what
+// it read — so without a warning a fixture missing deltas would look exactly like a clean one.
+func TestRecorderWarnsAboutUndecodableStreamEvents(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		malformed int
+		want      string
+	}{
+		{name: "a stream with two undecodable events", malformed: 2, want: "turn 1: 2 undecodable stream events dropped\n"},
+		{name: "a clean stream", malformed: 0, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			script := Script{Model: "rec-model", Turns: []Turn{{Text: "one two three", ChunkRunes: 4}}}
+			origin := malformingUpstream(t, script, tc.malformed)
+			path := filepath.Join(t.TempDir(), "fixture.yaml")
+			proxy := recorderProxy(t, origin, path)
+			warnings := &strings.Builder{}
+			proxy.recorder.WarnTo(warnings)
+
+			postTo(t, http.DefaultClient, proxy.URL, "rec-model", "hi", true)
+			if err := proxy.recorder.Close(); err != nil {
+				t.Fatalf("close recorder: %v", err)
+			}
+
+			if got := warnings.String(); got != tc.want {
+				t.Errorf("warnings = %q, want %q", got, tc.want)
+			}
+			recorded, err := Load(path)
+			if err != nil {
+				t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+			}
+			if got := recorded.Turns[0].Text; got != "one two three" {
+				t.Errorf("recorded text = %q, want every decodable delta kept", got)
+			}
+		})
+	}
+}
+
+// malformingUpstream starts a scripted upstream that slips count undecodable data events into a
+// streamed reply, one before each of its second and later writes, so they arrive among valid
+// events the way a misbehaving server's would. It returns the upstream's URL.
+func malformingUpstream(t *testing.T, s Script, count int) string {
+	t.Helper()
+
+	handler := InProcess(t, s).Handler()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		handler.ServeHTTP(&malformingResponse{ResponseWriter: w, remaining: count}, request)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// malformingResponse writes an undecodable SSE data event ahead of a handler's writes, after the
+// first, until remaining reaches zero.
+type malformingResponse struct {
+	http.ResponseWriter
+	writes    int
+	remaining int
+}
+
+// Write slips one undecodable event in ahead of p while any remain to be sent.
+func (m *malformingResponse) Write(p []byte) (int, error) {
+	m.writes++
+	if m.writes > 1 && m.remaining > 0 {
+		m.remaining--
+		if _, err := m.ResponseWriter.Write([]byte("data: {\"choices\":[\n\n")); err != nil {
+			return 0, err
+		}
+	}
+	return m.ResponseWriter.Write(p)
+}
+
+// Flush passes the handler's flush through, so the stream still arrives event by event.
+func (m *malformingResponse) Flush() {
+	if flusher, ok := m.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // postBodyTo sends one non-streamed completion request with Go's default client and returns
 // the body as the client read it.
 func postBodyTo(t *testing.T, baseURL, model, prompt string) string {

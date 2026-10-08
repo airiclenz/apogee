@@ -166,7 +166,10 @@ The headless text transcript gets its own case: `narrationSink.narrate` (`cmd/ap
 **Closes:** apogee-record-gzip-discovery-drop
 **Commit:** `fix(stubllm): ask the upstream for an uncompressed reply when recording`
 
-## 7. stubllm record warns about stream events it could not decode
+## 7. stubllm record warns about stream events it could not decode — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): the writer is injected through a new `Recorder.WarnTo(io.Writer)` setter (nil and never-set both mean `io.Discard`) rather than a `NewRecorder` parameter, so the four `NewRecorder` call sites are untouched; the per-turn count rides on the capture and is filed into a `Recorder.undecodable` side map keyed by arrival number, never on `Turn`.
+NOTES (2026-10-08): docs/design/test-drivers.md ("Recording a fixture") gains a paragraph on the warning, and the `record` command's `--help` Long text mentions it; both describe the new behaviour this item adds.
 
 **What:** Fix for the recorder half of `apogee-malformed-count-unsurfaced`: `fillFromStream` `continue`s on an unmarshal failure, silently. Depends on item 6 (same files).
 **Goal:** for each recorded turn whose stream held K > 0 undecodable data events, `stubllm record` writes one line `turn N: K undecodable stream events dropped` to its warning output; a clean stream writes nothing; the Script YAML is unchanged.

@@ -113,13 +113,18 @@ func newRecordCommand() *cobra.Command {
 		Short: "Proxy a real upstream and write the traffic as a script fixture",
 		Long: "Record proxies /v1/* to a real server and writes every completion it saw as a\n" +
 			"script turn. Point apogee at the printed address (--endpoint), drive the run you\n" +
-			"want to pin, then interrupt this process: the fixture is written on the way out.",
+			"want to pin, then interrupt this process: the fixture is written on the way out.\n" +
+			"A streamed reply that carried events it could not decode is recorded without them,\n" +
+			"and a warning naming the turn is printed on stderr.",
 		Args: cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, _ []string) error {
 			recorder, err := stubllm.NewRecorder(upstream, out)
 			if err != nil {
 				return err
 			}
+			// What the fixture silently lost — a stream event that would not decode — is said on
+			// stderr when it is written, beside the fixture rather than in it.
+			recorder.WarnTo(cmd.ErrOrStderr())
 
 			ctx, stop := interruptible(cmd.Context())
 			defer stop()

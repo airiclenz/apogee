@@ -5,11 +5,14 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // exampleFixture is the checked-in worked example of the script format. Serving it here pins
@@ -76,6 +79,93 @@ func TestServeCommandWithAnUnreadableScriptIsARunFailure(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "Usage:") {
 		t.Errorf("output = %q, want no usage dump for a run failure", out.String())
+	}
+}
+
+// TestRecordCommandWarnsOnStderrAboutUndecodableEvents pins the wiring of the recorder's warning
+// to the command: a recorded stream that held an event the recorder could not decode is reported
+// on the command's error writer when the fixture is written, naming the turn it came from.
+func TestRecordCommandWarnsOnStderrAboutUndecodableEvents(t *testing.T) {
+	t.Parallel()
+
+	origin := malformingUpstream(t, stubllm.Script{
+		Model: "rec-model",
+		Turns: []stubllm.Turn{{Text: "one two three", ChunkRunes: 4}},
+	})
+	out := &syncBuffer{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	fixture := filepath.Join(t.TempDir(), "fixture.yaml")
+	done := run(ctx, out, "record", "--upstream", origin, "--out", fixture, "--listen", "127.0.0.1:0")
+
+	url := waitForAddress(t, out)
+	postStream(t, url)
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("record exited with %v, want the fixture written on the interrupt", err)
+	}
+	if want := "turn 1: 1 undecodable stream events dropped\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("output = %q, want the warning %q", out.String(), want)
+	}
+}
+
+// malformingUpstream starts a scripted upstream that slips one undecodable data event into a
+// streamed reply after its first write, and returns the upstream's URL.
+func malformingUpstream(t *testing.T, s stubllm.Script) string {
+	t.Helper()
+
+	handler := stubllm.InProcess(t, s).Handler()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		handler.ServeHTTP(&malformingResponse{ResponseWriter: w}, request)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// malformingResponse writes one undecodable SSE data event ahead of a handler's second write.
+type malformingResponse struct {
+	http.ResponseWriter
+	writes int
+}
+
+// Write slips the undecodable event in ahead of the second write.
+func (m *malformingResponse) Write(p []byte) (int, error) {
+	m.writes++
+	if m.writes == 2 {
+		if _, err := m.ResponseWriter.Write([]byte("data: {\"choices\":[\n\n")); err != nil {
+			return 0, err
+		}
+	}
+	return m.ResponseWriter.Write(p)
+}
+
+// Flush passes the handler's flush through, so the stream still arrives event by event.
+func (m *malformingResponse) Flush() {
+	if flusher, ok := m.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// postStream sends one streamed completion request through the recorder and reads the reply to
+// its end, so the proxy files the turn.
+func postStream(t *testing.T, url string) {
+	t.Helper()
+
+	body := `{"model":"rec-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		url+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read reply: %v", err)
 	}
 }
 

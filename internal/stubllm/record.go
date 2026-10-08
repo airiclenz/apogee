@@ -68,6 +68,13 @@ type Recorder struct {
 	// while this proxy is still a Read away from the EOF that files the reply — see
 	// [Recorder.settle].
 	inflight int
+	// undecodable is how many streamed data events each completion's reply held that would not
+	// decode, keyed by arrival number like turns. It sits beside turns rather than in them because
+	// a Turn is the Script schema, and a dropped event is something to warn about, not to replay.
+	undecodable map[int]int
+	// warnings is where [Recorder.Close] reports what the fixture silently lost; see
+	// [Recorder.WarnTo].
+	warnings io.Writer
 }
 
 // settleWait is how long [Recorder.Close] gives replies still in flight. It is a backstop, not a
@@ -87,7 +94,13 @@ func NewRecorder(upstream, out string) (*Recorder, error) {
 		return nil, errors.New("stubllm: a recorder needs a path to write the fixture to")
 	}
 
-	recorder := &Recorder{upstream: target, out: out, turns: map[int]Turn{}}
+	recorder := &Recorder{
+		upstream:    target,
+		out:         out,
+		turns:       map[int]Turn{},
+		undecodable: map[int]int{},
+		warnings:    io.Discard,
+	}
 	recorder.proxy = &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(target)
@@ -112,6 +125,18 @@ func NewRecorder(upstream, out string) (*Recorder, error) {
 		},
 	}
 	return recorder, nil
+}
+
+// WarnTo sends the recorder's warnings to w — `stubllm record` hands it the command's stderr. A
+// recorder that is never told where to warn, or is handed nil, discards them: the warnings are
+// for the human at the command line, and a test that wants them asks.
+func (r *Recorder) WarnTo(w io.Writer) {
+	if w == nil {
+		w = io.Discard
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.warnings = w
 }
 
 // ServeHTTP proxies one request. Paths outside /v1/ are refused rather than forwarded — the
@@ -154,6 +179,9 @@ func (r *Recorder) Script() Script {
 // An unplayable recording is still WRITTEN and then reported: a real server can answer with a
 // shape the format refuses (content alongside tool calls, say), and a fixture a human can fix
 // by hand is worth more than a deleted one plus an error message.
+//
+// A streamed reply that carried data events the recorder could not decode is written without
+// them, and said so on the warning writer — see [Recorder.warnUndecodable].
 func (r *Recorder) Close() error {
 	r.settleInflight()
 
@@ -161,6 +189,7 @@ func (r *Recorder) Close() error {
 	if len(script.Turns) == 0 {
 		return fmt.Errorf("stubllm: nothing recorded — no completion request reached %s", r.upstream)
 	}
+	r.warnUndecodable()
 
 	body, err := Marshal(script)
 	if err != nil {
@@ -177,6 +206,24 @@ func (r *Recorder) Close() error {
 		return fmt.Errorf("stubllm: %s needs a hand edit: %w", r.out, err)
 	}
 	return nil
+}
+
+// warnUndecodable writes one line for each recorded turn whose stream held data events that would
+// not decode, numbered by the turn's 1-based place in the Script, in Script order. Without it a
+// fixture missing part of its reply would look exactly like a clean one: the replay is faithful
+// to what was kept, and nothing in the file says what was not.
+func (r *Recorder) warnUndecodable() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	numbers := slices.Sorted(maps.Keys(r.turns))
+	for position, n := range numbers {
+		if dropped := r.undecodable[n]; dropped > 0 {
+			// Best effort: a warning that cannot be written has nowhere else to go, and failing
+			// the Close over it would cost the fixture it is warning about.
+			_, _ = fmt.Fprintf(r.warnings, "turn %d: %d undecodable stream events dropped\n", position+1, dropped)
+		}
+	}
 }
 
 // begin reads the request body so the recorder knows what was asked, then hands the request
@@ -254,6 +301,9 @@ func (r *Recorder) finish(entry *capture) {
 
 	r.mu.Lock()
 	r.turns[entry.n] = turn
+	if entry.undecodable > 0 {
+		r.undecodable[entry.n] = entry.undecodable
+	}
 	r.mu.Unlock()
 	r.settle(entry)
 }
@@ -349,6 +399,9 @@ type capture struct {
 	pending []byte
 	events  []streamedEvent
 	body    bytes.Buffer
+	// undecodable is how many of events were not JSON the recorder could read, counted when the
+	// stream is reassembled into its Turn.
+	undecodable int
 }
 
 // streamedEvent is one SSE `data:` payload and the moment the proxy read it.
@@ -444,13 +497,15 @@ func (c *capture) turn() Turn {
 
 // fillFromStream reassembles a streamed reply into the Turn that reproduces it and returns the
 // finish reason it ended on. Timing is measured across every delta-carrying event, because a
-// server paces reasoning, content and tool-call fragments alike.
+// server paces reasoning, content and tool-call fragments alike. An event that does not decode is
+// skipped and counted, so the recorder can say the fixture lost it.
 func (c *capture) fillFromStream(turn *Turn) string {
 	var text, reasoning strings.Builder
 	var arrivals []time.Time
 	var chunkRunes []int
 	var calls callSet
 	var finish, reasoningField string
+	undecodable := 0
 
 	for _, event := range c.events {
 		if event.data == doneSentinel {
@@ -458,6 +513,7 @@ func (c *capture) fillFromStream(turn *Turn) string {
 		}
 		var envelope sseEnvelope
 		if err := json.Unmarshal([]byte(event.data), &envelope); err != nil {
+			undecodable++
 			continue
 		}
 		if envelope.Usage != nil {
@@ -492,6 +548,7 @@ func (c *capture) fillFromStream(turn *Turn) string {
 	turn.Text, turn.Reasoning, turn.ToolCalls = text.String(), reasoning.String(), calls.done()
 	turn.ReasoningField = reasoningField
 	turn.TokenDelay = medianGap(arrivals)
+	c.undecodable = undecodable
 	if runes := median(chunkRunes); runes > 0 {
 		turn.ChunkRunes = runes
 	}
