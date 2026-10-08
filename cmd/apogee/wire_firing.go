@@ -214,9 +214,11 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// TOP-LEVEL share while the Config below divided the window by the entry's, and one
 	// configuration would mean two splits of one window.
 	//
-	// The observed window is passed as unknown because nothing beats here to observe one; a
-	// `context-window:` pin still binds the Budget and an unpinned run leaves it inactive, which for
-	// one bounded prompt is the honest degrade rather than a guess.
+	// The observed window is passed as unknown because nothing beats HERE: the beat dials the model
+	// this resolution returns, so it can only run after it, and the offline probe composes from this
+	// half alone (probeContextConfig). What reaches rebindSpecFor is the `context-window:` pin;
+	// firingConfig binds the window its beat observes when that pin is unset — pin, else observed,
+	// the rule every Driver binds by (ADR 0024 decision 6, amended 2026-10-08).
 	specOpts := in.opts
 	specOpts.Endpoint = in.entry.Endpoint
 	specOpts.APIKey = apiKey
@@ -401,6 +403,18 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	}
 	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey, provider.WireFor(in.entry.Wire))
 
+	// The window this run binds: the `context-window:` pin bindFiringConfig resolved, else the window
+	// this beat observed — the rule a session's rebind binds by, so a Firing is no exception to it
+	// (ADR 0024 decision 6, amended 2026-10-08). Before that amendment an unpinned Firing bound
+	// nothing and ran on the unknown-window ceiling, which on a server advertising a million tokens
+	// managed the run as a 3072-token window. A beat that never answered, or answered without naming
+	// a window, binds the 0 that leaves the window unknown. The spec moves with the Config because
+	// the hint below reads the window the run actually bound off it.
+	if spec.MaxContextTokens == 0 && beat.Answered {
+		spec.MaxContextTokens = beat.ContextWindow
+		cfg.Context.MaxContextTokens = beat.ContextWindow
+	}
+
 	// The one thing only that observation can say about the binding above: whether the server this run
 	// is about to prompt advertises the model it just bound. A session says it at its rebind seam out of
 	// the same two values (wire_verbs.go — the grade discovery reached the id by, and the window it saw),
@@ -408,17 +422,17 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// returns rather than printing itself: headless puts them on stderr and the daemon logs them, so both
 	// Drivers gain the hint by reading a channel they already read (ADR 0031's Driver parity).
 	//
-	// The bound window handed over is the spec's, which on this path is the `context-window:` pin or
-	// nothing — rebindSpecFor is passed an observed window of 0 above, deliberately, so an unpinned
-	// Firing leaves the Budget inactive rather than binding a per-slot number. An unpinned run therefore
-	// says the window is unknown and a pinned one names the pin, while a session's own clause can credit
-	// the base entry for a window it actually bound. The two sentences differ because the two Drivers
-	// bind differently; aligning them would mean changing what a Firing binds.
+	// The bound window handed over is the spec's, which is the `context-window:` pin or, unpinned, the
+	// window the beat above observed — so the clause is the one a session composes out of the same two
+	// values: a pinned run names the pin, an unpinned one names the observed window (crediting the base
+	// entry when a variant slug inherited it), and only a run whose beat named no window says the
+	// window is unknown.
 	//
 	// The else is the whole no-double-say rule. hintNotice's own default branch already carries an
 	// unknown-window clause, and it is reached exactly when the bound window is 0 — so an
-	// unadvertised unpinned Firing says it once, inside the hint, and an ADVERTISED unpinned one,
-	// which composes no hint at all, gets the bare sentence instead. It is gated on the beat too:
+	// unadvertised Firing that bound no window says it once, inside the hint, and an ADVERTISED one
+	// that bound none, which composes no hint at all, gets the bare sentence instead. It is gated on
+	// the beat too:
 	// both unattended Drivers emit these notices BEFORE their offline gate, and a beat that never
 	// answered carries a zero Resolution, so an unpinned run against a dead endpoint would
 	// otherwise announce an unknown window ahead of "cannot send — server offline" and, in the

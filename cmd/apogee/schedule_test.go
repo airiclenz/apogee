@@ -1279,6 +1279,62 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	}
 }
 
+// A Firing raised from the TUI binds the window this session's beats observed when nothing pins one —
+// pin, else observed, the rule the session's own rebind binds by (ADR 0024 decision 6, amended
+// 2026-10-08). The observation reaches the composer on the handed-over beat rather than through a
+// round trip of its own (TestScheduleFiringTakesNoBeatOfItsOwn), so a session that has seen its
+// server name a window hands that window on, a pin still outranks it, and a session no beat has
+// named a window to yet leaves the Firing's window unknown.
+func TestScheduleFiringBindsTheSessionsObservedWindow(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name       string
+		pinned     int
+		observed   int
+		wantWindow int
+	}{
+		{name: "an unpinned session hands on the window its beats observed", observed: 1048576, wantWindow: 1048576},
+		{name: "a pin outranks the observation", pinned: 32768, observed: 1048576, wantWindow: 32768},
+		{name: "no observation leaves the window unknown", wantWindow: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			roots, err := resolveRoots(t.TempDir(), t.TempDir())
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			stub := &stubRunner{}
+
+			live := newLiveSettings(config.Options{ContextWindow: tt.pinned})
+			live.observe(tt.observed, provider.EffortDialectNone)
+			w := scheduleWiring{
+				runner: stub.once,
+				roots:  roots,
+				live:   live,
+				binding: func() upstreamBinding {
+					return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"}
+				},
+				width: func() int { return 1 },
+			}
+
+			firing := schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}
+			if _, err := w.fire(context.Background(), firing); err != nil {
+				t.Fatalf("fire: %v", err)
+			}
+			if !stub.called {
+				t.Fatal("the firing composed no run at all")
+			}
+			if got := stub.spec.Config.Context.MaxContextTokens; got != tt.wantWindow {
+				t.Errorf("the firing runs at Context.MaxContextTokens = %d, want %d — pin %d, observed %d; "+
+					"a Firing binds the pin, else the window the session observed",
+					got, tt.wantWindow, tt.pinned, tt.observed)
+			}
+		})
+	}
+}
+
 // A Firing raised while the footer says the server is OFFLINE is refused up front, with the sentence
 // a send earns at the prompt and `apogee headless` prints (notice.ServerOffline) — never run against
 // a dead endpoint to fail at its first request. The verdict is the TUI's own, latched host-side

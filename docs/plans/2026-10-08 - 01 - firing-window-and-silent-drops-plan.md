@@ -45,7 +45,13 @@
 - 6: guard folded
 - 7: guard folded
 
-## 1. A Firing binds the observed window when nothing is pinned
+## 1. A Firing binds the observed window when nothing is pinned — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): CONTEXT.md left unedited — its Rebind/pin passage states no Firing exception, so the conditional edit the item names had nothing to change; docs/manual/headless.md already words the notice as "the server did not advertise one and no context-window: pins it", now accurate.
+
+NOTES (2026-10-08): the bind in firingConfig is also gated on beat.Answered, so an unanswered beat binds 0 explicitly rather than relying on its ContextWindow being zero.
+
+NOTES (2026-10-08): added beyond the named tests — a daemon subtest ("a server that advertises a window never says it", binding 131072) in TestDaemonFireSaysOnceWhenTheContextWindowIsUnknown, and the headless advertised-window case as a subtest of TestHeadlessSaysWhenTheContextWindowIsUnknown; the WindowUnknown constant's text and hintNotice's "Budget and auto-compaction inactive" clause are left to item 2.
 
 **What:** Fix for `apogee-headless-window-compaction-loop` defect (2): an unpinned headless/daemon run against a server advertising 1M tokens was managed as a 3072-token window.
 **Goal:** a headless or daemon Firing whose entry and top level set no `context-window:` binds `cfg.Context.MaxContextTokens` to the window its beat observed; a pin still wins over the beat; an unanswered beat or a zero observed window binds 0. No `WindowUnknown` notice is printed when an observed window is bound.

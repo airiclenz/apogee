@@ -1900,11 +1900,12 @@ func TestHeadlessPrintsTheContextFileNotices(t *testing.T) {
 }
 
 // TestHeadlessSaysWhenTheContextWindowIsUnknown is the unattended half of the sentence a session
-// gets at its rebind seam. A headless run derives its Budget from configuration alone — the
-// composition deliberately binds no observed window (wire_firing.go) — so with no `context-window:`
-// pinned the Budget and auto-compaction are inactive and the oversize warning that would otherwise
-// catch the same trouble can never fire, because it is gated on a system share this path leaves at
-// zero (internal/domain/contextfile.go). Nothing else on this Driver says so.
+// gets at its rebind seam. A headless run binds the `context-window:` pin, else the window its one
+// beat observed (wire_firing.go; ADR 0024 decision 6, amended 2026-10-08) — so only a run whose
+// server names no window and whose config pins none binds no window, and then the Budget is inactive
+// and the oversize warning that would otherwise catch the same trouble can never fire, because it is
+// gated on a system share that only a bound window gives (internal/domain/contextfile.go). Nothing
+// else on this Driver says so.
 //
 // The wanted string is notice.WindowUnknown itself rather than a hand-typed copy: the point of one
 // spelling is that the TUI and the unattended Drivers cannot drift.
@@ -1921,6 +1922,26 @@ func TestHeadlessSaysWhenTheContextWindowIsUnknown(t *testing.T) {
 		}
 		if strings.Contains(out, notice.WindowUnknown) {
 			t.Errorf("the unknown-window line leaked onto stdout: %q", out)
+		}
+	})
+
+	t.Run("an advertised window is bound and leaves nothing to say", func(t *testing.T) {
+		srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+			Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+			Props:  &stubllm.Props{NCtx: 131072},
+		}})
+		stub := &stubRunner{res: run.Result{SessionID: "s-14", FinalText: "the answer", Turns: 1}}
+
+		_, errOut, err := headlessRunOn(t, stub, srv, fenceableHost, "", "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, notice.WindowUnknown) {
+			t.Errorf("a run whose server advertised a window said the window is unknown: %q", errOut)
+		}
+		if got := stub.spec.Config.Context.MaxContextTokens; got != 131072 {
+			t.Errorf("the run binds Context.MaxContextTokens = %d, want the advertised 131072 — an "+
+				"unpinned headless run binds the window its beat observed", got)
 		}
 	})
 

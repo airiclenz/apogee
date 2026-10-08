@@ -836,9 +836,9 @@ func TestDaemonFireLogsTheCompositionsNotices(t *testing.T) {
 
 	harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
 
-	// Unpinned, so the bound window is zero — rebindSpecFor keeps its hard-coded observed window
-	// and a Firing states the pin or nothing (wire_firing.go).
-	want := hintNotice("my-alias", provider.HintTrusted, 131072, 0)
+	// Unpinned, so the bound window is the one the beat observed — a Firing binds the pin, else the
+	// observation (wire_firing.go; ADR 0024 decision 6, amended 2026-10-08) — and the hint names it.
+	want := hintNotice("my-alias", provider.HintTrusted, 131072, 131072)
 	if want == "" {
 		t.Fatal("the fixture composes no hint at all; it no longer covers the unadvertised-model case")
 	}
@@ -847,11 +847,12 @@ func TestDaemonFireLogsTheCompositionsNotices(t *testing.T) {
 	}
 }
 
-// An unpinned daemon Firing SAYS its context window is unknown — once per process. A Firing derives
-// its Budget from configuration alone, so the oversize warning that would otherwise catch the same
-// trouble can never fire on this path (internal/domain/contextfile.go gates it on a system share an
-// unattended run leaves at zero); without this line a nightly schedule runs forever with the Budget
-// and auto-compaction inactive and nothing in the journal saying so.
+// An unpinned daemon Firing whose server names no window SAYS its context window is unknown — once
+// per process. With no window bound there is no system share either, so the oversize warning that
+// would otherwise catch the same trouble can never fire on this path (internal/domain/contextfile.go
+// gates it on that share); without this line a nightly schedule runs forever with the Budget
+// inactive and nothing in the journal saying so. A server that advertises a window gets that window
+// bound (ADR 0024 decision 6, amended 2026-10-08) and nothing is said.
 //
 // The latch is the second half, shaped on TestDaemonFireWarnsOnceOnUnconfinedAuto: the sentence
 // reports a standing fact about the daemon's configuration rather than anything a tick did, so
@@ -869,6 +870,27 @@ func TestDaemonFireSaysOnceWhenTheContextWindowIsUnknown(t *testing.T) {
 		if got := strings.Count(harness.logged.String(), notice.WindowUnknown); got != 1 {
 			t.Errorf("the unknown-window line was logged %d times over two firings, want exactly 1; "+
 				"the log holds:\n%s", got, harness.logged.String())
+		}
+	})
+
+	t.Run("a server that advertises a window never says it", func(t *testing.T) {
+		upstream := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+			Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+			Props:  &stubllm.Props{NCtx: 131072},
+		}})
+		harness := newDaemonFireHarnessOn(t, config.Options{
+			Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid", Model: headlessBeatModel}},
+		}, upstream)
+
+		harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
+
+		if strings.Contains(harness.logged.String(), notice.WindowUnknown) {
+			t.Errorf("a Firing whose server advertised a window said the window is unknown; the log holds:\n%s",
+				harness.logged.String())
+		}
+		if got := harness.runner.spec.Config.Context.MaxContextTokens; got != 131072 {
+			t.Errorf("the firing runs at Context.MaxContextTokens = %d, want the advertised 131072 — an "+
+				"unpinned Firing binds the window its beat observed", got)
 		}
 	})
 

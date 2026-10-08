@@ -865,8 +865,8 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 				t.Fatalf("routing.seat non-nil = %v, want %v", got, tc.wantSeat)
 			}
 			// A run that names no Sub-agent server has nothing to say ABOUT THE SEAT. The slice
-			// itself is shared — an unpinned Firing also carries notice.WindowUnknown — so what is
-			// asserted is the absence of a `sub-agents:` line, not an empty composition.
+			// itself is shared — a Firing that bound no window also carries notice.WindowUnknown —
+			// so what is asserted is the absence of a `sub-agents:` line, not an empty composition.
 			if tc.wantNotice == "" {
 				if slices.ContainsFunc(notices, func(n string) bool {
 					return strings.HasPrefix(n, "sub-agents:")
@@ -967,17 +967,91 @@ func TestFiringConfigCarriesItsPrimaryObservation(t *testing.T) {
 	}
 }
 
+// A Firing binds its window as every Driver does — the `context-window:` pin, else the window its one
+// beat observed (ADR 0024 decision 6, amended 2026-10-08). Before the amendment an unpinned Firing
+// bound nothing whatever its server advertised, so a headless run against a box reporting a million
+// tokens was managed by the unknown-window ceiling as a 3072-token window and folded its history on
+// every Turn (apogee-headless-window-compaction-loop). A beat that never answered binds nothing: it
+// observed nothing, and the run is refused at the offline gate besides.
+func TestFiringConfigBindsThePinElseTheObservedWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		beat         heartbeat.Beat
+		pinnedWindow int
+		wantBound    int
+	}{
+		{
+			name: "a pin outranks the observed window",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "served-model", ContextWindow: 1048576,
+				Resolution: apiprovider.HintExact,
+			},
+			pinnedWindow: 32768,
+			wantBound:    32768,
+		},
+		{
+			name: "an unpinned run binds the observed window",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "served-model", ContextWindow: 1048576,
+				Resolution: apiprovider.HintExact,
+			},
+			wantBound: 1048576,
+		},
+		{
+			name: "an unanswered beat binds nothing",
+			beat: heartbeat.Beat{ActiveModel: "served-model", Failure: "dial tcp: refused"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			beats := &stubBeat{beat: tc.beat}
+			cfg, _, notices, err := firingConfig(context.Background(), firingInputs{
+				opts: config.Options{Bypass: true},
+				entry: config.ServerEntry{
+					Name:          "box",
+					Endpoint:      "http://box.example/v1",
+					Model:         tc.beat.ActiveModel,
+					ContextWindow: config.TokenCount(tc.pinnedWindow),
+				},
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				beat:     beats.discover,
+				recordID: "2026-10-08T09-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+
+			if got := cfg.Context.MaxContextTokens; got != tc.wantBound {
+				t.Errorf("Config.Context.MaxContextTokens = %d, want %d — pin %d, observed %d; a Firing "+
+					"binds the pin, else the window its beat observed", got, tc.wantBound,
+					tc.pinnedWindow, tc.beat.ContextWindow)
+			}
+			for _, n := range notices {
+				if strings.Contains(n, "context window unknown") {
+					t.Errorf("notices = %q; a run that bound a window, or never reached its server, has "+
+						"no unknown window to announce", notices)
+				}
+			}
+		})
+	}
+}
+
 // The "not advertised" line a session gets at its rebind seam, reaching the Drivers nobody is
 // watching: an unattended run binds the configured id verbatim exactly as a session does, so the
 // human reading the stderr of a headless run or the daemon's log has to be told the same thing —
 // the server never listed this model, and here is what that cost.
 //
-// The window clause is the pin or nothing, and that is the load-bearing half. The composition hands
-// rebindSpecFor an observed window of 0 on purpose, so an unpinned Firing binds no window and leaves
-// the Budget inactive (the honest degrade); the observed number the beat carries reaches the
-// SENTENCE alone. A change that fed it to the rebind instead would make a run on a `--parallel 8`
-// box bind the per-slot window and start pruning a prompt it sends whole today, which is why the
-// bound window is asserted here beside the notice.
+// The window clause names the window the run bound, and that is the load-bearing half: the pin, else
+// the window the beat observed (ADR 0024 decision 6, amended 2026-10-08) — so an unpinned run on a
+// server that reports a window names it, crediting the base entry when a variant slug inherited it,
+// exactly as a session's clause does, and only a beat that named no window leaves it unknown. The
+// bound window is asserted beside the notice because the sentence and the binding must agree.
 func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -990,22 +1064,33 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 		wantWindowUnknown bool
 	}{
 		{
-			name: "an unadvertised model with no pin has no window to report",
+			name: "an unadvertised model with no pin names the window it bound",
 			beat: heartbeat.Beat{
 				Reachable: true, Answered: true,
 				ActiveModel: "my-alias", ContextWindow: 131072,
 				Resolution: apiprovider.HintTrusted,
 			},
-			wantContains: []string{"my-alias", "not advertised", "context window unknown", "Budget"},
+			wantContains: []string{"my-alias", "not advertised", "context window: 128k"},
+			wantBound:    131072,
 		},
 		{
-			name: "a variant slug is not credited to its base entry either",
+			name: "a variant slug credits the base entry for the window it bound",
 			beat: heartbeat.Beat{
 				Reachable: true, Answered: true,
 				ActiveModel: "vendor/model:variant", ContextWindow: 131072,
 				Resolution: apiprovider.HintBaseSlug,
 			},
-			wantContains: []string{"vendor/model:variant", "not advertised", "context window unknown"},
+			wantContains: []string{"vendor/model:variant", "not advertised", "context window from base 'vendor/model': 128k"},
+			wantBound:    131072,
+		},
+		{
+			name: "an unadvertised model whose beat named no window has none to report",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "my-alias",
+				Resolution:  apiprovider.HintTrusted,
+			},
+			wantContains: []string{"my-alias", "not advertised", "context window unknown", "Budget"},
 		},
 		{
 			name: "an entry that pins a window states the pin",
@@ -1019,14 +1104,25 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 			wantBound:    32768,
 		},
 		{
-			// Unremarkable about the MODEL, and that is exactly the run this item is for: nothing is
-			// unadvertised, so no hint is composed, and without the else the fact that the Budget and
-			// auto-compaction are inactive would never be said at all.
-			name: "an advertised model is unremarkable but its unknown window is not",
+			// Nothing surprising happened: the model is advertised and the window it reported is the
+			// one bound, so there is neither a hint nor an unknown window to say.
+			name: "an advertised model with an observed window says nothing",
 			beat: heartbeat.Beat{
 				Reachable: true, Answered: true,
 				ActiveModel: "my-alias", ContextWindow: 131072,
 				Resolution: apiprovider.HintExact,
+			},
+			wantBound: 131072,
+		},
+		{
+			// Unremarkable about the MODEL, and that is exactly the run the else is for: nothing is
+			// unadvertised, so no hint is composed, and without the else the fact that the run has no
+			// window to manage its history against would never be said at all.
+			name: "an advertised model is unremarkable but its unknown window is not",
+			beat: heartbeat.Beat{
+				Reachable: true, Answered: true,
+				ActiveModel: "my-alias",
+				Resolution:  apiprovider.HintExact,
 			},
 			wantWindowUnknown: true,
 		},
@@ -1082,7 +1178,7 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 			// An unknown window is announced ONCE however it is announced: inside the hint when the
 			// model is unadvertised, as notice.WindowUnknown's bare sentence when it is not.
 			// Counting both spellings is what pins the else — a plain append would say it twice on
-			// the unadvertised-and-unpinned run, which is the commonest unattended run there is.
+			// an unadvertised run that bound no window.
 			said, bare := 0, 0
 			for _, n := range notices {
 				if strings.Contains(n, "context window unknown") {
@@ -1098,15 +1194,15 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 			}
 			switch {
 			case tc.wantWindowUnknown && bare != 1:
-				t.Errorf("notices = %q; want notice.WindowUnknown exactly once — an unattended run derives "+
-					"its Budget from configuration alone, so this sentence is the only thing that can "+
-					"tell its user the Budget and auto-compaction are inactive", notices)
+				t.Errorf("notices = %q; want notice.WindowUnknown exactly once — a run whose beat named no "+
+					"window and no pin binds none, and this sentence is the only thing that can tell its "+
+					"user so", notices)
 			case !tc.wantWindowUnknown && bare != 0:
 				t.Errorf("notices = %q; want no bare unknown-window line here", notices)
 			}
 			if cfg.Context.MaxContextTokens != tc.wantBound {
-				t.Errorf("Config.Context.MaxContextTokens = %d, want %d; the observed window reaches the "+
-					"NOTICE alone — binding it would prune a prompt an unpinned Firing sends whole",
+				t.Errorf("Config.Context.MaxContextTokens = %d, want %d; a Firing binds the pin, else the "+
+					"window its beat observed, and the notice names the window it bound",
 					cfg.Context.MaxContextTokens, tc.wantBound)
 			}
 

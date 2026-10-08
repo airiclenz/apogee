@@ -181,12 +181,18 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		// be, and one whose footer says offline has every reason raise needs to refuse the Firing
 		// before a prompt is spent on it (the gate is Beat.Answered, wire_firing.go). No verdict yet
 		// reads as online, so a session that has never heard from its monitor fires as it always did.
+		//
+		// The window is the last one this session's beats could name (liveSettings.observed), which
+		// an unpinned Firing binds exactly as the session's own rebind does — pin, else observed (ADR
+		// 0024 decision 6, amended 2026-10-08) — and 0 until a beat has named one, which leaves it
+		// unknown.
 		beat: func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
 			offline, failure := w.upstream.verdict()
 			return heartbeat.Beat{
 				Reachable:     !offline,
 				Answered:      !offline,
 				Failure:       failure,
+				ContextWindow: w.live.observed(),
 				TotalSlots:    w.width(),
 				EffortSupport: domain.EffortSupport{Dialect: domainEffortDialect(w.live.observedDialect())},
 			}

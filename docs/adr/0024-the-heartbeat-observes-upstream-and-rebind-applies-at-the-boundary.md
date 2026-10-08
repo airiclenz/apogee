@@ -157,6 +157,17 @@ or not `/v1/models` lists it — an exact or base-slug match (the part before th
 supplies only the window, an unlisted id runs as configured with the window unknown and a
 transcript notice — and it is never replaced by another advertised model. Only an empty `model`
 binds the first advertised one. The `context-window:` pin above is unchanged.)*
+*(**Amended 2026-10-08:** every Driver binds the window the same way — the `context-window:`
+pin, else the window the server was observed to report — and a Firing is no exception. A
+headless or daemon Firing binds the window its one composition beat observed when nothing pins
+one, and a `/schedule` Firing binds the window the session's own beats last named; a beat that
+never answered, or named no window, binds none and the window stays unknown. This supersedes
+the earlier rule that an unpinned Firing bound no window whatever its server advertised — kept
+so a run on a `--parallel 8` box would not bind its per-slot window — under which a run
+against a server advertising a million tokens was managed by the unknown-window ceiling
+([ADR 0018](0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md))
+as a 3072-token window. The per-slot window is the window one conversation actually gets
+(Consequences below), and the pin remains the answer for a server that misreports it.)*
 
 The renderer needs **no knowledge of either**. A landed beat is measured against the last
 **observation**, not against the current binding, and the observation is recorded the moment the
