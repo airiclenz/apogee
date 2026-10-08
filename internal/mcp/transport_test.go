@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -1243,6 +1244,188 @@ func TestServerConfigValidateAuth(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "secret-value") {
 				t.Errorf("ValidateAuth = %q; it must never echo a header value", err)
+			}
+		})
+	}
+}
+
+// oauthServer is an MCP server that answers only requests carrying its current bearer token,
+// beside an authorization server's token endpoint on another origin that mints that token.
+type oauthServer struct {
+	mcp    *httptest.Server
+	tokens *httptest.Server
+
+	bearer      atomic.Value // the access token the MCP server accepts
+	seen        atomic.Int64 // requests the MCP server received
+	unbearered  atomic.Int64 // MCP requests without the accepted bearer
+	refreshes   atomic.Int64
+	resource    atomic.Value // the resource the last refresh carried
+	tokenBearer atomic.Int64 // token-endpoint requests carrying any bearer
+}
+
+// newOAuthServer starts both servers; the MCP server accepts accepted until a refresh mints
+// "access-new".
+func newOAuthServer(t *testing.T, accepted string) *oauthServer {
+	t.Helper()
+	o := &oauthServer{}
+	o.bearer.Store(accepted)
+	o.resource.Store("")
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "oauth", Version: "v0.0.1"}, nil)
+	server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}}}, nil
+		})
+	next := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil)
+	o.mcp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		o.seen.Add(1)
+		if r.Header.Get("Authorization") != "Bearer "+o.bearer.Load().(string) {
+			o.unbearered.Add(1)
+			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
+	o.tokens = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			o.tokenBearer.Add(1)
+		}
+		_ = r.ParseForm()
+		o.refreshes.Add(1)
+		o.resource.Store(r.PostForm.Get("resource"))
+		o.bearer.Store("access-new")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"access-new","token_type":"Bearer","expires_in":3600,"refresh_token":"refresh-new"}`)
+	}))
+	t.Cleanup(func() {
+		o.mcp.CloseClientConnections()
+		o.mcp.Close()
+		o.tokens.Close()
+	})
+	return o
+}
+
+// endpoint is the MCP server's endpoint.
+func (o *oauthServer) endpoint() string { return o.mcp.URL + "/mcp" }
+
+// oauthHost is a Host whose token store is store and whose authorization-server client reaches
+// the loopback test servers (the real one refuses loopback by design).
+func oauthHost(store *mcpauth.Store) Host {
+	return Host{
+		OAuthStore: store,
+		NewOAuthClient: func(security.URLGuard, func(*http.Request) (*url.URL, error)) *http.Client {
+			return &http.Client{Timeout: 10 * time.Second}
+		},
+	}
+}
+
+// oauthServerConfig is an `auth: oauth` streamable-http server at endpoint.
+func oauthServerConfig(endpoint string) ServerConfig {
+	return ServerConfig{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: endpoint, Auth: AuthOAuth}
+}
+
+// TestConnect_OAuthServerRidesTheStoredBearer pins that an `auth: oauth` server is connected with
+// the stored bearer on every request — refreshed first when it has expired, with the RFC 8707
+// resource and the rotated token persisted — and that the bearer never reaches the authorization
+// server's origin.
+func TestConnect_OAuthServerRidesTheStoredBearer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		expiry        time.Duration
+		wantRefreshes int64
+	}{
+		{name: "a valid token is sent as stored", expiry: time.Hour, wantRefreshes: 0},
+		{name: "an expired token is refreshed first", expiry: -time.Minute, wantRefreshes: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			accepted := "access-old"
+			if tt.wantRefreshes > 0 {
+				accepted = "access-new"
+			}
+			o := newOAuthServer(t, accepted)
+			store := mcpauth.NewStore(t.TempDir())
+			if err := store.Save("remote", o.endpoint(), mcpauth.Record{
+				AccessToken:   "access-old",
+				RefreshToken:  "refresh-old",
+				TokenType:     "Bearer",
+				Expiry:        time.Now().Add(tt.expiry),
+				TokenEndpoint: o.tokens.URL + "/token",
+				Resource:      o.endpoint(),
+				Client:        mcpauth.Client{ID: "client-1", TokenEndpointAuthMethod: "none"},
+			}); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+
+			c, err := ConnectWith(ctx, oauthHost(store), []ServerConfig{oauthServerConfig(o.endpoint())},
+				security.URLGuard{}, t.TempDir())
+			if err != nil {
+				t.Fatalf("ConnectWith: %v", err)
+			}
+			defer func() { _ = c.Close() }()
+			res, err := c.Tools()[0].Execute(ctx, domain.ToolCall{ID: "call-1", Tool: "remote__ping"})
+
+			if err != nil || res.IsError {
+				t.Fatalf("Execute = %+v, %v; want the pong result", res, err)
+			}
+			if n := o.unbearered.Load(); n != 0 {
+				t.Errorf("%d of %d MCP request(s) lacked the bearer", n, o.seen.Load())
+			}
+			if got := o.refreshes.Load(); got != tt.wantRefreshes {
+				t.Errorf("refreshes = %d; want %d", got, tt.wantRefreshes)
+			}
+			if n := o.tokenBearer.Load(); n != 0 {
+				t.Errorf("the token endpoint saw a bearer on %d request(s); want none", n)
+			}
+			if tt.wantRefreshes == 0 {
+				return
+			}
+			if got := o.resource.Load().(string); got != o.endpoint() {
+				t.Errorf("refresh resource = %q; want the endpoint %q", got, o.endpoint())
+			}
+			saved, ok, err := store.Load("remote", o.endpoint())
+			if err != nil || !ok || saved.RefreshToken != "refresh-new" {
+				t.Errorf("saved refresh token = %q (%v, %v); want the rotated refresh-new", saved.RefreshToken, ok, err)
+			}
+		})
+	}
+}
+
+// TestConnect_OAuthServerRefusals pins the two ways an `auth: oauth` server fails its connect
+// before a request leaves: a host with no token store names the server, and a server never logged
+// in is mcpauth.ErrLoginRequired naming the login command.
+func TestConnect_OAuthServerRefusals(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		host      Host
+		wantLogin bool
+		wantText  string
+	}{
+		{name: "no token store", host: Host{}, wantText: `server "remote"`},
+		{name: "no stored record", host: oauthHost(mcpauth.NewStore(t.TempDir())), wantLogin: true,
+			wantText: "apogee mcp login remote"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			o := newOAuthServer(t, "access-old")
+
+			_, err := ConnectWith(context.Background(), tt.host, []ServerConfig{oauthServerConfig(o.endpoint())},
+				security.URLGuard{}, t.TempDir())
+
+			if err == nil || !strings.Contains(err.Error(), tt.wantText) {
+				t.Fatalf("ConnectWith error = %v; want one naming %q", err, tt.wantText)
+			}
+			if got := errors.Is(err, mcpauth.ErrLoginRequired); got != tt.wantLogin {
+				t.Errorf("errors.Is(ErrLoginRequired) = %v; want %v", got, tt.wantLogin)
+			}
+			if n := o.seen.Load(); n != 0 {
+				t.Errorf("the MCP server saw %d request(s); want none", n)
 			}
 		})
 	}

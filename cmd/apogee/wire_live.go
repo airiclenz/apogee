@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
@@ -67,13 +68,18 @@ func (t watchTiming) applyTo(w *filewatch.Watcher) {
 }
 
 // liveMCPHost is the process an MCP connect runs in: the environment's egress proxy for the HTTP
-// transports, and the real platform facilities a stdio server is launched, env-scoped and torn
-// down through. TerminateDuration stays zero — internal/mcp's own default rung wait.
-func liveMCPHost() mcp.Host {
+// transports, the real platform facilities a stdio server is launched, env-scoped and torn down
+// through, and the OAuth token store under home — the session's apogee home — with the
+// floor-guarded authorization-server client an `auth: oauth` server refreshes over, whose finite
+// timeout bounds a refresh at teardown. TerminateDuration stays zero — internal/mcp's own default
+// rung wait.
+func liveMCPHost(home string) mcp.Host {
 	return mcp.Host{
-		Proxy:       http.ProxyFromEnvironment,
-		Shell:       platform.Current(),
-		NewTeardown: platform.NewProcessTeardown,
+		Proxy:          http.ProxyFromEnvironment,
+		Shell:          platform.Current(),
+		NewTeardown:    platform.NewProcessTeardown,
+		OAuthStore:     mcpauth.NewStore(home),
+		NewOAuthClient: mcpauth.NewAuthClient,
 	}
 }
 
@@ -94,7 +100,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// amendment 2026-07-26). Before, both call sites here handed the transport a ZERO guard, so a
 	// configured `deny-hosts` entry applied to every network tool and to no MCP endpoint (audit
 	// 2026-08-25 F-40); a denied host is now refused at startup with the url-safety message.
-	mcpClient, err := mcp.ConnectWith(ctx, liveMCPHost(), w.opts.MCPServers,
+	mcpClient, err := mcp.ConnectWith(ctx, liveMCPHost(w.roots.config), w.opts.MCPServers,
 		mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts), w.roots.workspace)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
@@ -118,7 +124,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// rather than kept until something else happens to dial.
 	w.mcpSet = newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
 		spec := w.toolSet.built()
-		return mcp.ConnectWith(ctx, liveMCPHost(), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
+		return mcp.ConnectWith(ctx, liveMCPHost(w.roots.config), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the

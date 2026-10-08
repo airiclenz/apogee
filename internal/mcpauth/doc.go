@@ -15,6 +15,14 @@
 // imports neither internal/mcp nor internal/config. NewAuthClient (client.go) is the floor-guarded,
 // body-bounded client for authorization servers, which are untrusted.
 //
+// Handler (handler.go) is the SDK's auth.OAuthHandler a connected server's transport carries: it
+// sends the stored bearer, refreshes it at the record's stored token endpoint with the stored
+// resource (never re-discovery) on a context that outlives the triggering request, and saves a
+// rotated refresh token before using the new access token. Handlers sharing a record — in this
+// process or another — refresh under a lock file beside it and adopt a newer token one of them
+// saved. It never prompts: a server that needs a login gets ErrLoginRequired, whose text names
+// `apogee mcp login <name>`.
+//
 // Invariants:
 //   - Directory 0700, files 0600: the files hold bearer and refresh tokens (ADR 0095 D1).
 //   - A save replaces the file through a temp file and a rename, so a crash never leaves half a

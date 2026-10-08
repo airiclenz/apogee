@@ -149,23 +149,28 @@ func (f *loginFlow) run(ctx context.Context) (Record, error) {
 	return record, nil
 }
 
-// clientFor is the client a request to rawURL goes over: the endpoint's own for its origin (the
-// operator named it, and a local server's origin is unreachable under the floor), the auth
-// client for any other.
+// clientFor is the client a request to rawURL goes over (routeClient).
 func (f *loginFlow) clientFor(rawURL string) *http.Client {
+	return routeClient(rawURL, f.cfg.Endpoint, f.cfg.EndpointClient, f.cfg.AuthClient)
+}
+
+// routeClient is the client a request to rawURL goes over: endpointClient for the endpoint's own
+// origin (the operator named it, and a local server's origin is unreachable under the floor),
+// authClient for any other. Login and the connected handler's refresh both route through it.
+func routeClient(rawURL, endpoint string, endpointClient, authClient *http.Client) *http.Client {
 	target, err := url.Parse(rawURL)
 	if err != nil {
-		return f.cfg.AuthClient
+		return authClient
 	}
-	endpoint, err := url.Parse(f.cfg.Endpoint)
+	endpointURL, err := url.Parse(endpoint)
 	if err != nil {
-		return f.cfg.AuthClient
+		return authClient
 	}
-	want, ok := security.CanonicalOrigin(endpoint)
+	want, ok := security.CanonicalOrigin(endpointURL)
 	if got, gotOK := security.CanonicalOrigin(target); ok && gotOK && got == want {
-		return f.cfg.EndpointClient
+		return endpointClient
 	}
-	return f.cfg.AuthClient
+	return authClient
 }
 
 // probe sends the unauthenticated initialize and returns the 401's WWW-Authenticate challenges.

@@ -111,7 +111,15 @@ NOTES (2026-10-08): stored-registration reuse needs an exact redirect-URL match,
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/mcpauth/`
 **Commit:** `feat(mcpauth): log in to an OAuth-protected MCP server`
 
-## 5. Connected handler: bearer, refresh, persisted rotation
+## 5. Connected handler: bearer, refresh, persisted rotation — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): the auth client reaches internal/mcp as a Host factory, `NewOAuthClient func(guard, proxy) *http.Client` (nil means mcpauth.NewAuthClient), beside `OAuthStore *mcpauth.Store` — NewAuthClient needs the connect's guard, which liveMCPHost does not have; liveMCPHost now takes the apogee home (`liveMCPHost(w.roots.config)`) and sets both.
+NOTES (2026-10-08): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by liveMCPHost taking the apogee home (the one test call site passes a t.TempDir() home).
+NOTES (2026-10-08): consequential edit — internal/mcpauth/doc.go: made necessary by handler.go (the package doc now describes the Handler).
+NOTES (2026-10-08): internal/mcpauth/login.go — loginFlow.clientFor's origin routing moved into a package func routeClient that the handler's refresh shares (a token endpoint on the endpoint's own origin goes over the endpoint's vetted client, as in Login); behaviour unchanged. The plan's Files did not list login.go.
+NOTES (2026-10-08): cross-process coordination is a lock (platform.AcquireLockWait on `<home>/mcp-auth/.<name>.lock`, waited up to the refresh timeout + 5 s), under which the record is re-read and a valid token not the rejected one is adopted; the lock file is left in place by `logout` (Store.Delete removes the record only).
+NOTES (2026-10-08): only a 4xx refresh answer is ErrLoginRequired (the authorization server rejecting it); a transport failure or a 5xx is a plain error naming the server, since a new login would not fix an unreachable server. An insufficient_scope 403 is ErrLoginRequired (step-up needs a new login).
+NOTES (2026-10-08): `client-secret-env:` is read at connect (newOAuthHandler) for a preregistered confidential client's refresh; an unset variable fails the connect naming the server and variable, mirroring HeadersEnv. The refresh runs on context.WithoutCancel(ctx) bounded by a 30 s timeout, since a token endpoint on the endpoint's origin rides the endpoint client, which has no timeout.
 
 **What:** Depends on items 2–4.
 **Goal:** a `streamable-http` server with `auth: oauth` connects with the stored bearer; an expired access token is refreshed using a session-lifetime ctx (never the triggering request's ctx), and a rotated refresh token is saved before use; with no stored record, or a refresh the auth server rejects, connecting fails with a typed `mcpauth.ErrLoginRequired` whose message names `apogee mcp login <name>`. No path prompts.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -109,6 +110,16 @@ type Host struct {
 	// running still holds a pipe. Zero — or any non-positive value — means
 	// platform.ProcessWaitDelay.
 	WaitDelay time.Duration
+	// OAuthStore holds the token records of the `auth: oauth` servers, at the session's apogee
+	// home. It is the one field with no real facility behind its zero value: the home is the
+	// composition root's to resolve (ADR 0001), so a nil store fails the connect of an
+	// `auth: oauth` server, naming it. Servers without `auth: oauth` never read it.
+	OAuthStore *mcpauth.Store
+	// NewOAuthClient builds the client an `auth: oauth` server's token refresh speaks to its
+	// authorization server over, from the connect's guard and Proxy. Nil means
+	// mcpauth.NewAuthClient: floor-guarded, body-bounded, with a finite timeout that also bounds
+	// a refresh the session's Close triggers.
+	NewOAuthClient func(guard security.URLGuard, proxy func(*http.Request) (*url.URL, error)) *http.Client
 }
 
 // withStdioDefaults returns h with every unset stdio facility resolved to the real one, so a

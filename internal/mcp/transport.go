@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -463,16 +464,67 @@ func buildSSETransport(ctx context.Context, host Host, cfg ServerConfig, guard s
 }
 
 // buildStreamableTransport builds a streamable-http client transport the same way — same vetting,
-// same pinned client.
+// same pinned client. A server with `auth: oauth` also gets the OAuth handler (newOAuthHandler)
+// that sets its stored bearer token on every request; the token rides the origin-pinned client,
+// so it only ever reaches the configured endpoint's origin.
 func buildStreamableTransport(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
 	endpoint, client, err := vetEndpoint(ctx, host, cfg, guard)
 	if err != nil {
 		return nil, err
 	}
-	return &mcpsdk.StreamableClientTransport{
+	transport := &mcpsdk.StreamableClientTransport{
 		Endpoint:   endpoint,
 		HTTPClient: client,
-	}, nil
+	}
+	if cfg.Auth == AuthOAuth {
+		handler, err := newOAuthHandler(host, cfg, guard, endpoint, client)
+		if err != nil {
+			return nil, err
+		}
+		transport.OAuthHandler = handler
+	}
+	return transport, nil
+}
+
+// newOAuthHandler builds an `auth: oauth` server's connected handler over the host's token store:
+// the stored bearer, refreshed through the authorization-server client (Host.NewOAuthClient) or,
+// for a token endpoint on the endpoint's own origin, through the endpoint's client. It never
+// prompts. A host with no store, an unset `client-secret-env:` variable and an unreadable record
+// fail the connect naming the server; a missing record is mcpauth.ErrLoginRequired, whose text
+// names `apogee mcp login <name>`. The secret variable is read here, so each connect and
+// reconnect sends its current value, as HeadersEnv does.
+func newOAuthHandler(
+	host Host,
+	cfg ServerConfig,
+	guard security.URLGuard,
+	endpoint string,
+	endpointClient *http.Client,
+) (*mcpauth.Handler, error) {
+	if host.OAuthStore == nil {
+		return nil, fmt.Errorf("mcp: server %q: auth: %s needs a token store, and this host has none",
+			cfg.Name, AuthOAuth)
+	}
+	var secret string
+	if cfg.ClientSecretEnv != "" {
+		value, ok := os.LookupEnv(cfg.ClientSecretEnv)
+		if !ok {
+			return nil, fmt.Errorf("mcp: server %q: client-secret-env: the environment variable %s is not set",
+				cfg.Name, cfg.ClientSecretEnv)
+		}
+		secret = value
+	}
+	newClient := host.NewOAuthClient
+	if newClient == nil {
+		newClient = mcpauth.NewAuthClient
+	}
+	return mcpauth.NewHandler(mcpauth.HandlerConfig{
+		Name:           cfg.Name,
+		Endpoint:       endpoint,
+		Store:          host.OAuthStore,
+		EndpointClient: endpointClient,
+		AuthClient:     newClient(guard, host.Proxy),
+		ClientSecret:   secret,
+	})
 }
 
 // vetEndpoint turns a configured HTTP endpoint into the two things an SDK transport needs: the
