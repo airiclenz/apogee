@@ -27,9 +27,11 @@ func sampleRecord() Record {
 		Resource:      "https://mcp.example.com/v1/mcp",
 		Scopes:        []string{"read", "write"},
 		Client: Client{
-			ID:                   "client-1",
-			Secret:               "secret-1",
-			RegistrationEndpoint: "https://auth.example.com/oauth/register",
+			ID:                      "client-1",
+			Secret:                  "secret-1",
+			RegistrationEndpoint:    "https://auth.example.com/oauth/register",
+			RedirectURIs:            []string{"http://127.0.0.1:43123/callback"},
+			TokenEndpointAuthMethod: "client_secret_post",
 		},
 	}
 }

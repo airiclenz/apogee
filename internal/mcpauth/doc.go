@@ -8,6 +8,13 @@
 // Store never reaches for an ambient ~/.apogee itself (ADR 0001). It does no network I/O and knows
 // nothing of the login flow: it loads, saves and deletes records.
 //
+// Login (login.go) mints a record: it probes the endpoint, discovers the authorization server
+// (RFC 9728, RFC 8414), registers a client (RFC 7591) unless one is configured, runs the
+// authorization code flow with PKCE and the RFC 8707 resource, and saves the result. Its user
+// interaction, the endpoint's vetted client and the home all arrive as arguments: the package
+// imports neither internal/mcp nor internal/config. NewAuthClient (client.go) is the floor-guarded,
+// body-bounded client for authorization servers, which are untrusted.
+//
 // Invariants:
 //   - Directory 0700, files 0600: the files hold bearer and refresh tokens (ADR 0095 D1).
 //   - A save replaces the file through a temp file and a rename, so a crash never leaves half a

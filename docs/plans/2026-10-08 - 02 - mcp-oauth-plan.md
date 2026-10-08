@@ -87,7 +87,15 @@ NOTES (2026-10-08): Save also narrows an already-existing `mcp-auth` dir to 0700
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/mcpauth/`
 **Commit:** `feat(mcpauth): persist MCP OAuth tokens under the apogee home`
 
-## 4. Login core: discovery, registration, PKCE code exchange
+## 4. Login core: discovery, registration, PKCE code exchange — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): store.go Client gains RedirectURIs and TokenEndpointAuthMethod (and store_test.go's every-field sampleRecord sets them) — the item's stale-redirect re-registration and saved token_endpoint_auth_method bullets need both persisted; the plan's Files did not list item 3's file.
+NOTES (2026-10-08): consequential edit — internal/mcpauth/doc.go: made necessary by login.go/client.go (the package doc said the package knows nothing of the login flow).
+NOTES (2026-10-08): consequential edit — go.mod: made necessary by login.go importing golang.org/x/oauth2 directly (`go mod tidy` moves it from indirect to direct; go.sum unchanged).
+NOTES (2026-10-08): requests are routed by origin — the endpoint's vetted client carries every request to the endpoint's own origin (probe, PRM, and an authorization server on that origin, e.g. the 2025-03-26 fallback), the auth client every other origin; the plan named only the probe and the PRM fetch, but the origin-pinned endpoint client refuses other origins and the floor client refuses a local same-origin AS.
+NOTES (2026-10-08): NewAuthClient(guard, proxy) builds one GuardedClient (DialFloor, Host proxy) per request origin, lazily, so the auth-server URL is the target although Login receives a ready *http.Client; each request is also pre-flighted with guard.CheckContext; 30 s timeout; bodies bounded at 1 MiB via http.MaxBytesReader.
+NOTES (2026-10-08): the probe is an unauthenticated MCP initialize POST; a 5xx answer is reported as a server error, not ErrNoAuthRequired (every other non-401 answer is ErrNoAuthRequired). Login also refuses an authorization server whose metadata lacks S256, and adds ErrStateMismatch as a typed error.
+NOTES (2026-10-08): stored-registration reuse needs an exact redirect-URL match, as the plan says; with item 6's 127.0.0.1:0 listener the port changes per login, so in practice every DCR login re-registers — a loopback-port-insensitive match (RFC 8252 §7.3) would be an owner call.
 
 **What:** Depends on item 3.
 **Goal:** `mcpauth.Login(ctx, LoginConfig)` takes a server's endpoint, optional preregistered client, an auth-server `*http.Client`, a redirect URL and a code-fetcher callback (`func(ctx, authorizeURL string) (code, state string, err error)`), and returns a saved record: it probes the endpoint unauthenticated, follows the 401 `WWW-Authenticate` / RFC 9728 well-known metadata to an RFC 8414 auth server, registers by DCR when no client is given, runs authorization code + PKCE S256 with the RFC 8707 `resource` parameter and state check, and exchanges the code. A server that answers the probe without 401 returns a typed "no auth required" error.

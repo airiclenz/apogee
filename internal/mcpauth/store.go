@@ -59,10 +59,15 @@ func ValidateServerName(name string) error {
 // Client is the OAuth client a token was issued to: a Dynamic Client Registration result, or a
 // preregistered `client-id:`. Secret is set only for a registration that returned one; a
 // preregistered client's secret comes from its `client-secret-env:` variable and is never stored.
+// RegistrationEndpoint and RedirectURIs are set for a registration only: a later login reuses it
+// only while both still match. TokenEndpointAuthMethod (RFC 7591 §2) is how the client
+// authenticates at the token endpoint, kept so a refresh sends its credentials the same way.
 type Client struct {
-	ID                   string `json:"client_id"`
-	Secret               string `json:"client_secret,omitempty"`
-	RegistrationEndpoint string `json:"registration_endpoint,omitempty"`
+	ID                      string   `json:"client_id"`
+	Secret                  string   `json:"client_secret,omitempty"`
+	RegistrationEndpoint    string   `json:"registration_endpoint,omitempty"`
+	RedirectURIs            []string `json:"redirect_uris,omitempty"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"`
 }
 
 // Record is one server's persisted OAuth state: the token, what a refresh needs without

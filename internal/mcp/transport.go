@@ -532,6 +532,16 @@ func vetEndpoint(ctx context.Context, host Host, cfg ServerConfig, guard securit
 	return u.String(), client, nil
 }
 
+// EndpointClient returns an HTTP-transported server's vetted endpoint string and the client its
+// transport speaks over — vetEndpoint's pair, with the same refusals — for a caller that must
+// reach the endpoint outside a session: the OAuth login's unauthenticated probe and its
+// endpoint-origin metadata fetches (internal/mcpauth). The client is pinned to the endpoint's
+// origin and carries the configured headers, so it is never the client for an authorization
+// server on another origin.
+func EndpointClient(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
+	return vetEndpoint(ctx, host, cfg, guard)
+}
+
 // endpointRefusal words a GuardedClient refusal in this package's own sentences, unchanged from
 // the ones the connect has always produced. An unusable proxy and an origin-less endpoint wrap
 // security.ErrURLBlocked bare; a dial target that could not be pinned wraps the pin's own
