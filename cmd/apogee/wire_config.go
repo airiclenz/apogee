@@ -93,7 +93,8 @@ func projectConfig(
 		// and they are scrubbed beside the key sources for exactly the same reason: a token
 		// readable out of a `terminal` child is a token the model can read — and a Firing runs the
 		// same `reactions:` list a session does, so it scrubs the same variables. An HTTP MCP
-		// server's `headers-env:` names token variables on the same footing, and joins them.
+		// server's `headers-env:` names token variables on the same footing, and so does its
+		// `client-secret-env:` (an OAuth client's secret); both join them.
 		SecretEnvVars: slices.Concat(
 			config.APIKeyEnvNames(opts),
 			config.ReactionEnvNames(opts),

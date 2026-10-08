@@ -107,7 +107,24 @@ type ServerConfig struct {
 	// ValidateHeaders when a name or value could not be sent as written.
 	Headers    map[string]string
 	HeadersEnv map[string]string
+
+	// Auth selects how apogee authorises itself to a streamable-http server. Empty is no auth of
+	// apogee's own (Headers / HeadersEnv may still carry the server's scheme); AuthOAuth has
+	// apogee obtain, persist and refresh an OAuth 2.1 bearer token for the Endpoint. ValidateAuth
+	// refuses every other value, and AuthOAuth on any other transport.
+	Auth string
+	// ClientID optionally names an OAuth client registered with the authorization server ahead of
+	// time; empty means apogee registers one itself (Dynamic Client Registration).
+	// ClientSecretEnv is the NAME of the environment variable holding that client's secret, so the
+	// secret never sits in the config file — empty for a public client. Both need Auth set to
+	// AuthOAuth, and ClientSecretEnv needs ClientID.
+	ClientID        string
+	ClientSecretEnv string
 }
+
+// AuthOAuth is the one recognised ServerConfig.Auth value: apogee authorises to the server with an
+// OAuth 2.1 bearer token it obtains through an interactive login.
+const AuthOAuth = "oauth"
 
 // reservedHeaderPrefix marks the header names the MCP protocol itself owns: the SDK sets
 // Mcp-Session-Id and Mcp-Protocol-Version, and Mcp-Method / Mcp-Name per request, so every name
@@ -152,6 +169,57 @@ func (cfg ServerConfig) ValidateHeaders() error {
 		if strings.TrimSpace(cfg.HeadersEnv[name]) == "" {
 			return fmt.Errorf("headers-env: %q maps to no environment variable name — "+
 				"the value is the NAME of the variable holding the header, not the header itself", name)
+		}
+	}
+	return nil
+}
+
+// ValidateAuth refuses an `auth:` / `client-id:` / `client-secret-env:` combination that could not
+// do what it says: an Auth value other than AuthOAuth; AuthOAuth on any transport but
+// streamable-http; a ClientID or ClientSecretEnv without AuthOAuth; a ClientSecretEnv without the
+// ClientID it is the secret of; and an Authorization header — in Headers or HeadersEnv, any case —
+// beside AuthOAuth, which would fight the bearer token apogee sends itself.
+//
+// AuthOAuth on stdio or sse is a refusal, not the notice a transport-mismatched key earns
+// elsewhere (internal/config's mcpEnvAllowlistNotices): an ignored `auth:` would leave the server
+// connecting with no credentials while the user believes it authorised, so it is never downgraded
+// to a notice. An entry that omits `transport:` is refused in transport-free wording, so no refusal
+// ever prints an empty transport word. The error names the keys, never a value.
+func (cfg ServerConfig) ValidateAuth() error {
+	if cfg.Auth != "" && cfg.Auth != AuthOAuth {
+		return fmt.Errorf("auth: %q is not a recognised value — the only one is %s", cfg.Auth, AuthOAuth)
+	}
+	if cfg.Auth == AuthOAuth && cfg.Transport != TransportStreamableHTTP {
+		if cfg.Transport == "" {
+			return fmt.Errorf("auth: %s needs transport: %s", AuthOAuth, TransportStreamableHTTP)
+		}
+		return fmt.Errorf("auth: %s needs transport: %s — this %s server would connect without it",
+			AuthOAuth, TransportStreamableHTTP, cfg.Transport)
+	}
+	if cfg.Auth != AuthOAuth {
+		if cfg.ClientID != "" {
+			return fmt.Errorf("client-id: is read only with auth: %s — set auth: %s or drop the key",
+				AuthOAuth, AuthOAuth)
+		}
+		if cfg.ClientSecretEnv != "" {
+			return fmt.Errorf("client-secret-env: is read only with auth: %s — set auth: %s or drop the key",
+				AuthOAuth, AuthOAuth)
+		}
+		return nil
+	}
+	if cfg.ClientSecretEnv != "" && cfg.ClientID == "" {
+		return errors.New("client-secret-env: needs client-id: — the secret belongs to a client " +
+			"registered ahead of time, named by client-id:")
+	}
+	for _, key := range []struct {
+		name    string
+		headers map[string]string
+	}{{"headers", cfg.Headers}, {"headers-env", cfg.HeadersEnv}} {
+		for _, name := range slices.Sorted(maps.Keys(key.headers)) {
+			if strings.EqualFold(name, "Authorization") {
+				return fmt.Errorf("%s: %q cannot be configured with auth: %s — apogee sends the "+
+					"bearer token itself", key.name, name, AuthOAuth)
+			}
 		}
 	}
 	return nil

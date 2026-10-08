@@ -1145,3 +1145,105 @@ func TestHeaderTransport_ClonesTheRequest(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// ValidateAuth admits `auth: oauth` on a streamable-http server, alone or with a preregistered
+// client, and refuses every combination that could not do what it says. An omitted transport is
+// refused in transport-free wording — never an empty transport word.
+func TestServerConfigValidateAuth(t *testing.T) {
+	t.Parallel()
+
+	const endpoint = "https://mcp.example.com/"
+	cases := []struct {
+		name string
+		cfg  ServerConfig
+		want string // empty: accepted
+	}{
+		{
+			name: "no auth at all",
+			cfg:  ServerConfig{Name: "docs", Transport: TransportSSE, Endpoint: endpoint},
+		},
+		{
+			name: "oauth on streamable-http",
+			cfg:  ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint, Auth: AuthOAuth},
+		},
+		{
+			name: "oauth with a preregistered confidential client",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, ClientID: "apogee-client", ClientSecretEnv: "DOCS_CLIENT_SECRET",
+				Headers: map[string]string{"X-Tenant": "acme"}},
+		},
+		{
+			name: "an auth value other than oauth",
+			cfg:  ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint, Auth: "basic"},
+			want: `auth: "basic" is not a recognised value — the only one is oauth`,
+		},
+		{
+			name: "oauth on sse",
+			cfg:  ServerConfig{Name: "docs", Transport: TransportSSE, Endpoint: endpoint, Auth: AuthOAuth},
+			want: "auth: oauth needs transport: streamable-http — this sse server would connect without it",
+		},
+		{
+			name: "oauth on stdio",
+			cfg:  ServerConfig{Name: "docs", Transport: TransportStdio, Command: "a-mcp", Auth: AuthOAuth},
+			want: "auth: oauth needs transport: streamable-http — this stdio server would connect without it",
+		},
+		{
+			name: "oauth with no transport",
+			cfg:  ServerConfig{Name: "docs", Endpoint: endpoint, Auth: AuthOAuth},
+			want: "auth: oauth needs transport: streamable-http",
+		},
+		{
+			name: "client-id without auth",
+			cfg:  ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint, ClientID: "apogee-client"},
+			want: "client-id: is read only with auth: oauth — set auth: oauth or drop the key",
+		},
+		{
+			name: "client-secret-env without auth",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				ClientSecretEnv: "DOCS_CLIENT_SECRET"},
+			want: "client-secret-env: is read only with auth: oauth — set auth: oauth or drop the key",
+		},
+		{
+			name: "client-secret-env without client-id",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, ClientSecretEnv: "DOCS_CLIENT_SECRET"},
+			want: "client-secret-env: needs client-id: — the secret belongs to a client registered " +
+				"ahead of time, named by client-id:",
+		},
+		{
+			name: "an Authorization header beside oauth",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Headers: map[string]string{"Authorization": "Bearer secret-value"}},
+			want: `headers: "Authorization" cannot be configured with auth: oauth — apogee sends the bearer token itself`,
+		},
+		{
+			name: "a lower-case authorization header-env beside oauth",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, HeadersEnv: map[string]string{"authorization": "DOCS_MCP_TOKEN"}},
+			want: `headers-env: "authorization" cannot be configured with auth: oauth — apogee sends the bearer token itself`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.cfg.ValidateAuth()
+
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("ValidateAuth = %v; want the entry accepted", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateAuth accepted the entry; want %q", tc.want)
+			}
+			if err.Error() != tc.want {
+				t.Errorf("ValidateAuth = %q; want %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "secret-value") {
+				t.Errorf("ValidateAuth = %q; it must never echo a header value", err)
+			}
+		})
+	}
+}

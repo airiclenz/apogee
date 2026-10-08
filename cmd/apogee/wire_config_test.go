@@ -243,9 +243,9 @@ func TestProjectConfigFoldsTheWorkflowKeys(t *testing.T) {
 	}
 }
 
-// An HTTP MCP server's `headers-env:` names a token variable, so it joins the secret set beside the
-// key sources and the Reaction header sources: a token a `terminal` child could read is a token the
-// model can read.
+// An HTTP MCP server's `headers-env:` names a token variable, and its `client-secret-env:` an OAuth
+// client's secret, so both join the secret set beside the key sources and the Reaction header
+// sources: a token a `terminal` child could read is a token the model can read.
 func TestProjectConfigScrubsTheMCPHeaderEnvNames(t *testing.T) {
 	t.Parallel()
 	opts := projectionOptions(t)
@@ -254,13 +254,20 @@ func TestProjectConfigScrubsTheMCPHeaderEnvNames(t *testing.T) {
 		Transport:  mcp.TransportStreamableHTTP,
 		Endpoint:   "https://mcp.example.com/",
 		HeadersEnv: map[string]string{"Authorization": "DOCS_MCP_TOKEN"},
+	}, {
+		Name:            "wiki",
+		Transport:       mcp.TransportStreamableHTTP,
+		Endpoint:        "https://wiki.example.com/mcp",
+		Auth:            mcp.AuthOAuth,
+		ClientID:        "apogee-client",
+		ClientSecretEnv: "WIKI_CLIENT_SECRET",
 	}}
 	roots := firingRoots(t)
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
 
 	secrets := projectConfig(opts, roots, fenceableHost, domain.ModeAuto, provider).SecretEnvVars
 
-	for _, want := range []string{"BOX_KEY", "DOCS_MCP_TOKEN"} {
+	for _, want := range []string{"BOX_KEY", "DOCS_MCP_TOKEN", "WIKI_CLIENT_SECRET"} {
 		if !slices.Contains(secrets, want) {
 			t.Errorf("SecretEnvVars = %q; want it to carry %q", secrets, want)
 		}

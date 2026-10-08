@@ -366,8 +366,9 @@ func reapProcess(cmd *exec.Cmd, td platform.ProcessTeardown) {
 // validateServers rejects an empty or duplicate server name before any connection is made: the
 // name is the alias that qualifies a surfaced tool's registry key, so it must be present and
 // unique across the configured set, else two servers' tools would collide or be unaddressable. A
-// server whose headers could not be sent as written (ServerConfig.ValidateHeaders) is refused here
-// too, so a host that builds its ServerConfigs without the config loader meets the same rule.
+// server whose headers could not be sent as written (ServerConfig.ValidateHeaders), or whose auth
+// keys could not do what they say (ServerConfig.ValidateAuth), is refused here too, so a host that
+// builds its ServerConfigs without the config loader meets the same rules.
 func validateServers(servers []ServerConfig) error {
 	seen := make(map[string]bool, len(servers))
 	for i, cfg := range servers {
@@ -379,6 +380,9 @@ func validateServers(servers []ServerConfig) error {
 			return fmt.Errorf("mcp: duplicate server name %q", name)
 		}
 		if err := cfg.ValidateHeaders(); err != nil {
+			return fmt.Errorf("mcp: server %q: %w", name, err)
+		}
+		if err := cfg.ValidateAuth(); err != nil {
 			return fmt.Errorf("mcp: server %q: %w", name, err)
 		}
 		seen[name] = true

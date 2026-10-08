@@ -3390,6 +3390,125 @@ func TestApplyConfigMCPServerHeadersRefusals(t *testing.T) {
 	}
 }
 
+// `auth: oauth` on a streamable-http entry loads with its optional preregistered client, and every
+// combination that could not do what it says is a startup refusal naming the entry and the key.
+// `auth:` on a stdio or sse server is refused, not noticed like the other transport-mismatched
+// keys: ignored, it would connect unauthenticated. An entry that omits `transport:` is refused in
+// transport-free wording — never an empty transport word.
+func TestApplyConfigMCPServerAuth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the accepted shape", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, "mcp-servers:\n  - name: docs\n    transport: streamable-http\n"+
+			"    endpoint: https://mcp.example.com/\n    auth: oauth\n    client-id: apogee-client\n"+
+			"    client-secret-env: DOCS_CLIENT_SECRET\n")
+		opts := Options{ConfigDir: home}
+
+		err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify)
+
+		if err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		want := []mcp.ServerConfig{{
+			Name:            "docs",
+			Transport:       mcp.TransportStreamableHTTP,
+			Endpoint:        "https://mcp.example.com/",
+			Auth:            mcp.AuthOAuth,
+			ClientID:        "apogee-client",
+			ClientSecretEnv: "DOCS_CLIENT_SECRET",
+		}}
+		if !reflect.DeepEqual(opts.MCPServers, want) {
+			t.Errorf("mcpServers = %+v; want %+v", opts.MCPServers, want)
+		}
+	})
+
+	cases := []struct {
+		name      string
+		entryYAML string
+		want      string
+	}{
+		{
+			name:      "auth on an sse server",
+			entryYAML: "    transport: sse\n    endpoint: https://mcp.example.com/\n    auth: oauth\n",
+			want: "apogee: mcp-servers.docs: auth: oauth needs transport: streamable-http — " +
+				"this sse server would connect without it",
+		},
+		{
+			name:      "auth on a stdio server",
+			entryYAML: "    transport: stdio\n    command: a-mcp\n    auth: oauth\n",
+			want: "apogee: mcp-servers.docs: auth: oauth needs transport: streamable-http — " +
+				"this stdio server would connect without it",
+		},
+		{
+			name:      "auth on an entry that omits transport",
+			entryYAML: "    endpoint: https://mcp.example.com/\n    auth: oauth\n",
+			want:      "apogee: mcp-servers.docs: auth: oauth needs transport: streamable-http",
+		},
+		{
+			name:      "an auth value other than oauth",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: bearer\n",
+			want:      `apogee: mcp-servers.docs: auth: "bearer" is not a recognised value — the only one is oauth`,
+		},
+		{
+			name:      "client-id without auth",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    client-id: apogee-client\n",
+			want:      "apogee: mcp-servers.docs: client-id: is read only with auth: oauth — set auth: oauth or drop the key",
+		},
+		{
+			name: "client-secret-env without auth",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n" +
+				"    client-secret-env: DOCS_CLIENT_SECRET\n",
+			want: "apogee: mcp-servers.docs: client-secret-env: is read only with auth: oauth — " +
+				"set auth: oauth or drop the key",
+		},
+		{
+			name: "client-secret-env without client-id",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
+				"    client-secret-env: DOCS_CLIENT_SECRET\n",
+			want: "apogee: mcp-servers.docs: client-secret-env: needs client-id:",
+		},
+		{
+			name: "an Authorization header beside auth",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
+				"    headers:\n      Authorization: Bearer secret-value\n",
+			want: `apogee: mcp-servers.docs: headers: "Authorization" cannot be configured with auth: oauth`,
+		},
+		{
+			name: "an authorization header-env in another case beside auth",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
+				"    headers-env:\n      AUTHORIZATION: DOCS_MCP_TOKEN\n",
+			want: `apogee: mcp-servers.docs: headers-env: "AUTHORIZATION" cannot be configured with auth: oauth`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, "mcp-servers:\n  - name: docs\n"+tc.entryYAML)
+			opts := Options{ConfigDir: home}
+
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted the entry; want a refusal containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q; want it to contain %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "this  server") {
+				t.Errorf("error = %q; it must never print an empty transport word", err)
+			}
+			if strings.Contains(err.Error(), "secret-value") {
+				t.Errorf("error = %q; it must never echo a header value", err)
+			}
+		})
+	}
+}
+
 // `headers:` and `headers-env:` ride an HTTP request, which a stdio server never receives, so a
 // stdio entry that spells either is told so — a notice naming both keys when both are set, and
 // never a refusal: the server still loads. An HTTP entry spelling them is silent.
@@ -3440,19 +3559,24 @@ func TestApplyConfigMCPHeadersOnAStdioServerNotices(t *testing.T) {
 	}
 }
 
-// MCPHeaderEnvNames is the secret set's MCP contribution: every `headers-env:` variable name across
-// the configured servers, trimmed, deduplicated and sorted, so the scrub is stable run to run.
+// MCPHeaderEnvNames is the secret set's MCP contribution: every `headers-env:` and
+// `client-secret-env:` variable name across the configured servers, trimmed, deduplicated and
+// sorted, so the scrub is stable run to run.
 func TestMCPHeaderEnvNamesAreSortedAndDeduplicated(t *testing.T) {
 	t.Parallel()
 	opts := Options{MCPServers: []mcp.ServerConfig{
 		{Name: "a", Transport: mcp.TransportSSE, HeadersEnv: map[string]string{"Authorization": "ZED_TOKEN", "X-Key": "ALPHA_KEY"}},
 		{Name: "b", Transport: mcp.TransportStreamableHTTP, HeadersEnv: map[string]string{"Authorization": " ZED_TOKEN "}},
 		{Name: "c", Transport: mcp.TransportStreamableHTTP},
+		{Name: "d", Transport: mcp.TransportStreamableHTTP, Auth: mcp.AuthOAuth, ClientID: "apogee-client",
+			ClientSecretEnv: " MID_SECRET "},
+		{Name: "e", Transport: mcp.TransportStreamableHTTP, Auth: mcp.AuthOAuth, ClientID: "apogee-client",
+			ClientSecretEnv: "ZED_TOKEN"},
 	}}
 
 	got := MCPHeaderEnvNames(opts)
 
-	if want := []string{"ALPHA_KEY", "ZED_TOKEN"}; !slices.Equal(got, want) {
+	if want := []string{"ALPHA_KEY", "MID_SECRET", "ZED_TOKEN"}; !slices.Equal(got, want) {
 		t.Errorf("MCPHeaderEnvNames = %q; want %q", got, want)
 	}
 }

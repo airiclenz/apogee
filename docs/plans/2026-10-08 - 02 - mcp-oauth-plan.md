@@ -58,7 +58,10 @@ refreshes on its own. Login runs at startup (before the TUI) or through `apogee 
 **Acceptance:** `test -f "docs/adr/0095-mcp-oauth-tokens-are-persisted-by-apogee.md" && grep -l 0095 docs/adr/0047-*.md`
 **Commit:** `docs(adr): record that apogee persists MCP OAuth tokens`
 
-## 2. Config: `auth: oauth`, `client-id:`, `client-secret-env:`
+## 2. Config: `auth: oauth`, `client-id:`, `client-secret-env:` — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): consequential edit — internal/mcp/client.go: made necessary by the new ServerConfig.ValidateAuth — validateServers calls it beside ValidateHeaders so a host building ServerConfigs without the config loader meets the same rules (its doc comment promises that parity).
+NOTES (2026-10-08): the secret-env scrub extends MCPHeaderEnvNames itself (name kept) rather than a sibling, so cmd/apogee/wire_config.go changes only its comment; gofmt realigned the existing toServerConfig field block in internal/config/config.go.
 
 **What:**
 **Goal:** an `mcp-servers:` entry accepts `auth: oauth` with optional `client-id:` and `client-secret-env:`; config load refuses `auth` on a non-`streamable-http` server, an `auth` value other than `oauth`, `client-id`/`client-secret-env` without `auth: oauth`, `client-secret-env` without `client-id`, and an `Authorization` header (any case) in `headers:`/`headers-env:` when `auth: oauth` is set. The `client-secret-env` variable name joins the secret-env scrub. `mcp.ServerConfig` carries the three values.

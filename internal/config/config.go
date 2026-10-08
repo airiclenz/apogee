@@ -376,7 +376,11 @@ func fileUnconfinedHosts(o *Options, fc fileConfig) error {
 // are everywhere else in this package: the schema shape and the resolved one stay independently
 // evolvable. An entry whose `headers:` / `headers-env:` could not be sent as written is a startup
 // refusal (mcp.ServerConfig.ValidateHeaders owns the rule), so a reserved or malformed header is
-// never a request that fails later, per connect, with nothing in the config pointing at it.
+// never a request that fails later, per connect, with nothing in the config pointing at it. So is
+// an `auth:` / `client-id:` / `client-secret-env:` combination that could not do what it says
+// (mcp.ServerConfig.ValidateAuth) — including `auth: oauth` on a stdio or sse server, which is
+// refused rather than noticed like the other transport-mismatched keys below: ignored, it would
+// leave the server connecting unauthenticated while the user believes it authorised.
 func fileMCPServers(o *Options, fc fileConfig) error {
 	o.MCPServers = nil
 	if len(fc.MCPServers) > 0 {
@@ -384,6 +388,9 @@ func fileMCPServers(o *Options, fc fileConfig) error {
 		for i, m := range fc.MCPServers {
 			servers[i] = m.toServerConfig()
 			if err := servers[i].ValidateHeaders(); err != nil {
+				return fmt.Errorf("apogee: mcp-servers.%s: %w", m.Name, err)
+			}
+			if err := servers[i].ValidateAuth(); err != nil {
 				return fmt.Errorf("apogee: mcp-servers.%s: %w", m.Name, err)
 			}
 		}
@@ -622,16 +629,18 @@ func mcpStdioHeaderNotices(servers []mcp.ServerConfig) []string {
 }
 
 // MCPHeaderEnvNames is every environment variable name an `mcp-servers:` entry reads a header
-// value out of (`headers-env:`), sorted and deduplicated. A root appends it to
-// [domain.Config.SecretEnvVars] beside APIKeyEnvNames and ReactionEnvNames, so the `terminal`,
-// `python_exec` and console tools cannot read an MCP server's token back out of the environment
-// they inherit. Sorted because the names come off a map, and a set that reordered between runs
-// would make every caller's own output unstable.
+// value out of (`headers-env:`) or an OAuth client secret out of (`client-secret-env:`), sorted and
+// deduplicated. A root appends it to [domain.Config.SecretEnvVars] beside APIKeyEnvNames and
+// ReactionEnvNames, so the `terminal`, `python_exec` and console tools cannot read an MCP server's
+// token or client secret back out of the environment they inherit. Sorted because the names come
+// off a map, and a set that reordered between runs would make every caller's own output unstable.
 func MCPHeaderEnvNames(o Options) []string {
 	var names []string
 	seen := make(map[string]bool)
 	for _, server := range o.MCPServers {
-		for _, envName := range server.HeadersEnv {
+		envNames := slices.Collect(maps.Values(server.HeadersEnv))
+		envNames = append(envNames, server.ClientSecretEnv)
+		for _, envName := range envNames {
 			name := strings.TrimSpace(envName)
 			if name == "" || seen[name] {
 				continue
@@ -2445,21 +2454,30 @@ type mcpServerConfig struct {
 	// `headers:` / `headers-env:` precedent. An absent key stays a nil map.
 	Headers    map[string]string `yaml:"headers"`
 	HeadersEnv map[string]string `yaml:"headers-env"`
+	// Auth, ClientID and ClientSecretEnv are a streamable-http server's OAuth opt-in (`auth:
+	// oauth`) and its optional preregistered client — the client id, and the NAME of the
+	// environment variable holding its secret. mcp.ServerConfig.ValidateAuth owns their rules.
+	Auth            string `yaml:"auth"`
+	ClientID        string `yaml:"client-id"`
+	ClientSecretEnv string `yaml:"client-secret-env"`
 }
 
 // toServerConfig maps the on-disk MCP server schema onto the mcp.ServerConfig value the client
 // connects with.
 func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 	return mcp.ServerConfig{
-		Name:         m.Name,
-		Transport:    mcp.Transport(m.Transport),
-		Command:      m.Command,
-		Args:         m.Args,
-		Env:          m.Env,
-		Endpoint:     m.Endpoint,
-		EnvAllowlist: m.EnvAllowlist,
-		Headers:      m.Headers,
-		HeadersEnv:   m.HeadersEnv,
+		Name:            m.Name,
+		Transport:       mcp.Transport(m.Transport),
+		Command:         m.Command,
+		Args:            m.Args,
+		Env:             m.Env,
+		Endpoint:        m.Endpoint,
+		EnvAllowlist:    m.EnvAllowlist,
+		Headers:         m.Headers,
+		HeadersEnv:      m.HeadersEnv,
+		Auth:            m.Auth,
+		ClientID:        m.ClientID,
+		ClientSecretEnv: m.ClientSecretEnv,
 	}
 }
 
