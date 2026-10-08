@@ -136,6 +136,9 @@
 // the offline estimate of what apogee itself puts in front of the model (ADR 0079), or with
 // `--live` the server's own Turn-1 count for one fixed one-word request, twice (as configured,
 // then Bypass) when advise/shape Reactions are armed;
+// mcp_login_fetch.go the terminal half of an MCP OAuth login — the loopback `/callback`
+// listener the authorization server redirects to, the printed authorize URL, Enter to open
+// it on a local desktop and a pasted redirect URL as the fallback, whichever arrives first;
 // undo.go `apogee undo <session-id> [confirm <generation>]`, the revert an unattended
 // Firing has nobody to offer — it holds the session, opens its snapshot store from a fresh
 // process and shows `/undo`'s own listing; the confirm quotes the generation the preview

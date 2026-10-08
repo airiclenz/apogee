@@ -134,7 +134,15 @@ NOTES (2026-10-08): `client-secret-env:` is read at connect (newOAuthHandler) fo
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/mcpauth/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/mcp/`
 **Commit:** `feat(mcp): connect to OAuth MCP servers with a refreshed bearer`
 
-## 6. Interactive code fetcher: loopback callback, Enter to open, paste fallback
+## 6. Interactive code fetcher: loopback callback, Enter to open, paste fallback — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): newLoginFetcher returns a fourth value, an error — binding 127.0.0.1:0 can fail, which the plan's three-value signature had no way to report; fetch is an mcpauth.CodeFetcher and closes the listener itself on return (close stays idempotent for the caller's defer).
+NOTES (2026-10-08): the injected input is a factory, `openInput func() (cancelreader.CancelReader, error)` (nil means cancelreader.NewReader(os.Stdin)), opened per wait and cancelled, joined and closed before fetch returns — a cancelled cancelreader stays cancelled for good, so one shared reader could not serve item 7's y/N prompt after a fetch; item 7 should take the same factory. Close releases only the reader's epoll plumbing, never stdin.
+NOTES (2026-10-08): the server's error/error_description pass through sanitize.StripEscapesToLine (the one-line form of StripEscapes) because they land in a single printed error line, where a kept newline would forge a second line; the printed authorize URL is stripped the same way, and the opener refuses any URL with a control byte, space or quote.
+NOTES (2026-10-08): the Windows opener is `rundll32 url.dll,FileProtocolHandler` per the goal, not settingsedit.go's `cmd /c start`, because cmd.exe reads an authorize URL's `&` as syntax; the opener argv is a small urlOpenerArgv beside the fetcher.
+NOTES (2026-10-08): on Windows cancelreader puts the console in raw mode for the wait (no echo, Enter arrives as a lone "\r"): the line splitter accepts "\r", "\n" and "\r\n", but a pasted URL does not echo there — untested on Windows.
+NOTES (2026-10-08): a fallback cancelreader (stdin not a file) cannot interrupt a blocked read, so its read is not joined; when input cannot be opened at all the wait runs on the callback alone with a one-line note; a closed stdin prints a note and keeps waiting for the callback.
+NOTES (2026-10-08): consequential edit — go.mod: made necessary by mcp_login_fetch.go importing github.com/muesli/cancelreader directly (`go mod tidy` moved it from indirect to direct; go.sum unchanged).
 
 **What:** Depends on item 4.
 **Goal:** a terminal code fetcher in `cmd/apogee` listens on `127.0.0.1:0` at `/callback`, prints the full authorize URL, and accepts whichever arrives first: the callback, or a line on stdin that is a pasted redirect URL carrying `code` and `state`. On a local desktop an empty line (Enter) opens the URL via the platform opener (`xdg-open` / `open` / `rundll32 url.dll,FileProtocolHandler`) and keeps waiting; remote sessions print the paste instruction instead. The wait ends only on ctx cancellation or a result; the listener closes on return.
