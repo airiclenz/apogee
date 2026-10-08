@@ -34,7 +34,10 @@ wrote. The probe never suggests `custom-regex` or a `tool-call-example:`; the ma
 - Reading the user's `model-profiles:` from the probe.
 - Storing reply text in the probe record.
 
-## 1. Suggest a tool-call format only on evidence; quote the call otherwise
+## 1. Suggest a tool-call format only on evidence; quote the call otherwise — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): the native probe's user message literal is hoisted into a const `echoAsk` shared with the markdown-fenced trial (wording byte-identical; no BatteryVersion change); `probeNativeToolCall` gains a third result (salvaged) and `Battery` a small `finding(c)` lookup helper used by the report.
+NOTES (2026-10-08): the `tool-call format` line renders after the blank line that precedes the suggested-profile heading, directly above it; a hand-built Battery with no native finding, or one whose trial never ran without another case applying, renders no line. Extra unit test `TestModelReportQuotesTheReply` pins the quote's whitespace collapse, 120-rune cut and empty-reply wording.
 
 **What:**
 **Goal:** `SuggestProfile` returns `markdown-fenced` only when a markdown-fenced trial reply parsed to

@@ -126,12 +126,16 @@ func candidateDigest(candidates []string) string {
 // Model profile). It is a SUGGESTION and travels as one: ProfileYAML renders it for copying and
 // config.yaml is never touched (ADR 0021 §5 — the config file is the user's own document, a
 // probe produces evidence, and turning evidence into a preference is the user's move).
+//
+// The tool-call format is suggested only on evidence: markdown-fenced when the battery's
+// markdown-fenced trial saw that format carry the model's call, native in every other case. A
+// native call needs no text format; a JSON call written in the reply is run by the salvage guard,
+// which fires only under a native parser; and a call no listed format parses is better served by
+// native plus the quoted call (Model.Report) than by a format that would drop it. The probe never
+// suggests custom-regex — its pattern and example are written from the model's call by the user.
 func SuggestProfile(b Battery) domain.ModelProfile {
 	p := domain.ModelProfile{ToolCallFormat: domain.FormatNative}
-	if !b.Observed(CapNativeToolCall) {
-		// No structured call arrived, so the loop would have to recover calls from visible
-		// content. Markdown-fenced is the suggestion because it is the format small models
-		// reach for unprompted; custom-regex needs a pattern only the user can supply.
+	if b.FencedTrial.Parsed {
 		p.ToolCallFormat = domain.FormatMarkdownFenced
 	}
 	switch b.Thinking.Style {

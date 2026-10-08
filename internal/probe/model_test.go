@@ -157,9 +157,105 @@ func TestModelReportIncompleteBattery(t *testing.T) {
 		"none — the battery did not complete",
 		"not signed — an incomplete run is not an observation",
 		"no — an incomplete battery derives no identity to record",
+		// The native probe never completed, so no trial was asked and no format is claimed.
+		field("tool-call format", "native — the native probe never completed, so no tool-call format was tested"),
 	} {
 		if !strings.Contains(m.Report(), want) {
 			t.Errorf("report does not state %q:\n%s", want, m.Report())
+		}
+	}
+}
+
+// The tool-call format line names the evidence behind the suggested format, and quotes the
+// model's written call wherever no listed format was confirmed — that shape is the user's to
+// write a custom-regex profile from. A native call needs no explaining and gets no line.
+func TestModelReportToolCallFormat(t *testing.T) {
+	t.Parallel()
+
+	const noFit = "native — no listed format parses this model's call; the model wrote: " +
+		`probe_echo(text="apogee")` +
+		" — a custom-regex profile (tool-call-pattern:, tool-call-example:) written from that shape is yours to add"
+
+	for _, tc := range []struct {
+		name       string
+		script     script
+		wantLine   string // "" asserts that no tool-call format line is rendered
+		wantFormat string
+	}{
+		{
+			name:       "native call",
+			script:     script{nativeTools: true, structured: true, chain: true},
+			wantFormat: "native",
+		},
+		{
+			name:       "salvageable JSON call",
+			script:     script{salvageableTools: true, structured: true},
+			wantLine:   "native — the model wrote its call as JSON in the reply, and the salvage guard runs that under native",
+			wantFormat: "native",
+		},
+		{
+			name:       "fenced trial parsed",
+			script:     script{writtenCall: pythonicCall, structured: true, fencedTrial: fencedCall},
+			wantLine:   "markdown-fenced — taught that format, the model wrote a probe_echo call it parses",
+			wantFormat: "markdown-fenced",
+		},
+		{
+			name:       "no listed format fits",
+			script:     script{writtenCall: pythonicCall, structured: true, fencedTrial: pythonicCall},
+			wantLine:   noFit,
+			wantFormat: "native",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			report := gatherModel(t, tc.script, "fake-model").Report()
+
+			if tc.wantLine == "" {
+				if strings.Contains(report, "tool-call format:") {
+					t.Errorf("a native call needs no tool-call format line:\n%s", report)
+				}
+			} else if want := field("tool-call format", tc.wantLine); !strings.Contains(report, want) {
+				t.Errorf("report does not state %q:\n%s", want, report)
+			}
+			if want := "      tool-call-format: " + tc.wantFormat; !strings.Contains(report, want) {
+				t.Errorf("report does not suggest %q:\n%s", want, report)
+			}
+		})
+	}
+}
+
+// A trial request that never completed names its failure, confirms no format, and still quotes
+// the call the model wrote in the native probe.
+func TestModelReportToolCallFormatTrialFailed(t *testing.T) {
+	t.Parallel()
+	m := gatherModel(t, script{writtenCall: pythonicCall, structured: true, fencedTrialFail: true}, "fake-model")
+	report := m.Report()
+
+	for _, want := range []string{
+		"  tool-call format: native — the markdown-fenced trial never completed (" + m.Battery.FencedTrial.Failure + ")",
+		`, so no text format was confirmed; the model wrote: probe_echo(text="apogee")`,
+		"      tool-call-format: native",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report does not state %q:\n%s", want, report)
+		}
+	}
+}
+
+// The quote is one line, cut on a rune boundary, and says so when the reply was empty.
+func TestModelReportQuotesTheReply(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("é", quoteReplyLimit+5)
+	for _, tc := range []struct {
+		name, reply, want string
+	}{
+		{name: "empty", reply: " \n\t", want: "nothing (the reply was empty)"},
+		{name: "multi-line", reply: "probe_echo(\n  text=\"apogee\"\n)", want: `probe_echo( text="apogee" )`},
+		{name: "long", reply: long, want: strings.Repeat("é", quoteReplyLimit) + "…"},
+	} {
+		if got := quoteReply(tc.reply); got != tc.want {
+			t.Errorf("%s: quoteReply = %q; want %q", tc.name, got, tc.want)
 		}
 	}
 }

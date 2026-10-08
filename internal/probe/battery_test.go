@@ -34,6 +34,15 @@ type script struct {
 	// salvageableTools plays a model that writes its call out as fenced JSON in the visible
 	// content instead of on the wire — nothing native, but something the salvage guard runs.
 	salvageableTools bool
+	// writtenCall is the visible content the native tool-call probe answers with in place of a
+	// call, so a test can play a model that writes its call in a shape of its own.
+	writtenCall string
+	// fencedTrial is the visible content the markdown-fenced trial request is answered with, and
+	// fencedTrialFail answers that request with a 500 instead. With neither set the trial request
+	// falls through to the JSON probe's reply, which is what every fake upstream written before
+	// the trial answers it with — and that reply never parses to a probe_echo call.
+	fencedTrial     string
+	fencedTrialFail bool
 }
 
 // requestLog records the body of every chat request the fake Upstream received, so a test can
@@ -94,10 +103,17 @@ func batteryServer(t *testing.T, s script) (*httptest.Server, *requestLog) {
 			return
 		}
 
+		if isFencedTrial(body.Messages) && s.fencedTrialFail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case body.LogProbs != nil && *body.LogProbs:
 			_, _ = w.Write([]byte(s.candidateReply()))
+		case isFencedTrial(body.Messages) && s.fencedTrial != "":
+			_, _ = w.Write([]byte(chatReply(jsonString(s.fencedTrial), "")))
 		case len(body.Tools) == 1:
 			_, _ = w.Write([]byte(s.toolReply()))
 		case len(body.Tools) == 2:
@@ -110,7 +126,36 @@ func batteryServer(t *testing.T, s script) (*httptest.Server, *requestLog) {
 	return srv, log
 }
 
+// fencedTrialMarker is the heading the taught markdown-fenced instructions open with: a request
+// whose system message carries it is the markdown-fenced trial, the one request the battery
+// teaches a format in.
+const fencedTrialMarker = "## Tool Call Format"
+
+// isFencedTrial reports whether a request is the markdown-fenced trial, routed by its system
+// message exactly as the plan's fake upstream contract says.
+func isFencedTrial(messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}) bool {
+	return len(messages) > 0 && messages[0].Role == "system" &&
+		strings.Contains(messages[0].Content, fencedTrialMarker)
+}
+
+// fencedTrialRequests counts the markdown-fenced trial requests in a request log.
+func fencedTrialRequests(log *requestLog) int {
+	n := 0
+	for _, body := range log.all() {
+		if strings.Contains(body, fencedTrialMarker) {
+			n++
+		}
+	}
+	return n
+}
+
 func (s script) toolReply() string {
+	if s.writtenCall != "" {
+		return chatReply(jsonString(s.writtenCall), "")
+	}
 	if s.malformedTools != "" {
 		return chatReply("null", `,"tool_calls":`+s.malformedTools)
 	}
@@ -237,8 +282,9 @@ func TestBatteryAllPass(t *testing.T) {
 }
 
 // The no-native-tools model: it answers in prose when offered a tool, so neither the tool probe
-// nor the chain that depends on it passes — and the suggested profile switches the tool-call
-// format to the text one, which is the whole point of suggesting a profile at all.
+// nor the chain that depends on it passes. Prose is no evidence that any text format carries its
+// call — the markdown-fenced trial's reply does not parse to probe_echo — so the suggestion stays
+// native rather than naming a format the model was never seen to use.
 func TestBatteryNoNativeTools(t *testing.T) {
 	t.Parallel()
 	b := runBattery(t, script{structured: true, logprobs: true})
@@ -252,8 +298,121 @@ func TestBatteryNoNativeTools(t *testing.T) {
 	if got := Tier(b); got != TierBasic {
 		t.Errorf("tier = %q; want %q for one observed capability", got, TierBasic)
 	}
-	if got := SuggestProfile(b).ToolCallFormat; got != domain.FormatMarkdownFenced {
-		t.Errorf("suggested tool-call-format = %q; want the text format for a model with no native calls", got)
+	if got := SuggestProfile(b).ToolCallFormat; got != domain.FormatNative {
+		t.Errorf("suggested tool-call-format = %q; want native for a model whose call no trial parsed", got)
+	}
+}
+
+// pythonicCall is the call shape a real model wrote in its reply (docs/skill-runs/probe-model,
+// 2026-10-08, model 3): no listed format parses it, and the salvage guard does not run it.
+const pythonicCall = `probe_echo(text="apogee")`
+
+// fencedCall is a probe_echo call written in the markdown-fenced format the trial teaches.
+const fencedCall = "```tool\nTOOL_NAME\nprobe_echo\nBEGIN_ARG\ntext\nEND_ARG\napogee\n```"
+
+// The markdown-fenced trial is asked only when the native probe completed without a call the loop
+// or the salvage guard would run, and the format is suggested only when the trial's reply parsed
+// to the canary tool. Every other case suggests native (bd apogee-probe-suggests-unparseable-format).
+func TestBatteryFencedTrialSuggestsOnlyOnEvidence(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		script     script
+		wantSent   int
+		wantTrial  FencedTrial
+		wantFormat domain.ToolCallFormat
+	}{
+		{
+			name:       "native call",
+			script:     script{nativeTools: true, structured: true, chain: true, fencedTrial: fencedCall},
+			wantFormat: domain.FormatNative,
+		},
+		{
+			name:       "salvageable JSON call",
+			script:     script{salvageableTools: true, structured: true, fencedTrial: fencedCall},
+			wantFormat: domain.FormatNative,
+		},
+		{
+			name:       "pythonic call, fenced trial reply",
+			script:     script{writtenCall: pythonicCall, structured: true, fencedTrial: fencedCall},
+			wantSent:   1,
+			wantTrial:  FencedTrial{Ran: true, Parsed: true},
+			wantFormat: domain.FormatMarkdownFenced,
+		},
+		{
+			name:       "pythonic call, pythonic trial reply",
+			script:     script{writtenCall: pythonicCall, structured: true, fencedTrial: pythonicCall},
+			wantSent:   1,
+			wantTrial:  FencedTrial{Ran: true},
+			wantFormat: domain.FormatNative,
+		},
+		{
+			name:       "native probe never completed",
+			script:     script{fail: true, fencedTrial: fencedCall},
+			wantFormat: domain.FormatNative,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, log := runBatteryRecording(t, tc.script)
+
+			if got := fencedTrialRequests(log); got != tc.wantSent {
+				t.Errorf("markdown-fenced trial requests sent = %d; want %d", got, tc.wantSent)
+			}
+			if b.FencedTrial != tc.wantTrial {
+				t.Errorf("fenced trial = %+v; want %+v", b.FencedTrial, tc.wantTrial)
+			}
+			if got := SuggestProfile(b).ToolCallFormat; got != tc.wantFormat {
+				t.Errorf("suggested tool-call-format = %q; want %q", got, tc.wantFormat)
+			}
+		})
+	}
+}
+
+// A trial request that never completes confirms no format: the suggestion stays native and the
+// failure is kept for the report, and — the trial not being a Capability — the battery is still
+// complete.
+func TestBatteryFencedTrialFailureSuggestsNative(t *testing.T) {
+	t.Parallel()
+	b, log := runBatteryRecording(t, script{writtenCall: pythonicCall, structured: true, fencedTrialFail: true})
+
+	if got := fencedTrialRequests(log); got == 0 {
+		t.Error("the markdown-fenced trial was never sent")
+	}
+	if !b.FencedTrial.Ran || b.FencedTrial.Parsed || b.FencedTrial.Failure == "" {
+		t.Errorf("fenced trial = %+v; want a run that failed without parsing", b.FencedTrial)
+	}
+	if got := SuggestProfile(b).ToolCallFormat; got != domain.FormatNative {
+		t.Errorf("suggested tool-call-format = %q; want native when the trial never completed", got)
+	}
+	if !b.Complete() {
+		t.Errorf("a failed trial is not a failed capability probe; the battery is complete: %+v", b.Findings)
+	}
+}
+
+// The trial is not a Capability: whether it parses, fails or never runs, the feature set and the
+// behavioral signature — the identity a probe records — are the same.
+func TestFingerprintIgnoresTheFencedTrial(t *testing.T) {
+	t.Parallel()
+	parsed := runBattery(t, script{writtenCall: pythonicCall, structured: true, logprobs: true, fencedTrial: fencedCall})
+	unparsed := runBattery(t, script{writtenCall: pythonicCall, structured: true, logprobs: true, fencedTrial: pythonicCall})
+	failed := runBattery(t, script{writtenCall: pythonicCall, structured: true, logprobs: true, fencedTrialFail: true})
+
+	if !parsed.FencedTrial.Parsed {
+		t.Fatalf("the fixture no longer parses the trial: %+v", parsed.FencedTrial)
+	}
+	want := BehaviorSignature(unparsed)
+	for name, b := range map[string]Battery{"parsed": parsed, "failed": failed} {
+		if got := BehaviorSignature(b); got != want {
+			t.Errorf("%s trial moved the signature: %q vs %q", name, got, want)
+		}
+		if got, wantFeatures := strings.Join(b.Features(), "+"), strings.Join(unparsed.Features(), "+"); got != wantFeatures {
+			t.Errorf("%s trial moved the features: %q vs %q", name, got, wantFeatures)
+		}
+	}
+	if fp := Fingerprint("fake-model", parsed); fp != Fingerprint("fake-model", unparsed) {
+		t.Errorf("the trial moved the fingerprint: %+v", fp)
 	}
 }
 

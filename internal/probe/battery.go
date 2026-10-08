@@ -79,6 +79,27 @@ type Battery struct {
 	Findings   []Finding
 	Candidates []string
 	Thinking   ThinkingObservation
+
+	// ToolReply is the visible content of the native tool-call probe's reply, kept so the report
+	// can quote the call a model WROTE when no listed format carries it — that shape is the
+	// user's material for a format of their own. Salvaged reports that the tool-call salvage guard
+	// would run the call written there. FencedTrial is the one extra request that asks whether the
+	// markdown-fenced format carries the model's call. None of the three is a Capability: they
+	// never reach Features, Complete or the fingerprint, and they feed only the suggested
+	// tool-call format and the report line that explains it.
+	ToolReply   string
+	Salvaged    bool
+	FencedTrial FencedTrial
+}
+
+// FencedTrial is the markdown-fenced trial's outcome. Ran is false when the trial was not asked
+// for — a native call arrived, the salvage guard already runs the written call, or the native
+// probe never completed. Parsed reports that the reply, read by the markdown-fenced parser,
+// carried a call to the canary tool; Failure is set only when the trial request never completed.
+type FencedTrial struct {
+	Ran     bool
+	Parsed  bool
+	Failure string
 }
 
 // ThinkingObservation records how the model surfaced private reasoning, if at all: through the
@@ -100,6 +121,16 @@ func (b Battery) Observed(c Capability) bool {
 		}
 	}
 	return false
+}
+
+// finding returns the battery's Finding for one capability, and whether the battery holds one.
+func (b Battery) finding(c Capability) (Finding, bool) {
+	for _, f := range b.Findings {
+		if f.Capability == c {
+			return f, true
+		}
+	}
+	return Finding{}, false
 }
 
 // Complete reports whether every capability probe finished. It gates the fingerprint: a run
@@ -132,7 +163,10 @@ func (b Battery) Features() []string {
 }
 
 // RunBattery runs the capability suite against chat: the three capability probes in suite
-// order, then the candidate-distribution probe. It spends real tokens on a live Upstream and
+// order, then the candidate-distribution probe. Between the native tool-call probe and the rest,
+// it runs the markdown-fenced trial when that probe completed without a native call the loop
+// could dispatch and without a written call the salvage guard runs — the one case where a text
+// format is the question, and the only case where the trial is asked. It spends real tokens on a live Upstream and
 // is therefore never called on a path the user did not explicitly ask for (ADR 0021 §1).
 //
 // It returns a Battery rather than an error because a failed probe is a REPORTED finding: a
@@ -142,7 +176,14 @@ func (b Battery) Features() []string {
 func RunBattery(ctx context.Context, chat Chat) Battery {
 	b := Battery{Version: BatteryVersion}
 
-	toolFinding, toolResp := probeNativeToolCall(ctx, chat)
+	toolFinding, toolResp, salvaged := probeNativeToolCall(ctx, chat)
+	if toolFinding.Failure == "" {
+		b.ToolReply = toolResp.Content
+		b.Salvaged = salvaged
+		if !toolFinding.Observed && !salvaged {
+			b.FencedTrial = runFencedTrial(ctx, chat)
+		}
+	}
 	jsonFinding, jsonResp := probeStructuredJSON(ctx, chat)
 	chainFinding := probeMultiStepChain(ctx, chat)
 	b.Findings = []Finding{toolFinding, jsonFinding, chainFinding}
@@ -194,40 +235,84 @@ func salvageableCallName(content string) (string, bool) {
 	return calls[0].Tool, true
 }
 
+// echoAsk is the native tool-call probe's request, and the markdown-fenced trial's: the trial
+// asks the same thing under a taught format, so a call it parses answers the native probe's
+// own question.
+const echoAsk = `Call the tool "probe_echo" with the text "apogee".`
+
 // probeNativeToolCall offers exactly one tool and asks for it by name. A model that answers in
 // prose ("I would call probe_echo...") fails the probe, which is the point: the question is
-// whether the STRUCTURED channel carries the call, because that is what the loop reads.
-func probeNativeToolCall(ctx context.Context, chat Chat) (Finding, provider.RawResponse) {
+// whether the STRUCTURED channel carries the call, because that is what the loop reads. The
+// third result reports that the salvage guard would run a call written in the reply's content.
+func probeNativeToolCall(ctx context.Context, chat Chat) (Finding, provider.RawResponse, bool) {
 	f := Finding{Capability: CapNativeToolCall}
 	resp, err := chat(ctx, provider.Request{
 		Messages: []provider.Message{
 			{Role: "system", Content: batterySystemPrompt},
-			{Role: "user", Content: `Call the tool "probe_echo" with the text "apogee".`},
+			{Role: "user", Content: echoAsk},
 		},
 		Tools: []provider.ToolSpec{echoTool},
 	})
 	if err != nil {
 		f.Failure = err.Error()
 		f.Detail = "the probe never completed, so this capability is unknown"
-		return f, resp
+		return f, resp, false
 	}
 	calls := wellFormedToolCalls(resp.ToolCalls)
 	if len(calls) == 0 {
 		if len(resp.ToolCalls) > 0 {
 			f.Detail = malformedToolCallsDetail(resp.ToolCalls, resp.Content)
-			return f, resp
+			return f, resp, false
 		}
 		if name, ok := salvageableCallName(resp.Content); ok {
 			f.Detail = "the reply carried no tool_calls entry, but its content carried a JSON call for " +
 				name + " — the tool-call salvage guard runs it"
-			return f, resp
+			return f, resp, true
 		}
 		f.Detail = "the reply carried no tool_calls entry — " + firstWords(resp.Content)
-		return f, resp
+		return f, resp, false
 	}
 	f.Observed = true
 	f.Detail = fmt.Sprintf("the reply carried a native tool_calls entry for %q", calls[0].Function.Name)
-	return f, resp
+	return f, resp, false
+}
+
+// fencedTrialProfile is the profile the markdown-fenced trial teaches and parses with. One value
+// drives both processing.InstructionsFor and processing.ParserFor, so what the model is taught
+// and what its reply is read by stay the one seam a session would use under that profile.
+var fencedTrialProfile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+
+// runFencedTrial asks the native probe's question again with no wire tools, the markdown-fenced
+// format taught in the system message over a menu of the canary tool alone, and reads the reply
+// with that format's parser. It is evidence for the suggested tool-call format only: a model whose
+// written call this parser cannot read must not be told the format fits (the probe suggests
+// markdown-fenced only on a parsed call to the canary tool).
+func runFencedTrial(ctx context.Context, chat Chat) FencedTrial {
+	trial := FencedTrial{Ran: true}
+	menu := []domain.ToolDef{{Name: echoTool.Name, Description: echoTool.Description, Schema: echoTool.Parameters}}
+	instructions, err := processing.InstructionsFor(fencedTrialProfile, menu)
+	if err != nil {
+		trial.Failure = err.Error()
+		return trial
+	}
+	parser, _, err := processing.ParserFor(fencedTrialProfile)
+	if err != nil {
+		trial.Failure = err.Error()
+		return trial
+	}
+	resp, err := chat(ctx, provider.Request{
+		Messages: []provider.Message{
+			{Role: "system", Content: batterySystemPrompt + "\n\n" + instructions},
+			{Role: "user", Content: echoAsk},
+		},
+	})
+	if err != nil {
+		trial.Failure = err.Error()
+		return trial
+	}
+	call, found := parser.ParseToolCall(resp.Content)
+	trial.Parsed = found && call.Tool == echoTool.Name
+	return trial
 }
 
 // probeStructuredJSON asks for a bare JSON object with no tools offered. Servers and models

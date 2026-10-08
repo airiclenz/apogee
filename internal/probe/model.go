@@ -141,8 +141,11 @@ func (m Model) Report() string {
 		"",
 		"behavioral fingerprint")
 	lines = append(lines, m.fingerprintLines()...)
+	lines = append(lines, "")
+	if format := m.toolCallFormatLine(); format != "" {
+		lines = append(lines, field("tool-call format", format))
+	}
 	lines = append(lines,
-		"",
 		"suggested model profile — paste into ~/.apogee/config.yaml (nothing is written for you):",
 		ProfileYAML(m.Model, m.Profile))
 
@@ -169,6 +172,55 @@ func (m Model) findingLines() []string {
 		out = append(out, field(string(f.Capability), verdict))
 	}
 	return out
+}
+
+// toolCallFormatLine says why the suggested profile names the tool-call format it does, and
+// returns "" when a native call arrived — native then needs no explaining. Every other case
+// names the evidence behind the suggestion, and where no listed format was confirmed it quotes
+// the call the model wrote: that shape is what a custom-regex profile of the user's own would be
+// written from, and the probe never writes one for them.
+func (m Model) toolCallFormatLine() string {
+	native, ok := m.Battery.finding(CapNativeToolCall)
+	if !ok || native.Observed {
+		return ""
+	}
+	trial := m.Battery.FencedTrial
+	switch {
+	case native.Failure != "":
+		return "native — the native probe never completed, so no tool-call format was tested"
+	case m.Battery.Salvaged:
+		return "native — the model wrote its call as JSON in the reply, and the salvage guard runs that under native"
+	case trial.Parsed:
+		return "markdown-fenced — taught that format, the model wrote a probe_echo call it parses"
+	case trial.Failure != "":
+		return "native — the markdown-fenced trial never completed (" + trial.Failure +
+			"), so no text format was confirmed; the model wrote: " + quoteReply(m.Battery.ToolReply)
+	case trial.Ran:
+		return "native — no listed format parses this model's call; the model wrote: " +
+			quoteReply(m.Battery.ToolReply) +
+			" — a custom-regex profile (tool-call-pattern:, tool-call-example:) written from that shape is yours to add"
+	default:
+		return ""
+	}
+}
+
+// quoteReplyLimit is how many runes of a model's reply the tool-call format line quotes: enough to
+// show a written call's whole shape, short enough to keep the line one line.
+const quoteReplyLimit = 120
+
+// quoteReply renders a model reply for quoting in one report line: whitespace collapsed, cut on a
+// rune boundary at quoteReplyLimit with an ellipsis. An empty reply says so, because "the model
+// wrote nothing" is itself the finding. Terminal escapes are stripped where the report is printed
+// (cmd/apogee), not here.
+func quoteReply(s string) string {
+	t := strings.Join(strings.Fields(s), " ")
+	if t == "" {
+		return "nothing (the reply was empty)"
+	}
+	if runes := []rune(t); len(runes) > quoteReplyLimit {
+		t = string(runes[:quoteReplyLimit]) + "…"
+	}
+	return t
 }
 
 // candidateLine states whether the server exposed a candidate-token distribution — an
