@@ -332,7 +332,9 @@ script, a taken port — exits **1** with just the error.
 
 A fixture is something you **capture**, not something you write. `record` stands between a client
 and a real server, forwards `/v1/*` verbatim — plus llama.cpp's `/props`, the one path off `/v1/`
-it lets through, because apogee probes it — and writes everything it saw as a Script:
+it lets through, because apogee probes it — and writes everything it saw as a Script. One header
+is not forwarded: the client's `Accept-Encoding` is dropped, so the proxy's own transport asks for
+gzip and decodes the reply itself — a compressing upstream records exactly as an uncompressed one:
 
 ```console
 $ stubllm record --upstream http://127.0.0.1:1111 --out smoke.yaml

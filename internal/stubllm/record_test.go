@@ -1,6 +1,7 @@
 package stubllm
 
 import (
+	"compress/gzip"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -351,6 +353,200 @@ func TestRecorderCapturesDiscovery(t *testing.T) {
 			t.Errorf("recorded discovery = %+v, want %+v", script.Discovery, want)
 		}
 	})
+}
+
+// TestRecorderRecordsACompressingUpstream pins that a server which gzips whenever the request
+// accepts gzip records exactly as an uncompressed one does. Go's client asks for gzip on its
+// own, and a recorder that forwarded that header verbatim captured the compressed bytes: the
+// discovery block came out empty and every turn's text with it, while the client — which
+// decoded its own copy — saw nothing wrong. The client still has to read every reply.
+func TestRecorderRecordsACompressingUpstream(t *testing.T) {
+	t.Parallel()
+
+	t.Run("discovery", func(t *testing.T) {
+		t.Parallel()
+
+		want := Discovery{
+			Models: []DiscoveredModel{{ID: "rec-model", ContextLength: 32768}},
+			Props:  &Props{NCtx: 8192, TotalSlots: 1},
+		}
+		origin := gzipUpstream(t, Script{Model: "rec-model", Discovery: want, Turns: []Turn{{Text: "ok"}}})
+		path := filepath.Join(t.TempDir(), "fixture.yaml")
+		proxy := recorderProxy(t, origin.URL, path)
+
+		for _, probe := range []string{modelsPath, propsPath} {
+			if status := getStatusAt(t, proxy.URL+probe); status != http.StatusOK {
+				t.Fatalf("GET %s through the proxy = %d, want 200", probe, status)
+			}
+		}
+		postTo(t, http.DefaultClient, proxy.URL, "rec-model", "hi", false)
+		if err := proxy.recorder.Close(); err != nil {
+			t.Fatalf("close recorder: %v", err)
+		}
+
+		script, err := Load(path)
+		if err != nil {
+			t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+		}
+		if !reflect.DeepEqual(script.Discovery, want) {
+			t.Errorf("recorded discovery = %+v, want %+v\n%s", script.Discovery, want, read(t, path))
+		}
+		origin.assertCompressed(t)
+	})
+
+	t.Run("a non-streamed reply", func(t *testing.T) {
+		t.Parallel()
+
+		origin := gzipUpstream(t, Script{Model: "rec-model", Turns: []Turn{{Text: "whole reply"}}})
+		path := filepath.Join(t.TempDir(), "fixture.yaml")
+		proxy := recorderProxy(t, origin.URL, path)
+
+		if body := postBodyTo(t, proxy.URL, "rec-model", "hi"); !strings.Contains(body, "whole reply") {
+			t.Errorf("client read %q, want the decoded reply carrying %q", body, "whole reply")
+		}
+		if err := proxy.recorder.Close(); err != nil {
+			t.Fatalf("close recorder: %v", err)
+		}
+
+		script, err := Load(path)
+		if err != nil {
+			t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+		}
+		if got := script.Turns[0]; got.Text != "whole reply" {
+			t.Errorf("turn = %+v, want the whole text", got)
+		}
+		origin.assertCompressed(t)
+	})
+
+	t.Run("a streamed reply", func(t *testing.T) {
+		t.Parallel()
+
+		origin := gzipUpstream(t, Script{Model: "rec-model", Turns: []Turn{{Text: "streamed reply", ChunkRunes: 4}}})
+		path := filepath.Join(t.TempDir(), "fixture.yaml")
+		proxy := recorderProxy(t, origin.URL, path)
+
+		if got := observe(t, proxy.URL, "rec-model", "hi"); got.text != "streamed reply" {
+			t.Errorf("client saw %q, want the decoded stream %q", got.text, "streamed reply")
+		}
+		if err := proxy.recorder.Close(); err != nil {
+			t.Fatalf("close recorder: %v", err)
+		}
+
+		script, err := Load(path)
+		if err != nil {
+			t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+		}
+		if got := script.Turns[0]; got.Text != "streamed reply" || got.ChunkRunes != 4 {
+			t.Errorf("turn = %+v, want the streamed text in chunks of 4", got)
+		}
+		origin.assertCompressed(t)
+	})
+}
+
+// compressingUpstream is a scripted upstream behind a layer that gzips every reply whose request
+// accepts gzip, as a server fronted by a compressing proxy does. It counts the replies it
+// compressed, so a test can tell the layer was reached and is not passing vacuously.
+type compressingUpstream struct {
+	URL        string
+	compressed *atomic.Int64
+}
+
+// gzipUpstream starts a compressingUpstream playing s for the duration of the test.
+func gzipUpstream(t *testing.T, s Script) compressingUpstream {
+	t.Helper()
+
+	origin, err := newServer(s)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	handler := origin.Handler()
+	compressed := &atomic.Int64{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if !strings.Contains(request.Header.Get("Accept-Encoding"), "gzip") {
+			handler.ServeHTTP(w, request)
+			return
+		}
+		compressed.Add(1)
+		zipped := &gzipResponse{ResponseWriter: w, zw: gzip.NewWriter(w)}
+		handler.ServeHTTP(zipped, request)
+		if zipped.wroteHeader {
+			_ = zipped.zw.Close()
+		}
+	}))
+	t.Cleanup(server.Close)
+	return compressingUpstream{URL: server.URL, compressed: compressed}
+}
+
+// assertCompressed fails the test when no reply went out compressed.
+func (u compressingUpstream) assertCompressed(t *testing.T) {
+	t.Helper()
+
+	if u.compressed.Load() == 0 {
+		t.Error("the upstream compressed no reply — the recorder was never shown gzip")
+	}
+}
+
+// gzipResponse compresses what a handler writes, flushing the compressor through on every Flush
+// so a stream still arrives event by event.
+type gzipResponse struct {
+	http.ResponseWriter
+	zw          *gzip.Writer
+	wroteHeader bool
+}
+
+// WriteHeader marks the reply as gzipped before the status goes out.
+func (g *gzipResponse) WriteHeader(status int) {
+	if !g.wroteHeader {
+		g.wroteHeader = true
+		g.Header().Del("Content-Length")
+		g.Header().Set("Content-Encoding", "gzip")
+	}
+	g.ResponseWriter.WriteHeader(status)
+}
+
+// Write compresses p, committing a 200 first when the handler set no status.
+func (g *gzipResponse) Write(p []byte) (int, error) {
+	if !g.wroteHeader {
+		g.WriteHeader(http.StatusOK)
+	}
+	return g.zw.Write(p)
+}
+
+// Flush pushes the compressed bytes so far through to the client.
+func (g *gzipResponse) Flush() {
+	if !g.wroteHeader {
+		g.WriteHeader(http.StatusOK)
+	}
+	_ = g.zw.Flush()
+	if flusher, ok := g.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// postBodyTo sends one non-streamed completion request with Go's default client and returns
+// the body as the client read it.
+func postBodyTo(t *testing.T, baseURL, model, prompt string) string {
+	t.Helper()
+
+	body := fmt.Sprintf(`{"model":%q,"stream":false,"messages":[{"role":"user","content":%q}]}`,
+		model, prompt)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		baseURL+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	reply, err := readAll(resp)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	return reply
 }
 
 // getStatusAt GETs a URL and returns only the status, draining the body so the proxy files it.

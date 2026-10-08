@@ -92,6 +92,11 @@ func NewRecorder(upstream, out string) (*Recorder, error) {
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(target)
 			request.Out.Host = target.Host
+			// The client's own Accept-Encoding is dropped so the proxy's transport adds its
+			// implicit gzip instead and decodes the reply itself. Forwarded as is, the header
+			// would hand an upstream that compresses its gzip bytes straight to capture, where
+			// neither a probe's JSON nor a completion's text could be read back.
+			request.Out.Header.Del("Accept-Encoding")
 		},
 		ModifyResponse: recorder.capture,
 		// A proxy that buffers is a proxy that invents timing. -1 flushes every write

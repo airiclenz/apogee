@@ -152,7 +152,7 @@ The headless text transcript gets its own case: `narrationSink.narrate` (`cmd/ap
 **Closes:** apogee-malformed-count-unsurfaced
 **Commit:** `fix(drivers): show and record the malformed-chunk note`
 
-## 6. stubllm record asks the upstream for an uncompressed reply
+## 6. stubllm record asks the upstream for an uncompressed reply — ✅ DONE (2026-10-08)
 
 **What:** Fix for `apogee-record-gzip-discovery-drop`: the recorder forwards the client's implicit `Accept-Encoding: gzip`, so `capture` sees gzip bytes and `fileProbe` drops the discovery reply.
 **Goal:** `stubllm record` against an upstream that gzips whenever the request accepts gzip records the discovery block, a non-streamed reply and a streamed reply exactly as against an uncompressed upstream; the client still decodes every reply.
