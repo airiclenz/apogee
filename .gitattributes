@@ -9,6 +9,13 @@ graphics/apogee-logo.md text eol=lf
 *.golden text eol=lf
 **/testdata/** text eol=lf
 
+# ...except binary fixtures, which the line above would otherwise mark as text: a CRLF byte pair
+# inside a PDF or an image would be rewritten to LF on `git add` and corrupt the fixture.
+**/testdata/**/*.pdf binary
+**/testdata/**/*.png binary
+**/testdata/**/*.gif binary
+**/testdata/**/*.jpg binary
+
 # The go:embed'd defaults must stay LF for the same reason the block art above does: //go:embed
 # bakes the bytes into the binary verbatim, so a core.autocrlf=true checkout ships a daemon unit,
 # a plist and a starter config whose every line ends in a carriage return, and which `apogee

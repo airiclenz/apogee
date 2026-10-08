@@ -62,7 +62,7 @@ server; naming a variable that is unset is refused rather than capturing a casse
 | `storyboards/<clip>.cassette` | the model replies `capture` saved and `record` replays (JSON, committed beside its storyboard) |
 | `fonts/` | the rasterizer's faces and their OFL licences (**Fonts and licences**, below) |
 | `stage/` | templates for the taskman stage repo (copied out by `setup.sh`) |
-| `history/` | one folder per shipped clip: the GIF that shipped, its variants, and a `NOTES.md` of the recording facts |
+| `history/` | local only (gitignored): one folder per shipped clip — the GIF that shipped, its variants, and a `NOTES.md` of the recording facts |
 | `cmd/demorig` (repo root) | the rig's Go tool: `lint`, `capture`, `record`, `check`, `render` |
 
 Nothing is built inside this repo. The rig lands in `~/.cache/apogee-demo` (override with
@@ -382,6 +382,12 @@ beside it rather than loose in `graphics/`.
 
 `graphics/demo.gif` stays the one path the README references; `history/` is the record, not the
 link.
+
+`history/` is **local only**: `/.gitignore` keeps it out of the tree, because each clip weighs
+megabytes and every clone would carry it forever. The folders below were tracked until 2026-10-08
+and stay readable from git history — `git show 52e1264e:graphics/demo/history/<folder>/NOTES.md`,
+or `git restore --source=52e1264e -- graphics/demo/history/` to bring them back into a working
+tree. A clip recorded since lives only on the machine that recorded it.
 
 | folder | clip |
 |---|---|
