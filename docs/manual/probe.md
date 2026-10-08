@@ -45,7 +45,8 @@ from those four system directories; one found only on `PATH` is never run and re
 `apogee probe model` is the other half, and it is deliberately an **explicit act**
 rather than something the bare noun triggers, because it costs live model calls *and*
 writes. It runs a three-part capability battery — a native tool call, JSON/structured
-output, and a multi-step tool chain — then prints what it observed, an ordinal
+output, and a multi-step tool chain, plus one extra request when the native call did not
+arrive (see how the tool-call format is picked, below) — then prints what it observed, an ordinal
 capability tier, and the `model-profiles:` entry the findings suggest — keyed by the
 model it probed, and paste-ready as YAML
 (your `config.yaml` is never edited). It also records a **behavioral fingerprint**: the
@@ -65,6 +66,31 @@ since a timed-out attempt is retried and the wait before the call itself gives u
 times the attempt budget. It defaults to five minutes, which one short exchange ordinarily costs a
 30B-class model quantised onto a CPU; raise it on a slower box (`--timeout 10m`). There is no
 unbounded setting: `--timeout 0`, like any negative value, keeps the five-minute default.
+
+**How the suggested `tool-call-format:` is picked.** The probe suggests a format only when the
+battery saw that format carry the model's call, and a `tool-call format` line in the report says
+which case applied:
+
+- **A native call arrived.** The suggestion is `native`, and no line is printed.
+- **The model wrote its call as JSON in the reply text.** The suggestion is `native`: the
+  tool-call salvage guard runs such a call, and it runs only under `native`.
+- **Anything else** costs **one extra request**: the native question again, with no tools on the
+  wire and the `markdown-fenced` format taught in the system message, the way a session under that
+  format would teach it. If the reply parses to a call to the probe's tool, the suggestion is
+  `markdown-fenced`. If it does not, the suggestion is `native` and the line says no listed format
+  parses this model's call, quoting the call the model wrote in the native probe (on one line, cut
+  at 120 characters). If the extra request itself fails, the suggestion is `native` and the line
+  quotes the call the same way.
+- **The native probe never completed.** No format was tested and no extra request is sent; the
+  suggestion is `native` and the line says so.
+
+The extra request is not a capability: it never moves the tier, the fingerprint or the record.
+The probe never suggests `custom-regex`, and never writes a `tool-call-pattern:` or a
+`tool-call-example:` for you — the quoted call is the material you write both from (see
+[model profiles](configuration.md#model-profiles--model-profiles)). The pattern's `args` group must
+capture JSON arguments, so a call written any other way — `probe_echo(text="apogee")` — is never
+converted for you.
+
 Both `apogee probe` and `apogee probe model` resolve the entry's API key before
 they look at the server, and a source that refuses — an `api-key-cmd:` that fails, an
 `api-key-env:` naming a variable that is not set — fails the command with that source's own

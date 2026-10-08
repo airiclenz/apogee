@@ -14,10 +14,11 @@
 // The MODEL half — RunBattery and GatherModel — is the other kind of thing entirely, and the
 // package keeps the two textually apart for that reason. It spends real tokens on a live
 // Upstream (native tool call, structured JSON, a multi-step tool chain, and a one-token
-// candidate-distribution probe) and, when the run completes, it earns the model's advertised
-// label a fingerprint at domain.ConfidenceMedium. The battery raises an identity's TIER; it
-// never re-spells it (ADR 0021, Amendment 2026-07-22) — the label is the key every per-model
-// setting and every Library observation is filed under. What was observed travels beside
+// candidate-distribution probe, plus the markdown-fenced trial when the native call did not
+// arrive) and, when the run completes, it earns the model's advertised label a fingerprint at
+// domain.ConfidenceMedium. The battery raises an identity's TIER; it never re-spells it (ADR
+// 0021, Amendment 2026-07-22) — the label is the key every per-model setting and every Library
+// observation is filed under. What was observed travels beside
 // the identity as the BehaviorSignature: a fuzzy feature match, never a hash of a response,
 // which sampling alone would move (ADR 0021 §6). The battery still writes nothing itself: the
 // record is persisted by the composition root through this package's SaveProbeRecord, so
@@ -47,9 +48,10 @@
 // The model half, the part that spends tokens. battery.go is the live suite: the Capability slugs
 // (stable, because they are folded into the fingerprint), the Chat seam it calls the Upstream
 // through, the probes themselves — native tool call, structured JSON, multi-step chain, and the
-// one-token candidate distribution — the thinking observation, and BatteryVersion, which stamps
-// every record because a label earned under one battery is not comparable to one earned under
-// another. The two prompts it sends are not in that file but beside it, as plain embedded assets:
+// one-token candidate distribution — the markdown-fenced trial (one extra request, not a
+// Capability, that is the only evidence for suggesting a text tool-call format), the thinking
+// observation, and BatteryVersion, which stamps every record because a label earned under one
+// battery is not comparable to one earned under another. The two prompts it sends are not in that file but beside it, as plain embedded assets:
 // prompts/system-prompt.txt and prompts/candidate-prompt.txt, with prompts/README.md — the one
 // file there that is NOT embedded — stating the rule that governs the directory, that every byte
 // under it is folded into the fingerprint and so editing one is a BatteryVersion bump.

@@ -1333,7 +1333,11 @@ model-profiles:
 ```
 
 `apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready
-to paste here. Editing this block while a session runs swaps the parser on the spot: it is not one
+to paste here. Its `tool-call-format:` is `native` or `markdown-fenced` — the latter only when one
+extra request, taught that format, came back with a call it parses — and never `custom-regex`:
+where no listed format reads the model's call, the report quotes the call the model wrote, and that
+shape is what you write `tool-call-pattern:` and `tool-call-example:` from ([how the probe picks
+the format](probe.md)). Editing this block while a session runs swaps the parser on the spot: it is not one
 of the sixteen keys, listed at the top of this page, that wait for the next start.
 
 ## Keeping the session store bounded — `sessions:`

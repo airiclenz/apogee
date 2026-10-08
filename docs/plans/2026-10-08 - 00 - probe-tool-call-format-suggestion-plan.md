@@ -97,7 +97,11 @@ request, `native — the native probe never completed, so no tool-call format wa
 
 **Commit:** `fix(probe): suggest a tool-call format only when the battery saw it carry the call`
 
-## 2. State the suggestion rule in the manual
+## 2. State the suggestion rule in the manual — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): the plan asks for one CHANGELOG Fixed entry covering both beads, but item 1's sidecar already carries its own entry (apogee-probe-suggests-unparseable-format); this sidecar adds a second, docs-only entry for apogee-probe-suggests-tool-call-example rather than rewriting item 1's — the closeout may merge the two.
+NOTES (2026-10-08): the probe.md rule also states that the pattern's `args` group must capture JSON, so a non-JSON call such as `probe_echo(text="apogee")` is never converted (per the plan's ratified Example-key call and configuration.md's `tool-call-example:` check).
+NOTES (2026-10-08): left untouched, outside the rule (they say neither what format is suggested nor how many requests are spent): `cmd/apogee/probemodel.go` --help ("asks the configured model to do three things", the capabilities) and CONTEXT.md:2436, whose request list already omitted the candidate-distribution probe before this run.
 
 **What:**
 **Goal:** the user manual states how `apogee probe model` picks the suggested `tool-call-format:`

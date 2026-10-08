@@ -767,8 +767,9 @@ func placeholderToolCallReply() string {
 // about a model, not about a broken server.
 //
 // It is a fixture of its own rather than a stubllm script (checklist T-11 step 8) because
-// `probe model` branches on request SHAPE: the battery asks five differently-shaped questions —
-// one tool, two tools twice, logprobs, no tools — and stubllm matches on the last message's text
+// `probe model` branches on request SHAPE: the battery asks up to six questions in four shapes —
+// one tool, two tools twice, logprobs, and no tools (the JSON question, and the markdown-fenced
+// trial when no native call arrived, as here) — and stubllm matches on the last message's text
 // and cannot emit a logprobs reply at all. A scripted upstream cannot drive this battery.
 func modelUpstreamPlaceholderToolCalls(t *testing.T) *httptest.Server {
 	t.Helper()
