@@ -6,8 +6,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-two line kinds of ADR 0075 §4 — twenty Event variants, workflow_phase (ADR 0087) the
-// newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// The twenty-three line kinds of ADR 0075 §4 — twenty-one Event variants, workflow_phase (ADR 0087)
+// and malformed_chunks the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -32,6 +32,7 @@ const (
 	kindSeamClosed        = "seam_closed"
 	kindUpstreamAttempt   = "upstream_attempt"
 	kindWorkflowPhase     = "workflow_phase"
+	kindMalformedChunks   = "malformed_chunks"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -62,6 +63,7 @@ func Kinds() []string {
 		kindSeamClosed,
 		kindUpstreamAttempt,
 		kindWorkflowPhase,
+		kindMalformedChunks,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -229,6 +231,8 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 			Detail:   e.Detail,
 			Call:     e.Call,
 		}, true
+	case domain.MalformedChunksEvent:
+		return kindMalformedChunks, e.EventBase, malformedChunksData{Count: e.Count}, true
 	default:
 		return "", domain.EventBase{}, nil, false
 	}
@@ -403,6 +407,12 @@ type refClippedData struct {
 	Ref      string `json:"ref"`
 	Tokens   int    `json:"tokens"`
 	Absolute bool   `json:"absolute"`
+}
+
+// malformedChunksData is the malformed_chunks line: how many undecodable stream chunks a reply
+// that still ended successfully skipped — text or a tool call it carried may be missing.
+type malformedChunksData struct {
+	Count int `json:"count"`
 }
 
 // usageData is the usage line: the token accounting an Upstream reply carried, the emitting

@@ -561,6 +561,12 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			return nil, turnFailed, ""
 		}
 
+		// The reply ended on Done, so it is used — but a reply that skipped undecodable chunks may
+		// be missing text or a call, and looking clean must not hide that: one note per completion.
+		if reply.malformed > 0 {
+			a.cfg.Events.Emit(domain.MalformedChunksEvent{EventBase: a.base(turn), Count: reply.malformed})
+		}
+
 		// The parse is per call: a call whose arguments are not a JSON object stays in the
 		// Response marked (domain.ToolCall.Malformed) and is answered on its own at dispatch, its
 		// error tool-result row being its surface — no ErrorEvent — while its siblings run.

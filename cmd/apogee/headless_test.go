@@ -2988,6 +2988,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 				domain.SeamClosedEvent{Seam: domain.MomentPostResponse, Fired: []string{"tool-call-repair"}},
 				domain.UpstreamAttemptEvent{Server: "stub", Outcome: "ok"},
 				domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Workflow: "wf-1", Name: "audit"},
+				domain.MalformedChunksEvent{Count: 2},
 			} {
 				sink.Emit(e)
 			}
@@ -2998,7 +2999,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 		t.Fatalf("a completed run returned an error: %v", err)
 	}
 
-	// The two frames bracket the nineteen default-stream variants, in the contract's own order —
+	// The two frames bracket the twenty default-stream variants, in the contract's own order —
 	// seam_closed is the one kind the default stream holds back.
 	kinds := eventjson.Kinds()
 	want := []string{"run_started"}

@@ -531,6 +531,30 @@ func (e RefClippedEvent) Notice() string {
 	return fmt.Sprintf("%s clipped to %s tokens (its share of the context window) — read_file ranges for the rest", e.Ref, bound)
 }
 
+// MalformedChunksEvent reports that an Upstream reply which ended SUCCESSFULLY skipped stream
+// chunks it could not decode (the provider's Delta.MalformedChunks on the terminal Done). It is a
+// NOTE, never a fault: the reply was used as delivered, but text or a tool call those chunks
+// carried may be missing from it, so a reply that looks clean is not silently trusted as whole.
+// A faulted stream carries the count in its fault message instead and never emits this event.
+//
+// Count is the number of chunks that reply dropped, always positive — a reply with nothing
+// dropped emits no event. Notice renders the one sentence every Driver shows, so no surface holds
+// its own spelling of the drop.
+type MalformedChunksEvent struct {
+	EventBase
+	Count int
+}
+
+// Notice is the human-facing sentence for one reply's dropped chunks: how many were skipped and
+// what that may have cost the reply.
+func (e MalformedChunksEvent) Notice() string {
+	noun := "chunks"
+	if e.Count == 1 {
+		noun = "chunk"
+	}
+	return fmt.Sprintf("the reply dropped %d malformed stream %s — text may be missing", e.Count, noun)
+}
+
 // UsageEvent reports the token accounting an Upstream reply carried — the prompt
 // (context) tokens, the generated completion tokens, and their total — once a Turn's
 // stream reaches its terminal Done. A server that omits usage emits no UsageEvent, so an

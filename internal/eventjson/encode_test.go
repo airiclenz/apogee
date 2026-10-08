@@ -366,6 +366,16 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"ref":"@docs/big.md","tokens":32000,"absolute":true}`,
 		},
 		{
+			name: "malformed_chunks",
+			event: domain.MalformedChunksEvent{
+				EventBase: domain.EventBase{Turn: 4},
+				Count:     2,
+			},
+			wantKind: "malformed_chunks",
+			wantBase: domain.EventBase{Turn: 4},
+			wantData: `{"count":2}`,
+		},
+		{
 			name: "usage",
 			event: domain.UsageEvent{
 				EventBase:          domain.EventBase{Turn: 2},
@@ -676,16 +686,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyTwo pins the vocabulary itself — the twenty serialized variants, the opt-in
-// seam_closed among them, plus the two frames — so a kind added to the encoder without a manual
-// entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyTwo(t *testing.T) {
+// TestKindsAreTwentyThree pins the vocabulary itself — the twenty-one serialized variants, the
+// opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
+// manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
+func TestKindsAreTwentyThree(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 22 {
-		t.Fatalf("len(Kinds()) = %d, want 22: %v", len(kinds), kinds)
+	if len(kinds) != 23 {
+		t.Fatalf("len(Kinds()) = %d, want 23: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

@@ -109,7 +109,7 @@ internal/agent/turn.go — foldSaturated, autoFoldArmed; internal/agent/predicti
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'UnknownWindow|PredictiveGuard|AutoCompact|EmergencyFold|CompactOnDemand|StandDown|GrowthBounds|FoldTable' ./internal/agent/`
 **Commit:** `fix(agent): stop re-folding every turn once a fold has saturated`
 
-## 4. The engine emits a note when a successful reply dropped malformed chunks
+## 4. The engine emits a note when a successful reply dropped malformed chunks — ✅ DONE (2026-10-08)
 
 **What:** Fix for `apogee-malformed-count-unsurfaced`, engine half: `collectCompletion` drops `Delta.MalformedChunks` on a successful `DeltaDone`.
 **Goal:** a completion whose stream ended successfully with `MalformedChunks > 0` yields exactly one `domain.MalformedChunksEvent{Count}` from the loop; its `Notice()` returns `the reply dropped N malformed stream chunks — text may be missing` (singular `chunk` for 1); a fault path is unchanged and emits no extra event.

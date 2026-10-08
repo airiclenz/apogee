@@ -291,6 +291,13 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
+			name: "MalformedChunksEvent appends nothing yet and moves nothing else",
+			// A successful reply skipped undecodable stream chunks. The engine emits the note; the
+			// TUI does not render it yet, so the fold is a no-op here — no entry, no gauge, no
+			// progress save.
+			event: domain.MalformedChunksEvent{Count: 2},
+		},
+		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",
 			// The top-level reading is the status line's: it lights the gauge and nothing in the
 			// scrollback. A sub-agent's reading (Depth > 0) appends no entry either — it lands ON

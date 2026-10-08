@@ -315,6 +315,7 @@ type (
 	ErrorEvent             = domain.ErrorEvent
 	PruneEvent             = domain.PruneEvent
 	RefClippedEvent        = domain.RefClippedEvent
+	MalformedChunksEvent   = domain.MalformedChunksEvent
 	UsageEvent             = domain.UsageEvent
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent

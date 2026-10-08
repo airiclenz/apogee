@@ -95,3 +95,25 @@ func TestSubAgentNamedEventCarriesTheChildRunsIdentity(t *testing.T) {
 		t.Error("two members of one fan-out share an EventBase; the rename cannot be attributed")
 	}
 }
+
+// TestMalformedChunksEventNoticeNamesTheCount pins the one sentence every Driver shows for a
+// successful reply that dropped undecodable stream chunks: the count, and the singular noun for a
+// single chunk, so no surface spells the drop its own way.
+func TestMalformedChunksEventNoticeNamesTheCount(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		count int
+		want  string
+	}{
+		{count: 1, want: "the reply dropped 1 malformed stream chunk — text may be missing"},
+		{count: 2, want: "the reply dropped 2 malformed stream chunks — text may be missing"},
+	}
+	for _, tc := range cases {
+		got := MalformedChunksEvent{Count: tc.count}.Notice()
+
+		if got != tc.want {
+			t.Errorf("Notice() for Count %d = %q, want %q", tc.count, got, tc.want)
+		}
+	}
+}

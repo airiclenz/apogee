@@ -28,6 +28,7 @@ type completion struct {
 	overflow  bool            // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
 	retryable bool            // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable in-band, or a mid-stream EOF / net timeout): re-sending the same request can succeed
 	errMsg    string          // the terminal fault message when failed
+	malformed int             // stream chunks the provider could not decode and skipped, as the terminal Done reported them; 0 on a fault (its errMsg names the count)
 
 	thinkingBlocks []json.RawMessage // the reply's opaque reasoning blocks (DeltaThinkingBlock), in wire order
 	requested      string            // the model the request named — the one thinkingBlocks are bound to
@@ -81,6 +82,7 @@ func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, obs
 			out.finish = domain.FinishReason(delta.FinishReason)
 			out.usage = delta.Usage
 			out.served = delta.Model
+			out.malformed = delta.MalformedChunks
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			// Both are terminal, but only the overflow says something about the request that the
 			// caller can act on: the prompt exceeded the window, so a shorter history is a real
