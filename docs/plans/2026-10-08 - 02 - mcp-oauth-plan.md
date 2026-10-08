@@ -73,7 +73,9 @@ NOTES (2026-10-08): the secret-env scrub extends MCPHeaderEnvNames itself (name 
 **Acceptance:** `go build ./... && go vet ./internal/config/ ./internal/mcp/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestApplyConfigMCPServerAuth|TestApplyConfigMCPServerHeadersRefusals|TestMCPHeaderEnvNamesAreSortedAndDeduplicated|TestRegistryIsBijectionWithFileConfig' ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestServerConfigValidateAuth' ./internal/mcp/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectConfigScrubsTheMCPHeaderEnvNames' ./cmd/apogee/`
 **Commit:** `feat(config): accept auth: oauth on streamable-http MCP servers`
 
-## 3. Token store under `~/.apogee/mcp-auth/`
+## 3. Token store under `~/.apogee/mcp-auth/` — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): Save also narrows an already-existing `mcp-auth` dir to 0700 (MkdirAll leaves an existing dir's mode alone); a corrupt record file is a Load error, not a silent miss; the on-disk record nests the normalised endpoint beside the exported Record, so callers pass the configured endpoint to Load/Save and never set it themselves.
 
 **What:**
 **Goal:** package `internal/mcpauth` exposes a store that loads, saves and deletes one server's record — access token, refresh token, expiry, token type, and the client registration (client id, optional secret, registration endpoint) — at `<apogee home>/mcp-auth/<name>.json`, dir 0700, file 0600, atomic replace; a record whose stored endpoint differs from the normalised configured endpoint loads as a miss; a server name that is not a safe file stem is refused.
