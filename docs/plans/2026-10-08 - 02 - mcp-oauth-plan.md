@@ -47,7 +47,7 @@ refreshes on its own. Login runs at startup (before the TUI) or through `apogee 
 - 7: guard folded (writer decision: doc.go map; plus subcommands.go, resolved home, injected deps, pre-connect login loop, reconnect test) — yields to `cmd/apogee/undo.go` `runUndoVerb` (home through resolveRoots)
 - 8: guard folded (writer decision: preregistered redirect URI in the manual; plus widened sweep, excluded settled docs, CLI page placement, doc-drift tests)
 
-## 1. ADR: MCP OAuth tokens are persisted by apogee
+## 1. ADR: MCP OAuth tokens are persisted by apogee — ✅ DONE (2026-10-08)
 
 **What:**
 **Goal:** an ADR records every ratified call above and amends ADR 0047's "stores nothing itself" for MCP OAuth tokens and client registrations only; ADR 0047 carries a dated amendment line pointing at it.

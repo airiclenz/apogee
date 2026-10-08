@@ -122,6 +122,12 @@ options (`api-key-env:`, an `api-key-cmd:` wrapper script, `chmod 600`), never h
 store is reached through its CLI like every other external program (ADR 0042); apogee links no
 keychain library and stores nothing itself.
 
+> **Amended 2026-10-08 ([ADR 0095](0095-mcp-oauth-tokens-are-persisted-by-apogee.md)).** "Stores
+> nothing itself" no longer holds for one class of secret: the OAuth tokens and client
+> registrations apogee itself obtains for `auth: oauth` MCP servers live in 0600 files under
+> `~/.apogee/mcp-auth/`. Every secret the user brings (this ADR's key sources included) is still
+> read from the user's own source and never stored by apogee.
+
 **9 — Migration writes a STANDARD key source.** The item is filed under service `apogee` with the
 entry's name as the account (upsert, so re-migrating updates rather than duplicates), and the secret
 travels to the tool on **STDIN, never in argv** — an argv is world-readable on both platforms, a
