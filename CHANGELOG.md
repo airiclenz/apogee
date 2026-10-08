@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.24.10] — 2026-10-08
+
 - **`apogee probe model` suggests a tool-call format only on evidence.** It used to suggest `markdown-fenced` for any model without native tool calls, even one whose written call (`probe_echo(text="apogee")`) that format cannot parse. The probe now sends one extra request that teaches the markdown-fenced format, and suggests that format only when the reply parses to a `probe_echo` call. In every other case it suggests `native`. A new `tool-call format` report line says which case applied. Where no listed format fits, it quotes the call the model wrote, so you can write a custom-regex profile from it. The extra request is not a capability, so the fingerprint and the battery version are unchanged.
 
 - Fixed (docs): the manual now explains how `apogee probe model` picks the `tool-call-format:` it suggests. A native call means `native`. A JSON call written in the reply also means `native`, because the salvage guard runs it. Otherwise one extra request teaches the markdown-fenced format, and that format is suggested only when the reply parses. If it does not, the report quotes the call the model wrote. The probe never suggests `custom-regex` and never writes a `tool-call-pattern:` or `tool-call-example:` for you; the quoted call is what you write both from (`docs/manual/probe.md`, `docs/manual/configuration.md`) (apogee-probe-suggests-tool-call-example).
