@@ -24,6 +24,8 @@ IDEAS.md
 
 # Local per-tool loader shim — AGENTS.md is the canonical, checked-in agent guide
 /CLAUDE.md
+/CLAUDE.local.md
+/AGENTS.local.md
 live-config.yaml
 
 # Per-run scaffolding written by the orchestrator skills (prompt copies, ledgers). It is machine

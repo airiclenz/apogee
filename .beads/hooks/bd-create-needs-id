@@ -1,0 +1,37 @@
+#!/usr/bin/env sh
+# bd-create-needs-id — Claude Code PreToolUse guard for the spoken-id rule (AGENTS.md).
+#
+# Every new bead is created with `bd create --id apogee-<slug>`. Without `--id`, bd mints a hash
+# suffix (`apogee-qi3`) that says nothing in a plan, a commit or a `bd ready` listing, and an id
+# is permanent: bd has no rename. The rule lives in AGENTS.md, but an agent that never loaded it
+# still runs `bd create` bare, so this hook refuses the command before it runs.
+#
+# It reads the Bash tool call from stdin (.claude/settings.json wires it) and exits 2 — Claude
+# Code's "block, and show the model this stderr" — when the command runs `bd create` without one
+# `--id` per create, or `bd q` (quick capture has no `--id` at all). The match is textual, so a
+# command that only quotes `bd create` in a string is refused too; rephrase it.
+
+command -v jq >/dev/null 2>&1 || exit 0
+cmd=$(jq -r '.tool_input.command // empty')
+[ -z "$cmd" ] && exit 0
+
+# A bd invocation starts the command or follows a separator, a subshell or whitespace.
+bd_verb='(^|[;&|(`$[:space:]])bd[[:space:]]+'
+
+if printf '%s\n' "$cmd" | grep -E -q "${bd_verb}q([[:space:]]|$)"; then
+  echo "Blocked: \`bd q\` cannot take --id, so it always mints a hash id. Create the bead singly with" >&2
+  echo "\`bd create --id apogee-<slug> ...\` (AGENTS.md: spoken ids)." >&2
+  exit 2
+fi
+
+creates=$(printf '%s\n' "$cmd" | grep -E -o "${bd_verb}create([[:space:]]|$)" | wc -l)
+[ "$creates" -eq 0 ] && exit 0
+ids=$(printf '%s\n' "$cmd" | grep -E -o -- '--id([=[:space:]])' | wc -l)
+if [ "$ids" -lt "$creates" ]; then
+  echo "Blocked: every \`bd create\` needs \`--id apogee-<slug>\` (AGENTS.md: spoken ids). The slug is" >&2
+  echo "two to four kebab-case words naming the defect or the work, never the fix, e.g." >&2
+  echo "\`apogee-net-deny-egress\`. Ids are permanent, so \`bd show apogee-<slug>\` first to rule out" >&2
+  echo "a collision. \`--file\` and \`--graph\` cannot carry --id: create such beads one at a time." >&2
+  exit 2
+fi
+exit 0

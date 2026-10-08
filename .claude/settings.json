@@ -12,6 +12,18 @@
           }
         ]
       }
+	],
+	"PreToolUse": [
+		{
+			"matcher": "Bash",
+			"hooks": [
+				{
+					"type": "command",
+					"command": "sh \"$CLAUDE_PROJECT_DIR/.beads/hooks/bd-create-needs-id\"",
+					"timeout": 10
+				}
+			]
+		}
     ]
   }
 }
