@@ -1209,7 +1209,7 @@ func TestServerConfigValidateAuth(t *testing.T) {
 			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
 				Auth: AuthOAuth, ClientSecretEnv: "DOCS_CLIENT_SECRET"},
 			want: "client-secret-env: needs client-id: — the secret belongs to a client registered " +
-				"ahead of time, named by client-id:",
+				"ahead of time, and client-id: names that client",
 		},
 		{
 			name: "an Authorization header beside oauth",

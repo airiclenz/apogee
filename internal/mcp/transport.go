@@ -210,7 +210,7 @@ func (cfg ServerConfig) ValidateAuth() error {
 	}
 	if cfg.ClientSecretEnv != "" && cfg.ClientID == "" {
 		return errors.New("client-secret-env: needs client-id: — the secret belongs to a client " +
-			"registered ahead of time, named by client-id:")
+			"registered ahead of time, and client-id: names that client")
 	}
 	for _, key := range []struct {
 		name    string
