@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.24.11] — 2026-10-08
+
 - **Docs: ADR 0095 — MCP OAuth tokens are persisted by apogee.** A `streamable-http` MCP server opts in with `auth: oauth` (refused on `sse`/`stdio`, and beside an `Authorization` header); apogee registers itself by Dynamic Client Registration (or uses a preregistered `client-id:` / `client-secret-env:`), logs in with PKCE at startup on stderr or through `apogee mcp login <name>`, and keeps the token and registration in one 0600 file per server under `~/.apogee/mcp-auth/` (dir 0700, atomic write, keyed by name and normalised endpoint). The authorize URL is always printed and opens only on Enter; the loopback callback on `127.0.0.1:0` races a pasted redirect URL for remote hosts; nothing prompts mid-session; a declined or TTY-less startup login aborts the launch; `apogee mcp logout <name>` deletes the local file only. ADR 0047 carries a dated amendment narrowing its "stores nothing itself" to secrets the user brings.
 
 - **`mcp-servers:` accepts `auth: oauth`, `client-id:` and `client-secret-env:`.** A `streamable-http` entry can opt into OAuth, optionally naming a preregistered client and the environment variable holding its secret. Config load refuses `auth:` on a `stdio` or `sse` server (or an entry with no `transport:`), any `auth` value but `oauth`, `client-id:`/`client-secret-env:` without `auth: oauth`, `client-secret-env:` without `client-id:`, and an `Authorization` header in `headers:`/`headers-env:` beside `auth: oauth`. The `client-secret-env:` variable is scrubbed from the execution tools' environment like a `headers-env:` token.
