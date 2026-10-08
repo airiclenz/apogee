@@ -145,6 +145,36 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   closure above `boundedBodyTransport`, both beneath security's `OriginPinTransport`, so a header
   (an auth token above all) only ever reaches the configured origin — an SSE `endpoint` event
   naming another origin is refused before a header could leave.
+- **An `auth: oauth` server's bearer rides the origin pin; its authorization server runs under the
+  floor** (2026-10-08, [ADR 0095](../adr/0095-mcp-oauth-tokens-are-persisted-by-apogee.md)).
+  `ServerConfig.Auth` (`auth: oauth`), `ClientID` and `ClientSecretEnv` (`client-id:`, the NAME of
+  the variable holding a preregistered client's secret) are a streamable-http server's OAuth
+  opt-in, and `ServerConfig.ValidateAuth` is their one rule, refused at load and again in
+  `validateServers`: any other `auth` value, `oauth` on stdio or sse (a refusal, never the
+  transport-mismatch note — an ignored `auth:` would connect with no credentials), `client-id:` /
+  `client-secret-env:` without `auth: oauth`, a secret without its client id, and an
+  `Authorization` header in `headers:` / `headers-env:` beside it. The `client-secret-env:` name
+  joins the secret-env scrub with the `headers-env:` names (`config.MCPHeaderEnvNames`). The
+  token store is `internal/mcpauth`: one 0600 JSON record per server at
+  `<home>/mcp-auth/<name>.json` (directory 0700, atomic replace), keyed by the server name and the
+  normalised endpoint, so a record minted for another endpoint loads as a miss.
+  `buildStreamableTransport` sets an `mcpauth.Handler` as the SDK transport's `OAuthHandler`
+  over the same `vetEndpoint` client, so the **bearer is set only on requests that already passed
+  `OriginPinTransport`** and reaches the configured endpoint's origin and nowhere else. The
+  **authorization server is untrusted** — the MCP server names it, the operator never does — so
+  its traffic (metadata, Dynamic Client Registration, the PKCE code exchange, every refresh) goes
+  over `mcpauth.NewAuthClient`: each request pre-flighted by the url-safety guard, dialled under
+  `security.DialFloor` through a guarded client built per origin, bodies bounded at 1 MiB, a
+  30-second timeout and no redirects followed. The endpoint's floor exemption never extends to it;
+  only a request to the endpoint's own origin (the unauthenticated probe, protected-resource
+  metadata served there, an authorization server co-hosted there) rides the endpoint's pinned client
+  (`routeClient`). The handler refreshes an expired token itself, bound to the server as the RFC
+  8707 resource, and saves a rotated refresh token before it is used, serialised across processes
+  by a lock file beside the record. A missing record or a refresh the authorization server
+  rejects is `mcpauth.ErrLoginRequired`, whose error names `apogee mcp login <name>`; the engine
+  never prompts. The interactive login — the loopback listener on `127.0.0.1:0` at `/callback`,
+  the pasted-redirect fallback, the startup offer on stderr and `apogee mcp login|logout` — lives
+  in `cmd/apogee` alone, so the client stays wire-silent and any Driver can bring its own login.
 - **Every tool call is bounded by a 5-minute deadline** (2026-09-29). `serverTool.Execute` derives
   its call context from the caller's with `mcpCallTimeout` (5 minutes, a fixed package value, no
   config key), so a silent or wedged server can never hold the agent past it. The caller's own
@@ -168,7 +198,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   session and returns the error, so a half-wired MCP set never reaches the registry and no orphaned
   stdio process — or process tree — leaks. `workspaceRoot` is the exec fence a stdio server's
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
-  Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` (§2),
+  Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` and
+  its `auth:` keys `ValidateAuth` (§2),
   and server names must be non-empty and unique (the name
   prefixes each surfaced tool's registry key as `<name>__<tool>` — see the Tool naming bullet below).
 - **Host** is what a connect takes from the process rather than from config: `Host.Proxy` resolves
@@ -176,7 +207,9 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   scopes a stdio server's `env-allowlist` environment (nil: `platform.Current()`);
   `Host.NewTeardown` builds the container its process tree is held in (nil:
   `platform.NewProcessTeardown`); `Host.TerminateDuration` is the shutdown ladder's rung wait
-  (non-positive: 5s). The composition root (`cmd/apogee/wire_live.go`, `liveMCPHost`) passes the
+  (non-positive: 5s); `Host.OAuthStore` is the `auth: oauth` token store at the session's apogee
+  home (nil fails such a server's connect, naming it) and `Host.NewOAuthClient` builds the
+  authorization-server client a refresh uses (nil: `mcpauth.NewAuthClient`). The composition root (`cmd/apogee/wire_live.go`, `liveMCPHost`) passes the
   real one through `ConnectWith`; a test injects its own the same way rather than swapping a
   package variable — the Host seams are not package variables (2026-10-01). The one swappable
   package variable `internal/mcp` does hold is `mcpCallTimeout` (`internal/mcp/tool.go`), the fixed

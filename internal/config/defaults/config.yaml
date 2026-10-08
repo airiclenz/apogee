@@ -472,6 +472,13 @@ context-files:
 # endpoint. A header name the transport or protocol sets itself (Host, Content-Type, Accept, any
 # Mcp-* name, …), an invalid name, a value with a line break, or one header named twice is refused
 # at startup; a `headers-env:` variable is scrubbed from every tool subprocess from the next start.
+# A streamable-http server that wants an OAuth login takes `auth: oauth` instead of a token header:
+# apogee runs the browser login (at startup, or `apogee mcp login <name>`), saves the token under
+# ~/.apogee/mcp-auth/<name>.json and refreshes it itself; `apogee mcp logout <name>` deletes it.
+# The token is sent to that endpoint's origin alone, and the authorization server is reached under
+# the SSRF floor. Optional `client-id:` names a client registered ahead of time (redirect URI
+# http://127.0.0.1/callback, any port), and `client-secret-env:` the NAME of the variable holding
+# its secret — scrubbed from tool subprocesses like a `headers-env:` one.
 #
 # mcp-servers:
 #   - name: github                       # the prefix on each tool's name; must be unique
@@ -487,6 +494,12 @@ context-files:
 #       X-Tenant: acme
 #     headers-env:                       # sse | streamable-http: header -> env variable NAME
 #       Authorization: DOCS_MCP_TOKEN
+#   - name: tracker
+#     transport: streamable-http
+#     endpoint: https://mcp.tracker.example.com/
+#     auth: oauth                        # streamable-http only: log in, no Authorization header
+#     client-id: apogee-desktop          # optional: a client registered ahead of time
+#     client-secret-env: TRACKER_SECRET  # optional: env variable NAME holding its secret
 
 # =============================================================================
 # The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all

@@ -315,8 +315,9 @@ as the body, and its **reply body** stands where the command's stdout would — 
 below, so a server that streams without end cannot hold the turn's memory. What either answers
 goes through three steps before the model sees it:
 
-1. **Redaction.** Every value of a configured secret — the variables your `api-key-env:` entries
-   and your webhook `headers-env:` entries name — is replaced by `[redacted]`, so a script that
+1. **Redaction.** Every value of a configured secret — the variables your `api-key-env:` entries,
+   your webhook `headers-env:` entries and your `mcp-servers:` entries' `headers-env:` and
+   `client-secret-env:` keys name — is replaced by `[redacted]`, so a script that
    echoes its own config file cannot hand the model a token the credential scrub kept out of the
    child's environment. apogee's own `APOGEE_API_KEY` is scrubbed from that environment but is
    not among the values redacted here.
@@ -412,8 +413,9 @@ it does not run at all: `workspace confinement is unavailable on this host` is r
 advise contributes nothing and a gate asks. As with `run:`, the program is resolved before it
 starts and refused when it lives somewhere the model could have written it. Unlike `run:`, the
 command is spawned through the same door every execution tool uses, so it gets that door's
-credential scrub — apogee's own key, every `api-key-env:` variable and every webhook
-`headers-env:` variable are **absent** from its environment — along with the process-tree teardown
+credential scrub — apogee's own key, every `api-key-env:` variable, every webhook
+`headers-env:` variable and every `mcp-servers:` entry's `headers-env:` and `client-secret-env:`
+variable are **absent** from its environment — along with the process-tree teardown
 and that door's ceilings: combined stdout and stderr are capped at 256 KiB before the 8 KiB advice
 cap is applied, and a `timeout:` above 3600 s is clamped to 3600 s. A `timeout: 0s` on an entry that
 spells only `advise:` or `gate:` falls back to the class default, where the same value on a `run:`

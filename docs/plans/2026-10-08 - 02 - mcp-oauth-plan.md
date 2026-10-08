@@ -179,7 +179,11 @@ NOTES (2026-10-08): added TestStartupMCPLoginRetriesAConnectWhoseRefreshWasRejec
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMCPCmd|TestStartupMCPLogin|TestDocMapNamesEveryFile|TestSubcommands' ./cmd/apogee/ && go run ./cmd/apogee mcp --help`
 **Commit:** `feat(cli): add apogee mcp login and logout`
 
-## 8. Docs: manual, CONTEXT.md, MCP client contract
+## 8. Docs: manual, CONTEXT.md, MCP client contract — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): docs/manual/reactions.md (not in the item's Files) carried two prose enumerations of the secret-env scrub/redaction sources (the advise Redaction step and the advise/gate door's scrub); both read cfg.SecretEnvVars, which already held the MCP `headers-env:` names and now `client-secret-env:`, so both gained the `mcp-servers:` names per the item's correction rule.
+NOTES (2026-10-08): CONTEXT.md's Key source `_Avoid_` line ("apogee keeps no secret of its own") was the one "stores no credential" claim the sweep found; it now says apogee keeps no API key of its own and names the MCP OAuth token (ADR 0095) as the one credential it writes.
+NOTES (2026-10-08): the dated `api-key-env`-only scrub route in docs/design/confinement-execution-contract.md (§ amended 2026-08-22) was left as written — a dated contract record of the hook door's route, not an MCP enumeration.
 
 **What:** Depends on item 7.
 **Goal:** `docs/manual/configuration.md` ("External MCP servers") documents `auth: oauth`, `client-id:`, `client-secret-env:`, the token file location and the SSH paste fallback; the same section documents `apogee mcp login|logout`; `CONTEXT.md` ("MCP client") and `docs/design/mcp-client.md` state that the bearer reaches only the endpoint origin and the auth server runs under the floor. Every doc line claiming MCP servers are headers-only, or that apogee stores no credential, is corrected (grep `-i 'oauth\|stores nothing\|headers-env'` across `docs/`, `README.md`, `CONTEXT.md`).

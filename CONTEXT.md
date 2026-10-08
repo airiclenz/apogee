@@ -720,8 +720,9 @@ whose output is the key, or a named environment variable (`api-key-env`). An ent
 having none is the keyless state. **Key migration** is the startup offer that moves a plaintext key
 into the OS secret store and turns the entry into a command source. See
 [ADR 0047](docs/adr/0047-api-keys-resolve-through-a-per-entry-key-source.md).
-_Avoid_: "credential provider", "keychain support" (apogee keeps no secret of its own and links no
-keychain library — a source is a line in the entry), "key fallback" (an entry names one source, not
+_Avoid_: "credential provider", "keychain support" (apogee keeps no API key of its own and links no
+keychain library — a source is a line in the entry; the one credential apogee writes itself is an
+[MCP OAuth token](#safety-and-autonomy), which a login mints and nothing else could hold — ADR 0095), "key fallback" (an entry names one source, not
 a chain).
 
 **Model profile**:
@@ -1674,7 +1675,18 @@ sets itself (`Host`, `Content-Length`, `Content-Type`, `Accept`, `Connection`,
 `Transfer-Encoding`, `Last-Event-ID`, every `Mcp-*`), one name configured twice, in either key or
 across both (names are case-insensitive), a literal value carrying CR, LF or NUL, and a blank variable name; the refusal
 names the key and the header, never a value. A stdio entry that sets either key draws a note — it
-has no HTTP request to carry them. **Resume reconnects
+has no HTTP request to carry them. A **streamable-http** entry may instead set `auth: oauth`
+(optionally `client-id:` and `client-secret-env:` for a client registered ahead of time; without
+them apogee registers its own by Dynamic Client Registration): apogee then logs in by an
+interactive browser login (`apogee mcp login <name>`, or the offer on stderr at startup before the
+TUI), persists the OAuth 2.1 bearer token under `~/.apogee/mcp-auth/<name>.json`, refreshes it on its
+own, and sends it on every request. The **bearer reaches only the endpoint's origin** — it rides
+the same origin-pinned client as the headers — while the **authorization server**, named by the MCP
+server rather than by you, runs **under the SSRF floor** and url-safety with bounded bodies: the
+endpoint's floor exemption never extends to it. `auth:` on stdio or sse, or beside an
+`Authorization` header, is a refusal rather than a note. Mid-session nothing prompts: a reconnect
+that needs a login fails naming `apogee mcp login <name>` ([ADR
+0095](docs/adr/0095-mcp-oauth-tokens-are-persisted-by-apogee.md)). **Resume reconnects
 fresh** — no server-side state is restored (ADR 0008). The *client shape* is
 [docs/design/mcp-client.md](docs/design/mcp-client.md); the *gating* is ADR 0004/0008/0012.
 _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).

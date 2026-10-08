@@ -185,7 +185,8 @@ The full tour is in [the manual](docs/manual/README.md).
 - **Workspace context files** — an `AGENTS.md` at the workspace root goes into the system
   prompt on its own; `context-files:` picks the names, or turns it off.
 - **MCP servers** over stdio, SSE, or streamable-http, for tools apogee doesn't ship — with
-  an `env-allowlist:` so a stdio server inherits only the environment you name.
+  an `env-allowlist:` so a stdio server inherits only the environment you name, and an OAuth
+  browser login (`auth: oauth`, `apogee mcp login`) for a streamable-http server that wants one.
 - **Reads your dependencies.** On a Go project the toolchain's `GOROOT` and module cache
   are readable, so the model can open the standard library and your modules, never write
   them.

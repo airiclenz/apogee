@@ -435,7 +435,8 @@ it becomes the prefix on every tool that server contributes, so the model sees `
 and you can tell whose tool a call reached) and a `transport`, which is `stdio` for a local process
 apogee launches or `sse` / `streamable-http` for a server reached over http(s). A stdio entry takes
 `command`, optional `args`, and optional `env`; an http one takes `endpoint`, and optional
-`headers` and `headers-env`.
+`headers` and `headers-env` — and a `streamable-http` one can instead log in with OAuth
+(`auth: oauth`, optionally with `client-id` and `client-secret-env`).
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -523,6 +524,94 @@ exactly as an `api-key-env:` name is, so a command the model chose cannot read t
 that scrub is fixed when apogee starts, so a variable a live edit adds is scrubbed from the next
 start. The two keys are read by the **http** transports alone: a `stdio` entry that sets either is
 told so at startup, as a notice and never a refusal.
+
+**Logging in to an http server — `auth: oauth`.** A `streamable-http` server protected by OAuth
+2.1 — the [MCP authorization
+spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization) — takes
+`auth: oauth`, and apogee does the login itself rather than wanting a token in `headers-env:`. It
+asks the server, learns its authorization server from the server's own answer (protected-resource
+and authorization-server metadata, RFC 9728 and RFC 8414), registers itself there as a client
+(Dynamic Client Registration, RFC 7591) unless you name one, runs a browser login with PKCE, and
+keeps the token it gets.
+
+```yaml
+# ~/.apogee/config.yaml
+mcp-servers:
+  - name: tracker
+    transport: streamable-http
+    endpoint: https://mcp.tracker.example.com/
+    auth: oauth
+  - name: wiki
+    transport: streamable-http
+    endpoint: https://wiki.example.com/mcp
+    auth: oauth
+    client-id: apogee-desktop             # a client registered ahead of time
+    client-secret-env: WIKI_OAUTH_SECRET  # the variable's NAME; leave out for a public client
+```
+
+`client-id:` names a client an administrator registered with the authorization server ahead of
+time, for a server that does not let apogee register its own. Register that client with the
+redirect URI **`http://127.0.0.1/callback`** and loopback port variance (RFC 8252 §7.3): every
+login listens on a free port of `127.0.0.1` chosen when it starts, so the authorization server must
+accept any port on that address — there is no key that fixes the port. `client-secret-env:` names
+the environment variable holding a confidential client's secret, read at each login and each
+connect; it needs `client-id:`, a variable that is not set fails the login or the connect naming
+the server and the variable, and — like a `headers-env:` variable — it is dropped from the
+environment of every tool subprocess from the next start.
+
+`auth:` is checked when the file is loaded, and every check is a refusal naming the entry, never a
+notice: an ignored `auth:` would leave a server connecting with no credentials while you believe it
+authorised. Refused are `auth:` on a `stdio` or `sse` server or an entry with no `transport:`, any
+value but `oauth`, `client-id:` or `client-secret-env:` without `auth: oauth`,
+`client-secret-env:` without `client-id:`, and an `Authorization` header in `headers:` or
+`headers-env:` beside `auth: oauth` — apogee sends the bearer token itself. Other headers still
+ride along.
+
+**`apogee mcp login` and `apogee mcp logout`.** `apogee mcp login <name>` runs the login for a
+configured `auth: oauth` server and saves its token, replacing any it had; `apogee mcp logout
+<name>` deletes the saved token and says whether there was one. Logout makes no network call: the
+token is forgotten here, not revoked at the authorization server. Both read the configuration
+apogee itself would — `--config` and `APOGEE_CONFIG` included — and refuse a name that is not
+configured and a server without `auth: oauth`.
+
+You rarely need `login` by hand. At startup, every `auth: oauth` server with no saved token is
+offered the login on the terminal before the TUI opens (`MCP server "tracker" needs an OAuth
+login. Log in now? [y/N]`), and so is one whose saved token the authorization server will no
+longer refresh. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
+stops with an error naming `apogee mcp login <name>` — connecting is all-or-nothing, so one server
+that cannot log in holds back the rest. Mid-session nothing ever prompts: a reconnect that needs a
+login fails, and the `mcp-servers:` row in `/settings` names the same command.
+
+The login always prints the full authorization URL. On a local desktop, `⏎` opens it in your
+browser — nothing opens without that keypress, and only an `https` or loopback `http` URL is
+opened — and the browser comes back to the listener on `127.0.0.1`, which ends the login. **Over
+SSH**, or on a machine with no desktop, open the URL in a browser on your own machine instead:
+after you log in, it lands on a `http://127.0.0.1:…/callback?code=…` address that fails to load,
+because that loopback address is your machine's, not the one apogee runs on. Copy that full
+address out of the browser's address bar and paste it at apogee's prompt. Whichever arrives first,
+the callback or the paste, finishes the login.
+
+**Where the token lives.** apogee keeps one file per server at
+`~/.apogee/mcp-auth/<name>.json` (the directory `0700`, the file `0600`, rewritten atomically),
+holding the access and refresh tokens, their expiry, the authorization server and the client
+registration — everything a refresh needs. It is the one credential apogee writes to disk itself
+([ADR 0095](../adr/0095-mcp-oauth-tokens-are-persisted-by-apogee.md)): an API key or a header token
+is something you already keep somewhere, and apogee only reads it from where you point, but an
+OAuth token is minted by the login and has nowhere else to live. The server's `name` is the file's
+name, so it must be a safe file stem — letters, digits, `.`, `_` and `-`, starting with a letter or
+a digit. A token is saved against the server's endpoint: change `endpoint:` and the old token is
+not sent to the new address — the server needs a new login. A session refreshes an expired token on
+its own and saves a rotated refresh token before using it; apogee instances sharing one token take
+turns through a lock file beside it, so neither spends a refresh token the other already used.
+
+**Who sees the token.** The bearer token rides the same origin-pinned connection as the headers
+above, so it reaches the configured endpoint's own origin and nothing else. The authorization
+server is not one you wrote — the MCP server names it — so it gets no share of the endpoint's
+exemption: every request to it (its metadata, the client registration, the code exchange, each
+refresh) runs under the SSRF floor and your
+[`url-safety:`](#what-the-network-tools-may-reach--url-safety) lists, with bounded replies, a
+30-second timeout and no redirects followed. Only an authorization server on the endpoint's own
+origin is reached over the endpoint's pinned connection.
 
 The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
 `⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
@@ -1971,7 +2060,7 @@ tool subprocess and every `advise:` or `gate:` reaction command is handed, so a 
 read that key back out. A `run:` reaction command is your own notifier, its output never reaches
 the model, and it inherits the environment whole. That scrub is one list, whichever server the session is on: the
 union of every entry's `api-key-env:` name, every webhook reaction's `headers-env:` names, every
-`mcp-servers:` entry's `headers-env:` names and `APOGEE_API_KEY`. A stdio MCP server is the exception — it inherits apogee's full environment
+`mcp-servers:` entry's `headers-env:` names and `client-secret-env:` name, and `APOGEE_API_KEY`. A stdio MCP server is the exception — it inherits apogee's full environment
 unless its entry sets `env-allowlist:`. Both resolve the first time this session actually
 needs that server's key — never at startup for entries you do not use — and a key that
 resolved is remembered for the rest of the session, while a failure is not: a locked keychain
