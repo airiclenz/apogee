@@ -157,7 +157,13 @@ NOTES (2026-10-08): consequential edit — go.mod: made necessary by mcp_login_f
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMCPLoginFetch|TestDocMapNamesEveryFile' ./cmd/apogee/`
 **Commit:** `feat(cli): complete an MCP OAuth login from the terminal`
 
-## 7. `apogee mcp login|logout <name>` and the startup login
+## 7. `apogee mcp login|logout <name>` and the startup login — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): wire_boot.go (not in the item's Files) carries the one-line change that copies rootDeps.mcpLogin onto the rootWiring in newRootWiringWith — the wiring is constructed only there, and the startup hook reads it as w.mcpLogin.
+NOTES (2026-10-08): the injected deps are one rootDeps field, `mcpLogin mcpLoginDeps` (terminal = item 6's loginTerminal with its openInput factory and opener, isTerminal, newAuthClient), also taken by newMCPCommandWith; the session's reconnect Host takes the same newAuthClient (nil = mcpauth.NewAuthClient), so liveMCPHost's signature is unchanged.
+NOTES (2026-10-08): `apogee mcp login|logout` resolve config through config.ApplyConfig like `apogee probe`, so they need the config's `servers:` entry as every command does; bare `apogee mcp` prints its help and an unknown word after it is refused.
+NOTES (2026-10-08): the startup login lives in mcp_cmd.go (rootWiring.connectMCPServers); wireSession calls it in place of its direct mcp.ConnectWith. A record that cannot be read is not offered a login — the connect reports it naming the server.
+NOTES (2026-10-08): added TestStartupMCPLoginRetriesAConnectWhoseRefreshWasRejected beyond the plan's list — it proves the SDK keeps LoginRequiredError in the chain on a rejected refresh, which the post-connect retry relies on.
 
 **What:** Depends on items 5–6.
 **Goal:** `apogee mcp login <name>` runs item 4's login with item 6's fetcher for a configured `auth: oauth` server and saves the record; `apogee mcp logout <name>` deletes it and says whether one existed; both refuse an unknown name or a server without `auth: oauth`. At startup, when connecting fails with `ErrLoginRequired`: on a TTY stdin, apogee asks on stderr whether to log in now, runs the same login, and retries the connect once; when declined or stdin is not a TTY, launch aborts with the error naming `apogee mcp login <name>`. A mid-session reconnect surfaces `ErrLoginRequired` on the settings row and never prompts.

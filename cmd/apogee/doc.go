@@ -139,6 +139,8 @@
 // mcp_login_fetch.go the terminal half of an MCP OAuth login — the loopback `/callback`
 // listener the authorization server redirects to, the printed authorize URL, Enter to open
 // it on a local desktop and a pasted redirect URL as the fallback, whichever arrives first;
+// mcp_cmd.go `apogee mcp login|logout <name>` over that fetcher, and the startup login that
+// offers an `auth: oauth` server with no usable token a login on stderr before the connect;
 // undo.go `apogee undo <session-id> [confirm <generation>]`, the revert an unattended
 // Firing has nobody to offer — it holds the session, opens its snapshot store from a fresh
 // process and shows `/undo`'s own listing; the confirm quotes the generation the preview

@@ -100,8 +100,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// amendment 2026-07-26). Before, both call sites here handed the transport a ZERO guard, so a
 	// configured `deny-hosts` entry applied to every network tool and to no MCP endpoint (audit
 	// 2026-08-25 F-40); a denied host is now refused at startup with the url-safety message.
-	mcpClient, err := mcp.ConnectWith(ctx, liveMCPHost(w.roots.config), w.opts.MCPServers,
-		mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts), w.roots.workspace)
+	//
+	// An `auth: oauth` server with no usable token is offered a login on stderr first, before the
+	// alternate screen opens (connectMCPServers, mcp_cmd.go); declined, or with no terminal to ask
+	// on, the launch aborts naming `apogee mcp login <name>`.
+	mcpClient, err := w.connectMCPServers(ctx)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
@@ -124,7 +127,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// rather than kept until something else happens to dial.
 	w.mcpSet = newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
 		spec := w.toolSet.built()
-		return mcp.ConnectWith(ctx, liveMCPHost(w.roots.config), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
+		// It never offers a login: a server that needs one fails the reconnect with the error naming
+		// `apogee mcp login <name>`, which the settings row relays.
+		return mcp.ConnectWith(ctx, w.mcpLogin.mcpHost(w.roots.config), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the

@@ -98,6 +98,9 @@ type rootDeps struct {
 	runner func(context.Context, run.Spec) (run.Result, error)
 	// confiner builds this host's confinement backend, once per run.
 	confiner func() apogee.Confiner
+	// mcpLogin is the terminal, TTY check and authorization-server client the startup login of an
+	// `auth: oauth` MCP server runs over (mcp_cmd.go); its zero value is this process's own.
+	mcpLogin mcpLoginDeps
 }
 
 // hookCloseGrace is how long a root gives its Reaction Runner to finish what it is already running
@@ -218,6 +221,9 @@ type rootWiring struct {
 	// the boot's half of rootDeps, held so the `/schedule` wiring can read it where it composes its
 	// firingInputs. nil is the production value, resolved by raise when the Firing is raised.
 	runner func(context.Context, run.Spec) (run.Result, error)
+	// mcpLogin is the boot's other half of rootDeps the session reads later: what the startup login
+	// of an `auth: oauth` MCP server talks through (connectMCPServers).
+	mcpLogin mcpLoginDeps
 	// hooks is this session's Reaction Runner (ADR 0073): the observe-only decorator installed as
 	// Config.Events over the Bridge's own sink, so every engine Event reaches the renderer first and
 	// whatever the `reactions:` list subscribes to is fired off the engine's path afterwards. It is

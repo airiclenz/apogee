@@ -64,7 +64,7 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 // caller (rootDeps): a boot test dictates the backend's capability matrix through it and asks its
 // gating question on every host. Zero deps resolve to the production values.
 func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, deps rootDeps) *rootWiring {
-	w := &rootWiring{opts: opts, mode: mode, roots: roots, runner: deps.runner}
+	w := &rootWiring{opts: opts, mode: mode, roots: roots, runner: deps.runner, mcpLogin: deps.mcpLogin}
 
 	// The one key resolver this run has. Every seam that needs a server's API key — the startup
 	// Config below, the bind, a `/server` switch, the Sub-agent server's beat — resolves through
