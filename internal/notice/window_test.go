@@ -11,8 +11,8 @@ import (
 // human — the TUI as a transcript note on a rebind, headless on stderr, the daemon in its journal —
 // and the whole reason it lives here is that the three cannot drift apart.
 func TestWindowUnknownIsTheOneSpelling(t *testing.T) {
-	want := "context window unknown — automatic compaction and the Budget are inactive; " +
-		"set context-window: in config.yaml"
+	want := "context window unknown — apogee bounds each request by a conservative assumption " +
+		"and the Budget is inactive; set context-window: in config.yaml"
 	if notice.WindowUnknown != want {
 		t.Errorf("WindowUnknown = %q, want %q", notice.WindowUnknown, want)
 	}

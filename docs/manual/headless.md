@@ -58,10 +58,11 @@ server offline (<endpoint>)`, exit `2`, no record written and no tokens spent. A
 answers anything at all still runs: a rate-limited or unreadable model list is not a dead
 server, and an endpoint that serves completions without advertising a list never was one.
 A run whose bound entry has no context window — the server did not advertise one and no
-`context-window:` pins it — says so once on stderr, `context window unknown — automatic
-compaction and the Budget are inactive; set context-window: in config.yaml` (for a model the
-server does not list, the same fact rides the not-advertised notice as a clause), and runs on
-with both inactive.
+`context-window:` pins it — says so once on stderr, `context window unknown — apogee
+bounds each request by a conservative assumption and the Budget is inactive; set context-window:
+in config.yaml` (for a model the server does not list, the same fact rides the not-advertised
+notice as a clause), and runs on with the Budget inactive and every request held to that
+assumption.
 The run is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
 records nothing — no session record, and no undo snapshot store either, since a store filed

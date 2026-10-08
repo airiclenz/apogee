@@ -588,8 +588,8 @@ func decodeReasoning(raw json.RawMessage) *modelReasoning {
 // binding observer restates the hint every heartbeat and would otherwise ping-pong). An
 // advertised entry only supplies the window — either the exact entry, or, for a variant slug
 // like "vendor/model:exacto", the entry for the base slug before the first ':'. An unlisted id
-// is used as-is with an unknown window, which leaves Budget and auto-compaction inactive
-// exactly as an advertised model with no window does, and lets a genuinely wrong id fail loud
+// is used as-is with an unknown window, which leaves the Budget inactive and every request
+// bounded by a conservative assumption exactly as an advertised model with no window does, and lets a genuinely wrong id fail loud
 // on the next completion instead of silently running someone else's model. Only an empty hint
 // falls back to the first advertised entry.
 func resolveHint(models []DiscoveredModel, hint string) (active string, window int, grade HintResolution) {

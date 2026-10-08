@@ -24,8 +24,8 @@
 //     resolve, in place of a bare `lookup … no such host`.
 //
 //   - WindowUnknown (window.go) is the honesty line for a binding whose context window nobody
-//     could name — the Budget and auto-compaction bind against the window, so with none known
-//     they silently do nothing. A const rather than a function: it carries no value at all, and
+//     could name — the Budget binds against the window, so with none known it is inactive, and
+//     the engine bounds each request by ADR 0018's conservative ceiling instead. A const rather than a function: it carries no value at all, and
 //     the sentence a session shows and the one an unattended run says are the same sentence.
 //
 // Sentences are built by concatenation rather than fmt.Sprintf: these are short fixed shapes

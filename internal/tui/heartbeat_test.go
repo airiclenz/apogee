@@ -1250,8 +1250,9 @@ func TestBeatScriptNarratesEachChangeOnce(t *testing.T) {
 	}
 }
 
-// A bound model whose window nobody can name is honest about the consequence: the Budget and
-// automatic compaction both bind against the window, so with none known they simply do nothing.
+// A bound model whose window nobody can name is honest about the consequence: the Budget binds
+// against the window, so with none known it is inactive, and each request is bounded by a
+// conservative assumption instead.
 // The line rides the rebind because that is when the fact is established — at launch it would fire
 // on every cold start and be wrong a second later. It survives the quiet first-contact seed: the
 // suppression is aimed at connection narration the restated box already carries, and this is

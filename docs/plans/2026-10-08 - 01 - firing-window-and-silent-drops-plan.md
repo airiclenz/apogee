@@ -67,7 +67,10 @@ This supersedes the rejection recorded at `wire_firing.go:410-416` and `wire_fir
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFiringConfig|TestHeadless.*Window|TestDaemonFire.*Window|TestDaemonFireLogsTheCompositionsNotices|TestScheduleFiring' ./cmd/apogee/`
 **Commit:** `fix(firing): bind the observed context window when nothing is pinned`
 
-## 2. The unknown-window notice says what apogee does
+## 2. The unknown-window notice says what apogee does — ✅ DONE (2026-10-08)
+
+NOTES (2026-10-08): hintNotice's clause now reads `(context window unknown — requests bounded by a conservative assumption, Budget inactive)`; it keeps the `context window unknown`/`unknown` and `Budget` substrings, so wire_firing_test.go and upstream_test.go needed no change.
+NOTES (2026-10-08): cmd/apogee/daemonfire_test.go, cmd/apogee/wire_firing_test.go and cmd/apogee/headless_test.go are listed in Files but reference notice.WindowUnknown by symbol (no hand-typed copy), so they needed no edit; likewise the TUI heartbeat "window unknown" case asserts via unknownWindowNote (= notice.WindowUnknown), which window_test.go pins verbatim — only heartbeat_test.go's comment claiming compaction does nothing changed.
 
 **What:** Fix for `apogee-headless-window-compaction-loop` defect (1): the notice says automatic compaction is inactive while ADR 0018's conservative ceiling bounds every request. Depends on item 1.
 **Goal:** `notice.WindowUnknown` reads exactly `context window unknown — apogee bounds each request by a conservative assumption and the Budget is inactive; set context-window: in config.yaml`, and every Driver that emits it (TUI rebind note, headless stderr, daemon log) emits that string.

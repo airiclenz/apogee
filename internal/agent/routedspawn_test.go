@@ -203,7 +203,7 @@ func TestSpawnStampsItsOwnWindowOnItsReadings(t *testing.T) {
 // TestRoutedSpawnWithoutATargetWindowKeepsTheParents covers the one target field that may name
 // NOTHING: a flagged entry with no `context-window:` pin, on a server whose beat observed no
 // per-slot window, hands the engine a target with window 0. Taking that 0 would build the child
-// windowless — Budget and automatic Compaction inactive, readings stamped 0 — so the parent's
+// windowless — Budget inactive, folds on the conservative ceiling, readings stamped 0 — so the parent's
 // window stands instead, and the STAMP says so too: a Driver reading it paints the routed fill
 // against a real limit rather than falling back to the session's window for a child in a different
 // one. A target that does name a window still overrides, which is the routed case proper.

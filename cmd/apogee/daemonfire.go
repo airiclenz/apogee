@@ -250,8 +250,9 @@ func (w *daemonWiring) latchUnconfinedWarning() bool {
 
 // latchWindowUnknown reports whether THIS Firing is the one that says the unknown-context-window
 // line, and marks it said. Same shape and same reason as the unconfined-Auto warning above: the
-// sentence is about the daemon's CONFIGURATION — no `context-window:` is pinned, so the Budget and
-// auto-compaction are inactive for every Firing this process will ever raise — and a fact that
+// sentence is about the daemon's CONFIGURATION — no `context-window:` is pinned, so the Budget is
+// inactive and every request is bounded by a conservative assumption for every Firing this process
+// will ever raise — and a fact that
 // cannot change between ticks said once per tick is a nightly schedule writing the same line into
 // the supervisor's journal forever. Every OTHER composition notice keeps logging per Firing,
 // because those describe the run that just happened.

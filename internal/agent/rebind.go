@@ -65,7 +65,8 @@ type RebindSpec struct {
 	SystemPrompt string
 	// MaxContextTokens is the BOUND context window in tokens — the caller has already applied a
 	// configured `context-window:` pin over the observed one. 0 ⇒ unknown, which leaves the
-	// Budget and automatic Compaction inactive exactly as an undiscovered window does.
+	// Budget inactive and the structural bounds on ADR 0018's conservative ceiling, exactly as an
+	// undiscovered window does.
 	MaxContextTokens int
 	// MaxOutputTokens is the ceiling on ONE reply from the server this session is on — the bound
 	// `servers:` entry's `max-output-tokens:` pin, carried as written (ADR 0046). It is the one
@@ -304,8 +305,8 @@ type UpstreamSpec struct {
 	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
 	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
 	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named
-	// one, which leaves the Budget and automatic Compaction inactive until the new server's first
-	// observed window binds through Rebind — the state a session before its first beat is already in,
+	// one, which leaves the Budget inactive (and the bounds on the conservative ceiling) until the new
+	// server's first observed window binds through Rebind — the state a session before its first beat is already in,
 	// and the honest one here, since no request can open while nothing is bound. Keeping the RETIRED
 	// server's window instead would budget against a number describing a machine this session no
 	// longer talks to.

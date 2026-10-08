@@ -174,8 +174,8 @@ server advertises), which is a different model's window and may be smaller or la
 parent's ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md),
 [ADR 0066](docs/adr/0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md)).
 When that entry names **neither** — no pin, and nothing observed — the routed child keeps the
-**parent's** window rather than running windowless: no window at all would leave its Budget and
-automatic Compaction inactive and its readings unmeasurable.
+**parent's** window rather than running windowless: no window at all would leave its Budget
+inactive, its folds on the conservative unknown-window ceiling and its readings unmeasurable.
 How full that window got is **visible per run**: the TUI paints the run's own reading on its
 collapsed call block (`N tool calls · 12k/32k · <gist>`) and `apogee headless` prints one
 `sub-agent: <used>/<limit> · <the delegation's name, else the task>` line on stderr per run.

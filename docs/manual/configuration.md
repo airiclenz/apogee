@@ -1050,8 +1050,9 @@ wrong for how you run it; that key is a **pin** the heartbeat never overrides. I
 whole number of tokens: a fractional or negative value — and a whole number written with a
 decimal point or an exponent, `65536.0` or `1e3` — is refused when the config loads, rather
 than rounded into a window you did not write. With no
-window known, the Budget and automatic compaction stay inactive and apogee says so in the
-transcript the moment it binds a model without one. How that window is **split** is a second
+window known, the Budget stays inactive, apogee bounds each request by a conservative
+assumption — one that fits a small local server, so a larger window is managed as if it were
+small — and it says so in the transcript the moment it binds a model without one. How that window is **split** is a second
 file-only key: apogee holds a fifth of it back for the model's reply and lets the prompt fill
 the rest, and `response-reserve:` (a fraction above 0 and below 1) sets your own share instead
 — raise it for a model that answers at length, lower it to spend more of the window on history.
@@ -1476,8 +1477,8 @@ model apogee asks for, whether or not the server's `/v1/models` lists it. A list
 id takes its context window from the listing; an id with a `:` suffix the server
 does not list — an OpenRouter variant such as `vendor/model:nitro` — takes the
 window of the base id before the `:` when that one is listed; any other unlisted
-id runs with the window unknown, which leaves the Budget and auto-compaction
-inactive until you pin `context-window:`. Either way apogee says so once, in the
+id runs with the window unknown, which leaves the Budget inactive and bounds each
+request by a conservative assumption until you pin `context-window:`. Either way apogee says so once, in the
 transcript:
 
     model 'vendor/model:nitro' is not advertised by the server; using it as configured (context window from base 'vendor/model': 128k)

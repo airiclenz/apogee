@@ -622,8 +622,8 @@ func (o *hintObserver) gradeFor(model string) provider.HintResolution {
 // its composition returns (wire_firing.go), so the sentence is one thing said in one voice on every
 // Driver (ADR 0031). Discovery no longer substitutes the first advertised model for an unmatched hint — it
 // runs the id as configured — so the human has to be told that, and told what it cost: an unknown
-// context window leaves the Budget and auto-compaction inactive, exactly as an advertised model that
-// reports no window does, and a genuinely wrong id now fails loud on the next completion instead of
+// context window leaves the Budget inactive and bounds each request by ADR 0018's conservative
+// ceiling, exactly as an advertised model that reports no window does, and a genuinely wrong id now fails loud on the next completion instead of
 // quietly serving someone else's model. An exact match and the no-hint fallback are silent, because
 // nothing surprising happened.
 //
@@ -643,6 +643,6 @@ func hintNotice(model string, grade provider.HintResolution, window, bound int) 
 	case bound > 0:
 		return notice + " (context window: " + format.Tokens(bound) + ")"
 	default:
-		return notice + " (context window unknown — Budget and auto-compaction inactive)"
+		return notice + " (context window unknown — requests bounded by a conservative assumption, Budget inactive)"
 	}
 }

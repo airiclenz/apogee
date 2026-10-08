@@ -103,8 +103,9 @@
 #              what goes on the wire, advertised or not — the server's model list only supplies
 #              the context window, from the matching entry or, for a variant slug like
 #              `vendor/model:exacto`, from its base entry. An id the list cannot place at all
-#              still runs, with the context window unknown (the Budget and auto-compaction then
-#              inactive), and apogee says so once in the transcript at startup.
+#              still runs, with the context window unknown (the Budget then inactive and each
+#              request bounded by a conservative assumption), and apogee says so once in the
+#              transcript at startup.
 #              --model / APOGEE_MODEL overrides it for the server this session starts on.
 #              Whichever name a run ends up bound to — set here or discovered from the server — is
 #              also the name the Model profile is matched on: how that model speaks the wire is
@@ -822,8 +823,10 @@ remember-model: true
 # it, so a model switch still rebinds but the window stays exactly what you set here. Leave it unset
 # to discover the window from the server, live — including when the server switches models. Set it
 # only when your server does not advertise a window, or when its number is wrong for how you run it.
-# It drives the Budget and the automatic compaction above: with no window known, both stay inactive
-# and apogee says so in the transcript the moment it binds a model without one. Config-file only (no
+# It drives the Budget and the automatic compaction above: with no window known, the Budget stays
+# inactive, compaction bounds each request by a conservative assumption (one that fits a small local
+# server, so a larger window is managed as if it were small), and apogee says so in the transcript
+# the moment it binds a model without one. Config-file only (no
 # flag or env).
 # context-window: 32768
 
