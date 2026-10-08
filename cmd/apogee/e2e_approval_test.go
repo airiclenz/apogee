@@ -304,9 +304,9 @@ func guardHome(t *testing.T) string {
 	return home
 }
 
-// awaitApprovalPane waits for an ORDINARY approval pane and returns the settled frame it painted.
-// The settle is not tidiness here: the decision keys arm one latch after the pane opens, so a frame
-// read before the screen went quiet is a frame a caller could not yet answer.
+// awaitApprovalPane waits for an ORDINARY approval pane to arm and returns the settled frame it
+// painted. The arm is not tidiness here: the decision keys come alive one latch after the pane
+// opens ([awaitArmed]), so a pane read before then is a pane a caller could not yet answer.
 func awaitApprovalPane(drv *tuitest.Driver) tuitest.Frame {
 	return awaitPaneMarked(drv, approvalMarker)
 }
@@ -317,12 +317,13 @@ func awaitForcedPane(drv *tuitest.Driver) tuitest.Frame { return awaitPaneMarked
 
 func awaitPaneMarked(drv *tuitest.Driver, marker string) tuitest.Frame {
 	drv.WaitText(marker)
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 	return drv.Frame()
 }
 
 // decide answers an armed ORDINARY approval pane and waits for it to go. The caller must have
-// settled the frame first (awaitApprovalPane) — an unarmed letter is SWALLOWED, not queued, so a
+// waited for the arm first (awaitApprovalPane) — an unarmed letter is SWALLOWED, not queued, so a
 // test that typed one too early would wait out its whole timeout on a pane nobody answered.
 func decide(drv *tuitest.Driver, key string) { decideOn(drv, key, approvalMarker) }
 
@@ -335,6 +336,16 @@ func decideOn(drv *tuitest.Driver, key, marker string) {
 	drv.WaitGone(marker)
 }
 
+// awaitArmed waits for the decision pane the last key raised — an approval pane or an ask_user
+// pane, which share the latch — to bring its decision keys to life. They arm on the terminal's
+// answer to the pane's SECOND drain marker (internal/tui approval.go), and arming paints nothing,
+// so a settled screen is no evidence of it: on a loaded runner the round trip outlasted the settle
+// window, and the letter typed into the pane was swallowed, as an unarmed letter is. Waiting for
+// those answers to have gone into the program's input is: a key typed afterwards is read behind
+// them. It must follow the key that raised the pane, or a pane raised by the program on its own
+// after the last key — never a key typed INTO the pane, which restarts the count.
+func awaitArmed(drv driven) { drv.WaitCursorAnswers(tuitest.PaneArmAnswers) }
+
 // promptPlaceholder is what the input box shows in exactly one state: empty, with nothing in
 // flight. While a pane is up or a tool is running the same box offers to QUEUE instead, and a box
 // with anything typed in it shows what was typed.
@@ -346,12 +357,13 @@ const promptPlaceholder = "Send a message…"
 // passing, that no pane is standing — a pane that appeared would still be waiting to be answered.
 func waitIdle(drv driven) { drv.WaitText(promptPlaceholder) }
 
-// raisePane sends the conversation's one prompt and waits for its approval pane to settle. The
-// settle is not tidiness: the decision keys arm one latch after the pane opens, so a caller that
-// typed one before the screen went quiet would have it swallowed.
+// raisePane sends the conversation's one prompt and waits for its approval pane to arm and settle.
+// The arm is not tidiness: the decision keys come alive one latch after the pane opens
+// ([awaitArmed]), so a caller that typed one before then would have it swallowed.
 func raisePane(drv driven) {
 	submit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 }
 

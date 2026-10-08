@@ -41,6 +41,9 @@ type Driver struct {
 	// When a lone Esc was last sent, so the next write can let the reader's escape timeout expire
 	// first. Guarded by writeMu.
 	lastEsc time.Time
+	// The cursor-position reports pumped so far, and where that count stood at the last key
+	// ([Driver.WaitCursorAnswers]). Guarded by writeMu.
+	cursor cursorAnswers
 
 	// The attached program: the Send target [Driver.Resize] needs, and the cancel [Driver.Kill]
 	// pulls. Both are nil until Attach.
@@ -254,6 +257,19 @@ func (d *Driver) WaitGone(text string) {
 	WaitGone(d.t, d.screen, text)
 }
 
+// WaitCursorAnswers waits until n cursor-position reports have gone into the program's input since
+// the last key was sent. A key typed afterwards is read behind them, so whatever the program arms on
+// those reports is armed before the key arrives — the one wait a decision pane's latch can be told
+// by, since arming paints nothing ([PaneArmAnswers]).
+func (d *Driver) WaitCursorAnswers(n int) {
+	d.t.Helper()
+	d.WaitFor(func() bool {
+		d.writeMu.Lock()
+		defer d.writeMu.Unlock()
+		return d.cursor.sinceKey() >= n
+	}, awaitingCursorAnswers(n))
+}
+
 // WaitQuiet waits for the screen to stop changing for d — what a test does before pinning a golden.
 func (d *Driver) WaitQuiet(quiet time.Duration) {
 	d.t.Helper()
@@ -441,6 +457,7 @@ func (d *Driver) send(p []byte) {
 	if _, err := d.writer.Write(p); err != nil {
 		d.t.Fatalf("tuitest: write %q to the program's input: %v", p, err)
 	}
+	d.cursor.keySent()
 	if string(p) == string(Esc) {
 		d.lastEsc = time.Now()
 	}
@@ -459,6 +476,7 @@ func (d *Driver) pumpAnswers() {
 		if n > 0 {
 			d.writeMu.Lock()
 			_, werr := d.writer.Write(buf[:n])
+			d.cursor.pump(buf[:n])
 			d.writeMu.Unlock()
 			if werr != nil {
 				return // the input is closed; the program is no longer listening

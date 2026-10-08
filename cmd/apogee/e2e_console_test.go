@@ -173,6 +173,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 // internal/tui/approval.go), so every later call of the same tool in this session runs unasked.
 func alwaysAllow(drv *tuitest.PTYDriver) {
 	drv.WaitText("Always allow this session")
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 	drv.Type("s")
 }
@@ -185,6 +186,7 @@ func allowIfAsked(drv *tuitest.PTYDriver) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, _, ok := drv.Frame().Find("Always allow this session"); ok {
+			awaitArmed(drv)
 			drv.WaitQuiet(settled)
 			drv.Type("s")
 			return

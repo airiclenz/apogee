@@ -310,6 +310,7 @@ func allowAndAwait(drv *tuitest.PTYDriver, done string) {
 	}, tuitest.Awaiting("an approval pane, or "+done))
 
 	if _, _, ok := drv.Frame().Find(approvalRow); ok {
+		awaitArmed(drv)
 		drv.WaitQuiet(settled)
 		drv.Type("s")
 	}

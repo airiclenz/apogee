@@ -583,6 +583,7 @@ func TestE2EReactionsApprovalDecidedCarriesTheVerdict(t *testing.T) {
 
 	submit(drv, `Append a line saying "smoke test" to a.txt.`)
 	drv.WaitText("Always allow this session")
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 	drv.Type("a")
 	drv.WaitText(smokeWriteReply)

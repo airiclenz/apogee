@@ -163,6 +163,7 @@ func TestE2EPopupClickAsk(t *testing.T) {
 
 	submit(drv, popupMultiPrompt)
 	drv.WaitText(askChoiceHint)
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 
 	const secondFinding = "Add the missing layout() call"
@@ -359,6 +360,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	// Single-select, the first choice highlighted.
 	submit(drv, popupSinglePrompt)
 	drv.WaitText(askChoiceHint)
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 	tuitest.Golden(t, "popup-ask-single", drv.Frame(), goldenRedactions(sess)...)
 	drv.Press(tuitest.Enter)
@@ -367,6 +369,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	// Multi-select, the first box ticked.
 	submit(drv, popupMultiPrompt)
 	drv.WaitText(askChoiceHint)
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 	drv.Press(tuitest.Space)
 	drv.WaitText("[✔]")
@@ -378,6 +381,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	// Single-select with a custom answer typed: the highlight drops and the box shows the draft.
 	submit(drv, popupSinglePrompt)
 	drv.WaitText(askChoiceHint)
+	awaitArmed(drv)
 	drv.WaitQuiet(settled)
 	drv.Type("Do the config first")
 	drv.WaitText("Do the config first")

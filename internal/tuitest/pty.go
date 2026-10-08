@@ -51,6 +51,9 @@ type PTYDriver struct {
 	// is the escape-timeout rule (see [escapeGap]), guarded by the same lock.
 	writeMu sync.Mutex
 	lastEsc time.Time
+	// cursor tallies the cursor-position reports pumped into the child, and where that tally stood
+	// at the last key ([PTYDriver.WaitCursorAnswers]). Guarded by writeMu.
+	cursor cursorAnswers
 
 	// raw is every byte the child has written to the terminal, kept whole. The frames come from
 	// the emulator; this is for the claims that are about the SEQUENCES themselves — the
@@ -248,6 +251,17 @@ func (d *PTYDriver) WaitGone(text string) {
 	WaitGone(d.t, d.screen, text)
 }
 
+// WaitCursorAnswers is [Driver.WaitCursorAnswers] for the shipped binary: it waits until n
+// cursor-position reports have gone into the child's input since the last key was sent.
+func (d *PTYDriver) WaitCursorAnswers(n int) {
+	d.t.Helper()
+	d.WaitFor(func() bool {
+		d.writeMu.Lock()
+		defer d.writeMu.Unlock()
+		return d.cursor.sinceKey() >= n
+	}, awaitingCursorAnswers(n))
+}
+
 // WaitQuiet waits for the screen to stop changing for quiet — the settle rule, unchanged from the
 // in-process driver, because it is a property of the picture and not of how the bytes arrived.
 func (d *PTYDriver) WaitQuiet(quiet time.Duration) {
@@ -376,6 +390,7 @@ func (d *PTYDriver) send(p []byte) {
 	}
 	d.lastEsc = time.Time{}
 	_, _ = d.master.Write(p)
+	d.cursor.keySent()
 	if string(p) == string(Esc) {
 		d.lastEsc = time.Now()
 	}
@@ -416,6 +431,7 @@ func (d *PTYDriver) pumpAnswers() {
 		if n > 0 {
 			d.writeMu.Lock()
 			_, werr := d.master.Write(buf[:n])
+			d.cursor.pump(buf[:n])
 			d.writeMu.Unlock()
 			if werr != nil {
 				return // the master is closed; nobody is listening

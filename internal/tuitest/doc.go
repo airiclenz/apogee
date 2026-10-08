@@ -30,6 +30,8 @@
 //     that only the ones it started are held against it.
 //   - driver.go — [Driver]: the in-process terminal. It hands a program its input, its output and
 //     the terminal's own answers, and the test its keys, its resize and its quit.
+//   - cursor.go — the tally of cursor-position answers both drivers keep, and [PaneArmAnswers]:
+//     what lets a test wait for a decision pane to arm, which paints nothing.
 //   - keys.go — [Key]: the byte sequences a terminal sends for the keys apogee binds.
 //   - pty.go — [PTYDriver]: the black-box terminal. It starts the SHIPPED binary under a real
 //     pseudo-terminal and reads back what only a real terminal knows — colour, window size, a

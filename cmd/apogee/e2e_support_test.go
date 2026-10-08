@@ -247,6 +247,7 @@ type driven interface {
 	WaitFor(cond func() bool, opts ...tuitest.Option)
 	WaitText(text string)
 	WaitGone(text string)
+	WaitCursorAnswers(n int)
 	WaitQuiet(quiet time.Duration)
 }
 

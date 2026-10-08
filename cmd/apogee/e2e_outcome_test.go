@@ -102,8 +102,7 @@ func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 	// Steps 6 and 7 — a command that EXITS 0 and quotes the word "error" on its way out. The slot
 	// carries the tool's own verdict, and the quoted text never colours it.
 	submit(drv, terminalPrompt)
-	drv.WaitText(approvalMarker)
-	drv.WaitQuiet(settled)
+	awaitApprovalPane(drv)
 	decide(drv, "a")
 	drv.WaitText("That is what the command had to say.")
 	drv.WaitQuiet(settled)
@@ -230,8 +229,7 @@ func approveEdit(t *testing.T, drv *tuitest.Driver, prompt string) {
 	t.Helper()
 
 	submit(drv, prompt)
-	drv.WaitText(approvalMarker)
-	drv.WaitQuiet(settled)
+	awaitApprovalPane(drv)
 	decide(drv, "a")
 	drv.WaitText("The edit is in.")
 	drv.WaitQuiet(settled)
