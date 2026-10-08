@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,16 @@ const loginCallbackPath = "/callback"
 // callbackReadHeaderTimeout bounds how long the callback listener waits for a request's headers,
 // so a local client that opens a connection and says nothing cannot hold it.
 const callbackReadHeaderTimeout = 10 * time.Second
+
+// callbackShutdownTimeout bounds how long closing the listener waits for an in-flight answer page
+// to reach the browser before it drops whatever connection is still open.
+const callbackShutdownTimeout = 2 * time.Second
+
+// The pages the callback answers the browser with, once the authorization response has arrived.
+const (
+	loginReceivedPage = "apogee: login received. You can close this tab and return to the terminal.\n"
+	loginFailedPage   = "apogee: the login did not complete. The terminal says why; you can close this tab.\n"
+)
 
 // errLoginRefused is the sentinel a fetch wraps when the authorization server redirected back with
 // an `error` instead of a code (RFC 6749 §4.1.2.1): the user declined, or the server refused.
@@ -100,9 +111,14 @@ func newLoginFetcher(term loginTerminal) (string, mcpauth.CodeFetcher, func(), e
 	var once sync.Once
 	closeListener := func() {
 		once.Do(func() {
-			// Close's only error is the listener's own close error, which leaves nothing to do:
-			// the port is released either way.
-			_ = server.Close()
+			// Shutdown lets a callback that is still answering the browser finish its page; past
+			// the timeout, Close drops what is left. Either error leaves nothing to do: the port
+			// is released either way.
+			ctx, cancel := context.WithTimeout(context.Background(), callbackShutdownTimeout)
+			defer cancel()
+			if server.Shutdown(ctx) != nil {
+				_ = server.Close()
+			}
 			<-served
 		})
 	}
@@ -303,9 +319,9 @@ func splitTerminalLines() bufio.SplitFunc {
 	}
 }
 
-// callbackHandler answers the authorization server's redirect: it hands the first authorization
-// response to the waiting fetch and tells the browser to return to the terminal. A request that is
-// not an authorization response is refused and ends nothing.
+// callbackHandler answers the authorization server's redirect: it tells the browser to return to
+// the terminal and then hands the first authorization response to the waiting fetch. A request
+// that is not an authorization response is refused and ends nothing.
 func callbackHandler(results chan<- loginResult) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		result, isRedirect := redirectResult(r.URL.Query())
@@ -313,13 +329,20 @@ func callbackHandler(results chan<- loginResult) http.HandlerFunc {
 			http.Error(w, "apogee: this is not an authorization response.", http.StatusBadRequest)
 			return
 		}
-		deliver(results, result)
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		page := loginReceivedPage
 		if result.err != nil {
-			_, _ = fmt.Fprintln(w, "apogee: the login did not complete. The terminal says why; you can close this tab.")
-			return
+			page = loginFailedPage
 		}
-		_, _ = fmt.Fprintln(w, "apogee: login received. You can close this tab and return to the terminal.")
+		// The page goes out whole before the fetch hears of the response: the fetch closes the
+		// listener as soon as it returns, and a page still buffered then would reach the browser
+		// as a reset connection instead.
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(page)))
+		_, _ = io.WriteString(w, page)
+		// A failed flush leaves the page to the server's own end-of-request write, which the
+		// graceful shutdown in closeListener still waits for.
+		_ = http.NewResponseController(w).Flush()
+		deliver(results, result)
 	}
 }
 

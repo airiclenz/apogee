@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
@@ -139,6 +140,127 @@ func TestMCPLoginFetch_Callback_DeliversCodeAndState(t *testing.T) {
 		t.Fatalf("fetch = %q, %q, %v; want the-code, the-state, nil", code, state, err)
 	}
 	requirePortFree(t, redirectURL)
+}
+
+// answerPageCase is one authorization response the callback answers, and the page it answers with.
+type answerPageCase struct {
+	name     string
+	query    url.Values
+	wantPage string
+}
+
+func answerPageCases() []answerPageCase {
+	return []answerPageCase{
+		{
+			name:     "login received",
+			query:    url.Values{"code": {"the-code"}, "state": {"the-state"}},
+			wantPage: loginReceivedPage,
+		},
+		{
+			name:     "login refused",
+			query:    url.Values{"error": {"access_denied"}},
+			wantPage: loginFailedPage,
+		},
+	}
+}
+
+func TestMCPLoginFetch_CallbackHandler_FlushesThePageBeforeDeliveringTheResult(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range answerPageCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			results := make(chan loginResult, 1)
+			writer := &deliveryGuardWriter{t: t, results: results, header: http.Header{}}
+			request := httptest.NewRequest(http.MethodGet, loginCallbackPath+"?"+testCase.query.Encode(), nil)
+
+			callbackHandler(results).ServeHTTP(writer, request)
+
+			if writer.flushed != testCase.wantPage {
+				t.Errorf("flushed %q before the result was delivered, want %q", writer.flushed, testCase.wantPage)
+			}
+			if len(results) != 1 {
+				t.Errorf("delivered %d results, want 1", len(results))
+			}
+		})
+	}
+}
+
+// deliveryGuardWriter stands in for the browser's connection and fails the test when any of the
+// answer page is written or flushed once the result has reached results: the fetch closes the
+// listener as soon as it hears of the result, so a page still unsent by then is lost. It has no
+// WriteString, so io.WriteString reaches Write too.
+type deliveryGuardWriter struct {
+	t       *testing.T
+	results chan loginResult
+	header  http.Header
+	body    bytes.Buffer
+	flushed string
+}
+
+func (writer *deliveryGuardWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *deliveryGuardWriter) WriteHeader(int) {}
+
+func (writer *deliveryGuardWriter) Write(data []byte) (int, error) {
+	if len(writer.results) != 0 {
+		writer.t.Errorf("wrote %q after the result was delivered", data)
+	}
+	return writer.body.Write(data)
+}
+
+func (writer *deliveryGuardWriter) Flush() {
+	if len(writer.results) != 0 {
+		writer.t.Error("flushed after the result was delivered")
+	}
+	writer.flushed = writer.body.String()
+}
+
+func TestMCPLoginFetch_Callback_BrowserReceivesTheWholeAnswerPage(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range answerPageCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			if page := callbackPageWhileFetching(t, testCase.query); page != testCase.wantPage {
+				t.Fatalf("the browser got %q, want %q", page, testCase.wantPage)
+			}
+		})
+	}
+}
+
+// callbackPageWhileFetching starts a fetch, sends the browser's callback while the fetch waits on
+// it, and returns the page the browser was answered with once the fetch has returned.
+func callbackPageWhileFetching(t *testing.T, query url.Values) string {
+	t.Helper()
+	input := newPipeInput()
+	term, _ := testLoginTerminal(t, nil, input, &bytes.Buffer{})
+	redirectURL, fetch := newTestFetcher(t, term)
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		_, _, _ = fetch(context.Background(), "https://auth.example/authorize")
+	}()
+	waitFor(t, func() bool { return input.inFlight.Load() == 1 })
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	response, err := client.Get(redirectURL + "?" + query.Encode())
+	if err != nil {
+		t.Fatalf("GET the callback: %v", err)
+	}
+	page, err := io.ReadAll(response.Body)
+	if closeErr := response.Body.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("read the answer page: %v", err)
+	}
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetch did not return after the callback")
+	}
+	return string(page)
 }
 
 func TestMCPLoginFetch_PastedRedirect_DeliversCodeAndState(t *testing.T) {
