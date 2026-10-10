@@ -1276,6 +1276,33 @@ executed call is one remembered decision however the model spelled it; a call wh
 COLLIDE under that fold — two spellings of one parameter — is refused before it is resolved, since
 no single reading of it would describe what the tool would run.
 
+**Allow rule**:
+A remembered, persisted *yes* that answers an ordinary **Approval** without asking: for `terminal`, a
+word prefix (`go test`) that every simple command of a command line must match; for **MCP**, a whole
+server. A **project** Allow rule holds under one **Project root** and is the default; a **global** one holds
+everywhere and is only written by hand. It never turns a refusal into a yes, never answers a forced
+look, and yields to a **Reaction**'s ask or deny; every call it lets through says so in the audit.
+_Avoid_: "permission", "allowlist entry", "always-allow" (the session-only choice is *allow for this
+session*).
+
+**Project root**:
+The folder whose `.apogee/` holds the project's **Project config** and skills: the nearest folder
+with a `.apogee/`, from the **Workspace** up to — never past — its git top-level; the Workspace
+itself when there is none or no repo. Never `$HOME`'s `~/.apogee`, which is the global config.
+_Avoid_: "repo root", "git root" (the Project root may sit below either).
+
+**Project config**:
+The **Project root**'s own `.apogee/` settings, committable with the repo. apogee alone writes it, and only
+on the user's answer; tools may not. An entry in it that grants anything — an **Allow rule** — is
+inert until **Adopted**.
+_Avoid_: "repo config", "local config", "project settings file".
+
+**Adoption**:
+The user's recorded acceptance of one granting **Project config** entry, pinned in `~/.apogee` to that
+entry's exact content and **Project root**. An entry with no matching pin — new, edited, pulled from a
+teammate, or written behind apogee's back — is *proposed* and does nothing until adopted.
+_Avoid_: "trust" (adoption is per entry, never a whole-folder yes), "approval" (that is one call).
+
 **Ask-user**:
 A free-text question the model puts to the human mid-task (via the `ask_user` tool), answered
 through a host-supplied **`Asker`** delegate — the public analogue of the **Approver**, but
