@@ -433,6 +433,21 @@ type Options struct {
 	// whose value this run is not taking from the file. ApplyConfig fills it (overrideSources);
 	// absent from the map ⇒ the file or the built-in default, which is the majority of keys.
 	Overrides map[string]Source
+
+	// GlobalConfigOnly says this resolution reads the global config alone and takes no Project
+	// config layer (ADR 0096). Not flag-bound: a Driver sets it before ApplyConfig — the daemon
+	// does, since a Firing's workspace is not the one the daemon starts in. False ⇒ the layer is
+	// read from the workspace's Project root, which is what every interactive and one-shot command
+	// wants.
+	GlobalConfigOnly bool
+
+	// ProjectKeys records which keys the Project config layer contributed to this run, keyed by
+	// registry path: a project-param key the project file states, and a tighten-only list the
+	// project file added entries to that the global file does not carry. Resolution collapses the
+	// layers into one value, so this is how a surface tells that a value is not the global file's
+	// alone — a /settings commit of a tighten-only list holding project entries would write them
+	// into the global file. ApplyConfig fills it; empty when no project layer was read.
+	ProjectKeys map[string]bool
 }
 
 // The two words `workflow-wake:` takes (ADR 0089). They are words rather than a YAML bool because

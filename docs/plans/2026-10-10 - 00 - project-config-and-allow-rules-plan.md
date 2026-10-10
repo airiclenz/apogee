@@ -118,7 +118,13 @@ NOTES (2026-10-10): ADR 0037/0076 and CHANGELOG mentions of `GlobalOnly` left as
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/ && go test -race -count=1 -run 'Settings|Confine' ./cmd/apogee/`
 **Commit:** `refactor(config): give every key a class; GlobalOnly becomes Interlocked`
 
-## 4. Layered load of the Project config
+## 4. Layered load of the Project config — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from "a `projectroot.Resolve` error skips the layer with a notice": item 2 made Resolve never fail, so the notice now comes from `resolveProjectRoot` (`os.Getwd`/`filepath.Abs`/`os.Stat` of the workspace). A `--workspace` that does not exist yet gets that notice and the layer is skipped.
+NOTES (2026-10-10): the loader checks the project file exists with `filepath.EvalSymlinks` on the real filesystem before calling the injected readFile. The symlink-to-global guard needs that call anyway. It also stops test fakes that answer every path with the same bytes from being read as a project file.
+NOTES (2026-10-10): global-only keys are dropped (and named in the one notice) BEFORE the project document is decoded and checked alone. A bad value under a key the layer ignores therefore costs only that notice, not the whole layer. A null value (`key:`) counts as stating nothing. YAML merge keys (`<<:`) in the project file are not layered.
+NOTES (2026-10-10): new `Options.GlobalConfigOnly` (the daemon sets it before ApplyConfig) and `Options.ProjectKeys` (registry paths the project layer contributed to). `settingsRows` uses ProjectKeys to make a tighten-only row read-only. `LoadLayeredConfig(globalPath, projectRoot, readFile, notify)` is the named layered loader for later items; ResolveOptions shares its core (`parseLayeredConfig`). `parseConfigFile` is split into `readConfigData`, `decodeConfigData` and `checkFileConfig` so the merged document gets the same whole-file checks.
+NOTES (2026-10-10): project-param rows (e.g. `context-files.names`) are still editable from /settings and write the global file, where the project value outranks them at the next launch. Item 5 (project-source rows read-only) owns this. `docs/manual/configuration.md` is left to item 19.
 
 **What:** Recast at the regression check (2026-10-10).
 **Goal:** `ResolveOptions` merges `<Project root>/.apogee/config.yaml` over the global file — project-param keys overlay, tighten-only lists union, global-only keys are dropped with one notice naming each — before env and flags.

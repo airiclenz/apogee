@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -700,5 +703,41 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 				t.Errorf("row %q value = %q; want %q", tc.path, got, tc.want)
 			}
 		})
+	}
+}
+
+// A tighten-only list holding entries the Project config added shows the union of both files, so a
+// /settings commit of it would write the project's entries into the global file. The row is
+// therefore read-only, pointing at the editor; the same list with nothing from the project layer
+// stays editable.
+func TestSettingsRowsHoldProjectEntriesOutOfTheGlobalFile(t *testing.T) {
+	t.Parallel()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeConfigHomeFor(t, home, "http://127.0.0.1:1", "tools:\n  disabled: [web_fetch]\n"+
+		"url-safety:\n  deny-hosts: [x.example]\n")
+	if err := os.MkdirAll(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
+		t.Fatalf("create the project folder: %v", err)
+	}
+	project := "tools:\n  disabled: [terminal]\nurl-safety:\n  deny-hosts: [x.example]\n"
+	if err := os.WriteFile(filepath.Join(workspace, ".apogee", "config.yaml"), []byte(project), 0o600); err != nil {
+		t.Fatalf("write the project config: %v", err)
+	}
+	opts := config.Options{ConfigDir: home, Workspace: workspace}
+	var undetermined *config.StartupUndetermined
+	err := config.ApplyConfig(&opts, noFlagChanged, noEnvironment, os.ReadFile, func(string) {})
+	if err != nil && !errors.As(err, &undetermined) {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	byPath := rowsByPath(t, settingsRows(opts))
+
+	if got := byPath["tools.disabled"]; got.Value != "[web_fetch, terminal]" || got.Editable ||
+		got.EditPointer != pointerExternalEdit {
+		t.Errorf("tools.disabled row = {value %q editable %v pointer %q}; want the union, read-only, "+
+			"pointing at the editor", got.Value, got.Editable, got.EditPointer)
+	}
+	if got := byPath["url-safety.deny-hosts"]; !got.Editable {
+		t.Error("url-safety.deny-hosts is read-only; the project added nothing to it, so a commit " +
+			"writes only the global file's own entries")
 	}
 }

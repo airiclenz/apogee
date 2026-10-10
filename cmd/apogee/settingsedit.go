@@ -342,7 +342,8 @@ func appliedValue(row tui.SettingRow) string {
 	return row.Value
 }
 
-// projection reads the config file — and only the file — into the two views the diff needs. It runs
+// projection reads the config files — the global file with the Project config layered over it, and
+// nothing else — into the two views the diff needs. It runs
 // the STARTUP resolution (ApplyConfig) with no flags and no environment, which is what makes the two
 // sides of the diff comparable and the validation the real one rather than a second, weaker copy of
 // it; the rows come off that same resolution (settingsRows), so a key added to the registry is

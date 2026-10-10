@@ -107,6 +107,9 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 	section := ""
 	next := 0
 	for _, k := range config.KeyRegistry {
+		if carriesProjectEntries(k, opts) {
+			k.Editable = false
+		}
 		if next < len(settingSections) && settingSections[next].Opens == k.Path {
 			section = settingSections[next].Name
 			next++
@@ -285,6 +288,14 @@ func editPointer(k config.Key) string {
 	default:
 		return pointerConfine
 	}
+}
+
+// carriesProjectEntries reports whether a tighten-only list's value holds entries the Project config
+// added (ADR 0096 §6): the row shows the union of both files, so a commit from this pane would write
+// the project's entries into the global file. Such a row is read-only here and its ⏎ opens the
+// editor instead, like any other key the pane will not write.
+func carriesProjectEntries(k config.Key, opts config.Options) bool {
+	return k.Class == config.ClassTightenOnly && opts.ProjectKeys[k.Path]
 }
 
 // externallyEdited reports whether ⏎ on this key's row suspends into the human's own editor — the

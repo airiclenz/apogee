@@ -2848,23 +2848,41 @@ func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify f
 // into one exported call.
 func parseConfigFile(path string, readFile func(string) ([]byte, error), notify func(string),
 	mayMigrate bool) (fileConfig, error) {
+	data, present, err := readConfigData(path, readFile, notify, mayMigrate)
+	if err != nil || !present {
+		return fileConfig{}, err
+	}
+	return decodeConfigData(path, data, notify)
+}
+
+// readConfigData reads the global config file and runs the legacy migration over it, answering the
+// migrated bytes and whether there was a file at all: an empty path and an absent file both answer
+// present=false with no error, since a config file is optional.
+func readConfigData(path string, readFile func(string) ([]byte, error), notify func(string),
+	mayMigrate bool) ([]byte, bool, error) {
 	if path == "" {
-		return fileConfig{}, nil
+		return nil, false, nil
 	}
 	data, err := readFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return fileConfig{}, nil
+			return nil, false, nil
 		}
-		return fileConfig{}, fmt.Errorf("apogee: read config %q: %w", path, err)
+		return nil, false, fmt.Errorf("apogee: read config %q: %w", path, err)
 	}
 	data, note, err := migrateLegacyConfig(path, data, time.Now(), mayMigrate)
 	if err != nil {
-		return fileConfig{}, err
+		return nil, false, err
 	}
 	if note != "" {
 		notify(note)
 	}
+	return data, true, nil
+}
+
+// decodeConfigData decodes the migrated bytes of the global file into the schema, announces the
+// keys the schema does not spell, and runs the whole-file checks (checkFileConfig).
+func decodeConfigData(path string, data []byte, notify func(string)) (fileConfig, error) {
 	var fc fileConfig
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return fileConfig{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
@@ -2878,17 +2896,25 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	for _, unknown := range unknownKeys(data) {
 		notify(fmt.Sprintf(unknownKeyNotice, path, unknown.key, unknown.line))
 	}
-	canonicaliseServers(&fc)
-	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
-		return fileConfig{}, err
-	}
-	if err := validateReactionBlocks(fc.Reactions); err != nil {
-		return fileConfig{}, err
-	}
-	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {
+	if err := checkFileConfig(&fc); err != nil {
 		return fileConfig{}, err
 	}
 	return fc, nil
+}
+
+// checkFileConfig canonicalises the decoded `servers:` list and refuses the blocks whose defects
+// are facts about the decoded document as a whole — the model profiles, the Reactions and the
+// top-level reply share. It runs on the global file alone and again on the document a Project
+// config was layered into (layer.go), so both are judged by one set of checks.
+func checkFileConfig(fc *fileConfig) error {
+	canonicaliseServers(fc)
+	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
+		return err
+	}
+	if err := validateReactionBlocks(fc.Reactions); err != nil {
+		return err
+	}
+	return validateResponseReserveFraction(fc.ResponseReserve)
 }
 
 // legacyFileConfig is the retired half of the schema — and ONLY that half: the top-level
@@ -3065,16 +3091,19 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // ----------------------------------------------------------------------------
 
 // ResolveOptions resolves every configured value onto opts, in precedence order: the built-in
-// defaults and the config file first (one pass, since the file is the only source below the
-// defaults), then the APOGEE_* variables, then the explicitly-set flags — so a flag beats a
-// variable beats the file beats the default. Every source writes onto opts itself, which is what
-// makes applying them in that order the precedence rule; the file pass writes every key of the
-// schema, so no value from a previous resolution survives it.
+// defaults and the config files first (one pass over the one document the Project config is
+// layered into the global file as — see parseLayeredConfig), then the APOGEE_* variables, then the
+// explicitly-set flags — so a flag beats a variable beats the files beat the default. Every source
+// writes onto opts itself, which is what makes applying them in that order the precedence rule;
+// the file pass writes every key of the schema, so no value from a previous resolution survives it.
 //
-// The config file lives at <apogee-home>/config.yaml, where the home follows
+// The global config file lives at <apogee-home>/config.yaml, where the home follows
 // --config > APOGEE_CONFIG > ~/.apogee; the file cannot set the home (it lives inside it), so
 // --config / APOGEE_CONFIG are resolved onto opts first. The workspace honours
-// --workspace > APOGEE_WORKSPACE > cwd the same way. changed, getenv and readFile are injected so
+// --workspace > APOGEE_WORKSPACE > cwd the same way, and the Project config is read from the
+// Project root that workspace resolves to (internal/projectroot) — unless opts.GlobalConfigOnly
+// says this Driver takes no project layer. Which keys the project layer stated is recorded on
+// opts.ProjectKeys. changed, getenv and readFile are injected so
 // the whole chain is testable end-to-end, and so is hostID — the machine identity the Host
 // acknowledgement ladder is selected by (ADR 0012, amendment 2026-07-21) — which is what lets a
 // test pin that ladder off whatever host it runs on. [ApplyConfig] passes the live platform.HostID().
@@ -3099,8 +3128,14 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	}
 	// The one reader that may MIGRATE: this is the startup pass, so a config still written in a
 	// retired shape is folded here and announced through notify. Every live re-read goes through
-	// LoadFileConfig, which refuses rather than rewriting a file a session is running on.
-	fc, err := parseConfigFile(FilePath(opts.ConfigDir), readFile, notify, true)
+	// LoadFileConfig, which refuses rather than rewriting a file a session is running on. The
+	// migration is the global file's alone: the Project config is layered over the migrated global
+	// document (layer.go) and is never rewritten.
+	projectRoot := ""
+	if !opts.GlobalConfigOnly {
+		projectRoot = resolveProjectRoot(opts.Workspace, notify)
+	}
+	fc, projectKeys, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify, true)
 	if err != nil {
 		return nil, err
 	}
@@ -3113,6 +3148,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	if err := applyFile(opts, fc); err != nil {
 		return nil, err
 	}
+	opts.ProjectKeys = projectKeys
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}
