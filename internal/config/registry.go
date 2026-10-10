@@ -80,6 +80,48 @@ const (
 	KindScheme Kind = "scheme"
 )
 
+// KeyClass is what a Project config (ADR 0096 §6) may do with a key — the one question a layered
+// load asks of a row before it lets the project file's value stand. The zero value is
+// ClassGlobalOnly, so a key added to the table without a thought for the project layer is fenced
+// out of it until someone marks it otherwise: the safe answer is the one nobody has to remember.
+type KeyClass int
+
+const (
+	// ClassGlobalOnly keys are read from the global config alone; a project file that states one is
+	// ignored with a notice. Everything that widens what a session may do lives here — mode,
+	// Bypass, confinement, servers, editor, the system prompt's file — as does every key nobody has
+	// yet argued belongs to a project.
+	ClassGlobalOnly KeyClass = iota
+	// ClassProjectParam keys describe the project and widen nothing (context-file names, the
+	// project's skills, workflow limits), so the project file's value outranks the global one and
+	// is live as written.
+	ClassProjectParam
+	// ClassTightenOnly keys may only be narrowed by a project: its entries are unioned with the
+	// global layer's rather than replacing them, so a repo can switch a tool off or deny a host but
+	// never switch one back on.
+	ClassTightenOnly
+	// ClassGranting keys widen what runs unasked — the Allow rules — so a project's entries for one
+	// are live only once the user has Adopted that exact file content.
+	ClassGranting
+)
+
+// String names the class the way ADR 0096 spells it, so a test failure or a diagnostic reads as the
+// decision does rather than as a number.
+func (c KeyClass) String() string {
+	switch c {
+	case ClassGlobalOnly:
+		return "global-only"
+	case ClassProjectParam:
+		return "project-param"
+	case ClassTightenOnly:
+		return "tighten-only"
+	case ClassGranting:
+		return "granting"
+	default:
+		return fmt.Sprintf("KeyClass(%d)", int(c))
+	}
+}
+
 // Key describes one key of the config schema: what it is, where it may be set from,
 // and whether a surface may edit it.
 //
@@ -95,10 +137,16 @@ const (
 // belong to one invocation), and api-key has an env var but deliberately no flag — a
 // secret typed on a command line lands in shell history and in `ps` output.
 //
-// GlobalOnly marks the keys ADR 0012 fences to the global config: no flag, no env, and no
-// project config may set them, because a hostile repo's invocation environment must not be
-// able to loosen Auto's blast radius. Editable is whether the settings surface may write the
-// key at all — false for every structured kind, and false for the confinement keys, whose
+// Class is what a Project config may do with the key (ADR 0096 §6): global-only — the zero value,
+// so an unmarked key is fenced to the global file — project-param, tighten-only or granting.
+//
+// Interlocked marks the confinement pair ADR 0012 fences behind its acknowledgement interlock: no
+// flag, no env and no project config may set them, because a hostile repo's invocation environment
+// must not be able to loosen Auto's blast radius, and no settings surface writes them either — the
+// interlock stays single-homed in /confine. It is a narrower fact than global-only, which most keys
+// are: an interlocked key is also global-only, never the reverse.
+//
+// Editable is whether the settings surface may write the key at all — false for every structured kind, and false for the confinement keys, whose
 // acknowledgement interlock stays single-homed in /confine — and, since ADR 0037, it is also
 // whether that surface APPLIES it: a key it writes takes effect in the running session on the
 // same keypress, except the few read only while a session is wired, whose rows say they take
@@ -181,22 +229,23 @@ const (
 // table and call the row's own projections, so a key described here is a key resolution reads by
 // the act of being described, and the variable and flag NAMES (EnvVar, FlagName) have one home.
 type Key struct {
-	Path       string
-	Kind       Kind
-	Default    string
-	EnumValues []string
-	EnvVar     string
-	FlagName   string
-	GlobalOnly bool
-	Editable   bool
-	Masked     bool
-	Validate   func(value string) error
-	Desc       string
-	Read       func(o Options) string
-	Text       func(o Options) string
-	Structure  func(o Options) any
-	Set        func(value string, o *Options) error
-	Copy       func(dst, src *Options)
+	Path        string
+	Kind        Kind
+	Default     string
+	EnumValues  []string
+	EnvVar      string
+	FlagName    string
+	Class       KeyClass
+	Interlocked bool
+	Editable    bool
+	Masked      bool
+	Validate    func(value string) error
+	Desc        string
+	Read        func(o Options) string
+	Text        func(o Options) string
+	Structure   func(o Options) any
+	Set         func(value string, o *Options) error
+	Copy        func(dst, src *Options)
 
 	// field is the row's typed descriptor, nil for a row that writes its projections by hand.
 	field fieldSpec
@@ -392,6 +441,7 @@ var KeyRegistry = bindRows([]Key{
 	},
 	{
 		Path: "context-files.enable", Kind: KindBool, Default: "true",
+		Class:    ClassProjectParam,
 		Editable: true,
 		Desc:     "Fold the workspace context files below into the system prompt at session start.",
 		// Answered from the resolved LIST rather than from the switch: the block resolves to the names
@@ -405,6 +455,7 @@ var KeyRegistry = bindRows([]Key{
 		// (KindStringList): the row is typed as the comma-separated names it shows, and the writer
 		// renders them back as the flow sequence the template documents.
 		Path: "context-files.names", Kind: KindStringList, Default: "[AGENTS.md]",
+		Class:    ClassProjectParam,
 		Editable: true,
 		Validate: validateContextFileNames, // the startup check itself: contextFilesSettings.validate
 		Desc:     "Workspace-root file names folded into the system prompt, in list order.",
@@ -417,19 +468,19 @@ var KeyRegistry = bindRows([]Key{
 		// the EFFECTIVE value is resolveConfineToWorkspace's, because only it holds this machine's
 		// identity.
 		Path: "confine-to-workspace", Kind: KindBool, Default: "true",
-		GlobalOnly: true,
-		Editable:   false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
-		Desc:       "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
+		Interlocked: true,
+		Editable:    false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
+		Desc:        "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
 		field: boolField(func(o *Options) *bool { return &o.ConfineToWorkspace },
 			func(fc fileConfig) *bool { return fc.ConfineToWorkspace }),
 	},
 	{
 		Path: "unconfined-hosts", Kind: KindStructured,
-		GlobalOnly: true,
-		Desc:       "Machines acknowledged as disposable, where auto mode runs unconfined.",
-		Read:       func(o Options) string { return countSummary(len(o.UnconfinedHosts), "host") },
-		Structure:  func(o Options) any { return o.UnconfinedHosts },
-		fromFile:   fileUnconfinedHosts,
+		Interlocked: true,
+		Desc:        "Machines acknowledged as disposable, where auto mode runs unconfined.",
+		Read:        func(o Options) string { return countSummary(len(o.UnconfinedHosts), "host") },
+		Structure:   func(o Options) any { return o.UnconfinedHosts },
+		fromFile:    fileUnconfinedHosts,
 	},
 	{
 		Path: "web-search-endpoint", Kind: KindString,
@@ -453,6 +504,7 @@ var KeyRegistry = bindRows([]Key{
 		// refusal (unknownToolNotice), and a hook here would make the settings surface stricter than
 		// the file it writes.
 		Path: "tools.disabled", Kind: KindStringList,
+		Class:    ClassTightenOnly,
 		Editable: true,
 		Desc:     "Built-in tools to take off the menu, by name; the model is neither offered nor able to call them.",
 		// The NAMES rather than a count: the list is short, which tools are off is the whole of what
@@ -506,6 +558,7 @@ var KeyRegistry = bindRows([]Key{
 	},
 	{
 		Path: "url-safety.deny-hosts", Kind: KindStringList,
+		Class:    ClassTightenOnly,
 		Editable: true,
 		Desc:     "Hosts the network tools may never reach, with their subdomains; deny wins over the allow list.",
 		field: listField(func(o *Options) *[]string { return &o.URLDenyHosts },
@@ -518,6 +571,7 @@ var KeyRegistry = bindRows([]Key{
 	},
 	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
+		Class:    ClassProjectParam,
 		Editable: true,
 		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
 		field: boolField(func(o *Options) *bool { return &o.UseProjectSkills },
@@ -706,6 +760,7 @@ var KeyRegistry = bindRows([]Key{
 		// the engine's own (domain.DefaultWorkflowRetries), so the host's and an embedder's zero
 		// Config agree.
 		Path: "workflow-retries", Kind: KindInt, Default: strconv.Itoa(domain.DefaultWorkflowRetries),
+		Class: ClassProjectParam,
 		Desc: "How many times a workflow restarts an item with a fresh sub-agent after a fault, a " +
 			"missing receipt, or a cap its continuations did not clear; 0 never restarts one; takes " +
 			"effect at the next start.",
@@ -716,6 +771,7 @@ var KeyRegistry = bindRows([]Key{
 		// workflow-retries's posture exactly, for the continuation bound.
 		Path: "workflow-continuations", Kind: KindInt,
 		Default: strconv.Itoa(domain.DefaultWorkflowContinuations),
+		Class:   ClassProjectParam,
 		Desc: "How many times a workflow continues a capped sub-agent within one attempt, each " +
 			"continuation seeded with the rounds before it; 0 never continues one; takes effect at " +
 			"the next start.",
@@ -729,6 +785,7 @@ var KeyRegistry = bindRows([]Key{
 		// nobody spelled. File-only, so no Validate hook: a non-editable row carries none.
 		Path: "workflow-wake", Kind: KindEnum, Default: WorkflowWakeOn,
 		EnumValues: workflowWakeValues,
+		Class:      ClassProjectParam,
 		Desc: "Whether a background workflow's end wakes the agent: on = it takes a turn to read " +
 			"the result; off = the note waits for your next message; takes effect at the next start.",
 		field: checkedField(ParseWorkflowWake, workflowWakeValue,
@@ -1043,7 +1100,7 @@ var KeyRegistry = bindRows([]Key{
 		// with headers — and no field on a one-line row could write it, so the row counts what is
 		// armed and ⏎ opens the file. It sits
 		// directly under `bypass`, which opens the pane's Reactions section: the off-switch first,
-		// then the list it switches off. Read-only, and NOT GlobalOnly: apogee has one config file,
+		// then the list it switches off. Read-only, and NOT Interlocked: apogee has one config file,
 		// and the flag would take the row out of the live reload diff that keeps a session's
 		// Reactions following the file.
 		Path: "reactions", Kind: KindStructured,

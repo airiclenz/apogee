@@ -259,7 +259,7 @@ func (e *externalEdit) changed() (tui.ConfigReload, error) {
 
 	var applied []tui.AppliedSetting
 	for i, k := range config.KeyRegistry {
-		if k.GlobalOnly || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer {
+		if k.Interlocked || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer {
 			continue
 		}
 		if i >= len(before.rows) || i >= len(after.rows) {

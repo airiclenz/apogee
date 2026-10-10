@@ -303,6 +303,57 @@ func TestRegistryRowsProjectEveryValue(t *testing.T) {
 	}
 }
 
+// TestRegistryKeyClassesArePinned pins every key a Project config may touch (ADR 0096 §6) to its
+// class. Global-only is the zero value, so the pin lists the exceptions and nothing else: a key that
+// gains a class without the pin following — or loses one — fails here, which keeps "what a cloned
+// repo can set" a reviewed list rather than a property scattered across the table.
+func TestRegistryKeyClassesArePinned(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]KeyClass{
+		"context-files.enable":   ClassProjectParam,
+		"context-files.names":    ClassProjectParam,
+		"use-project-skills":     ClassProjectParam,
+		"workflow-retries":       ClassProjectParam,
+		"workflow-continuations": ClassProjectParam,
+		"workflow-wake":          ClassProjectParam,
+		"tools.disabled":         ClassTightenOnly,
+		"url-safety.deny-hosts":  ClassTightenOnly,
+	}
+	got := map[string]KeyClass{}
+	for _, k := range KeyRegistry {
+		if k.Class != ClassGlobalOnly {
+			got[k.Path] = k.Class
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("non-global-only keys and their classes:\n  got  %v\n  want %v", got, want)
+	}
+}
+
+// TestRegistryInterlockMarksExactlyTheConfinementPair pins the ADR 0012 interlock to the two keys
+// /confine owns, and checks that an interlocked key is also global-only: the interlock is the
+// narrower fence, so a project layer that could set an interlocked key would undo it.
+func TestRegistryInterlockMarksExactlyTheConfinementPair(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"confine-to-workspace", "unconfined-hosts"}
+	var got []string
+	for _, k := range KeyRegistry {
+		if !k.Interlocked {
+			continue
+		}
+		got = append(got, k.Path)
+		if k.Class != ClassGlobalOnly {
+			t.Errorf("registry row %q is interlocked but classed %v; an interlocked key is global-only",
+				k.Path, k.Class)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("interlocked keys = %v, want %v", got, want)
+	}
+}
+
 // The suggestion band's row is a bool that defaults ON and is editable, which is the whole of what
 // the key promises a surface: /settings offers it, an untouched config paints the band, and the row
 // reads back what THIS session resolved rather than the declared default (ADR 0061). The row's

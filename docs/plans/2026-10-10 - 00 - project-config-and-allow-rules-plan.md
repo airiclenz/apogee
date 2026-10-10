@@ -103,7 +103,11 @@ NOTES (2026-10-10): consequential edit — docs/manual/configuration.md: made ne
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/projectroot/ && go test -race -count=1 -run 'Skill' ./internal/skills/ && go test -race -count=1 -run 'Skill' ./internal/tui/`
 **Commit:** `feat(config): resolve the Project root; skills read its .apogee/skills`
 
-## 3. Config key classes
+## 3. Config key classes — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — CONTEXT.md: made necessary by the registry's `global-only` column becoming `Class` + `Interlocked` (Settings surface entry's list of what a registry row describes)
+NOTES (2026-10-10): `KeyClass` is an int enum with a `String()` spelling ADR 0096's names (for test and diagnostic output); `ClassGranting` is declared but carries no key yet — item 10's `allow:` is its first; the interlock test also asserts an interlocked key is classed global-only
+NOTES (2026-10-10): ADR 0037/0076 and CHANGELOG mentions of `GlobalOnly` left as historical records
 
 **What:**
 **Goal:** every registry key has a class — global-only (zero value), project-param, tighten-only or granting — and the confinement-interlock meaning has its own field.

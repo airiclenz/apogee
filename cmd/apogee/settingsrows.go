@@ -274,7 +274,7 @@ func settingSource(k config.Key, overrides map[string]config.Source) (tui.Settin
 
 // editPointer says where a key this pane will not write is edited instead — empty for an editable
 // key. The confinement pair is the one case that does not open an editor: their acknowledgement
-// interlock stays single-homed in /confine (ADR 0012), and GlobalOnly is exactly the property that
+// interlock stays single-homed in /confine (ADR 0012), and Interlocked is exactly the property that
 // marks them, so the pointer follows the registry rather than a second list of paths.
 func editPointer(k config.Key) string {
 	switch {
@@ -296,5 +296,5 @@ func editPointer(k config.Key) string {
 // not a shape test: a key that became read-only for some other reason tomorrow should reach the
 // editor like the rest.
 func externallyEdited(k config.Key) bool {
-	return !k.Editable && !k.GlobalOnly
+	return !k.Editable && !k.Interlocked
 }

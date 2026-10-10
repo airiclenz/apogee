@@ -158,7 +158,7 @@ func writableKey(key string) (Key, error) {
 		return Key{}, fmt.Errorf("apogee: %q is not a setting apogee knows", key)
 	}
 	switch {
-	case k.GlobalOnly && !k.Editable:
+	case k.Interlocked && !k.Editable:
 		return Key{}, fmt.Errorf(
 			"apogee: %s is not written from the settings surface: it is the confinement acknowledgement, "+
 				"which /confine makes deliberately", k.Path)

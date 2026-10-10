@@ -1491,9 +1491,9 @@ _Avoid_: "trusted host" (it is not a trust store, and nothing is verified), "whi
 **Settings surface** (`/settings`):
 The **full-height pane over the key registry** — the in-app view of `~/.apogee/config.yaml`. The
 **key registry** is one declarative table describing every config key (path, kind, default,
-env-var and flag names, global-only, editability, masking, validation hook, one-line description);
-both the pane and [Resolution](#safety-and-autonomy)'s multi-source precedence read their metadata
-from it, and a reflection **bijection guard** against `fileConfig`'s yaml tags makes a schema key
+env-var and flag names, key class, confinement interlock, editability, masking, validation hook,
+one-line description); both the pane and [Resolution](#safety-and-autonomy)'s multi-source
+precedence read their metadata from it, and a reflection **bijection guard** against `fileConfig`'s yaml tags makes a schema key
 without a registry row a test failure — the screen cannot drift from the schema. The pane claims
 the **entire transcript row budget** while the frame floor (status line, input box, footer) stays
 drawn — a new pane class, `layout.md`'s first surface allowed to take all of it — lists every key
