@@ -144,6 +144,11 @@ func statedKeys(data []byte) map[string]bool {
 	return stated
 }
 
+// ProjectFilePath is where the Project root projectRoot keeps its Project config, or "" for the
+// empty root — no project layer. It is the one spelling of that path outside this package: the
+// composition root watches the file the layered load reads, and the two must not drift apart.
+func ProjectFilePath(projectRoot string) string { return projectFilePath(projectRoot) }
+
 // projectFilePath is the Project config's path under projectRoot, or "" for the empty root that
 // means no project layer.
 func projectFilePath(projectRoot string) string {

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
@@ -18,37 +19,40 @@ import (
 const maskedValue = "••••"
 
 // probeConfigCommand builds `apogee probe config` — the fourth subject of `probe`, on the FREE side
-// of its split (ADR 0021 §1): no agent, no model, no write. It reads config.yaml the way a LIVE
-// reload reads it (config.LoadFileConfig — the projection every `/settings` apply comes through)
+// of its split (ADR 0021 §1): no agent, no model, no write. It reads config.yaml with the Project
+// config of the current directory's Project root layered over it (ADR 0096 §6), the way a LIVE
+// re-read of a saved file reads them (config.LoadLayeredConfig — the files the watcher re-reads)
 // rather than the way startup does, so a file still written in a retired shape is reported as
 // needing the migration a startup makes instead of being migrated here: the one migrating read is
 // the startup pass, and a diagnostic that rewrote the file it was asked to describe would be the
 // wrong kind of answer.
 //
 // It reports three things: every notice the reader collects (an unknown key, a key that will be
-// ignored), whether the file awaits that migration, and — when it does not — the value every key
-// of the registry resolves to from the file alone, spelled the way the file spells it. Flags,
-// APOGEE_* variables and the host acknowledgement are deliberately NOT layered in: `apogee probe`
-// already reports the resolution a session runs with, and this verb's question is the narrower
-// "what does the file say?".
+// ignored, a global-only key the project file may not set), whether the global file awaits that
+// migration, and — when it does not — the value every key of the registry resolves to from the
+// two files alone, spelled the way the files spell it. Flags, APOGEE_* variables and the host
+// acknowledgement are deliberately NOT layered in: `apogee probe` already reports the resolution a
+// session runs with, and this verb's question is the narrower "what do the files say?".
 func probeConfigCommand() *cobra.Command {
 	var configDir string
 
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Report what config.yaml says: its notices, a pending migration, and every key's value",
-		Long: "apogee probe config reads config.yaml the way a live reload reads it and reports what\n" +
-			"the reader noticed (an unknown key it ignored, for instance), whether the file is still\n" +
-			"written in a retired shape that a startup would migrate, and otherwise the value every\n" +
-			"key resolves to from the file alone — the file's own value where it states one, the\n" +
-			"built-in default where it does not.\n\n" +
+		Short: "Report what the config files say: their notices, a pending migration, and every key's value",
+		Long: "apogee probe config reads config.yaml, with the Project config of the current\n" +
+			"directory's Project root (<root>/.apogee/config.yaml) layered over it, the way a live\n" +
+			"re-read reads them, and reports what the reader noticed (an unknown key it ignored, for\n" +
+			"instance), whether the global file is still written in a retired shape that a startup\n" +
+			"would migrate, and otherwise the value every key resolves to from the two files alone —\n" +
+			"the project file's value for a key it may set, the global file's own value where it\n" +
+			"states one, the built-in default where neither does.\n\n" +
 			"It never writes: a file that needs the migration is reported, not rewritten. Flags and\n" +
 			"the APOGEE_* environment are not layered in; `apogee probe` reports those.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			report, err := configReport(config.FilePath(configDir), os.ReadFile)
+			report, err := configReport(config.FilePath(configDir), probeProjectRoot(), os.ReadFile)
 			if err != nil {
 				return err
 			}
@@ -68,20 +72,34 @@ func probeConfigCommand() *cobra.Command {
 	return cmd
 }
 
-// configReport reads the config file at path through the live reader and renders the report.
-// A refusal of a retired shape is a FINDING the report states under `migration`, not a failure
-// of the command; every other error the reader returns — a malformed file, a value a key
-// refuses — is the command's own, in the reader's sentence.
-func configReport(path string, readFile func(string) ([]byte, error)) (string, error) {
+// probeProjectRoot is the Project root the report layers: the current directory's, resolved by the
+// same walk a session started here resolves it by. A directory that cannot be named is no project
+// layer — the report then reads the global file alone, as a session with no Project root does.
+func probeProjectRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return projectroot.Resolve(cwd, userHome())
+}
+
+// configReport reads the config file at path, with the Project config of projectRoot layered over
+// it, through the live reader and renders the report. A refusal of a retired shape is a FINDING
+// the report states under `migration`, not a failure of the command; every other error the reader
+// returns — a malformed global file, a value a key refuses — is the command's own, in the reader's
+// sentence. A defect in the project file is neither: the reader announces it and skips the layer,
+// so it reaches the report under `notices`.
+func configReport(path, projectRoot string, readFile func(string) ([]byte, error)) (string, error) {
 	var notices []string
-	o, err := config.LoadFileConfig(path, readFile, func(msg string) { notices = append(notices, msg) })
+	o, err := config.LoadLayeredConfig(path, projectRoot, readFile,
+		func(msg string) { notices = append(notices, msg) })
 	if err != nil && !errors.Is(err, config.ErrRetiredShape) {
 		return "", err
 	}
 
 	lines := []string{
 		"apogee probe — config report",
-		"  (nothing is written; the file is read the way a live reload reads it)",
+		"  (nothing is written; the files are read the way a live reload reads them)",
 		"",
 		"notices",
 	}

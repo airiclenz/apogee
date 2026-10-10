@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -41,12 +42,14 @@ func startConfigWatcher(t *testing.T, path string) *filewatch.Watcher {
 	return w
 }
 
-// watchedConfig is the chain the composition root wires, composed over one temp file: the poll, the
-// baseline the diff is made against, and the seam the renderer parks a wait on.
+// watchedConfig is the chain the composition root wires, composed over temp files: the polls, the
+// baseline the diff is made against, and the seam the renderer parks a wait on. projectPath is the
+// Project config the second watcher polls, or "" for the global file alone.
 type watchedConfig struct {
-	path  string
-	edits *externalEdit
-	await func(context.Context) bool
+	path        string
+	projectPath string
+	edits       *externalEdit
+	await       func(context.Context) bool
 }
 
 // newWatchedConfig seeds the file with body and starts watching it at the test cadence.
@@ -58,7 +61,35 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 	return &watchedConfig{
 		path:  path,
 		edits: newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" }),
-		await: awaitConfigChangeOn(startConfigWatcher(t, path)),
+		await: awaitConfigChangeOn(startConfigWatcher(t, path), nil),
+	}
+}
+
+// newWatchedLayeredConfig is newWatchedConfig with a Project config beside the global file: a
+// workspace outside any repository, which is its own Project root (internal/projectroot), whose
+// `.apogee/config.yaml` is seeded with project — or left absent when project is empty — and watched
+// by the second watcher at the path the composition root derives (projectConfigWatchPath).
+func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfig {
+	t.Helper()
+	home, workspace := t.TempDir(), t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, global)
+	opts := config.Options{ConfigDir: home, Workspace: workspace}
+	projectPath := projectConfigWatchPath(opts, projectroot.Resolve(workspace, ""))
+	if projectPath == "" {
+		t.Fatal("no Project config path for a workspace that is its own Project root")
+	}
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	if project != "" {
+		writeSettingsFixture(t, projectPath, project)
+	}
+	return &watchedConfig{
+		path:        path,
+		projectPath: projectPath,
+		edits:       newExternalEdit(opts, workspace, func(string) string { return "" }),
+		await:       awaitConfigChangeOn(startConfigWatcher(t, path), startConfigWatcher(t, projectPath)),
 	}
 }
 
@@ -67,13 +98,19 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 // rather than hanging the suite.
 func (c *watchedConfig) reload(t *testing.T, why string) ([]tui.AppliedSetting, error) {
 	t.Helper()
+	reload, err := c.reloadWhole(t, why)
+	return reload.Applied, err
+}
+
+// reloadWhole is reload answering the whole re-read: the keys it applies and the notices it adds.
+func (c *watchedConfig) reloadWhole(t *testing.T, why string) (tui.ConfigReload, error) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), configWatchTestDeadline)
 	defer cancel()
 	if !c.await(ctx) {
 		t.Fatalf("no change reported for %s", why)
 	}
-	reload, err := c.edits.changed()
-	return reload.Applied, err
+	return c.edits.changed()
 }
 
 // The headline of ADR 0041 decision 5: a key changed in the file by something that is not apogee
@@ -232,5 +269,120 @@ func TestWatchedConfigRepointedMCPServerReconnects(t *testing.T) {
 	}
 	if !old.closed {
 		t.Error("the old sessions are still open; a reconnect that landed leaves no orphan behind it")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The Project config, watched beside the global file (ADR 0096 §6)
+// ----------------------------------------------------------------------------
+
+// A project-param key saved into the Project config reaches the session through the same diff and
+// the same dispatcher a global edit does — here a project file created mid-session, which the second
+// watcher reports as the change it is.
+func TestWatchedProjectConfigAppliesAProjectParamKey(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, "context-files:\n  names: [AGENTS.md]\n", "")
+
+	writeSettingsFixture(t, c.projectPath, "context-files:\n  names: [CLAUDE.md]\n")
+	applied, err := c.reload(t, "a project-param key saved into the Project config")
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Path != "context-files.names" {
+		t.Fatalf("reload = %+v, want context-files.names — the project file's value outranks the global one",
+			applied)
+	}
+	spy := &applySettingSpy{}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	if _, err := applySettingFor(applier)(applied[0].Path, applied[0].Value); err != nil {
+		t.Fatalf("apply %s: %v", applied[0].Path, err)
+	}
+	if len(spy.contextFiles) != 1 || strings.Join(spy.contextFiles[0].names, ",") != "CLAUDE.md" {
+		t.Errorf("engine got %+v, want the project's [CLAUDE.md] through the dispatcher", spy.contextFiles)
+	}
+}
+
+// A global-only key saved into the Project config applies nothing — the layer drops it — and the
+// re-read says so once, in the loader's own words.
+func TestWatchedProjectConfigIgnoresAGlobalOnlyKeyWithANotice(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, "mode: ask-before\n", "context-files:\n  enable: true\n")
+
+	writeSettingsFixture(t, c.projectPath, "context-files:\n  enable: true\nmode: auto\n")
+	reload, err := c.reloadWhole(t, "a global-only key saved into the Project config")
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(reload.Applied) != 0 {
+		t.Errorf("reload applied %+v; a global-only key in the Project config moves nothing", reload.Applied)
+	}
+	if len(reload.Notices) != 1 || !strings.Contains(reload.Notices[0], "ignoring global-only key") ||
+		!strings.Contains(reload.Notices[0], `"mode"`) {
+		t.Errorf("notices = %q, want the one line naming the ignored mode key", reload.Notices)
+	}
+}
+
+// A Project config removed mid-session changes nothing live: a deletion is no report
+// (internal/filewatch skips a failed stat), so the layer it carried stands until the next launch.
+func TestWatchedProjectConfigRemovalChangesNothingLive(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, "", "context-files:\n  names: [CLAUDE.md]\n")
+
+	if err := os.Remove(c.projectPath); err != nil {
+		t.Fatalf("remove the Project config: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*configWatchTestSettle)
+	defer cancel()
+	if c.await(ctx) {
+		t.Error("removing the Project config was reported as a change; it applies at the next launch")
+	}
+}
+
+// The second watcher's path is the Project config the layered load reads, and nothing when there is
+// no second file: a resolution on the global config alone, the empty Project root, or a project
+// file that is the global file itself.
+func TestProjectConfigWatchPath(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	projectFile := filepath.Join(root, ".apogee", "config.yaml")
+	for _, tc := range []struct {
+		name string
+		opts config.Options
+		root string
+		want string
+	}{
+		{"a Project root", config.Options{ConfigDir: t.TempDir()}, root, projectFile},
+		{"the global config alone", config.Options{ConfigDir: t.TempDir(), GlobalConfigOnly: true}, root, ""},
+		{"no Project root", config.Options{ConfigDir: t.TempDir()}, "", ""},
+		{"the global file itself", config.Options{ConfigDir: filepath.Join(root, ".apogee")}, root, ""},
+	} {
+		if got := projectConfigWatchPath(tc.opts, tc.root); got != tc.want {
+			t.Errorf("%s: projectConfigWatchPath = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The /settings applies re-read the global file alone (settingsApplier.fileConfig): every key they
+// read is global-only, so a Project config that does not even parse cannot fail one of them.
+func TestWatchedMalformedProjectConfigLeavesAServersApplyWorking(t *testing.T) {
+	t.Parallel()
+	applier := fakeApplier(t)
+	projectFile := config.ProjectFilePath(applier.roots.project)
+	if projectFile == "" {
+		t.Fatal("the fixture's workspace resolved no Project root")
+	}
+	if err := os.MkdirAll(filepath.Dir(projectFile), 0o700); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	writeSettingsFixture(t, projectFile, "servers: [\n")
+	writeSettingsFixture(t, applier.configPath,
+		"servers:\n  - name: local\n    endpoint: http://127.0.0.1:1111\n")
+
+	if _, err := applySettingFor(applier)("servers", "1 server"); err != nil {
+		t.Fatalf("apply servers beside a malformed Project config: %v", err)
+	}
+	if got := applier.live.serverList(); len(got) != 1 || got[0].Name != "local" {
+		t.Errorf("servers after the apply = %+v, want the global file's one local entry", got)
 	}
 }

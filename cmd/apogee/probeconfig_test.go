@@ -11,7 +11,8 @@ import (
 
 // runProbeConfig executes `apogee probe config` against a hermetic apogee home and returns
 // everything it printed on both streams. It passes only --config: the verb declares no
-// --workspace, because nothing it reports depends on one.
+// --workspace, because the Project config it layers is the current directory's
+// (TestProbeConfigLayersTheProjectConfigOfTheCurrentDirectory).
 func runProbeConfig(t *testing.T, configHome string) string {
 	t.Helper()
 	cmd := newProbeCommand()
@@ -56,7 +57,7 @@ func TestProbeConfigReportsUnknownKeysAndResolvedValues(t *testing.T) {
 
 	for _, want := range []string{
 		"apogee probe — config report",
-		"  (nothing is written; the file is read the way a live reload reads it)",
+		"  (nothing is written; the files are read the way a live reload reads them)",
 		`apogee: config ` + path + `: unknown key "bogus" at line 6 is ignored`,
 		"migration\n  (none)",
 		"ui.stall-after:",
@@ -136,6 +137,38 @@ func TestProbeConfigFailsOnAMalformedFile(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "migration") {
 		t.Errorf("a malformed file was reported as a migration:\n%s", out.String())
+	}
+}
+
+// The report layers the Project config of the directory it runs in: a project-param value the
+// project file sets is what `resolved` shows, the global value it outranks is not, and a global-only
+// key the project file states is named under `notices`. Not parallel: the Project root is the
+// process's working directory.
+func TestProbeConfigLayersTheProjectConfigOfTheCurrentDirectory(t *testing.T) {
+	home, _ := seedConfigHome(t, "workflow-retries: 2\n")
+	workspace := t.TempDir()
+	projectFile := filepath.Join(workspace, ".apogee", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(projectFile), 0o700); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	if err := os.WriteFile(projectFile, []byte("workflow-retries: 7\nmode: auto\n"), 0o600); err != nil {
+		t.Fatalf("write the Project config: %v", err)
+	}
+	t.Chdir(workspace)
+
+	report := runProbeConfig(t, home)
+
+	var retries string
+	for _, line := range strings.Split(sectionOf(report, "resolved"), "\n") {
+		if strings.HasPrefix(line, "  workflow-retries:") {
+			retries = strings.Fields(line)[1]
+		}
+	}
+	if retries != "7" {
+		t.Errorf("resolved workflow-retries = %q, want the project's 7 over the global 2:\n%s", retries, report)
+	}
+	if !strings.Contains(sectionOf(report, "notices"), "ignoring global-only key") {
+		t.Errorf("the ignored global-only key is not under `notices`:\n%s", report)
 	}
 }
 

@@ -258,6 +258,7 @@ type rootWiring struct {
 	live          *liveSettings
 	externalEdits *externalEdit
 	configWatch   *filewatch.Watcher
+	projectWatch  *filewatch.Watcher
 	mover         sessionMover
 	launcherPath  *launcherPath
 	launcherSeams launcherWiring
@@ -289,12 +290,15 @@ func (w *rootWiring) close() {
 		w.schedules.Close()
 	}
 
-	// The config watcher ends next, for the schedules' reason: the poll stops while everything it
+	// The config watchers end next, for the schedules' reason: the poll stops while everything it
 	// reported into is still standing. Stop waits for the poll goroutine and closes the channel
 	// behind it, so the wait the renderer parks on returns rather than leaking, and nothing the
 	// assembly let go of outlives runRoot.
 	if w.configWatch != nil {
 		w.configWatch.Stop()
+	}
+	if w.projectWatch != nil {
+		w.projectWatch.Stop()
 	}
 
 	// The Reactions go after the Firings and BEFORE the engine, for the Firings' own reason: a

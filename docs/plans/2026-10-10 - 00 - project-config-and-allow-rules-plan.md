@@ -161,7 +161,12 @@ NOTES (2026-10-10): the rows' source comes from the boot resolution (`settingsHo
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Source' ./internal/config/ && go test -race -count=1 -run 'Settings' ./internal/tui/ && go test -race -count=1 -run 'TestE2ELiveStateFollowsTheRunningSession|TestSettingsRowsMarkOverriddenKeys' ./cmd/apogee/`
 **Commit:** `feat(settings): show default/global/project/env/flag per row`
 
-## 6. Watch and re-read both files
+## 6. Watch and re-read both files — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): Approach's "`settingsApplier.fileConfig()` calls the layered loader" not done — the item's Regression guard keeps it on the global file alone (its six callers read only global-only blocks); a malformed-Project-config servers-apply test pins that.
+NOTES (2026-10-10): internal/config/layer.go (not in Files) gains an exported `ProjectFilePath`, delegating to the unexported `projectFilePath`, so the composition root watches the exact path the layered load reads instead of re-spelling `.apogee/config.yaml` in cmd/apogee.
+NOTES (2026-10-10): `awaitConfigChangeOn` now takes `(global, project *filewatch.Watcher)` with a nil project for no layer; the second watcher is skipped (`projectConfigWatchPath`) under `GlobalConfigOnly`, an empty Project root, or a project file that is the global file itself.
+NOTES (2026-10-10): `apogee probe config`'s report header now reads "the files are read the way a live reload reads them" (was "the file is read … reads it"); Short/Long and docs/manual/probe.md updated to say the Project root is the current directory.
 
 **What:**
 **Goal:** an edit to either the global or the Project config applies live through the existing per-key dispatcher, and every live re-read uses the layered load.

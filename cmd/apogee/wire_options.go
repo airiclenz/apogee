@@ -291,11 +291,12 @@ func (h configHost) SaveHostAcknowledgement() (string, error) { return h.saveHos
 func (h configHost) ReloadConfig() (tui.ConfigReload, error) { return h.w.externalEdits.changed() }
 
 // AwaitConfigChange is the trigger that needs no editor at all (ADR 0041 decision 3): one wait on the
-// watcher started in the assembly, answered when the file changes. What the renderer does with the
+// watchers started in the assembly — the global file's and the Project config's — answered when
+// either file changes. What the renderer does with the
 // news is exactly what it does when an editor exits — re-read through ReloadConfig, apply through the
 // two homes above — so a saved file applies whoever saved it (decision 5).
 func (h configHost) AwaitConfigChange(ctx context.Context) bool {
-	return awaitConfigChangeOn(h.w.configWatch)(ctx)
+	return awaitConfigChangeOn(h.w.configWatch, h.w.projectWatch)(ctx)
 }
 
 // MigrateKey answers the key-migration offer's "move it" (keymigrate.go, ADR 0047): the store write,

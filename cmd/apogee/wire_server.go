@@ -157,24 +157,40 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	return nil
 }
 
-// awaitConfigChangeOn adapts the polling watcher to [tui.ConfigHost.AwaitConfigChange]: one wait, one
+// awaitConfigChangeOn adapts the polling watchers to [tui.ConfigHost.AwaitConfigChange]: one wait, one
 // answer, and nothing about files or YAML crossing the seam (ADR 0041 decision 3). The renderer
 // re-reads through [tui.ConfigHost.ReloadConfig] when this returns true, which is the same call an
 // editor's exit makes — one apply path, two triggers.
 //
+// It fans in the two files the live re-read is layered from (ADR 0096 §6): the global config's
+// watcher and the Project config's, which is nil for a run with no project layer. A report from
+// either is the same news — the re-read resolves both files and diffs the result — so the wait does
+// not say which file moved.
+//
 // It answers false on two ends, and they mean the same thing to the caller: the program's context is
 // done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
-// watcher), or the watch itself has been stopped and closed its channel. Either way there will never
-// be another report, and the chain retires.
-func awaitConfigChangeOn(w *filewatch.Watcher) func(context.Context) bool {
+// watcher), or a watch has been stopped and closed its channel — teardown stops both together.
+// Either way there will never be another report, and the chain retires.
+func awaitConfigChangeOn(global, project *filewatch.Watcher) func(context.Context) bool {
 	return func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():
 			return false
-		case _, ok := <-w.Changes():
+		case _, ok := <-changesOf(global):
+			return ok
+		case _, ok := <-changesOf(project):
 			return ok
 		}
 	}
+}
+
+// changesOf is w's report channel, or nil for no watcher: a nil channel never receives, so the
+// select above simply never takes that case.
+func changesOf(w *filewatch.Watcher) <-chan struct{} {
+	if w == nil {
+		return nil
+	}
+	return w.Changes()
 }
 
 // serverHost is this binary's [tui.ServerHost]: the six acts over the one Upstream this session is
