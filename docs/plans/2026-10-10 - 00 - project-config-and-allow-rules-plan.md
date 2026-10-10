@@ -66,7 +66,12 @@
 - 5: guard folded (writer decision: `cmd/apogee/settingsrows_test.go` follows the Source split — `TestSettingsRowsMarkOverriddenKeys`)
 - 18: guard folded (writer decision: rule rows appended in `settingsHost.Rows` after `settingsRows`; global rules removable through the global splice writer — owner, 2026-10-10)
 
-## 1. Land ADR 0096 and its amendment notes
+## 1. Land ADR 0096 and its amendment notes — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from the assumption that ADR 0096 and the four CONTEXT.md terms (Allow rule, Project root, Project config, Adoption) were still uncommitted drafts — commit 81b63f49 already landed them, so this item adds only the amendment notes, the AGENTS.md reword and the Dangerous-action guard update.
+NOTES (2026-10-10): ADR 0096's `Amends:` front matter gains ADR 0041 (the watcher covers two files), which it omitted while this item gives 0041 an amendment pointing at 0096.
+NOTES (2026-10-10): the ADR 0076 amendment enumerates A2's unlabelled reasons as (a)–(d) — key-class table, the unfed tighten-only shape, the write deny, entry hashing/trust plus the single-file watcher — to match ADR 0096's "closes A2's gaps (a)–(d)"; the GlobalOnly correction was checked against `internal/config/registry.go` (only `confine-to-workspace` and `unconfined-hosts` carry `GlobalOnly`).
+NOTES (2026-10-10): CONTEXT.md's Dangerous-action guard entry now names `dangerous-rules:` as the feed of `security.MergeDangerousRules`; the key is wired by item 7, so the entry runs ahead of the code until then.
 
 **What:**
 **Goal:** ADR 0096 and the four new `CONTEXT.md` terms are committed, and every document 0096 amends carries a dated note pointing at it.

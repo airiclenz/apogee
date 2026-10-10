@@ -401,3 +401,35 @@ message after the tool result. On a tool-less request the wire degrades the note
 user role whole, fence included — that user-role tail is the wire's rendering of one existing
 message, not a new message the engine appended, which is the case the row rejects.
 
+
+## Amendment — 2026-10-10: stage 2b is ADR 0096
+
+The stage-2b grill A2 reserved was held on 2026-10-10 and is recorded as
+[ADR 0096](0096-project-config-grants-are-live-only-by-adoption.md). It amends decision 10 and closes
+A2's gaps for the keys it admits; it does not admit the execution keys decision 10 names.
+
+- **Decision 10's repo path is the Project root.** `<workspace>/.apogee/config.yaml` reads
+  `<Project root>/.apogee/config.yaml`: the nearest folder holding a `.apogee/`, from the workspace up
+  to — never past — its git top-level, the workspace itself otherwise, never `$HOME` (ADR 0096 §1).
+- **Decision 10's "tool write deny list" is a Tier-1 rule on the Project config.** There is still no
+  path deny list. File tools are refused — Tier 1, every mode, no look — on writing, moving or
+  deleting `<Project root>/.apogee/config.yaml` and on deleting, moving or replacing `.apogee/`
+  itself; the shell reader refuses the forms it can see (ADR 0096 §5). As decision 10 already said,
+  the Adoption pin, not the refusal, is the guarantee.
+- **A2's gaps are closed by ADR 0096.** (a) The key-class table: every key now carries one of four
+  classes — granting (adoption-gated), tighten-only, project parameter, global-only — and the default
+  is global-only, so a repo layer is handed nothing by omission (§6). (b) The tighten-only shape is
+  fed: `dangerous-rules:` feeds `security.MergeDangerousRules`, the global layer adding or removing by
+  ID and the project only adding (§6). (c) The write deny is the Tier-1 rule above (§5). (d) Config
+  entries are hashed and adoption is modelled — per entry, pinned to its exact content in
+  `~/.apogee/workspaces/<sha256 of the Project root path>.yaml` (§4) — and the watcher covers both
+  the global file and the Project config (ADR 0041's 2026-10-10 amendment).
+- **Correction to A2.** A2 calls `confine-to-workspace`, `unconfined-hosts`, `tools.disabled` and
+  `url-safety.deny-hosts` "all `GlobalOnly`". Only the first two carry `GlobalOnly` in the registry;
+  `tools.disabled` and `url-safety.deny-hosts` never did. Under ADR 0096 §6 those two are
+  **tighten-only**: a project may add entries, never remove one.
+- **Still out of scope.** Reactions (`run:` / `advise:` / `gate:`) and MCP servers in the Project
+  config — the execution keys decision 10 makes adoption-gated — are a follow-up; the per-entry
+  `workspace:` filter stays the per-project Reaction story meanwhile. A2's closing sentence is
+  discharged: `AGENTS.md`'s "single `~/.apogee` dotdir" decision stands for the **global** config
+  home, and the Project config layers over it.

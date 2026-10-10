@@ -110,3 +110,14 @@ the global library first, then the bare `skills/` dir, then `.apogee/skills` —
 now only ever cut into the lowest-priority source. Precedence is unchanged; only the mechanism
 enforcing it moved. The Context above describes `sourceDirs` as returning *increasing* priority:
 that describes the pre-amendment code.
+
+## Amendment (2026-10-10) — the workspace skill anchor is the Project root's `.apogee/skills`
+
+[ADR 0096](0096-project-config-grants-are-live-only-by-adoption.md) §1 introduces the **Project
+root**: the nearest folder holding a `.apogee/`, from the workspace up to — never past — its git
+top-level, the workspace itself otherwise, never `$HOME`. The `.apogee/skills` source is read from
+`<Project root>/.apogee/skills` rather than `<workspace>/.apogee/skills`, so a session started in a
+subfolder of the project finds the same skills as one started at its top. The precedence above is
+unchanged — the global library still wins, and the relative order of the workspace sources holds —
+and `.apogee/skills/` stays workspace territory: ADR 0096 §5's Tier-1 refusal covers the Project
+config file and the `.apogee/` folder itself, never the skills beneath it.

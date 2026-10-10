@@ -1,6 +1,6 @@
 ---
 Status: accepted
-Amends: ADR 0076 (decision D10 and amendment A2 — this ADR is the stage-2b grill A2 deferred to; it closes A2's gaps (a)–(d) for the keys it admits), ADR 0012 (the project layer may only tighten — except an **Allow rule**, which is a grant the user made and is live only by **Adoption**), ADR 0032 (the workspace skill anchor becomes the **Project root**)
+Amends: ADR 0076 (decision D10 and amendment A2 — this ADR is the stage-2b grill A2 deferred to; it closes A2's gaps (a)–(d) for the keys it admits), ADR 0012 (the project layer may only tighten — except an **Allow rule**, which is a grant the user made and is live only by **Adoption**), ADR 0032 (the workspace skill anchor becomes the **Project root**), ADR 0041 (the watcher covers two files: the global config and the **Project config**)
 ---
 
 # Project config grants are live only by adoption

@@ -1660,11 +1660,12 @@ level of its arguments, is skipped — an MCP tool declares none, so every argum
 nested values included, is inspected in full (ADR 0012 amendment 2026-09-26). `commit-secrets` is the one **content-derived** member: its evidence is what git
 would stage, precomputed by dispatch into a shadow index before the pure resolution runs (D6), never
 the call's arguments. It is **tighten-only** and trivially bypassable by anything determined,
-so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on, and **not
-user-configurable today**: no config key feeds it, so the shipped rules are the whole set. The
-add/remove split — a global config may add *or* remove rules by ID (it is the user's machine), a
-project config may only *add*, and only stricter — is the rule of the ADR 0012 merge seam
-(`security.MergeDangerousRules`), which no config key calls yet (apogee-089 would wire it).
+so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on, and
+user-configurable through the **`dangerous-rules:`** key (ADR 0096 §6): `add:` entries (`id`,
+`pattern`, `tier: ask|refuse`, `reason`) and `remove:` IDs. The add/remove split — a global config
+may add *or* remove rules by ID (it is the user's machine), a **Project config** may only *add*, and
+only stricter — is the rule of the ADR 0012 merge seam (`security.MergeDangerousRules`), which
+`dangerous-rules:` feeds.
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
 not — it guards against mistakes, not attackers).
 
