@@ -1331,7 +1331,7 @@ func (t *transcript) apply(e domain.Event) {
 		// only the decided one carries a verdict to render. The requested phase exists for
 		// observers that want the WAIT (Reactions, ADR 0073) and folds to nothing here.
 		if e.Phase == domain.ApprovalDecided {
-			t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
+			t.addApproval(e.Request, e.Decision, e.Rules, runOf(e.EventBase))
 		}
 	case domain.ReactionFiredEvent:
 		t.addReaction(e)
@@ -2697,8 +2697,25 @@ func prevSiblingAt(entries []entry, at, depth int) int {
 // is echoed raw — so it is escape-stripped like every other note text. This entry is built here
 // rather than through addNote (it carries a depth), which is exactly the kind of bypass that left
 // producers unstripped before.
-func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.ApprovalDecision, run runRef) {
-	text := fmt.Sprintf("approval %s: %s", decision, stripEscapes(req.Tool))
+//
+// A gate an Allow rule answered names the rules instead of a verdict — "approval allowed by project
+// rule `go test`: terminal" (ADR 0096 §3) — so the human can see what cleared a call nobody was
+// asked about. A rule's text comes from a config file a repository may ship, so it is stripped too.
+func (t *transcript) addApproval(
+	req domain.ApprovalRequest,
+	decision domain.ApprovalDecision,
+	rules []domain.AllowRule,
+	run runRef,
+) {
+	verdict := string(decision)
+	if decision == domain.ApprovalAllowedByRule && len(rules) > 0 {
+		phrases := make([]string, len(rules))
+		for i, r := range rules {
+			phrases[i] = r.String()
+		}
+		verdict = "allowed by " + strings.Join(phrases, ", ")
+	}
+	text := fmt.Sprintf("approval %s: %s", stripEscapes(verdict), stripEscapes(req.Tool))
 	t.place(inRun(entry{kind: entryNote, text: text}, run))
 }
 

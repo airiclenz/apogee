@@ -288,7 +288,26 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"sub_agent_task":"sweep the docs","sub_agent_name":"docs sweep",` +
 				`"cache_key":"terminal:rm","mcp_server_grant":true,"mcp_server_alias":"files",` +
 				`"resolved_path":"/work/repo/build","scope":"reads the package directory"},` +
-				`"decision":"allow-for-session"}`,
+				`"decision":"allow-for-session","rules":null}`,
+		},
+		{
+			name: "approval allowed by rule carries the rules",
+			event: domain.ApprovalEvent{
+				EventBase: domain.EventBase{Turn: 4},
+				Phase:     domain.ApprovalDecided,
+				Request:   domain.ApprovalRequest{Tool: "terminal"},
+				Decision:  domain.ApprovalAllowedByRule,
+				Rules: []domain.AllowRule{
+					{Kind: domain.AllowRuleTerminal, Text: "go test", Layer: domain.AllowRuleProject},
+				},
+			},
+			wantKind: "approval",
+			wantBase: domain.EventBase{Turn: 4},
+			wantData: `{"phase":"decided","request":{"tool":"terminal","arguments":null,` +
+				`"reason":"","remedy":"","sub_agent_task":"","sub_agent_name":"",` +
+				`"cache_key":"","mcp_server_grant":false,"mcp_server_alias":"",` +
+				`"resolved_path":"","scope":""},"decision":"allowed-by-rule",` +
+				`"rules":[{"kind":"terminal","text":"go test","layer":"project"}]}`,
 		},
 		{
 			name: "approval requested carries no verdict",
@@ -302,7 +321,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"phase":"requested","request":{"tool":"terminal","arguments":null,` +
 				`"reason":"write","remedy":"","sub_agent_task":"","sub_agent_name":"",` +
 				`"cache_key":"","mcp_server_grant":false,"mcp_server_alias":"",` +
-				`"resolved_path":"","scope":""},"decision":""}`,
+				`"resolved_path":"","scope":""},"decision":"","rules":null}`,
 		},
 		{
 			name: "turn",

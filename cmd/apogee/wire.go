@@ -387,6 +387,9 @@ type settingsEngine interface {
 	// refuses a Generation it will not arm (Agent.SetReactions) and the Runner a list it cannot, and
 	// either refusal is the settings row's sentence.
 	SetReactions(apogee.Generation) error
+	// SetAllowRules installs the effective Allow rules on the whole agent tree (ADR 0096): the set a
+	// re-read of either config file or an adoption answer resolves to.
+	SetAllowRules([]apogee.AllowRule)
 	SetContextFiles(enable bool, names []string)
 	SwapTools(*apogee.ToolRegistry) error
 	SetProfile(apogee.ModelProfile) error

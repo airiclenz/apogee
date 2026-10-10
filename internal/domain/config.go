@@ -513,6 +513,18 @@ type Config struct {
 	// stays on under Bypass; the circuit breaker beside the guard is not configured here.
 	DangerousRules []DangerousRule
 
+	// AllowRules is the effective set of Allow rules (ADR 0096 §2, §3): the persisted yeses that
+	// answer an ORDINARY Approval gate — ask-before's, allow-edits' and Auto's static gate for a
+	// backend that cannot be confined — without consulting the Approver. A `terminal` rule is a
+	// word prefix every simple command of the line must match (security.MatchAllowRules); an MCP
+	// rule names one server whose every tool call it answers. A rule answers nothing else: a
+	// refusal stays a refusal, and a forced gate — a Tier-2 speed-bump, a Reaction's `ask`, the
+	// runtime confine-fallback demote — still asks. The host resolves the set (every global rule,
+	// then every ADOPTED project rule — a proposed or rejected one never reaches here); nil ⇒ no
+	// rules, exactly the gates before the key existed. It only SEEDS the engine: the live set is
+	// swapped with Agent.SetAllowRules and is shared by every agent of the tree.
+	AllowRules []AllowRule
+
 	// UndoSnapshots is the human's `undo-snapshots:` answer carried to the Driver that opens the
 	// session's undo store — the snapshot-backed journal that makes `/undo` survive a relaunch and
 	// reach every write, not only the ones that went through apogee's own funnel (ADR 0074).
@@ -574,6 +586,46 @@ type DangerousRule struct {
 	Hint           string
 	WritesOnly     bool
 	ShellWriteView bool
+}
+
+// AllowRuleKind is the tool family an AllowRule answers for, spelled the way the `allow:` key spells
+// its two lists.
+type AllowRuleKind string
+
+const (
+	// AllowRuleTerminal rules are word prefixes of a `terminal` command line.
+	AllowRuleTerminal AllowRuleKind = "terminal"
+	// AllowRuleMCPServer rules each name one MCP server (its alias) whose every tool call they
+	// answer.
+	AllowRuleMCPServer AllowRuleKind = "mcp-servers"
+)
+
+// AllowRuleLayer is the config file an AllowRule came from — what the transcript names when the
+// rule answers a call ("allowed by project rule `go test`").
+type AllowRuleLayer string
+
+const (
+	// AllowRuleGlobal is a rule from the user's own global config, live as written.
+	AllowRuleGlobal AllowRuleLayer = "global"
+	// AllowRuleProject is a rule from the Project config, live only while its exact text is
+	// adopted (ADR 0096 §4).
+	AllowRuleProject AllowRuleLayer = "project"
+)
+
+// AllowRule is one effective Allow rule (Config.AllowRules): the family it answers for, its text
+// exactly as the file spells it — a word prefix for a terminal rule, a server alias for an MCP one
+// — and the layer it came from.
+type AllowRule struct {
+	Kind  AllowRuleKind
+	Text  string
+	Layer AllowRuleLayer
+}
+
+// String names the rule the way a surface reports it answered a call: its layer and its text —
+// "project rule `go test`". The text is the config file's, so a terminal surface strips it before
+// painting it.
+func (r AllowRule) String() string {
+	return string(r.Layer) + " rule `" + r.Text + "`"
 }
 
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only

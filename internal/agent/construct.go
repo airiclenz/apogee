@@ -224,6 +224,10 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
+	// The tree's Allow rules, seeded HERE and never by a delegate: a child's Config is a copy of the
+	// parent's construction seed, and storing it again would put back rules a SetAllowRules had
+	// since replaced.
+	treeAllowRules(cfg.Approver).store(cfg.AllowRules)
 }
 
 // guardsFor is the top-level guardrail bundle cfg asks for: the production breaker, and the
@@ -341,6 +345,7 @@ type queuedApprover struct {
 	slot  *domain.PromptSlot // this seam's own surface; the context's wins where one is designated
 	inner domain.Approver
 	cache *approvalCache // the Session's allow-for-session memory, shared by the whole agent tree
+	rules *allowRuleSet  // the effective Allow rules, shared by the whole agent tree (Agent.SetAllowRules)
 }
 
 // Approve takes the prompt slot, re-checks the Session's memory on the far side of the wait, and
@@ -394,7 +399,10 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 //
 // That same idempotence is what gives the tree ONE allow-for-session memory: the cache is created
 // here, with the wrapper, so re-using a parent's wrapper re-uses its memory — a child neither
-// inherits a copy nor starts empty, it reads and writes the very map its parent does.
+// inherits a copy nor starts empty, it reads and writes the very map its parent does. The tree's
+// effective Allow rules ride the wrapper for the same reason (allowRuleSet): created empty here,
+// seeded by the top-level Agent alone (seedTopLevel), and swapped by SetAllowRules, so a rule the
+// host installs mid-session answers a sub-agent that was already running.
 //
 // A nil Approver stays nil. "No Approver configured" is a FACT the resolver reads
 // (resolutionInput.approverPresent — a Gate with no Approver folds to a Refuse, Resolution D5), so
@@ -406,7 +414,7 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 	if _, already := ap.(*queuedApprover); already {
 		return ap
 	}
-	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap, cache: &approvalCache{}}
+	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap, cache: &approvalCache{}, rules: &allowRuleSet{}}
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;

@@ -180,6 +180,23 @@ const (
 	DangerousTierRefuse = domain.DangerousTierRefuse
 )
 
+// AllowRule is one effective Allow rule (Config.AllowRules, ADR 0096): a `terminal` word prefix or
+// an MCP server alias that answers an ordinary Approval gate without asking. See domain.AllowRule.
+type AllowRule = domain.AllowRule
+
+// AllowRuleKind is the tool family an AllowRule answers for.
+type AllowRuleKind = domain.AllowRuleKind
+
+// AllowRuleLayer is the config file an AllowRule came from: the global config or the Project config.
+type AllowRuleLayer = domain.AllowRuleLayer
+
+const (
+	AllowRuleTerminal  = domain.AllowRuleTerminal
+	AllowRuleMCPServer = domain.AllowRuleMCPServer
+	AllowRuleGlobal    = domain.AllowRuleGlobal
+	AllowRuleProject   = domain.AllowRuleProject
+)
+
 // ContextFilesReport is what a session's workspace context files (Config.ContextFiles)
 // contributed and what the standing system content costs against its Budget share — the
 // read-only view Agent.ContextFilesReport returns for the host's session notice.
@@ -416,6 +433,9 @@ const (
 	ApprovalAllow           = domain.ApprovalAllow
 	ApprovalDeny            = domain.ApprovalDeny
 	ApprovalAllowForSession = domain.ApprovalAllowForSession
+	// ApprovalAllowedByRule is an event spelling only: the decided phase of a gate an Allow rule
+	// answered in the Approver's place (Config.AllowRules). No Approver returns it.
+	ApprovalAllowedByRule = domain.ApprovalAllowedByRule
 )
 
 // ApprovalPhase is the phase an ApprovalEvent reports.

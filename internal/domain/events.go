@@ -377,14 +377,26 @@ const (
 	// ApprovalRequested reports that the gate has been RAISED and the Approver is now being
 	// consulted — emitted before the (blocking) consultation, so an observer learns that a human
 	// is being waited on while the wait is still happening. Only the gates that actually reach the
-	// Approver raise it: a call cleared by the remembered allow-for-session, and one refused
-	// because no Approver is configured, raise no Approval and emit nothing.
+	// Approver raise it: a call cleared by the remembered allow-for-session, one answered by an
+	// Allow rule, and one refused because no Approver is configured raise no Approval and emit no
+	// requested phase.
 	ApprovalRequested ApprovalPhase = "requested"
 	// ApprovalDecided reports the verdict the Approver returned for that same request. An
 	// Approver that FAILED produces neither this phase nor a verdict — the error is reported as
 	// an ErrorEvent instead — so a requested phase is not guaranteed a decided one.
+	//
+	// A gate an Allow rule answered (Config.AllowRules) emits this phase ALONE, with Decision
+	// ApprovalAllowedByRule and the answering rules on ApprovalEvent.Rules: nobody was waited on,
+	// so there is no requested phase, but the call was cleared without the human and that must be
+	// observable — the approval-decided Moment fires for it (ADR 0096 §3). A call cleared by the
+	// remembered allow-for-session still emits nothing: the human already answered it.
 	ApprovalDecided ApprovalPhase = "decided"
 )
+
+// ApprovalAllowedByRule is the decided-phase Decision of a gate an Allow rule answered in the
+// Approver's place (ApprovalDecided). It is an EVENT spelling only: no Approver returns it, and an
+// Approver that did would be read as a deny like any unknown verdict.
+const ApprovalAllowedByRule ApprovalDecision = "allowed-by-rule"
 
 // ApprovalEvent reports that an Approval was requested/decided for a tool call.
 // (The decision is obtained synchronously via the Approver; this event is for
@@ -394,11 +406,18 @@ const (
 // carrying the same Request — so that the WAIT itself is observable and not only its outcome.
 // Decision is the zero value on the requested phase and carries meaning only on the decided one;
 // a consumer that wants one note per Approval (the TUI transcript) folds ApprovalDecided alone.
+//
+// Rules is set only on a decided phase whose Decision is ApprovalAllowedByRule: the Allow rules
+// that answered the gate, in first-use order — one for an MCP server, one or more for a `terminal`
+// line whose simple commands different rules covered. Each carries its text and its layer, which
+// is what the transcript names ("allowed by project rule `go test`"). A rule's text comes from a
+// config file a repository may ship, so a Driver treats it as untrusted display text.
 type ApprovalEvent struct {
 	EventBase
 	Phase    ApprovalPhase
 	Request  ApprovalRequest
 	Decision ApprovalDecision
+	Rules    []AllowRule
 }
 
 // TurnEvent reports that a Turn reached its quiescent boundary — the loop's own Turn boundary made

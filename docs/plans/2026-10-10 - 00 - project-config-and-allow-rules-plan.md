@@ -262,7 +262,13 @@ NOTES (2026-10-10): exported config.WorkspacesDir(configDir) as the one spelling
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/ && go test -race -count=1 -run 'Settings|Manual' ./cmd/apogee/`
 **Commit:** `feat(config): allow: rules with adoption-gated project entries`
 
-## 11. The engine answers ordinary gates from rules
+## 11. The engine answers ordinary gates from rules — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): the tree-shared rule holder (allowRuleSet, in agent.go) hangs off the approver seam (queuedApprover, construct.go) beside the allow-for-session cache, so every agent in the tree shares it with no change to subagent.go's delegation struct; only the top-level Agent seeds it (seedTopLevel), and an Agent with no Approver holds no rules — it has no gate for a rule to answer.
+NOTES (2026-10-10): ApprovalAllowedByRule is declared in internal/domain/events.go beside ApprovalPhase (an event-only spelling no Approver returns), not in internal/domain/approval.go, which the item's Files does not list; ApprovalEvent carries `Rules []AllowRule` (every rule that answered, in first-use order) because one `terminal` line can be covered by several rules.
+NOTES (2026-10-10): approve now returns the answering rules as well (allowed, rules, outcome); executeGate books the audit as AuditAllowedByRule with the rules' phrase ("project rule `go test`") as the reason; the request-building half of approve was extracted into approvalRequest so the rule path and the Approver path present the same request.
+NOTES (2026-10-10): the headless `approval` line's `rules` member is always present (`null` unless a rule answered), per ADR 0075 decision 3's no-omitempty rule, so the two existing approval goldens in TestEncodeJSONGolden gained `"rules":null`.
+NOTES (2026-10-10): consequential edit — docs/manual/headless.md: made necessary by the new `rules` member on the `approval` line (internal/eventjson/encode.go).
 
 **What:** Recast at the regression check (2026-10-10).
 **Goal:** a call whose gate is ordinary (not forced) and which an effective rule covers runs without an Approver round-trip in every driver, emitting an audit decision `allowed-by-rule` and an approval-decided event the TUI renders as "allowed by project rule `go test`" (or `global`).

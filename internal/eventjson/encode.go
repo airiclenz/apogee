@@ -146,6 +146,7 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 			Phase:    string(e.Phase),
 			Request:  approvalRequestOf(e.Request),
 			Decision: string(e.Decision),
+			Rules:    allowRulesOf(e.Rules),
 		}, true
 	case domain.TurnEvent:
 		return kindTurn, e.EventBase, turnData{
@@ -358,11 +359,32 @@ type childInterjectionData struct {
 }
 
 // approvalData is the approval line. Decision is meaningless on the requested phase and carries
-// the verdict on the decided one, exactly as the variant does.
+// the verdict on the decided one, exactly as the variant does. Rules lists the Allow rules that
+// answered a gate in the Approver's place (decision `allowed-by-rule`), null on every other line.
 type approvalData struct {
 	Phase    string          `json:"phase"`
 	Request  approvalRequest `json:"request"`
 	Decision string          `json:"decision"`
+	Rules    []allowRule     `json:"rules"`
+}
+
+// allowRule mirrors domain.AllowRule — the family a rule answers for, its text and its layer.
+type allowRule struct {
+	Kind  string `json:"kind"`
+	Text  string `json:"text"`
+	Layer string `json:"layer"`
+}
+
+// allowRulesOf lists the rules on the line, nil for none — the member then encodes as null.
+func allowRulesOf(rules []domain.AllowRule) []allowRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]allowRule, len(rules))
+	for i, r := range rules {
+		out[i] = allowRule{Kind: string(r.Kind), Text: r.Text, Layer: string(r.Layer)}
+	}
+	return out
 }
 
 // turnData is the turn line: a Turn's quiescent boundary. Unlike the Reaction vocabulary's

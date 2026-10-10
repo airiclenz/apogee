@@ -1200,9 +1200,14 @@ func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call
 // fallback. That asks the human a second time, by the demote gate, whether to run UNCONFINED; two
 // prompts in the rare failure case is the honest shape, because the two questions are different.
 func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
-	allowed, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason, verdict.remedy)
+	allowed, rules, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason, verdict.remedy)
 	if outcome == dispatchCancelled {
 		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
+	}
+	if len(rules) > 0 {
+		// The audit trail says what cleared the call: no human answered it, a rule did.
+		verdict.auditDecision = security.AuditAllowedByRule
+		verdict.auditReason = allowRulesPhrase(rules)
 	}
 	if !allowed {
 		// A denied gate the guard FORCED answers the model with the rule's way out appended,
@@ -1271,7 +1276,8 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 	}
 
 	reason, remedy := confineDemotePrompt(fb, toolErr)
-	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, reason, remedy)
+	// The demote gate is forced, so no Allow rule can answer it.
+	allowed, _, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, reason, remedy)
 	if outcome == dispatchCancelled {
 		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
 	}
@@ -1433,12 +1439,36 @@ func malformedArgumentsResult(call domain.ToolCall) domain.ToolResult {
 // The resolver only produces a Gate when an Approver is configured (a gate with none is a
 // Refuse — Resolution D5), so the nil-Approver guard below is defensive: it refuses rather than
 // dereferencing a nil Approver, never running unapproved.
-func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, force bool, cacheKey, reason, remedy string) (bool, dispatchOutcome) {
+//
+// An ordinary gate an effective Allow rule covers is answered by the rule in the Approver's place
+// (ADR 0096 §3; allowRulesCovering): the call runs, the decided phase alone is announced with
+// Decision ApprovalAllowedByRule and the rules on it — nobody was waited on, but the call was
+// cleared without the human and that stays observable — and rules reports them so the caller can
+// book the audit. The test is `!force` and never the cache key, which is also empty for arguments
+// that do not decode: force is what marks a Tier-2 speed-bump, a Reaction's `ask` and the runtime
+// confine demote, and a rule answers none of them, exactly as the remembered allow-for-session
+// does not. Auto's STATIC gate for a backend that cannot confine is not forced, so a rule answers
+// it. A refusal never reaches here at all. The check runs on Agent.approve and nowhere else, so a
+// background workflow's children are answered by it too: their gates come through here like any
+// sub-agent's.
+func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, force bool, cacheKey, reason, remedy string) (allowed bool, rules []domain.AllowRule, outcome dispatchOutcome) {
 	if !force && sessionAllows(a.cfg.Approver).Allowed(cacheKey) {
-		return true, dispatchDone
+		return true, nil, dispatchDone
 	}
 	if a.cfg.Approver == nil {
-		return false, dispatchDone
+		return false, nil, dispatchDone
+	}
+	if !force {
+		if covering := a.allowRulesCovering(call); len(covering) > 0 {
+			a.cfg.Events.Emit(domain.ApprovalEvent{
+				EventBase: a.base(turn),
+				Phase:     domain.ApprovalDecided,
+				Request:   a.approvalRequest(call, cacheKey, reason, remedy),
+				Decision:  domain.ApprovalAllowedByRule,
+				Rules:     covering,
+			})
+			return true, covering, dispatchDone
+		}
 	}
 
 	// The request's CacheKey is what decides whether its answer may ever be remembered, and this
@@ -1454,18 +1484,49 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 	if force {
 		sessionKey = ""
 	}
+	areq := a.approvalRequest(call, sessionKey, reason, remedy)
 
+	// The gate is announced BEFORE the Approver is consulted, because the consultation blocks for
+	// as long as the human takes: an observer that only saw the decided phase would learn about
+	// the wait only once it was over. Both phases carry the same request (domain.ApprovalPhase).
+	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Phase: domain.ApprovalRequested, Request: areq})
+
+	decision, err := a.cfg.Approver.Approve(ctx, areq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, nil, dispatchCancelled
+		}
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: "approver: " + err.Error()})
+		return false, nil, dispatchDone
+	}
+
+	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Phase: domain.ApprovalDecided, Request: areq, Decision: decision})
+	switch decision {
+	// The two allows are one branch here: whether this verdict is also REMEMBERED was settled by
+	// the CacheKey above and acted on by the seam, so all dispatch has left to read from either is
+	// "the call may run".
+	case domain.ApprovalAllowForSession, domain.ApprovalAllow:
+		return true, nil, dispatchDone
+	default: // ApprovalDeny or any unknown verdict — refuse
+		return false, nil, dispatchDone
+	}
+}
+
+// approvalRequest is the ApprovalRequest one gate on call presents, its CacheKey already the
+// sessionKey approve settled (empty for a forced gate).
+func (a *Agent) approvalRequest(call domain.ToolCall, sessionKey, reason, remedy string) domain.ApprovalRequest {
 	// How far the "allow for this session" answer reaches beyond the call this request paints: an
 	// MCP gate's memory is keyed at SERVER grain, so one yes clears every sibling tool of that
 	// server (ADR 0012). A gate whose answer is remembered NOWHERE discloses no grant, and the
-	// sessionKey emptied above is exactly that condition — a forced allow-for-session behaves as a
-	// plain allow, so claiming the server grain on that pane would over-state what the yes does.
+	// sessionKey approve empties for a forced gate is exactly that condition — a forced
+	// allow-for-session behaves as a plain allow, so claiming the server grain on that pane would
+	// over-state what the yes does.
 	grantAlias, serverGrant := a.mcpServerGrant(call)
 	if sessionKey == "" {
 		grantAlias, serverGrant = "", false
 	}
 
-	areq := domain.ApprovalRequest{
+	return domain.ApprovalRequest{
 		Tool:         call.Tool,
 		Arguments:    call.Arguments,
 		Reason:       reason,
@@ -1487,30 +1548,92 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		// declares no scope, which is all but one of them (domain.ApprovalRequest.Scope).
 		Scope: a.approvalScope(call),
 	}
-	// The gate is announced BEFORE the Approver is consulted, because the consultation blocks for
-	// as long as the human takes: an observer that only saw the decided phase would learn about
-	// the wait only once it was over. Both phases carry the same request (domain.ApprovalPhase).
-	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Phase: domain.ApprovalRequested, Request: areq})
+}
 
-	decision, err := a.cfg.Approver.Approve(ctx, areq)
-	if err != nil {
-		if ctx.Err() != nil {
-			return false, dispatchCancelled
+// posixShellReporter is the optional interface a `terminal` tool states its shell through
+// ((*tools.Terminal).POSIXShell): whether the line goes to a POSIX shell the Allow-rule matcher
+// can read. A tool that does not state it is matched by no rule.
+type posixShellReporter interface {
+	POSIXShell() bool
+}
+
+// allowRulesCovering is the effective Allow rules (allowRuleSet) that answer call, in first-use
+// order, or nil when none does (ADR 0096 §2). An MCP server's call is answered by a rule naming its
+// alias (the mcpServerGrant marker, so a rule clears exactly the grain an allow-for-session would);
+// a `terminal` line by the rules the word-prefix matcher reports every simple command covered by,
+// read from the call's own command and workdir under the workspace root. Every other tool —
+// file edits included — and an unknown one are answered by no rule.
+func (a *Agent) allowRulesCovering(call domain.ToolCall) []domain.AllowRule {
+	rules := treeAllowRules(a.cfg.Approver).load()
+	if len(rules) == 0 {
+		return nil
+	}
+	tool, ok := a.lookupTool(call.Tool)
+	if !ok {
+		return nil
+	}
+	if alias, isServer := mcpServerAlias(tool); isServer {
+		return mcpRuleCovering(rules, alias)
+	}
+	shell, isShell := tool.(posixShellReporter)
+	if call.Tool != shellToolName || !isShell {
+		return nil
+	}
+	var args struct {
+		Command string `json:"command"`
+		Workdir string `json:"workdir"`
+	}
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return nil
+	}
+	site := security.AllowSite{Root: a.cfg.WorkspaceDir, Workdir: args.Workdir, IsPOSIXShell: shell.POSIXShell()}
+	return terminalRulesCovering(rules, args.Command, site)
+}
+
+// mcpRuleCovering is the first MCP rule naming alias, or nil. An unnamed server's empty alias
+// matches nothing: a rule's text is never empty (the loader refuses one).
+func mcpRuleCovering(rules []domain.AllowRule, alias string) []domain.AllowRule {
+	for _, r := range rules {
+		if r.Kind == domain.AllowRuleMCPServer && alias != "" && r.Text == alias {
+			return []domain.AllowRule{r}
 		}
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: "approver: " + err.Error()})
-		return false, dispatchDone
 	}
+	return nil
+}
 
-	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Phase: domain.ApprovalDecided, Request: areq, Decision: decision})
-	switch decision {
-	// The two allows are one branch here: whether this verdict is also REMEMBERED was settled by
-	// the CacheKey above and acted on by the seam, so all dispatch has left to read from either is
-	// "the call may run".
-	case domain.ApprovalAllowForSession, domain.ApprovalAllow:
-		return true, dispatchDone
-	default: // ApprovalDeny or any unknown verdict — refuse
-		return false, dispatchDone
+// terminalRulesCovering is the terminal rules that cover every simple command of command at site,
+// in first-use order, or nil when the line asks (security.MatchAllowRules).
+func terminalRulesCovering(rules []domain.AllowRule, command string, site security.AllowSite) []domain.AllowRule {
+	terminal := make([]domain.AllowRule, 0, len(rules))
+	texts := make([]string, 0, len(rules))
+	for _, r := range rules {
+		if r.Kind == domain.AllowRuleTerminal {
+			terminal = append(terminal, r)
+			texts = append(texts, r.Text)
+		}
 	}
+	if len(texts) == 0 {
+		return nil
+	}
+	used, isAllowed := security.MatchAllowRules(command, texts, site)
+	if !isAllowed {
+		return nil
+	}
+	covering := make([]domain.AllowRule, len(used))
+	for i, index := range used {
+		covering[i] = terminal[index]
+	}
+	return covering
+}
+
+// allowRulesPhrase names the rules that cleared a call for its audit reason — "project rule `go
+// test`", several joined by ", ".
+func allowRulesPhrase(rules []domain.AllowRule) string {
+	phrases := make([]string, len(rules))
+	for i, r := range rules {
+		phrases[i] = r.String()
+	}
+	return strings.Join(phrases, ", ")
 }
 
 // executeTool runs one tool under a recover boundary (ADR 0007): a panic becomes an ErrorEvent

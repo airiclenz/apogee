@@ -86,7 +86,8 @@ type SeamPayload struct {
 	// approval-requested, approval-decided.
 	Scope string `json:"scope,omitempty"`
 	// Decision is the verdict the Approver returned, in the ApprovalDecision spelling — `allow`,
-	// `deny` or `allow-for-session`. approval-decided.
+	// `deny` or `allow-for-session` — or `allowed-by-rule` for a gate an Allow rule answered in
+	// the Approver's place (ApprovalAllowedByRule, ADR 0096 §3). approval-decided.
 	Decision string `json:"decision,omitempty"`
 
 	// Source is what faulted — a tool name, a Reaction id, or "loop". error.

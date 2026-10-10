@@ -60,7 +60,7 @@ import (
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
 // anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetScratchDir, SetReactions,
 // SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents,
-// SetEffortOverride, SetDelegationTarget and SetDelegationSeat — is the exception: each moves
+// SetEffortOverride, SetDelegationTarget, SetDelegationSeat and SetAllowRules — is the exception: each moves
 // live state behind the mutex that guards it, so the host (the settings surface, Shift+Tab,
 // /confine, a heartbeat) may call it while a Step runs and the change lands at that state's next
 // consumption boundary. Most members swap one field; three reach further. SetReactions swaps a
@@ -1262,6 +1262,61 @@ func (a *Agent) ConfineToWorkspace() bool {
 	a.confineMu.RLock()
 	defer a.confineMu.RUnlock()
 	return a.confineToWorkspace
+}
+
+// SetAllowRules installs the effective Allow rules (ADR 0096 §2, §3) — the set that answers an
+// ordinary Approval gate without consulting the Approver, replacing the one Config.AllowRules
+// seeded or an earlier call installed; nil installs none. The host hands the RESOLVED set: every
+// global rule and every adopted project rule, never a proposed or rejected one.
+//
+// It is safe to call from another goroutine while a Step runs, and it reaches the WHOLE tree: the
+// set lives on the approver seam every agent of the tree shares (allowRuleSet), so the next
+// ordinary gate any of them reaches — a sub-agent already mid-flight included — reads the new set.
+// An Agent configured with no Approver has no gate for a rule to answer, and the call is a no-op.
+func (a *Agent) SetAllowRules(rules []domain.AllowRule) {
+	treeAllowRules(a.cfg.Approver).store(rules)
+}
+
+// allowRuleSet is the agent tree's effective Allow rules, guarded because SetAllowRules may land
+// while any agent of the tree reads it at a gate. It hangs off the approver seam (queuedApprover)
+// beside the allow-for-session memory and for that memory's reason — it is the one object a parent
+// and all its descendants share. Every method is nil-receiver-safe: a rig with no seam answers
+// with no rules, which is the conservative direction (a prompt, never an unapproved call).
+type allowRuleSet struct {
+	mu    sync.RWMutex
+	rules []domain.AllowRule
+}
+
+// store replaces the set with a copy of rules, so the caller's slice can never move it later.
+func (s *allowRuleSet) store(rules []domain.AllowRule) {
+	if s == nil {
+		return
+	}
+	held := slices.Clone(rules)
+	s.mu.Lock()
+	s.rules = held
+	s.mu.Unlock()
+}
+
+// load returns the set as last stored. The slice is never mutated in place — store swaps it whole
+// — so the caller may range over it after the lock is released.
+func (s *allowRuleSet) load() []domain.AllowRule {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rules
+}
+
+// treeAllowRules reaches the tree's Allow rules through the Approver an Agent holds, on
+// sessionAllows' terms: anything that is not the seam answers nil, which holds no rules.
+func treeAllowRules(ap domain.Approver) *allowRuleSet {
+	q, ok := ap.(*queuedApprover)
+	if !ok || q == nil {
+		return nil
+	}
+	return q.rules
 }
 
 // SetConfineToWorkspace changes Auto's blast radius for subsequent tool calls: true (the

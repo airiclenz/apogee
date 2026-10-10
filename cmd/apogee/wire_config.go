@@ -209,11 +209,40 @@ func projectConfig(
 		// The dangerous-action guard's ruleset (ADR 0012), merged here once from the shipped set and
 		// the `dangerous-rules:` key, so every Driver builds its guard from the same rules.
 		DangerousRules: dangerousRulesFromOptions(opts),
+		// The effective Allow rules (ADR 0096 §2, §3): every global rule, then every ADOPTED project
+		// rule — the loader has already set the proposed and rejected ones aside — that answer an
+		// ordinary gate without asking. They ride the Config so the engine applies them for every
+		// Driver; today only a session reaches an ordinary gate, since an unattended run's Approver
+		// denies and its gates are refused before a rule is read.
+		AllowRules: allowRulesFromOptions(opts),
 		// Whether the engine's context-fill notice is on (ADR 0077): the `context-fill-notice`
 		// key, default off. Not a Floor guard, so it is carried as is — no negation — beside
 		// Bypass, which switches it off with the rest of the advise class.
 		ContextFillNotice: opts.ContextFillNotice,
 	}
+}
+
+// allowRulesFromOptions is the `allow:` key's effective rules in the engine's spelling, each tagged
+// with the layer it came from — what the transcript names when a rule answers a call. Nil when the
+// key grants nothing.
+func allowRulesFromOptions(opts config.Options) []apogee.AllowRule {
+	effective := opts.AllowRules.Rules
+	if len(effective) == 0 {
+		return nil
+	}
+	out := make([]apogee.AllowRule, len(effective))
+	for i, r := range effective {
+		kind := apogee.AllowRuleTerminal
+		if r.Kind == config.AllowMCPServers {
+			kind = apogee.AllowRuleMCPServer
+		}
+		layer := apogee.AllowRuleGlobal
+		if r.Layer == config.SourceProject {
+			layer = apogee.AllowRuleProject
+		}
+		out[i] = apogee.AllowRule{Kind: kind, Text: r.Text, Layer: layer}
+	}
+	return out
 }
 
 // dangerousRulesFromOptions merges the shipped dangerous-action rules with the `dangerous-rules:`

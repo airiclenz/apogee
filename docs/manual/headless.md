@@ -246,7 +246,7 @@ moment, and the case difference is the signal.
 | `sub_agent_phase` | one delegation crossing a lifecycle boundary; a `finished` carries the delegation's result, a cancelled run's included (a finished child's report, a running one's stopped summary, a queued one's not-started result). `data.cancelled` is always `false` — a cancel no longer rolls a delegation back — and stays on the line only so its shape is unchanged |
 | `sub_agent_named` | the name a delegated run was given |
 | `child_interjection` | input steered into a running delegation, whether it landed, and — as `data.reason` on one that did not — why: `completed`, `capped`, `faulted`, `stopped` or `cancelled` (the child ended that way before the boundary the message waited for — `stopped` is a delegation the human stopped singly while the parent's turn went on) or `refused` (the child, still running, refused it there); `""` on a landed message. The set is open: read an unknown value as `completed` |
-| `approval` | an approval request: its phase, the request, the decision |
+| `approval` | an approval request: its phase, the request, the decision — and, as `data.rules`, the allow rules that answered it when the decision is `allowed-by-rule` (`null` otherwise) |
 | `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
 | `reaction_fired` | a Reaction acted: an engine builtin (a Floor guard or the context-fill notice) or armed Reaction, at which Moment, and what it did |
 | `error` | something failed, named by its source |

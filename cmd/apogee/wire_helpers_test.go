@@ -62,6 +62,7 @@ type applySettingSpy struct {
 	// where a Bypass toggle and a Floor-guard flip land too, which is the only way the "one key
 	// moved, the other six stood still" claim can be asserted: the seam takes all seven at once.
 	generations  []apogee.Generation
+	allowRules   [][]apogee.AllowRule
 	contextFiles []contextFileChoice
 	swaps        []*apogee.ToolRegistry
 	profiles     []apogee.ModelProfile
@@ -80,6 +81,10 @@ func (s *applySettingSpy) SetPruneToolResults(on bool)  { s.prune = append(s.pru
 func (s *applySettingSpy) SetReactions(gen apogee.Generation) error {
 	s.generations = append(s.generations, gen)
 	return nil
+}
+
+func (s *applySettingSpy) SetAllowRules(rules []apogee.AllowRule) {
+	s.allowRules = append(s.allowRules, rules)
 }
 
 func (s *applySettingSpy) SetContextFiles(on bool, n []string) {

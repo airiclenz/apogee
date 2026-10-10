@@ -94,6 +94,9 @@ const (
 	// AuditMalformedArguments: the call's arguments were not a JSON object, so dispatch answered
 	// it with the parse error instead of running it (domain.ToolCall.Malformed).
 	AuditMalformedArguments AuditDecision = "malformed-arguments"
+	// AuditAllowedByRule: the call cleared an ordinary Approval gate on an Allow rule (ADR 0096
+	// §3) — no human was consulted — and ran.
+	AuditAllowedByRule AuditDecision = "allowed-by-rule"
 )
 
 // GuardOutcome is what PreExecute tells the executor to do with a call before the mode

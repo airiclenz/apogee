@@ -959,6 +959,11 @@ type Engine interface {
 	// effect on the next tool call and affects only this Session — persisting the host
 	// acknowledgement is the binary's job, not the engine's.
 	SetConfineToWorkspace(bool)
+	// SetAllowRules installs the effective Allow rules (ADR 0096) — every global rule and every
+	// adopted project rule — that answer an ordinary Approval gate without asking, replacing the
+	// set the engine holds. Goroutine-safe like SetMode, and it reaches the whole agent tree, a
+	// sub-agent already running included: the next ordinary gate any of them reaches reads it.
+	SetAllowRules([]domain.AllowRule)
 	// ConfineToWorkspace reports the blast radius the NEXT tool call's Resolution will read —
 	// the live setting, so it already reflects any earlier SetConfineToWorkspace. The /confine
 	// status report renders it, and /confine off|on reads it to say whether the line changed
