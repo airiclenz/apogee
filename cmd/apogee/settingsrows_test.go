@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -767,5 +768,158 @@ func TestSettingsRowsHoldProjectEntriesOutOfTheGlobalFile(t *testing.T) {
 	if got := byPath["url-safety.deny-hosts"]; !got.Editable {
 		t.Error("url-safety.deny-hosts is read-only; the project added nothing to it, so a commit " +
 			"writes only the global file's own entries")
+	}
+}
+
+// layeredSettingsHost is the `/settings` host the composition root wires, over a global file holding
+// global and a workspace outside any repository — its own Project root — whose `.apogee/` holds
+// project, or no config at all when project is empty. It answers the Project config's path beside it.
+func layeredSettingsHost(t *testing.T, global, project string) (settingsHost, string) {
+	t.Helper()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeConfigHomeFor(t, home, "http://127.0.0.1:1", global)
+	root := projectroot.Resolve(workspace, "")
+	projectPath := config.ProjectFilePath(root)
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatalf("create the project folder: %v", err)
+	}
+	if project != "" {
+		writeSettingsFixture(t, projectPath, project)
+	}
+	opts := config.Options{ConfigDir: home, Workspace: workspace}
+	var undetermined *config.StartupUndetermined
+	if err := config.ApplyConfig(&opts, noFlagChanged, noEnvironment, os.ReadFile, func(string) {}); err != nil &&
+		!errors.As(err, &undetermined) {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	return settingsHost{
+		opts:          opts,
+		configPath:    config.FilePath(home),
+		projectRoot:   projectSaveRoot(opts, root),
+		workspacesDir: config.WorkspacesDir(home),
+		edits:         newExternalEdit(opts, workspace, noEnvironment),
+		apply:         func(string, string) (string, error) { return "", nil },
+	}, projectPath
+}
+
+// A param key saved to this project lands in `.apogee/config.yaml`, reports `project`, and is not
+// reported back by the watcher's re-read as somebody else's edit — so no "config changed on disk".
+func TestSettingsHostSavesAParamKeyToTheProjectConfig(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "", "")
+
+	outcome, err := h.SaveTo(tui.SettingTargetProject, "use-project-skills", "false")
+
+	if err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	if data, _ := os.ReadFile(projectPath); !strings.Contains(string(data), "use-project-skills: false") {
+		t.Errorf("project config =\n%s\nwant the saved key", data)
+	}
+	if global, _ := os.ReadFile(h.configPath); strings.Contains(string(global), "use-project-skills: false") {
+		t.Errorf("the project save reached the global file:\n%s", global)
+	}
+	if want := (tui.SettingOutcome{Value: "false", Source: tui.SettingFromProject}); outcome != want {
+		t.Errorf("outcome = %+v, want %+v", outcome, want)
+	}
+	if reload, err := h.edits.changed(); err != nil || len(reload.Applied) != 0 {
+		t.Errorf("re-read after the save = %+v (err %v); want nothing changed on disk", reload.Applied, err)
+	}
+}
+
+// A tighten-only list saved to the project is unioned with the global entries, and the outcome is
+// that union: a global `tools.disabled: [terminal]` with `[web_fetch]` saved to the project keeps
+// terminal disabled, and the project file holds only what was saved.
+func TestSettingsHostProjectSaveOfATightenOnlyListAnswersTheUnion(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "tools:\n  disabled: [terminal]\n", "")
+
+	outcome, err := h.SaveTo(tui.SettingTargetProject, "tools.disabled", "[web_fetch]")
+
+	if err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	if want := (tui.SettingOutcome{Value: "[terminal, web_fetch]", Source: tui.SettingFromProject}); outcome != want {
+		t.Errorf("outcome = %+v, want %+v — terminal must stay disabled", outcome, want)
+	}
+	if data, _ := os.ReadFile(projectPath); strings.Contains(string(data), "terminal") {
+		t.Errorf("project config =\n%s\nwant only the saved entry", data)
+	}
+	if _, err := h.SaveTo(tui.SettingTargetGlobal, "tools.disabled", outcome.Value); err == nil {
+		t.Error("a global save of the union was accepted; it would copy the project's entries into the global file")
+	}
+}
+
+// Resetting a project row removes the project's line and answers the global value it uncovers;
+// resetting the global line under a project value answers the project's, which still outranks it.
+func TestSettingsHostResetInAnswersTheLayeredValue(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "use-project-skills: false\n", "use-project-skills: true\n")
+
+	underProject, err := h.ResetIn(tui.SettingTargetGlobal, "use-project-skills")
+	if err != nil {
+		t.Fatalf("ResetIn(global): %v", err)
+	}
+	if want := (tui.SettingOutcome{Value: "true", Source: tui.SettingFromProject}); underProject != want {
+		t.Errorf("global reset outcome = %+v, want the project's %+v", underProject, want)
+	}
+
+	if err := os.WriteFile(h.configPath, []byte("use-project-skills: false\n"+startupServerYAMLFor("http://127.0.0.1:1")), 0o600); err != nil {
+		t.Fatalf("rewrite the global config: %v", err)
+	}
+	uncovered, err := h.ResetIn(tui.SettingTargetProject, "use-project-skills")
+	if err != nil {
+		t.Fatalf("ResetIn(project): %v", err)
+	}
+	if want := (tui.SettingOutcome{Value: "false", Source: tui.SettingFromGlobal}); uncovered != want {
+		t.Errorf("project reset outcome = %+v, want the global %+v", uncovered, want)
+	}
+	if data, _ := os.ReadFile(projectPath); strings.Contains(string(data), "use-project-skills") {
+		t.Errorf("project config =\n%s\nwant the line gone", data)
+	}
+}
+
+// A project save is refused for a key only the global file may state, and in a session with no
+// Project config to write; neither touches a file.
+func TestSettingsHostRefusesAProjectSaveItCannotMake(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "", "")
+	global := h
+	global.projectRoot = ""
+
+	if _, err := h.SaveTo(tui.SettingTargetProject, "bypass", "true"); err == nil {
+		t.Error("SaveTo(project, bypass) = nil; want a refusal for a global-only key")
+	}
+	if _, err := global.SaveTo(tui.SettingTargetProject, "use-project-skills", "false"); !errors.Is(err, errNoProjectConfig) {
+		t.Errorf("SaveTo with no Project config = %v; want %v", err, errNoProjectConfig)
+	}
+	if _, err := os.Stat(projectPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused save created %s (stat err %v)", projectPath, err)
+	}
+}
+
+// Which rows are offered the project target is the registry's class, an editable row, and a session
+// with a Project config to write: a param key the project sets is editable here now rather than read-only.
+func TestSettingsRowsOfferTheProjectTargetByClass(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "use-project-skills: false\n")
+
+	byPath := rowsByPath(t, h.Rows())
+	global := h
+	global.projectRoot = ""
+	noProject := rowsByPath(t, global.Rows())
+
+	if got := byPath["use-project-skills"]; !got.Editable || !got.ProjectCapable || got.EditPointer != "" ||
+		got.Source != tui.SettingFromProject {
+		t.Errorf("use-project-skills row = %+v; want an editable, project-capable project row", got)
+	}
+	if got := byPath["tools.disabled"]; !got.ProjectCapable {
+		t.Error("tools.disabled is not offered the project target; a project may add to a tighten-only list")
+	}
+	if got := byPath["bypass"]; got.ProjectCapable {
+		t.Error("bypass is offered the project target; it is global-only")
+	}
+	if got := noProject["use-project-skills"]; got.ProjectCapable {
+		t.Error("a session with no Project config to write offered the project target")
 	}
 }

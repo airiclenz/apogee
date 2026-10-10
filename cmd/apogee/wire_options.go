@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee"
@@ -205,8 +206,12 @@ func (w *rootWiring) options() tui.Options {
 			opts:       w.opts,
 			live:       w.engine,
 			configPath: configPath,
-			edits:      w.externalEdits,
-			apply:      applySetting,
+			// The Project root a "this project" save writes under — empty where there is no Project
+			// config this session may write (projectSaveRoot), which keeps every row global-only.
+			projectRoot:   projectSaveRoot(w.opts, w.roots.project),
+			workspacesDir: w.workspacesDir(),
+			edits:         w.externalEdits,
+			apply:         applySetting,
 			// The seed is asked of the holder for the model this session is BOUND to and the config
 			// home its prompt files resolve against — the same two inputs rebindSpecFor resolves the
 			// running prompt with, so the editor opens on exactly what the run sends.
@@ -390,6 +395,12 @@ type settingsHost struct {
 	// configPath is the file both writes splice — the same config.yaml the host acknowledgement is
 	// recorded in and the watcher is looking at.
 	configPath string
+	// projectRoot is the Project root a targeted save to this project writes `.apogee/config.yaml`
+	// under (ADR 0096 §6), and workspacesDir the apogee-home folder that write's lock is kept in. An
+	// empty projectRoot means there is no Project config this session may write: no row is offered
+	// the project target, and SaveTo refuses one.
+	projectRoot   string
+	workspacesDir string
 	// edits is the external-edit baseline every landed write re-takes (ADR 0041 decision 8).
 	edits *externalEdit
 	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the root composes
@@ -418,6 +429,9 @@ type settingsHost struct {
 // keypress that lands it, with nothing to invalidate.
 func (h settingsHost) Rows() []tui.SettingRow {
 	rows := overlayLiveSettings(settingsRows(h.opts), h.live)
+	if h.projectRoot == "" {
+		rows = withoutProjectTarget(rows)
+	}
 	if h.promptSeed == nil {
 		return rows
 	}
@@ -451,6 +465,115 @@ func (h settingsHost) Reset(key string) error {
 	}
 	h.edits.refresh()
 	return nil
+}
+
+// SaveTo is Write into the file target names — the `/settings` save of a project-capable key — and
+// it answers what the files then say for the key ([tui.SettingOutcome]), re-resolved over both
+// layers, so the pane applies the value the next start will resolve rather than the one it typed
+// (landed). The baseline is re-taken by that same reading, so the watcher sees no change. A global
+// save of a tighten-only list the project now adds entries to is refused (notHeldByProject).
+func (h settingsHost) SaveTo(target tui.SettingTarget, key, value string) (tui.SettingOutcome, error) {
+	var err error
+	switch target {
+	case tui.SettingTargetGlobal:
+		err = h.notHeldByProject(key)
+		if err == nil {
+			err = config.SaveConfigSetting(h.configPath, key, value)
+		}
+	case tui.SettingTargetProject:
+		err = h.inProject(func() error { return config.SaveProjectSetting(h.projectRoot, h.workspacesDir, key, value) })
+	default:
+		err = fmt.Errorf("apogee: no config file is called %q", target)
+	}
+	if err != nil {
+		return tui.SettingOutcome{}, err
+	}
+	fallback := tui.SettingOutcome{Value: value, Source: tui.SettingFromGlobal}
+	if target == tui.SettingTargetProject {
+		fallback.Source = tui.SettingFromProject
+	}
+	return h.landed(key, fallback), nil
+}
+
+// ResetIn is Reset in the file target names, answered the same way: what the files say once the
+// line is gone — the other file's value, or the default.
+func (h settingsHost) ResetIn(target tui.SettingTarget, key string) (tui.SettingOutcome, error) {
+	var err error
+	switch target {
+	case tui.SettingTargetGlobal:
+		err = config.ResetConfigSetting(h.configPath, key)
+	case tui.SettingTargetProject:
+		err = h.inProject(func() error { return config.ResetProjectSetting(h.projectRoot, h.workspacesDir, key) })
+	default:
+		err = fmt.Errorf("apogee: no config file is called %q", target)
+	}
+	if err != nil {
+		return tui.SettingOutcome{}, err
+	}
+	fallback := tui.SettingOutcome{Source: tui.SettingFromDefault}
+	if k, ok := config.LookupKey(key); ok {
+		fallback.Value = k.Default
+	}
+	return h.landed(key, fallback), nil
+}
+
+// projectSaveRoot is the Project root a `/settings` save to this project may write under, or "" when
+// this session has no Project config to write: it takes no project layer, it has no Project root, or
+// that root's project file is the global config itself (projectConfigWatchPath, whose answer is the
+// same question asked of the watcher).
+func projectSaveRoot(opts config.Options, projectRoot string) string {
+	if projectConfigWatchPath(opts, projectRoot) == "" {
+		return ""
+	}
+	return projectRoot
+}
+
+// errNoProjectConfig refuses a save to this project in a session with no Project config to write —
+// no Project root, the home folder, or a project file that is the global one.
+var errNoProjectConfig = errors.New("apogee: this session has no project config to save to")
+
+// inProject runs a Project config write, or refuses it when this session has none to write.
+func (h settingsHost) inProject(write func() error) error {
+	if h.projectRoot == "" {
+		return errNoProjectConfig
+	}
+	return write()
+}
+
+// notHeldByProject refuses a global save of a tighten-only list the Project config now adds entries
+// to — the row the boot resolution would have made read-only (carriesProjectEntries), reached here
+// because a project save earlier in this session gave the list its project entries. Its value is the
+// union of both files, so saving it to the global file would copy the project's entries there.
+func (h settingsHost) notHeldByProject(key string) error {
+	k, ok := config.LookupKey(key)
+	if !ok || k.Class != config.ClassTightenOnly || h.edits == nil {
+		return nil
+	}
+	projected, err := h.edits.projection()
+	if err != nil || !carriesProjectEntries(k, projected.opts) {
+		return nil
+	}
+	return fmt.Errorf("apogee: %s carries entries from the project config; edit its global half in config.yaml", key)
+}
+
+// landed re-takes the external-edit baseline over both files and answers what that reading says for
+// key: its row's value, in the spelling a re-read applies (appliedValue), and the file that supplies
+// it. fallback stands in when the files cannot be projected — the write itself landed, so the pane
+// still applies what it asked for, the pre-layering answer, rather than failing a save that happened.
+func (h settingsHost) landed(key string, fallback tui.SettingOutcome) tui.SettingOutcome {
+	if h.edits == nil {
+		return fallback
+	}
+	projected, ok := h.edits.retake()
+	if !ok {
+		return fallback
+	}
+	for _, row := range projected.rows {
+		if row.Path == key {
+			return tui.SettingOutcome{Value: appliedValue(row), Source: row.Source}
+		}
+	}
+	return fallback
 }
 
 // Apply is the apply half of the same keypress (ADR 0037): what the file now says, the session now

@@ -214,6 +214,68 @@ func isHome(root string) bool {
 }
 
 // ----------------------------------------------------------------------------
+// Project settings — the `/settings` pane's "this project" save
+// ----------------------------------------------------------------------------
+
+// SaveProjectSetting writes value as the Project config's setting for the registry path key — the
+// `/settings` save whose target is this project (ADR 0096 §6). It is [SaveConfigSetting]'s splice and
+// gate run through the Project config writer above, so the file starts empty rather than from the
+// template, and a re-set of what the file already says writes nothing.
+//
+// Only a key a project may state is written: a project-param key, whose value outranks the global
+// one, or a tighten-only list, whose entries are unioned with the global layer's — so a project save
+// can add to `tools.disabled` but never take a global entry out of force.
+//
+// Errors: a refusal for a key the settings surface may not write ([SaveConfigSetting]'s), for a
+// global-only or granting key, and for a value the key cannot hold; the writer's refusals and the
+// transaction's errors (editProject).
+func SaveProjectSetting(projectRoot, workspacesDir, key, value string) error {
+	k, err := projectWritableKey(key)
+	if err != nil {
+		return err
+	}
+	if err := validateSettingValue(k, value); err != nil {
+		return err
+	}
+	splice, verify, err := scalarSetEdit(k, value)
+	if err != nil {
+		return fmt.Errorf("apogee: update project config: %w", err)
+	}
+	return editProject(projectRoot, workspacesDir, splice, verify)
+}
+
+// ResetProjectSetting removes the Project config's line for the registry path key, so the key falls
+// back to the global file's value, or to its default. A key the project file does not set is a
+// no-op, and nothing — not even an empty `.apogee/` — is left behind.
+//
+// Errors: as [SaveProjectSetting].
+func ResetProjectSetting(projectRoot, workspacesDir, key string) error {
+	k, err := projectWritableKey(key)
+	if err != nil {
+		return err
+	}
+	splice, verify := scalarResetEdit(k)
+	return editProject(projectRoot, workspacesDir, splice, verify)
+}
+
+// projectWritableKey is writableKey narrowed to the keys a Project config may state at all. A
+// global-only key in the project file would be ignored with a notice at the next start, and a
+// granting one is the Allow rules' own writer's (AddProjectAllowRule) — writing either here would
+// put a line in the repository that does nothing it appears to.
+func projectWritableKey(key string) (Key, error) {
+	k, err := writableKey(key)
+	if err != nil {
+		return Key{}, err
+	}
+	switch k.Class {
+	case ClassProjectParam, ClassTightenOnly:
+		return k, nil
+	default:
+		return Key{}, fmt.Errorf("apogee: %s is read from the global config only; a project config cannot set it", k.Path)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Project rules — the `allow:` lists the writer above edits
 // ----------------------------------------------------------------------------
 

@@ -390,7 +390,18 @@ cmd/apogee/wire_options.go — configHost.AwaitConfigChange, ReloadConfig; cmd/a
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'ProjectCmd|Adopt|ProjectRule' ./cmd/apogee/`
 **Commit:** `feat(cli): apogee project adopt`
 
-## 17. /settings saves to global or this project
+## 17. /settings saves to global or this project — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from "project writes go through item 8's writer" — item 8's Project config writer exposes only the Allow-rule edits, so `SaveProjectSetting`/`ResetProjectSetting` (project-param and tighten-only keys only; global-only and granting keys refused) were added beside them in internal/config/projectwrite.go, over the existing `editProject` transaction and the scalar splice, with tests in internal/config/projectwrite_test.go.
+NOTES (2026-10-10): consequential edit — internal/config/doc.go: made necessary by projectwrite.go now carrying the `/settings` project save (package map line).
+NOTES (2026-10-10): consequential edit — docs/manual/commands.md: made necessary by project rows no longer being read-only in /settings (the save-target question replaces "read-only here").
+NOTES (2026-10-10): consequential edit — docs/layout/settings-screen-layout.md: made necessary by the same change (mockup row, the read-only paragraph, and the "outranks" note wording).
+NOTES (2026-10-10): consequential edit — layout.md: made necessary by the new save-target legend and the changed outranks-note rule in the /settings spec.
+NOTES (2026-10-10): the target-taking seam is two new `SettingsHost` methods, `SaveTo(target, path, value)` and `ResetIn(target, path)`, each answering a `SettingOutcome{Value, Source}` read off the layered re-projection that also re-takes the external-edit baseline (`externalEdit.retake`); `Write`/`Reset` stay as the global path and non-project-capable rows still use them unchanged. `SettingRow.ProjectCapable` is set in `settingsRows` from `Key.Class` (project-param or tighten-only, and editable) and cleared by `settingsHost.Rows` when the session has no writable Project config (`projectSaveRoot`).
+NOTES (2026-10-10): "never offer a tighten-only save that drops a global entry" is met by applying the layered union after a project save (a global entry cannot leave force) plus a refusal of a GLOBAL save of a tighten-only list the project now adds entries to (`notHeldByProject` — the mid-session form of item 4's carriesProjectEntries read-only rule); the question itself always offers both files.
+NOTES (2026-10-10): `setInProject` now marks only project-sourced rows the pane cannot save back to the project (the granting `allow:` and non-editable project-param keys such as `workflow-retries`); an editable project-param row the project sets is editable, with the question opening on "this project".
+NOTES (2026-10-10): `TestSettingsStepsCoverEveryKind` and `TestSettingsStepsPaintThroughTheTable` enumerate the pane's second steps; their bound/map were extended to the new `settingsSaveTarget` step. `outranksAtNextLaunch` was replaced by `settingsOutranksNote` (env/flag rows unchanged; a watcher-applied edit of a project row keeps "project config outranks at next launch").
+NOTES (2026-10-10): acceptance run as `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Settings' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Settings' ./cmd/apogee/` (all ok), plus `go test ./internal/config/`, targeted cmd/apogee ConfigWatch/ExternalEdit/ProjectRule/E2ELiveState/DocMap runs and golangci-lint over the three packages (0 issues).
 
 **What:**
 **Goal:** editing a project-capable key in `/settings` asks "Save to: global / this project", defaulting to the key's current source; global-only keys write global as today.

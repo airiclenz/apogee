@@ -639,10 +639,12 @@ func TestSettingsGiveWayLeavesItsFactOnTheStatusLine(t *testing.T) {
 // rows is a provider rather than a slice because it is one on the real seam: a test that swaps the
 // list under an open pane is asserting that the pane re-derives, so the fake must ask again too.
 type fakeSettingsHost struct {
-	rows  func() []SettingRow
-	write func(path, value string) error
-	reset func(path string) error
-	apply func(path, value string) (string, error)
+	rows    func() []SettingRow
+	write   func(path, value string) error
+	reset   func(path string) error
+	saveTo  func(target SettingTarget, path, value string) (SettingOutcome, error)
+	resetIn func(target SettingTarget, path string) (SettingOutcome, error)
+	apply   func(path, value string) (string, error)
 }
 
 func (h fakeSettingsHost) Rows() []SettingRow {
@@ -664,6 +666,20 @@ func (h fakeSettingsHost) Reset(path string) error {
 		return errors.New(noSettingsWriterNote)
 	}
 	return h.reset(path)
+}
+
+func (h fakeSettingsHost) SaveTo(target SettingTarget, path, value string) (SettingOutcome, error) {
+	if h.saveTo == nil {
+		return SettingOutcome{}, errors.New(noSettingsWriterNote)
+	}
+	return h.saveTo(target, path, value)
+}
+
+func (h fakeSettingsHost) ResetIn(target SettingTarget, path string) (SettingOutcome, error) {
+	if h.resetIn == nil {
+		return SettingOutcome{}, errors.New(noSettingsWriterNote)
+	}
+	return h.resetIn(target, path)
 }
 
 func (h fakeSettingsHost) Apply(path, value string) (string, error) {
@@ -688,6 +704,13 @@ type settingsWriteLog struct {
 	applies   []settingEdit
 	applyNote string
 	applyErr  error
+
+	// The targeted half ([SettingsHost.SaveTo], [SettingsHost.ResetIn]): every save or reset made into
+	// a chosen file, with that file on the entry, and the layered answer the files give back — layered
+	// stands in for the binary's re-resolution over both files; nil answers with what was handed
+	// over, from the file it went to.
+	targeted []settingEdit
+	layered  func(edit settingEdit) SettingOutcome
 }
 
 // write and reset are the two [SettingsHost] seams. A refusal records nothing, exactly as a real refused
@@ -706,6 +729,26 @@ func (l *settingsWriteLog) reset(path string) error {
 	}
 	l.resets = append(l.resets, path)
 	return nil
+}
+
+// saveTo and resetIn are the targeted seams, refused by err exactly as write and reset are.
+func (l *settingsWriteLog) saveTo(target SettingTarget, path, value string) (SettingOutcome, error) {
+	return l.landTargeted(settingEdit{path: path, value: value, target: target})
+}
+
+func (l *settingsWriteLog) resetIn(target SettingTarget, path string) (SettingOutcome, error) {
+	return l.landTargeted(settingEdit{path: path, reset: true, target: target})
+}
+
+func (l *settingsWriteLog) landTargeted(edit settingEdit) (SettingOutcome, error) {
+	if l.err != nil {
+		return SettingOutcome{}, l.err
+	}
+	l.targeted = append(l.targeted, edit)
+	if l.layered != nil {
+		return l.layered(edit), nil
+	}
+	return SettingOutcome{Value: edit.value, Source: SettingSource(edit.target)}, nil
 }
 
 // apply is the third seam. The ATTEMPT is recorded whether or not it succeeds, because that is the
@@ -729,6 +772,7 @@ func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (
 	opts.Settings = fakeSettingsHost{
 		rows:  func() []SettingRow { return rows },
 		write: log.write, reset: log.reset, apply: log.apply,
+		saveTo: log.saveTo, resetIn: log.resetIn,
 	}
 	return openSettingsPane(t, newTestModelEng(t, eng, opts)), eng
 }
@@ -4084,7 +4128,7 @@ func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
 // The two arms every step must carry are the ones settingsKey cannot route without.
 func TestSettingsStepsCoverEveryKind(t *testing.T) {
 	t.Parallel()
-	for kind := settingsKeyList + 1; kind <= settingsTextEditor; kind++ {
+	for kind := settingsKeyList + 1; kind <= settingsSaveTarget; kind++ {
 		step, ok := settingsSteps[kind]
 		if !ok {
 			t.Errorf("kind %d has no row in settingsSteps", kind)
@@ -4097,8 +4141,8 @@ func TestSettingsStepsCoverEveryKind(t *testing.T) {
 	if _, ok := settingsSteps[settingsKeyList]; ok {
 		t.Error("the key list has a row in settingsSteps; it is the pane's own screen, not a step")
 	}
-	if n := len(settingsSteps); n != int(settingsTextEditor) {
-		t.Errorf("settingsSteps has %d rows, want one per second step (%d)", n, settingsTextEditor)
+	if n := len(settingsSteps); n != int(settingsSaveTarget) {
+		t.Errorf("settingsSteps has %d rows, want one per second step (%d)", n, settingsSaveTarget)
 	}
 }
 
@@ -4110,7 +4154,7 @@ func TestSettingsStepsPaintThroughTheTable(t *testing.T) {
 	t.Parallel()
 	own := map[settingsKind]bool{
 		settingsEnumList: true, settingsTextEditor: true,
-		settingsValueBuffer: false, settingsResetArmed: false,
+		settingsValueBuffer: false, settingsResetArmed: false, settingsSaveTarget: false,
 	}
 	for kind, want := range own {
 		if got := settingsSteps[kind].paint != nil; got != want {
@@ -4228,5 +4272,175 @@ func TestSettingsFieldWithoutSelectionDeletesOneRune(t *testing.T) {
 				t.Fatalf("field = %q, want %q — one rune deleted", got, c.want)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The save target — global or this project (ADR 0096 §6)
+// ----------------------------------------------------------------------------
+
+// settingsProjectBoolRow is a project-capable bool row — `use-project-skills:` as the binary hands it
+// over in a session with a Project config to write — supplied by source.
+func settingsProjectBoolRow(source SettingSource) SettingRow {
+	return SettingRow{
+		Path: "use-project-skills", Section: "Tools & skills", Kind: SettingBool, Value: "true",
+		Default: "true", Source: source, Editable: true, ProjectCapable: true,
+		Desc: "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
+	}
+}
+
+// A commit on a project-capable key asks which file it lands in before anything is written: the
+// question opens on the file that supplies the key now, the chosen file is the one written, and the
+// row reports `project` from then on — the journal's answer over the boot resolution's.
+func TestSettingsPaneSavesAProjectCapableKeyToThisProject(t *testing.T) {
+	t.Parallel()
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, []SettingRow{settingsProjectBoolRow(SettingFromGlobal)}, log)
+
+	m = step(t, m, keyEnter())
+	asking := strip(m.renderSettings())
+	m = step(t, step(t, m, keyRight()), keyEnter())
+
+	if !strings.Contains(asking, "Save to: [global] / this project") {
+		t.Errorf("the commit did not ask which file, opening on global:\n%s", asking)
+	}
+	want := []settingEdit{{path: "use-project-skills", value: "false", target: SettingTargetProject}}
+	if !reflect.DeepEqual(log.targeted, want) || len(log.writes) != 0 {
+		t.Fatalf("targeted = %+v, writes = %+v; want only %+v", log.targeted, log.writes, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "false *") || !strings.Contains(pane, "(project)") {
+		t.Errorf("the saved row does not report its new value from the project:\n%s", pane)
+	}
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane kind = %v after the save; want the key list", m.settings.kind)
+	}
+}
+
+// A key only the global file may state is written there exactly as before: no question, no
+// targeted save.
+func TestSettingsPaneGlobalOnlyKeyOffersNoSaveTarget(t *testing.T) {
+	t.Parallel()
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, []SettingRow{settingsBoolRow()}, log)
+
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "auto-title", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Errorf("writes = %+v, want %+v", log.writes, want)
+	}
+	if len(log.targeted) != 0 || strings.Contains(strip(m.renderSettings()), settingsTargetLead) {
+		t.Errorf("a global-only key was offered a save target (targeted %+v)", log.targeted)
+	}
+}
+
+// The pane applies what the FILES now say, not what was typed: a tighten-only list saved to the
+// project is the union with the global entries, so a global `tools.disabled: [terminal]` with
+// `[web_fetch]` saved to the project keeps terminal disabled in the running session.
+func TestSettingsPaneProjectSaveAppliesTheLayeredValue(t *testing.T) {
+	t.Parallel()
+	row := SettingRow{
+		Path: "tools.disabled", Section: "Tools & skills", Kind: SettingString, Value: "[terminal]",
+		Source: SettingFromGlobal, Editable: true, ProjectCapable: true, Desc: "Tools switched off.",
+	}
+	log := &settingsWriteLog{layered: func(settingEdit) SettingOutcome {
+		return SettingOutcome{Value: "[terminal, web_fetch]", Source: SettingFromProject}
+	}}
+	m, _ := settingsEditModel(t, []SettingRow{row}, log)
+
+	m = step(t, m, keyEnter())
+	for range len(row.Value) {
+		m = step(t, m, keyBackspace())
+	}
+	m = step(t, typeSetting(t, m, "[web_fetch]"), keyEnter())
+	m = step(t, step(t, m, keyRight()), keyEnter())
+
+	if want := []settingEdit{{path: "tools.disabled", value: "[web_fetch]", target: SettingTargetProject}}; !reflect.DeepEqual(log.targeted, want) {
+		t.Fatalf("targeted = %+v, want %+v", log.targeted, want)
+	}
+	if want := []settingEdit{{path: "tools.disabled", value: "[terminal, web_fetch]"}}; !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want the layered %+v — terminal must stay disabled", log.applies, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "[terminal, web_fetch] *") {
+		t.Errorf("the row does not show the layered value:\n%s", pane)
+	}
+}
+
+// Resetting a row the project supplies removes the project's line and applies what the files then
+// say — the global value it uncovered, not the default — with the row now reporting `global`.
+func TestSettingsPaneProjectResetAppliesTheLayeredValue(t *testing.T) {
+	t.Parallel()
+	row := settingsProjectBoolRow(SettingFromProject)
+	row.Value = "false"
+	log := &settingsWriteLog{layered: func(settingEdit) SettingOutcome {
+		return SettingOutcome{Value: "false", Source: SettingFromGlobal}
+	}}
+	m, _ := settingsEditModel(t, []SettingRow{row}, log)
+
+	m = step(t, step(t, m, keyBackspace()), keyEnter())
+	asking := strip(m.renderSettings())
+	m = step(t, m, keyEnter())
+
+	if !strings.Contains(asking, "Reset in: global / [this project]") {
+		t.Errorf("the reset did not ask which file, opening on the project:\n%s", asking)
+	}
+	if want := []settingEdit{{path: "use-project-skills", reset: true, target: SettingTargetProject}}; !reflect.DeepEqual(log.targeted, want) {
+		t.Fatalf("targeted = %+v, want %+v", log.targeted, want)
+	}
+	if want := []settingEdit{{path: "use-project-skills", value: "false"}}; !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want the global value %+v", log.applies, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "false *") || !strings.Contains(pane, "(global)") {
+		t.Errorf("the reset row does not report the global value it fell back to:\n%s", pane)
+	}
+}
+
+// A global save under a value the project sets changes nothing in force, and the row says why.
+func TestSettingsPaneGlobalSaveUnderAProjectValueNotesTheProjectOutranksIt(t *testing.T) {
+	t.Parallel()
+	log := &settingsWriteLog{layered: func(settingEdit) SettingOutcome {
+		return SettingOutcome{Value: "true", Source: SettingFromProject}
+	}}
+	m, _ := settingsEditModel(t, []SettingRow{settingsProjectBoolRow(SettingFromProject)}, log)
+
+	m = step(t, step(t, step(t, m, keyEnter()), keyLeft()), keyEnter())
+
+	if want := []settingEdit{{path: "use-project-skills", value: "false", target: SettingTargetGlobal}}; !reflect.DeepEqual(log.targeted, want) {
+		t.Fatalf("targeted = %+v, want %+v", log.targeted, want)
+	}
+	if want := []settingEdit{{path: "use-project-skills", value: "true"}}; !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want the project's value %+v still in force", log.applies, want)
+	}
+	if got, want := m.settingsNote(settingsProjectBoolRow(SettingFromProject)), "· "+settingsProjectOutranksNote; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+}
+
+// esc on the question goes back to where the commit came from with nothing written — the buffer
+// still holding what was typed — and a refused save does the same, with the reason on the row.
+func TestSettingsPaneSaveTargetCancelAndRefusalReturnToTheBuffer(t *testing.T) {
+	t.Parallel()
+	row := SettingRow{
+		Path: "context-files.names", Section: "System prompt", Kind: SettingString, Value: "",
+		Source: SettingFromDefault, Editable: true, ProjectCapable: true, Desc: "Context files.",
+	}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, []SettingRow{row}, log)
+	m = step(t, typeSetting(t, step(t, m, keyEnter()), "CLAUDE.md"), keyEnter())
+
+	cancelled := step(t, m, keyEsc())
+	log.err = errors.New("read-only config home")
+	refused := step(t, m, keyEnter())
+
+	for name, got := range map[string]Model{"cancelled": cancelled, "refused": refused} {
+		if got.settings.kind != settingsValueBuffer || got.settings.editor.value() != "CLAUDE.md" {
+			t.Errorf("%s: kind %v buffer %q; want the buffer back holding the typed value",
+				name, got.settings.kind, got.settings.editor.value())
+		}
+	}
+	if len(log.targeted) != 0 {
+		t.Errorf("targeted = %+v, want nothing written", log.targeted)
+	}
+	if note := refused.settingsNote(row); !strings.Contains(note, "read-only config home") {
+		t.Errorf("refused note = %q, want the reason", note)
 	}
 }

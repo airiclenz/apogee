@@ -45,7 +45,8 @@
 // from. projectwrite.go runs that transaction against a Project config (ADR 0096 §4): an absent
 // file starts as an empty document rather than the template, the lock lives under the apogee home
 // beside the root's adoption record (internal/adoption), a symlinked `.apogee/` or `config.yaml` is
-// refused, and nothing but the config is left in the repository. configwrite.go is the
+// refused, and nothing but the config is left in the repository; it carries the `/settings` pane's
+// project save of one key as well as the Allow-rule edits. configwrite.go is the
 // acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
 // that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
 // /settings key, addressed by its registry path, and configwrite_scalarsplice.go is that writer's

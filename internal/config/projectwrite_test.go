@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/adoption"
@@ -447,4 +448,54 @@ func TestRemoveProjectAllowRule(t *testing.T) {
 			t.Errorf("file =\n%s\nwant it untouched", data)
 		}
 	})
+}
+
+// A `/settings` save to this project lands in the Project config as the one line it states — no
+// template, nothing but the config in the repository — and its reset takes the line back out.
+func TestSaveProjectSettingWritesAndResetsOneLine(t *testing.T) {
+	t.Parallel()
+	root, workspaces := projectWriteFixture(t)
+
+	if err := SaveProjectSetting(root, workspaces, "use-project-skills", "false"); err != nil {
+		t.Fatalf("SaveProjectSetting: %v", err)
+	}
+	data, err := os.ReadFile(ProjectFilePath(root))
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if string(data) != "use-project-skills: false\n" {
+		t.Errorf("project config =\n%s\nwant the one line it states", data)
+	}
+
+	if err := ResetProjectSetting(root, workspaces, "use-project-skills"); err != nil {
+		t.Fatalf("ResetProjectSetting: %v", err)
+	}
+	if data, _ := os.ReadFile(ProjectFilePath(root)); strings.Contains(string(data), "use-project-skills") {
+		t.Errorf("project config after reset =\n%s\nwant the line gone", data)
+	}
+}
+
+// A key the Project config may not state is refused before anything is created: a global-only key
+// would be ignored at the next start, and a value the key cannot hold is no save at all.
+func TestSaveProjectSettingRefusals(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, key, value string }{
+		{"a global-only key", "bypass", "true"},
+		{"a value the key cannot hold", "use-project-skills", "maybe"},
+		{"a key no surface writes", "servers", "x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root, workspaces := projectWriteFixture(t)
+
+			err := SaveProjectSetting(root, workspaces, tc.key, tc.value)
+
+			if err == nil {
+				t.Fatalf("SaveProjectSetting(%q, %q) = nil, want a refusal", tc.key, tc.value)
+			}
+			if tree := treeOf(t, root); len(tree) != 0 {
+				t.Errorf("project tree = %v, want nothing created", tree)
+			}
+		})
+	}
 }

@@ -80,6 +80,9 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
 		return m, nil
 	}
+	if settingsTargetable(row) {
+		return m.settingsAskTarget(row, settingsPendingSave{reset: true}), nil
+	}
 	if err := m.opts.Settings.Reset(row.Path); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
 		return m, nil
@@ -107,12 +110,17 @@ func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) 
 // settingsPersist is settingsWrite's body and its outcome: the model after the attempt, and whether the
 // write LANDED. The bool exists for the edit buffer, which is the one caller whose next move depends on
 // it — a refused value keeps its buffer open so it can be corrected (settingsCommitBuffer), where a
-// refused toggle has nothing to keep. Nothing lays out here or in its callers: what the attempt moved —
+// refused toggle has nothing to keep. A project-capable row has not landed YET: the pane asks which
+// file the value goes to (settingsAskTarget) and reports false, leaving the buffer behind the question
+// for a cancelled or refused save to hand back to. Nothing lays out here or in its callers: what the attempt moved —
 // a row's slot, the pane's step, a key in the paint — is settled by Update's repaint tail (model.go).
 func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bool) {
 	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
 		return m, nil, false
+	}
+	if settingsTargetable(row) {
+		return m.settingsAskTarget(row, settingsPendingSave{value: value}), nil, false
 	}
 	if err := m.opts.Settings.Write(row.Path, value); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
@@ -120,6 +128,144 @@ func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bo
 	}
 	m, cmd := m.settingsApplied(row, settingEdit{path: row.Path, value: value})
 	return m, cmd, true
+}
+
+// settingsTargetable reports whether a commit on row asks which config file it lands in: a row this
+// pane writes whose key the binary says a project may state ([SettingRow.ProjectCapable]).
+func settingsTargetable(row SettingRow) bool {
+	return row.Editable && row.ProjectCapable
+}
+
+// settingsAskTarget holds a project-capable row's commit and puts the save-target question up — the
+// one second step that comes AFTER the value rather than before it. The highlight opens on the file
+// that supplies the key now (settingsDefaultTarget), so a ⏎ straight through saves where the value
+// already lives, and the step the commit came from is kept for the question to hand back to.
+func (m Model) settingsAskTarget(row SettingRow, pending settingsPendingSave) Model {
+	pending.target, pending.from = m.settingsDefaultTarget(row), m.settings.kind
+	m.settings.kind, m.settings.pending = settingsSaveTarget, pending
+	return m
+}
+
+// settingsDefaultTarget is the file the save-target question opens on: this project when the
+// Project config supplies the key now — as the run resolved it, or as a save this session made left
+// it (settingsSourceOf) — and the global file otherwise.
+func (m Model) settingsDefaultTarget(row SettingRow) SettingTarget {
+	if m.settingsSourceOf(row) == SettingFromProject {
+		return SettingTargetProject
+	}
+	return SettingTargetGlobal
+}
+
+// settingsSaveTargetRow is the row the save-target question is about, and whether there still IS one
+// — re-asked on every key like every other step's target, so a ⏎ can never save a value into a key
+// that moved into the selected slot.
+func (m Model) settingsSaveTargetRow(rows []SettingRow) (SettingRow, bool) {
+	if m.settings.kind != settingsSaveTarget {
+		return SettingRow{}, false
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok || !settingsTargetable(row) {
+		return SettingRow{}, false
+	}
+	return row, true
+}
+
+// settingsSaveTargetKey answers the save-target question: ←/→ (or ↑/↓, tab) move the highlight
+// between the two files, ⏎ saves to the highlighted one and esc goes back to where the commit came
+// from — the buffer still holding what was typed, or the key list — having written nothing.
+func (m Model) settingsSaveTargetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.settings.kind, m.settings.pending = m.settings.pending.from, settingsPendingSave{}
+		return m, nil
+	case "enter":
+		return m.settingsSaveToTarget(row)
+	case "left", "right", "up", "down", "tab", "shift+tab":
+		m.settings.pending.target = otherSettingTarget(m.settings.pending.target)
+	}
+	return m, nil // swallowed, like every key the pane does not act on
+}
+
+// otherSettingTarget is the file the highlight moves to: there are two, so every move is a swap.
+func otherSettingTarget(target SettingTarget) SettingTarget {
+	if target == SettingTargetProject {
+		return SettingTargetGlobal
+	}
+	return SettingTargetProject
+}
+
+// settingsSaveToTarget saves the held commit to the chosen file through [SettingsHost.SaveTo] or
+// [SettingsHost.ResetIn] and lands what the files then SAY — the layered value, not the one the
+// human committed — so the session runs what the next start will resolve: a tighten-only list saved
+// to the project keeps the global entries in force, a global save under a project value leaves the
+// project's in force, and a project reset falls back to the global file's (ADR 0096 §6).
+//
+// The edit is journaled with the file chosen and the source that now supplies the key, which is what
+// the row's source mark and its note report from then on (settingsSourceOf, settingsOutranksNote).
+// It counts as a reset only where it returned the key to its default; a reset that uncovered the
+// other file's value is that value, landed like any other.
+//
+// A refusal hands back to the step the commit came from, with the reason on the row: a mistyped value
+// is still in its buffer to be corrected.
+func (m Model) settingsSaveToTarget(row SettingRow) (tea.Model, tea.Cmd) {
+	pending := m.settings.pending
+	m.settings.kind, m.settings.pending = pending.from, settingsPendingSave{}
+	outcome, err := m.settingsSaveIn(pending, row.Path)
+	if err != nil {
+		return m.settingsFailed(row, err.Error())
+	}
+	m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+	m, cmd := m.settingsApplied(row, settingEdit{
+		path:   row.Path,
+		value:  outcome.Value,
+		reset:  pending.reset && outcome.Source == SettingFromDefault,
+		target: pending.target,
+		source: outcome.Source,
+	})
+	return m, cmd
+}
+
+// settingsSaveIn is the held commit's one call into the host: the write or the reset, into the file
+// the question settled on.
+func (m Model) settingsSaveIn(pending settingsPendingSave, path string) (SettingOutcome, error) {
+	if m.opts.Settings == nil {
+		return SettingOutcome{}, errors.New(noSettingsWriterNote)
+	}
+	if pending.reset {
+		return m.opts.Settings.ResetIn(pending.target, path)
+	}
+	return m.opts.Settings.SaveTo(pending.target, path, pending.value)
+}
+
+// settingsTargetHint is the save-target question's legend: which file, the highlighted one
+// bracketed, and the keys that answer — "Reset in:" for a held reset, which removes a line rather
+// than saving one.
+func (m Model) settingsTargetHint() string {
+	global, project := settingsTargetGlobal, settingsTargetProject
+	if m.settings.pending.target == SettingTargetProject {
+		project = "[" + project + "]"
+	} else {
+		global = "[" + global + "]"
+	}
+	lead := settingsTargetLead
+	if m.settings.pending.reset {
+		lead = settingsTargetResetLead
+	}
+	return lead + global + " / " + project + settingsTargetKeys
+}
+
+// settingsPendingValue is the value cell of the row the question is about: the value being saved,
+// so the human sees what they are about to put where — or, for a held reset, the row's own cell,
+// since what a reset leaves depends on the file chosen.
+func (m Model) settingsPendingValue(row SettingRow) string {
+	pending := m.settings.pending
+	switch {
+	case pending.reset:
+		return m.settingsValueCell(row)
+	case row.Kind == SettingText:
+		return settingsTextSummary(pending.value)
+	}
+	return pending.value
 }
 
 // settingsApplied records an edit that LANDED and puts it into effect — the one place both halves of

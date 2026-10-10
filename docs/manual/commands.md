@@ -588,8 +588,13 @@ in registry order — roughly the order the starter `config.yaml` documents them
 each row showing the value **this run resolved** for it and where that value came from —
 `(default)`, `(global)` for `~/.apogee/config.yaml`, `(project)` for the project's
 `.apogee/config.yaml`, or `(env)` / `(flag)` for an override — so a key that reads one way in the
-file and another on screen explains itself. A row the project config sets is read-only here
-(`· set in the project config`): the pane writes the global file, which the project outranks. Two rows answer from the **running session**
+file and another on screen explains itself. Saving a key a project may set — the context files, the
+project-skills switch, `tools.disabled`, `url-safety.deny-hosts` — asks **Save to: global / this
+project** (`←/→` choose, `⏎` save, `esc` back), opening on the file that supplies the key now; every
+other key is written to the global file as before. The row then shows what the two files resolve
+to together — a list saved to the project still carries the global entries, and a global save
+under a project value notes `· saved to global; the project config outranks it`. A row the project
+sets that the pane cannot write there points at it (`· set in the project config`). Two rows answer from the **running session**
 instead of that resolution — `mode:` and `confine-to-workspace:` show what apogee is running
 right now — and the rows are re-derived at every paint, not read once when the pane opens, so a
 `shift+tab` or a `/confine off` is already on the row whenever the pane paints, and

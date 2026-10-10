@@ -162,17 +162,18 @@ type Scheduler interface {
 	List() []schedule.Status
 }
 
-// SettingsHost is the `/settings` pane's whole seam: the rows it shows, the two writes a committed
-// row makes to the config file, and the live apply that puts a persisted key into effect on the
+// SettingsHost is the `/settings` pane's whole seam: the rows it shows, the writes a committed
+// row makes to the config files (the global file, or — for a project-capable key — the file the
+// human picks), and the live apply that puts a persisted key into effect on the
 // running session — ADR 0035's one key per deliberate edit and ADR 0037's validate → persist →
-// apply, named as one host capability rather than spelled as four bare funcs (ADR 0054). It is
+// apply, named as one host capability rather than spelled as six bare funcs (ADR 0054). It is
 // defined here like [SessionHost], so the renderer stays unit-testable with a fake while the
 // composition root owns the key registry, the schema, the file format, and the resolution from a
 // file-spelled value onto whatever live seam the key moves.
 //
 // A nil host means `/settings` is unwired whole: the pane has nothing to show and says so, the
 // nil-seam degrade every seam in [Options] takes. A host that IS wired but cannot do one of the
-// four says so in that method's own answer — no rows, an error out of Write or Reset, an Apply
+// six says so in that method's own answer — no rows, an error out of a write or a reset, an Apply
 // that reports nothing — so a Driver that persists without applying (ADR 0031) needs no second
 // interface to say it.
 type SettingsHost interface {
@@ -209,6 +210,21 @@ type SettingsHost interface {
 	//
 	// Same contract as Write in every other respect — synchronous, path-addressed, errors reported.
 	Reset(path string) error
+
+	// SaveTo is Write for a [SettingRow.ProjectCapable] key, into the file target names, and it
+	// answers what the files say for the key once the write has landed ([SettingOutcome]) — the
+	// value the pane applies and journals in place of the one it handed over, because the project
+	// layer may keep a different one in force. A global-only key, or a project target in a session
+	// with no Project config to write, is refused. The external-edit baseline is re-taken over both
+	// files, so the watcher does not report the save back as somebody's edit.
+	//
+	// Same contract as Write in every other respect — synchronous, path-addressed, errors reported.
+	SaveTo(target SettingTarget, path, value string) (SettingOutcome, error)
+
+	// ResetIn is Reset in the file target names: the key's line there is removed, and the answer is
+	// what the files then say for the key — the global file's value after a project reset, the
+	// project's after a global one, the default when neither sets it. Same contract as SaveTo.
+	ResetIn(target SettingTarget, path string) (SettingOutcome, error)
 
 	// Apply makes one persisted key take effect in the RUNNING session — the apply half of every
 	// `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path and
@@ -1827,6 +1843,29 @@ const (
 	SettingFromFlag    SettingSource = "flag"    // an explicitly-set command-line flag won
 )
 
+// SettingTarget is the config file a `/settings` save lands in: the global file every key may be
+// written to, or this project's `.apogee/config.yaml`, which only a [SettingRow.ProjectCapable] key
+// is offered (ADR 0096 §6). The pane asks which on every commit of such a key, defaulting to the
+// file that supplies the key now, and journals the answer so the row reports where it went.
+type SettingTarget string
+
+const (
+	SettingTargetGlobal  SettingTarget = "global"  // ~/.apogee/config.yaml
+	SettingTargetProject SettingTarget = "project" // <Project root>/.apogee/config.yaml
+)
+
+// SettingOutcome is what the config files say for a key once a targeted save or reset has landed
+// ([SettingsHost.SaveTo], [SettingsHost.ResetIn]) — the LAYERED answer, re-resolved from both files,
+// rather than the value the pane handed over. The two differ exactly where the project layer has a
+// say: a global save under a project value leaves the project's value in force, a project reset
+// falls back to the global file's, and a tighten-only list saved to the project is the union of
+// both files' entries. The pane applies and journals this, so the running session and the row
+// agree with what the next start will resolve from the files.
+type SettingOutcome struct {
+	Value  string        // the layered value, in the spelling [SettingsHost.Apply] takes and the row shows
+	Source SettingSource // the file that now supplies it: default, global or project
+}
+
 // SettingRow is one row of the `/settings` pane: a config key as the binary resolved it this run.
 // It is plain data — the [ServerChoice] posture — projected from the binary's declarative key
 // registry, so the renderer never reads the config schema, the file, or an environment variable,
@@ -1878,6 +1917,13 @@ type SettingRow struct {
 	// not a shape the renderer can read off a row. False for every editable row — those are written
 	// here — and false for the confinement pair, whose own pointer says where they go instead.
 	ExternalEdit bool
+
+	// ProjectCapable says a commit on this row may land in this project's config as well as the
+	// global one, so the pane asks which ([SettingTarget]) and saves through [SettingsHost.SaveTo]. It
+	// is the binary's call — a project-param or tighten-only key (ADR 0096 §6), editable here, in a
+	// session that has a Project config to write — and false for every other row, which is written
+	// to the global file through [SettingsHost.Write] without a question.
+	ProjectCapable bool
 }
 
 // EditorCommand is one resolved external edit — the OUT half of the round trip

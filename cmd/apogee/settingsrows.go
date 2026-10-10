@@ -48,9 +48,10 @@ const noneSettingValue = "none"
 // /confine (ADR 0012), so the pane sends the human there rather than growing a second way to loosen
 // a blast radius.
 //
-// pointerProject is the third: a row whose value the Project config sets is not written here at
-// all (ADR 0096) — the pane writes the global file, which the project outranks — so the row says
-// where its value comes from instead and its ⏎ does nothing.
+// pointerProject is the third: a row whose value the Project config sets and which this pane cannot
+// save back there — a granting key, whose project entries are live only by Adoption (ADR 0096) — is
+// not written here at all, so the row says where its value comes from instead and its ⏎ does
+// nothing. A project-param row the project sets is written here, to the file the human picks.
 const (
 	pointerExternalEdit = "⏎ opens $EDITOR"
 	pointerConfine      = "use /confine"
@@ -156,6 +157,9 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 			EditPointer:  pointer,
 			ExternalEdit: external,
 			Desc:         k.Desc,
+			// A key a project may state is offered the project target wherever this pane writes it;
+			// the host takes the offer back in a session with no Project config (withoutProjectTarget).
+			ProjectCapable: k.Editable && savableToProject(k),
 		})
 	}
 	return rows
@@ -289,14 +293,40 @@ func settingSource(k config.Key, opts *config.Options) (tui.SettingSource, strin
 	}
 }
 
-// setInProject reports whether the Project config sets this row's value outright — a project-param
-// key the project file states (ADR 0096). Such a row is read-only here until the pane can ask which
-// file a save goes to: a commit would land in the global file, which the project outranks at the
-// next start. A tighten-only list is NOT one of these even when the project added entries to it:
-// its value is the union of both files, and carriesProjectEntries already sends it to the editor,
-// where the global half of it is edited.
+// setInProject reports whether the Project config sets this row's value and the pane cannot save it
+// back there (ADR 0096): a granting key, whose project entries go live only by Adoption and have a
+// writer of their own, or a project-param key this pane does not write at all — whose ⏎ would
+// otherwise open the GLOBAL file in the editor. Such a row is read-only here and points at the
+// project config. An editable project-param row is NOT one of these — the pane asks which file its
+// save goes to — and neither is
+// a tighten-only list the project added entries to: its value is the union of both files, and
+// carriesProjectEntries already sends it to the editor, where the global half of it is edited.
 func setInProject(k config.Key, source tui.SettingSource) bool {
-	return source == tui.SettingFromProject && k.Class != config.ClassTightenOnly
+	if source != tui.SettingFromProject || k.Class == config.ClassTightenOnly {
+		return false
+	}
+	return !k.Editable || !savableToProject(k)
+}
+
+// savableToProject reports whether a `/settings` save of this key may land in the Project config:
+// a project-param key, which the project file states outright, or a tighten-only list, whose
+// project entries are unioned with the global ones (ADR 0096 §6). Every other class is the global
+// file's alone, or — the granting `allow:` — written by its own seam.
+func savableToProject(k config.Key) bool {
+	return k.Class == config.ClassProjectParam || k.Class == config.ClassTightenOnly
+}
+
+// withoutProjectTarget is rows with the project target taken off every one of them — the host's
+// answer in a session with no Project config to write (settingsHost.projectRoot), where every save
+// goes to the global file without a question. The rows are copied rather than written through, the
+// overlayLiveSettings posture.
+func withoutProjectTarget(rows []tui.SettingRow) []tui.SettingRow {
+	global := make([]tui.SettingRow, len(rows))
+	copy(global, rows)
+	for i := range global {
+		global[i].ProjectCapable = false
+	}
+	return global
 }
 
 // editPointer says where a key this pane will not write is edited instead — empty for an editable

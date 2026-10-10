@@ -391,7 +391,10 @@ there and a legend is the only place a human could have read that from. The valu
 `⏎ save · esc cancel`, and an armed reset `⏎ confirm reset · esc cancel` — the one line this pane
 asks anything on, the `/sessions` delete-confirm posture with `⏎` in place of `y`. The multi-line
 field reads `ctrl+s save · esc discard`, and it has to be read: `⏎` there belongs to the **value**,
-which is the whole difference between that step and every other.
+which is the whole difference between that step and every other. A commit on a key a project may set
+then asks one more thing, `Save to: [global] / this project · ←/→ choose · ⏎ save · esc back`
+(`Reset in:` for a reset), the bracket on the highlighted file; `esc` there goes back to the step the
+commit came from with nothing written.
 
 **What the approval prompt's body says is the call, in the call's own words.** The tool's raw name
 rides the top border, a non-empty reason leads the body as `Reason: …`, and the arguments follow it
@@ -2605,8 +2608,9 @@ the reason the last act on it was refused, else the answer to an act that landed
 `· already on macStudio`, or the `· opened in your editor` of an editor started **detached**, which
 opened in its own window and left this pane standing where it was — else the boundary note of an
 edit that landed at a boundary this session will cross rather than at once
-(`· applies at next clear`), else — on a row an environment variable, a flag or the Project config
-supplies — that the source wins again at the next start, else
+(`· applies at next clear`), else — on a row an environment variable or a flag supplies — that the
+source wins again at the next start, or, after a global save under a Project config value, that the
+project outranks it, else
 the `· ⏎ opens $EDITOR`, `· use /confine` or `· set in the project config` pointer of a key this
 pane will not write. That
 tier is one column rather than three because a row is only ever one of those things at a time, and

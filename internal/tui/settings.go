@@ -81,12 +81,13 @@ import (
 
 // settingsKind is what the open pane is DOING: reading its key list, asking which value one enum key
 // should take, holding the buffer a string or an int is being typed into, waiting for a reset to be
-// confirmed, or holding the multi-line field a text key's prose is written in. It is the picker's own
+// confirmed, holding the multi-line field a text key's prose is written in, or asking which config
+// file a project-capable key's commit lands in. It is the picker's own
 // two-step idiom (pickerKind, /schedule's cycle-then-mode pair): one pane, one selection per step, and
 // the step is a field rather than a second overlay — so there is no state in which two settings
 // surfaces are open and no second give-way rule to write.
 //
-// One field for all five is also what makes them mutually exclusive by construction: a pane cannot be
+// One field for all six is also what makes them mutually exclusive by construction: a pane cannot be
 // buffering a value and awaiting a reset confirmation at once, so no keypress has two meanings and no
 // state pair has to be reasoned about.
 type settingsKind int
@@ -97,6 +98,7 @@ const (
 	settingsValueBuffer                     // the selected string/int key's edit buffer, on its own row
 	settingsResetArmed                      // backspace armed the selected row's reset; ⏎ confirms it
 	settingsTextEditor                      // the selected text key's prose, in a multi-line field filling the pane
+	settingsSaveTarget                      // a project-capable key's commit, asking which config file it lands in
 )
 
 // settingsPane is the overlay's inline state on the Model. Its zero value is "closed", so it lives
@@ -148,6 +150,21 @@ type settingsPane struct {
 	sel     fieldSel
 	failure settingFailure
 	answer  settingAnswer
+	// pending is the commit the save-target question is about, meaningful only while kind is
+	// [settingsSaveTarget] — the value, or the reset, a ProjectCapable row was committed with.
+	pending settingsPendingSave
+}
+
+// settingsPendingSave is a project-capable key's commit held while the pane asks which file it lands
+// in ([SettingTarget]): what was committed — a value, or a reset — the file the highlight is on, and
+// the step the commit came from, which the question hands back to when it is cancelled or the save is
+// refused, so a mistyped port is corrected in the buffer it was typed in rather than retyped. Plain
+// values only, like the rest of [settingsPane] (ADR 0011).
+type settingsPendingSave struct {
+	value  string
+	reset  bool
+	target SettingTarget
+	from   settingsKind
 }
 
 // settingEdit is one key this session PERSISTED and the value the file now yields for it — the fact
@@ -171,12 +188,19 @@ type settingsPane struct {
 // apply loop (applyReloaded) and only the caller knows which trigger it is serving — and because the
 // journal keeps one entry per key ([Model.recordSettingEdit]), so the LAST source is what the row
 // says about the key.
+//
+// target and source are a targeted save's (a [SettingRow.ProjectCapable] key, [SettingsHost.SaveTo]):
+// the file the human chose, and the file that supplies the key once the save landed — which is what
+// the row's source mark reports from then on (ADR 0037 decision 8: the boot resolution plus the
+// journal). Both are empty for every other edit, whose row keeps the source it was resolved with.
 type settingEdit struct {
 	path    string
 	value   string
 	note    string
 	reset   bool
 	watched bool
+	target  SettingTarget
+	source  SettingSource
 }
 
 // settingFailure is the last write this pane was REFUSED, and by what — a read-only config home, a
@@ -244,6 +268,17 @@ const (
 	settingsBufferHint  = "⏎ save · esc cancel"
 	settingsResetHint   = "⏎ confirm reset · esc cancel"
 	settingsTextHint    = "ctrl+s save · esc discard"
+)
+
+// The save-target question's legend: which file a project-capable key's commit lands in, the
+// highlighted one bracketed, and the keys that answer. It is composed per paint (settingsTargetHint)
+// because the bracket moves with the choice.
+const (
+	settingsTargetLead      = "Save to: "
+	settingsTargetResetLead = "Reset in: "
+	settingsTargetGlobal    = "global"
+	settingsTargetProject   = "this project"
+	settingsTargetKeys      = " · ←/→ choose · ⏎ save · esc back"
 )
 
 // The pane's description header: the label its first line opens with, and the number of lines the
@@ -346,16 +381,51 @@ func settingsSourceMarker(source SettingSource) string {
 	return "(" + string(source) + ")"
 }
 
-// outranksAtNextLaunch reports whether a row's source will beat a value this pane writes to the
-// global file when apogee next starts: an override (env, flag) or the Project config. A default or
-// global row is the file this pane writes, so an edit to it is what the next start reads.
-func outranksAtNextLaunch(source SettingSource) bool {
-	switch source {
-	case SettingFromProject, SettingFromEnv, SettingFromFlag:
-		return true
-	default:
-		return false
+// settingsOverride reports whether a source is an override — an environment variable or a flag —
+// which outranks both config files whichever one this pane writes.
+func settingsOverride(source SettingSource) bool {
+	return source == SettingFromEnv || source == SettingFromFlag
+}
+
+// settingsOutranksNote is what an edited row says about a source that sits above the file its edit
+// was written to, or "" when nothing does:
+//
+//   - an override (env, flag) wins again at the next start, though the edit applied now — "APOGEE_MODE
+//     outranks at next launch";
+//   - a save to the GLOBAL file under a value the Project config sets changes nothing in force: the
+//     pane applied the layered value, which is still the project's (settingsSaveToTarget), so the
+//     note says where the save went and what kept it from mattering;
+//   - an untargeted edit — a re-read the watcher applied — of a row the Project config supplies is
+//     outranked at the next start like an override's.
+//
+// A save to the file that now supplies the key, and every edit of a default or global row, says
+// nothing: the next start reads exactly what was written.
+func settingsOutranksNote(row SettingRow, edit settingEdit) string {
+	switch {
+	case settingsOverride(row.Source):
+		return settingsSourceLabel(row) + " outranks at next launch"
+	case edit.target == SettingTargetGlobal && edit.source == SettingFromProject:
+		return settingsProjectOutranksNote
+	case edit.target == "" && row.Source == SettingFromProject:
+		return settingsSourceLabel(row) + " outranks at next launch"
 	}
+	return ""
+}
+
+// settingsProjectOutranksNote is the row's note after a global save under a project value.
+const settingsProjectOutranksNote = "saved to global; the project config outranks it"
+
+// settingsSourceOf is the source mark a row paints: the source a targeted save left supplying the key
+// (settingEdit.source) once one has landed, else the source the run resolved it from. An override
+// keeps its mark whatever was saved, because it outranks both files.
+func (m Model) settingsSourceOf(row SettingRow) SettingSource {
+	if settingsOverride(row.Source) {
+		return row.Source
+	}
+	if edit, ok := m.settingEditOf(row.Path); ok && edit.source != "" {
+		return edit.source
+	}
+	return row.Source
 }
 
 // runSettingsCommand drives the /settings verb: it opens the pane, or — with no rows to show —
@@ -417,12 +487,15 @@ func (m Model) settingRows() []SettingRow {
 // pointer can name a row" (settingsPaint): a step that paints for itself takes no pointer through the
 // list it replaced. The renderers keep their own signatures (renderSettingsEnum takes the row,
 // renderSettingsText the rows), so the column takes both and each arm spends the one it needs.
+// hintOf is a legend that depends on the step's own state — the save-target question's, whose
+// bracket follows the highlighted file — and stands in for hint where it is set.
 // height is paint's height query — the rows that pane takes, answered without painting it
 // ([Model.settingsHeight]) — set exactly where paint is set and nil exactly where it is nil.
 type settingsStep struct {
 	target    func(m Model, rows []SettingRow) (SettingRow, bool)
 	key       func(m Model, msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd)
 	hint      string
+	hintOf    func(m Model) string
 	editing   func(m Model, row SettingRow) bool
 	editorMsg func(m Model, msg tea.Msg) (Model, tea.Cmd, bool)
 	paint     func(m Model, row SettingRow, rows []SettingRow) string
@@ -471,6 +544,12 @@ func init() {
 			target: Model.settingsResetTarget,
 			key:    Model.settingsResetKey,
 			hint:   settingsResetHint,
+		},
+		settingsSaveTarget: {
+			target:  Model.settingsSaveTargetRow,
+			key:     Model.settingsSaveTargetKey,
+			hintOf:  Model.settingsTargetHint,
+			editing: func(_ Model, row SettingRow) bool { return settingsTargetable(row) },
 		},
 	}
 }
@@ -614,6 +693,7 @@ func (m Model) settingsFieldMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 // it — so one verb serves all four.
 func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, listCursor{}, lineEditor{}
+	m.settings.pending = settingsPendingSave{}
 	return m, nil
 }
 
@@ -1264,6 +1344,9 @@ func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisp
 			if m.settings.kind == settingsValueBuffer {
 				cells = m.settingBufferCells(row)
 			}
+			if m.settings.kind == settingsSaveTarget {
+				cells[1] = stripEscapes(m.settingsPendingValue(row))
+			}
 			kind = popupRowEditing
 		}
 		add(cells, kind, i)
@@ -1315,7 +1398,7 @@ func (m Model) settingBufferCells(row SettingRow) popupRow {
 	return popupRow{
 		stripEscapes(row.Path),
 		m.settingsEditText(),
-		stripEscapes(settingsSourceMarker(row.Source)),
+		stripEscapes(settingsSourceMarker(m.settingsSourceOf(row))),
 		stripEscapes(m.settingsNote(row)),
 	}
 }
@@ -1341,6 +1424,9 @@ func (m Model) settingsEditText() string {
 // that would do nothing on it (settingsResetKind), and rows is passed rather than re-derived so the
 // legend is about the row the frame is highlighting.
 func (m Model) settingsPaneHint(rows []SettingRow) string {
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.hintOf != nil {
+		return step.hintOf(m)
+	}
 	if step, ok := settingsSteps[m.settings.kind]; ok && step.hint != "" {
 		return step.hint
 	}
@@ -1388,7 +1474,7 @@ func (m Model) settingRowCellsPending(row SettingRow, pending settingEdit) popup
 	return popupRow{
 		stripEscapes(row.Path),
 		stripEscapes(value),
-		stripEscapes(settingsSourceMarker(row.Source)),
+		stripEscapes(settingsSourceMarker(m.settingsSourceOf(row))),
 		stripEscapes(m.settingsNote(row)),
 	}
 }
@@ -1481,12 +1567,11 @@ func settingsTextSummary(text string) string {
 //     ([settingAnswer]) — and which the value cell, showing what it showed before, cannot say;
 //   - the apply's own boundary note for an edit that landed at a boundary rather than at once
 //     ("· applies at next clear"), which is the only deferral wording this surface has;
-//   - on a row an environment variable, a flag or the Project config supplies, that the source will
-//     win again at the next start (ADR 0037 decision 4; ADR 0096) — "project config outranks at next
-//     launch". The edit itself DID apply — a pane edit outranks an override for the running session —
-//     so the sentence is about precedence at the next start and not about the edit having failed to
-//     land. A default or global row says nothing: its edit lands in the very file the next start
-//     reads;
+//   - on a row an environment variable or a flag supplies, that the source will win again at the
+//     next start (ADR 0037 decision 4) — the edit itself DID apply, a pane edit outranking an override
+//     for the running session — and after a global save under a project value, that the Project
+//     config outranks it (ADR 0096; settingsOutranksNote). A save to the file that supplies the key
+//     says nothing: it lands in the very file the next start reads;
 //   - nothing at all for every other edit, because settingsValueCell already shows what was written
 //     and its ` *` already says this session wrote it; and
 //   - the read-only row's pointer, which is the registry's own fact and the only one of these a pane
@@ -1505,8 +1590,8 @@ func (m Model) settingsNote(row SettingRow) string {
 	switch {
 	case edited && edit.note != "":
 		return "· " + edit.note // applied, at a boundary this session will cross (ADR 0037 decision 3)
-	case edited && outranksAtNextLaunch(row.Source):
-		return "· " + settingsSourceLabel(row) + " outranks at next launch"
+	case edited && settingsOutranksNote(row, edit) != "":
+		return "· " + settingsOutranksNote(row, edit)
 	case edited:
 		return "" // applied live: the value cell and its marker say it
 	case row.EditPointer != "":

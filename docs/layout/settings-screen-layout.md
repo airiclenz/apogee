@@ -57,7 +57,7 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │   system-prompt-file                 (default)                                               │
 │   system-prompt-models  none         (default)  · ⏎ opens $EDITOR                            │
 │   context-files.enable  true         (default)                                               │
-│   context-files.names   [AGENTS.md]  (project)  · set in the project config                  │
+│   context-files.names   [AGENTS.md]  (project)                                               │
 │                                                                                              │
 │   Confinement                                                                                │
 │   confine-to-workspace  true         (default)  · use /confine                               │
@@ -80,9 +80,13 @@ cells — key, value, a source mark, and the note or pointer. The mark names whe
 came from: `(default)`, `(global)` for the global config file, `(project)` for the Project config
 layered over it, `(env)` or `(flag)` for an override — so every row carries one, and the column
 collapses away only on rows a provider reported without a source. The note column collapses away on
-a configuration with nothing read-only and nothing edited yet. A row the Project config sets is
-read-only here and points at it (`· set in the project config`), since this pane writes the global
-file and the project would outrank the edit at the next start.
+a configuration with nothing read-only and nothing edited yet. A commit on a key a project may set
+(a project-param or tighten-only key, ADR 0096 §6) asks which file it lands in before anything is
+written — the legend becomes `Save to: [global] / this project · ←/→ choose · ⏎ save · esc back`
+(`Reset in:` for a reset), the bracket on the file that supplies the key now, and the row's value
+cell shows the value being saved. The row then reports the file that supplies the key and the value
+both files resolve to together. A row the Project config sets that this pane cannot write there
+points at it (`· set in the project config`).
 
 The mockup is **abridged**: it shows five of the pane's ten sections. In the built pane
 `Tools & skills`, `Session`, `Presentation`, `Interface` and `Reactions` sit between `Confinement`
@@ -100,8 +104,8 @@ it is the one deferral wording the surface has: `context-files:` is part of the 
 is cached against, so it lands at the next `/clear`. Every other key is already in force by the time
 the row repaints. Where an environment variable or a flag outranks the file the note reads
 `· APOGEE_MODE outranks at next launch` — about the next start, not about this edit, which applied;
-the renderer words a row the Project config supplies the same way, `· project config outranks at
-next launch`, though the binary hands it such a row read-only today —
+a global save under a value the Project config sets reads `· saved to global; the project config
+outranks it`, since the project's value stays in force —
 and a write whose apply then failed reads `✗ saved — live apply failed: …`.
 
 ### The selection popup (`mode`, `server`, every 3-plus-option key)
