@@ -2763,7 +2763,8 @@ writing, moving or deleting that root's `.apogee/config.yaml`, and deleting, mov
 `.apogee/` folder itself (`write-project-config`, which no `remove:` takes away). Staging or
 committing the file with git and copying it elsewhere are not writes there, and `.apogee/skills/`
 stays writable. The refusal catches the shell forms apogee can read — a redirect, `tee`, `sed -i`, a
-`cp` or `mv` destination, `rm`, `ln` — not every program that could open the file, which is why a
+`cp`, `mv` or `install` destination (a copy of a `config.yaml` into the `.apogee/` folder included),
+`rm`, `ln` — not every program that could open the file, which is why a
 project's grants are live only once you adopt them.
 
 ## Commands that run without asking — `allow:`
