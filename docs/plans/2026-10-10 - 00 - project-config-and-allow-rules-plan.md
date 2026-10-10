@@ -414,7 +414,14 @@ NOTES (2026-10-10): acceptance run as `go build ./... && GOMEMLIMIT=2GiB go test
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Settings' ./internal/tui/ && go test -race -count=1 -run 'Settings' ./cmd/apogee/`
 **Commit:** `feat(settings): choose global or project when saving`
 
-## 18. /settings: Allow rules section
+## 18. /settings: Allow rules section — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from the assumption that a global rule's removal could ride `config.SaveConfigSetting`'s path as is — the scalar writer cannot remove a list entry, so `internal/config/projectwrite.go` gains `RemoveGlobalAllowRule` (the project removal's splice and gate, factored into `allowRuleRemoval`, run in the global config's own `edit` transaction), with `TestRemoveGlobalAllowRule` in `internal/config/projectwrite_test.go`.
+NOTES (2026-10-10): `cmd/apogee/wire_settings.go` gains a nil-safe `liveSettings.allowRules()` read accessor, the in-memory source `settingsHost.allowRules` lists from (Rows reads no disk); it is a file the plan did not list.
+NOTES (2026-10-10): `ConfigHost.RemoveRule` now removes a global rule instead of refusing it (owner-ratified in the plan); `TestProjectRuleActsRefuseAGlobalRule` keeps its adopt refusal, drops the RemoveRule refusal and gains a RejectRules refusal; global removal is covered by the new `TestProjectRuleRemoveTakesAGlobalRuleOutOfTheGlobalConfig`.
+NOTES (2026-10-10): no ConfigHost widening was needed (RemoveRule and AdoptRules already existed), so `internal/tui/keymigration_test.go`'s fakeConfigHost is unchanged; and a session with no rules shows no section, so `cmd/apogee/testdata/frames/t16-settings-rows.txt` (a rule-less home) is unchanged — `TestE2ELiveStateFollowsTheRunningSession` passes as is.
+NOTES (2026-10-10): ⏎ adopts a rejected rule as well as a proposed one (the goal names proposed; re-adopting a rule turned down earlier has no other in-app door).
+NOTES (2026-10-10): consequential edit — docs/layout/settings-screen-layout.md: made necessary by the new section after `Model profiles` (the spec's "ten sections" paragraph).
 
 **What:**
 **Goal:** `/settings` has an *Allow rules* section listing every rule with its layer and state (adopted, proposed, rejected), where a rule can be removed and a proposed one adopted.

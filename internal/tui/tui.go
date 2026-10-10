@@ -411,9 +411,10 @@ type ConfigHost interface {
 	// offered again until their text changes. A rule that was in force leaves the effective set.
 	RejectRules(rules []domain.AllowRule) error
 
-	// RemoveRule takes a project rule out of the Project config and drops its recorded answer, so it
-	// grants nothing from the next call on. A global rule is the human's own hand-written line and is
-	// refused here.
+	// RemoveRule takes a rule out of the file that holds it, so it grants nothing from the next call
+	// on: a project rule out of the Project config, its recorded answer dropped first; a global rule
+	// out of the global config, through that file's own splice writer. The `/settings` *Allow rules*
+	// section's removal (ADR 0096 §4).
 	RemoveRule(rule domain.AllowRule) error
 
 	// ProposedRules re-reads what the Project config proposes now: its rules no adoption or
@@ -1821,7 +1822,32 @@ const (
 	// moves ([ServerHost.Switch]) and the move records the choice ([ServerHost.RecordChoice], ADR 0036
 	// decision 2), which is this key's whole persistence.
 	SettingServer SettingKind = "server"
+	// SettingRule is one Allow rule (ADR 0096 §4) — a row of the pane's *Allow rules* section, not a
+	// config key. The rule itself travels in [SettingRow.Rule] and where it stands in
+	// [SettingRow.RuleState], which is also its value cell. ⏎ on a proposed or rejected rule adopts it
+	// ([ConfigHost.AdoptRules]) and ⌫ then ⏎ removes it from the file that holds it
+	// ([ConfigHost.RemoveRule]) — never [SettingsHost.Reset], because what goes is a list entry and
+	// not a key's line. Neither act is journaled: the row's next paint, re-derived from the session's
+	// rules in force, is the whole report.
+	SettingRule SettingKind = "rule"
 )
+
+// SettingRuleState is where a [SettingRule] row's rule stands: a global rule is live as written, and
+// a project rule is live only by Adoption — adopted, proposed (no answer recorded for its text) or
+// rejected (ADR 0096 §4).
+type SettingRuleState string
+
+const (
+	SettingRuleLive     SettingRuleState = "live"     // a global rule: the human's own line, in force as written
+	SettingRuleAdopted  SettingRuleState = "adopted"  // a project rule the human adopted: in force
+	SettingRuleProposed SettingRuleState = "proposed" // a project rule no answer is recorded for: inert
+	SettingRuleRejected SettingRuleState = "rejected" // a project rule the human turned down: inert
+)
+
+// adoptable reports whether a rule in this state is one ⏎ adopts: an inert project rule.
+func (s SettingRuleState) adoptable() bool {
+	return s == SettingRuleProposed || s == SettingRuleRejected
+}
 
 // SettingSource is which precedence source supplied the value a row shows, in the order they rank:
 // flag > env > project > global > default. The pane marks EVERY row with it, because a value reads
@@ -1924,6 +1950,11 @@ type SettingRow struct {
 	// session that has a Project config to write — and false for every other row, which is written
 	// to the global file through [SettingsHost.Write] without a question.
 	ProjectCapable bool
+
+	// Rule and RuleState are a [SettingRule] row's Allow rule — its kind, its text and the layer it
+	// came from — and where it stands. Both are zero on every other row.
+	Rule      domain.AllowRule
+	RuleState SettingRuleState
 }
 
 // EditorCommand is one resolved external edit — the OUT half of the round trip

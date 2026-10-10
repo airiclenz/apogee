@@ -363,3 +363,70 @@ func carriesProjectEntries(k config.Key, opts config.Options) bool {
 func externallyEdited(k config.Key) bool {
 	return !k.Editable && !k.Interlocked
 }
+
+// allowRulesSection is the header the Allow rules' rows sit under — the section that follows the
+// registry's last, because its rows are no registry key's (ADR 0096 §4).
+const allowRulesSection = "Allow rules"
+
+// allowRuleRows is the *Allow rules* section: one row per rule the session holds — the rules in
+// force first (every global rule, then every adopted project rule, each in file order), then the
+// proposed and the rejected project rules — each carrying its layer as the source mark and where it
+// stands as its value. No rules, no rows: the section is a list of rules, and an empty one has
+// nothing under its header to act on.
+func allowRuleRows(set config.AllowRules) []tui.SettingRow {
+	rows := make([]tui.SettingRow, 0, len(set.Rules)+len(set.Proposed)+len(set.Rejected))
+	for _, r := range set.Rules {
+		state := tui.SettingRuleAdopted
+		if r.Layer != config.SourceProject {
+			state = tui.SettingRuleLive
+		}
+		rows = append(rows, allowRuleRow(r, state))
+	}
+	for _, r := range set.Proposed {
+		rows = append(rows, allowRuleRow(r, tui.SettingRuleProposed))
+	}
+	for _, r := range set.Rejected {
+		rows = append(rows, allowRuleRow(r, tui.SettingRuleRejected))
+	}
+	return rows
+}
+
+// allowRuleRow is one rule's row: keyed by its list and its text as the file spells them
+// ("terminal: go test"), with the rule in the engine's spelling for the act a keypress on it makes.
+func allowRuleRow(r config.AllowRule, state tui.SettingRuleState) tui.SettingRow {
+	rule := engineAllowRules([]config.AllowRule{r})[0]
+	source := tui.SettingFromGlobal
+	if rule.Layer == apogee.AllowRuleProject {
+		source = tui.SettingFromProject
+	}
+	return tui.SettingRow{
+		Path:      string(r.Kind) + ": " + r.Text,
+		Section:   allowRulesSection,
+		Kind:      tui.SettingRule,
+		Value:     string(state),
+		Source:    source,
+		Editable:  true,
+		Desc:      allowRuleDesc(r, state),
+		Rule:      rule,
+		RuleState: state,
+	}
+}
+
+// allowRuleDesc is a rule row's description: which rule it is and where it stands, then what it
+// lets run — in the conditional for a rule that grants nothing until it is adopted.
+func allowRuleDesc(r config.AllowRule, state tui.SettingRuleState) string {
+	subject := "commands starting with `" + r.Text + "`"
+	if r.Kind == config.AllowMCPServers {
+		subject = "calls to the MCP server `" + r.Text + "`"
+	}
+	switch state {
+	case tui.SettingRuleLive:
+		return "Your global rule, live as written: " + subject + " run without asking at an ordinary gate."
+	case tui.SettingRuleAdopted:
+		return "A project rule you adopted: " + subject + " run without asking at an ordinary gate."
+	case tui.SettingRuleRejected:
+		return "A project rule you turned down, inert: " + subject + " would run without asking."
+	}
+	return "A project rule proposed by the project config, inert until adopted: " + subject +
+		" would run without asking."
+}

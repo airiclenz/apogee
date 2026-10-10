@@ -311,8 +311,36 @@ func AddProjectAllowRule(projectRoot, workspacesDir string, kind AllowKind, text
 //
 // Errors: as [AddProjectAllowRule], plus a refusal for an item that is not one plain line.
 func RemoveProjectAllowRule(projectRoot, workspacesDir string, kind AllowKind, text string) (string, error) {
-	if err := checkAllowRule(kind, text); err != nil {
+	splice, verify, err := allowRuleRemoval(kind, text)
+	if err != nil {
 		return "", err
+	}
+	return projectFilePath(projectRoot), editProject(projectRoot, workspacesDir, splice, verify)
+}
+
+// RemoveGlobalAllowRule takes text out of the `allow.<kind>` list of the global config at path —
+// the `/settings` removal of a global rule — through the splice and the gate the project removal
+// uses, inside the global config's own transaction (its lock, its atomic mode-preserving rename). A
+// list that does not hold it is left alone and nothing is written.
+//
+// Errors: as [RemoveProjectAllowRule], with the global transaction's errors in place of the
+// Project config writer's.
+func RemoveGlobalAllowRule(path string, kind AllowKind, text string) error {
+	splice, verify, err := allowRuleRemoval(kind, text)
+	if err != nil {
+		return err
+	}
+	return edit(path, splice, verify)
+}
+
+// allowRuleRemoval is the splice and the gate that take text out of `allow.<kind>`, whichever file
+// they run against: the splice finds the item's index in the file as parsed, and the gate holds the
+// result to that list less exactly that item.
+//
+// Errors: checkAllowRule's refusals.
+func allowRuleRemoval(kind AllowKind, text string) (editSplice, editVerify, error) {
+	if err := checkAllowRule(kind, text); err != nil {
+		return nil, nil, err
 	}
 	at := -1
 	splice := func(before fileConfig, data []byte) ([]byte, error) {
@@ -326,7 +354,7 @@ func RemoveProjectAllowRule(projectRoot, workspacesDir string, kind AllowKind, t
 		want := slices.Delete(slices.Clone(allowList(before.Allow, kind)), at, at+1)
 		return verifyAllowList(before, after, kind, want, "remove the rule by hand")
 	}
-	return projectFilePath(projectRoot), editProject(projectRoot, workspacesDir, splice, verify)
+	return splice, verify, nil
 }
 
 // checkAllowRule refuses what no rule can be before the file is opened: a kind the `allow:` key

@@ -221,6 +221,21 @@ func (s *liveSettings) update(fn func(*config.Options)) {
 	fn(&s.now)
 }
 
+// allowRules reports the effective Allow rules and the inert ones beside them as they stand NOW —
+// the resolution installAllowRules last put here (projectrules.go). It is the `/settings` *Allow
+// rules* section's whole source: Rows is asked on every paint and reads no disk, so the section
+// lists from this holder, which every rule act settles into before it returns. The value shares its
+// lists with the holder; nobody edits them in place, because every writer replaces the field whole.
+// A nil holder — a Driver composed without one — has no rules.
+func (s *liveSettings) allowRules() config.AllowRules {
+	if s == nil {
+		return config.AllowRules{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.now.AllowRules
+}
+
 // pin reports the context-window pin in force right now — what a first binding and a server move
 // adopt as the session's window, since the pin is global and survives both.
 func (s *liveSettings) pin() int {

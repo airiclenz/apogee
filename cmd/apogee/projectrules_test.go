@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // The four Allow-rule acts of the config host (projectrules.go, ADR 0096 §4), driven the way the
@@ -227,8 +228,8 @@ func TestProjectRuleAdoptionReadsWhatTheFileProposes(t *testing.T) {
 	}
 }
 
-// A global rule is the human's own line and no act here edits it, nor answers for it; nothing is
-// written when one is handed over.
+// A global rule is the human's own line, live as written: no act here answers for it — adoption is a
+// project rule's question — and nothing is written when one is handed over.
 func TestProjectRuleActsRefuseAGlobalRule(t *testing.T) {
 	t.Parallel()
 	srv := scriptedTerminalModel(t)
@@ -236,14 +237,198 @@ func TestProjectRuleActsRefuseAGlobalRule(t *testing.T) {
 	host := configHost{w: w}
 	global := apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "make", Layer: apogee.AllowRuleGlobal}
 
-	if err := host.RemoveRule(global); err == nil || !strings.Contains(err.Error(), "global config") {
-		t.Errorf("RemoveRule(global) = %v, want a refusal naming the global config", err)
-	}
 	if err := host.AdoptRules([]apogee.AllowRule{global}); err == nil {
 		t.Error("AdoptRules(global) succeeded, want a refusal")
 	}
+	if err := host.RejectRules([]apogee.AllowRule{global}); err == nil {
+		t.Error("RejectRules(global) succeeded, want a refusal")
+	}
 	if _, err := os.Stat(config.ProjectFilePath(w.roots.project)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the project config exists after refused acts (stat: %v)", err)
+	}
+}
+
+// globalRule is the global rule the tests below hand-write into the global config.
+var globalRule = apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "make", Layer: apogee.AllowRuleGlobal}
+
+// writeGlobalRule appends globalRule to the wiring's global config and settles, as a session started
+// on that file would hold it: in force, and in the external-edit baseline.
+func writeGlobalRule(t *testing.T, w *rootWiring) {
+	t.Helper()
+	f, err := os.OpenFile(w.configPath(), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open the global config: %v", err)
+	}
+	_, err = f.WriteString("allow:\n  terminal:\n    - " + globalRule.Text + "\n")
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Fatalf("write the global rule: %v", err)
+	}
+	if err := w.settleAllowRules(); err != nil {
+		t.Fatalf("settleAllowRules: %v", err)
+	}
+}
+
+// ruleRows is the *Allow rules* section of rows, keyed by row path, as "<state> <source>".
+func ruleRows(rows []tui.SettingRow) map[string]string {
+	out := map[string]string{}
+	for _, r := range rows {
+		if r.Kind == tui.SettingRule {
+			out[r.Path] = string(r.RuleState) + " " + string(r.Source)
+		}
+	}
+	return out
+}
+
+// Removing a global rule — the /settings section's removal — takes its line out of the global config
+// and the rule out of the live holder, with apogee's own write kept out of the watcher's report.
+func TestProjectRuleRemoveTakesAGlobalRuleOutOfTheGlobalConfig(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	writeGlobalRule(t, w)
+	if got := w.live.allowRules().Rules; len(got) != 1 || got[0].Text != globalRule.Text {
+		t.Fatalf("live rules before the removal = %+v, want the global rule", got)
+	}
+
+	if err := host.RemoveRule(globalRule); err != nil {
+		t.Fatalf("RemoveRule(global): %v", err)
+	}
+
+	data, err := os.ReadFile(w.configPath())
+	if err != nil {
+		t.Fatalf("read the global config: %v", err)
+	}
+	if strings.Contains(string(data), "- "+globalRule.Text) {
+		t.Errorf("the global config still lists the rule:\n%s", data)
+	}
+	if !strings.Contains(string(data), "server: probe-target") {
+		t.Errorf("the removal changed more than the rule:\n%s", data)
+	}
+	if got := w.live.allowRules().Rules; len(got) != 0 {
+		t.Errorf("live rules after the removal = %+v, want none", got)
+	}
+	assertNoReloadedKey(t, host)
+}
+
+// The /settings section lists from the live holder: a rule added in the approval pane mid-session
+// shows at once, a proposed one is adopted from its row's rule, and neither needs the files — the
+// section still lists both once the Project config is gone from disk.
+func TestProjectRuleSettingsSectionListsFromTheLiveHolder(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	settings := settingsHost{allowRules: w.live.allowRules}
+	writeGlobalRule(t, w)
+	path := config.ProjectFilePath(w.roots.project)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("allow:\n  terminal:\n    - ls\n"), 0o644); err != nil {
+		t.Fatalf("write the project config: %v", err)
+	}
+	if err := w.settleAllowRules(); err != nil {
+		t.Fatalf("settleAllowRules: %v", err)
+	}
+
+	if err := host.AddProjectRule(apogee.AllowRuleTerminal, projectRuleCommand); err != nil {
+		t.Fatalf("AddProjectRule: %v", err)
+	}
+	want := map[string]string{
+		"terminal: make": "live global",
+		"terminal: ls":   "proposed project",
+		"terminal: echo": "adopted project",
+	}
+	rows := settings.Rows()
+	if got := ruleRows(rows); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the section after the approval pane's add = %v, want %v", got, want)
+	}
+
+	var proposed tui.SettingRow
+	for _, r := range rows {
+		if r.Path == "terminal: ls" {
+			proposed = r
+		}
+	}
+	if err := host.AdoptRules([]apogee.AllowRule{proposed.Rule}); err != nil {
+		t.Fatalf("AdoptRules from the section's row: %v", err)
+	}
+	want["terminal: ls"] = "adopted project"
+	if got := ruleRows(settings.Rows()); !reflect.DeepEqual(got, want) {
+		t.Errorf("the section after the adoption = %v, want %v", got, want)
+	}
+	inForce := false
+	for _, r := range w.live.allowRules().Rules {
+		inForce = inForce || r.Text == "ls"
+	}
+	if !inForce {
+		t.Errorf("the adopted rule is not in force: %+v", w.live.allowRules().Rules)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove the project config: %v", err)
+	}
+	if got := ruleRows(settings.Rows()); !reflect.DeepEqual(got, want) {
+		t.Errorf("the section with the project config gone = %v, want %v — Rows reads no disk", got, want)
+	}
+}
+
+// The section's rows come after every registry row, under their own header, so the registry's order
+// and sections stand as they are; a session with no rules has no section at all.
+func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
+	t.Parallel()
+	set := config.AllowRules{
+		Rules: []config.AllowRule{
+			{Kind: config.AllowTerminal, Text: "make", Layer: config.SourceGlobal},
+			{Kind: config.AllowMCPServers, Text: "github", Layer: config.SourceProject},
+		},
+		Proposed: []config.AllowRule{{Kind: config.AllowTerminal, Text: "ls", Layer: config.SourceProject}},
+		Rejected: []config.AllowRule{{Kind: config.AllowTerminal, Text: "rm", Layer: config.SourceProject}},
+	}
+	host := settingsHost{allowRules: func() config.AllowRules { return set }}
+	rows := host.Rows()
+	registry := settingsRows(config.Options{})
+	if len(rows) != len(registry)+4 {
+		t.Fatalf("rows = %d, want the %d registry rows and 4 rules", len(rows), len(registry))
+	}
+	for i, r := range registry {
+		if rows[i].Path != r.Path {
+			t.Fatalf("row %d = %q, want the registry's %q — the rules come after it", i, rows[i].Path, r.Path)
+		}
+	}
+	type ruleCell struct {
+		path   string
+		state  tui.SettingRuleState
+		source tui.SettingSource
+		rule   apogee.AllowRule
+	}
+	want := []ruleCell{
+		{"terminal: make", tui.SettingRuleLive, tui.SettingFromGlobal,
+			apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "make", Layer: apogee.AllowRuleGlobal}},
+		{"mcp-servers: github", tui.SettingRuleAdopted, tui.SettingFromProject,
+			apogee.AllowRule{Kind: apogee.AllowRuleMCPServer, Text: "github", Layer: apogee.AllowRuleProject}},
+		{"terminal: ls", tui.SettingRuleProposed, tui.SettingFromProject,
+			apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "ls", Layer: apogee.AllowRuleProject}},
+		{"terminal: rm", tui.SettingRuleRejected, tui.SettingFromProject,
+			apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "rm", Layer: apogee.AllowRuleProject}},
+	}
+	for i, w := range want {
+		r := rows[len(registry)+i]
+		got := ruleCell{r.Path, r.RuleState, r.Source, r.Rule}
+		if got != w || r.Kind != tui.SettingRule || r.Section != allowRulesSection || r.Value != string(w.state) {
+			t.Errorf("rule row %d = %+v, want %+v under %q", i, r, w, allowRulesSection)
+		}
+		if r.Desc == "" {
+			t.Errorf("rule row %d has no description", i)
+		}
+	}
+
+	if got := len((settingsHost{allowRules: func() config.AllowRules { return config.AllowRules{} }}).Rows()); got != len(registry) {
+		t.Errorf("rows with no rules = %d, want the %d registry rows alone", got, len(registry))
 	}
 }
 

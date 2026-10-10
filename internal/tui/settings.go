@@ -270,6 +270,15 @@ const (
 	settingsTextHint    = "ctrl+s save · esc discard"
 )
 
+// The legends of an Allow rule's row ([SettingRule]): the key list's while one is selected — ⏎ adopts
+// only an inert project rule, so a rule already in force drops it — and the armed removal's, worded
+// for the act it confirms rather than as a reset.
+const (
+	settingsRuleHint          = "↑/↓ select · ⏎ adopt · ⌫ remove · esc close"
+	settingsRuleInForceHint   = "↑/↓ select · ⌫ remove · esc close"
+	settingsRuleRemoveArmHint = "⏎ confirm remove · esc cancel"
+)
+
 // The save-target question's legend: which file a project-capable key's commit lands in, the
 // highlighted one bracketed, and the keys that answer. It is composed per paint (settingsTargetHint)
 // because the bracket moves with the choice.
@@ -543,7 +552,7 @@ func init() {
 		settingsResetArmed: {
 			target: Model.settingsResetTarget,
 			key:    Model.settingsResetKey,
-			hint:   settingsResetHint,
+			hintOf: Model.settingsResetArmedHint,
 		},
 		settingsSaveTarget: {
 			target:  Model.settingsSaveTargetRow,
@@ -706,6 +715,8 @@ func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 //   - a string or an int opens a buffer on the row, seeded with what the key holds;
 //   - a text key's prose opens a multi-line field over the whole list, seeded with the same
 //     ([SettingText]) — the one step whose ⏎ is the value's rather than the pane's; and
+//   - an Allow rule's row adopts its rule when the rule is inert, and does nothing when it is already
+//     in force ([SettingRule], settingsAdoptRule) — it is no config key, so none of the above apply;
 //   - a row the registry does not let this surface write does nothing at all — its own cell already
 //     says where it IS edited ([SettingRow.EditPointer]), so a refusal note here would only repeat it.
 //
@@ -717,6 +728,9 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row := rows[sel]
+	if row.Kind == SettingRule {
+		return m.settingsAdoptRule(row)
+	}
 	if !row.Editable {
 		// A block this pane cannot hold on a row is edited where it CAN be edited: the human's own
 		// editor, opened on the key's line (ADR 0037 decision 5). Every other read-only row still does
@@ -1233,7 +1247,12 @@ func settingsBufferable(row SettingRow) bool {
 // override outranks what the file says.
 //
 // A kind that takes no reset AT ALL is refused before either question is asked (settingsResetKind).
+// An Allow rule's row always has something for it to do: its reset is the rule's removal, and the
+// rule is in a file for as long as the row is there to show it.
 func (m Model) settingsResettable(row SettingRow) bool {
+	if row.Kind == SettingRule {
+		return true
+	}
 	if !row.Editable || !settingsResetKind(row) {
 		return false
 	}
@@ -1430,10 +1449,25 @@ func (m Model) settingsPaneHint(rows []SettingRow) string {
 	if step, ok := settingsSteps[m.settings.kind]; ok && step.hint != "" {
 		return step.hint
 	}
-	if row, ok := m.settingsSelectedRow(rows); ok && !settingsResetKind(row) {
+	row, ok := m.settingsSelectedRow(rows)
+	switch {
+	case ok && row.Kind == SettingRule && row.RuleState.adoptable():
+		return settingsRuleHint
+	case ok && row.Kind == SettingRule:
+		return settingsRuleInForceHint
+	case ok && !settingsResetKind(row):
 		return settingsNoResetHint
 	}
 	return settingsHint
+}
+
+// settingsResetArmedHint is the armed reset's legend: the removal's wording on an Allow rule's row,
+// the reset's on every other.
+func (m Model) settingsResetArmedHint() string {
+	if row, ok := m.settingsSelectedRow(m.settingRows()); ok && row.Kind == SettingRule {
+		return settingsRuleRemoveArmHint
+	}
+	return settingsResetHint
 }
 
 // settingRowCells is one key's row in the pane's fixed column schema — ["key", "value", "(global)",

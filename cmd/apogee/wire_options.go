@@ -218,6 +218,9 @@ func (w *rootWiring) options() tui.Options {
 			promptSeed: func() string {
 				return w.live.promptEditorSeed(w.holder.Binding().Model, w.roots.config)
 			},
+			// The *Allow rules* section lists from the live-settings holder, which every rule act —
+			// the approval pane's, the adoption pane's, this pane's own — settles into.
+			allowRules: w.live.allowRules,
 		},
 		Skills: w.skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
@@ -415,6 +418,12 @@ type settingsHost struct {
 	// lands. A nil func seeds nothing, the answer a Driver that composed this host without a
 	// settings holder honestly has.
 	promptSeed func() string
+	// allowRules is the session's Allow rules as they stand now — the live-settings holder every rule
+	// act settles into (projectrules.go) — which the *Allow rules* section is listed from after the
+	// registry's rows (allowRuleRows). It is a func for promptSeed's reason: the answer is the
+	// session's and moves under an open pane, and it reads memory, never the store or a config file,
+	// because Rows is asked on every paint. A nil func lists no rules.
+	allowRules func() config.AllowRules
 }
 
 // Rows is every key the registry describes, with the value this run resolved and the source mark
@@ -427,15 +436,21 @@ type settingsHost struct {
 // convention — which is also what makes the overlay and the seed enough: a mode cycled with the
 // pane open shows on the next paint, and a prompt written through the pane stops seeding from the
 // keypress that lands it, with nothing to invalidate.
+//
+// After the registry's rows come the *Allow rules* section's, one per rule the session holds now
+// (allowRuleRows) — appended, so the registry's own order and sections stand as they are.
 func (h settingsHost) Rows() []tui.SettingRow {
 	rows := overlayLiveSettings(settingsRows(h.opts), h.live)
 	if h.projectRoot == "" {
 		rows = withoutProjectTarget(rows)
 	}
-	if h.promptSeed == nil {
+	if h.promptSeed != nil {
+		rows = seedPromptEditor(rows, h.promptSeed())
+	}
+	if h.allowRules == nil {
 		return rows
 	}
-	return seedPromptEditor(rows, h.promptSeed())
+	return append(rows, allowRuleRows(h.allowRules())...)
 }
 
 // Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry

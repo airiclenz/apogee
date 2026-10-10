@@ -17,7 +17,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // Four answers the human gives about a project rule, each one write to the Project config or to
-// its adoption record (or both) followed by the same settling: the external-edit baseline is
+// its adoption record (or both) — and the one act that reaches a global rule, its removal from the
+// global config (the `/settings` *Allow rules* section's) — followed by the same settling: the external-edit baseline is
 // re-taken, because apogee's own write is not an edit the watcher should report back (ADR 0041
 // decision 8), and the effective Allow rules are re-resolved from the files and installed on the
 // session — the live-settings holder and the engine, whose rule set the whole agent tree shares, so
@@ -52,9 +53,12 @@ func (h configHost) RejectRules(rules []apogee.AllowRule) error {
 	return h.w.answerProjectRules(rules, (*adoption.Store).Reject)
 }
 
-// RemoveRule takes a project rule out of the Project config, its recorded answer first, and
-// settles. A global rule is refused: it is the human's own line in the global config.
+// RemoveRule takes a rule out of the file that holds it — a project rule out of the Project config,
+// its recorded answer first; a global rule out of the global config — and settles.
 func (h configHost) RemoveRule(rule apogee.AllowRule) error {
+	if rule.Layer == apogee.AllowRuleGlobal {
+		return h.w.removeGlobalRule(rule)
+	}
 	return h.w.removeProjectRule(rule)
 }
 
@@ -110,13 +114,12 @@ func (w *rootWiring) answerProjectRules(rules []apogee.AllowRule, answer adoptio
 // removeProjectRule forgets the rule's answer, then takes it out of the Project config, and
 // settles.
 //
-// Errors: a refusal for a global rule, the store's errors (the file is then untouched), the
-// writer's refusals (the rule is then in the file but proposed, and the error says so), and the
-// settling's.
+// Errors: a refusal for a rule that is not a project rule, the store's errors (the file is then
+// untouched), the writer's refusals (the rule is then in the file but proposed, and the error says
+// so), and the settling's.
 func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 	if rule.Layer != apogee.AllowRuleProject {
-		return fmt.Errorf("apogee: the %s is in your global config, %s; remove it there by hand",
-			rule, w.configPath())
+		return fmt.Errorf("apogee: the %s is not a project rule; it is not in the project config", rule)
 	}
 	entry, err := projectRuleEntry(rule)
 	if err != nil {
@@ -130,6 +133,22 @@ func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 		// The record moved even though the file did not, so the rules in force must follow it.
 		return errors.Join(fmt.Errorf("apogee: the rule's adoption was dropped, so it no longer applies, "+
 			"but it is still in the project config: %w", err), w.settleAllowRules())
+	}
+	return w.settleAllowRules()
+}
+
+// removeGlobalRule takes a global rule out of the global config through that file's own splice
+// writer, and settles. A global rule has no adoption record, so the file is the one write.
+//
+// Errors: a refusal for a rule of a kind the `allow:` key lacks, the writer's refusals (the file is
+// then untouched), and the settling's.
+func (w *rootWiring) removeGlobalRule(rule apogee.AllowRule) error {
+	kind, err := configAllowKind(rule.Kind)
+	if err != nil {
+		return err
+	}
+	if err := config.RemoveGlobalAllowRule(w.configPath(), kind, rule.Text); err != nil {
+		return err
 	}
 	return w.settleAllowRules()
 }

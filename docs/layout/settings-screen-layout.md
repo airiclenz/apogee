@@ -93,6 +93,15 @@ The mockup is **abridged**: it shows five of the pane's ten sections. In the bui
 and `Model profiles`, in that order, and a section is a run over the registry's own order rather than
 a per-key label — so a key added to the registry inherits the section it was inserted into.
 
+After `Model profiles` comes one more section, `Allow rules`, whose rows are no registry key's: one
+per Allow rule the session holds (ADR 0096 §4) — the rules in force first, then the proposed and the
+rejected project rules — keyed by list and text (`terminal: go test`), with where the rule stands as
+the value (`live` for a global rule, `adopted`, `proposed`, `rejected`) and its layer as the source
+mark. ⏎ adopts a proposed or rejected rule; ⌫ arms its removal from the file that holds it and ⏎
+confirms (`⏎ confirm remove · esc cancel`). The legend on a rule's row reads
+`↑/↓ select · ⏎ adopt · ⌫ remove · esc close`, dropping `⏎ adopt` on a rule already in force. A
+session with no rules shows no such section.
+
 ### An edited row
 
 ```

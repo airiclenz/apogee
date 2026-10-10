@@ -4444,3 +4444,170 @@ func TestSettingsPaneSaveTargetCancelAndRefusalReturnToTheBuffer(t *testing.T) {
 		t.Errorf("refused note = %q, want the reason", note)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The Allow rules section (ADR 0096 §4)
+// ----------------------------------------------------------------------------
+
+// settingsRuleRow is one Allow rule's row as the binary hands it over (cmd/apogee/settingsrows.go):
+// under the section, its state as the value, its layer as the source mark.
+func settingsRuleRow(text string, layer domain.AllowRuleLayer, state SettingRuleState) SettingRow {
+	source := SettingFromProject
+	if layer == domain.AllowRuleGlobal {
+		source = SettingFromGlobal
+	}
+	return SettingRow{
+		Path: "terminal: " + text, Section: "Allow rules", Kind: SettingRule, Value: string(state),
+		Source: source, Editable: true, Desc: "Commands starting with `" + text + "` run without asking.",
+		Rule:      domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: text, Layer: layer},
+		RuleState: state,
+	}
+}
+
+// settingsRuleModel is a model with the pane OPEN over *rows — re-read on every paint, as the
+// binary's rows are — with the settings seams wired to log and the config host to host.
+func settingsRuleModel(t *testing.T, rows *[]SettingRow, host fakeConfigHost, log *settingsWriteLog) Model {
+	t.Helper()
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return *rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+		saveTo: log.saveTo, resetIn: log.resetIn,
+	}
+	opts.Config = host
+	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+}
+
+// The section lists every rule under its own header, each with the layer it came from and where it
+// stands — in force as written, adopted, proposed or rejected.
+func TestSettingsPaneListsAllowRulesWithLayerAndState(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{
+		settingsBoolRow(),
+		settingsRuleRow("make", domain.AllowRuleGlobal, SettingRuleLive),
+		settingsRuleRow("go test", domain.AllowRuleProject, SettingRuleAdopted),
+		settingsRuleRow("npm ci", domain.AllowRuleProject, SettingRuleProposed),
+		settingsRuleRow("rm -rf", domain.AllowRuleProject, SettingRuleRejected),
+	}
+	m := settingsRuleModel(t, &rows, fakeConfigHost{}, &settingsWriteLog{})
+
+	pane := strip(m.renderSettings())
+	if !strings.Contains(pane, "Allow rules") {
+		t.Fatalf("the pane has no Allow rules section:\n%s", pane)
+	}
+	for _, want := range []struct{ text, state, layer string }{
+		{"make", "live", "(global)"},
+		{"go test", "adopted", "(project)"},
+		{"npm ci", "proposed", "(project)"},
+		{"rm -rf", "rejected", "(project)"},
+	} {
+		line := ""
+		for _, l := range strings.Split(pane, "\n") {
+			if strings.Contains(l, "terminal: "+want.text) {
+				line = l
+			}
+		}
+		if !strings.Contains(line, want.state) || !strings.Contains(line, want.layer) {
+			t.Errorf("the %q rule's row reads %q; want its state %q and its layer %q", want.text, line, want.state, want.layer)
+		}
+	}
+}
+
+// ⌫ then ⏎ on a rule's row removes the rule through the config host — never the settings host's
+// reset, since no key's line is what goes — and the row leaves the section with it.
+func TestSettingsPaneRuleRemovalRoutesToRemoveRuleNeverReset(t *testing.T) {
+	t.Parallel()
+	rule := settingsRuleRow("go test", domain.AllowRuleProject, SettingRuleAdopted)
+	rows := []SettingRow{settingsBoolRow(), rule}
+	var removed []domain.AllowRule
+	host := fakeConfigHost{removeRule: func(r domain.AllowRule) error {
+		removed = append(removed, r)
+		rows = rows[:1] // the live holder, settled: the rule is gone from the rules in force
+		return nil
+	}}
+	log := &settingsWriteLog{}
+	m := settingsRuleModel(t, &rows, host, log)
+
+	m = step(t, m, keyDown())
+	if got := m.settingsPaneHint(m.settingRows()); got != settingsRuleInForceHint {
+		t.Errorf("the legend on an adopted rule = %q, want %q", got, settingsRuleInForceHint)
+	}
+	armed := step(t, m, keyBackspace())
+	if armed.settings.kind != settingsResetArmed {
+		t.Fatalf("pane = %+v, want the removal armed", armed.settings)
+	}
+	if pane := strip(armed.renderSettings()); !strings.Contains(pane, settingsRuleRemoveArmHint) {
+		t.Errorf("the armed removal's legend is not the removal's:\n%s", pane)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("arming removed %+v; arming is not the act", removed)
+	}
+
+	confirmed := step(t, armed, keyEnter())
+
+	if want := []domain.AllowRule{rule.Rule}; !reflect.DeepEqual(removed, want) {
+		t.Fatalf("RemoveRule calls = %+v, want %+v", removed, want)
+	}
+	if len(log.resets) != 0 || len(log.targeted) != 0 {
+		t.Errorf("the removal reached the settings host's reset: resets %+v, targeted %+v", log.resets, log.targeted)
+	}
+	if pane := strip(confirmed.renderSettings()); strings.Contains(pane, "terminal: go test") {
+		t.Errorf("the removed rule is still listed:\n%s", pane)
+	}
+}
+
+// A removal the host refuses leaves the rule listed and says why on its row.
+func TestSettingsPaneRuleRemovalRefusedStaysOnTheRow(t *testing.T) {
+	t.Parallel()
+	rule := settingsRuleRow("make", domain.AllowRuleGlobal, SettingRuleLive)
+	rows := []SettingRow{rule}
+	host := fakeConfigHost{removeRule: func(domain.AllowRule) error { return errors.New("read-only config home") }}
+	m := settingsRuleModel(t, &rows, host, &settingsWriteLog{})
+
+	refused := pressSettings(t, m, keyBackspace(), keyEnter())
+
+	if note := refused.settingsNote(rule); !strings.Contains(note, "read-only config home") {
+		t.Errorf("refused note = %q, want the reason", note)
+	}
+}
+
+// ⏎ adopts an inert project rule — proposed, or rejected earlier — through the config host, and does
+// nothing on a rule already in force.
+func TestSettingsPaneRuleEnterAdoptsOnlyAnInertRule(t *testing.T) {
+	t.Parallel()
+	proposed := settingsRuleRow("npm ci", domain.AllowRuleProject, SettingRuleProposed)
+	rows := []SettingRow{
+		settingsRuleRow("go test", domain.AllowRuleProject, SettingRuleAdopted),
+		proposed,
+		settingsRuleRow("rm -rf", domain.AllowRuleProject, SettingRuleRejected),
+		settingsRuleRow("make", domain.AllowRuleGlobal, SettingRuleLive),
+	}
+	var adopted [][]domain.AllowRule
+	host := fakeConfigHost{adoptRules: func(r []domain.AllowRule) error {
+		adopted = append(adopted, r)
+		return nil
+	}}
+	log := &settingsWriteLog{}
+	m := settingsRuleModel(t, &rows, host, log)
+
+	m = step(t, m, keyEnter()) // the adopted rule: nothing to adopt
+	if len(adopted) != 0 {
+		t.Fatalf("⏎ on an adopted rule adopted %+v", adopted)
+	}
+	m = step(t, m, keyDown())
+	if got := m.settingsPaneHint(m.settingRows()); got != settingsRuleHint {
+		t.Errorf("the legend on a proposed rule = %q, want %q", got, settingsRuleHint)
+	}
+	m = pressSettings(t, m, keyEnter(), keyDown(), keyEnter(), keyDown(), keyEnter())
+
+	want := [][]domain.AllowRule{{proposed.Rule}, {rows[2].Rule}}
+	if !reflect.DeepEqual(adopted, want) {
+		t.Errorf("AdoptRules calls = %+v, want %+v — the proposed and the rejected rule, not the live ones", adopted, want)
+	}
+	if len(log.writes) != 0 || len(log.applies) != 0 {
+		t.Errorf("an adoption reached the settings host: writes %+v, applies %+v", log.writes, log.applies)
+	}
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list — an adoption opens no step", m.settings)
+	}
+}

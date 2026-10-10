@@ -76,6 +76,9 @@ func (m Model) settingsResetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model,
 // value is (settingsApplied). The armed state ends either way: the question was answered.
 func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	m.settings.kind = settingsKeyList
+	if row.Kind == SettingRule {
+		return m.settingsRemoveRule(row)
+	}
 	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
 		return m, nil
@@ -89,6 +92,33 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	}
 	m, cmd := m.settingsApplied(row, settingEdit{path: row.Path, value: row.Default, reset: true})
 	return m, cmd
+}
+
+// settingsRemoveRule is the armed reset's answer on an Allow rule's row: the rule taken out of the file
+// that holds it through [ConfigHost.RemoveRule], never [SettingsHost.Reset] — what goes is a list
+// entry, not a key's line. A refusal stays on the row; a removal that lands needs no report of its
+// own, because the row leaves the section on the next paint, re-derived from the rules in force.
+func (m Model) settingsRemoveRule(row SettingRow) (tea.Model, tea.Cmd) {
+	if err := m.configHostOrNoop().RemoveRule(row.Rule); err != nil {
+		return m.settingsFailed(row, err.Error())
+	}
+	m.settings.failure, m.settings.answer = settingFailure{}, settingAnswer{}
+	return m, nil
+}
+
+// settingsAdoptRule is ⏎ on an Allow rule's row: an inert project rule — proposed, or rejected
+// earlier — is adopted through [ConfigHost.AdoptRules] and comes into force; a rule already in force
+// has nothing to adopt, and the keypress does nothing. A refusal stays on the row; an adoption that
+// lands shows as the row's new state on the next paint.
+func (m Model) settingsAdoptRule(row SettingRow) (tea.Model, tea.Cmd) {
+	if !row.RuleState.adoptable() {
+		return m, nil
+	}
+	if err := m.configHostOrNoop().AdoptRules([]domain.AllowRule{row.Rule}); err != nil {
+		return m.settingsFailed(row, err.Error())
+	}
+	m.settings.failure, m.settings.answer = settingFailure{}, settingAnswer{}
+	return m, nil
 }
 
 // settingsWrite persists one key through [SettingsHost.Write] and records what became of it. It is

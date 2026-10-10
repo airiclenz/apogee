@@ -390,6 +390,36 @@ func TestAddProjectAllowRuleRefusals(t *testing.T) {
 	}
 }
 
+// The global file's removal is the project one's splice in the global transaction: the rule's line
+// goes, the rest of the file — the other list and every other key — stays, and a rule the list does
+// not hold writes nothing.
+func TestRemoveGlobalAllowRule(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	const file = "mode: ask-before\nallow:\n  terminal:\n    - make\n    - go test\n  mcp-servers:\n    - make\n"
+	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveGlobalAllowRule(path, AllowTerminal, "make"); err != nil {
+		t.Fatalf("RemoveGlobalAllowRule: %v", err)
+	}
+	want := "mode: ask-before\nallow:\n  terminal:\n    - go test\n  mcp-servers:\n    - make\n"
+	if data, _ := os.ReadFile(path); string(data) != want {
+		t.Errorf("file =\n%s\nwant\n%s", data, want)
+	}
+
+	if err := RemoveGlobalAllowRule(path, AllowTerminal, "make"); err != nil {
+		t.Fatalf("RemoveGlobalAllowRule of a rule already gone: %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != want {
+		t.Errorf("file after a second removal =\n%s\nwant it untouched", data)
+	}
+	if err := RemoveGlobalAllowRule(path, AllowTerminal, " "); err == nil {
+		t.Error("RemoveGlobalAllowRule of a blank rule succeeded, want a refusal")
+	}
+}
+
 // Removing a rule takes its line and nothing else; a rule the file does not hold leaves the file —
 // and a project with no config at all — exactly as it was.
 func TestRemoveProjectAllowRule(t *testing.T) {
