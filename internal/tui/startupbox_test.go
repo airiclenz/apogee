@@ -153,3 +153,66 @@ func TestRenderStartupBoxStackedFallback(t *testing.T) {
 		}
 	}
 }
+
+// The boot update notice lengthens the version value to "<current> → <latest> · <command>". The wide
+// layout carries it whole beside the logo when the card has room, the stacked fallback carries it
+// whole below the logo when the longer value pushed the wide layout out, and a stacked card too
+// narrow for it ends the row in "…" rather than cutting it silently — every line still the card's
+// full width.
+func TestRenderStartupBoxUpdateNotice(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const notice = "v0.24.11 → v0.25.0 · scoop update apogee"
+	v := startupView{
+		Logo:    strings.TrimRight(apogeeLogo, "\n"),
+		Host:    "test-host:1111",
+		Model:   "gpt-oss-20b",
+		Context: "32k",
+		Version: notice,
+	}
+	tests := []struct {
+		name    string
+		width   int
+		wide    bool // the logo shares its rows with the info block (the wide layout)
+		whole   bool // the notice appears untruncated
+		elision bool // the version row ends in "…"
+	}{
+		// inner 96 ≥ logo 36 + gap 4 + info 49: the wide layout still fits the longer value.
+		{"wide", 100, true, true, false},
+		// inner 76 < 89: the longer value pushes the card into the stacked layout, where it fits.
+		{"stacked", 80, false, true, false},
+		// inner 40 < "version  " + the 40-column notice: the stacked row is cut with "…".
+		{"stacked truncated", 44, false, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			lines := renderStartupBox(th, v, tt.width)
+			plain := ansi.Strip(strings.Join(lines, "\n"))
+
+			if got := lineWithLogoAnd(lines, "host"); got != tt.wide {
+				t.Errorf("info block beside the logo = %v, want %v:\n%s", got, tt.wide, plain)
+			}
+			if got := strings.Contains(plain, notice); got != tt.whole {
+				t.Errorf("whole notice present = %v, want %v:\n%s", got, tt.whole, plain)
+			}
+			if tt.elision {
+				found := false
+				for _, ln := range lines {
+					p := ansi.Strip(ln)
+					if strings.Contains(p, "version") && strings.Contains(p, "v0.24.11 →") && strings.Contains(p, "…") {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("narrow stacked card does not end the version row in \"…\":\n%s", plain)
+				}
+			}
+			for i, ln := range lines {
+				if w := lipgloss.Width(ln); w != tt.width {
+					t.Errorf("line %d is %d cols, want the full content width %d: %q", i, w, tt.width, ansi.Strip(ln))
+				}
+			}
+		})
+	}
+}

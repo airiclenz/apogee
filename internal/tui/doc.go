@@ -950,7 +950,10 @@
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace
-// ([Options.Recall]); picker.go the modal single-select overlay behind /model, /server and
+// ([Options.Recall]); update_check.go the boot update notice — one [UpdateHost] question asked
+// from Init off the Update loop, its answer kept on Options so every restatement of the start-up
+// box keeps "<current> → <latest> · <command>" on the version row, while the lookup and the install
+// detection stay in the binary (ADR 0031); picker.go the modal single-select overlay behind /model, /server and
 // /sub-agents-server;
 // listsurface.go the surface that overlay, the /sessions browser, the /settings key list with its
 // two sub-lists and the "/" | "@" dropdown all ARE underneath their own wording — the [listCursor]

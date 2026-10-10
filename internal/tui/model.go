@@ -1115,7 +1115,7 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // This is also the ONLY place the boot restore is issued from, which is what makes it interactive-TUI
 // only: a headless run builds no Model, so it never reaches an Init and never actuates a server.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd())
+	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd())
 }
 
 // ----------------------------------------------------------------------------
@@ -1489,6 +1489,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// sent before as the box's recall state (recall.go). It repaints nothing — the entries are
 		// invisible until an arrow asks for one — so no layout follows.
 		m.foldRecallLoaded(msg)
+		return m, nil
+
+	case updateCheckedMsg:
+		// Options.Update answered Init's boot check (update_check.go): a newer release restates the
+		// start-up box's version row in place; anything else changes nothing. The restated entry is
+		// touched, so the deferred settle repaints it.
+		m.foldUpdateChecked(msg)
 		return m, nil
 
 	case spinnerTickMsg:
@@ -3890,14 +3897,15 @@ func (m Model) upstreamSegments() []string {
 // newStartupView builds the one-time start-up box's facts from the resolved display Options — the
 // single source both newModel's seed and /clear's re-seed (startNewSession) read, so the fresh-launch
 // box and the post-/clear box can never drift. Version is BaseVersion (the clean release version), not
-// the full provenance-tagged Options.Version the footer shows.
+// the full provenance-tagged Options.Version the footer shows — followed by the newer release and its
+// upgrade command once the boot update check has found one (startupVersion, update_check.go).
 func newStartupView(opts Options) startupView {
 	return startupView{
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),
 		Host:    hostDisplay(opts),
 		Model:   displayModel(opts.Model),
 		Context: format.Tokens(opts.ContextWindow),
-		Version: opts.BaseVersion,
+		Version: startupVersion(opts),
 	}
 }
 

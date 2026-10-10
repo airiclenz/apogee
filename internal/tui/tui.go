@@ -140,6 +140,21 @@ type RecallHost interface {
 	LoadPrompts() ([]string, error)
 }
 
+// UpdateHost is the boot update-check seam: one question, asked once per launch off the Update
+// loop — is a newer apogee release published, and what does this install run to get it? It is
+// defined here like [RecallHost] so the renderer stays wire-silent (ADR 0031): the lookup, the
+// install-method detection and every network byte live behind it in the binary, and this package
+// only paints the answer on the start-up box's version row.
+//
+// CheckForUpdate reports the newer release's tag and the upgrade command for this install, with
+// ok=false for "nothing to say" — no newer release, the check disabled, offline, or any failure.
+// It is called on a Cmd goroutine with the session's context, so it may block on the network, but
+// it must honour ctx and never fail loudly: the notice is a courtesy, and a session never notices
+// its absence.
+type UpdateHost interface {
+	CheckForUpdate(ctx context.Context) (latest, command string, ok bool)
+}
+
 // Scheduler is the scheduling seam the TUI drives: put a standing instruction on the clock
 // (Add), take one off it (Stop), and list what is live (List) — the whole of what a surface
 // needs from the scheduler library (ADR 0033). It is defined here like [SessionHost] and typed
@@ -1280,6 +1295,18 @@ type Options struct {
 	// seam from Version so the box reads clean while /version and --version keep the full string;
 	// the TUI stays format-agnostic (cmd/apogee resolves both). Empty ⇒ unwired.
 	BaseVersion string
+
+	// Update is the boot update-check host ([UpdateHost]); nil ⇒ no check is made and the start-up
+	// box's version row reads BaseVersion alone. The Model asks it exactly once, from Init, off the
+	// Update loop; a newer release it reports turns the version value into
+	// "<BaseVersion> → <latest> · <command>" (update_check.go).
+	Update UpdateHost
+
+	// updateNotice is the landed answer of [Options.Update] — never set by the binary, only by the
+	// Model's fold. It lives HERE rather than on the Model because newStartupView reads Options, and
+	// every one of its callers (the /clear re-seed, a /resume, a heartbeat rebind, a server switch
+	// or bind) must restate the box with the notice still on it.
+	updateNotice updateNotice
 
 	// TracePath and DiagPath are the two hidden diagnostic seams (`--tui-trace` and `--tui-diag`,
 	// cmd/apogee/root.go), each empty unless a path was named on the command line and each costing

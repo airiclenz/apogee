@@ -134,7 +134,13 @@ internal/config/defaults_test.go — TestRegistryFollowsTheTemplateOrder, TestEm
 **Acceptance:** `go test -race -count=1 ./internal/config/`; `go test -race -count=1 -run 'TestManualDocumentsEverySettingsKey|TestManualListsEveryEnvironmentOverride|SettingsRows' ./cmd/apogee/`
 **Commit:** `feat(config): add the update-check setting`
 
-## 5. TUI: show the update notice on the version row
+## 5. TUI: show the update notice on the version row — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — internal/tui/doc.go: made necessary by the new update_check.go (the package file map TestDocMapNamesEveryFile enforces).
+
+NOTES (2026-10-10): the UpdateHost interface sits in tui.go beside RecallHost; the landed result is an unexported Options.updateNotice field (the plan's "field on m.opts"), composed by startupVersion; a host answer with ok=true but no tag, or an empty BaseVersion, leaves the version value bare.
+
+NOTES (2026-10-10): the CHANGELOG entry describes the surface as shipped once item 6 wires the host; nothing calls Options.Update until then, so item 6 should not add a second entry for the notice itself.
 
 **What:**
 **Goal:** when a host on `tui.Options` reports a newer release, the startup box's version value reads `<current> → <latest> · <command>` (U+2192, U+00B7) in both wide and stacked layouts. It survives `/clear`'s re-seed. With no host, or when the host returns nothing, the box is byte-identical to today's.
