@@ -101,6 +101,17 @@
 // option or verb writes (`--output=file`, `uniq in out`, `sed 'w file'`) and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
 // its command-line argument (domain.ArgRoleShellCommand).
+// allowmatch.go reads the same lines for the opposite question — may a persisted yes answer
+// this call? MatchAllowRules decides whether every simple command of a `terminal` line is covered
+// by a word-prefix Allow rule (ADR 0096 §2). A line must first pass an allowlist of constructs
+// the view reads exactly as sh and bash do (scanMatchableShellLine: plain words, quoted literals,
+// bare `$NAME`, `;` `&&` `||` `|`, no word empty once unquoted, and the tokenizer reading the very
+// same words) — anything else asks — and then asks on a wrapper, reserved
+// word, shell builtin outside a short safe list (allowAskBuiltins spares `cd`, `.`, `source`, `echo`,
+// `pwd`, `true`, `false`) or `NAME=value` prefix and on any `cd` but a plain relative one in the line's leading run
+// of `cd`s, joined by `&&`, that lands in an existing workspace directory once symlinks are
+// resolved (allowedCdDestination);
+// SuggestAllowRules proposes the rules the approval pane prefills. Both are pure.
 //
 // secrets.go is the one rule whose evidence is not in the call at all but in what git has staged:
 // SecretFindings, the pure scan of a shadow-index staged diff (added lines only, attributed to
