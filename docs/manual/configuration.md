@@ -2661,6 +2661,14 @@ malformed rule in the project file costs the project layer, not the start — on
 session runs on the global config alone. The key is file-only (no flag, no environment variable),
 and the guard is built when a session starts, so an edit reaches the next session.
 
+Beside these rules, a session with a Project root refuses — in every mode, with no prompt — a tool
+writing, moving or deleting that root's `.apogee/config.yaml`, and deleting, moving or replacing its
+`.apogee/` folder itself (`write-project-config`, which no `remove:` takes away). Staging or
+committing the file with git and copying it elsewhere are not writes there, and `.apogee/skills/`
+stays writable. The refusal catches the shell forms apogee can read — a redirect, `tee`, `sed -i`, a
+`cp` or `mv` destination, `rm`, `ln` — not every program that could open the file, which is why a
+project's grants are live only once you adopt them.
+
 ## Commands that run without asking — `allow:`
 
 An **Allow rule** is a yes you give once instead of at every prompt. `allow:` holds two lists:

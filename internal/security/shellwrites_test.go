@@ -279,3 +279,54 @@ func TestShellWriteViewReadsInterpreterHeredocs(t *testing.T) {
 		})
 	}
 }
+
+// TestProjectConfigControlPlaneTargets pins the project-config write view `write-project-config` reads a
+// command line through (Rule.ProjectConfigView): writeTargetsOf's reading, save that a git command
+// and a cp's sources are reads, and that only rm, rmdir, unlink, mv and ln may name the `.apogee`
+// folder itself.
+func TestProjectConfigControlPlaneTargets(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, command, want string
+	}{
+		// --- what still writes ------------------------------------------------------
+		{"a redirect", "echo x > .apogee/config.yaml", ".apogee/config.yaml"},
+		{"tee", "echo x | tee .apogee/config.yaml", ".apogee/config.yaml"},
+		{"sed -i", "sed -i 's/a/b/' .apogee/config.yaml", "s/a/b/ .apogee/config.yaml"},
+		{"rm of the config", "rm .apogee/config.yaml", ".apogee/config.yaml"},
+		{"mv keeps both operands", "mv .apogee/config.yaml bak.yaml", ".apogee/config.yaml bak.yaml"},
+		{"a cd before the write", "cd .apogee && rm config.yaml", ".apogee/config.yaml"},
+
+		// --- git and a cp's sources are reads -----------------------------------------
+		{"git add stages", "git add .apogee/config.yaml", ""},
+		{"git checkout", "git checkout -- .apogee/config.yaml", ""},
+		{"git's output option still writes", "git diff --output=.apogee/config.yaml", ".apogee/config.yaml"},
+		{"a cp source", "cp .apogee/config.yaml bak.yaml", "bak.yaml"},
+		{"a cp destination", "cp evil.yaml .apogee/config.yaml", ".apogee/config.yaml"},
+		{"cp -t names the directory", "cp -t .apogee/config.yaml x y", ".apogee/config.yaml"},
+		{"cp --target-directory=", "cp --target-directory=out .apogee/config.yaml", "out"},
+		{"cp after --", "cp -- -odd .apogee/config.yaml", ".apogee/config.yaml"},
+
+		// --- the folder itself --------------------------------------------------------
+		{"rm -rf of the folder", "rm -rf .apogee", ".apogee"},
+		{"mv of the folder", "mv .apogee x", ".apogee x"},
+		{"ln over the folder", "ln -sfn elsewhere .apogee", "elsewhere .apogee"},
+		{"mkdir names the folder and leaves it standing", "mkdir .apogee", ""},
+		{"a cd into the folder", "cd .apogee/ && ls", ""},
+		{"a copy into the folder", "cp notes.md .apogee/", ""},
+		{"a skill write stays visible", "echo x > .apogee/skills/x/SKILL.md", ".apogee/skills/x/SKILL.md"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := projectConfigTargetsOf(tc.command)
+
+			if got != tc.want {
+				t.Errorf("projectConfigTargetsOf(%q) = %q, want %q", tc.command, got, tc.want)
+			}
+		})
+	}
+}

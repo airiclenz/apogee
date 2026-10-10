@@ -593,3 +593,156 @@ func TestDangerousRulesConvertBetweenTheEngineAndTheGuard(t *testing.T) {
 		t.Errorf("an unknown tier converted to %v; want TierNone, which the guard drops", unknown[0].Tier)
 	}
 }
+
+// The Project root and workspace the Project config cases below are judged under: the workspace is
+// the root, so every relative spelling is the workspace's own.
+const (
+	projectConfigRoot      = "/work/proj"
+	projectConfigWorkspace = "/work/proj"
+)
+
+// projectConfigGuard is the shipped floor plus the Project config's refusal for root and
+// workspace — the guard internal/agent builds for a session with a Project root.
+func projectConfigGuard(t *testing.T, root, workspace string) *DangerousActionGuard {
+	t.Helper()
+
+	rule, ok := ProjectConfigRule(root, workspace)
+	if !ok {
+		t.Fatalf("ProjectConfigRule(%q, %q) built no rule", root, workspace)
+	}
+	return NewDangerousActionGuard(append(DefaultDangerousRules(), rule))
+}
+
+// TestProjectConfigControlPlaneIsRefused pins ADR 0096 §5: a file tool's write, move or delete of
+// `<root>/.apogee/config.yaml`, and the shell forms the guard can see — a redirect, tee, sed -i, a
+// cp or mv destination, rm, ln — are Tier-1 refused in every spelling of the root, and deleting,
+// moving or replacing `.apogee` itself is too.
+func TestProjectConfigControlPlaneIsRefused(t *testing.T) {
+	t.Parallel()
+	g := projectConfigGuard(t, projectConfigRoot, projectConfigWorkspace)
+	fileTool := stubTool{name: "write_file", payloadKeys: []string{"content"}}
+
+	cases := []struct {
+		name string
+		call domain.ToolCall
+		tool domain.Tool
+	}{
+		{"write_file on the config", writeCall(".apogee/config.yaml"), fileTool},
+		{"write_file on the config, dot-led", writeCall("./.apogee/config.yaml"), fileTool},
+		{"write_file on the config, absolute", writeCall("/work/proj/.apogee/config.yaml"), fileTool},
+		{"write_file on the config, Windows separators", writeCall(`.apogee\config.yaml`), fileTool},
+		{"delete_file on the config", argCall("delete_file", map[string]any{"path": ".apogee/config.yaml"}), stubTool{name: "delete_file"}},
+		{"delete_file on the folder", argCall("delete_file", map[string]any{"path": ".apogee"}), stubTool{name: "delete_file"}},
+		{"move_file of the config away", argCall("move_file", map[string]any{"source": ".apogee/config.yaml", "destination": "x.yaml"}), stubTool{name: "move_file"}},
+		{"move_file over the config", argCall("move_file", map[string]any{"source": "x.yaml", "destination": ".apogee/config.yaml"}), stubTool{name: "move_file"}},
+		{"copy_file over the config", argCall("copy_file", map[string]any{"source": "x.yaml", "destination": ".apogee/config.yaml"}), stubTool{name: "copy_file", sourceKeys: []string{"source"}}},
+		{"a redirect into the config", terminalCall("echo x > .apogee/config.yaml"), shellTool},
+		{"tee into the config", terminalCall("echo x | tee .apogee/config.yaml"), shellTool},
+		{"sed -i on the config", terminalCall("sed -i 's/a/b/' .apogee/config.yaml"), shellTool},
+		{"a cp destination", terminalCall("cp evil.yaml .apogee/config.yaml"), shellTool},
+		{"a mv destination", terminalCall("mv evil.yaml ./.apogee/config.yaml"), shellTool},
+		{"rm of the config", terminalCall("rm -f /work/proj/.apogee/config.yaml"), shellTool},
+		{"ln over the config", terminalCall("ln -sf /tmp/evil.yaml .apogee/config.yaml"), shellTool},
+		{"rm -rf of the folder", terminalCall("rm -rf .apogee"), shellTool},
+		{"rm -rf of the folder, trailing slash", terminalCall("rm -rf .apogee/"), shellTool},
+		{"mv of the folder", terminalCall("mv .apogee x"), shellTool},
+		{"ln -s over the folder", terminalCall("ln -sfn /tmp/evil .apogee"), shellTool},
+		{"a git_commit not resolved to the tool is judged in full", argCall("git_commit", map[string]any{"files": []string{".apogee/config.yaml"}}), nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call, tc.tool, nil)
+
+			if d.Tier != TierHardRefuse || d.RuleID != ProjectConfigRuleID {
+				t.Errorf("Inspect = tier %d rule %q; want the hard refusal %q", d.Tier, d.RuleID, ProjectConfigRuleID)
+			}
+		})
+	}
+}
+
+// TestProjectConfigControlPlaneLeavesTheRestAlone pins the refusal's precision: `.apogee/skills/`
+// stays workspace territory, a nested repository's own `.apogee/` is not the Project config, git
+// commands, git_commit's staged files and a cp's source read the file, and the home's
+// `~/.apogee/config.yaml` keeps the forced look ADR 0049 §4 asks — never this refusal.
+func TestProjectConfigControlPlaneLeavesTheRestAlone(t *testing.T) {
+	t.Parallel()
+	g := projectConfigGuard(t, projectConfigRoot, projectConfigWorkspace)
+	fileTool := stubTool{name: "write_file", payloadKeys: []string{"content"}}
+	gitCommit := stubTool{name: "git_commit", payloadKeys: []string{"message"}}
+
+	cases := []struct {
+		name     string
+		call     domain.ToolCall
+		tool     domain.Tool
+		wantTier Tier
+		wantRule string
+	}{
+		{"write_file of a project skill", writeCall(".apogee/skills/x/SKILL.md"), fileTool, TierNone, ""},
+		{"a shell write of a project skill", terminalCall("echo x > .apogee/skills/x/SKILL.md"), shellTool, TierNone, ""},
+		{"a nested repository's config", writeCall("vendor/dep/.apogee/config.yaml"), fileTool, TierNone, ""},
+		{"a sibling file", writeCall(".apogee/config.yaml.bak"), fileTool, TierNone, ""},
+		{"reading the config", terminalCall("cat .apogee/config.yaml"), shellTool, TierNone, ""},
+		{"git add of the config", terminalCall("git add .apogee/config.yaml"), shellTool, TierNone, ""},
+		{"copying the config away", terminalCall("cp .apogee/config.yaml bak.yaml"), shellTool, TierNone, ""},
+		{"mkdir of the folder", terminalCall("mkdir -p .apogee"), shellTool, TierNone, ""},
+		{"git_commit staging the config", argCall("git_commit", map[string]any{"message": "m", "files": []string{".apogee/config.yaml"}}), gitCommit, TierNone, ""},
+		{"the home config keeps its look", writeCall("~/.apogee/config.yaml"), fileTool, TierForceApproval, "write-apogee-control-plane"},
+		{"the home config through the shell keeps its look", terminalCall("echo x > ~/.apogee/config.yaml"), shellTool, TierForceApproval, "write-apogee-control-plane"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call, tc.tool, nil)
+
+			if d.Tier != tc.wantTier || d.RuleID != tc.wantRule {
+				t.Errorf("Inspect = tier %d rule %q; want tier %d rule %q", d.Tier, d.RuleID, tc.wantTier, tc.wantRule)
+			}
+		})
+	}
+}
+
+// TestProjectConfigControlPlaneSpellsTheRootFromTheWorkspace pins the relative spellings: with the
+// Project root above the workspace, the config is `../.apogee/config.yaml` from there, and a bare
+// `.apogee/config.yaml` names the workspace's own folder — not the Project config. The absolute
+// root is matched as the guard's normalized text spells it, case folded.
+func TestProjectConfigControlPlaneSpellsTheRootFromTheWorkspace(t *testing.T) {
+	t.Parallel()
+	g := projectConfigGuard(t, "/Work/Proj", "/Work/Proj/sub")
+
+	cases := []struct {
+		name     string
+		command  string
+		wantTier Tier
+	}{
+		{"the climb to the root", "echo x > ../.apogee/config.yaml", TierHardRefuse},
+		{"the climb, dot-led", "rm ./../.apogee/config.yaml", TierHardRefuse},
+		{"the absolute root, as written", "echo x > /Work/Proj/.apogee/config.yaml", TierHardRefuse},
+		{"the workspace's own folder", "echo x > .apogee/config.yaml", TierNone},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), shellTool, nil)
+
+			if d.Tier != tc.wantTier {
+				t.Errorf("Inspect(%q) = tier %d rule %q; want tier %d", tc.command, d.Tier, d.RuleID, tc.wantTier)
+			}
+		})
+	}
+}
+
+// TestProjectConfigControlPlaneNeedsAProjectRoot pins the empty-root half: no Project root, no rule.
+func TestProjectConfigControlPlaneNeedsAProjectRoot(t *testing.T) {
+	t.Parallel()
+
+	if rule, ok := ProjectConfigRule("", projectConfigWorkspace); ok {
+		t.Errorf("ProjectConfigRule with no root built %+v; want no rule", rule)
+	}
+}

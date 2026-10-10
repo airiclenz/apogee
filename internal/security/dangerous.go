@@ -3,6 +3,7 @@ package security
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -91,6 +92,16 @@ type Rule struct {
 	// A tool without that declaration — python_exec, every MCP tool — is judged on its full text
 	// whatever the rule says. Meaningless without WritesOnly.
 	ShellWriteView bool
+	// ProjectConfigView puts a WritesOnly rule on the project-config write view in place of the
+	// write-shaped one: a declared shell command line is read for what it can write, move or
+	// delete as projectConfigTargetsOf reads it — git commands and a cp's sources are reads
+	// there — and git_commit's `files` (the paths it stages) are out of sight, so neither git nor
+	// a copy taken of the Project config trips the rule while a redirect, an `rm`, a `mv` or a
+	// file tool's write still does. Only `write-project-config` sets it (ProjectConfigRule, ADR
+	// 0096 §5): staging, committing and copying the config are ordinary, and the Adoption
+	// fingerprint is what guards its content. It is engine-built and never configurable, so
+	// domain.DangerousRule does not carry it. Meaningless without WritesOnly.
+	ProjectConfigView bool
 
 	re *regexp.Regexp // compiled lazily by compile()
 }
@@ -142,7 +153,8 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 // class: it is skipped when the tool is read-only, and judges a text that omits the
 // tool's declared read-source values (see the Rule field's doc); one that also carries
 // ShellWriteView judges a tool's declared shell command line (domain.ArgRoleShellCommand) by
-// what it writes rather than by every word it names. It never errors and never executes
+// what it writes rather than by every word it names, and one that carries ProjectConfigView judges
+// the project-config write view instead (projectConfigViewOf). It never errors and never executes
 // anything — pure inspection.
 //
 // exemptPaths are paths whose spellings NO rule may see: maskExempt removes them from both
@@ -181,12 +193,17 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 	// The shell write view of the same call, for the rules that opted in: identical unless
 	// the tool declares a shell command-line argument, in which case that argument is
 	// replaced by what its command line can write (writeTargetsOf).
+	shellKeys := domain.ArgKeysWithRole(tool, domain.ArgRoleShellCommand)
 	shellWrites := writes
-	if shellKeys := domain.ArgKeysWithRole(tool, domain.ArgRoleShellCommand); len(shellKeys) > 0 {
-		if text, ok := shellWriteText(call, shellKeys, dropped); ok {
+	if len(shellKeys) > 0 {
+		if text, ok := shellWriteText(call, shellKeys, dropped, writeTargetsOf); ok {
 			shellWrites = maskExempt(normalize(text), exemptPaths)
 		}
 	}
+
+	// The project-config write view, built only when a rule on it is reached.
+	var projectConfigWrites string
+	projectConfigBuilt := false
 
 	for _, r := range g.rules {
 		if r.WritesOnly {
@@ -194,7 +211,14 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 				continue
 			}
 			view := writes
-			if r.ShellWriteView {
+			switch {
+			case r.ProjectConfigView:
+				if !projectConfigBuilt {
+					projectConfigWrites = projectConfigViewOf(call, tool, shellKeys, dropped, writes, exemptPaths)
+					projectConfigBuilt = true
+				}
+				view = projectConfigWrites
+			case r.ShellWriteView:
 				view = shellWrites
 			}
 			if r.re.MatchString(view) {
@@ -217,6 +241,7 @@ func (g *DangerousActionGuard) Rules() []Rule {
 		out[i] = Rule{
 			ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason, Hint: r.Hint,
 			WritesOnly: r.WritesOnly, ShellWriteView: r.ShellWriteView,
+			ProjectConfigView: r.ProjectConfigView,
 		}
 	}
 	return out
@@ -297,13 +322,14 @@ func inspectableText(call domain.ToolCall, dropKeys []string) string {
 	return b.String()
 }
 
-// shellWriteText is inspectableText's shell-aware twin for the write view a ShellWriteView
-// rule matches: the tool name and every string leaf in the arguments except dropKeys and the
-// shell command-line keys — whose values contribute their write targets (writeTargetsOf)
-// instead of their words. ok is false when the arguments are not a JSON object, in which
+// shellWriteText is inspectableText's shell-aware twin for the write views a ShellWriteView or
+// ProjectConfigView rule matches: the tool name and every string leaf in the arguments except
+// dropKeys and the shell command-line keys — whose values contribute their write targets as
+// targetsOf reads them (writeTargetsOf, projectConfigTargetsOf) instead of their words. ok is false when the arguments are not a JSON object, in which
 // case the caller keeps the write-shaped view it already has (the raw bytes, fully judged):
 // the narrowing is earned by a well-formed call, never by a malformed one.
-func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text string, ok bool) {
+func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string,
+	targetsOf func(string) string) (text string, ok bool) {
 	var args map[string]any
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return "", false
@@ -320,9 +346,40 @@ func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text st
 			continue
 		}
 		b.WriteByte(' ')
-		b.WriteString(writeTargetsOf(line))
+		b.WriteString(targetsOf(line))
 	}
 	return b.String(), true
+}
+
+// gitCommitToolName is the built-in git_commit tool's name (internal/tools' GitCommitToolName,
+// spelled here because this package is imported by tools, never the reverse). Its `files` are the
+// paths it stages — a git verb's operands — which the project-config write view leaves out of sight.
+const gitCommitToolName = "git_commit"
+
+// gitCommitStagedKey is git_commit's argument naming the paths it stages.
+const gitCommitStagedKey = "files"
+
+// projectConfigViewOf builds the project-config write view of call (Rule.ProjectConfigView) from
+// the write-shaped view's dropped keys: git_commit's staged paths drop out too, and a declared
+// shell command line contributes what projectConfigTargetsOf reads off it. The built-in git_commit
+// is known by its resolved tool, never by the call's name alone, so an unknown tool stays judged
+// in full. Arguments that are not a JSON object leave the write-shaped view, writes, as it is.
+func projectConfigViewOf(call domain.ToolCall, tool domain.Tool, shellKeys, dropped []string,
+	writes string, exemptPaths []string) string {
+	drop := dropped
+	if tool != nil && tool.Name() == gitCommitToolName {
+		drop = append(slices.Clone(dropped), gitCommitStagedKey)
+	}
+	if len(shellKeys) > 0 {
+		if text, ok := shellWriteText(call, shellKeys, drop, projectConfigTargetsOf); ok {
+			return maskExempt(normalize(text), exemptPaths)
+		}
+		return writes
+	}
+	if len(drop) == len(dropped) {
+		return writes
+	}
+	return maskExempt(normalize(inspectableText(call, drop)), exemptPaths)
 }
 
 // collectArgs appends the string leaves of a decoded argument value, dropping the whole value

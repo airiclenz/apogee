@@ -3036,3 +3036,117 @@ func TestAllowRuleSetReachesARunningSubAgent(t *testing.T) {
 		t.Errorf("ran %d, asked %d, result %+v — want the child's call answered by the new rule", ran, approver.calls, result)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The Project config's Tier-1 refusal (ADR 0096 §5 — security.ProjectConfigRule)
+// ---------------------------------------------------------------------------
+
+// TestProjectConfigControlPlaneRefusesAWriteInAuto drives write_file at the Project config in Auto,
+// where an in-workspace write otherwise runs without a word: the guard built from Config.ProjectRoot
+// refuses it before dispatch — no look, no file.
+func TestProjectConfigControlPlaneRefusesAWriteInAuto(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	sink := &recordingSink{}
+	cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, tools.NewWriteFile(ws))
+	cfg.ProjectRoot = ws
+	approver := &fakeApprover{decision: domain.ApprovalAllow}
+	cfg.Approver = approver
+
+	driveToolCall(t, cfg, sink, "c1", "write_file", `{"path":".apogee/config.yaml","content":"allow: {}"}`)
+
+	res, _ := lastToolResult(sink.events)
+	if !res.IsError || !strings.Contains(res.Content, "refused by the dangerous-action guard") {
+		t.Errorf("result = %q (error %v); want the guard's hard refusal", res.Content, res.IsError)
+	}
+	if approver.calls != 0 {
+		t.Errorf("Approver consulted %d times; a Tier-1 refusal asks no one", approver.calls)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".apogee", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the Project config exists after the refused write (stat: %v)", err)
+	}
+}
+
+// TestProjectConfigControlPlaneJudgesTheRealTools holds the refusal against the registry's real
+// tools, whose declarations (the terminal's shell command line, git_commit's payload message and
+// its staged files) are what the project-config write view reads: a shell write is refused, while
+// git_commit staging the config, `git add` of it and a project skill write stay clear.
+func TestProjectConfigControlPlaneJudgesTheRealTools(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	guard := guardsFor(domain.Config{ProjectRoot: ws, WorkspaceDir: ws, ConfigDir: t.TempDir()}).Dangerous
+
+	cases := []struct {
+		name     string
+		tool     domain.Tool
+		args     string
+		wantRule string
+	}{
+		{"a redirect into the config", tools.NewTerminal(ws, nil), `{"command":"echo x > .apogee/config.yaml"}`, security.ProjectConfigRuleID},
+		{"deleting the folder", tools.NewTerminal(ws, nil), `{"command":"rm -rf .apogee"}`, security.ProjectConfigRuleID},
+		{"git add of the config", tools.NewTerminal(ws, nil), `{"command":"git add .apogee/config.yaml"}`, ""},
+		{"git_commit staging the config", tools.NewGitCommit(ws), `{"message":"m","files":[".apogee/config.yaml"]}`, ""},
+		{"a project skill write", tools.NewWriteFile(ws), `{"path":".apogee/skills/x/SKILL.md","content":"x"}`, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := domain.ToolCall{ID: "c1", Tool: tc.tool.Name(), Arguments: json.RawMessage(tc.args)}
+
+			d := guard.Inspect(call, tc.tool, nil)
+
+			if d.RuleID != tc.wantRule {
+				t.Errorf("Inspect = tier %d rule %q; want rule %q", d.Tier, d.RuleID, tc.wantRule)
+			}
+		})
+	}
+}
+
+// TestProjectConfigControlPlaneIsBuiltOnlyForAProjectConfig pins when the engine builds no refusal:
+// no Project root, a Project root whose `.apogee/` links to the apogee home, and one whose
+// `config.yaml` links to the global config file — the last two are the global file under another
+// name, which keeps the home's forced look instead.
+func TestProjectConfigControlPlaneIsBuiltOnlyForAProjectConfig(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("mode: plan\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkedDir := t.TempDir()
+	if err := os.Symlink(home, filepath.Join(linkedDir, ".apogee")); err != nil {
+		t.Fatal(err)
+	}
+	linkedFile := t.TempDir()
+	if err := os.Mkdir(filepath.Join(linkedFile, ".apogee"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "config.yaml"), filepath.Join(linkedFile, ".apogee", "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	ownRoot := t.TempDir()
+
+	cases := []struct {
+		name      string
+		root      string
+		wantBuilt bool
+	}{
+		{"no Project root", "", false},
+		{"a .apogee linked to the apogee home", linkedDir, false},
+		{"a config.yaml linked to the global file", linkedFile, false},
+		{"a Project root of its own", ownRoot, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rules := guardsFor(domain.Config{ProjectRoot: tc.root, WorkspaceDir: tc.root, ConfigDir: home}).Dangerous.Rules()
+
+			if built := slices.Contains(ruleIDs(rules), security.ProjectConfigRuleID); built != tc.wantBuilt {
+				t.Errorf("rule built = %v, want %v", built, tc.wantBuilt)
+			}
+		})
+	}
+}

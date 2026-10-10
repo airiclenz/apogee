@@ -1,6 +1,12 @@
 package security
 
-import "github.com/airiclenz/apogee/internal/domain"
+import (
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 // ----------------------------------------------------------------------------
 // The default dangerous-action ruleset + the config-merge semantics (ADR 0012)
@@ -271,6 +277,71 @@ func DefaultDangerousRules() []Rule {
 			Pattern: `\bsudo\s+\S`,
 		},
 	}
+}
+
+// ProjectConfigRuleID is the id of the rule ProjectConfigRule builds.
+const ProjectConfigRuleID = "write-project-config"
+
+// ProjectConfigRule builds the Tier-1 refusal that keeps the tools off the Project config (ADR 0096
+// §5): writing, moving or deleting `<projectRoot>/.apogee/config.yaml`, and deleting, moving or
+// replacing `<projectRoot>/.apogee` itself, is refused in every mode without a look. ok is false —
+// no rule — when projectRoot is empty: a workspace that is the user's home resolves to no Project
+// root, and the home's `~/.apogee` stays the forced look `write-apogee-control-plane` asks
+// (ADR 0049 §4), never a boundary. The host also builds none when the Project config IS the global
+// config file; that symlink question is the caller's, since this package reads no disk for it.
+//
+// The pattern is built from the absolute root rather than spelled once, because RE2 has no
+// lookbehind and a static `\.apogee/config\.yaml` would capture `~/.apogee` too. It matches a
+// whole token (whitespace on both sides, an optional trailing `/`) spelled from the absolute root
+// or, relative to workspaceDir, bare or `./`-led when the root is the workspace and as the `../`
+// chain that climbs to it when the root is above (the Project root is the workspace or one of its
+// ancestors) — so a nested repository's own `vendor/x/.apogee/config.yaml` and `.apogee/skills/`
+// never match. The rule reads the project-config write view (Rule.ProjectConfigView): git
+// commands, git_commit's staged files and a cp's sources are not writes there, which is what keeps
+// `git add .apogee/config.yaml` and `cp .apogee/config.yaml bak.yaml` ordinary — the Adoption
+// fingerprint, not this refusal, is what guards the file's content, and the refusal is the
+// footgun layer over it (a python_exec line that opens the file is out of its reach).
+func ProjectConfigRule(projectRoot, workspaceDir string) (Rule, bool) {
+	if projectRoot == "" {
+		return Rule{}, false
+	}
+	pattern := `(?:^|\s)(?:` + strings.Join(projectRootSpellings(projectRoot, workspaceDir), "|") +
+		`)\.apogee(?:/config\.yaml)?/?(?:\s|$)`
+	return Rule{
+		ID:     ProjectConfigRuleID,
+		Tier:   TierHardRefuse,
+		Reason: "write, move or delete of the Project config (.apogee/config.yaml) or its .apogee folder",
+		Hint: "the Project config changes only by the user's hand: say what should change and let " +
+			"the user edit it; .apogee/skills/ stays writable",
+		Pattern:           pattern,
+		WritesOnly:        true,
+		ProjectConfigView: true,
+	}, true
+}
+
+// projectRootSpellings returns the regexp prefixes, each ending in `/` (or empty, for the bare
+// relative spelling), a path under projectRoot may be written with in the normalized text the guard
+// inspects: the absolute root, and the relative spellings from workspaceDir when it is the root or
+// below it.
+func projectRootSpellings(projectRoot, workspaceDir string) []string {
+	spellings := []string{regexp.QuoteMeta(strings.TrimRight(normalize(projectRoot), "/")) + "/"}
+	if workspaceDir == "" {
+		return spellings
+	}
+	rel, err := filepath.Rel(workspaceDir, projectRoot)
+	if err != nil {
+		return spellings
+	}
+	if rel == "." {
+		return append(spellings, "", `\./`)
+	}
+	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
+		if segment != ".." {
+			return spellings
+		}
+	}
+	climb := regexp.QuoteMeta(filepath.ToSlash(rel)) + "/"
+	return append(spellings, climb, `\./`+climb)
 }
 
 // MergeDangerousRules is the config-merge seam ADR 0012 fixes, fed by the `dangerous-rules:` key

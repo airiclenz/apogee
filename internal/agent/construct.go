@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -233,15 +235,67 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 // guardsFor is the top-level guardrail bundle cfg asks for: the production breaker, and the
 // dangerous-action guard built from cfg.DangerousRules — the shipped ruleset when the field is nil,
 // exactly the rules it holds otherwise, so a non-nil empty slice is a guard with no rules (a global
-// `remove:` of every shipped id) rather than the shipped set brought back. A delegate never builds
-// its own: it shares this one read-only (Guards.ForSubAgent), so the floor cannot be re-derived one
-// level down.
+// `remove:` of every shipped id) rather than the shipped set brought back — plus the Project
+// config's Tier-1 refusal for cfg.ProjectRoot (projectConfigRule, ADR 0096 §5), which rides beside
+// the configured set rather than in it: it is built from the root, so no `dangerous-rules:` entry
+// spells or removes it. A delegate never builds its own: it shares this one read-only
+// (Guards.ForSubAgent), so the floor cannot be re-derived one level down.
 func guardsFor(cfg domain.Config) security.Guards {
 	guards := security.NewDefaultGuards()
+	rules := security.DefaultDangerousRules()
 	if cfg.DangerousRules != nil {
-		guards.Dangerous = security.NewDangerousActionGuard(security.RulesFromDomain(cfg.DangerousRules))
+		rules = security.RulesFromDomain(cfg.DangerousRules)
 	}
+	if rule, ok := projectConfigRule(cfg); ok {
+		rules = append(rules, rule)
+	}
+	guards.Dangerous = security.NewDangerousActionGuard(rules)
 	return guards
+}
+
+// projectConfigRule is security.ProjectConfigRule for cfg's Project root and workspace — none when
+// there is no Project root, and none when the Project config IS the global config file under
+// another name (the root's `.apogee/` is the apogee home or links to it, or its `config.yaml` links
+// to the global one): that file keeps the forced look `write-apogee-control-plane` asks, the same
+// skip the host's layered load makes so the global file is never layered over itself.
+func projectConfigRule(cfg domain.Config) (security.Rule, bool) {
+	if isGlobalConfigFile(cfg.ProjectRoot, cfg.ConfigDir) {
+		return security.Rule{}, false
+	}
+	return security.ProjectConfigRule(cfg.ProjectRoot, cfg.WorkspaceDir)
+}
+
+// projectConfigDirName and configFileName spell where a config file lives under a Project root
+// and under the apogee home.
+const (
+	projectConfigDirName = ".apogee"
+	configFileName       = "config.yaml"
+)
+
+// isGlobalConfigFile reports whether projectRoot's config is the global config file reached through
+// another name: its `.apogee/` is the apogee home at configDir, or its `config.yaml` is the global
+// file, each compared as the file system resolves it. Either path empty is no match.
+func isGlobalConfigFile(projectRoot, configDir string) bool {
+	if projectRoot == "" || configDir == "" {
+		return false
+	}
+	projectDir := filepath.Join(projectRoot, projectConfigDirName)
+	return sameFile(projectDir, configDir) ||
+		sameFile(filepath.Join(projectDir, configFileName), filepath.Join(configDir, configFileName))
+}
+
+// sameFile reports whether a and b both exist and are the same file once every symlink on the
+// way is followed.
+func sameFile(a, b string) bool {
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(aInfo, bInfo)
 }
 
 // seed copies the delegation into the Agent under construction — every fact once, before anything

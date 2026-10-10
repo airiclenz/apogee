@@ -3,6 +3,7 @@ package security
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -54,16 +55,115 @@ import (
 // is a read and `echo x > .git/config` a write, and a line built to look like the former while
 // doing the latter is the adversary game this guard does not play.
 func writeTargetsOf(command string) string {
+	return joinTargets(command, func(cmd simpleCommand) []string {
+		return append(slices.Clone(cmd.redirectTargets), operandTargets(cmd.words)...)
+	})
+}
+
+// joinTargets splits command into its simple commands and joins, space-separated, the targets
+// targetsOf reads off each one, every relative literal target resolved against the directory the
+// line's earlier `cd`s left that command in.
+func joinTargets(command string, targetsOf func(simpleCommand) []string) string {
 	var targets []string
 	for _, cmd := range splitSimpleCommands(command, workDir{}) {
-		for _, t := range cmd.redirectTargets {
-			targets = append(targets, cmd.dir.resolve(t))
-		}
-		for _, t := range operandTargets(cmd.words) {
+		for _, t := range targetsOf(cmd) {
 			targets = append(targets, cmd.dir.resolve(t))
 		}
 	}
 	return strings.Join(targets, " ")
+}
+
+// projectConfigTargetsOf is the project-config write view (Rule.ProjectConfigView): what a shell
+// command line can write, move or delete that the `write-project-config` rule judges. It reads the
+// line as writeTargetsOf does, with three differences, each the rule's own and none of them
+// writeTargetsOf's (whose output, and so `write-git-control-plane`, is untouched):
+//
+//   - a `git` command contributes only the file an output option names (`--output=file`): staging,
+//     committing or checking out the Project config is git's business, and the Adoption
+//     fingerprint (ADR 0096 §4), not a write refusal, is what stands behind the file's content;
+//   - a `cp` contributes its destination only (cpDestinations) — copying the config elsewhere
+//     reads it;
+//   - a target whose last segment is `.apogee` is kept only for a leader that deletes, moves or
+//     replaces what it names (replacingLeaders: rm, rmdir, unlink, mv, ln) — `mkdir .apogee`,
+//     `cd .apogee` or `cp x .apogee/` name the folder and leave it standing.
+func projectConfigTargetsOf(command string) string {
+	return joinTargets(command, projectConfigCommandTargets)
+}
+
+// replacingLeaders are the leaders whose operands may delete, move or replace the very path they
+// name — the only ones the project-config write view lets name the `.apogee` folder itself.
+var replacingLeaders = map[string]bool{
+	"rm": true, "rmdir": true, "unlink": true, "mv": true, "ln": true,
+}
+
+// apogeeFolderName is the folder the Project config lives in, as a path's last segment spells it.
+const apogeeFolderName = ".apogee"
+
+// projectConfigCommandTargets is one simple command's share of projectConfigTargetsOf. A command
+// that is only assignments keeps every value, as operandTargets does: it names no leader to judge,
+// and its values are what a later command's operands resolve through.
+func projectConfigCommandTargets(cmd simpleCommand) []string {
+	targets := slices.Clone(cmd.redirectTargets)
+	words := stripWrappers(cmd.words)
+	if len(words) == 0 {
+		return append(targets, operandTargets(cmd.words)...)
+	}
+	leader := path.Base(words[0])
+	targets = append(targets, projectConfigOperandTargets(leader, cmd.words, words[1:])...)
+	if replacingLeaders[leader] {
+		return targets
+	}
+	return slices.DeleteFunc(targets, namesApogeeFolder)
+}
+
+// namesApogeeFolder reports whether target's last path segment is the `.apogee` folder itself.
+func namesApogeeFolder(target string) bool {
+	return path.Base(strings.TrimRight(target, "/")) == apogeeFolderName
+}
+
+// projectConfigOperandTargets is operandTargets with the project-config view's two exemptions:
+// a git command's operands and a cp's sources.
+func projectConfigOperandTargets(leader string, words, operands []string) []string {
+	switch leader {
+	case "git":
+		return outputOptionValues(leader, operands)
+	case "cp":
+		return cpDestinations(operands)
+	}
+	return operandTargets(words)
+}
+
+// cpDestinations returns what a `cp` writes: the directory a `-t` / `--target-directory` option
+// names, or else its last positional operand. Option parsing stops at `--`; a short option cluster
+// ending in `t` takes the next word as the directory, as does a bare `--target-directory`.
+func cpDestinations(operands []string) []string {
+	var positional, directories []string
+	optionsDone := false
+	for i := 0; i < len(operands); i++ {
+		w := operands[i]
+		switch {
+		case optionsDone || w == "-" || !strings.HasPrefix(w, "-"):
+			positional = append(positional, w)
+		case w == "--":
+			optionsDone = true
+		case w == "--target-directory":
+			if i+1 < len(operands) {
+				i++
+				directories = append(directories, operands[i])
+			}
+		case strings.HasPrefix(w, "--target-directory="):
+			directories = append(directories, strings.TrimPrefix(w, "--target-directory="))
+		case !strings.HasPrefix(w, "--") && strings.HasSuffix(w, "t"):
+			if i+1 < len(operands) {
+				i++
+				directories = append(directories, operands[i])
+			}
+		}
+	}
+	if len(directories) > 0 || len(positional) == 0 {
+		return directories
+	}
+	return positional[len(positional)-1:]
 }
 
 // simpleCommand is one pipeline stage or chain member of a command line: its words in order

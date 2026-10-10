@@ -1,5 +1,7 @@
 # The upstream TestE2EGuardControlPlane talks to: a model that asks for two terminal commands under
-# the workspace's git control plane, one a read and one a write.
+# the workspace's git control plane, one a read and one a write, and a third that writes the
+# workspace's Project config (`.apogee/config.yaml`), which the `write-project-config` rule the
+# engine builds from the Project root hard-refuses (ADR 0096 §5).
 #
 # The two commands are chosen for what the shell WRITE VIEW makes of them (internal/security's
 # `write-git-control-plane` rule, ShellWriteView — ADR 0049). `ls -la .git/hooks` names the control
@@ -18,6 +20,13 @@ turns:
         last_message: The user's first request
       repeat: true
       text: Control-plane commands
+    # The wrap-up once the REFUSED Project config write has come back, told apart from the git
+    # control plane's refusal by the rule's own reason and so matched BEFORE that one.
+    - when:
+        tool_result: terminal
+        last_message: ^refused by the dangerous-action guard. write, move or delete of the Project config
+      repeat: true
+      text: The project config stayed shut.
     # The wrap-up once the REFUSED call has come back. The refusal is a terminal tool result like any
     # other, so it is told apart from the allowed one by its own text — the guard's wording is what
     # the model was handed — and matched BEFORE the generic wrap-up below.
@@ -48,6 +57,14 @@ turns:
       tool_calls:
         - name: terminal
           arguments: '{"command":"echo hooked > .git/config"}'
+    # A WRITE to the Project config through the shell: a redirect into `.apogee/config.yaml`, which
+    # the project-config write view sees and its rule hard-refuses.
+    - when:
+        last_message: ^Overwrite the project config
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"echo hooked > .apogee/config.yaml"}'
     # Anything apogee asks on its own account.
     - repeat: true
       text: Nothing else to add.

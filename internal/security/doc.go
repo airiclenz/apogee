@@ -60,8 +60,11 @@
 //     declared shell command line (domain.ArgRoleShellCommand — terminal's and console_open's
 //     command) is read for what it WRITES by the one write-shaped rule that opted in
 //     (Rule.ShellWriteView — write-git-control-plane; shellwrites.go), so `cat .git/config`
-//     is the read it is while `echo x > .git/config` still refuses. Tools that declare
-//     nothing stay fully inspected.
+//     is the read it is while `echo x > .git/config` still refuses. The Project config's
+//     refusal (ProjectConfigRule — `write-project-config`, ADR 0096 §5), which the engine builds
+//     from the Project root beside the configured set, reads the project-config write view
+//     instead (Rule.ProjectConfigView): git commands, git_commit's staged files and a cp's
+//     sources are reads there. Tools that declare nothing stay fully inspected.
 //   - The circuit-breaker (CircuitBreaker): halts a runaway loop of back-to-back identical
 //     failing calls, surfacing an ErrorEvent rather than spinning.
 //   - The audit decision (AuditDecision): how a call was gated. The executor emits it on
@@ -91,7 +94,8 @@
 // the prompt keys a dispatch merely forwards (domain.ArgRolePrompt), so neither a document that
 // quotes a guarded path nor a delegated task that names one is an action. rules.go is the
 // content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment
-// per rule saying where its boundary is, and MergeDangerousRules, which encodes who may loosen it
+// per rule saying where its boundary is, ProjectConfigRule, the Project config's Tier-1 refusal
+// built from the Project root, and MergeDangerousRules, which encodes who may loosen it
 // (global may add or remove, project may only add — ADR 0012) — the merge seam that ADR fixes,
 // fed by the `dangerous-rules:` key (ADR 0096 §6), and RulesFromDomain / DomainRules, the
 // conversions between Rule and the engine's domain.DangerousRule that domain.Config carries the
@@ -100,7 +104,8 @@
 // keeps its redirect targets, the operands of mutating or unknown leaders and the files an output
 // option or verb writes (`--output=file`, `uniq in out`, `sed 'w file'`) and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
-// its command-line argument (domain.ArgRoleShellCommand).
+// its command-line argument (domain.ArgRoleShellCommand) — plus projectConfigTargetsOf, the same
+// reading with git commands and a cp's sources as reads, for Rule.ProjectConfigView.
 // allowmatch.go reads the same lines for the opposite question — may a persisted yes answer
 // this call? MatchAllowRules decides whether every simple command of a `terminal` line is covered
 // by a word-prefix Allow rule (ADR 0096 §2). A line must first pass an allowlist of constructs
