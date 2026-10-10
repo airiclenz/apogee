@@ -270,7 +270,13 @@ Also (reviewer guards, verified): `DRY_RUN=1` with `SUMS_FILE` branches before a
 **Acceptance:** `go test -race -count=1 -run TestReleaseScoop .`
 **Commit:** `feat(release): publish the Scoop manifest`
 
-## 10. winget submission via komac
+## 10. winget submission via komac — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): the token reaches komac through its environment (`GITHUB_TOKEN="$token" komac ...`, which komac reads natively) instead of `--token`, so no process listing shows it; the dry run therefore prints `GITHUB_TOKEN=<redacted> komac update ...` rather than `--token <redacted>` — the redaction, the sentinel-token assertion and the skipped komac/`gh auth token` lookups are as the item specifies.
+
+NOTES (2026-10-10): `runReleaseScript` now returns stderr too (and `releaseScriptCommand` is factored out of it) so the winget dry-run test can assert the token is absent from both streams; `GITHUB_TOKEN` joins `releaseScriptEnvKeys`. Added `TestReleaseWingetRequiresKomac` (real run, komac-free PATH, non-zero exit + install hint) beyond the two named tests.
+
+NOTES (2026-10-10): scripts/release-winget.sh is staged (`git add`, mode 100755) so `TestReleaseWingetScriptIsExecutable` passes before the commit. docs/manual/building.md is left to item 11, which owns the Releasing section.
 
 **Depends on item 9** (shares `release_scripts_test.go`).
 **What:**

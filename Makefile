@@ -251,6 +251,17 @@ release-smoke:
 release-scoop:
 	@VERSION="$(VERSION)" ./scripts/release-scoop.sh
 
+## release-winget: submit a PUBLISHED release's winget manifest update with komac (make release-winget VERSION=v0.25.0)
+#
+# Runs `komac update AiricLenz.Apogee --version <version> --urls <both Windows archives>
+# --submit` with GITHUB_TOKEN (or `gh auth token`), opening the manifest pull request against
+# microsoft/winget-pkgs; it merges later, after winget's review. Run it after the Scoop step;
+# DRY_RUN=1 prints the command with the token redacted and runs nothing. Never part of `make
+# check` — it reaches the network and opens a pull request in another repository.
+.PHONY: release-winget
+release-winget:
+	@VERSION="$(VERSION)" ./scripts/release-winget.sh
+
 ## fmt: format all Go source in place
 .PHONY: fmt
 fmt:

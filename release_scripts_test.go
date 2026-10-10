@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	releaseScoopScript = "scripts/release-scoop.sh"
+	releaseScoopScript  = "scripts/release-scoop.sh"
+	releaseWingetScript = "scripts/release-winget.sh"
 
 	// executableIndexMode is the git index mode of a committed executable file.
 	executableIndexMode = "100755"
@@ -25,7 +26,7 @@ const (
 // releaseScriptEnvKeys are the variables the release scripts read; the tests clear every one
 // the developer's shell might carry, so only what a test sets explicitly reaches the script.
 var releaseScriptEnvKeys = []string{
-	"REPO", "VERSION", "BUCKET_REPO", "BUCKET_URL", "SUMS_FILE", "DRY_RUN",
+	"REPO", "VERSION", "BUCKET_REPO", "BUCKET_URL", "SUMS_FILE", "DRY_RUN", "GITHUB_TOKEN",
 }
 
 // scoopArchitecture is one entry of a Scoop manifest's `architecture` block.
@@ -71,7 +72,7 @@ func TestReleaseScoopDryRun(t *testing.T) {
 		t.Fatalf("write the fixture SHA256SUMS: %v", err)
 	}
 
-	stdout := runReleaseScript(t, releaseScoopScript, "VERSION=v"+bare, "DRY_RUN=1", "SUMS_FILE="+sums)
+	stdout, _ := runReleaseScript(t, releaseScoopScript, "VERSION=v"+bare, "DRY_RUN=1", "SUMS_FILE="+sums)
 
 	var manifest scoopManifest
 	if err := json.Unmarshal(stdout, &manifest); err != nil {
@@ -119,6 +120,58 @@ func TestReleaseScoopScriptIsExecutable(t *testing.T) {
 	requireExecutableInIndex(t, releaseScoopScript)
 }
 
+// TestReleaseWingetDryRun runs scripts/release-winget.sh with DRY_RUN, a sentinel GITHUB_TOKEN and
+// no komac on PATH, and checks the printed komac command: the package id, the bare version, both
+// Windows archives' release URLs and --submit — and that the token's value is printed nowhere.
+func TestReleaseWingetDryRun(t *testing.T) {
+	t.Parallel()
+	requireBash(t)
+
+	const (
+		bare        = "9.8.7"
+		token       = "sentinel-token-must-not-print"
+		releaseBase = "https://github.com/airiclenz/apogee/releases/download/v" + bare + "/"
+	)
+	stdout, stderr := runReleaseScript(t, releaseWingetScript,
+		"VERSION=v"+bare, "DRY_RUN=1", "GITHUB_TOKEN="+token, pathWithoutKomac(t))
+
+	command := strings.TrimSpace(string(stdout))
+	want := "GITHUB_TOKEN=<redacted> komac update AiricLenz.Apogee --version " + bare +
+		" --urls " + releaseBase + "apogee_" + bare + "_windows_amd64.zip " +
+		releaseBase + "apogee_" + bare + "_windows_arm64.zip --submit"
+	if command != want {
+		t.Errorf("dry-run command:\n got: %s\nwant: %s", command, want)
+	}
+	if strings.Contains(string(stdout), token) || strings.Contains(stderr, token) {
+		t.Errorf("the dry run printed the GITHUB_TOKEN value\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+}
+
+// TestReleaseWingetRequiresKomac runs scripts/release-winget.sh for real with no komac on PATH: it
+// must exit non-zero before any token lookup and name how to install komac.
+func TestReleaseWingetRequiresKomac(t *testing.T) {
+	t.Parallel()
+	requireBash(t)
+
+	cmd := releaseScriptCommand(releaseWingetScript, "VERSION=v9.8.7", pathWithoutKomac(t))
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("bash %s without komac: err = %v; want a non-zero exit\n%s", releaseWingetScript, err, out)
+	}
+	if !strings.Contains(string(out), "komac is not installed") || !strings.Contains(string(out), "install komac") {
+		t.Errorf("the missing-komac failure gives no install hint:\n%s", out)
+	}
+}
+
+// TestReleaseWingetScriptIsExecutable pins scripts/release-winget.sh's committed mode: `make
+// release-winget` execs it directly, so a checkout without the executable bit fails there.
+func TestReleaseWingetScriptIsExecutable(t *testing.T) {
+	t.Parallel()
+
+	requireExecutableInIndex(t, releaseWingetScript)
+}
+
 // requireBash skips the test where no bash is on PATH: the release scripts are bash.
 func requireBash(t *testing.T) {
 	t.Helper()
@@ -128,20 +181,45 @@ func requireBash(t *testing.T) {
 	}
 }
 
-// runReleaseScript runs a release script under bash with the developer's release variables
-// cleared and env added, failing the test on a non-zero exit. It returns the script's stdout.
-func runReleaseScript(t *testing.T, script string, env ...string) []byte {
-	t.Helper()
-
+// releaseScriptCommand builds the command that runs a release script under bash with the
+// developer's release variables cleared and env added.
+func releaseScriptCommand(script string, env ...string) *exec.Cmd {
 	cmd := exec.Command("bash", script)
 	cmd.Env = append(environWithout(releaseScriptEnvKeys), env...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	return cmd
+}
+
+// runReleaseScript runs a release script as releaseScriptCommand builds it, failing the test on a
+// non-zero exit. It returns the script's stdout and stderr.
+func runReleaseScript(t *testing.T, script string, env ...string) (stdout []byte, stderr string) {
+	t.Helper()
+
+	cmd := releaseScriptCommand(script, env...)
+	var errOut strings.Builder
+	cmd.Stderr = &errOut
 	stdout, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("bash %s: %v\nstderr:\n%s", script, err, stderr.String())
+		t.Fatalf("bash %s: %v\nstderr:\n%s", script, err, errOut.String())
 	}
-	return stdout
+	return stdout, errOut.String()
+}
+
+// pathWithoutKomac returns a PATH entry holding only the external commands the release scripts
+// need before they reach komac, so komac is absent from it whatever the developer has
+// installed; a later PATH entry in an exec.Cmd's Env wins over the inherited one. It skips where
+// dirname cannot be found or linked.
+func pathWithoutKomac(t *testing.T) string {
+	t.Helper()
+
+	dirname, err := exec.LookPath("dirname")
+	if err != nil {
+		t.Skip("dirname is not installed; the release scripts cannot run here")
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(dirname, filepath.Join(dir, "dirname")); err != nil {
+		t.Skipf("cannot link dirname into a komac-free PATH: %v", err)
+	}
+	return "PATH=" + dir
 }
 
 // environWithout returns the process environment minus every variable named in keys.
