@@ -19,6 +19,13 @@ MODULE  := github.com/airiclenz/apogee
 BUILD_COUNT := $(shell git rev-list --count HEAD 2>/dev/null)
 GO_LDFLAGS  := $(if $(BUILD_COUNT),-X $(MODULE).buildCount=$(BUILD_COUNT))
 
+# `dist` alone also stamps the release marker (version.go / apogee.DistBuild), so a binary from a
+# release archive tells itself apart from a `make build`/`make install` checkout build — the update
+# check names `apogee update` for the one and `git pull && make install` for the other. The value
+# is distinctive because -trimpath drops -ldflags from the build info: the stamp is checked with
+# `grep -ac release-archive` on the binary, never with `go version -m`.
+DIST_LDFLAGS := $(GO_LDFLAGS) -X $(MODULE).distBuild=release-archive
+
 # The 6 release targets the Phase-2 cross-build invariant must stay green on.
 CROSS_TARGETS := \
 	linux/amd64   linux/arm64 \
@@ -294,7 +301,7 @@ dist:
 		printf '  -> %s\n' "$$name"; \
 		mkdir -p "$(DIST_DIR)/$$name" || exit 1; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 \
-			go build -trimpath -ldflags "$(GO_LDFLAGS)" -o "$(DIST_DIR)/$$name/$$exe" $(PKG) || exit 1; \
+			go build -trimpath -ldflags "$(DIST_LDFLAGS)" -o "$(DIST_DIR)/$$name/$$exe" $(PKG) || exit 1; \
 		cp LICENSE README.md "$(DIST_DIR)/$$name/" || exit 1; \
 		if [ "$$os" = windows ]; then \
 			(cd $(DIST_DIR) && zip -qr "$$name.zip" "$$name") || exit 1; \

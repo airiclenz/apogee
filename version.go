@@ -10,9 +10,10 @@ import (
 // embedded into the binary at build time. It is the project's SINGLE SOURCE OF TRUTH
 // for the release version: every build path — `make build`, `go build`, `go run`,
 // `go install` — carries this exact file, so there is no -ldflags override of the version
-// NUMBER that could drift from it. (A release build does inject one optional piece of build
-// provenance — the commit-count build number — via -ldflags; see buildCount below. That is
-// provenance only and is never the version number.) To cut a release, edit VERSION and nothing else.
+// NUMBER that could drift from it. (A release build does inject two optional pieces of build
+// provenance via -ldflags — the commit-count build number and the `make dist` release stamp; see
+// buildCount and distBuild below. They are provenance only and never the version number.) To cut a
+// release, edit VERSION and nothing else.
 //
 // It lives in the root facade because go:embed cannot reach a parent directory and the
 // ADR-0010 invariant forbids internal/* from importing the root, so this is the only
@@ -33,6 +34,29 @@ const commitShortLen = 12
 // omits the number — the version NUMBER itself is unaffected, always the embedded VERSION file.
 // This is build provenance, never a second source for the version.
 var buildCount string
+
+// distBuild is the release stamp: `make dist` sets it via
+// `-ldflags -X github.com/airiclenz/apogee.distBuild=release-archive` (see the Makefile), and no
+// other build path does, so it marks a binary shipped in a release archive apart from one built
+// from a checkout. Like buildCount it is provenance, never part of the version string. The value
+// is deliberately distinctive: `make dist` builds with -trimpath, which drops -ldflags from the
+// embedded build info, so the stamp is only observable as this string in the binary itself.
+var distBuild string
+
+// isDistBuild is the release stamp read once, at package initialisation. Reading it here rather
+// than inside DistBuild keeps the stamp in every binary the linker emits: an -X variable nothing
+// reachable reads is dead-code-eliminated, value and all, and the release check
+// (`grep -ac release-archive` on an archive's binary) must find it whether or not the binary
+// links a caller of DistBuild.
+var isDistBuild = distBuild != ""
+
+// DistBuild reports whether this binary was built by `make dist` — a published release archive's
+// binary — rather than by `make build`/`make install`, `go build` or `go install`. The update
+// check uses it to tell a hand-unpacked archive (which `apogee update` may replace) from a source
+// build (which is upgraded with git).
+func DistBuild() bool {
+	return isDistBuild
+}
 
 // Version returns the full version string: the release version from the top-level VERSION
 // file (the single source of truth), optionally followed by build provenance — a commit-count

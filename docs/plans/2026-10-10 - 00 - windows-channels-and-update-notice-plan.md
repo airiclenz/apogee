@@ -82,7 +82,13 @@ NOTES (2026-10-10): `Newer` drops semver build metadata (`+…`) before comparin
 **Acceptance:** `go test -race -count=1 ./internal/update/`
 **Commit:** `feat(update): look up the latest published release`
 
-## 3. Install-method detection and the dist stamp
+## 3. Install-method detection and the dist stamp — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): `DistBuild()` returns a package-level `isDistBuild = distBuild != ""` computed at initialisation rather than reading `distBuild` itself: with no caller of `DistBuild` linked into cmd/apogee yet (item 6 wires it), the linker dead-code-eliminated the unread `-X` variable and `make dist` binaries carried no `release-archive` string (grep count 0); the init-time read keeps the stamp in every binary (count 1 on all four tar.gz binaries, 0 on a local `go build`).
+
+NOTES (2026-10-10): the Makefile gains `DIST_LDFLAGS := $(GO_LDFLAGS) -X $(MODULE).distBuild=release-archive`, used by the `dist` recipe only; `build`/`run`/`install`/`cross` keep `GO_LDFLAGS`. `UpgradeCommand` returns "" for an out-of-range Method; a test reads go.mod's `module` line so the GoInstall command cannot drift from the module path.
+
+NOTES (2026-10-10): consequential edit — version.go: the versionFile doc said a release build injects "one" -ldflags provenance value; it now names both buildCount and distBuild.
 
 **What:**
 **Goal:** `update.Detect(Inputs) Method` classifies a binary as Homebrew, Scoop, Winget, GoInstall, Source or Archive. `Method.UpgradeCommand()` returns exactly: `brew upgrade apogee`, `scoop update apogee`, `winget upgrade AiricLenz.Apogee`, `go install github.com/airiclenz/apogee/cmd/apogee@latest` (the module's real cmd path, read from `go.mod`), `git pull && make install`, `apogee update`. Release archives from `make dist` carry a stamp that local builds lack.

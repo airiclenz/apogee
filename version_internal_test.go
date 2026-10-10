@@ -79,3 +79,13 @@ func TestBuildMetadata(t *testing.T) {
 		})
 	}
 }
+
+// TestDistBuild_Unstamped_ReturnsFalse pins that a binary built without the `make dist` ldflags
+// stamp — the test binary itself — is not reported as a release-archive build.
+func TestDistBuild_Unstamped_ReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	if DistBuild() {
+		t.Errorf("DistBuild() = true for an unstamped build (distBuild = %q); want false", distBuild)
+	}
+}
