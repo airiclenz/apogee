@@ -211,8 +211,9 @@ func (s *Store) Forget(entries ...Entry) error {
 }
 
 // update is the one read-modify-write of the record: take the lock beside it, read it, apply
-// change, and replace the file atomically — or, when change leaves nothing recorded and there is
-// no file yet, write nothing.
+// change, and replace the file atomically. It always writes, so a change that leaves nothing
+// recorded — a Forget on a root with no record yet — still creates an empty record bound to
+// this root.
 func (s *Store) update(change func(*record)) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), dirPerm); err != nil {
 		return fmt.Errorf("apogee: create adoption directory %q: %w", filepath.Dir(s.path), err)

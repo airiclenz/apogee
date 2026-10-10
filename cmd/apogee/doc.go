@@ -74,9 +74,10 @@
 // settingsedit.go is the `$EDITOR` round trip for the keys no row can express — the
 // argv out, the list of changed keys back (ADR 0037 decision 5); projectrules.go the four
 // Allow-rule acts of the config host (ADR 0096 §4) — a project rule written into the Project
-// config, adopted, rejected or removed, then the baseline re-taken and the effective rules
-// re-resolved and installed on the engine — and the same install behind a watched re-read
-// that moved the `allow:` key.
+// config, adopted or rejected, and a rule removed from whichever file holds it (a project rule
+// from the Project config and its adoption record, a global rule from the global config), then
+// the baseline re-taken and the effective rules re-resolved and installed on the engine — and
+// the same install behind a watched re-read that moved the `allow:` key.
 //
 // The session's wiring: upstream.go the holder owning the CURRENT heartbeat Monitor and
 // binding — so a `/server` switch is a composition-root move the renderer never sees —

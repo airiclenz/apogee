@@ -46,12 +46,14 @@
 // file starts as an empty document rather than the template, the lock lives under the apogee home
 // beside the root's adoption record (internal/adoption), a symlinked `.apogee/` or `config.yaml` is
 // refused, and nothing but the config is left in the repository; it carries the `/settings` pane's
-// project save of one key as well as the Allow-rule edits. configwrite.go is the
-// acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
-// that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
-// /settings key, addressed by its registry path, and configwrite_scalarsplice.go is that writer's
-// splice machinery — where the key stands in the parsed document, how a text key's block is
-// rendered, and where a key the file does not set yet is inserted.
+// project save of one key as well as the Allow-rule edits, and RemoveGlobalAllowRule, which runs
+// the same Allow-rule removal against the global config inside that file's own transaction.
+// configwrite.go is the acknowledgement writer that records a host `/confine off --save` names,
+// and the per-entry writer that remembers a choice on a single `servers:` entry.
+// configwrite_scalar.go sets or resets one /settings key, addressed by its registry path, and
+// configwrite_scalarsplice.go is that writer's splice machinery — where the key stands in the
+// parsed document, how a text key's block is rendered, and where a key the file does not set yet
+// is inserted.
 // configwrite_keysource.go points one `servers:`
 // entry at a key command, or marks the entry as keeping the plaintext key it already carries
 // (ADR 0047).
