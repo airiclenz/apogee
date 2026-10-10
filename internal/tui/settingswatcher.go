@@ -314,6 +314,10 @@ func (m Model) foldConfigChanged(msg configChangedMsg) (tea.Model, tea.Cmd) {
 		m.transcript.addNote(configWatchAppliedNote + strings.Join(appliedPaths(reload.Applied), ", "))
 	}
 	m = m.noteLoaderNotices(reload.Notices)
+	// A changed file may propose project rules nobody has been asked about. They are queued here and
+	// offered by the Update tail once the session is idle with nothing else up (adoption.go) — at
+	// once on an idle save, after the turn on a save that landed mid-turn.
+	m = m.refreshAdoption()
 	return m, tea.Batch(append(cmds, next)...)
 }
 

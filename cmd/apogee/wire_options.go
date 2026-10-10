@@ -9,7 +9,7 @@ package main
 // every field it names is filled.
 //
 // Below it, the host capabilities that projection names as INTERFACES rather than as bare funcs
-// (ADR 0054): configHost, the twelve acts a session performs on the config files themselves; settingsHost,
+// (ADR 0054): configHost, the thirteen acts a session performs on the config files themselves; settingsHost,
 // the `/settings` pane's four acts over that same file; and schemeHost, the three things this program
 // does with the schemes folder. Each is one value the literal hands over and one seam a renderer test
 // fakes.
@@ -191,6 +191,11 @@ func (w *rootWiring) options() tui.Options {
 		// — the rewrite, and the retarget that puts it in force in this session — is the host's. It
 		// stays zero on a config that carries no retired flag, which is every config written since.
 		SubAgentsMigration: w.subAgentsFlagged,
+		// The Project config's rules this start-up found proposed (ADR 0096 §4) — in the file, with no
+		// answer recorded for their text — for the adoption pane to offer; each answer is one call
+		// back through the host above (projectrules.go). Empty with no Project config or nothing in it
+		// unanswered, and the renderer then raises nothing.
+		ProposedRules: engineAllowRules(w.opts.AllowRules.Proposed),
 		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
 		// the write and the reset that splice this run's config.yaml, and the apply that puts the
 		// key just persisted into effect. Everything behind it — the registry, the file format, the
@@ -264,15 +269,15 @@ func (w *rootWiring) options() tui.Options {
 // The host capabilities Options names as interfaces (ADR 0054)
 // ----------------------------------------------------------------------------
 
-// configHost is this binary's [tui.ConfigHost]: the twelve acts a session performs on the config
+// configHost is this binary's [tui.ConfigHost]: the thirteen acts a session performs on the config
 // files this run resolved — the host acknowledgement, the `$EDITOR` round trip and the watcher's
 // wait, the three start-up-offer answers, the model recording, and the four Allow-rule acts on the
-// Project config and its adoption record (projectrules.go). It holds the wiring itself rather than
-// twelve closures over it, the serverHost posture: every act reads live state the wiring owns — the
-// external-edit baseline, the watcher, the secret store, the bound entry, the Project root — and
-// each is the verb that already existed beside it (keymigrate.go, settingsedit.go, wire_server.go,
+// Project config and its adoption record with the read of what it proposes (projectrules.go). It
+// holds the wiring itself rather than thirteen closures over it, the serverHost posture: every act
+// reads live state the wiring owns — the external-edit baseline, the watcher, the secret store, the
+// bound entry, the Project root — and each is the verb that already existed beside it (keymigrate.go, settingsedit.go, wire_server.go,
 // wire_verbs.go, projectrules.go), unchanged by the regrouping. This value is only where the
-// renderer's twelve names meet them.
+// renderer's thirteen names meet them.
 type configHost struct {
 	w *rootWiring
 	// saveHostAcknowledgement is the one act that is a closure, because internal/config hands it over

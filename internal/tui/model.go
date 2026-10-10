@@ -432,6 +432,11 @@ type Model struct {
 	holds         engineHold
 	resumePending bool
 
+	// adoption is the adoption pane's session state (adoption.go, ADR 0096 §4): the proposed project
+	// rules waiting for the next idle fold with nothing else up, and every rule a pane has already
+	// raised, so a later config change offers only what is new.
+	adoption adoptionState
+
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
 	//
@@ -902,6 +907,14 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// to the ask above: a `servers:` entry still carrying ADR 0045's retired `sub-agents: true` flag,
 	// which now routes nothing (keymigration.go).
 	m.openSubAgentsMigration()
+	// And the proposed project rules (ADR 0096 §4, adoption.go), which give way to all of the above:
+	// a rule that is not adopted only keeps asking before a call runs, while those questions are about
+	// a session that cannot run as its owner meant. Where something is up, they wait, and the Update
+	// tail raises the pane at the first fold that finds the session idle with nothing else up.
+	if opts.Config != nil {
+		m.queueAdoption(opts.ProposedRules)
+	}
+	m.openAdoption()
 	return m
 }
 
@@ -1134,9 +1147,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// Ahead of it, by the same rule, a background workflow's waiting prompt is offered
 	// (offerAfterFold): the pane it opens holds the wake until the human has answered. Ahead of
 	// both, a restored session's background workflows are started again (resumeAfterFold), so a
-	// note the snapshot held is there for the wake.
+	// note the snapshot held is there for the wake, and then the proposed project rules waiting for
+	// their adoption pane are offered (adoptAfterFold) — before the prompt and the wake, because a
+	// rule the human adopts is one the turn a wake starts can already use. That idle fold is what
+	// makes "the next turn boundary" (ADR 0096 §4): a file that changed mid-turn is asked about at
+	// the fold that ends the turn, and one that changed while idle at the fold that saw it.
 	defer func() {
 		next = resumeAfterFold(next)
+		next = adoptAfterFold(next)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))

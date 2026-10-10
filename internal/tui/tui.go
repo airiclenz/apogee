@@ -231,11 +231,11 @@ type SettingsHost interface {
 	Apply(path, value string) (note string, err error)
 }
 
-// ConfigHost is the config FILE as one host capability: the twelve acts a running session performs on
-// the files the composition root resolved — the host acknowledgement `/confine off --save` records,
+// ConfigHost is the config FILE as one host capability: the thirteen acts a running session performs
+// on the files the composition root resolved — the host acknowledgement `/confine off --save` records,
 // the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers, the
-// `remember-model:` recording, and the four Allow-rule acts on the Project config and its adoption
-// record (ADR 0096) — named as one interface rather than spelled as bare funcs (ADR 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
+// `remember-model:` recording, the four Allow-rule acts on the Project config and its adoption
+// record (ADR 0096), and the read of the rules it proposes — named as one interface rather than spelled as bare funcs (ADR 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
 // the others lean on for their posture: every act here is "one small file, spliced and renamed",
 // synchronous, on a keypress the human is waiting on, with a failure REPORTED and never swallowed —
 // the [SettingsHost.Write] contract.
@@ -246,8 +246,8 @@ type SettingsHost interface {
 // A nil host means the config file is unwired whole — a bench or headless Driver that composes no
 // file (ADR 0031) — and every act degrades as its unwired func did: the acknowledgement says it was
 // not saved, the external edit says the row cannot open an editor, nothing is watched, no start-up
-// offer is raised, every model pick is session-scoped, and no Allow rule can be saved
-// ([configHostOrNoop]). A host that IS wired but cannot do one act says so in that act's own answer
+// offer is raised, every model pick is session-scoped, no Allow rule can be saved and none is
+// proposed ([configHostOrNoop]). A host that IS wired but cannot do one act says so in that act's own answer
 // (ADR 0054 decision 3).
 type ConfigHost interface {
 	// SaveHostAcknowledgement persists THIS host's `unconfined-hosts:` acknowledgement to the
@@ -399,6 +399,14 @@ type ConfigHost interface {
 	// grants nothing from the next call on. A global rule is the human's own hand-written line and is
 	// refused here.
 	RemoveRule(rule domain.AllowRule) error
+
+	// ProposedRules re-reads what the Project config proposes now: its rules no adoption or
+	// rejection is recorded for, resolved from the two files and the adoption record the way a
+	// relaunch would resolve them. The adoption pane asks after a watched change (adoption.go); the
+	// start-up's finding arrives as [Options.ProposedRules] instead. It writes nothing.
+	//
+	// An error — a config file that no longer resolves — is REPORTED, and nothing is offered.
+	ProposedRules() ([]domain.AllowRule, error)
 }
 
 // noopConfigHost is what a nil [ConfigHost] degrades to: every act answers exactly as its unwired
@@ -435,6 +443,7 @@ func (noopConfigHost) AddProjectRule(domain.AllowRuleKind, string) error { retur
 func (noopConfigHost) AdoptRules([]domain.AllowRule) error               { return errNoProjectRules }
 func (noopConfigHost) RejectRules([]domain.AllowRule) error              { return errNoProjectRules }
 func (noopConfigHost) RemoveRule(domain.AllowRule) error                 { return errNoProjectRules }
+func (noopConfigHost) ProposedRules() ([]domain.AllowRule, error)        { return nil, nil }
 
 // configHostOrNoop is the ONE nil guard the family has: the wired host, or the degrade above when a
 // Driver composed none. Every act that can carry its refusal in its own answer calls through here
@@ -1415,6 +1424,14 @@ type Options struct {
 	// file that has one is a file that never ran, and the choice between them is the human's. Empty —
 	// the ordinary case — raises nothing at all.
 	SubAgentsMigration []string
+
+	// ProposedRules are the Project config's Allow rules this start-up found PROPOSED (ADR 0096 §4):
+	// in the file, with no adoption or rejection recorded for their exact text, and so inert. The
+	// adoption pane offers them one at a time once nothing more urgent is up (adoption.go); a rule a
+	// file change proposes later is read through [ConfigHost.ProposedRules]. Empty — no Project
+	// config, or nothing in it unanswered — raises nothing, which is what a hand-built Options and
+	// every unattended Driver get: a rule cannot fire there, so there is nothing to ask.
+	ProposedRules []domain.AllowRule
 
 	// Launcher is the llama-launcher seam whole ([LauncherHost]): the Launch profiles this machine
 	// defines, the verb that activates one, the two that free or stop the server this session is on,

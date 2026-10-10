@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +177,48 @@ func TestProjectRuleRejectAndAdoptMoveOnlyTheRecord(t *testing.T) {
 		t.Fatalf("AdoptRules: %v", err)
 	}
 	assertRuleRecord(t, w, true, adoption.Adopted)
+	approver.reset()
+	runE2EExchange(t, ctx, w.engine, "run it again")
+	if got := approver.requests(); len(got) != 0 {
+		t.Errorf("approval requests with the rule adopted = %+v, want none", got)
+	}
+}
+
+// A rule written into the Project config behind apogee's back — a teammate's commit, a pull — is
+// what the adoption pane reads as proposed: inert until adopted, and no longer proposed once it is.
+func TestProjectRuleAdoptionReadsWhatTheFileProposes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	srv := scriptedTerminalModel(t)
+	approver := &e2eApprover{}
+	w := projectRuleWiring(t, srv.URL, approver, &e2eSink{})
+	host := configHost{w: w}
+	path := config.ProjectFilePath(w.roots.project)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("allow:\n  terminal:\n    - "+projectRuleCommand+"\n"), 0o644); err != nil {
+		t.Fatalf("write the project config: %v", err)
+	}
+
+	proposed, err := host.ProposedRules()
+	if err != nil {
+		t.Fatalf("ProposedRules: %v", err)
+	}
+	if want := []apogee.AllowRule{echoRule}; !reflect.DeepEqual(proposed, want) {
+		t.Fatalf("ProposedRules = %+v, want %+v", proposed, want)
+	}
+	runE2EExchange(t, ctx, w.engine, "run a command")
+	if got := approver.requests(); len(got) != 1 {
+		t.Errorf("approval requests with the rule proposed = %d, want the gate", len(got))
+	}
+
+	if err := host.AdoptRules(proposed); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+	if after, err := host.ProposedRules(); err != nil || len(after) != 0 {
+		t.Errorf("ProposedRules after adopting = %+v, %v; want none", after, err)
+	}
 	approver.reset()
 	runE2EExchange(t, ctx, w.engine, "run it again")
 	if got := approver.requests(); len(got) != 0 {

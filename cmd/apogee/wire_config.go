@@ -226,12 +226,18 @@ func projectConfig(
 // with the layer it came from — what the transcript names when a rule answers a call. Nil when the
 // key grants nothing.
 func allowRulesFromOptions(opts config.Options) []apogee.AllowRule {
-	effective := opts.AllowRules.Rules
-	if len(effective) == 0 {
+	return engineAllowRules(opts.AllowRules.Rules)
+}
+
+// engineAllowRules is rules in the engine's spelling, each tagged with the layer it came from — the
+// one conversion the effective set and the proposed one (the adoption pane's) both take. Nil when
+// rules is empty.
+func engineAllowRules(rules []config.AllowRule) []apogee.AllowRule {
+	if len(rules) == 0 {
 		return nil
 	}
-	out := make([]apogee.AllowRule, len(effective))
-	for i, r := range effective {
+	out := make([]apogee.AllowRule, len(rules))
+	for i, r := range rules {
 		kind := apogee.AllowRuleTerminal
 		if r.Kind == config.AllowMCPServers {
 			kind = apogee.AllowRuleMCPServer

@@ -32,6 +32,7 @@ type fakeConfigHost struct {
 	adoptRules              func(rules []domain.AllowRule) error
 	rejectRules             func(rules []domain.AllowRule) error
 	removeRule              func(rule domain.AllowRule) error
+	proposedRules           func() ([]domain.AllowRule, error)
 }
 
 func (h fakeConfigHost) SaveHostAcknowledgement() (string, error) {
@@ -116,6 +117,13 @@ func (h fakeConfigHost) RemoveRule(rule domain.AllowRule) error {
 		return noopConfigHost{}.RemoveRule(rule)
 	}
 	return h.removeRule(rule)
+}
+
+func (h fakeConfigHost) ProposedRules() ([]domain.AllowRule, error) {
+	if h.proposedRules == nil {
+		return noopConfigHost{}.ProposedRules()
+	}
+	return h.proposedRules()
 }
 
 // configSeams is the [ConfigHost] fake opts carries, created on the spot when it carries none —

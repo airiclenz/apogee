@@ -21,6 +21,10 @@ import (
 // session — the live-settings holder and the engine, whose rule set the whole agent tree shares, so
 // a sub-agent already running reads the new rule at its next ordinary gate.
 //
+// Beside the four answers is the one read the adoption pane asks after a watched change
+// (ProposedRules): the rules the Project config proposes now, resolved exactly as the settling
+// resolves the rules in force.
+//
 // The order of the two writes is always the safe one. An adoption is recorded only after the file
 // holds the rule, and dropped before the file loses it, so a failure part-way leaves a rule
 // PROPOSED — inert — and never a recorded yes to text no file holds: such a yes would answer the
@@ -47,6 +51,12 @@ func (h configHost) RejectRules(rules []apogee.AllowRule) error {
 // settles. A global rule is refused: it is the human's own line in the global config.
 func (h configHost) RemoveRule(rule apogee.AllowRule) error {
 	return h.w.removeProjectRule(rule)
+}
+
+// ProposedRules is what the Project config proposes now — its rules no answer is recorded for —
+// for the adoption pane to offer after a watched change. It writes nothing.
+func (h configHost) ProposedRules() ([]apogee.AllowRule, error) {
+	return h.w.proposedRules()
 }
 
 // addProjectRule writes the rule, adopts it, and settles. A rule the list already holds writes
@@ -141,7 +151,7 @@ func (w *rootWiring) settleAllowRules() error {
 	if w.externalEdits != nil {
 		w.externalEdits.refresh()
 	}
-	resolved, err := config.LoadLayeredConfig(w.configPath(), w.roots.project, os.ReadFile, func(string) {})
+	resolved, err := w.layeredOptions()
 	if err != nil {
 		return fmt.Errorf("apogee: the answer is saved, but the rules in force could not be refreshed: %w", err)
 	}
@@ -152,6 +162,25 @@ func (w *rootWiring) settleAllowRules() error {
 		w.engine.SetAllowRules(allowRulesFromOptions(resolved))
 	}
 	return nil
+}
+
+// proposedRules re-resolves the two files and the adoption record and reports the project rules
+// that come out proposed, in the engine's spelling.
+//
+// Errors: a global config that no longer resolves.
+func (w *rootWiring) proposedRules() ([]apogee.AllowRule, error) {
+	resolved, err := w.layeredOptions()
+	if err != nil {
+		return nil, fmt.Errorf("apogee: the proposed rules could not be read: %w", err)
+	}
+	return engineAllowRules(resolved.AllowRules.Proposed), nil
+}
+
+// layeredOptions is the resolution a relaunch would make of the two config files and the adoption
+// record — what the settling installs and the proposed-rules read reports. The loader's notices are
+// not repeated here: the watched re-read says them (ConfigHost.ReloadConfig).
+func (w *rootWiring) layeredOptions() (config.Options, error) {
+	return config.LoadLayeredConfig(w.configPath(), w.roots.project, os.ReadFile, func(string) {})
 }
 
 // workspacesDir is where this run keeps each Project root's adoption record and the Project config

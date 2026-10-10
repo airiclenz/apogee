@@ -94,6 +94,7 @@ const (
 	pickerMode                                 // the autonomy rungs this session may run at — the footer's mode marker
 	pickerFork                                 // the prompts this session may be forked at — /fork
 	pickerWorkflowBoundary                     // stop or keep the running workflows — /clear, a switch, /fork
+	pickerAdoption                             // adopt, defer or reject one proposed project rule — adoption.go
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -133,6 +134,10 @@ type picker struct {
 	// (pickerWorkflowBoundary, commandrun.go): which one — /clear, a /sessions switch, a /fork — and
 	// what it needs to go ahead. Plain values, like migration.
 	boundary pendingBoundary
+	// adoption is what is left of a round of adoption offers (adoption.go): the proposed project
+	// rules still to be asked about, the one being asked about now at the front — migration's shape,
+	// so the same whole-struct zeroing ends the round and esc leaves every remaining rule proposed.
+	adoption []domain.AllowRule
 }
 
 // maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
@@ -152,7 +157,7 @@ const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 // pickerChooseHint and pickerStopHint are the legends for the kinds whose ⏎ answers a question
 // rather than moving the session: "choose" where a row is an answer (/schedule's two popups, /effort,
 // /sub-agents-server, the mode marker), "stop" where it ends something (/schedule-stop). The key
-// migration offers carry their own (keyMigrationHint) and /fork its "⏎ fork" (forkPickerHint) — four
+// migration offers and the adoption pane carry their own (keyMigrationHint) and /fork its "⏎ fork" (forkPickerHint) — four
 // verbs, because a legend that promised a switch would be wrong on every kind that is not one.
 const (
 	pickerChooseHint = "type to filter · ↑/↓ select · ⏎ choose · esc close"
@@ -179,8 +184,8 @@ type pickerOffering struct {
 }
 
 // fixedTitle is the title func of a kind whose pane is named by a constant — most of them; the
-// model picker names its host and the two migration offers name their entry, so those derive
-// theirs from the Model.
+// model picker names its host, the two migration offers their entry and the adoption pane its rule,
+// so those derive theirs from the Model.
 func fixedTitle(title string) func(Model) string {
 	return func(Model) string { return title }
 }
@@ -310,6 +315,12 @@ func init() {
 			hint:   boundaryConfirmHint,
 			rows:   func(Model) []popupRow { return boundaryRows() },
 			accept: Model.acceptBoundaryRow,
+		},
+		pickerAdoption: {
+			title:  Model.adoptionTitle,
+			hint:   keyMigrationHint,
+			rows:   func(Model) []popupRow { return adoptionRows() },
+			accept: Model.acceptAdoption,
 		},
 	}
 }
