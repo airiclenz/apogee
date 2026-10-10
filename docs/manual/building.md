@@ -168,7 +168,14 @@ Cutting a release is four acts, in this order, and only the first two are automa
    commit and does nothing else. Never move or delete a tag afterwards.
 3. **Publish.** `make dist` packs the six archives plus `SHA256SUMS` into `dist/`; attach
    all seven files to a GitHub Release on that tag, then point the Homebrew tap's formula
-   (`airiclenz/tap`) at the new assets and their checksums.
+   (`airiclenz/tap`) at the new assets and their checksums. After the tap, publish the two
+   Windows channels from the published release: `make release-scoop VERSION=vX.Y.Z` writes
+   `bucket/apogee.json` — both Windows archives' hashes, read from the release's
+   `SHA256SUMS` — into `airiclenz/scoop-bucket`, commits `apogee X.Y.Z` and pushes it; then
+   `make release-winget VERSION=vX.Y.Z` runs `komac update AiricLenz.Apogee` with both
+   Windows archives' URLs and `--submit`, opening the manifest pull request against
+   `microsoft/winget-pkgs`, which merges later, after winget's own validation and review.
+   `DRY_RUN=1` on either prints what it would publish and publishes nothing.
 4. **Smoke it from the outside.** `make release-smoke VERSION=vX.Y.Z` is the only step that
    can run *after* the release exists, and it is the one that catches a release nobody can
    install. It checks that the tag is remote and annotated rather than lightweight, that
@@ -180,9 +187,38 @@ Cutting a release is four acts, in this order, and only the first two are automa
    Where Homebrew is installed and already has apogee, it also runs
    `brew update && brew upgrade apogee` and expects the upgraded binary
    to report the same version — the one claim only a real tap and a real release can make.
+   Last, it reads the Scoop bucket's `bucket/apogee.json` and checks that it names the
+   release and lists both Windows archives' hashes exactly as the release's `SHA256SUMS`
+   does. Only the latest release belongs in the bucket, so smoking an older tag skips that
+   check, naming the bucket's version, rather than failing it; the winget half has no such
+   check, since its pull request merges on winget's schedule, not the release's.
    Every check that needs a tool this machine lacks (`gh`, `brew`, `unzip` for the two
-   Windows archives' stamp) says `SKIP` and names it, so a partial run is never mistaken for
-   a pass. A binary built from a modified tree only warns — untracked files flip that flag.
+   Windows archives' stamp, `jq` for the bucket's manifest) — or a bucket it cannot reach —
+   says `SKIP` and names it, so a partial run is never mistaken for a pass. A binary built
+   from a modified tree only warns — untracked files flip that flag.
+
+**One-time setup for the Windows channels.** `make release-scoop` and `make release-winget` publish into repositories that have to exist
+first, and the first winget submission is a different command from every later one. Done
+once, by the owner, before the first release that ships on Scoop and winget:
+
+1. **Create the Scoop bucket.** A public GitHub repository `airiclenz/scoop-bucket`; the
+   script writes `bucket/apogee.json` into it, creating the directory on its first run. It
+   clones and pushes with `gh` (or plain `git` when `BUCKET_URL=` names the clone URL), so
+   that login needs push access to the bucket.
+2. **Fork `microsoft/winget-pkgs`** to the account that submits. komac pushes each manifest
+   branch to that fork and opens the pull request from it.
+3. **Install komac** from [its repository](https://github.com/russellbanks/Komac), which
+   lists the package-manager and prebuilt installs.
+4. **Submit the first manifest with `komac new AiricLenz.Apogee`.** `komac update` — what
+   `make release-winget` runs — can only update a package winget already knows, so the
+   first release goes in through `komac new`'s interactive questions: the version, both
+   Windows archives' release URLs, `apogee_<version>_windows_<arch>/apogee.exe` as the
+   nested portable executable with the command alias `apogee`, and the package's
+   publisher, name, licence and description. Let it submit, and wait for that pull request
+   to merge before the next release's `make release-winget`.
+5. **The token.** komac opens pull requests with `GITHUB_TOKEN`, or `gh auth token` when
+   that is unset: a classic personal access token with the **`public_repo`** scope, which
+   is enough to push to the fork and open a pull request on `microsoft/winget-pkgs`.
 
 `make check` covers what can be proven *before* a release: alongside the Go gates it runs
 `scripts/check-pins.sh` — every GitHub Action must be pinned to a 40-character commit SHA

@@ -291,7 +291,15 @@ Also (reviewer guard, verified): `DRY_RUN=1` skips the komac-presence check and 
 **Acceptance:** `go test -race -count=1 -run TestReleaseWinget .`
 **Commit:** `feat(release): submit the winget manifest with komac`
 
-## 11. Install docs, release runbook and smoke check for the new channels
+## 11. Install docs, release runbook and smoke check for the new channels — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): the building.md one-time setup is a bold-led paragraph plus a numbered list inside `## Releasing`, not a `###` heading — a heading there would have pulled the section's following `make check` / raw-toolchain paragraphs under it.
+
+NOTES (2026-10-10): release-smoke.sh gains `BUCKET_REPO` (same default as release-scoop.sh) and `BUCKET_MANIFEST_URL` (a file:// URL reads a local fixture) env overrides; the bucket step reads the manifest with jq and SKIPs when jq is absent rather than parsing JSON by hand. "Is $VERSION the latest release" is the same HEAD releases/latest redirect lookup the update check uses; when it cannot be read, a version mismatch SKIPs.
+
+NOTES (2026-10-10): the bucket step was exercised offline against fixtures (manifest from release-scoop.sh's own DRY_RUN): match → OK; hash mismatch → FAIL; stale bucket + latest → FAIL; stale bucket + newer latest → SKIP; latest unreadable → SKIP; unreachable manifest → SKIP; no SHA256SUMS → SKIP; invalid JSON → FAIL; no jq → SKIP.
+
+NOTES (2026-10-10): README "Three ways in, and all three land the same thing" now reads "Every way in lands the same thing", with no number to go stale.
 
 **Depends on items 9, 10.**
 **What:**

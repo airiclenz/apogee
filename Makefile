@@ -232,8 +232,10 @@ home-census:
 ## release-smoke: verify a PUBLISHED release end to end (make release-smoke VERSION=v0.18.0)
 #
 # The post-publish half of checklist T-21: the six archives exist and their SHA256SUMS
-# verify, the host's own archive unpacks to a binary reporting that version, and — when
-# Homebrew is installed — `brew upgrade apogee` moves this machine onto it. It is never
+# verify, the host's own archive unpacks to a binary reporting that version, when Homebrew
+# is installed `brew upgrade apogee` moves this machine onto it, and the Scoop bucket's
+# manifest names that version and both Windows hashes (skipped when the bucket is unreachable
+# or jq is absent; an older VERSION= skips a bucket already past it). It is never
 # part of `make check`: there is nothing to smoke until a release is cut, and the target
 # reaches the network on purpose. VERSION= names the released tag, defaulting to the tag
 # the VERSION file currently claims.

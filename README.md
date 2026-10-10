@@ -65,7 +65,7 @@ not its identity. `apogee headless`, `apogee daemon` and the eval bench run over
 
 ## Install
 
-Three ways in, and all three land the same thing: one static binary, no runtime beside it.
+Every way in lands the same thing: one static binary, no runtime beside it.
 
 **Homebrew — macOS and Linux:**
 
@@ -80,6 +80,28 @@ The formula installs the prebuilt binary for your platform — nothing is compil
 toolchain needed; `brew upgrade apogee` moves you to the next release. `brew trust` is
 what Homebrew 5.1+ wants before loading a third-party tap;
 `brew untrust --tap airiclenz/tap` revokes it.
+
+**Scoop — Windows:**
+
+```powershell
+scoop bucket add airiclenz https://github.com/airiclenz/scoop-bucket
+scoop install apogee
+apogee --version
+```
+
+The bucket's manifest installs the release archive for your architecture and checks its
+`SHA256SUMS` hash; `scoop update apogee` moves you to the next release.
+
+**winget — Windows:**
+
+```powershell
+winget install AiricLenz.Apogee
+apogee --version
+```
+
+`winget upgrade AiricLenz.Apogee` moves you to the next release. Each release reaches
+winget through a manifest pull request that winget's own reviewers merge, so it can
+arrive there a little after the releases page has it.
 
 **A prebuilt archive — Windows, macOS, or Linux, `amd64` or `arm64`.** Every release
 carries all six targets on the
@@ -99,6 +121,13 @@ apogee --version
 
 On Windows, download `apogee_<version>_windows_arm64.zip` (or `_amd64`), unpack it, and
 put `apogee.exe` somewhere on your `PATH`.
+
+An archive install updates itself: `apogee update` fetches the latest release for your
+platform, verifies it against that release's `SHA256SUMS`, checks the new binary reports
+the release before swapping it in, and asks first (`--yes` skips the question). It needs
+the binary's directory to be writable by you. Every other channel upgrades with its own
+command, and the interactive TUI names the right one on its startup box when a newer
+release is out — see [Updating apogee](docs/manual/updating.md).
 
 The binaries are **not code-signed** yet. On macOS a *browser* download is quarantined —
 `xattr -d com.apple.quarantine ./apogee` clears that (the `curl` above never sets it) —
@@ -299,6 +328,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 | [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model and terminal can do, what the config file says, and what the model is sent at turn 1 |
 | [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts; the JSON event lines |
 | [`apogee daemon`](docs/manual/daemon.md) | Standing schedules that outlive the session |
+| [Updating apogee](docs/manual/updating.md) | The update notice on the startup box, the upgrade command for each install channel, `apogee update` for archive installs |
 | [Building from source](docs/manual/building.md) | Prerequisites, Makefile targets, cross-compilation |
 
 Working on this repo *with* a coding agent? [`AGENTS.md`](AGENTS.md) is the agent-facing

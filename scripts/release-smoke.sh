@@ -5,25 +5,36 @@
 # proves what the tree BECAME: the tag is annotated and remote, `make dist` still packs the
 # six archives, the published assets download and their SHA256SUMS verify, every published
 # binary carries the tagged commit's build stamp, the host's own archive unpacks to a
-# binary that reports the released version, and — where Homebrew is
-# installed — `brew upgrade apogee` moves this machine onto it. None of that can be asserted
+# binary that reports the released version, where Homebrew is
+# installed `brew upgrade apogee` moves this machine onto it, and the Scoop bucket's manifest
+# names the release and both Windows archives' SHA256SUMS hashes. None of that can be asserted
 # before a release exists, which is why it is a target of its own and never part of `make check`.
 #
 # Usage:
 #   make release-smoke VERSION=v0.18.0     # or: VERSION=v0.18.0 scripts/release-smoke.sh
 #   make release-smoke                     # takes the version from the VERSION file
 #
+# Environment:
+#   REPO                 the release repository (default airiclenz/apogee)
+#   BUCKET_REPO          the Scoop bucket repository (default airiclenz/scoop-bucket)
+#   BUCKET_MANIFEST_URL  read the bucket's manifest from this URL instead of the bucket's
+#                        bucket/apogee.json on GitHub (a file:// URL reads a local fixture)
+#
 # Needs: curl, tar, a sha256 tool, a Go toolchain (for the `make dist` pre-check and for
 # reading the published binaries' build stamp), and `unzip` for the two Windows archives'
 # stamp check.
-# Uses `gh` and `git ls-remote` for the tag pre-checks when they are available, and `brew`
-# for the upgrade check when it is installed; each of those is skipped, loudly, when absent.
+# Uses `gh` and `git ls-remote` for the tag pre-checks when they are available, `brew` for
+# the upgrade check when it is installed, and `jq` to read the Scoop bucket's manifest; each
+# of those is skipped, loudly, when absent — as is the bucket check when the bucket is
+# unreachable.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 REPO="${REPO:-airiclenz/apogee}"
+BUCKET_REPO="${BUCKET_REPO:-airiclenz/scoop-bucket}"
+BUCKET_MANIFEST_URL="${BUCKET_MANIFEST_URL:-https://raw.githubusercontent.com/$BUCKET_REPO/HEAD/bucket/apogee.json}"
 VERSION="${VERSION:-}"
 if [ -z "$VERSION" ]; then
 	VERSION="$(tr -d ' \t\r\n' < VERSION)"
@@ -244,6 +255,71 @@ else
 	*"$VERSION"*) ;;
 	*) fail "brew still reports $reported after the upgrade — is the tap formula pointing at $VERSION?" ;;
 	esac
+fi
+
+# ---------------------------------------------------------------------------------------
+# Scoop — the bucket's manifest names this release and the hashes it published. Only the
+# latest release can be expected in the bucket, so an older $VERSION skips on a version
+# mismatch instead of failing; the hashes are checked whenever the versions agree.
+# ---------------------------------------------------------------------------------------
+step "the Scoop bucket's manifest names $VERSION and its SHA256SUMS hashes"
+
+# latest_release prints the tag github.com redirects releases/latest to, or nothing when it
+# cannot be read — the same lookup apogee's own update check makes.
+latest_release() {
+	local location
+	location="$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$REPO/releases/latest" 2>/dev/null || true)"
+	case "${location##*/}" in
+	v*) printf '%s' "${location##*/}" ;;
+	esac
+}
+
+# manifest_hash prints the hash the manifest $1 lists for Scoop architecture $2, lower-cased
+# and without Scoop's optional `sha256:` prefix.
+manifest_hash() {
+	jq -r --arg arch "$2" '.architecture[$arch].hash // ""' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^sha256://'
+}
+
+# sums_hash prints the hash SHA256SUMS lists for asset $1, accepting both line forms.
+sums_hash() {
+	awk -v name="$1" '$2 == name || $2 == "*" name { print tolower($1); exit }' "$work/SHA256SUMS"
+}
+
+if ! command -v jq >/dev/null 2>&1; then
+	skip "jq is not installed — cannot read the bucket's manifest"
+elif [ ! -f "$work/SHA256SUMS" ]; then
+	skip "the release's SHA256SUMS did not download — nothing to check the bucket's hashes against"
+elif ! curl -fsSL "$BUCKET_MANIFEST_URL" -o "$work/apogee.json" 2>/dev/null; then
+	skip "the bucket's manifest is unreachable at $BUCKET_MANIFEST_URL"
+elif ! bucket_version="$(jq -r '.version // ""' "$work/apogee.json" 2>/dev/null)"; then
+	fail "the bucket's manifest at $BUCKET_MANIFEST_URL is not valid JSON"
+elif [ "$bucket_version" != "$BARE" ]; then
+	latest="$(latest_release)"
+	if [ -z "$latest" ]; then
+		skip "the bucket is at ${bucket_version:-no version}, not $BARE, and the latest release could not be read"
+	elif [ "$latest" = "$VERSION" ]; then
+		fail "the bucket is at ${bucket_version:-no version}, not the latest release $BARE — run make release-scoop VERSION=$VERSION"
+	else
+		skip "the bucket is at ${bucket_version:-no version}; $VERSION is not the latest release ($latest)"
+	fi
+else
+	matched=0
+	for pair in 64bit:amd64 arm64:arm64; do
+		key="${pair%%:*}"
+		name="apogee_${BARE}_windows_${pair#*:}.zip"
+		published_hash="$(sums_hash "$name")"
+		bucket_hash="$(manifest_hash "$work/apogee.json" "$key" || true)"
+		if [ -z "$published_hash" ]; then
+			fail "the release's SHA256SUMS lists no hash for $name"
+		elif [ "$bucket_hash" != "$published_hash" ]; then
+			fail "the bucket's $key hash is ${bucket_hash:-missing}, not $name's $published_hash"
+		else
+			matched=$((matched + 1))
+		fi
+	done
+	if [ "$matched" -eq 2 ]; then
+		echo "    bucket at $BARE, both Windows hashes match SHA256SUMS"
+	fi
 fi
 
 printf '\n'
