@@ -202,7 +202,13 @@ internal/config/config_test.go — TestEveryConfigKeyReachesTheOptions, everyKey
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/ && go test -race -count=1 -run 'Dangerous|Guard' ./internal/security/ ./internal/agent/ && go test -race -count=1 -run 'Settings|Manual' ./cmd/apogee/`
 **Commit:** `feat(security): make dangerous-action rules configurable`
 
-## 8. Adoption store and Project config writer
+## 8. Adoption store and Project config writer — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): the lock-path seam is `lockConfigAt(lockPath, path, timeout)` in `internal/config/configsplice.go` (where `lockConfigWithin` lives — a file the item's Files list does not name); `lockConfigWithin` now delegates to it with the sidecar `config.yaml.lock`, behaviour unchanged.
+NOTES (2026-10-10): instead of the guard's example `editFromLocked(lockPath, path, read, …)`, `editFrom` is split into the lock plus `editHeld(path, read, splice, verify) (wrote bool, err)`; `editProject` takes the lock itself so the empty-file/`.apogee/` creation and its undo (when the splice finds nothing to write or the edit is refused) both run inside the same hold — otherwise a no-op edit would leave an empty `config.yaml` in the repo.
+NOTES (2026-10-10): `internal/config` now imports `internal/adoption` for `adoption.ConfigLockPath`, so the writer's lock is always named beside the root's adoption record (one hash of the root, one place); `editProject(projectRoot, workspacesDir, splice, verify)` is unexported and has no production caller yet — items 13/14/17 add the exported writers on top of it.
+NOTES (2026-10-10): stated modes for a first project write are 0755 for `.apogee/` and 0644 for `config.yaml` (an ordinary, committable repo file holding no secret; umask applies); the adoption store is 0700/0600 as the plan says. A later write preserves the file's existing mode.
+NOTES (2026-10-10): fingerprint = sha256(kind + "\x00" + exact text), no whitespace collapsing, per the regression guard / ADR 0096 §4. A record naming another Project root is refused (Classify errors, Adopt does not overwrite); an unknown answer value reads as proposed and survives rewrites. The writer also refuses a Project root that is the user's home (its `.apogee/` is the global config).
 
 **What:**
 **Goal:** a package records, per Project root, which granting entries are adopted or rejected by fingerprint, and writes the Project config without seeding a template or leaving files in the repo besides `config.yaml`.

@@ -293,13 +293,32 @@ func lockConfig(path string) (release func(), err error) {
 // lockConfigWithin is lockConfig with the wait the caller names — the seam a test uses to meet a
 // held lock without sitting out the full timeout.
 func lockConfigWithin(path string, timeout time.Duration) (release func(), err error) {
+	return lockConfigAt(configLockPath(path), path, timeout)
+}
+
+// configLockPath is the sidecar lock beside the config at path — config.yaml.lock — or "" for the
+// empty path, which names no file to guard.
+func configLockPath(path string) string {
 	if path == "" {
+		return ""
+	}
+	return path + configLockSuffix
+}
+
+// lockConfigAt takes the lock file at lockPath for a write to the config at path, waiting up to
+// timeout, and returns its release. It is lockConfig with the lock's location named by the caller:
+// the global config keeps its lock beside the file, but a Project config keeps its own OUTSIDE the
+// repository (projectwrite.go), so a write leaves nothing in the project but the config itself.
+// The lock's directory is created owner-only when absent; an empty lockPath takes no lock. Refusals
+// name the config path, which is what the user knows the file by.
+func lockConfigAt(lockPath, path string, timeout time.Duration) (release func(), err error) {
+	if lockPath == "" {
 		return func() {}, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), configDirPerm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(lockPath), configDirPerm); err != nil {
 		return nil, fmt.Errorf("apogee: create config directory: %w", err)
 	}
-	release, err = platform.AcquireLockWait(path+configLockSuffix, timeout)
+	release, err = platform.AcquireLockWait(lockPath, timeout)
 	var held *platform.LockHeldError
 	switch {
 	case errors.As(err, &held):

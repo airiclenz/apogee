@@ -88,19 +88,32 @@ func editFrom(path string, read editRead, splice editSplice, verify editVerify) 
 		return err
 	}
 	defer release()
+	_, err = editHeld(path, read, splice, verify)
+	return err
+}
 
+// editHeld is the transaction from the read step on, for a caller that already holds the config's
+// lock: read, splice, verify, replace. It reports whether it wrote the file — false for a splice
+// that found nothing to do, and for every refusal. editFrom is the global config's caller; the
+// Project config writer (projectwrite.go) is the other, because its lock lives outside the
+// repository and it must prepare the file — and, when nothing was written, take that preparation
+// back — inside the same hold.
+func editHeld(path string, read editRead, splice editSplice, verify editVerify) (bool, error) {
 	data, err := read(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	updated, err := verifiedEdit(data, splice, verify)
 	if err != nil {
-		return fmt.Errorf("apogee: update config %q: %w", path, err)
+		return false, fmt.Errorf("apogee: update config %q: %w", path, err)
 	}
 	if updated == nil {
-		return nil
+		return false, nil
 	}
-	return writeConfigAtomically(path, updated)
+	if err := writeConfigAtomically(path, updated); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // verifiedEdit is the middle of the transaction — parse, splice, re-parse, verify — over bytes a

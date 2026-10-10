@@ -42,7 +42,10 @@
 // keeps ONE key writable without moving a comment (ADR 0035). configedit.go is the one transaction
 // those pieces are run in — seed and read the file, splice, re-parse, verify, replace it
 // atomically — together with the per-container shape predicates a writer's verify step is written
-// from. configwrite.go is the
+// from. projectwrite.go runs that transaction against a Project config (ADR 0096 §4): an absent
+// file starts as an empty document rather than the template, the lock lives under the apogee home
+// beside the root's adoption record (internal/adoption), a symlinked `.apogee/` or `config.yaml` is
+// refused, and nothing but the config is left in the repository. configwrite.go is the
 // acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
 // that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
 // /settings key, addressed by its registry path, and configwrite_scalarsplice.go is that writer's
