@@ -189,7 +189,13 @@ cmd/demorig/record.go — ambientApogeeEnv, apogeeEnv; cmd/demorig/record_test.g
 **Acceptance:** `go test -race -count=1 -run 'Update' ./cmd/apogee/`
 **Commit:** `feat(cli): check for a newer release when the TUI boots`
 
-## 7. `internal/update`: download, verify and stage a release binary
+## 7. `internal/update`: download, verify and stage a release binary — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — internal/update/latest.go: made necessary by adding `Stage` (the package doc, which lives in latest.go, described only the lookup; one sentence now names `Stage`).
+
+NOTES (2026-10-10): the archive is downloaded into memory (bounded at 256 MiB; SHA256SUMS at 64 KiB, extracted binary at 512 MiB) and the binary is written to a `.apogee-staging-*` temp file in `dir`, chmod 0755, fsynced and renamed into place, so every failure leaves `dir` empty; `dir` must already exist. `Stage` validates the tag (`vX.Y.Z`) and goos/goarch (`[a-z0-9]+`) before any request, and exports `ErrChecksumMismatch` for item 8.
+
+NOTES (2026-10-10): the entry is matched by exact name and must be a regular file (a symlink entry is refused); the entry name never reaches the file system, so `../apogee` cannot escape `dir`. Lint: pinned golangci-lint over ./internal/update/ reports 0 issues.
 
 **Depends on item 2.**
 **What:**
