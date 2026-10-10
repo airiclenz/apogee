@@ -231,11 +231,11 @@ type SettingsHost interface {
 	Apply(path, value string) (note string, err error)
 }
 
-// ConfigHost is the config FILE as one host capability: the eight acts a running session performs on
-// the file the composition root resolved — the host acknowledgement `/confine off --save` records,
-// the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers and the
-// `remember-model:` recording — named as one interface rather than spelled as eight bare funcs (ADR
-// 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
+// ConfigHost is the config FILE as one host capability: the twelve acts a running session performs on
+// the files the composition root resolved — the host acknowledgement `/confine off --save` records,
+// the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers, the
+// `remember-model:` recording, and the four Allow-rule acts on the Project config and its adoption
+// record (ADR 0096) — named as one interface rather than spelled as bare funcs (ADR 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
 // the others lean on for their posture: every act here is "one small file, spliced and renamed",
 // synchronous, on a keypress the human is waiting on, with a failure REPORTED and never swallowed —
 // the [SettingsHost.Write] contract.
@@ -246,8 +246,9 @@ type SettingsHost interface {
 // A nil host means the config file is unwired whole — a bench or headless Driver that composes no
 // file (ADR 0031) — and every act degrades as its unwired func did: the acknowledgement says it was
 // not saved, the external edit says the row cannot open an editor, nothing is watched, no start-up
-// offer is raised, and every model pick is session-scoped ([configHostOrNoop]). A host that IS wired
-// but cannot do one act says so in that act's own answer (ADR 0054 decision 3).
+// offer is raised, every model pick is session-scoped, and no Allow rule can be saved
+// ([configHostOrNoop]). A host that IS wired but cannot do one act says so in that act's own answer
+// (ADR 0054 decision 3).
 type ConfigHost interface {
 	// SaveHostAcknowledgement persists THIS host's `unconfined-hosts:` acknowledgement to the
 	// global config (the `/confine off --save` half) and returns the file it wrote, so the
@@ -372,6 +373,32 @@ type ConfigHost interface {
 	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses, a
 	// program this machine cannot run) and nothing is launched.
 	ExternalEditSpec(path string) (EditorCommand, error)
+
+	// AddProjectRule is the "Always in this project…" answer (ADR 0096 §4): text — a word prefix for
+	// a `terminal` rule, a server alias for an MCP one — is written into the Project config's
+	// `allow:` list of kind, its exact text is recorded as adopted, and the session's effective Allow
+	// rules are updated, so the next identical call — this agent's or a running sub-agent's — runs
+	// without asking. It says nothing about the call that raised the question: the Approver answers
+	// that one, exactly as it would have.
+	//
+	// The order is the safe one: the file first and the adoption after it, so a failure part-way
+	// leaves a rule PROPOSED — inert — and never an adoption of text no file holds. A rule the list
+	// already holds is adopted and nothing is written. The [SettingsHost.Write] contract otherwise:
+	// synchronous on the keypress, and a failure is REPORTED.
+	AddProjectRule(kind domain.AllowRuleKind, text string) error
+
+	// AdoptRules records the project rules the human accepted — the adoption pane's "adopt" — and
+	// brings them into force. Only the record moves: the Project config already holds them.
+	AdoptRules(rules []domain.AllowRule) error
+
+	// RejectRules records the project rules the human turned down; they stay inert, and are not
+	// offered again until their text changes. A rule that was in force leaves the effective set.
+	RejectRules(rules []domain.AllowRule) error
+
+	// RemoveRule takes a project rule out of the Project config and drops its recorded answer, so it
+	// grants nothing from the next call on. A global rule is the human's own hand-written line and is
+	// refused here.
+	RemoveRule(rule domain.AllowRule) error
 }
 
 // noopConfigHost is what a nil [ConfigHost] degrades to: every act answers exactly as its unwired
@@ -389,6 +416,7 @@ var (
 	errNoPlaintextKeyRecord  = errors.New("recording that answer is not available in this build")
 	errNoSubAgentsMigration  = errors.New("moving the sub-agents flag is not available in this build")
 	errNoExternalEdit        = errors.New(noExternalEditNote)
+	errNoProjectRules        = errors.New("saving an allow rule is not available in this build")
 )
 
 func (noopConfigHost) SaveHostAcknowledgement() (string, error) { return "", errNoHostAcknowledgement }
@@ -403,6 +431,10 @@ func (noopConfigHost) RecordModelChoice(string) (bool, error) { return false, ni
 func (noopConfigHost) ExternalEditSpec(string) (EditorCommand, error) {
 	return EditorCommand{}, errNoExternalEdit
 }
+func (noopConfigHost) AddProjectRule(domain.AllowRuleKind, string) error { return errNoProjectRules }
+func (noopConfigHost) AdoptRules([]domain.AllowRule) error               { return errNoProjectRules }
+func (noopConfigHost) RejectRules([]domain.AllowRule) error              { return errNoProjectRules }
+func (noopConfigHost) RemoveRule(domain.AllowRule) error                 { return errNoProjectRules }
 
 // configHostOrNoop is the ONE nil guard the family has: the wired host, or the degrade above when a
 // Driver composed none. Every act that can carry its refusal in its own answer calls through here

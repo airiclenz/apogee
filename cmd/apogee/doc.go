@@ -71,7 +71,10 @@
 // The /settings seams: settingsrows.go projects the key registry plus the values THIS
 // run resolved onto the renderer's plain rows, masking what must never be shown;
 // settingsedit.go is the `$EDITOR` round trip for the keys no row can express — the
-// argv out, the list of changed keys back (ADR 0037 decision 5).
+// argv out, the list of changed keys back (ADR 0037 decision 5); projectrules.go the four
+// Allow-rule acts of the config host (ADR 0096 §4) — a project rule written into the Project
+// config, adopted, rejected or removed, then the baseline re-taken and the effective rules
+// re-resolved and installed on the engine.
 //
 // The session's wiring: upstream.go the holder owning the CURRENT heartbeat Monitor and
 // binding — so a `/server` switch is a composition-root move the renderer never sees —

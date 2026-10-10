@@ -268,3 +268,183 @@ func TestProjectWriteRefusesTheHomeFolder(t *testing.T) {
 		t.Errorf("a refused write left %v in the home folder", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Project rules — AddProjectAllowRule / RemoveProjectAllowRule
+// ----------------------------------------------------------------------------
+
+// writeProjectConfig seeds the Project config of root with text.
+func writeProjectConfig(t *testing.T, root, text string) string {
+	t.Helper()
+	path := projectFilePath(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A rule lands in every shape the `allow:` key can be met in, at the indentation already there,
+// with the rest of the file — comments and the other list included — untouched.
+func TestAddProjectAllowRuleMeetsEveryShape(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		kind AllowKind
+		file string
+		want string
+	}{
+		{"no file", AllowTerminal, "", "allow:\n  terminal:\n    - go test\n"},
+		{"no allow key", AllowTerminal, "# mine\nuse-project-skills: false\n",
+			"# mine\nuse-project-skills: false\n\nallow:\n  terminal:\n    - go test\n"},
+		{"a bare allow key", AllowTerminal, "allow:\nuse-project-skills: false\n",
+			"allow:\n  terminal:\n    - go test\nuse-project-skills: false\n"},
+		{"the other list only", AllowTerminal, "allow:\n    mcp-servers:\n        - github\n",
+			"allow:\n    mcp-servers:\n        - github\n    terminal:\n      - go test\n"},
+		{"a bare list key", AllowTerminal, "allow:\n  terminal:\n  mcp-servers: [github]\n",
+			"allow:\n  terminal:\n    - go test\n  mcp-servers: [github]\n"},
+		{"a list with items", AllowTerminal, "allow:\n  terminal:\n  - make  # build\n  mcp-servers:\n  - github\n",
+			"allow:\n  terminal:\n  - make  # build\n  - go test\n  mcp-servers:\n  - github\n"},
+		{"an MCP server", AllowMCPServers, "allow:\n  terminal:\n    - make\n",
+			"allow:\n  terminal:\n    - make\n  mcp-servers:\n    - go test\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root, workspaces := projectWriteFixture(t)
+			path := projectFilePath(root)
+			if tc.file != "" {
+				path = writeProjectConfig(t, root, tc.file)
+			}
+
+			got, err := AddProjectAllowRule(root, workspaces, tc.kind, "go test")
+			if err != nil {
+				t.Fatalf("AddProjectAllowRule: %v", err)
+			}
+			if got != path {
+				t.Errorf("path = %q, want %q", got, path)
+			}
+			if data, _ := os.ReadFile(path); string(data) != tc.want {
+				t.Errorf("file =\n%s\nwant\n%s", data, tc.want)
+			}
+		})
+	}
+}
+
+// A rule the list already holds is a confirmation: nothing is written.
+func TestAddProjectAllowRuleAlreadyThereWritesNothing(t *testing.T) {
+	t.Parallel()
+	root, workspaces := projectWriteFixture(t)
+	const file = "allow:\n  terminal: [\"go test\"]\n"
+	path := writeProjectConfig(t, root, file)
+
+	if _, err := AddProjectAllowRule(root, workspaces, AllowTerminal, "go test"); err != nil {
+		t.Fatalf("AddProjectAllowRule: %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != file {
+		t.Errorf("file =\n%s\nwant it untouched", data)
+	}
+}
+
+// What no rule can be is refused before the file is opened, and a list written in flow style is
+// refused rather than rewritten.
+func TestAddProjectAllowRuleRefusals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		kind AllowKind
+		text string
+		file string
+	}{
+		{"an unknown kind", "network", "x", ""},
+		{"a blank rule", AllowTerminal, "  ", ""},
+		{"a rule over two lines", AllowTerminal, "go\ntest", ""},
+		{"a flow-style list", AllowTerminal, "go test", "allow:\n  terminal: [make]\n"},
+		{"a flow-style block", AllowTerminal, "go test", "allow: {terminal: [make]}\n"},
+		{"a scalar allow", AllowTerminal, "go test", "allow: yes\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root, workspaces := projectWriteFixture(t)
+			if tc.file != "" {
+				writeProjectConfig(t, root, tc.file)
+			}
+
+			if _, err := AddProjectAllowRule(root, workspaces, tc.kind, tc.text); err == nil {
+				t.Fatal("AddProjectAllowRule succeeded; want a refusal")
+			}
+			if tc.file == "" {
+				if tree := treeOf(t, root); len(tree) != 0 {
+					t.Errorf("project tree = %v, want nothing left behind", tree)
+				}
+			} else if data, _ := os.ReadFile(projectFilePath(root)); string(data) != tc.file {
+				t.Errorf("file =\n%s\nwant it untouched", data)
+			}
+		})
+	}
+}
+
+// Removing a rule takes its line and nothing else; a rule the file does not hold leaves the file —
+// and a project with no config at all — exactly as it was.
+func TestRemoveProjectAllowRule(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a rule the list holds", func(t *testing.T) {
+		t.Parallel()
+		root, workspaces := projectWriteFixture(t)
+		path := writeProjectConfig(t, root, "allow:\n  terminal:\n    - make\n    - go test # tests\n  mcp-servers:\n    - go test\n")
+
+		if _, err := RemoveProjectAllowRule(root, workspaces, AllowTerminal, "go test"); err != nil {
+			t.Fatalf("RemoveProjectAllowRule: %v", err)
+		}
+		want := "allow:\n  terminal:\n    - make\n  mcp-servers:\n    - go test\n"
+		if data, _ := os.ReadFile(path); string(data) != want {
+			t.Errorf("file =\n%s\nwant\n%s", data, want)
+		}
+	})
+
+	t.Run("a rule the list does not hold", func(t *testing.T) {
+		t.Parallel()
+		root, workspaces := projectWriteFixture(t)
+		const file = "allow:\n  terminal:\n    - make\n"
+		path := writeProjectConfig(t, root, file)
+
+		if _, err := RemoveProjectAllowRule(root, workspaces, AllowTerminal, "go test"); err != nil {
+			t.Fatalf("RemoveProjectAllowRule: %v", err)
+		}
+		if data, _ := os.ReadFile(path); string(data) != file {
+			t.Errorf("file =\n%s\nwant it untouched", data)
+		}
+	})
+
+	t.Run("no project config", func(t *testing.T) {
+		t.Parallel()
+		root, workspaces := projectWriteFixture(t)
+
+		if _, err := RemoveProjectAllowRule(root, workspaces, AllowTerminal, "go test"); err != nil {
+			t.Fatalf("RemoveProjectAllowRule: %v", err)
+		}
+		if tree := treeOf(t, root); len(tree) != 0 {
+			t.Errorf("project tree = %v, want nothing created", tree)
+		}
+	})
+
+	t.Run("a rule written as a block scalar", func(t *testing.T) {
+		t.Parallel()
+		root, workspaces := projectWriteFixture(t)
+		const file = "allow:\n  terminal:\n    - >-\n      go test\n"
+		path := writeProjectConfig(t, root, file)
+
+		if _, err := RemoveProjectAllowRule(root, workspaces, AllowTerminal, "go test"); err == nil {
+			t.Fatal("RemoveProjectAllowRule succeeded; want a refusal")
+		}
+		if data, _ := os.ReadFile(path); string(data) != file {
+			t.Errorf("file =\n%s\nwant it untouched", data)
+		}
+	})
+}

@@ -6,7 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/adoption"
 )
@@ -208,4 +211,202 @@ func isHome(root string) bool {
 		home = resolved
 	}
 	return filepath.Clean(home) == root
+}
+
+// ----------------------------------------------------------------------------
+// Project rules — the `allow:` lists the writer above edits
+// ----------------------------------------------------------------------------
+
+// AddProjectAllowRule appends text to the `allow.<kind>` list of the Project config of projectRoot
+// and returns the file it wrote — the "Always in this project…" answer (ADR 0096 §4). It writes the
+// rule and nothing else: whether the rule is live is the adoption record's question, which the
+// caller answers next (internal/adoption). A list that already holds text is a confirmation, and
+// nothing is written.
+//
+// Errors: a refusal for an unknown kind, a blank text or one that spans lines; the writer's own
+// refusals and the transaction's errors (editProject); a refusal naming the part of the file the
+// splice could not read — a flow-style `allow:` block or list, or a key holding something else.
+func AddProjectAllowRule(projectRoot, workspacesDir string, kind AllowKind, text string) (string, error) {
+	if err := checkAllowRule(kind, text); err != nil {
+		return "", err
+	}
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		if slices.Contains(allowList(before.Allow, kind), text) {
+			return nil, nil
+		}
+		return spliceAllowRuleIn(data, kind, text)
+	}
+	verify := func(before, after fileConfig, _ []byte) error {
+		want := append(slices.Clone(allowList(before.Allow, kind)), text)
+		return verifyAllowList(before, after, kind, want, "add the rule by hand")
+	}
+	return projectFilePath(projectRoot), editProject(projectRoot, workspacesDir, splice, verify)
+}
+
+// RemoveProjectAllowRule takes text out of the `allow.<kind>` list of the Project config of
+// projectRoot and returns the file it wrote; a list that does not hold it is left alone. Only the
+// item's own line goes — the keys above it stay, so an emptied list reads as a bare `terminal:`.
+//
+// Errors: as [AddProjectAllowRule], plus a refusal for an item that is not one plain line.
+func RemoveProjectAllowRule(projectRoot, workspacesDir string, kind AllowKind, text string) (string, error) {
+	if err := checkAllowRule(kind, text); err != nil {
+		return "", err
+	}
+	at := -1
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		at = slices.Index(allowList(before.Allow, kind), text)
+		if at < 0 {
+			return nil, nil
+		}
+		return spliceAllowRuleOut(data, kind, at)
+	}
+	verify := func(before, after fileConfig, _ []byte) error {
+		want := slices.Delete(slices.Clone(allowList(before.Allow, kind)), at, at+1)
+		return verifyAllowList(before, after, kind, want, "remove the rule by hand")
+	}
+	return projectFilePath(projectRoot), editProject(projectRoot, workspacesDir, splice, verify)
+}
+
+// checkAllowRule refuses what no rule can be before the file is opened: a kind the `allow:` key
+// does not have, a blank rule — which would match every command — and a rule that spans lines.
+func checkAllowRule(kind AllowKind, text string) error {
+	switch {
+	case kind != AllowTerminal && kind != AllowMCPServers:
+		return fmt.Errorf("apogee: allow has no %q list; a rule sits under terminal or mcp-servers", kind)
+	case strings.TrimSpace(text) == "":
+		return errors.New("apogee: an allow rule names what it allows; this one is empty")
+	case strings.ContainsAny(text, "\r\n"):
+		return errors.New("apogee: an allow rule is one line; this one spans several")
+	}
+	return nil
+}
+
+// allowList is the list of kind in an `allow:` block as the file spells it, nil for no block.
+func allowList(ac *allowConfig, kind AllowKind) []string {
+	if ac == nil {
+		return nil
+	}
+	if kind == AllowMCPServers {
+		return ac.MCPServers
+	}
+	return ac.Terminal
+}
+
+// verifyAllowList is the gate both rule edits pass: the list of kind must read exactly want, the
+// other list must not have moved, and nothing outside `allow:` may have changed.
+func verifyAllowList(before, after fileConfig, kind AllowKind, want []string, byHand string) error {
+	other := AllowTerminal
+	if kind == AllowTerminal {
+		other = AllowMCPServers
+	}
+	if !slices.Equal(allowList(after.Allow, kind), want) ||
+		!slices.Equal(allowList(after.Allow, other), allowList(before.Allow, other)) ||
+		!sameApartFrom(before, after, "allow") {
+		return fmt.Errorf("the edit would have changed more than the allow.%s list; %s", kind, byHand)
+	}
+	return nil
+}
+
+// spliceAllowRuleIn inserts text as the last item of `allow.<kind>`. The shapes it meets, outermost
+// first: no `allow:` key — append a block; a bare `allow:` — start the mapping under it; a mapping
+// without the list — add the list after its last line; a bare list key — start the list; a list
+// with items — append one at their indentation. A flow-style block or list has no line to add to,
+// and is refused rather than rewritten.
+func spliceAllowRuleIn(data []byte, kind AllowKind, text string) ([]byte, error) {
+	doc, err := Document(data)
+	if err != nil {
+		return nil, err
+	}
+	root, err := rootMapping(doc)
+	if err != nil {
+		return nil, err
+	}
+	lines := SplitConfigLines(data)
+	allowKey, allow := mappingEntry(root, "allow")
+	switch {
+	case allowKey == nil:
+		item, err := renderAllowItem(text, 2*listIndent)
+		if err != nil {
+			return nil, err
+		}
+		block := []string{"allow:", indentLine(listIndent, string(kind)+":")}
+		return joinConfigLines(appendBlock(lines, append(block, item...))), nil
+	case isNullNode(allow):
+		return insertAllowList(lines, kind, text, listIndent, allowKey.Line)
+	case allow.Kind != yaml.MappingNode || allow.Style&yaml.FlowStyle != 0:
+		return nil, errors.New("its allow: key is not a block of lists; add the rule by hand")
+	}
+	listKey, list := mappingEntry(allow, string(kind))
+	subject := "its allow." + string(kind) + ": list"
+	switch {
+	case listKey == nil:
+		return insertAllowList(lines, kind, text, allow.Column-1, maxNodeLine(allow))
+	case isNullNode(list):
+		item, err := renderAllowItem(text, listKey.Column-1+listIndent)
+		if err != nil {
+			return nil, err
+		}
+		return insertAt(lines, item, listKey.Line, subject)
+	case list.Kind != yaml.SequenceNode || list.Style&yaml.FlowStyle != 0 || len(list.Content) == 0:
+		return nil, fmt.Errorf("%s is not a block list; add the rule by hand", subject)
+	}
+	item, err := renderAllowItem(text, list.Column-1)
+	if err != nil {
+		return nil, err
+	}
+	return insertAt(lines, item, maxNodeLine(list.Content[len(list.Content)-1]), subject)
+}
+
+// insertAllowList inserts a `<kind>:` key at indent, holding the one item text, after line at.
+func insertAllowList(lines []string, kind AllowKind, text string, indent, at int) ([]byte, error) {
+	item, err := renderAllowItem(text, indent+listIndent)
+	if err != nil {
+		return nil, err
+	}
+	insert := append([]string{indentLine(indent, string(kind)+":")}, item...)
+	return insertAt(lines, insert, at, "its allow: key")
+}
+
+// renderAllowItem renders text as one list item through the YAML marshaller — which owns the
+// quoting, so no rule can smuggle a syntax break into the file — indented to indent.
+func renderAllowItem(text string, indent int) ([]string, error) {
+	out, err := yaml.Marshal([]string{text})
+	if err != nil {
+		return nil, fmt.Errorf("render the allow rule: %w", err)
+	}
+	rendered := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	for i, l := range rendered {
+		rendered[i] = indentLine(indent, l)
+	}
+	return rendered, nil
+}
+
+// spliceAllowRuleOut removes the item at index at of `allow.<kind>` — its one line. An item that is
+// not a plain scalar on the line its dash opens is refused: removing that line alone would leave
+// the rest of it behind.
+func spliceAllowRuleOut(data []byte, kind AllowKind, at int) ([]byte, error) {
+	doc, err := Document(data)
+	if err != nil {
+		return nil, err
+	}
+	root, err := rootMapping(doc)
+	if err != nil {
+		return nil, err
+	}
+	subject := "its allow." + string(kind) + ": list"
+	_, allow := mappingEntry(root, "allow")
+	_, list := mappingEntry(allow, string(kind))
+	if list == nil || list.Kind != yaml.SequenceNode || list.Style&yaml.FlowStyle != 0 || at >= len(list.Content) {
+		return nil, fmt.Errorf("%s is not a block list; remove the rule by hand", subject)
+	}
+	item := list.Content[at]
+	if item.Kind != yaml.ScalarNode || item.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		return nil, fmt.Errorf("%s holds the rule as more than one line; remove the rule by hand", subject)
+	}
+	lines := SplitConfigLines(data)
+	line := item.Line
+	if line < 1 || line > len(lines) {
+		return nil, fmt.Errorf("%s points at line %d, which is outside the file", subject, line)
+	}
+	return joinConfigLines(slices.Delete(slices.Clone(lines), line-1, line)), nil
 }

@@ -304,7 +304,15 @@ internal/agent/secretsguard_test.go — TestCommitSecretsHonoursStricterTextVerd
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Dangerous|ControlPlane' ./internal/security/ ./internal/agent/ && go test -race -count=1 -run 'ControlPlane' ./cmd/apogee/`
 **Commit:** `feat(security): refuse tool writes to the Project config`
 
-## 13. ConfigHost seam: add a project rule
+## 13. ConfigHost seam: add a project rule — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from "item 8's writer" being a callable rule writer — item 8 shipped only the unexported transaction `editProject` (internal/config/projectwrite.go) and no `allow:` list splice, so the exported `AddProjectAllowRule` / `RemoveProjectAllowRule` (line splice + verify over `allow.<kind>`, idempotent, flow-style refused) were added beside it in internal/config/projectwrite.go, with tests in internal/config/projectwrite_test.go.
+NOTES (2026-10-10): seam shape chosen: `AddProjectRule(kind domain.AllowRuleKind, text string) error`, `AdoptRules([]domain.AllowRule) error`, `RejectRules([]domain.AllowRule) error`, `RemoveRule(domain.AllowRule) error`. RemoveRule refuses a global rule for now ("remove it there by hand"), so item 18 can add global removal without changing the signature. The unwired degrade answers "saving an allow rule is not available in this build". The Approver signature and its implementations are untouched; uiApprover answering ApprovalAllow after the add is item 14's pane work.
+NOTES (2026-10-10): write order is the safe one: add writes the file and then adopts; remove forgets the adoption and then edits the file. A failure part-way leaves a rule proposed (inert), never an adopted fingerprint for text no file holds. Each act then calls `w.externalEdits.refresh()` (ADR 0041 d8), re-resolves the effective rules with `config.LoadLayeredConfig`, and installs them through `w.live.update` and `w.engine.SetAllowRules` (lateEngine replays the set at bind).
+NOTES (2026-10-10): removing a rule deletes only that item's line. An emptied list stays in the file as a bare `terminal:` key, which parses to no rules.
+NOTES (2026-10-10): consequential edit — internal/tui/tui.go: the ConfigHost doc's "eight acts" count and nil-host degrade list made false by the four new acts.
+NOTES (2026-10-10): consequential edit — cmd/apogee/wire_options.go: the configHost and Options.Config docs' "eight acts" made false by the four new acts.
+NOTES (2026-10-10): consequential edit — cmd/apogee/doc.go: the file map must name the new projectrules.go (TestDocMapNamesEveryFile).
 
 **What:**
 **Goal:** the TUI can add a project or MCP-server rule through one `ConfigHost` method that writes the Project config, records its adoption and updates the live rules — with no change to the `Approver` signature.

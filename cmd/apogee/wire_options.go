@@ -9,7 +9,7 @@ package main
 // every field it names is filled.
 //
 // Below it, the host capabilities that projection names as INTERFACES rather than as bare funcs
-// (ADR 0054): configHost, the eight acts a session performs on the config file itself; settingsHost,
+// (ADR 0054): configHost, the twelve acts a session performs on the config files themselves; settingsHost,
 // the `/settings` pane's four acts over that same file; and schemeHost, the three things this program
 // does with the schemes folder. Each is one value the literal hands over and one seam a renderer test
 // fakes.
@@ -171,7 +171,8 @@ func (w *rootWiring) options() tui.Options {
 		// --save`, recording THIS host in the same config.yaml ApplyConfig read at startup; the
 		// `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5) and the watcher's
 		// wait that is its second trigger (ADR 0041 decision 3); the answers to the two start-up
-		// offers below; and the `remember-model:` recording of an explicit `/model` pick. The renderer
+		// offers below; the `remember-model:` recording of an explicit `/model` pick; and the
+		// Allow-rule acts — a project rule written, adopted, rejected or removed. The renderer
 		// learns only what each answer says — a path written, the keys that changed, a command line
 		// — because the file's location, its format, the secret store and the editor this
 		// environment names are all this layer's (configHost, below). Always wired here: the acts a
@@ -263,14 +264,15 @@ func (w *rootWiring) options() tui.Options {
 // The host capabilities Options names as interfaces (ADR 0054)
 // ----------------------------------------------------------------------------
 
-// configHost is this binary's [tui.ConfigHost]: the eight acts a session performs on the config file
-// this run resolved, which are eight faces of one file — the host acknowledgement, the `$EDITOR`
-// round trip and the watcher's wait, the three start-up-offer answers, and the model recording. It
-// holds the wiring itself rather than eight closures over it, the serverHost posture: every act reads
-// live state the wiring owns — the external-edit baseline, the watcher, the secret store, the bound
-// entry — and each is the verb that already existed beside it (keymigrate.go, settingsedit.go,
-// wire_server.go, wire_verbs.go), unchanged by the regrouping. This value is only where the
-// renderer's eight names meet them.
+// configHost is this binary's [tui.ConfigHost]: the twelve acts a session performs on the config
+// files this run resolved — the host acknowledgement, the `$EDITOR` round trip and the watcher's
+// wait, the three start-up-offer answers, the model recording, and the four Allow-rule acts on the
+// Project config and its adoption record (projectrules.go). It holds the wiring itself rather than
+// twelve closures over it, the serverHost posture: every act reads live state the wiring owns — the
+// external-edit baseline, the watcher, the secret store, the bound entry, the Project root — and
+// each is the verb that already existed beside it (keymigrate.go, settingsedit.go, wire_server.go,
+// wire_verbs.go, projectrules.go), unchanged by the regrouping. This value is only where the
+// renderer's twelve names meet them.
 type configHost struct {
 	w *rootWiring
 	// saveHostAcknowledgement is the one act that is a closure, because internal/config hands it over
