@@ -17,7 +17,9 @@
 
 **apogee is an open-source AI coding agent that runs in your terminal and works with
 local LLMs.** Point it at a local model server — llama.cpp, Ollama, LM Studio, vLLM — and
-your code never leaves your machine: no API key, no cloud, works offline. Point it at any
+your code never leaves your machine: no API key, no cloud, works offline. The one request
+apogee makes on its own is a check for a newer release on github.com when the TUI starts;
+[`update-check: false`](docs/manual/configuration.md#update-check) turns it off. Point it at any
 OpenAI-compatible endpoint, at OpenRouter, or at Claude over the Anthropic API, and the
 same agent runs there. One binary for Windows, macOS and Linux.
 

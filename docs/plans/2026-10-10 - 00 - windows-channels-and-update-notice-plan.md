@@ -49,7 +49,11 @@
 - The one-time manual setup: create `airiclenz/scoop-bucket`, fork `microsoft/winget-pkgs`, the first `komac new` submission (documented in item 11, never run by an agent).
 - Caching the check result; an in-chat `/update` command.
 
-## 1. ADR: the TUI's one first-party request, and the install channels
+## 1. ADR: the TUI's one first-party request, and the install channels — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from the ADR number 0096 — that number was taken by `0096-project-config-grants-are-live-only-by-adoption.md` (commit 9d16189c) after the plan was written, so the ADR is `docs/adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md`; the item's Acceptance `test -f docs/adr/0096-*.md` passes only on the old ADR, so the verifier should check `test -f docs/adr/0097-*.md`, and later items citing "ADR 0096" for this decision mean 0097.
+
+NOTES (2026-10-10): README links `docs/manual/configuration.md#update-check`, an anchor that exists only once item 4 adds the `### update-check` heading (as the plan's Read first line anticipates).
 
 **What:**
 **Goal:** `docs/adr/0096-*.md` records every ratified call above (update check, `apogee update` scope, channel matrix, detection rule). The README's "works offline" sentence states that the TUI makes one release check to github.com, which can be disabled.
