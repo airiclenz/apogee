@@ -244,6 +244,11 @@ func (w *rootWiring) options() tui.Options {
 		// to the human until they have sent something. recall.New touches no disk: the directory is
 		// created on the first recorded prompt.
 		Recall: recall.New(w.roots.prompts, w.roots.workspace),
+		// The boot update check (ADR 0097, wire_update.go): wired only here — the interactive TUI is
+		// the one Driver that asks — and only while `update-check:` is on (APOGEE_NO_UPDATE_CHECK
+		// forces it off) and this binary is a clean release build; nil otherwise, and nil sends
+		// nothing.
+		Update: updateHostFor(w.opts.UpdateCheck, apogee.BaseVersion(), apogee.Version()),
 		// The naming half of the same records: the seam that turns a first prompt into a title, and
 		// the `auto-title:` key that says whether a new session names itself without being asked.
 		// The seam is wired either way — the key is a preference about automatism, not a ban on the

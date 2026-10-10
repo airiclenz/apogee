@@ -357,7 +357,8 @@ func (s *ptySession) spawn() {
 // ptyEnv is the WHOLE environment the launched binary gets: nothing is inherited, so what a driven
 // run reads is exactly what this names, and an APOGEE_* variable in the developer's shell cannot
 // reach it. HOME is the suite's throwaway one (TestMain's), never the developer's; PATH is there
-// because apogee resolves the programs its tools spawn through it.
+// because apogee resolves the programs its tools spawn through it; APOGEE_NO_UPDATE_CHECK keeps the
+// shipped binary from asking the real release server for a newer version at boot (ADR 0097).
 //
 // extra is appended verbatim, so a caller can hand the child a variable this base set has no opinion
 // about (the egress run's HTTP_PROXY, T-18) without widening what every other run inherits.
@@ -366,6 +367,7 @@ func ptyEnv(extra ...string) []string {
 		"HOME=" + suiteTempHome,
 		"USERPROFILE=" + suiteTempHome,
 		"PATH=" + os.Getenv("PATH"),
+		config.EnvNoUpdateCheck + "=" + suiteNoUpdateCheck,
 	}, extra...)
 }
 

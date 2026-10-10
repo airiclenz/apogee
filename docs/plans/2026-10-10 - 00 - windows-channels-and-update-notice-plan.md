@@ -162,7 +162,13 @@ NOTES (2026-10-10): the CHANGELOG entry describes the surface as shipped once it
 **Acceptance:** `go test -race -count=1 -run 'Startup|UpdateCheck' ./internal/tui/`
 **Commit:** `feat(tui): name the upgrade command when a newer release exists`
 
-## 6. Wire the update host into the interactive TUI only
+## 6. Wire the update host into the interactive TUI only — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — cmd/apogee/doc.go: made necessary by the new wire_update.go (the composition root's file map TestDocMapNamesEveryFile enforces).
+
+NOTES (2026-10-10): the gate is wired as updateHostFor(updateCheck, baseVersion, fullVersion) over the pure updateCheckEnabled; options() passes w.opts.UpdateCheck (APOGEE_NO_UPDATE_CHECK already forced off by config.ApplyConfig) with apogee.BaseVersion()/Version(). The host captures the updateBaseURL/installInputs package seams at construction; tests that swap them are serial and restore via t.Cleanup.
+
+NOTES (2026-10-10): demorig's apogeeEnv now strips APOGEE_NO_UPDATE_CHECK with the other overrides and appends APOGEE_NO_UPDATE_CHECK=1, so a take never asks and never paints the notice; TestApogeeEnvStripsEveryApogeeOverride now expects that trailing entry.
 
 **Depends on items 2, 3, 4, 5.**
 **What:**

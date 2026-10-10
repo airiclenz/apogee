@@ -325,19 +325,24 @@ func endTake(ctx context.Context, term *Terminal) *Take {
 // whole of what a take runs on, so none of them reaches it. It lists every config.Env* name.
 var ambientApogeeEnv = []string{
 	config.EnvConfig, config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode,
-	config.EnvBypass, config.EnvWorkspace, config.EnvAPIKey,
+	config.EnvBypass, config.EnvWorkspace, config.EnvAPIKey, config.EnvNoUpdateCheck,
 }
 
-// apogeeEnv is environ less every variable in ambientApogeeEnv.
+// takeNoUpdateCheck is the one APOGEE_* variable a take SETS: the boot update check off, so a
+// recording neither asks the real release server for a newer version nor paints its notice on the
+// start-up box (ADR 0097). Any non-empty value turns the check off.
+const takeNoUpdateCheck = config.EnvNoUpdateCheck + "=1"
+
+// apogeeEnv is environ less every variable in ambientApogeeEnv, plus takeNoUpdateCheck.
 func apogeeEnv(environ []string) []string {
-	kept := make([]string, 0, len(environ))
+	kept := make([]string, 0, len(environ)+1)
 	for _, entry := range environ {
 		name, _, _ := strings.Cut(entry, "=")
 		if !slices.Contains(ambientApogeeEnv, name) {
 			kept = append(kept, entry)
 		}
 	}
-	return kept
+	return append(kept, takeNoUpdateCheck)
 }
 
 // performBeats waits for the program's first paint, then runs the beats.

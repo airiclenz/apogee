@@ -34,6 +34,10 @@ var ambientApogeeEnv = []string{
 	config.EnvBypass, config.EnvWorkspace,
 }
 
+// suiteNoUpdateCheck is the APOGEE_NO_UPDATE_CHECK value TestMain sets for the whole binary and
+// ptyEnv hands every PTY launch: any non-empty value turns the boot update check off.
+const suiteNoUpdateCheck = "1"
+
 // realUserHome is the process's home as it was BEFORE TestMain overrode it — the value the
 // guard test asserts nothing resolves to any more. Empty when the OS could not name one.
 var realUserHome string
@@ -82,6 +86,11 @@ func TestMain(m *testing.M) {
 	for _, name := range ambientApogeeEnv {
 		_ = os.Unsetenv(name)
 	}
+	// And the one variable the suite SETS rather than clears: the boot update check off for every
+	// driven launch, so no test sends a request to the real release server (ADR 0097). It stays out
+	// of ambientApogeeEnv, whose guard asserts each name empty; a test of the enabled path clears it
+	// with `t.Setenv(config.EnvNoUpdateCheck, "")` and stays serial.
+	_ = os.Setenv(config.EnvNoUpdateCheck, suiteNoUpdateCheck)
 	// The config watcher's cadence, likewise once for the binary rather than per launch. The
 	// production one — a poll a second plus a quarter-second settle (internal/filewatch) — is the
 	// right number for a human saving a document and a second and a half of the suite's budget for

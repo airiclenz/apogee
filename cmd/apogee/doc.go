@@ -52,6 +52,9 @@
 // rebuilds and re-installs it; wire_session.go the session-persistence host plus
 // the resume resolution a --resume/--continue start goes through (the prompt-recall
 // host is a workspace-bound *recall.Store, asserted in wire_options.go);
+// wire_update.go the boot update check behind [tui.Options.Update] — the gate that wires it only
+// for a clean release build with `update-check:` on, and the host that asks internal/update for
+// the latest release and names this install's upgrade command (ADR 0097);
 // wire_engine.go Agent construction through the public surface and the
 // late-bound engine that stands in until a server is picked; wire_server.go the entry a
 // startup selection collapses to, the one step that binds any entry to a session, the

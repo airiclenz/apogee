@@ -238,7 +238,7 @@ func headlessRunUnderEnv(t *testing.T, stub *stubRunner, name, value string) (st
 
 	for _, other := range []string{
 		config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode, config.EnvBypass,
-		config.EnvAPIKey, config.EnvConfig, config.EnvWorkspace,
+		config.EnvAPIKey, config.EnvConfig, config.EnvWorkspace, config.EnvNoUpdateCheck,
 	} {
 		t.Setenv(other, "")
 	}

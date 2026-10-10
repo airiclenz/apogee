@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -51,6 +52,7 @@ func TestApogeeEnvStripsEveryApogeeOverride(t *testing.T) {
 	overrides := []string{
 		config.EnvEndpoint, config.EnvServer, config.EnvModel, config.EnvMode,
 		config.EnvBypass, config.EnvAPIKey, config.EnvConfig, config.EnvWorkspace,
+		config.EnvNoUpdateCheck,
 	}
 	environ := []string{"PATH=/usr/bin", "HOME=/home/dev"}
 	for _, name := range overrides {
@@ -60,15 +62,16 @@ func TestApogeeEnvStripsEveryApogeeOverride(t *testing.T) {
 	got := apogeeEnv(environ)
 
 	for _, entry := range got {
-		name, _, _ := strings.Cut(entry, "=")
+		name, value, _ := strings.Cut(entry, "=")
 		for _, override := range overrides {
-			if name == override {
+			if name == override && value == "ambient-"+override {
 				t.Errorf("a take's environment carries the parent's %s", entry)
 			}
 		}
 	}
-	if len(got) != 2 || got[0] != "PATH=/usr/bin" || got[1] != "HOME=/home/dev" {
-		t.Errorf("unrelated variables not kept in order: got %q", got)
+	want := []string{"PATH=/usr/bin", "HOME=/home/dev", config.EnvNoUpdateCheck + "=1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("apogeeEnv = %q; want the unrelated variables in order, then the update check off: %q", got, want)
 	}
 }
 
