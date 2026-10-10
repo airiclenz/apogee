@@ -167,8 +167,8 @@ runs on. Both keys are [in Configuration](configuration.md); `0` switches either
 ## Recipes
 
 A recipe is a skill that carries a `recipe:` list of stages in its header, and usually the
-`inputs:` it takes. It lives where any skill does — `~/.apogee/skills/<id>/SKILL.md`, or a
-project's own `.apogee/skills` — and the files its stages name (prompt files, scripts) sit
+`inputs:` it takes. It lives where any skill does — `~/.apogee/skills/<id>/SKILL.md`, or the
+`.apogee/skills` at a project's [Project root](configuration.md#a-projects-own-config--apogeeconfigyaml) — and the files its stages name (prompt files, scripts) sit
 beside it in that folder. A shortened example:
 
 ```yaml

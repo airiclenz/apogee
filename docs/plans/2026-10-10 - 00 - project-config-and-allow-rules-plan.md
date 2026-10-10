@@ -434,7 +434,13 @@ NOTES (2026-10-10): consequential edit — docs/layout/settings-screen-layout.md
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Settings' ./internal/tui/ && go test -race -count=1 -run 'Frame|Settings|LiveState|ProjectRule' ./cmd/apogee/`
 **Commit:** `feat(settings): list, adopt and remove allow rules`
 
-## 19. Manual: project config, rules and adoption
+## 19. Manual: project config, rules and adoption — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — docs/manual/README.md: made necessary by the Configuration page now covering a project's `.apogee/config.yaml` (its index row named `~/.apogee/config.yaml` alone)
+NOTES (2026-10-10): most of the item's assumed surfaces were already written by items 5, 7, 10, 12, 14 and 17 (approval-pane row, `/settings` source marks and save target, `dangerous-rules:`/`allow:` keys, Tier-1 refusal, skills at the Project root); this item added the rest rather than rewriting those
+NOTES (2026-10-10): rule reach in headless/daemon is stated as the owner's ratified call ("today only the TUI reaches an ordinary gate"), not as "no rule can answer there" — run.Once's denier is a non-nil Approver, so Agent.approve would consult the rules before it if an unattended run ever reached an ordinary gate
+NOTES (2026-10-10): README gained one bullet (four wrapped lines) under Configuration rather than a single physical line
+NOTES (2026-10-10): retry fix — configuration.md "never silent" paragraph now says the `--format json` approval line carries the rules (its `rules` field) and the `approval-decided` Moment carries only `decision: allowed-by-rule`
 
 **What:**
 **Goal:** the manual describes the Project config (location, Project root, key classes, precedence), Allow rules (matching, where they answer, headless), Adoption, the approval-pane choice, `/settings` changes and `apogee project adopt`, and states that allowing `go test` or `make lint` runs whatever the repo's code does.

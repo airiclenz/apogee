@@ -263,7 +263,12 @@ matcher can read, or a named MCP server — a fifth row, `Always in this project
 `Deny`: it opens a line holding the suggested rule (`go test` for `go test ./...`) to edit, and `⏎`
 saves it to the project's `.apogee/config.yaml` and allows the call (`esc` goes back to the menu);
 for an MCP server it reads ``Always allow server `<alias>` in this project`` and saves the server at
-once. What that second row actually remembers is worth knowing before you press `s`
+once. A rule saved this way is adopted as it is written, so it answers the next matching call
+without a prompt, and the transcript names it in place of your answer
+(``approval allowed by project rule `go test`: terminal``); the
+[Allow rules](configuration.md#commands-that-run-without-asking--allow) section of the configuration
+page says what such a rule matches, and that allowing `go test` runs whatever the repository's
+tests do. What that second row actually remembers is worth knowing before you press `s`
 — and which prompts never offer it at all (the last paragraph of this section).
 
 **The mouse answers it too, in two clicks.** A click on one of the rows moves the `❯` onto it,
@@ -613,7 +618,8 @@ opens a multi-line field over the list, where `⏎` makes a new line, `ctrl+s` s
 discards. A buffer is a real field: the arrow keys, `home`/`end` and word jumps move the
 caret, and the mouse seats it and drags a selection exactly as it does in the prompt box —
 `backspace` or `delete` over a selection removes the selected text and leaves the caret where it
-began. Each committed edit is spliced straight into `~/.apogee/config.yaml` — your
+began. Each committed edit is spliced straight into `~/.apogee/config.yaml` — or into the project's
+`.apogee/config.yaml`, when you chose **this project** — your
 comments, your layout and every other key untouched, the result re-parsed and compared
 against the original before it replaces the file — and a top-level key that was still one of the
 commented examples lands directly below it; a nested key joins the end of its block when the
@@ -686,3 +692,12 @@ like any other boolean and applied to the running session: `tool-call-repair`, `
 them is the same kind of row — `on`/`off`, applied to the running session the moment you commit it
 — but it is not a Floor guard and starts `off`.
 
+**Allow rules have a section of their own.** Below `Model profiles` comes `Allow rules`, one row per
+[Allow rule](configuration.md#commands-that-run-without-asking--allow) the session knows — the rules
+in force first, then the project's proposed and rejected ones — keyed by list and text
+(`terminal: go test`), with where the rule stands as its value (`live` for one of your global rules,
+`adopted`, `proposed`, `rejected`) and the file it came from as its source mark. `⏎` on a proposed or
+rejected rule adopts it; `backspace` arms the rule's removal from the file that holds it and `⏎`
+confirms (`⏎ confirm remove · esc cancel`). A session with no rules shows no such section. Rules
+the project proposes are also asked about on their own, at start-up and from a shell with
+`apogee project adopt` — see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml).

@@ -293,7 +293,10 @@ host you did not name. A webhook that redirects must be configured at the URL it
 A running session's own webhooks keep the lists it started with: an edit to `url-safety:` reaches
 them at the next start. A `/schedule` firing raised after the edit composes its webhooks from the
 settings the session is running then, so it follows the edit; `apogee headless` and
-`apogee daemon` read the lists once, at start, like the rest of `config.yaml`.
+`apogee daemon` read the lists once, at start, like the rest of their configuration — for a
+headless run that includes a project's `url-safety.deny-hosts`, which a
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to; the daemon
+reads the global file alone.
 
 ## Advising the model
 
@@ -494,6 +497,9 @@ whole, and the session keeps firing the Reactions it already had.
 
 `apogee headless` and `apogee daemon` read the list **once**, at start. A daemon watches its
 `schedules.yaml`, but not `config.yaml`, so an edit here reaches it at its next restart.
+`reactions:` is a global-only key: a `reactions:` block in a project's `.apogee/config.yaml` is
+ignored with a start-up notice, so a repository you clone cannot add a Reaction to your sessions
+(see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml)).
 
 ## Migrating from `hooks:`
 

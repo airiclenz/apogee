@@ -2,7 +2,10 @@
 
 Settings resolve by precedence, highest first: a command-line flag overrides an
 `APOGEE_*` environment variable, which overrides `~/.apogee/config.yaml`, which
-overrides the built-in default. A documented starter `config.yaml` is written to
+overrides the built-in default. A repository may carry a **Project config** of its own,
+`.apogee/config.yaml` at its Project root, which sits between the environment and your global file
+for the few keys a project may set and is ignored for every other — see
+[A project's own config](#a-projects-own-config--apogeeconfigyaml). A documented starter `config.yaml` is written to
 `~/.apogee` on first run (your edits are never overwritten): nearly every setting
 is there as a commented example, and the few that ship active carry the value
 apogee already recommends. Three keys carry all four layers —
@@ -30,7 +33,8 @@ aside, each such write is a single key: a committed `/settings` edit; the `serve
 entry, the `launch-profile:` — a `/model` pick writes into that entry when `remember-model:`
 is on; the `ui.color-scheme` a `/color-scheme <name>` switch saves; the `ui.task-list-open`
 flip a click on a task-list card records, and the `ui.tools-open` flip a click on a large Tools
-umbrella records the same way; the consented move
+umbrella records the same way; the removal of one of your global Allow rules from `/settings`'
+*Allow rules* section; the consented move
 of a `servers:` entry's retired `sub-agents: true` flag onto `sub-agents-server:`; and the
 one-time migration of a config still written in the retired schema — which copies the file
 aside first and says so on startup. "Your edits are never overwritten" stands: nothing is
@@ -40,9 +44,21 @@ write, never removed), so two apogee windows saving at the same moment both land
 rather than one silently undoing the other; a write that still cannot get the lock after five
 seconds is refused, naming the config, and changes nothing.
 
-**And that file is watched.** While apogee runs it polls `~/.apogee/config.yaml`, and a save
-applies itself to the session you are in — whoever wrote it: the `/settings` pane's `⏎` jump, a
-GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal.
+A project's `.apogee/config.yaml` is written on the same terms — only on your act, one key or one
+rule at a time, comments and layout kept: an `Always in this project…` answer at an approval (see
+[Approving a call](commands.md#approving-a-call--how-far-an-approval-reaches)), a `/settings` save
+you pointed at **this project**, and a `/settings` removal of a project rule. Its lock is kept under
+`~/.apogee/workspaces/`, not beside the file, so nothing but the config itself ever lands in the
+repository. Adopting or rejecting a project rule writes no config at all — only the adoption record
+under `~/.apogee/workspaces/` (see [A project's own config](#a-projects-own-config--apogeeconfigyaml)).
+
+**And that file is watched — and so is the project's.** While apogee runs it polls
+`~/.apogee/config.yaml` and, when the session has one, the Project config beside it, and a save to
+either applies itself to the session you are in — whoever wrote it: the `/settings` pane's `⏎` jump, a
+GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal, a
+`git pull` that changed the project's file. The project's adoption record is watched too, so an
+answer given with `apogee project adopt` in another terminal reaches the running session's Allow
+rules without a restart.
 Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
 for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Sixteen
@@ -280,6 +296,87 @@ into every home and which nothing reads (the notice it switched is part of every
 delegation's cap — see `delegate-max-steps:` further down this page). A file
 edited while a session is running gets the same line, in the transcript, at the save that introduced
 the key — once, not again on every later save or on apogee's own writes.
+
+## A project's own config — `.apogee/config.yaml`
+
+A repository can carry settings of its own in a **Project config**: `.apogee/config.yaml` at the
+**Project root**, a file meant to be committed so everyone who clones the project shares it. The
+Project root is the nearest folder holding a `.apogee/`, walking up from the workspace to the git
+top-level and never past or onto your home folder; outside a repository, or in one that holds no
+`.apogee/`, it is the workspace itself. So a session started in a subfolder still reads the
+project's file, and the same root is where the project's own `.apogee/skills` is found (see
+[Skills a repository ships](#skills-a-repository-ships--use-project-skills)). A session whose
+workspace is your home folder has no Project config at all, and neither does one whose project
+`.apogee/` is your apogee home — the global file is never layered over itself.
+
+A cloned repository is text somebody else wrote, so the file cannot set just anything. Each key
+belongs to one of four classes:
+
+- **Project parameters** describe the project and widen nothing, so the project's value outranks
+  your global one and is live as written: `context-files.enable`, `context-files.names`,
+  `use-project-skills`, `workflow-retries`, `workflow-continuations` and `workflow-wake`.
+- **Tighten-only** keys may narrow and never widen: the project's entries are added to yours, not
+  put in their place — `tools.disabled`, `url-safety.deny-hosts`, and `dangerous-rules:`, whose
+  project `add:` joins yours and whose `remove:` is ignored (see
+  [Adding and removing rules](#adding-and-removing-rules--dangerous-rules)). A repository can switch
+  a tool off or deny a host; it can never switch one back on.
+- **Granting** — `allow:`, the [Allow rules](#commands-that-run-without-asking--allow). A project's
+  rules grant nothing until you **adopt** them, below.
+- **Global-only** — every other key. Mode, Bypass, confinement, `servers:`, `mcp-servers:`,
+  `reactions:`, the system prompt and the rest are read from `~/.apogee/config.yaml` alone; a
+  project file that states one is ignored for it, with one start-up line naming the keys and the
+  global file that does set them.
+
+Precedence for the keys a project may set is flag, then environment, then the Project config,
+then `~/.apogee/config.yaml`, then the default — none of those keys has a flag or a variable today,
+so in practice the project file outranks the global one and nothing else. The project file is
+never migrated, and it can never stop a start: an unknown key in it is reported against its own
+path, and a file that does not parse, or a value its key refuses, costs one line naming the file
+(`apogee: project config <path>: …; the project layer is skipped`) and the session runs on the
+global config alone. [`/settings`](commands.md#the-settings-screen--settings) marks a value the
+project supplied `(project)`, and [`apogee probe config`](probe.md), run in the project, shows the
+two files resolved together.
+
+**Who reads it.** A session in the TUI reads and watches it. `apogee headless` reads it for its
+workspace like a session, but asks nothing about it. `apogee daemon` reads **no** Project config:
+the folder a daemon starts in is not the workspace its firings run in, so it resolves the global
+file alone.
+
+**Adoption.** A project rule is *proposed* until you answer it, and the answer is kept on your
+machine, never in the repository: `~/.apogee/workspaces/<sha256>.yaml`, one record per Project
+root, pinned to each rule's exact text. A session that finds a proposed rule opens a small pane
+at start-up — ``allow `go test` without asking in this project?`` — with three answers: **adopt**
+(it runs without asking here, until the entry changes), **not now** (it stays inert, and the offer
+comes back at the next start-up; `esc` answers this for every rule left) and **reject** (it stays
+inert and is not offered again until the entry changes). A rule that a pull, a teammate's commit or
+an edit made behind apogee's back adds or changes mid-session is offered at the next idle moment,
+never in the middle of a turn it would answer for. A rule you write yourself from the approval
+pane (`Always in this project…`) is adopted as it is saved, and the `/settings` *Allow rules*
+section lists every rule with where it stands — adopts a proposed or rejected one, and removes a
+rule from the file that holds it. An unattended run never asks: `apogee headless` leaves
+proposed rules proposed.
+
+From a shell, `apogee project adopt` asks the same question for each proposed rule, in file order —
+`y` adopts, `r` rejects, `n` or `⏎` leaves it proposed — and records each answer as it is given,
+so you can answer after a pull, before a session, or beside a running one, which picks the answer
+up live. `--workspace` names the folder whose Project root to answer for (the current directory by
+default). It asks only on a terminal: with nothing proposed it says so and exits, with stdin not a
+terminal it refuses rather than guessing, and a folder with no Project config to answer is refused
+by name.
+
+**What allowing a command means.** Adopting `go test` or `make lint` lets apogee run whatever the
+repository's code does when you run it — the tests, the Makefile, the scripts they call — with no
+prompt, and in `allow-edits` the model may edit that code first. Adopt a rule the way you would run
+the command yourself in a fresh clone: knowing whose code it runs.
+
+**What apogee writes there.** apogee writes the project file only on your own act (the list is
+[above](#configuration)), and a new one starts empty rather than from the global starter template,
+so it states only what the project set. No `.gitignore` is written and the write's lock lives under
+`~/.apogee/workspaces/`. A `.apogee/` or `config.yaml` that is a symlink, or that resolves outside
+the Project root, is refused rather than followed. The model's file tools are refused the other
+way round — no tool may write, move or delete the Project config, in any mode (see
+[The dangerous-action guard](#the-dangerous-action-guard)) — while `.apogee/skills/` stays
+writable.
 
 ## Environment overrides
 
@@ -2693,13 +2790,23 @@ it cannot confine — never a refusal, never the dangerous-action guard's forced
 Reaction's `ask` or `deny`. An empty or blank rule refuses the start with an error naming it,
 because it would match everything.
 
+A call a rule cleared is never silent: the transcript names the rules in place of your answer —
+``approval allowed by project rule `go test`: terminal``, or `global rule` for one of yours — and the
+`--format json` approval line carries them too, in its `rules` field; the `approval-decided` Moment
+says only `decision: allowed-by-rule`, without the rules. The engine applies
+the rules for every Driver, but today only the TUI reaches an ordinary prompt: `apogee headless`
+and an `apogee daemon` firing run in `plan` or a fenced `auto`, which never wait on one, so in
+practice a rule saves a prompt in the TUI alone.
+
 Rules in `~/.apogee/config.yaml` are yours and live as written. A Project config
 (`.apogee/config.yaml` at the Project root) may carry rules too, but a repository can be cloned,
 pulled or written to behind your back, so each project rule grants nothing until you **adopt** it.
 apogee records the answer outside the repository, in `~/.apogee/workspaces/`, pinned to the rule's
 exact text: a rule edited after you adopted it — whitespace included — is proposed again, and a rule
-you rejected stays quiet until it changes. The `/settings` row counts the live rules and the
-proposed ones. Allowing `go test` or `make lint` runs whatever the repository's code does when
+you rejected stays quiet until it changes. How you are asked — the start-up pane, `apogee project
+adopt`, the `/settings` *Allow rules* section — is under
+[A project's own config](#a-projects-own-config--apogeeconfigyaml). The `/settings` row counts the
+live rules and the proposed ones. Allowing `go test` or `make lint` runs whatever the repository's code does when
 you run it, and in `allow-edits` the model may edit that code. The key is file-only (no flag, no
 environment variable).
 

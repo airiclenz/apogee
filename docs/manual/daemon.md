@@ -136,7 +136,11 @@ file carries no secrets. Leave `server:` out and the schedule runs on whatever `
 in `config.yaml` names as the startup default.
 
 `config.yaml` is read **once**, at startup: changing your servers means restarting the
-daemon. `schedules.yaml` is the only live surface. The seven Floor guards are on for
+daemon. It is the only config the daemon reads: a repository's
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) is not layered over it,
+because the folder the daemon starts in is not the workspace its firings run in; and a firing,
+like a headless run, never reaches the ordinary prompt an
+[Allow rule](configuration.md#commands-that-run-without-asking--allow) answers. `schedules.yaml` is the only live surface. The seven Floor guards are on for
 every firing, exactly as they are in a session.
 
 The daemon **never loads a model**. On a server llama-launcher fronts, `model:` would be
