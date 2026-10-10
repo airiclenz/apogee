@@ -64,7 +64,11 @@ NOTES (2026-10-10): README links `docs/manual/configuration.md#update-check`, an
 **Acceptance:** `test -f docs/adr/0096-*.md`; `grep -n "update-check" README.md`
 **Commit:** `docs(adr): record the boot update check and the package channels`
 
-## 2. `internal/update`: latest-release lookup and version ordering
+## 2. `internal/update`: latest-release lookup and version ordering — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): `Client` is built with `NewClient(baseURL)` (fields unexported, zero value refused by `Latest`); the package doc lives in latest.go rather than a separate doc.go, keeping to the item's four named files.
+
+NOTES (2026-10-10): `Newer` drops semver build metadata (`+…`) before comparing, so the full `Version()` string orders like `BaseVersion()`; `Latest` itself accepts only an exact `vX.Y.Z` final segment under `/releases/tag/` (pre-release, build-metadata and `/releases` index redirects are errors).
 
 **What:**
 **Goal:** package `internal/update` exports `Latest(ctx, Client) (string, error)` and `Newer(current, latest string) bool`. `Latest` returns the `vX.Y.Z` tag of the newest published release. `Newer` orders 0.x semver numerically and treats any version in `[v1.0.0, v1.8.0]` (the retracted series, `go.mod`) or a malformed one as not newer.
