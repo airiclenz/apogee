@@ -41,8 +41,9 @@ const (
 
 // narrowHostileSize is the terminal T-12's steps 6 and 10 are read at. Sixty columns is where the
 // approval pane's argument has to wrap and where the settings sub-list runs out of room, which is
-// the whole point of both steps.
-var narrowHostileSize = tuitest.Size{W: 60, H: 24}
+// the whole point of both steps. Twenty-five rows seat the approval pane's five-row menu (the
+// "Always in this project…" row included) beside the two rows of argument step 10 reads.
+var narrowHostileSize = tuitest.Size{W: 60, H: 25}
 
 // TestE2EHostileProbeKeepsItsOwnRows is T-12 step 1: the off-session report, on a workspace whose
 // ROOT NAME carries an escape sequence. The report is text a terminal will print verbatim, so the

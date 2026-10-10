@@ -2790,3 +2790,363 @@ func TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary(t *testing.T) 
 		t.Errorf("recovered ErrorEvent source = %q, want %q", recovered.Source, tools.SubAgentToolName)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Allow rules answer ordinary gates (ADR 0096 §3)
+// ----------------------------------------------------------------------------
+
+// ruleTerminal is a `terminal` double that states its shell the way *tools.Terminal does
+// (POSIXShell), so a test can put the matcher in front of a POSIX shell or of one it cannot read.
+type ruleTerminal struct {
+	isPOSIX bool
+	ran     *int
+}
+
+func (t ruleTerminal) Name() string            { return shellToolName }
+func (t ruleTerminal) Description() string     { return "terminal (rule double)" }
+func (t ruleTerminal) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t ruleTerminal) ReadOnly() bool          { return false }
+func (t ruleTerminal) Subprocess() bool        { return true }
+func (t ruleTerminal) POSIXShell() bool        { return t.isPOSIX }
+
+func (t ruleTerminal) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if t.ran != nil {
+		*t.ran++
+	}
+	return domain.ToolResult{CallID: call.ID, Content: "ok"}, nil
+}
+
+// goTestRule is the project rule every case below installs.
+var goTestRule = domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: "go test", Layer: domain.AllowRuleProject}
+
+// goTestCall is the `terminal` call goTestRule covers.
+func goTestCall() domain.ToolCall {
+	return domain.ToolCall{ID: "c1", Tool: shellToolName, Arguments: []byte(`{"command":"go test ./..."}`)}
+}
+
+// allowRuleConfig is an Ask-Before configuration over the given tools, with rules installed and
+// approver behind the gate.
+func allowRuleConfig(
+	t *testing.T,
+	sink *recordingSink,
+	approver domain.Approver,
+	rules []domain.AllowRule,
+	tools ...domain.Tool,
+) domain.Config {
+	t.Helper()
+
+	cfg := configWithTools(sink, tools...)
+	cfg.WorkspaceDir = t.TempDir()
+	cfg.Mode = domain.ModeAskBefore
+	cfg.Approver = approver
+	cfg.AllowRules = rules
+	return cfg
+}
+
+// newRuleAgent builds cfg into a quiescent Agent.
+func newRuleAgent(t *testing.T, cfg domain.Config) *Agent {
+	t.Helper()
+
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a
+}
+
+// auditDecisions lists every AuditEvent's decision, in order.
+func auditDecisions(events []domain.Event) []string {
+	var out []string
+	for _, e := range events {
+		if audit, ok := e.(domain.AuditEvent); ok {
+			out = append(out, audit.Decision)
+		}
+	}
+	return out
+}
+
+// An ordinary gate a rule covers runs with no Approver round-trip, announces the decided phase
+// alone with the rule that answered it, and books an allowed-by-rule audit.
+func TestAllowRuleAnswersAnOrdinaryGate(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	ran := 0
+	a := newRuleAgent(t, allowRuleConfig(t, sink, approver, []domain.AllowRule{goTestRule}, ruleTerminal{isPOSIX: true, ran: &ran}))
+
+	result, outcome := prepareAndRun(a, goTestCall())
+
+	if outcome != dispatchDone || result.IsError || ran != 1 {
+		t.Fatalf("outcome %v, result %+v, ran %d — want the call run once", outcome, result, ran)
+	}
+	if approver.calls != 0 {
+		t.Errorf("the Approver was consulted %d times, want 0", approver.calls)
+	}
+	approvals := approvalEvents(sink.events)
+	if len(approvals) != 1 {
+		t.Fatalf("got %d ApprovalEvents, want the decided phase alone", len(approvals))
+	}
+	got := approvals[0]
+	if got.Phase != domain.ApprovalDecided || got.Decision != domain.ApprovalAllowedByRule {
+		t.Errorf("event = phase %q decision %q, want decided / allowed-by-rule", got.Phase, got.Decision)
+	}
+	if !reflect.DeepEqual(got.Rules, []domain.AllowRule{goTestRule}) {
+		t.Errorf("event Rules = %+v, want the project rule `go test`", got.Rules)
+	}
+	if decisions := auditDecisions(sink.events); !slices.Equal(decisions, []string{string(security.AuditAllowedByRule)}) {
+		t.Errorf("audit decisions = %q, want one allowed-by-rule", decisions)
+	}
+}
+
+// A gate a rule does not answer still asks: a forced Tier-2 look, a Reaction's `ask`, a line the
+// rule does not cover, and a shell the matcher cannot read. Plan refuses before any gate.
+func TestAllowRuleNeverAnswersWhatItDoesNotCover(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		configure   func(cfg *domain.Config)
+		call        domain.ToolCall
+		isPOSIX     bool
+		wantAsked   int
+		wantRan     int
+		wantRefusal bool
+	}{
+		{
+			name: "forced Tier-2",
+			configure: func(cfg *domain.Config) {
+				cfg.DangerousRules = []domain.DangerousRule{{ID: "slow-tests", Pattern: `go test`, Tier: domain.DangerousTierAsk, Reason: "slow"}}
+			},
+			call: goTestCall(), isPOSIX: true, wantAsked: 1, wantRan: 1,
+		},
+		{
+			name: "Reaction ask",
+			configure: func(cfg *domain.Config) {
+				cfg.Reactions = []domain.Reaction{goGate("warden", domain.GateDecision{Verdict: domain.GateAsk, Reason: "look"})}
+			},
+			call: goTestCall(), isPOSIX: true, wantAsked: 1, wantRan: 1,
+		},
+		{
+			name:      "uncovered line",
+			configure: func(*domain.Config) {},
+			call:      domain.ToolCall{ID: "c1", Tool: shellToolName, Arguments: []byte(`{"command":"go test ./... && rm -rf x"}`)},
+			isPOSIX:   true, wantAsked: 1, wantRan: 1,
+		},
+		{
+			name:      "not a POSIX shell",
+			configure: func(*domain.Config) {},
+			call:      goTestCall(), isPOSIX: false, wantAsked: 1, wantRan: 1,
+		},
+		{
+			name:      "Plan refuses",
+			configure: func(cfg *domain.Config) { cfg.Mode = domain.ModePlan },
+			call:      goTestCall(), isPOSIX: true, wantAsked: 0, wantRan: 0, wantRefusal: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			approver := &fakeApprover{decision: domain.ApprovalAllow}
+			ran := 0
+			cfg := allowRuleConfig(t, sink, approver, []domain.AllowRule{goTestRule}, ruleTerminal{isPOSIX: tc.isPOSIX, ran: &ran})
+			tc.configure(&cfg)
+			a := newRuleAgent(t, cfg)
+
+			result, _ := prepareAndRun(a, tc.call)
+
+			if approver.calls != tc.wantAsked || ran != tc.wantRan || result.IsError != tc.wantRefusal {
+				t.Errorf("asked %d, ran %d, refused %v — want asked %d, ran %d, refused %v",
+					approver.calls, ran, result.IsError, tc.wantAsked, tc.wantRan, tc.wantRefusal)
+			}
+			for _, e := range approvalEvents(sink.events) {
+				if e.Decision == domain.ApprovalAllowedByRule {
+					t.Errorf("a rule answered the gate: %+v", e)
+				}
+			}
+		})
+	}
+}
+
+// An MCP rule names a server, and answers each of its tools' ordinary gates.
+func TestAllowRuleAnswersAnMCPServer(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	ran := 0
+	rule := domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "github", Layer: domain.AllowRuleGlobal}
+	a := newRuleAgent(t, allowRuleConfig(t, sink, approver, []domain.AllowRule{rule},
+		mcpServerTool{name: "github__search", alias: "github", ran: &ran},
+		mcpServerTool{name: "jira__search", alias: "jira", ran: &ran}))
+
+	prepareAndRun(a, domain.ToolCall{ID: "c1", Tool: "github__search", Arguments: []byte(`{}`)})
+	prepareAndRun(a, domain.ToolCall{ID: "c2", Tool: "jira__search", Arguments: []byte(`{}`)})
+
+	if ran != 1 || approver.calls != 1 {
+		t.Errorf("ran %d, asked %d — want the github call run unasked and the jira call asked (and denied)", ran, approver.calls)
+	}
+}
+
+// Auto's STATIC gate for a backend that cannot confine is not forced, so a rule answers it.
+func TestAllowRuleAnswersAutosUnconfinableGate(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	ran := 0
+	conf := &fakeConfiner{caps: capsBoth()}
+	cfg := autoConfigWS(sink, conf, true, t.TempDir(), ruleTerminal{isPOSIX: true, ran: &ran})
+	cfg.Approver = approver
+	cfg.AllowRules = []domain.AllowRule{goTestRule}
+	a := newRuleAgent(t, cfg)
+	conf.caps = domain.ConfinementCaps{} // the host loses fs-confinement after construction
+
+	result, _ := prepareAndRun(a, goTestCall())
+
+	if ran != 1 || approver.calls != 0 || result.IsError {
+		t.Errorf("ran %d, asked %d, result %+v — want the call run unasked", ran, approver.calls, result)
+	}
+	approvals := approvalEvents(sink.events)
+	if len(approvals) != 1 || approvals[0].Decision != domain.ApprovalAllowedByRule {
+		t.Errorf("approvals = %+v, want the gate answered by the rule", approvals)
+	}
+}
+
+// SetAllowRules reaches the whole tree: a sub-agent already running when the set lands answers its
+// next gate from the new rule.
+func TestAllowRuleSetReachesARunningSubAgent(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	ran := 0
+	cfg := allowRuleConfig(t, sink, approver, nil, ruleTerminal{isPOSIX: true, ran: &ran}, tools.NewSubAgent())
+	a := newRuleAgent(t, cfg)
+	child, err := a.newChildAgent("d1", "run the tests", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+
+	a.SetAllowRules([]domain.AllowRule{goTestRule})
+	result, _ := prepareAndRun(child, goTestCall())
+
+	if ran != 1 || approver.calls != 0 || result.IsError {
+		t.Errorf("ran %d, asked %d, result %+v — want the child's call answered by the new rule", ran, approver.calls, result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The Project config's Tier-1 refusal (ADR 0096 §5 — security.ProjectConfigRule)
+// ---------------------------------------------------------------------------
+
+// TestProjectConfigControlPlaneRefusesAWriteInAuto drives write_file at the Project config in Auto,
+// where an in-workspace write otherwise runs without a word: the guard built from Config.ProjectRoot
+// refuses it before dispatch — no look, no file.
+func TestProjectConfigControlPlaneRefusesAWriteInAuto(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	sink := &recordingSink{}
+	cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, tools.NewWriteFile(ws))
+	cfg.ProjectRoot = ws
+	approver := &fakeApprover{decision: domain.ApprovalAllow}
+	cfg.Approver = approver
+
+	driveToolCall(t, cfg, sink, "c1", "write_file", `{"path":".apogee/config.yaml","content":"allow: {}"}`)
+
+	res, _ := lastToolResult(sink.events)
+	if !res.IsError || !strings.Contains(res.Content, "refused by the dangerous-action guard") {
+		t.Errorf("result = %q (error %v); want the guard's hard refusal", res.Content, res.IsError)
+	}
+	if approver.calls != 0 {
+		t.Errorf("Approver consulted %d times; a Tier-1 refusal asks no one", approver.calls)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".apogee", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the Project config exists after the refused write (stat: %v)", err)
+	}
+}
+
+// TestProjectConfigControlPlaneJudgesTheRealTools holds the refusal against the registry's real
+// tools, whose declarations (the terminal's shell command line, git_commit's payload message and
+// its staged files) are what the project-config write view reads: a shell write is refused, while
+// git_commit staging the config, `git add` of it and a project skill write stay clear.
+func TestProjectConfigControlPlaneJudgesTheRealTools(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	guard := guardsFor(domain.Config{ProjectRoot: ws, WorkspaceDir: ws, ConfigDir: t.TempDir()}).Dangerous
+
+	cases := []struct {
+		name     string
+		tool     domain.Tool
+		args     string
+		wantRule string
+	}{
+		{"a redirect into the config", tools.NewTerminal(ws, nil), `{"command":"echo x > .apogee/config.yaml"}`, security.ProjectConfigRuleID},
+		{"deleting the folder", tools.NewTerminal(ws, nil), `{"command":"rm -rf .apogee"}`, security.ProjectConfigRuleID},
+		{"git add of the config", tools.NewTerminal(ws, nil), `{"command":"git add .apogee/config.yaml"}`, ""},
+		{"git_commit staging the config", tools.NewGitCommit(ws), `{"message":"m","files":[".apogee/config.yaml"]}`, ""},
+		{"a project skill write", tools.NewWriteFile(ws), `{"path":".apogee/skills/x/SKILL.md","content":"x"}`, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := domain.ToolCall{ID: "c1", Tool: tc.tool.Name(), Arguments: json.RawMessage(tc.args)}
+
+			d := guard.Inspect(call, tc.tool, nil)
+
+			if d.RuleID != tc.wantRule {
+				t.Errorf("Inspect = tier %d rule %q; want rule %q", d.Tier, d.RuleID, tc.wantRule)
+			}
+		})
+	}
+}
+
+// TestProjectConfigControlPlaneIsBuiltOnlyForAProjectConfig pins when the engine builds no refusal:
+// no Project root, a Project root whose `.apogee/` links to the apogee home, and one whose
+// `config.yaml` links to the global config file — the last two are the global file under another
+// name, which keeps the home's forced look instead.
+func TestProjectConfigControlPlaneIsBuiltOnlyForAProjectConfig(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("mode: plan\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkedDir := t.TempDir()
+	if err := os.Symlink(home, filepath.Join(linkedDir, ".apogee")); err != nil {
+		t.Fatal(err)
+	}
+	linkedFile := t.TempDir()
+	if err := os.Mkdir(filepath.Join(linkedFile, ".apogee"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "config.yaml"), filepath.Join(linkedFile, ".apogee", "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	ownRoot := t.TempDir()
+
+	cases := []struct {
+		name      string
+		root      string
+		wantBuilt bool
+	}{
+		{"no Project root", "", false},
+		{"a .apogee linked to the apogee home", linkedDir, false},
+		{"a config.yaml linked to the global file", linkedFile, false},
+		{"a Project root of its own", ownRoot, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rules := guardsFor(domain.Config{ProjectRoot: tc.root, WorkspaceDir: tc.root, ConfigDir: home}).Dangerous.Rules()
+
+			if built := slices.Contains(ruleIDs(rules), security.ProjectConfigRuleID); built != tc.wantBuilt {
+				t.Errorf("rule built = %v, want %v", built, tc.wantBuilt)
+			}
+		})
+	}
+}

@@ -123,6 +123,8 @@ type fakeEngine struct {
 	confineSet []bool        // records SetConfineToWorkspace calls (the /confine command)
 	confine    bool          // the live blast radius ConfineToWorkspace reports; SetConfineToWorkspace swaps it
 
+	allowRules [][]domain.AllowRule // records SetAllowRules calls, in order
+
 	effortSet      []domain.ThinkingEffort // records SetEffortOverride calls (the /effort command)
 	effortOverride domain.ThinkingEffort   // the live session override ThinkingEffort reports as its first layer
 	effortProfile  domain.ThinkingEffort   // the bound profile's own effort — scripted, never moved from the TUI
@@ -610,6 +612,12 @@ func (f *fakeEngine) SetConfineToWorkspace(confine bool) {
 	f.mu.Lock()
 	f.confineSet = append(f.confineSet, confine)
 	f.confine = confine
+	f.mu.Unlock()
+}
+
+func (f *fakeEngine) SetAllowRules(rules []domain.AllowRule) {
+	f.mu.Lock()
+	f.allowRules = append(f.allowRules, rules)
 	f.mu.Unlock()
 }
 

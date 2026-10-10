@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"maps"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -53,6 +55,15 @@ func projectionOptions(t *testing.T) config.Options {
 	opts.WorkflowRetries = 4
 	opts.WorkflowContinuations = 0
 	opts.WorkflowWake = false
+	opts.DangerousRules = config.DangerousRuleSet{
+		Add:        []domain.DangerousRule{{ID: "no-prod", Pattern: `kubectl .*prod`, Tier: domain.DangerousTierAsk}},
+		Remove:     []string{"sudo-escalation"},
+		ProjectAdd: []domain.DangerousRule{{ID: "no-force-push", Pattern: `--force`, Tier: domain.DangerousTierRefuse}},
+	}
+	opts.AllowRules = config.AllowRules{Rules: []config.AllowRule{
+		{Kind: config.AllowTerminal, Text: "go test", Layer: config.SourceGlobal},
+		{Kind: config.AllowMCPServers, Text: "github", Layer: config.SourceProject},
+	}}
 	return opts
 }
 
@@ -97,6 +108,16 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	}
 	if got.Inspector != want.Inspector {
 		t.Errorf("Config.Inspector = %v, want %v", got.Inspector, want.Inspector)
+	}
+	if got.ProjectRoot != want.ProjectRoot {
+		t.Errorf("Config.ProjectRoot = %q, want %q", got.ProjectRoot, want.ProjectRoot)
+	}
+	if !reflect.DeepEqual(got.DangerousRules, want.DangerousRules) {
+		t.Errorf("Config.DangerousRules = %d rules, want the projection's %d", len(got.DangerousRules),
+			len(want.DangerousRules))
+	}
+	if !reflect.DeepEqual(got.AllowRules, want.AllowRules) {
+		t.Errorf("Config.AllowRules = %+v, want the projection's %+v", got.AllowRules, want.AllowRules)
 	}
 	if got.UndoSnapshots != want.UndoSnapshots {
 		t.Errorf("Config.UndoSnapshots = %v, want %v", got.UndoSnapshots, want.UndoSnapshots)
@@ -240,6 +261,67 @@ func TestProjectConfigFoldsTheWorkflowKeys(t *testing.T) {
 	}
 	if flow.ResolvedWake() {
 		t.Error("Config.Workflow wake = on, want the stated off")
+	}
+}
+
+// The `dangerous-rules:` key reaches the engine merged: the shipped set less the global removals, plus
+// both files' additions — and a removal of every shipped id is an empty ruleset, never the nil that
+// means "the shipped set".
+func TestProjectConfigMergesTheDangerousRules(t *testing.T) {
+	t.Parallel()
+
+	opts := projectionOptions(t)
+	roots := firingRoots(t)
+	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+	ids := func(rules []apogee.DangerousRule) []string {
+		out := make([]string, len(rules))
+		for i, r := range rules {
+			out[i] = r.ID
+		}
+		return out
+	}
+
+	merged := ids(projectConfig(opts, roots, fenceableHost, domain.ModeAuto, provider).DangerousRules)
+	if slices.Contains(merged, "sudo-escalation") || !slices.Contains(merged, "no-prod") ||
+		!slices.Contains(merged, "no-force-push") || !slices.Contains(merged, "fork-bomb") {
+		t.Errorf("merged rule ids = %v; want the shipped set less sudo-escalation, plus no-prod and no-force-push",
+			merged)
+	}
+
+	opts.DangerousRules = config.DangerousRuleSet{}
+	for _, r := range security.DefaultDangerousRules() {
+		opts.DangerousRules.Remove = append(opts.DangerousRules.Remove, r.ID)
+	}
+	none := projectConfig(opts, roots, fenceableHost, domain.ModeAuto, provider).DangerousRules
+	if none == nil || len(none) != 0 {
+		t.Errorf("every shipped id removed = %#v; want a non-nil empty ruleset", none)
+	}
+}
+
+// The `allow:` key's effective rules reach the engine in its own spelling, each with the layer it
+// came from — the fact the transcript names when a rule answers a call — and only the effective
+// ones: a proposed or rejected project rule grants nothing, so it never rides the Config.
+func TestProjectConfigCarriesTheAllowRules(t *testing.T) {
+	t.Parallel()
+
+	opts := projectionOptions(t)
+	opts.AllowRules.Proposed = []config.AllowRule{{Kind: config.AllowTerminal, Text: "rm", Layer: config.SourceProject}}
+	opts.AllowRules.Rejected = []config.AllowRule{{Kind: config.AllowTerminal, Text: "curl", Layer: config.SourceProject}}
+	roots := firingRoots(t)
+	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+
+	got := projectConfig(opts, roots, fenceableHost, domain.ModeAskBefore, provider).AllowRules
+
+	want := []apogee.AllowRule{
+		{Kind: apogee.AllowRuleTerminal, Text: "go test", Layer: apogee.AllowRuleGlobal},
+		{Kind: apogee.AllowRuleMCPServer, Text: "github", Layer: apogee.AllowRuleProject},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Config.AllowRules = %+v, want %+v", got, want)
+	}
+	opts.AllowRules = config.AllowRules{}
+	if none := projectConfig(opts, roots, fenceableHost, domain.ModeAskBefore, provider).AllowRules; none != nil {
+		t.Errorf("no rules = %+v, want nil", none)
 	}
 }
 

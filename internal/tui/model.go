@@ -432,6 +432,11 @@ type Model struct {
 	holds         engineHold
 	resumePending bool
 
+	// adoption is the adoption pane's session state (adoption.go, ADR 0096 §4): the proposed project
+	// rules waiting for the next idle fold with nothing else up, and every rule a pane has already
+	// raised, so a later config change offers only what is new.
+	adoption adoptionState
+
 	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
 	// draft, never anything the model is told about.
 	//
@@ -728,7 +733,8 @@ func (m *Model) takeContextEstimate() {
 // stateAwaitingAsk. Grouping them changes none of that — it gives the FORGETTING one call site
 // instead of three assignments a fourth payload could quietly be left out of.
 //
-// Two pointers, a bare []bool and a bool — no self-referential no-copy type, so it rides the
+// Two pointers, a bare []bool, plain flags and the rule field (a [lineEditor], which the /settings
+// pane already carries on the Model) — no self-referential no-copy type, so it rides the
 // value-copied Model (ADR 0011); the ␣ toggle writes askChecked in place, which is safe because the slice is
 // allocated fresh for each question (the askReqMsg fold) and no copy of the Model outlives the
 // Update that produced it.
@@ -753,6 +759,10 @@ type pendingDecision struct {
 	// the second, the one whose answer arms it: the first left ahead of the pane's own frame, so it
 	// proves only that the frame was written (approvalDrainMarker, approval.go).
 	approvalDrainRelayed bool
+	// ruleEdit is the approval pane's "Always in this project…" sub-step — the rule field and the
+	// note a refused save left (approval.go). Per-REQUEST state like the latch above, so the reset
+	// that forgets the request closes the field with it.
+	ruleEdit projectRuleEdit
 }
 
 // reset lets go of the question and its payload together — the whole value, so a payload added to it
@@ -897,6 +907,14 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// to the ask above: a `servers:` entry still carrying ADR 0045's retired `sub-agents: true` flag,
 	// which now routes nothing (keymigration.go).
 	m.openSubAgentsMigration()
+	// And the proposed project rules (ADR 0096 §4, adoption.go), which give way to all of the above:
+	// a rule that is not adopted only keeps asking before a call runs, while those questions are about
+	// a session that cannot run as its owner meant. Where something is up, they wait, and the Update
+	// tail raises the pane at the first fold that finds the session idle with nothing else up.
+	if opts.Config != nil {
+		m.queueAdoption(opts.ProposedRules)
+	}
+	m.openAdoption()
 	return m
 }
 
@@ -1129,9 +1147,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// Ahead of it, by the same rule, a background workflow's waiting prompt is offered
 	// (offerAfterFold): the pane it opens holds the wake until the human has answered. Ahead of
 	// both, a restored session's background workflows are started again (resumeAfterFold), so a
-	// note the snapshot held is there for the wake.
+	// note the snapshot held is there for the wake, and then the proposed project rules waiting for
+	// their adoption pane are offered (adoptAfterFold) — before the prompt and the wake, because a
+	// rule the human adopts is one the turn a wake starts can already use. That idle fold is what
+	// makes "the next turn boundary" (ADR 0096 §4): a file that changed mid-turn is asked about at
+	// the fold that ends the turn, and one that changed while idle at the fold that saw it.
 	defer func() {
 		next = resumeAfterFold(next)
+		next = adoptAfterFold(next)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))
@@ -1760,6 +1783,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m, claimCmd, claimed := m.claimKey(keyClaimOrder, msg)
 	if claimed {
 		return m, claimCmd
+	}
+
+	// The approval pane's rule field, while it is open, takes every key but the frame's own ctrl+c
+	// and ctrl+l — asked HERE, ahead of the switch, so its esc goes back to the menu rather than
+	// arming the stop double-tap, and its letters type rather than rule (projectRuleKey, approval.go).
+	if m.editingProjectRule() {
+		if next, cmd, claimed := m.projectRuleKey(msg); claimed {
+			return next, cmd
+		}
 	}
 
 	switch msg.String() {

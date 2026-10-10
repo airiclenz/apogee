@@ -9,7 +9,7 @@ package main
 // every field it names is filled.
 //
 // Below it, the host capabilities that projection names as INTERFACES rather than as bare funcs
-// (ADR 0054): configHost, the eight acts a session performs on the config file itself; settingsHost,
+// (ADR 0054): configHost, the thirteen acts a session performs on the config files themselves; settingsHost,
 // the `/settings` pane's four acts over that same file; and schemeHost, the three things this program
 // does with the schemes folder. Each is one value the literal hands over and one seam a renderer test
 // fakes.
@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee"
@@ -74,6 +75,10 @@ func (w *rootWiring) options() tui.Options {
 		Endpoint:  w.opts.Endpoint,
 		Mode:      w.mode,
 		Workspace: w.roots.workspace,
+		// The Project root the skills loader hangs .apogee/skills off (stateRoots.project), so a
+		// skill loaded from a Project root above the workspace is labelled "workspace" rather than
+		// "elsewhere", and the empty-catalog note names the folder discovery actually looked in.
+		ProjectRoot: w.roots.project,
 		// The apogee home THIS run resolved (--config / APOGEE_CONFIG included), so a report that
 		// names a path — /skills telling an empty catalog where discovery looked — names the folder
 		// the run actually walks rather than the ~/.apogee default it may not be using.
@@ -167,7 +172,8 @@ func (w *rootWiring) options() tui.Options {
 		// --save`, recording THIS host in the same config.yaml ApplyConfig read at startup; the
 		// `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5) and the watcher's
 		// wait that is its second trigger (ADR 0041 decision 3); the answers to the two start-up
-		// offers below; and the `remember-model:` recording of an explicit `/model` pick. The renderer
+		// offers below; the `remember-model:` recording of an explicit `/model` pick; and the
+		// Allow-rule acts — a project rule written, adopted, rejected or removed. The renderer
 		// learns only what each answer says — a path written, the keys that changed, a command line
 		// — because the file's location, its format, the secret store and the editor this
 		// environment names are all this layer's (configHost, below). Always wired here: the acts a
@@ -186,6 +192,11 @@ func (w *rootWiring) options() tui.Options {
 		// — the rewrite, and the retarget that puts it in force in this session — is the host's. It
 		// stays zero on a config that carries no retired flag, which is every config written since.
 		SubAgentsMigration: w.subAgentsFlagged,
+		// The Project config's rules this start-up found proposed (ADR 0096 §4) — in the file, with no
+		// answer recorded for their text — for the adoption pane to offer; each answer is one call
+		// back through the host above (projectrules.go). Empty with no Project config or nothing in it
+		// unanswered, and the renderer then raises nothing.
+		ProposedRules: engineAllowRules(w.opts.AllowRules.Proposed),
 		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
 		// the write and the reset that splice this run's config.yaml, and the apply that puts the
 		// key just persisted into effect. Everything behind it — the registry, the file format, the
@@ -195,14 +206,21 @@ func (w *rootWiring) options() tui.Options {
 			opts:       w.opts,
 			live:       w.engine,
 			configPath: configPath,
-			edits:      w.externalEdits,
-			apply:      applySetting,
+			// The Project root a "this project" save writes under — empty where there is no Project
+			// config this session may write (projectSaveRoot), which keeps every row global-only.
+			projectRoot:   projectSaveRoot(w.opts, w.roots.project),
+			workspacesDir: w.workspacesDir(),
+			edits:         w.externalEdits,
+			apply:         applySetting,
 			// The seed is asked of the holder for the model this session is BOUND to and the config
 			// home its prompt files resolve against — the same two inputs rebindSpecFor resolves the
 			// running prompt with, so the editor opens on exactly what the run sends.
 			promptSeed: func() string {
 				return w.live.promptEditorSeed(w.holder.Binding().Model, w.roots.config)
 			},
+			// The *Allow rules* section lists from the live-settings holder, which every rule act —
+			// the approval pane's, the adoption pane's, this pane's own — settles into.
+			allowRules: w.live.allowRules,
 		},
 		Skills: w.skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
@@ -259,14 +277,15 @@ func (w *rootWiring) options() tui.Options {
 // The host capabilities Options names as interfaces (ADR 0054)
 // ----------------------------------------------------------------------------
 
-// configHost is this binary's [tui.ConfigHost]: the eight acts a session performs on the config file
-// this run resolved, which are eight faces of one file — the host acknowledgement, the `$EDITOR`
-// round trip and the watcher's wait, the three start-up-offer answers, and the model recording. It
-// holds the wiring itself rather than eight closures over it, the serverHost posture: every act reads
-// live state the wiring owns — the external-edit baseline, the watcher, the secret store, the bound
-// entry — and each is the verb that already existed beside it (keymigrate.go, settingsedit.go,
-// wire_server.go, wire_verbs.go), unchanged by the regrouping. This value is only where the
-// renderer's eight names meet them.
+// configHost is this binary's [tui.ConfigHost]: the thirteen acts a session performs on the config
+// files this run resolved — the host acknowledgement, the `$EDITOR` round trip and the watcher's
+// wait, the three start-up-offer answers, the model recording, and the four Allow-rule acts on the
+// Project config and its adoption record with the read of what it proposes (projectrules.go). It
+// holds the wiring itself rather than thirteen closures over it, the serverHost posture: every act
+// reads live state the wiring owns — the external-edit baseline, the watcher, the secret store, the
+// bound entry, the Project root — and each is the verb that already existed beside it (keymigrate.go, settingsedit.go, wire_server.go,
+// wire_verbs.go, projectrules.go), unchanged by the regrouping. This value is only where the
+// renderer's thirteen names meet them.
 type configHost struct {
 	w *rootWiring
 	// saveHostAcknowledgement is the one act that is a closure, because internal/config hands it over
@@ -284,14 +303,25 @@ func (h configHost) SaveHostAcknowledgement() (string, error) { return h.saveHos
 // against the baseline the spec took, and the loader's notices that are new against it
 // (settingsedit.go). Nothing here applies anything — the pane applies through the same two homes an
 // in-pane commit uses, so the file's authority and the apply's single path both stay where they were.
-func (h configHost) ReloadConfig() (tui.ConfigReload, error) { return h.w.externalEdits.changed() }
+//
+// The one thing it does put in force itself is the effective Allow rules, when the re-read moved
+// them (followReloadedAllowRules): a rule is no setting a row applies, and a hand-edited `allow:` or
+// an answer recorded outside this session has to reach the engine whatever the row shows.
+func (h configHost) ReloadConfig() (tui.ConfigReload, error) {
+	reload, err := h.w.externalEdits.changed()
+	if err != nil {
+		return reload, err
+	}
+	return h.w.followReloadedAllowRules(reload), nil
+}
 
 // AwaitConfigChange is the trigger that needs no editor at all (ADR 0041 decision 3): one wait on the
-// watcher started in the assembly, answered when the file changes. What the renderer does with the
+// watchers started in the assembly — the global file's, the Project config's and the adoption
+// record's — answered when any of the three changes. What the renderer does with the
 // news is exactly what it does when an editor exits — re-read through ReloadConfig, apply through the
 // two homes above — so a saved file applies whoever saved it (decision 5).
 func (h configHost) AwaitConfigChange(ctx context.Context) bool {
-	return awaitConfigChangeOn(h.w.configWatch)(ctx)
+	return awaitConfigChangeOn(h.w.configWatch, h.w.projectWatch, h.w.adoptionWatch)(ctx)
 }
 
 // MigrateKey answers the key-migration offer's "move it" (keymigrate.go, ADR 0047): the store write,
@@ -368,6 +398,12 @@ type settingsHost struct {
 	// configPath is the file both writes splice — the same config.yaml the host acknowledgement is
 	// recorded in and the watcher is looking at.
 	configPath string
+	// projectRoot is the Project root a targeted save to this project writes `.apogee/config.yaml`
+	// under (ADR 0096 §6), and workspacesDir the apogee-home folder that write's lock is kept in. An
+	// empty projectRoot means there is no Project config this session may write: no row is offered
+	// the project target, and SaveTo refuses one.
+	projectRoot   string
+	workspacesDir string
 	// edits is the external-edit baseline every landed write re-takes (ADR 0041 decision 8).
 	edits *externalEdit
 	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the root composes
@@ -382,10 +418,16 @@ type settingsHost struct {
 	// lands. A nil func seeds nothing, the answer a Driver that composed this host without a
 	// settings holder honestly has.
 	promptSeed func() string
+	// allowRules is the session's Allow rules as they stand now — the live-settings holder every rule
+	// act settles into (projectrules.go) — which the *Allow rules* section is listed from after the
+	// registry's rows (allowRuleRows). It is a func for promptSeed's reason: the answer is the
+	// session's and moves under an open pane, and it reads memory, never the store or a config file,
+	// because Rows is asked on every paint. A nil func lists no rules.
+	allowRules func() config.AllowRules
 }
 
-// Rows is every key the registry describes, with the value this run resolved and the marker for a
-// key an environment variable or a flag overrode (settingsrows.go), and — for the two keys the
+// Rows is every key the registry describes, with the value this run resolved and the source mark
+// that says which layer supplied it (settingsrows.go), and — for the two keys the
 // engine rather than the file holds — the value the session is RUNNING (overlayLiveSettings). The
 // one text row's prose is seeded with apogee's embedded default prompt where that default is what
 // the session resolves (seedPromptEditor), so the editor ⏎ opens starts from the prompt in force
@@ -394,12 +436,21 @@ type settingsHost struct {
 // convention — which is also what makes the overlay and the seed enough: a mode cycled with the
 // pane open shows on the next paint, and a prompt written through the pane stops seeding from the
 // keypress that lands it, with nothing to invalidate.
+//
+// After the registry's rows come the *Allow rules* section's, one per rule the session holds now
+// (allowRuleRows) — appended, so the registry's own order and sections stand as they are.
 func (h settingsHost) Rows() []tui.SettingRow {
 	rows := overlayLiveSettings(settingsRows(h.opts), h.live)
-	if h.promptSeed == nil {
+	if h.projectRoot == "" {
+		rows = withoutProjectTarget(rows)
+	}
+	if h.promptSeed != nil {
+		rows = seedPromptEditor(rows, h.promptSeed())
+	}
+	if h.allowRules == nil {
 		return rows
 	}
-	return seedPromptEditor(rows, h.promptSeed())
+	return append(rows, allowRuleRows(h.allowRules())...)
 }
 
 // Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry
@@ -429,6 +480,115 @@ func (h settingsHost) Reset(key string) error {
 	}
 	h.edits.refresh()
 	return nil
+}
+
+// SaveTo is Write into the file target names — the `/settings` save of a project-capable key — and
+// it answers what the files then say for the key ([tui.SettingOutcome]), re-resolved over both
+// layers, so the pane applies the value the next start will resolve rather than the one it typed
+// (landed). The baseline is re-taken by that same reading, so the watcher sees no change. A global
+// save of a tighten-only list the project now adds entries to is refused (notHeldByProject).
+func (h settingsHost) SaveTo(target tui.SettingTarget, key, value string) (tui.SettingOutcome, error) {
+	var err error
+	switch target {
+	case tui.SettingTargetGlobal:
+		err = h.notHeldByProject(key)
+		if err == nil {
+			err = config.SaveConfigSetting(h.configPath, key, value)
+		}
+	case tui.SettingTargetProject:
+		err = h.inProject(func() error { return config.SaveProjectSetting(h.projectRoot, h.workspacesDir, key, value) })
+	default:
+		err = fmt.Errorf("apogee: no config file is called %q", target)
+	}
+	if err != nil {
+		return tui.SettingOutcome{}, err
+	}
+	fallback := tui.SettingOutcome{Value: value, Source: tui.SettingFromGlobal}
+	if target == tui.SettingTargetProject {
+		fallback.Source = tui.SettingFromProject
+	}
+	return h.landed(key, fallback), nil
+}
+
+// ResetIn is Reset in the file target names, answered the same way: what the files say once the
+// line is gone — the other file's value, or the default.
+func (h settingsHost) ResetIn(target tui.SettingTarget, key string) (tui.SettingOutcome, error) {
+	var err error
+	switch target {
+	case tui.SettingTargetGlobal:
+		err = config.ResetConfigSetting(h.configPath, key)
+	case tui.SettingTargetProject:
+		err = h.inProject(func() error { return config.ResetProjectSetting(h.projectRoot, h.workspacesDir, key) })
+	default:
+		err = fmt.Errorf("apogee: no config file is called %q", target)
+	}
+	if err != nil {
+		return tui.SettingOutcome{}, err
+	}
+	fallback := tui.SettingOutcome{Source: tui.SettingFromDefault}
+	if k, ok := config.LookupKey(key); ok {
+		fallback.Value = k.Default
+	}
+	return h.landed(key, fallback), nil
+}
+
+// projectSaveRoot is the Project root a `/settings` save to this project may write under, or "" when
+// this session has no Project config to write: it takes no project layer, it has no Project root, or
+// that root's project file is the global config itself (projectConfigWatchPath, whose answer is the
+// same question asked of the watcher).
+func projectSaveRoot(opts config.Options, projectRoot string) string {
+	if projectConfigWatchPath(opts, projectRoot) == "" {
+		return ""
+	}
+	return projectRoot
+}
+
+// errNoProjectConfig refuses a save to this project in a session with no Project config to write —
+// no Project root, the home folder, or a project file that is the global one.
+var errNoProjectConfig = errors.New("apogee: this session has no project config to save to")
+
+// inProject runs a Project config write, or refuses it when this session has none to write.
+func (h settingsHost) inProject(write func() error) error {
+	if h.projectRoot == "" {
+		return errNoProjectConfig
+	}
+	return write()
+}
+
+// notHeldByProject refuses a global save of a tighten-only list the Project config now adds entries
+// to — the row the boot resolution would have made read-only (carriesProjectEntries), reached here
+// because a project save earlier in this session gave the list its project entries. Its value is the
+// union of both files, so saving it to the global file would copy the project's entries there.
+func (h settingsHost) notHeldByProject(key string) error {
+	k, ok := config.LookupKey(key)
+	if !ok || k.Class != config.ClassTightenOnly || h.edits == nil {
+		return nil
+	}
+	projected, err := h.edits.projection()
+	if err != nil || !carriesProjectEntries(k, projected.opts) {
+		return nil
+	}
+	return fmt.Errorf("apogee: %s carries entries from the project config; edit its global half in config.yaml", key)
+}
+
+// landed re-takes the external-edit baseline over both files and answers what that reading says for
+// key: its row's value, in the spelling a re-read applies (appliedValue), and the file that supplies
+// it. fallback stands in when the files cannot be projected — the write itself landed, so the pane
+// still applies what it asked for, the pre-layering answer, rather than failing a save that happened.
+func (h settingsHost) landed(key string, fallback tui.SettingOutcome) tui.SettingOutcome {
+	if h.edits == nil {
+		return fallback
+	}
+	projected, ok := h.edits.retake()
+	if !ok {
+		return fallback
+	}
+	for _, row := range projected.rows {
+		if row.Path == key {
+			return tui.SettingOutcome{Value: appliedValue(row), Source: row.Source}
+		}
+	}
+	return fallback
 }
 
 // Apply is the apply half of the same keypress (ADR 0037): what the file now says, the session now

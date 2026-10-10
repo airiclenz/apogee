@@ -3,6 +3,7 @@ package security
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -54,16 +55,261 @@ import (
 // is a read and `echo x > .git/config` a write, and a line built to look like the former while
 // doing the latter is the adversary game this guard does not play.
 func writeTargetsOf(command string) string {
+	return joinTargets(command, func(cmd simpleCommand) []string {
+		return append(slices.Clone(cmd.redirectTargets), operandTargets(cmd.words)...)
+	})
+}
+
+// joinTargets splits command into its simple commands and joins, space-separated, the targets
+// targetsOf reads off each one, every relative literal target resolved against the directory the
+// line's earlier `cd`s left that command in.
+func joinTargets(command string, targetsOf func(simpleCommand) []string) string {
 	var targets []string
 	for _, cmd := range splitSimpleCommands(command, workDir{}) {
-		for _, t := range cmd.redirectTargets {
-			targets = append(targets, cmd.dir.resolve(t))
-		}
-		for _, t := range operandTargets(cmd.words) {
+		for _, t := range targetsOf(cmd) {
 			targets = append(targets, cmd.dir.resolve(t))
 		}
 	}
 	return strings.Join(targets, " ")
+}
+
+// projectConfigTargetsOf is the project-config write view (Rule.ProjectConfigView): what a shell
+// command line can write, move or delete that the `write-project-config` rule judges. It reads the
+// line as writeTargetsOf does, with three differences, each the rule's own and none of them
+// writeTargetsOf's (whose output, and so `write-git-control-plane`, is untouched):
+//
+//   - a `git` command contributes only the file an output option names (`--output=file`): staging,
+//     committing or checking out the Project config is git's business, and the Adoption
+//     fingerprint (ADR 0096 §4), not a write refusal, is what stands behind the file's content;
+//   - a `cp` contributes its destination only (intoDirectoryOperands.destinations) — copying the config elsewhere
+//     reads it;
+//   - a target whose last segment is `.apogee` is kept only for a leader that deletes, moves or
+//     replaces what it names (replacingLeaders: rm, rmdir, unlink, mv, ln) — `mkdir .apogee`,
+//     `cd .apogee` or `cp notes.md .apogee/` name the folder and leave it standing; but a `cp` or
+//     `install` into that folder writes each source under its own name (intoFolderTargets), so
+//     `cp config.yaml .apogee/` contributes `.apogee/config.yaml`.
+func projectConfigTargetsOf(command string) string {
+	return joinTargets(command, projectConfigCommandTargets)
+}
+
+// replacingLeaders are the leaders whose operands may delete, move or replace the very path they
+// name — the only ones the project-config write view lets name the `.apogee` folder itself.
+var replacingLeaders = map[string]bool{
+	"rm": true, "rmdir": true, "unlink": true, "mv": true, "ln": true,
+}
+
+// apogeeFolderName is the folder the Project config lives in, as a path's last segment spells it.
+const apogeeFolderName = ".apogee"
+
+// projectConfigCommandTargets is one simple command's share of projectConfigTargetsOf. A command
+// that is only assignments keeps every value, as operandTargets does: it names no leader to judge,
+// and its values are what a later command's operands resolve through.
+func projectConfigCommandTargets(cmd simpleCommand) []string {
+	targets := slices.Clone(cmd.redirectTargets)
+	words := stripWrappers(cmd.words)
+	if len(words) == 0 {
+		return append(targets, operandTargets(cmd.words)...)
+	}
+	leader := path.Base(words[0])
+	targets = append(targets, projectConfigOperandTargets(leader, cmd.words, words[1:])...)
+	if replacingLeaders[leader] {
+		return targets
+	}
+	return slices.DeleteFunc(targets, namesApogeeFolder)
+}
+
+// namesApogeeFolder reports whether target's last path segment is the `.apogee` folder itself.
+func namesApogeeFolder(target string) bool {
+	return path.Base(strings.TrimRight(target, "/")) == apogeeFolderName
+}
+
+// projectConfigOperandTargets is operandTargets with the project-config view's two exemptions —
+// a git command's operands and a cp's sources — and its one addition: what a cp, install, mv or
+// ln puts into a destination directory (intoFolderTargets).
+func projectConfigOperandTargets(leader string, words, operands []string) []string {
+	switch leader {
+	case "git":
+		return outputOptionValues(leader, operands)
+	case "cp":
+		ops := parseIntoDirectoryOperands(operands)
+		return append(ops.destinations(), ops.intoFolderTargets(leader)...)
+	case "install", "mv", "ln":
+		ops := parseIntoDirectoryOperands(operands)
+		targets := operandTargets(words)
+		for _, dir := range ops.directories {
+			if !slices.Contains(targets, dir) {
+				targets = append(targets, dir) // an attached `-tDIR`, which valueOperands drops
+			}
+		}
+		return append(targets, ops.intoFolderTargets(leader)...)
+	}
+	return operandTargets(words)
+}
+
+// projectConfigFileName is the Project config's own name inside the `.apogee` folder.
+const projectConfigFileName = "config.yaml"
+
+// intoDirectoryValueLetters are the short options of cp, install, mv and ln that take a value —
+// the rest of the cluster or else the next word: `-t` names the target directory, and `-S` (a
+// backup suffix) and install's `-g`, `-m` and `-o` name something else. No other short option of
+// the four leaders is spelled with one of these letters.
+const intoDirectoryValueLetters = "tSgmo"
+
+// intoDirectoryValueOptions are the long options of the four leaders that take a value, apart from
+// `--target-directory`, as the next word when no `=` carries it.
+var intoDirectoryValueOptions = map[string]bool{
+	"--suffix": true, "--group": true, "--mode": true, "--owner": true,
+	"--strip-program": true, "--sparse": true, "--no-preserve": true,
+}
+
+// intoDirectoryOperands is a cp / install / mv / ln operand list read the way those leaders read
+// it: the directories `-t` / `--target-directory` name, the positional operands, the values of the
+// other value-taking options, and the two flags that change what the destination receives.
+type intoDirectoryOperands struct {
+	directories []string
+	positional  []string
+	values      []string
+	recursive   bool // cp -r, -R, -a, --recursive, --archive: a directory source may become the folder
+	makesDirs   bool // install -d / --directory: every operand is a directory to create
+}
+
+// parseIntoDirectoryOperands reads operands as cp, install, mv and ln do. Option parsing stops at
+// `--`; a short option cluster ends at its first value-taking letter, whose value is the rest of
+// the cluster or else the next word; `--target-directory` is read in any abbreviation the leaders
+// accept (`--t` upwards), since it names the destination itself.
+func parseIntoDirectoryOperands(operands []string) intoDirectoryOperands {
+	var ops intoDirectoryOperands
+	optionsDone := false
+	next := func(i *int) string {
+		if *i+1 < len(operands) {
+			*i++
+			return operands[*i]
+		}
+		return ""
+	}
+	for i := 0; i < len(operands); i++ {
+		w := operands[i]
+		switch {
+		case optionsDone || w == "-" || !strings.HasPrefix(w, "-"):
+			ops.positional = append(ops.positional, w)
+		case w == "--":
+			optionsDone = true
+		case strings.HasPrefix(w, "--"):
+			name, value, hasValue := strings.Cut(w, "=")
+			switch {
+			case len(name) >= len("--t") && strings.HasPrefix("--target-directory", name):
+				if !hasValue {
+					value = next(&i)
+				}
+				ops.directories = append(ops.directories, value)
+			case intoDirectoryValueOptions[name]:
+				if !hasValue {
+					value = next(&i)
+				}
+				ops.values = append(ops.values, value)
+			case name == "--recursive" || name == "--archive":
+				ops.recursive = true
+			case name == "--directory":
+				ops.makesDirs = true
+			}
+		default:
+			ops.readShortCluster(w[1:], func() string { return next(&i) })
+		}
+	}
+	return ops
+}
+
+// readShortCluster records one short option cluster (its letters without the `-`); next yields the
+// word after the cluster when the value-taking letter ends it.
+func (ops *intoDirectoryOperands) readShortCluster(letters string, next func() string) {
+	for j := 0; j < len(letters); j++ {
+		c := letters[j]
+		if strings.IndexByte(intoDirectoryValueLetters, c) >= 0 {
+			value := letters[j+1:]
+			if value == "" {
+				value = next()
+			}
+			if c == 't' {
+				ops.directories = append(ops.directories, value)
+			} else {
+				ops.values = append(ops.values, value)
+			}
+			return
+		}
+		switch c {
+		case 'r', 'R', 'a':
+			ops.recursive = true
+		case 'd':
+			ops.makesDirs = true
+		}
+	}
+}
+
+// destinations returns where the operands put their sources: the `-t` directories, or else the
+// last positional operand.
+func (ops intoDirectoryOperands) destinations() []string {
+	if len(ops.directories) > 0 || len(ops.positional) == 0 {
+		return ops.directories
+	}
+	return ops.positional[len(ops.positional)-1:]
+}
+
+// sources returns every word that may be a source: the positional operands that are not the
+// destination, and — failing closed on an option this reading takes for value-taking where a
+// leader does not — every other option's value.
+func (ops intoDirectoryOperands) sources() []string {
+	positional := ops.positional
+	if len(ops.directories) == 0 && len(positional) > 0 {
+		positional = positional[:len(positional)-1]
+	}
+	return append(slices.Clone(positional), ops.values...)
+}
+
+// intoFolderTargets returns what a cp or install writes inside a destination that names the
+// `.apogee` folder: `<destination>/<name>` for each source's entry name (sourceEntryName). Such a
+// destination is read as a directory whether or not a trailing `/` says so — failing closed, since
+// only the disk knows. The Project config's own path is added outright when the copy is recursive
+// (a directory source may become the folder, or be merged into it) or names no source the view
+// can read. The replacing leaders (mv, ln) contribute none: they keep the folder itself, which
+// the rule already refuses; nor does `install -d`, whose operands are all directories to create.
+func (ops intoDirectoryOperands) intoFolderTargets(leader string) []string {
+	if replacingLeaders[leader] || (leader == "install" && ops.makesDirs) {
+		return nil
+	}
+	var targets []string
+	for _, dest := range ops.destinations() {
+		if !namesApogeeFolder(dest) {
+			continue
+		}
+		names := make([]string, 0, len(ops.sources())+1)
+		for _, src := range ops.sources() {
+			names = append(names, sourceEntryName(src))
+		}
+		if len(names) == 0 || (leader == "cp" && ops.recursive) {
+			names = append(names, projectConfigFileName)
+		}
+		for _, name := range names {
+			targets = append(targets, path.Join(dest, name))
+		}
+	}
+	return targets
+}
+
+// sourceEntryName is the name a source lands under inside a destination directory: its last path
+// segment. A segment the view cannot read literally — a parameter, a home, a brace list, `.` or
+// `..` (a directory's contents) — fails closed to the Project config's name, as does a glob that
+// could match it.
+func sourceEntryName(src string) string {
+	name := path.Base(strings.TrimRight(src, "/"))
+	switch {
+	case name == "." || name == ".." || name == "/" || !isLiteralPath(name) || strings.Contains(name, "{"):
+		return projectConfigFileName
+	case strings.ContainsAny(name, "*?["):
+		if matched, err := path.Match(name, projectConfigFileName); matched || err != nil {
+			return projectConfigFileName
+		}
+	}
+	return name
 }
 
 // simpleCommand is one pipeline stage or chain member of a command line: its words in order

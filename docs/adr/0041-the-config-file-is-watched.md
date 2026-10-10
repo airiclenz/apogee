@@ -260,3 +260,13 @@ is the ` *` / ` ~` pair, not ` *` alone; see the amendment there.)*
 - This is user-visible — a new config key, a changed default editor, external edits applying live —
   and **warrants a minor bump** when the next version is cut. That call is the owner's, and no item
   of the implementing plan touches a version identifier.
+
+## Amendment (2026-10-10) — two watched files: the global config and the Project config
+
+[ADR 0096](0096-project-config-grants-are-live-only-by-adoption.md) adds a second config file,
+`<Project root>/.apogee/config.yaml`, layered over `~/.apogee/config.yaml`. The watcher of decision 3
+stops being single-file: it polls **both** files on the same ticker, with the same mtime-or-size
+change test, and a change to either re-reads the layered result — so a `git pull` or an external
+edit of the Project config applies live like an edit of the global file. A changed granting entry
+(an **Allow rule**) does not go live on that re-read: with no matching Adoption pin it is proposed,
+and offered at the next turn boundary (ADR 0096 §4).

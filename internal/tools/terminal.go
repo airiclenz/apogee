@@ -183,6 +183,14 @@ func (t *Terminal) ReadOnly() bool { return false }
 // keys on to confine it in Auto rather than gating it (domain.SubprocessTool).
 func (t *Terminal) Subprocess() bool { return true }
 
+// POSIXShell reports whether this tool hands its line to a POSIX shell (sh -c) rather than cmd.exe:
+// the platform shell's raw command line is empty exactly on POSIX — the `cmdline == ""` convention
+// Execute's pre-flight and fail-fast preamble key on. The Allow-rule matcher reads it (ADR 0096 §2),
+// since a line it cannot split the way the shell will never matches a rule.
+func (t *Terminal) POSIXShell() bool {
+	return t.host.shell.CommandLine("") == ""
+}
+
 // ArgRoles declares `command` as the shell command line this tool hands to the shell —
 // the role (domain.ArgRoleShellCommand) that lets a write-shaped dangerous-action rule judge what
 // the line writes rather than every word it names.

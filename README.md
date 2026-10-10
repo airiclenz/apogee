@@ -274,6 +274,10 @@ The full tour is in [the manual](docs/manual/README.md).
 - **A watched config** — edits to `~/.apogee/config.yaml` from anywhere apply to the
   running session; a few keys (each marked in the configuration manual) take effect at the
   next start.
+- **A project config and Allow rules** — a repository's committable `.apogee/config.yaml` may
+  set a few project keys, and `allow:` rules (`go test`, an MCP server) skip the prompt — a
+  project's rules only once you adopt them, since allowing `go test` runs whatever the repo's
+  code does.
 - **Your own system prompt** — replace apogee's, layer your text onto it, or give one
   model a prompt of its own.
 - **Turn any tool off** — or on — for every model or for one, because a shorter tool

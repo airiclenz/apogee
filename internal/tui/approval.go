@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"encoding/json"
+	"runtime"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // approvalOption is one row of the approval menu: the label the human reads, the key that takes it
@@ -22,6 +25,10 @@ type approvalOption struct {
 	// decision is what the row replies, meaningless when cancels is set.
 	decision domain.ApprovalDecision
 	cancels  bool
+	// projectRule marks the "Always in this project…" row: taking it saves an Allow rule into the
+	// Project config before the call is allowed (ConfigHost.AddProjectRule), so it sends no decision
+	// of its own until the save has landed ([Model.takeApprovalOption]).
+	projectRule bool
 }
 
 // approvalMenu is the approval prompt's decision menu in the order it is painted
@@ -29,11 +36,12 @@ type approvalOption struct {
 // rows renderPopup draws, the shortcut cells beside them, the order ↑/↓ walk, and (through
 // approvalKeysFor) the letters that take a row without walking to it — so a row can never be
 // paintable and unreachable, or reachable and unpainted. No site reads it whole: every reader takes
-// the menu ONE REQUEST offers (approvalMenuFor), which is this list on an ordinary gate and this list
-// without its session row on a forced one.
+// the menu ONE REQUEST offers ([Model.approvalMenuFor]), which drops the session row on a forced
+// gate and the project row wherever no Allow rule could be saved for the call.
 var approvalMenu = []approvalOption{
 	{label: "Allow", key: "a", decision: domain.ApprovalAllow},
 	{label: "Always allow this session", key: "s", decision: domain.ApprovalAllowForSession},
+	{label: projectRuleLabel, key: "p", decision: domain.ApprovalAllow, projectRule: true},
 	{label: "Deny", key: "d", decision: domain.ApprovalDeny},
 	{label: "Cancel", key: "esc", cancels: true},
 }
@@ -54,33 +62,39 @@ func isForcedApproval(req domain.ApprovalRequest) bool {
 	return req.CacheKey == ""
 }
 
-// approvalMenuFor is the menu ONE request offers: approvalMenu whole on an ordinary gate, and
-// approvalMenu without its session row on a forced one. Every reader of the menu — the rows the
-// pane paints, the ↑/↓ and wheel bounds, the row ⏎ and a second click resolve, the letters
-// approvalKeysFor answers — goes through here, so the highlight can never index a four-row menu
-// over three painted rows.
-func approvalMenuFor(req domain.ApprovalRequest) []approvalOption {
-	if !isForcedApproval(req) {
-		return approvalMenu
-	}
-	menu := make([]approvalOption, 0, len(approvalMenu)-1)
+// approvalMenuFor is the menu ONE request offers: approvalMenu without its session row on a forced
+// gate, and without its project row wherever [Model.projectRuleOffer] has no rule to save — an MCP
+// gate's row is relabelled with the server it names. Every reader of the menu — the rows the pane
+// paints, the ↑/↓ and wheel bounds, the row ⏎ and a second click resolve, the letters
+// approvalKeysFor answers — goes through here, so the highlight can never index a longer menu than
+// the pane paints.
+func (m Model) approvalMenuFor(req domain.ApprovalRequest) []approvalOption {
+	offer, offered := m.projectRuleOffer(req)
+	menu := make([]approvalOption, 0, len(approvalMenu))
 	for _, opt := range approvalMenu {
-		if opt.cancels || opt.decision != domain.ApprovalAllowForSession {
-			menu = append(menu, opt)
+		switch {
+		case opt.cancels:
+		case opt.decision == domain.ApprovalAllowForSession && isForcedApproval(req):
+			continue
+		case opt.projectRule && !offered:
+			continue
+		case opt.projectRule:
+			opt.label = offer.label
 		}
+		menu = append(menu, opt)
 	}
 	return menu
 }
 
-// approvalKeysFor maps a decision keypress to the ApprovalDecision it sends for ONE request: the
-// request's own menu rows (approvalMenuFor), indexed by the letter each one advertises in its
+// approvalKeysFor maps a decision keypress to the menu row it takes for ONE request: the request's
+// own menu rows ([Model.approvalMenuFor]), indexed by the letter each one advertises in its
 // shortcut cell, so the two can never drift — on a forced pane `s` is not in the map because the
-// row is not on the pane. The Cancel row is absent by construction — it sends no decision, and Esc
-// is claimed before the approval routing is reached (handleKey's "esc" case), so the pane inherits
-// the double-tap the key carries everywhere a worker runs rather than growing a cancel path of its
-// own.
-func approvalKeysFor(req domain.ApprovalRequest) map[string]domain.ApprovalDecision {
-	return approvalMenuKeys(approvalMenuFor(req))
+// row is not on the pane, and `p` is absent wherever the project row is. The Cancel row is absent by
+// construction — it sends no decision, and Esc is claimed before the approval routing is reached
+// (handleKey's "esc" case), so the pane inherits the double-tap the key carries everywhere a worker
+// runs rather than growing a cancel path of its own.
+func (m Model) approvalKeysFor(req domain.ApprovalRequest) map[string]approvalOption {
+	return approvalMenuKeys(m.approvalMenuFor(req))
 }
 
 // approvalDrainMarker is the question whose ANSWER arms the approval pane: a cursor-position report
@@ -117,11 +131,11 @@ func approvalDrainMarker() tea.Cmd {
 // a human on a terminal that answers nothing is not left holding a pane they cannot rule on.
 const approvalArmBackstop = 2 * time.Second
 
-func approvalMenuKeys(menu []approvalOption) map[string]domain.ApprovalDecision {
-	keys := make(map[string]domain.ApprovalDecision, len(menu))
+func approvalMenuKeys(menu []approvalOption) map[string]approvalOption {
+	keys := make(map[string]approvalOption, len(menu))
 	for _, opt := range menu {
 		if !opt.cancels {
-			keys[opt.key] = opt.decision
+			keys[opt.key] = opt
 		}
 	}
 	return keys
@@ -157,6 +171,8 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.state = stateAwaitingApproval
 	m.pending = &msg
 	m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
+	// and never inside a rule field a previous request left open
+	m.ruleEdit = projectRuleEdit{}
 	latch := m.openDecisionLatch()
 	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
@@ -308,13 +324,13 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// menu to read, and the key goes where every unclaimed key goes.
 		return m.scrollViewport(msg)
 	}
-	if decision, ok := approvalKeysFor(m.pending.Request)[msg.String()]; ok {
+	if opt, ok := m.approvalKeysFor(m.pending.Request)[msg.String()]; ok {
 		if !m.approvalArmed {
 			return m, nil
 		}
-		return m.sendApproval(decision)
+		return m.takeApprovalOption(opt)
 	}
-	menu := approvalMenuFor(m.pending.Request)
+	menu := m.approvalMenuFor(m.pending.Request)
 	switch msg.String() {
 	case "up":
 		m.approvalSel.move(-1, len(menu), listStopsAtEnds)
@@ -365,8 +381,11 @@ func (m Model) promptWheel(msg tea.MouseWheelMsg) (Model, bool) {
 	// question's choices safe here without a gesture path leaning on the state↔payload invariant
 	// (model.go), and a rectangle up with neither state live swallows the notch and moves nothing.
 	switch {
+	case m.editingProjectRule():
+		// The field is the pane's one row while it is open: there is no menu to walk, and the row the
+		// human left stays highlighted for the esc that goes back to it.
 	case m.state == stateAwaitingApproval && m.pending != nil:
-		m.approvalSel.wheel(msg, len(approvalMenuFor(m.pending.Request)))
+		m.approvalSel.wheel(msg, len(m.approvalMenuFor(m.pending.Request)))
 	case m.state == stateAwaitingAsk && m.pendingAsk != nil:
 		m.askSel.wheel(msg, len(m.pendingAsk.Request.Choices))
 	}
@@ -382,8 +401,17 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 	if m.pending == nil {
 		return m, nil
 	}
-	menu := approvalMenuFor(m.pending.Request)
-	opt := menu[m.approvalSel.highlight(len(menu))]
+	menu := m.approvalMenuFor(m.pending.Request)
+	return m.takeApprovalOption(menu[m.approvalSel.highlight(len(menu))])
+}
+
+// takeApprovalOption does what one menu row means, however it was reached — its letter, ⏎ on the
+// highlight, or the second click: a decision row replies, the project row saves its rule first
+// ([Model.openProjectRule]), and the Cancel row stops the worker.
+func (m Model) takeApprovalOption(opt approvalOption) (tea.Model, tea.Cmd) {
+	if opt.projectRule {
+		return m.openProjectRule()
+	}
 	if opt.cancels {
 		// A background workflow's gate has no worker to stop: Cancel sends it back to the engine's
 		// queue unanswered, as esc does (dismissWorkflowPrompt, workflow.go).
@@ -411,6 +439,8 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 	}
 	m.pending.Reply <- decision
 	m.pending = nil
+	// The rule field belongs to the request just answered.
+	m.ruleEdit = projectRuleEdit{}
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
 	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own
 	m.approvalDrainRelayed = false
@@ -442,7 +472,7 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // chrome is its two borders and nothing else (popupBorderChrome) and the menu costs the frame no
 // more than the legend did.
 //
-// A FORCED gate paints three of those options rather than four (approvalMenuFor): its answer is
+// A FORCED gate paints three of those options rather than four ([Model.approvalMenuFor]): its answer is
 // remembered nowhere (domain.ApprovalRequest.CacheKey is empty), so an "Always allow this session"
 // row would offer a memory the engine does not keep, and the `s` behind it would rule as a plain
 // Allow the human did not choose. In the row's place the pane closes on one faint disclosure —
@@ -453,6 +483,15 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // forced pane gives up: at a height where the hinted chrome cannot seat the whole menu beside it,
 // the pane re-budgets as the ordinary pane does and the disclosure yields before any decision row
 // does (approvalMenuBudget), so `❯ Allow` is on the screen at every window the pane is drawn in.
+//
+// An ordinary gate whose call a saved Allow rule could answer paints a fifth option, "Always in
+// this project…" [p], above Deny ([Model.projectRuleOffer], ADR 0096 §4) — for an MCP server it reads
+// "Always allow server `<alias>` in this project" and saves the server at once. The `terminal` row
+// opens a field in the menu's place, seeded with the suggested rule (security.SuggestAllowRules):
+// the field is then the pane's one row and every key but ctrl+c and ctrl+l is its own, its legend
+// is the hint row, ⏎ saves through [ConfigHost.AddProjectRule] and allows the call, and esc goes
+// back to the menu. A forced gate offers no such row, so its disclosure never competes with the
+// field's legend for the hint row.
 //
 // The vertical spacing is the same argument in blank lines, and every PART of the body is a
 // paragraph: the Sub-agent line, the Reason:, the Fix:, the Scope:, the labelled arguments, the
@@ -465,7 +504,7 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // human has to find the fact they are ruling on before they can rule on it. ONE further blank line
 // sets the menu off from the body (popupSpec.rowPadAbove), because that is still the break that
 // matters most: between what the human is deciding about and what the decisions are. Below the
-// menu there is none — the four options are adjacent to each other and the last of them ends the
+// menu there is none — the options are adjacent to each other and the last of them ends the
 // box, so nothing separates Cancel from the bottom border (popupRowStyle.padBelow stays off). The
 // menu's blank is booked out of the pane's own row budget below and gives way before an option does
 // on a window too short for both; the body's blanks are body LINES, counted by popupBodyLineCount
@@ -594,13 +633,7 @@ func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) 
 		parts = append(parts, note)
 	}
 
-	menu := approvalMenuFor(req)
-	rows := make([]popupRow, len(menu))
-	for i, opt := range menu {
-		// Two cells, so the module's column layout stacks the shortcuts into their own right-hand
-		// column whatever the labels measure — the mockup's alignment, derived rather than hand-padded.
-		rows[i] = popupRow{opt.label, "[" + opt.key + "]"}
-	}
+	rows, selected := m.approvalRows(req)
 
 	// The whole menu or as much of it as the window can seat; no cap of our own, because the menu is
 	// the whole offering rather than a window onto a longer list. The demand is in LINES
@@ -620,7 +653,10 @@ func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) 
 	// decisions stay. Booking and painting move together: popupRowPads paints padBelow only under a
 	// hint, so the pad follows the hint it exists for. The keys are untouched either way — a/d/esc
 	// answer a forced pane whether or not its rows are on the screen; what this keeps is the row.
-	disclosed := isForcedApproval(req) // a forced pane opens on its disclosure and may yield it below
+	// The rule field's legend, and a save it refused, are hints on the same terms (approvalHint): a
+	// forced pane offers no project row, so the two never compete for the one hint row.
+	hint := m.approvalHint(req)
+	disclosed := hint != "" // a hinted pane opens on its hint and may yield it below
 	maxBodyRows, rowsShown, seated := m.approvalMenuBudget(len(rows), disclosed)
 	if !seated {
 		return popupSpec{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
@@ -631,9 +667,8 @@ func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) 
 		// seated with the hint is seated without it, with never fewer rows than the first budget gave.
 		maxBodyRows, rowsShown, _ = m.approvalMenuBudget(len(rows), disclosed)
 	}
-	hint := ""
-	if disclosed {
-		hint = forcedApprovalDisclosure
+	if !disclosed {
+		hint = ""
 	}
 	spec := popupSpec{
 		// The tool NAME is a field like any other on this pane, and apogee does not author it — an MCP
@@ -655,7 +690,7 @@ func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) 
 		// keeps ending on its last decision.
 		rowStyle:  popupRowStyle{padBelow: disclosed},
 		hint:      hint,
-		selected:  m.approvalSel.highlight(len(rows)),
+		selected:  selected,
 		maxRows:   rowsShown,
 		scrollbar: m.popupScrollbarOn(),
 	}
@@ -666,9 +701,10 @@ func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) 
 }
 
 // approvalMenuLines is what the approval menu demands of the frame, in LINES: one per option — the
-// labels are ours and never wrap (popupFlatRowHeights) — plus the blank the menu is set off by
-// (popupSpec.rowPadAbove), plus, while the disclosure is painted, the blank that closes the menu
-// above it (popupRowStyle.padBelow). It is the one figure the budget books and the painter spends,
+// labels are ours and never wrap (popupFlatRowHeights), and the rule field is one row like them —
+// plus the blank the menu is set off by (popupSpec.rowPadAbove), plus, while a hint is painted (the
+// forced disclosure, or the rule field's legend), the blank that closes the menu above it
+// (popupRowStyle.padBelow). It is the one figure the budget books and the painter spends,
 // so a pane can never ask for four lines and paint five.
 func approvalMenuLines(options int, disclosed bool) int {
 	return popupRowBlockLines(popupFlatRowHeights(options), 0, popupRowPadLines(true, disclosed))
@@ -688,6 +724,39 @@ func (m Model) approvalMenuBudget(options int, disclosed bool) (maxBody, rowsSho
 	}
 	menuLines := approvalMenuLines(options, disclosed)
 	return m.popupBudget(panePrompt, menuLines, menuLines, chrome, popupFloor{})
+}
+
+// approvalRows is the pane's menu as the popup module paints it, and the row it highlights: the
+// request's own menu ([Model.approvalMenuFor]) as two cells per row, so the module's column layout
+// stacks the shortcuts into their own right-hand column whatever the labels measure — the mockup's
+// alignment, derived rather than hand-padded. While the rule field is open the menu gives way to
+// that field, as the pane's one row: the field is where every key goes (projectRuleKey), so a row of
+// letters that answer nothing would only be something to misread.
+func (m Model) approvalRows(req domain.ApprovalRequest) ([]popupRow, int) {
+	if m.editingProjectRule() {
+		return []popupRow{{"Rule: " + stripEscapes(m.ruleEdit.field.textWithCaret()), "[⏎]"}}, 0
+	}
+	menu := m.approvalMenuFor(req)
+	rows := make([]popupRow, len(menu))
+	for i, opt := range menu {
+		rows[i] = popupRow{opt.label, "[" + opt.key + "]"}
+	}
+	return rows, m.approvalSel.highlight(len(rows))
+}
+
+// approvalHint is the faint line the pane closes on, or "": a save the host refused says why
+// (projectRuleEdit.note), the open rule field names its two keys, and a forced pane says why its
+// session row is missing (forcedApprovalDisclosure).
+func (m Model) approvalHint(req domain.ApprovalRequest) string {
+	switch {
+	case m.ruleEdit.note != "":
+		return m.ruleEdit.note
+	case m.editingProjectRule():
+		return projectRuleLegend
+	case isForcedApproval(req):
+		return forcedApprovalDisclosure
+	}
+	return ""
 }
 
 // approvalTaskClipRunes bounds the delegated task the Sub-agent line spends body rows on. It is the
@@ -785,4 +854,176 @@ func approvalArgsBlock(req domain.ApprovalRequest) string {
 		lines[i] = d.Text
 	}
 	return stripEscapes(strings.Join(lines, "\n"))
+}
+
+// ----------------------------------------------------------------------------
+// "Always in this project…" — the approval pane's Allow-rule row (ADR 0096 §4)
+// ----------------------------------------------------------------------------
+
+// The project row's words. projectRuleLabel is the `terminal` row, whose rule the human edits
+// before it is saved; an MCP gate's row names its server instead (mcpProjectRuleLabel), because the
+// rule IS the server and there is nothing to edit.
+const (
+	projectRuleLabel = "Always in this project…"
+	// projectRuleLegend is the open field's hint row: what ⏎ and esc do there.
+	projectRuleLegend = "⏎ save to this project's config · esc back"
+	// projectRuleEmptyNote is the inline refusal of a field holding no rule.
+	projectRuleEmptyNote = "type a rule to save, or esc to go back"
+	// projectRuleSeparator joins the rules a line of several simple commands needs — one per
+	// command (security.SuggestAllowRules) — in the one field. A `;` can never be part of a rule:
+	// the matcher splits a line on it, so a rule holding one would match nothing.
+	projectRuleSeparator = "; "
+)
+
+// projectRuleEdit is the approval pane's "Always in this project…" sub-step: the field the
+// suggested `terminal` rule is edited in, and the inline note a refused save left. It rides on
+// [pendingDecision] because it is per-REQUEST state — the reset that forgets the request forgets the
+// field with it, so no rule typed for one call is ever saved for the next. The field is open exactly
+// while it is built (lineEditor.isBuilt): the zero value a reset leaves is the closed sub-step.
+type projectRuleEdit struct {
+	field lineEditor
+	// note is the refusal the last save met — an empty field, or the host's error — painted as the
+	// pane's hint until the next edit. "" when nothing was refused.
+	note string
+}
+
+// ruleOffer is the Allow rule the project row would save for one request: its kind, the text the
+// save starts from (the suggestion for a `terminal` line, the alias for an MCP server), and the
+// row's label.
+type ruleOffer struct {
+	kind  domain.AllowRuleKind
+	text  string
+	label string
+}
+
+// projectRuleOffer reports the rule the project row offers for req, and false where the pane must
+// not draw the row: a config file nobody wired (Options.Config nil — there is no Project config to
+// write), a forced gate (a rule never answers one, ADR 0096 §3), a `terminal` line no literal rule
+// could ever match (security.SuggestAllowRules answers nil — a redirect, a substitution, a
+// wrapper, a Windows `cmd` line), the single unnamed MCP server (a rule names a server by alias),
+// and every other tool — file edits get no rules.
+//
+// The `terminal` suggestion is read off the call's own command and workdir under the workspace
+// root, as the engine's matcher reads them (agent.allowRulesCovering), so a line offered the row
+// is one its saved rule covers. The shell is POSIX `sh` everywhere but Windows, where it is `cmd`
+// (internal/platform's rule tables); the renderer never imports internal/platform, so it reads the
+// same fact off runtime.GOOS, as the clipboard does.
+func (m Model) projectRuleOffer(req domain.ApprovalRequest) (ruleOffer, bool) {
+	if m.opts.Config == nil || isForcedApproval(req) {
+		return ruleOffer{}, false
+	}
+	if req.MCPServerGrant {
+		if req.MCPServerAlias == "" {
+			return ruleOffer{}, false
+		}
+		label := "Always allow server `" + flattenField(stripEscapes(req.MCPServerAlias)) + "` in this project"
+		return ruleOffer{kind: domain.AllowRuleMCPServer, text: req.MCPServerAlias, label: label}, true
+	}
+	// The kind is spelled the way the tool it answers for is named.
+	if req.Tool != string(domain.AllowRuleTerminal) {
+		return ruleOffer{}, false
+	}
+	var args struct {
+		Command string `json:"command"`
+		Workdir string `json:"workdir"`
+	}
+	if err := json.Unmarshal(req.Arguments, &args); err != nil {
+		return ruleOffer{}, false
+	}
+	site := security.AllowSite{Root: m.opts.Workspace, Workdir: args.Workdir, IsPOSIXShell: runtime.GOOS != "windows"}
+	suggestions := security.SuggestAllowRules(args.Command, site)
+	if len(suggestions) == 0 {
+		return ruleOffer{}, false
+	}
+	text := strings.Join(suggestions, projectRuleSeparator)
+	return ruleOffer{kind: domain.AllowRuleTerminal, text: text, label: projectRuleLabel}, true
+}
+
+// editingProjectRule reports whether the rule field is open over a live approval pane — the one
+// predicate the keys, the wheel, the click and the paint read, so none of them can believe the
+// field open over a pane that has gone.
+func (m Model) editingProjectRule() bool {
+	return m.state == stateAwaitingApproval && m.pending != nil && m.ruleEdit.field.isBuilt()
+}
+
+// openProjectRule takes the project row: a `terminal` rule opens the field seeded with the
+// suggestion, caret at its end, for the human to narrow or widen before it is saved; an MCP server's
+// rule is the server and is saved at once.
+func (m Model) openProjectRule() (tea.Model, tea.Cmd) {
+	offer, ok := m.projectRuleOffer(m.pending.Request)
+	if !ok {
+		return m, nil
+	}
+	if offer.kind == domain.AllowRuleMCPServer {
+		return m.saveProjectRule(offer.kind, offer.text)
+	}
+	m.ruleEdit = projectRuleEdit{field: newPopupField(m.opts.CursorShape, m.th.surface, settingsCaret, offer.text)}
+	return m, nil
+}
+
+// projectRuleKey routes a keypress while the rule field is open: esc goes back to the menu, ⏎
+// saves, and every other key edits the field — the letters that answer the menu included, so typing
+// `go test ./...` types it rather than allowing or denying the call. ctrl+c and ctrl+l are not
+// claimed: the quit gesture and the repaint stay the frame's, as they are under every other field.
+// It is asked before handleKey's own switch, so this esc is the field's, never the first press of
+// the stop double-tap.
+func (m Model) projectRuleKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+c", "ctrl+l":
+		return m, nil, false
+	case "esc":
+		m.ruleEdit = projectRuleEdit{}
+		return m, nil, true
+	case "enter":
+		next, cmd := m.saveProjectRule(domain.AllowRuleTerminal, m.ruleEdit.field.value())
+		return next.(Model), cmd, true
+	}
+	m.ruleEdit.note = "" // an edit answers the refusal it was painted for
+	return m, m.ruleEdit.field.editKey(msg), true
+}
+
+// saveProjectRule saves the rules text holds into the Project config through the host
+// ([ConfigHost.AddProjectRule]) and, once every one has landed, allows the call that asked — the
+// rule answers the NEXT identical call, the human's choice answers this one. A field holding no
+// rule, or a save the host refused, is said inline (projectRuleEdit.note) and nothing is answered:
+// the pane stays up for the human to fix the rule or rule another way.
+func (m Model) saveProjectRule(kind domain.AllowRuleKind, text string) (tea.Model, tea.Cmd) {
+	rules := splitProjectRules(text)
+	if len(rules) == 0 {
+		m.ruleEdit.note = projectRuleEmptyNote
+		return m, nil
+	}
+	host := m.configHostOrNoop()
+	for _, rule := range rules {
+		if err := host.AddProjectRule(kind, rule); err != nil {
+			m.ruleEdit.note = "not saved: " + flattenField(stripEscapes(err.Error()))
+			return m, nil
+		}
+	}
+	return m.sendApproval(domain.ApprovalAllow)
+}
+
+// splitProjectRules reads the rule field into its rules: one per projectRuleSeparator, each with its
+// words single-spaced — the matcher compares whole words, so the spacing is not part of a rule — and
+// none empty.
+func splitProjectRules(text string) []string {
+	var rules []string
+	for _, part := range strings.Split(text, strings.TrimSpace(projectRuleSeparator)) {
+		if rule := strings.Join(strings.Fields(part), " "); rule != "" {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}
+
+// projectRuleMsg hands a Msg that is TEXT to the open rule field — the terminal's bracketed paste,
+// and the clipboard reply the widget's own ctrl+v asks for ([lineEditor.editMsg]) — so the field
+// takes a paste as the /settings value row does (settingsEditorMsg). claimed is false while the
+// field is closed, which leaves the text to the surfaces it was always theirs.
+func (m Model) projectRuleMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
+	if !m.editingProjectRule() {
+		return m, nil, false
+	}
+	m.ruleEdit.note = ""
+	return m, m.ruleEdit.field.editMsg(msg), true
 }

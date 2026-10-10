@@ -46,25 +46,25 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │                                                                                              │
 │                                                                                              │
 │   Upstream                                                                                   │
-│ ❯ servers               2 servers    · ⏎ opens $EDITOR                                       │
-│   server                macStudio                                                            │
+│ ❯ servers               2 servers    (global)   · ⏎ opens $EDITOR                            │
+│   server                macStudio    (global)                                                │
 │                                                                                              │
 │   Autonomy                                                                                   │
-│   mode                  ask-before                                                           │
+│   mode                  ask-before   (global)                                                │
 │                                                                                              │
 │   System prompt                                                                              │
-│   system-prompt-text    7 lines                                                              │
-│   system-prompt-file                                                                         │
-│   system-prompt-models  none         · ⏎ opens $EDITOR                                       │
-│   context-files.enable  true                                                                 │
-│   context-files.names   [AGENTS.md]                                                          │
+│   system-prompt-text    7 lines      (global)                                                │
+│   system-prompt-file                 (default)                                               │
+│   system-prompt-models  none         (default)  · ⏎ opens $EDITOR                            │
+│   context-files.enable  true         (default)                                               │
+│   context-files.names   [AGENTS.md]  (project)                                               │
 │                                                                                              │
 │   Confinement                                                                                │
-│   confine-to-workspace  true         · use /confine                                          │
-│   unconfined-hosts      none         · use /confine                                          │
+│   confine-to-workspace  true         (default)  · use /confine                               │
+│   unconfined-hosts      none         (default)  · use /confine                               │
 │                                                                                              │
 │   Model profiles                                                                             │
-│   model-profiles        native       · ⏎ opens $EDITOR                                       │
+│   model-profiles        native       (default)  · ⏎ opens $EDITOR                            │
 │                                                                                              │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -76,25 +76,45 @@ the list losing a row. That closing blank is also this pane's **breathing row** 
 one every other boxed pane spends on itself, which is why the pane asks for none of its own — and the
 blank above the key legend is its counterpart below. Both are bought out of the row window rather
 than out of the pane's height, so a short terminal gives them up and keeps the keys. Rows are four
-cells — key, value, an `(env)`/`(flag)` mark, and the note or pointer — and the last two columns
-collapse away entirely on a configuration with nothing overridden and nothing read-only.
+cells — key, value, a source mark, and the note or pointer. The mark names where the row's value
+came from: `(default)`, `(global)` for the global config file, `(project)` for the Project config
+layered over it, `(env)` or `(flag)` for an override — so every row carries one, and the column
+collapses away only on rows a provider reported without a source. The note column collapses away on
+a configuration with nothing read-only and nothing edited yet. A commit on a key a project may set
+(a project-param or tighten-only key, ADR 0096 §6) asks which file it lands in before anything is
+written — the legend becomes `Save to: [global] / this project · ←/→ choose · ⏎ save · esc back`
+(`Reset in:` for a reset), the bracket on the file that supplies the key now, and the row's value
+cell shows the value being saved. The row then reports the file that supplies the key and the value
+both files resolve to together. A row the Project config sets that this pane cannot write there
+points at it (`· set in the project config`).
 
 The mockup is **abridged**: it shows five of the pane's ten sections. In the built pane
 `Tools & skills`, `Session`, `Presentation`, `Interface` and `Reactions` sit between `Confinement`
 and `Model profiles`, in that order, and a section is a run over the registry's own order rather than
 a per-key label — so a key added to the registry inherits the section it was inserted into.
 
+After `Model profiles` comes one more section, `Allow rules`, whose rows are no registry key's: one
+per Allow rule the session holds (ADR 0096 §4) — the rules in force first, then the proposed and the
+rejected project rules — keyed by list and text (`terminal: go test`), with where the rule stands as
+the value (`live` for a global rule, `adopted`, `proposed`, `rejected`) and its layer as the source
+mark. ⏎ adopts a proposed or rejected rule; ⌫ arms its removal from the file that holds it and ⏎
+confirms (`⏎ confirm remove · esc cancel`). The legend on a rule's row reads
+`↑/↓ select · ⏎ adopt · ⌫ remove · esc close`, dropping `⏎ adopt` on a rule already in force. A
+session with no rules shows no such section.
+
 ### An edited row
 
 ```
-│ ❯ context-files.enable  false *      · applies at next clear                                 │
+│ ❯ context-files.enable  false *      (default)  · applies at next clear                      │
 ```
 
 The ` *` says *this session changed this key here* and is cleared only by a relaunch. The note beside
 it is the one deferral wording the surface has: `context-files:` is part of the prefix every request
 is cached against, so it lands at the next `/clear`. Every other key is already in force by the time
 the row repaints. Where an environment variable or a flag outranks the file the note reads
-`· APOGEE_MODE outranks at next launch` — about the next start, not about this edit, which applied —
+`· APOGEE_MODE outranks at next launch` — about the next start, not about this edit, which applied;
+a global save under a value the Project config sets reads `· saved to global; the project config
+outranks it`, since the project's value stays in force —
 and a write whose apply then failed reads `✗ saved — live apply failed: …`.
 
 ### The selection popup (`mode`, `server`, every 3-plus-option key)
@@ -128,7 +148,7 @@ longer names. Choosing a different server is how this key changes.
 ### The single-line field (string and int keys)
 
 ```
-│ ❯ system-prompt-file    ~/prompts/apogee.md▏                                                 │
+│ ❯ system-prompt-file    ~/prompts/apogee.md▏  (global)                                       │
 ```
 
 The field opens **in place**, on the row and in the value's own column, seeded with what the key

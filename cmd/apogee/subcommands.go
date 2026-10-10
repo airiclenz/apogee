@@ -13,7 +13,8 @@ import "github.com/spf13/cobra"
 // core (ADR 0034). `undo` is the fourth: the revert those two unattended Drivers have nobody
 // to offer, reading one saved session's snapshot store from a fresh process (ADR 0074). `mcp` is
 // the fifth: `apogee mcp login|logout <name>`, the OAuth login of an `auth: oauth` MCP server that
-// a session refreshes but never prompts for once it is running.
+// a session refreshes but never prompts for once it is running. `project` is the sixth: `apogee
+// project adopt`, the terminal answer to the Allow rules a Project config proposes (ADR 0096 §4).
 // Registering a child is what makes a
 // Commands section appear under `apogee --help` — the one permitted output delta of the
 // Phase-5 subcommand work.
@@ -23,5 +24,6 @@ import "github.com/spf13/cobra"
 // through to the root's argument validation when nothing matches, so an unknown word still
 // fails with the same `unknown command` error it does today.
 func subcommands() []*cobra.Command {
-	return []*cobra.Command{newProbeCommand(), newHeadlessCommand(), newDaemonCommand(), newUndoCommand(), newMCPCommand()}
+	return []*cobra.Command{newProbeCommand(), newHeadlessCommand(), newDaemonCommand(), newUndoCommand(), newMCPCommand(),
+		newProjectCommand()}
 }

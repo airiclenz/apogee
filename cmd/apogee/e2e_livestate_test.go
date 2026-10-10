@@ -191,13 +191,13 @@ func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
 	// one of them flips it to the ` *` that says this session wrote it.
 	openSettings(drv)
 	for _, key := range []string{watchedSchemeKey, watchedCompactKey} {
-		if row := settingsRow(t, drv, key); !strings.HasSuffix(row, watchedMark) {
+		if row := settingsRow(t, drv, key); !strings.HasSuffix(sansSourceMark(row), watchedMark) {
 			t.Errorf("the row %q carries no %q after a save on disk moved it", row, watchedMark)
 		}
 	}
 	settingsGoDown(t, drv, watchedCompactKey)
 	pressAndRepaint(drv, tuitest.Enter)
-	if row := settingsCursor(drv); !strings.HasSuffix(row, editedMark) {
+	if row := settingsCursor(drv); !strings.HasSuffix(sansSourceMark(row), editedMark) {
 		t.Errorf("the row %q keeps the watcher's mark after an edit in the pane", row)
 	}
 	closePane(drv, settingsHint)
@@ -415,6 +415,16 @@ func settingsGoDown(t *testing.T, drv *tuitest.Driver, key string) {
 		}
 	}
 	t.Fatalf("the settings list never highlighted %q (it stopped on %q)", key, settingsCursor(drv))
+}
+
+// sansSourceMark is a settings row without the source mark ("(global)", "(default)") every row
+// ends in when no note follows it, so a claim about the mark the VALUE cell ends in (` ~`, ` *`)
+// reads the value cell rather than the column after it.
+func sansSourceMark(row string) string {
+	if i := strings.LastIndex(row, " ("); i >= 0 && strings.HasSuffix(row, ")") {
+		return strings.TrimSpace(row[:i])
+	}
+	return row
 }
 
 // settingsValue is the VALUE cell of the row naming key: the first field after the key itself, which

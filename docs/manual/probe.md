@@ -124,27 +124,32 @@ last-column wrap
   OK — the terminal holds a pending wrap at the last column — the semantics the renderer emits against
 ```
 
-`apogee probe config` is the fourth subject, free like the host report: it answers "what does
-`config.yaml` say?" — the file alone, without the flags, `APOGEE_*` variables and host
-acknowledgement that `apogee probe` layers on top. It reads the file the way a **live reload**
-reads it (the read every `/settings` apply makes), never the way startup does, so it never
-migrates or rewrites the file it describes. The report has three sections: `notices` lists
-everything the reader announced — an unknown key it ignored, spelled exactly as the startup
-notice spells it — or `(none)`; `migration` says whether the file is still written in a retired
-shape (the old top-level `endpoint:`/`api-key:`/`host-alias:`/`model:` keys, or a `hooks:`
-block) that a startup would fold for you, quoting the same refusal a live reload gives; and
-`resolved` lists every key of the configuration at the value the file resolves it to — the
-file's own value where it states one, the built-in default where it does not — spelled the way
-the file spells it and in the order the starter file presents them. A structured block reads as
-a summary (`servers: 2 servers`), so no `api-key` ever reaches the report. When the file awaits
-migration the `resolved` section is replaced by `(start apogee once to migrate the file, then
-re-run)`. It takes `--config` only. A file the reader refuses for any other reason — a
-malformed one, a value a key rejects — fails the command with the reader's own sentence.
+`apogee probe config` is the fourth subject, free like the host report: it answers "what do the
+config files say?" — `config.yaml` with the Project config of the current directory's Project
+root (`<root>/.apogee/config.yaml`, see [configuration](configuration.md)) layered over it, and
+nothing else: not the flags, `APOGEE_*` variables and host acknowledgement that `apogee probe`
+layers on top. It reads the files the way a **live reload** reads them (the re-read a saved
+file triggers), never the way startup does, so it never migrates or rewrites a file it
+describes. The report has three sections: `notices` lists everything the reader announced — an
+unknown key it ignored, spelled exactly as the startup notice spells it, a global-only key the
+project file may not set, a project file it had to skip — or `(none)`; `migration` says whether
+the global file is still written in a retired shape (the old top-level
+`endpoint:`/`api-key:`/`host-alias:`/`model:` keys, or a `hooks:` block) that a startup would
+fold for you, quoting the same refusal a live reload gives; and `resolved` lists every key of the
+configuration at the value the two files resolve it to — the project file's value for a key it
+may set, the global file's own value where it states one, the built-in default where neither
+does — spelled the way the files spell it and in the order the starter file presents them. A
+structured block reads as a summary (`servers: 2 servers`), so no `api-key` ever reaches the
+report. When the global file awaits migration the `resolved` section is replaced by `(start
+apogee once to migrate the file, then re-run)`. It takes `--config` only; the Project root is
+the directory you run it in. A global file the reader refuses for any other reason — a
+malformed one, a value a key rejects — fails the command with the reader's own sentence; a
+project file's defect is a notice, and the report then reads the global file alone.
 
 ```console
 $ apogee probe config
 apogee probe — config report
-  (nothing is written; the file is read the way a live reload reads it)
+  (nothing is written; the files are read the way a live reload reads them)
 
 notices
   apogee: config /home/me/.apogee/config.yaml: unknown key "auto-compct" at line 12 is ignored

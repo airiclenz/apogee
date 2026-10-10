@@ -1276,6 +1276,33 @@ executed call is one remembered decision however the model spelled it; a call wh
 COLLIDE under that fold — two spellings of one parameter — is refused before it is resolved, since
 no single reading of it would describe what the tool would run.
 
+**Allow rule**:
+A remembered, persisted *yes* that answers an ordinary **Approval** without asking: for `terminal`, a
+word prefix (`go test`) that every simple command of a command line must match; for **MCP**, a whole
+server. A **project** Allow rule holds under one **Project root** and is the default; a **global** one holds
+everywhere and is only written by hand. It never turns a refusal into a yes, never answers a forced
+look, and yields to a **Reaction**'s ask or deny; every call it lets through says so in the audit.
+_Avoid_: "permission", "allowlist entry", "always-allow" (the session-only choice is *allow for this
+session*).
+
+**Project root**:
+The folder whose `.apogee/` holds the project's **Project config** and skills: the nearest folder
+with a `.apogee/`, from the **Workspace** up to — never past — its git top-level; the Workspace
+itself when there is none or no repo. Never `$HOME`'s `~/.apogee`, which is the global config.
+_Avoid_: "repo root", "git root" (the Project root may sit below either).
+
+**Project config**:
+The **Project root**'s own `.apogee/` settings, committable with the repo. apogee alone writes it, and only
+on the user's answer; tools may not. An entry in it that grants anything — an **Allow rule** — is
+inert until **Adopted**.
+_Avoid_: "repo config", "local config", "project settings file".
+
+**Adoption**:
+The user's recorded acceptance of one granting **Project config** entry, pinned in `~/.apogee` to that
+entry's exact content and **Project root**. An entry with no matching pin — new, edited, pulled from a
+teammate, or written behind apogee's back — is *proposed* and does nothing until adopted.
+_Avoid_: "trust" (adoption is per entry, never a whole-folder yes), "approval" (that is one call).
+
 **Ask-user**:
 A free-text question the model puts to the human mid-task (via the `ask_user` tool), answered
 through a host-supplied **`Asker`** delegate — the public analogue of the **Approver**, but
@@ -1464,9 +1491,9 @@ _Avoid_: "trusted host" (it is not a trust store, and nothing is verified), "whi
 **Settings surface** (`/settings`):
 The **full-height pane over the key registry** — the in-app view of `~/.apogee/config.yaml`. The
 **key registry** is one declarative table describing every config key (path, kind, default,
-env-var and flag names, global-only, editability, masking, validation hook, one-line description);
-both the pane and [Resolution](#safety-and-autonomy)'s multi-source precedence read their metadata
-from it, and a reflection **bijection guard** against `fileConfig`'s yaml tags makes a schema key
+env-var and flag names, key class, confinement interlock, editability, masking, validation hook,
+one-line description); both the pane and [Resolution](#safety-and-autonomy)'s multi-source
+precedence read their metadata from it, and a reflection **bijection guard** against `fileConfig`'s yaml tags makes a schema key
 without a registry row a test failure — the screen cannot drift from the schema. The pane claims
 the **entire transcript row budget** while the frame floor (status line, input box, footer) stays
 drawn — a new pane class, `layout.md`'s first surface allowed to take all of it — lists every key
@@ -1633,11 +1660,12 @@ level of its arguments, is skipped — an MCP tool declares none, so every argum
 nested values included, is inspected in full (ADR 0012 amendment 2026-09-26). `commit-secrets` is the one **content-derived** member: its evidence is what git
 would stage, precomputed by dispatch into a shadow index before the pure resolution runs (D6), never
 the call's arguments. It is **tighten-only** and trivially bypassable by anything determined,
-so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on, and **not
-user-configurable today**: no config key feeds it, so the shipped rules are the whole set. The
-add/remove split — a global config may add *or* remove rules by ID (it is the user's machine), a
-project config may only *add*, and only stricter — is the rule of the ADR 0012 merge seam
-(`security.MergeDangerousRules`), which no config key calls yet (apogee-089 would wire it).
+so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on, and
+user-configurable through the **`dangerous-rules:`** key (ADR 0096 §6): `add:` entries (`id`,
+`pattern`, `tier: ask|refuse`, `reason`) and `remove:` IDs. The add/remove split — a global config
+may add *or* remove rules by ID (it is the user's machine), a **Project config** may only *add*, and
+only stricter — is the rule of the ADR 0012 merge seam (`security.MergeDangerousRules`), which
+`dangerous-rules:` feeds.
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
 not — it guards against mistakes, not attackers).
 

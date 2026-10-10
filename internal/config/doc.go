@@ -42,12 +42,18 @@
 // keeps ONE key writable without moving a comment (ADR 0035). configedit.go is the one transaction
 // those pieces are run in — seed and read the file, splice, re-parse, verify, replace it
 // atomically — together with the per-container shape predicates a writer's verify step is written
-// from. configwrite.go is the
-// acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
-// that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
-// /settings key, addressed by its registry path, and configwrite_scalarsplice.go is that writer's
-// splice machinery — where the key stands in the parsed document, how a text key's block is
-// rendered, and where a key the file does not set yet is inserted.
+// from. projectwrite.go runs that transaction against a Project config (ADR 0096 §4): an absent
+// file starts as an empty document rather than the template, the lock lives under the apogee home
+// beside the root's adoption record (internal/adoption), a symlinked `.apogee/` or `config.yaml` is
+// refused, and nothing but the config is left in the repository; it carries the `/settings` pane's
+// project save of one key as well as the Allow-rule edits, and RemoveGlobalAllowRule, which runs
+// the same Allow-rule removal against the global config inside that file's own transaction.
+// configwrite.go is the acknowledgement writer that records a host `/confine off --save` names,
+// and the per-entry writer that remembers a choice on a single `servers:` entry.
+// configwrite_scalar.go sets or resets one /settings key, addressed by its registry path, and
+// configwrite_scalarsplice.go is that writer's splice machinery — where the key stands in the
+// parsed document, how a text key's block is rendered, and where a key the file does not set yet
+// is inserted.
 // configwrite_keysource.go points one `servers:`
 // entry at a key command, or marks the entry as keeping the plaintext key it already carries
 // (ADR 0047).
@@ -57,7 +63,15 @@
 // configmigrate.go is the one-time fold of the retired
 // top-level upstream keys into `servers:` (ADR 0036 decision 9), and — under its own heading, since
 // it is the opposite kind of write — the CONSENTED migration of ADR 0045's retired per-entry
-// `sub-agents: true` flag onto the root `sub-agents-server:` key. unknownkeys.go is the walk that
+// `sub-agents: true` flag onto the root `sub-agents-server:` key. layer.go is the Project config layer (ADR 0096 §6): the project file
+// read and checked alone, its keys sorted by registry class, and merged into the global document
+// before the one decode — project-param keys overlaid, tighten-only lists unioned, global-only keys
+// dropped with a notice, and `dangerous-rules:` carried apart: its `add:` to the security seam as the
+// project's additions, its `remove:` dropped with a notice. allow.go is the `allow:` key, the one
+// granting key (ADR 0096 §2, §4): the on-disk Allow rules, the global file's live as written, the
+// Project config's carried apart from the merge and sorted by the user's adoption record
+// (internal/adoption) — only the adopted ones join the effective set, the rest are reported as
+// proposed or rejected — and where those records live (`~/.apogee/workspaces`). unknownkeys.go is the walk that
 // announces, at startup, every key of the migrated file the schema does not spell — a notice, never
 // a refusal — and the yaml-tag reader it shares with the registry bijection test. The one-goroutine
 // poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows

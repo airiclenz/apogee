@@ -60,6 +60,7 @@ import (
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -257,6 +258,8 @@ type rootWiring struct {
 	live          *liveSettings
 	externalEdits *externalEdit
 	configWatch   *filewatch.Watcher
+	projectWatch  *filewatch.Watcher
+	adoptionWatch *filewatch.Watcher
 	mover         sessionMover
 	launcherPath  *launcherPath
 	launcherSeams launcherWiring
@@ -288,12 +291,18 @@ func (w *rootWiring) close() {
 		w.schedules.Close()
 	}
 
-	// The config watcher ends next, for the schedules' reason: the poll stops while everything it
+	// The config watchers end next, for the schedules' reason: the poll stops while everything it
 	// reported into is still standing. Stop waits for the poll goroutine and closes the channel
 	// behind it, so the wait the renderer parks on returns rather than leaking, and nothing the
 	// assembly let go of outlives runRoot.
 	if w.configWatch != nil {
 		w.configWatch.Stop()
+	}
+	if w.projectWatch != nil {
+		w.projectWatch.Stop()
+	}
+	if w.adoptionWatch != nil {
+		w.adoptionWatch.Stop()
 	}
 
 	// The Reactions go after the Firings and BEFORE the engine, for the Firings' own reason: a
@@ -382,6 +391,9 @@ type settingsEngine interface {
 	// refuses a Generation it will not arm (Agent.SetReactions) and the Runner a list it cannot, and
 	// either refusal is the settings row's sentence.
 	SetReactions(apogee.Generation) error
+	// SetAllowRules installs the effective Allow rules on the whole agent tree (ADR 0096): the set a
+	// re-read of either config file or an adoption answer resolves to.
+	SetAllowRules([]apogee.AllowRule)
 	SetContextFiles(enable bool, names []string)
 	SwapTools(*apogee.ToolRegistry) error
 	SetProfile(apogee.ModelProfile) error
@@ -442,6 +454,10 @@ type stateRoots struct {
 	scratch   string
 	snapshots string
 	workspace string
+	// project is the Project root (internal/projectroot, ADR 0096 §1): the folder whose .apogee/
+	// holds the project's config and skills — the workspace itself outside a repository, and empty
+	// when the workspace is the user's home (no project layer). Readers treat empty as workspace.
+	project string
 }
 
 // resolveColorScheme loads one colour scheme by name and renders whatever the load complained about
@@ -467,6 +483,8 @@ func resolveColorScheme(name, schemesDir string) (scheme.Scheme, []string) {
 // apogee home (configDir override, else ~/.apogee) holds config/sessions, and the
 // workspace (workspace override, else the current directory) scopes the file tools. It
 // computes paths only — directory creation is deferred to the writer that needs them (P2.5).
+// The Project root is resolved here too, by a filesystem walk from the workspace that can never
+// fail (projectroot.Resolve), so it adds nothing to the error set.
 func resolveRoots(configDir, workspace string) (stateRoots, error) {
 	absHome, err := config.ApogeeHome(configDir)
 	if err != nil {
@@ -521,7 +539,19 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// time its journal is opened, and a run whose `undo-snapshots:` is off creates nothing.
 		snapshots: filepath.Join(absHome, "snapshots"),
 		workspace: absWorkspace,
+		project:   projectroot.Resolve(absWorkspace, userHome()),
 	}, nil
+}
+
+// userHome is the user's home folder for the Project root's home guard, or "" when the platform
+// cannot name one — which leaves only that guard off: with no home to compare against, the walk
+// still stops at the git top-level, so the answer stays inside the workspace's own repository.
+func userHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 // ----------------------------------------------------------------------------

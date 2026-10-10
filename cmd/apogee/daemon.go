@@ -180,7 +180,10 @@ func runDaemonWith(ctx context.Context, opts *config.Options, changed func(strin
 	out, errOut io.Writer, signals <-chan os.Signal, deps daemonDeps) error {
 	// The same resolution a session performs (flag > env > file > default), so a Firing runs against
 	// the server, and with the Reactions, a session on this host would (ADR 0031). Notices go to
-	// stderr; the daemon's own narration goes to stdout, which is what a supervisor journals.
+	// stderr; the daemon's own narration goes to stdout, which is what a supervisor journals. The
+	// daemon reads no Project config: the folder it starts in is not the workspace a Firing runs in,
+	// so it resolves the global file alone (ADR 0096).
+	opts.GlobalConfigOnly = true
 	if err := config.ApplyConfig(opts, changed, os.Getenv, os.ReadFile, func(msg string) {
 		_, _ = fmt.Fprintln(errOut, msg)
 	}); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -282,7 +283,7 @@ func TestModelApprovalHidesTheSessionRowOnAForcedGate(t *testing.T) {
 	const denyRow = 1
 	x, y := frameCell(t, m, "Deny")
 	m = step(t, m, leftClick(x, y))
-	if got := m.approvalSel.highlight(len(approvalMenuFor(req))); got != denyRow {
+	if got := m.approvalSel.highlight(len(m.approvalMenuFor(req))); got != denyRow {
 		t.Errorf("approvalSel = %d after a click on Deny, want %d", got, denyRow)
 	}
 	if !m.clickArmed.holds(panePrompt, denyRow) {
@@ -477,4 +478,252 @@ func TestStoppedChildWithdrawsItsApprovalPane(t *testing.T) {
 			t.Errorf("state = %v mid whole-Turn stop; want the pane left for finishWorker to clear", m.state)
 		}
 	})
+}
+
+// approvalMenuLen is how many rows the open approval pane's menu offers: the per-request menu
+// (Model.approvalMenuFor), never approvalMenu whole — the project row is the request's to offer.
+func approvalMenuLen(t *testing.T, m Model) int {
+	t.Helper()
+	if m.pending == nil {
+		t.Fatal("no approval pane is open")
+	}
+	return len(m.approvalMenuFor(m.pending.Request))
+}
+
+// projectRulePane opens an armed approval pane for req over a model whose config host records every
+// AddProjectRule it is handed, and returns the model, the reply channel and the recorded rules.
+func projectRulePane(t *testing.T, req domain.ApprovalRequest, addErr error) (Model, chan domain.ApprovalDecision, *[]domain.AllowRule) {
+	t.Helper()
+	saved := &[]domain.AllowRule{}
+	host := fakeConfigHost{addProjectRule: func(kind domain.AllowRuleKind, text string) error {
+		if addErr != nil {
+			return addErr
+		}
+		*saved = append(*saved, domain.AllowRule{Kind: kind, Text: text})
+		return nil
+	}}
+	m := newTestModelEng(t, &fakeEngine{}, Options{Config: host, Workspace: t.TempDir()})
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{Request: req, Reply: reply})
+	return armApproval(t, m), reply, saved
+}
+
+// terminalGate is an ordinary `terminal` gate over command.
+func terminalGate(command string) domain.ApprovalRequest {
+	args, _ := json.Marshal(map[string]string{"command": command})
+	return domain.ApprovalRequest{Tool: "terminal", Reason: "subprocess execution", Arguments: args, CacheKey: "terminal:fixture"}
+}
+
+// typeIntoPane types s one key at a time.
+func typeIntoPane(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	for _, r := range s {
+		m = step(t, m, keyRune(r))
+	}
+	return m
+}
+
+// The fourth choice: `p` opens the rule field seeded with the suggestion, ⏎ in the field saves the
+// rule through the host and allows the call that asked — and the menu row the highlight stood on
+// is never what ⏎ resolves.
+func TestModelApprovalAlwaysInThisProjectSavesTheEditedRule(t *testing.T) {
+	t.Parallel()
+
+	m, reply, saved := projectRulePane(t, terminalGate("go test ./..."), nil)
+	if !strings.Contains(plain(m.View()), "Always in this project…") {
+		t.Fatalf("the pane offers no project row:\n%s", plain(m.View()))
+	}
+
+	m = step(t, m, keyRune('p'))
+
+	if !m.editingProjectRule() {
+		t.Fatal("`p` did not open the rule field")
+	}
+	if got := m.ruleEdit.field.value(); got != "go test" {
+		t.Errorf("the field opened on %q, want the suggestion %q", got, "go test")
+	}
+	if view := plain(m.View()); !strings.Contains(view, "Rule: go test") || strings.Contains(view, "Deny") {
+		t.Errorf("the open field is not the pane's one row:\n%s", view)
+	}
+
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if want := []domain.AllowRule{{Kind: domain.AllowRuleTerminal, Text: "go test"}}; !slices.Equal(*saved, want) {
+		t.Errorf("saved %+v, want %+v", *saved, want)
+	}
+	select {
+	case d := <-reply:
+		if d != domain.ApprovalAllow {
+			t.Errorf("the save answered %q, want %q", d, domain.ApprovalAllow)
+		}
+	default:
+		t.Fatal("the save answered nothing; the call is still waiting")
+	}
+	if m.ruleEdit.field.isBuilt() || m.ruleEdit.note != "" {
+		t.Errorf("the rule field outlived the request it was opened for: %+v", m.ruleEdit)
+	}
+}
+
+// Typing in the field edits it: the menu's letters type rather than rule, Backspace deletes, and
+// nothing scrolls the transcript under it. esc goes back to the menu without arming the stop.
+func TestModelApprovalRuleFieldTakesTheKeys(t *testing.T) {
+	t.Parallel()
+
+	m, reply, saved := projectRulePane(t, terminalGate("go test ./..."), nil)
+	m = step(t, m, keyRune('p'))
+	offset := m.viewport.YOffset()
+
+	m = typeIntoPane(t, m, " ./... -d")
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+
+	if got := m.ruleEdit.field.value(); got != "go test ./..." {
+		t.Errorf("the field holds %q, want %q", got, "go test ./...")
+	}
+	if got := m.viewport.YOffset(); got != offset {
+		t.Errorf("typing in the field scrolled the transcript from %d to %d", offset, got)
+	}
+	select {
+	case d := <-reply:
+		t.Fatalf("a letter typed into the field ruled %q", d)
+	default:
+	}
+
+	m = step(t, m, keyEsc())
+
+	if m.editingProjectRule() {
+		t.Error("esc left the field open")
+	}
+	if !m.lastEsc.IsZero() {
+		t.Error("the field's esc armed the stop double-tap")
+	}
+	if m.state != stateAwaitingApproval || len(*saved) != 0 {
+		t.Errorf("esc out of the field changed the pane: state %v, saved %+v", m.state, *saved)
+	}
+}
+
+// An empty field and a save the host refused are both said inline, and the call stays asked.
+func TestModelApprovalRuleFieldRefusesInline(t *testing.T) {
+	t.Parallel()
+
+	m, reply, _ := projectRulePane(t, terminalGate("go test ./..."), nil)
+	m = step(t, m, keyRune('p'))
+	for range len("go test") {
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	m = step(t, m, keyEnter())
+	if view := plain(m.View()); !strings.Contains(view, projectRuleEmptyNote) {
+		t.Errorf("an empty field was not refused inline:\n%s", view)
+	}
+
+	failing, failingReply, _ := projectRulePane(t, terminalGate("go test ./..."), fmt.Errorf("flow-style allow: block"))
+	failing = step(t, failing, keyRune('p'))
+	failing = step(t, failing, keyEnter())
+	if view := plain(failing.View()); !strings.Contains(view, "not saved: flow-style allow: block") {
+		t.Errorf("the host's refusal is not on the pane:\n%s", view)
+	}
+	for _, r := range []chan domain.ApprovalDecision{reply, failingReply} {
+		select {
+		case d := <-r:
+			t.Fatalf("a refused save ruled %q", d)
+		default:
+		}
+	}
+}
+
+// The project row is the request's: hidden wherever no rule could be saved for the call.
+func TestModelApprovalProjectRowOnlyWhereARuleCouldMatch(t *testing.T) {
+	t.Parallel()
+
+	writeArgs := json.RawMessage(`{"path":"a.go","content":"x"}`)
+	forced := terminalGate("go test ./...")
+	forced.CacheKey = ""
+	cases := []struct {
+		name string
+		req  domain.ApprovalRequest
+	}{
+		{"forced", forced},
+		{"redirect", terminalGate("go test ./... > out.txt")},
+		{"write_file", domain.ApprovalRequest{Tool: "write_file", Arguments: writeArgs, CacheKey: ordinaryGateKey}},
+		{"unnamed MCP server", domain.ApprovalRequest{Tool: "search", Arguments: json.RawMessage(`{}`), CacheKey: "mcp-server:", MCPServerGrant: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, _, _ := projectRulePane(t, tc.req, nil)
+			if view := plain(m.View()); strings.Contains(view, "in this project") {
+				t.Errorf("the pane offers a project row it cannot honour:\n%s", view)
+			}
+			if _, ok := m.approvalKeysFor(tc.req)["p"]; ok {
+				t.Error("`p` is a key on a pane without the project row")
+			}
+		})
+	}
+
+	t.Run("no config host", func(t *testing.T) {
+		t.Parallel()
+		m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+		req := terminalGate("go test ./...")
+		m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+		if view := plain(m.View()); strings.Contains(view, "in this project") {
+			t.Errorf("a pane with no config file to write offers the project row:\n%s", view)
+		}
+	})
+}
+
+// An MCP gate's project row names the server and saves it at once — the rule IS the server, so
+// there is no line to edit.
+func TestModelApprovalProjectRowForAnMCPServer(t *testing.T) {
+	t.Parallel()
+
+	req := domain.ApprovalRequest{
+		Tool:           "github__search",
+		Reason:         "unconfinable MCP tool",
+		Arguments:      json.RawMessage(`{"query":"apogee"}`),
+		CacheKey:       "mcp-server:github",
+		MCPServerGrant: true,
+		MCPServerAlias: "github",
+	}
+	m, reply, saved := projectRulePane(t, req, nil)
+	if view := plain(m.View()); !strings.Contains(view, "Always allow server `github` in this project") {
+		t.Fatalf("the MCP project row is missing:\n%s", view)
+	}
+
+	m = step(t, m, keyRune('p'))
+
+	if m.editingProjectRule() {
+		t.Error("the MCP row opened a field; a server rule has nothing to edit")
+	}
+	if want := []domain.AllowRule{{Kind: domain.AllowRuleMCPServer, Text: "github"}}; !slices.Equal(*saved, want) {
+		t.Errorf("saved %+v, want %+v", *saved, want)
+	}
+	select {
+	case d := <-reply:
+		if d != domain.ApprovalAllow {
+			t.Errorf("the save answered %q, want %q", d, domain.ApprovalAllow)
+		}
+	default:
+		t.Fatal("the MCP save answered nothing")
+	}
+}
+
+// A line of several simple commands needs one rule per command: the field joins them, and the save
+// writes each.
+func TestModelApprovalRuleFieldSavesEachRuleOfTheLine(t *testing.T) {
+	t.Parallel()
+
+	m, _, saved := projectRulePane(t, terminalGate("go build ./... && go vet ./..."), nil)
+	m = step(t, m, keyRune('p'))
+	if got, want := m.ruleEdit.field.value(), "go build"+projectRuleSeparator+"go vet"; got != want {
+		t.Errorf("the field opened on %q, want %q", got, want)
+	}
+
+	m = step(t, m, keyEnter())
+
+	want := []domain.AllowRule{{Kind: domain.AllowRuleTerminal, Text: "go build"}, {Kind: domain.AllowRuleTerminal, Text: "go vet"}}
+	if !slices.Equal(*saved, want) {
+		t.Errorf("saved %+v, want %+v", *saved, want)
+	}
 }

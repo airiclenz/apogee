@@ -680,7 +680,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 		tr.addNote(skillCatalogNote(
 			[]skills.Skill{{ID: "review", DisplayName: "Rev" + osc52 + "iew", Summary: "su" + csi + "mmary"}},
 			[]skills.SkipError{{Path: "/lib/bad/SKILL.md", Err: errors.New("yaml: " + osc52 + "broken")}},
-			"/home/me/.apogee", "/ws",
+			skillRoots{home: "/home/me/.apogee", workspace: "/ws"},
 		))
 		assertTranscriptNoESC(t, tr)
 		if got := plainRender(tr); !strings.Contains(got, "iew") {
@@ -4508,5 +4508,61 @@ func TestPrefixThroughKeepsTheWholeExchange(t *testing.T) {
 		if tr.entries[1].text != "first" {
 			t.Error("editing the prefix reached the transcript's own entries")
 		}
+	})
+}
+
+// A gate an Allow rule answered is recorded by the rules that answered it, layer and text, where
+// an Approver's verdict would stand — and the rule text, a repository's config, is stripped.
+func TestTranscriptRendersApprovalAllowedByRule(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		rules []domain.AllowRule
+		want  string
+	}{
+		{
+			name:  "one project rule",
+			rules: []domain.AllowRule{{Kind: domain.AllowRuleTerminal, Text: "go test", Layer: domain.AllowRuleProject}},
+			want:  "approval allowed by project rule `go test`: terminal",
+		},
+		{
+			name: "a global and a project rule",
+			rules: []domain.AllowRule{
+				{Kind: domain.AllowRuleTerminal, Text: "go vet", Layer: domain.AllowRuleGlobal},
+				{Kind: domain.AllowRuleTerminal, Text: "go test", Layer: domain.AllowRuleProject},
+			},
+			want: "approval allowed by global rule `go vet`, project rule `go test`: terminal",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+
+			tr.apply(domain.ApprovalEvent{
+				Phase:    domain.ApprovalDecided,
+				Request:  domain.ApprovalRequest{Tool: "terminal"},
+				Decision: domain.ApprovalAllowedByRule,
+				Rules:    tc.rules,
+			})
+
+			if got := renderPlain(tr, 200); !strings.Contains(got, tc.want) {
+				t.Errorf("transcript = %q, want it to contain %q", got, tc.want)
+			}
+		})
+	}
+	t.Run("rule text is escape-stripped", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+
+		tr.apply(domain.ApprovalEvent{
+			Phase:    domain.ApprovalDecided,
+			Request:  domain.ApprovalRequest{Tool: "terminal"},
+			Decision: domain.ApprovalAllowedByRule,
+			Rules:    []domain.AllowRule{{Kind: domain.AllowRuleTerminal, Text: "go" + escOSC52 + " test", Layer: domain.AllowRuleProject}},
+		})
+
+		assertTranscriptNoESC(t, tr)
 	})
 }

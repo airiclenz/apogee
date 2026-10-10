@@ -221,6 +221,21 @@ func (s *liveSettings) update(fn func(*config.Options)) {
 	fn(&s.now)
 }
 
+// allowRules reports the effective Allow rules and the inert ones beside them as they stand NOW —
+// the resolution installAllowRules last put here (projectrules.go). It is the `/settings` *Allow
+// rules* section's whole source: Rows is asked on every paint and reads no disk, so the section
+// lists from this holder, which every rule act settles into before it returns. The value shares its
+// lists with the holder; nobody edits them in place, because every writer replaces the field whole.
+// A nil holder — a Driver composed without one — has no rules.
+func (s *liveSettings) allowRules() config.AllowRules {
+	if s == nil {
+		return config.AllowRules{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.now.AllowRules
+}
+
 // pin reports the context-window pin in force right now — what a first binding and a server move
 // adopt as the session's window, since the pin is global and survives both.
 func (s *liveSettings) pin() int {
@@ -1164,6 +1179,16 @@ var settingsTable = slices.Concat([]settingsEntry{
 		apply: applyURLSafetyHosts,
 	},
 	{
+		key: settingKeyAllow,
+		apply: func(settingsApplier, string, string) (string, error) {
+			// The rules are in force before this row is reached: the re-read that reported the key
+			// moved has already re-resolved and installed them (followReloadedAllowRules), because a
+			// set that empties reaches the pane as an empty value it journals without applying. The
+			// key is not Editable, so a re-read is the only way here; answering it is the whole apply.
+			return "", nil
+		},
+	},
+	{
 		key: "use-project-skills",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			return applySkillSourceGate(a, key, value, func(src *skills.Sources, landed config.Options) {
@@ -1446,7 +1471,7 @@ func applySkillSourceGate(
 		return "", err
 	}
 	src := a.skills.Sources()
-	src.Home, src.Workspace = a.roots.config, a.roots.workspace
+	src.Home, src.Workspace, src.ProjectRoot = a.roots.config, a.roots.workspace, a.roots.project
 	set(&src, landed)
 	a.skills.SetSources(src)
 	// The scan's error is soft and is dropped here for the reason the "/" menu's reload drops it:

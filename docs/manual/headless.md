@@ -46,7 +46,9 @@ ends, neither shows its `background` switch, and the `workflow` tool is not offe
 roster lifts — see [Background workflows](workflows.md#background-workflows).
 
 `--endpoint`, `--model`, `--server`, `--bypass`, `--workspace` and `--config` resolve exactly as a
-session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
+session's do — flag over `APOGEE_*` environment over `config.yaml`, with the workspace's
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) layered over that file
+for the keys a project may set — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from
 `--server`, `APOGEE_SERVER` or the `server:` key, in that order, with `--endpoint`
 overriding all three.
@@ -82,7 +84,11 @@ rather than the flag: `ask-before` from either — the interactive ladder's own 
 a host that never spelled a mode out would otherwise carry — is silently replaced by `plan`,
 while `allow-edits` from either is refused exactly as the flag is. Whatever the mode, every gated
 action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
-and `present_document` are not registered, and no MCP server is contacted.
+and `present_document` are not registered, and no MCP server is contacted. An
+[Allow rule](configuration.md#commands-that-run-without-asking--allow) answers an ordinary prompt,
+and `plan` and a fenced `auto` never reach one, so a rule — global or adopted — has nothing to
+clear here; and a rule the Project config proposes is never asked about: it stays proposed until you answer it in a
+session or with `apogee project adopt`.
 
 Under the default `--format text`, only the model's answer goes to **stdout**, once, when
 the run is done; everything else — resolution notices, the live narration below, and the
@@ -246,7 +252,7 @@ moment, and the case difference is the signal.
 | `sub_agent_phase` | one delegation crossing a lifecycle boundary; a `finished` carries the delegation's result, a cancelled run's included (a finished child's report, a running one's stopped summary, a queued one's not-started result). `data.cancelled` is always `false` — a cancel no longer rolls a delegation back — and stays on the line only so its shape is unchanged |
 | `sub_agent_named` | the name a delegated run was given |
 | `child_interjection` | input steered into a running delegation, whether it landed, and — as `data.reason` on one that did not — why: `completed`, `capped`, `faulted`, `stopped` or `cancelled` (the child ended that way before the boundary the message waited for — `stopped` is a delegation the human stopped singly while the parent's turn went on) or `refused` (the child, still running, refused it there); `""` on a landed message. The set is open: read an unknown value as `completed` |
-| `approval` | an approval request: its phase, the request, the decision |
+| `approval` | an approval request: its phase, the request, the decision — and, as `data.rules`, the allow rules that answered it when the decision is `allowed-by-rule` (`null` otherwise) |
 | `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
 | `reaction_fired` | a Reaction acted: an engine builtin (a Floor guard or the context-fill notice) or armed Reaction, at which Moment, and what it did |
 | `error` | something failed, named by its source |

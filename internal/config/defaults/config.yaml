@@ -570,6 +570,51 @@ context-files:
 #   deny-hosts: [ads.example.com]
 
 # =============================================================================
+# The dangerous-action guard's rules. A floor of shipped rules refuses a catastrophic call outright
+# (rm -rf of an absolute path, a fork bomb, a write to ~/.ssh or .git/hooks, …) or forces the
+# approval prompt even in auto (curl | sh, sudo, a command naming ~/.apogee). This block changes
+# that set: add: takes rules of your own, remove: the ids of shipped rules to drop
+# (rm-rf-root-home-system, rm-fr-root-home-system, fork-bomb, write-ssh-keys,
+# write-credential-persistence, write-git-control-plane, write-apogee-control-plane,
+# overwrite-block-device, remote-pipe-to-shell, sudo-escalation). An add: reusing a shipped id
+# replaces that rule.
+#
+# A pattern is a Go regular expression matched against the call's text after whitespace is
+# collapsed, everything is lower-cased and `\` is folded to `/` — write it that way. tier: is ask
+# (the approval prompt, even in auto) or refuse (refused in every mode). A rule with no id, no
+# pattern, a pattern that does not compile or another tier refuses the start, naming the rule.
+#
+# A project's .apogee/config.yaml may only ADD rules, and a same-id project rule stands only beside
+# the rule it tightens, at a stricter tier; its remove: is ignored with a notice. Config-file only
+# (no flag or env); the guard is built when a session starts. Default: the shipped rules alone.
+#
+# dangerous-rules:
+#   add:
+#     - id: no-prod-deploy
+#       pattern: '\bkubectl\s+.*--context[= ]prod\b'
+#       tier: ask
+#       reason: deploy to the production cluster
+#   remove: [sudo-escalation]
+
+# =============================================================================
+# Allow rules: commands and MCP servers that run without asking where the mode would otherwise ask
+# (ask-before, allow-edits, and auto's prompt for a call it cannot confine). A terminal: rule is a
+# word prefix that EVERY command of the line must start with — `go test` allows `go test ./...` but
+# not `go testify` or `go test && rm x`; a redirect, $(…), backticks, a heredoc, a wrapper (sudo,
+# env, timeout, …) or a NAME=value prefix always asks, and so does every line on Windows cmd. A rule
+# under mcp-servers names a whole server. No rule ever answers a refusal, the dangerous-action
+# guard's forced prompt, or a reaction's ask or deny. An empty rule refuses the start.
+#
+# Rules written here are yours and live as written. A project's .apogee/config.yaml may carry rules
+# too, but each one grants nothing until you adopt its exact text; an edited rule is proposed
+# again. Allowing `go test` runs whatever the repository's tests do. Config-file only (no flag or
+# env). Default: no rules.
+#
+# allow:
+#   terminal: [go test, make lint]
+#   mcp-servers: [docs]
+
+# =============================================================================
 # Discover skills from the workspace's bare skills/ folder, in addition to the global library
 # (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder
 # containing a SKILL.md (YAML frontmatter — id/name, displayName, summary/description — plus a

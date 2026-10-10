@@ -612,7 +612,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"AutoTitle":             true, "RememberModel": true,
 		"ContextWindow": true, "WorkingWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
-		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
+		"URLAllowHosts": true, "URLDenyHosts": true, "DangerousRules": true, "AllowRules": true, "ModelProfiles": true,
 		"Present":      true,
 		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
 		"ToolsEnabled": true, "Sessions": true, "Currency": true,
@@ -680,8 +680,13 @@ func everyKeyFileConfig() fileConfig {
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
-		Tools:         &toolsConfig{Disabled: []string{"web_search"}, Enabled: []string{"web_fetch"}},
-		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
+		Tools:     &toolsConfig{Disabled: []string{"web_search"}, Enabled: []string{"web_fetch"}},
+		URLSafety: &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
+		DangerousRules: &dangerousRulesConfig{
+			Add:    []dangerousRuleConfig{{ID: "no-prod", Pattern: `kubectl .*prod`, Tier: "ask", Reason: "prod"}},
+			Remove: []string{"sudo-escalation"},
+		},
+		Allow:         &allowConfig{Terminal: []string{"go test"}, MCPServers: []string{"docs"}},
 		ModelProfiles: map[string]modelProfileConfig{"qwen": {ToolCallFormat: "xml"}},
 		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}",
 			CommandOnModelDocuments: true, Port: 8080, Host: "box.local"},
@@ -6505,6 +6510,71 @@ func TestApplyConfigRecordsOverrideSources(t *testing.T) {
 	want := map[string]Source{"server": SourceEnv, "mode": SourceFlag}
 	if !reflect.DeepEqual(opts.Overrides, want) {
 		t.Errorf("opts.overrides = %v; want %v", opts.Overrides, want)
+	}
+}
+
+// Every key reports the source that supplied it once the layers are collapsed: a key only the
+// Project config states is the project's, one only the global file states is the global file's, a
+// key both files state is the project's (it outranks), an override is the override's, and a key
+// nothing states is the built-in default. A bare `key:` states nothing.
+func TestSourceOfReportsEachLayer(t *testing.T) {
+	t.Parallel()
+
+	global := "workflow-retries: 2\nauto-title: false\ncontext-files:\n  names: [A.md]\nmode: plan\nui:\n  spinner:\n"
+	project := "context-files:\n  names: [B.md]\n"
+	o, _ := resolveLayeredStartup(t, global, project, Options{}, nil)
+
+	for path, want := range map[string]Source{
+		"context-files.names": SourceProject,
+		"workflow-retries":    SourceGlobal,
+		"auto-title":          SourceGlobal,
+		"mode":                SourceGlobal,
+		"ui.spinner":          SourceDefault,
+		"delegate-max-depth":  SourceDefault,
+	} {
+		if got := o.SourceOf(path); got != want {
+			t.Errorf("SourceOf(%q) = %q; want %q", path, got, want)
+		}
+	}
+}
+
+// An override outranks both files, and the Project config outranks the global file: SourceOf reads
+// the three facts resolution recorded in precedence order.
+func TestSourceOfRanksOverridesOverTheFiles(t *testing.T) {
+	t.Parallel()
+
+	o := Options{
+		Overrides:   map[string]Source{"mode": SourceEnv, "bypass": SourceFlag},
+		ProjectKeys: map[string]bool{"mode": true, "workflow-retries": true},
+		GlobalKeys:  map[string]bool{"mode": true, "bypass": true, "workflow-retries": true},
+	}
+	for path, want := range map[string]Source{
+		"mode":             SourceEnv,
+		"bypass":           SourceFlag,
+		"workflow-retries": SourceProject,
+		"auto-title":       SourceDefault,
+	} {
+		if got := o.SourceOf(path); got != want {
+			t.Errorf("SourceOf(%q) = %q; want %q", path, got, want)
+		}
+	}
+}
+
+// Without a global file every key the project does not state is the default's, and the global
+// file's keys are recorded only when there is one.
+func TestSourceOfWithoutAGlobalFileIsTheDefault(t *testing.T) {
+	t.Parallel()
+
+	o, _ := resolveLayeredStartup(t, "", "workflow-retries: 6\n", Options{}, nil)
+
+	if got := o.SourceOf("workflow-retries"); got != SourceProject {
+		t.Errorf("SourceOf(workflow-retries) = %q; want %q", got, SourceProject)
+	}
+	if got := o.SourceOf("auto-title"); got != SourceDefault {
+		t.Errorf("SourceOf(auto-title) = %q; want %q", got, SourceDefault)
+	}
+	if len(o.GlobalKeys) != 0 {
+		t.Errorf("GlobalKeys = %v; want none without a global file", o.GlobalKeys)
 	}
 }
 

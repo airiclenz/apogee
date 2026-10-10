@@ -527,3 +527,25 @@ The mechanism is in `internal/agent/resolution.go` (`planScriptStage`, `planScri
 row of `resolveLadder`, `applyOverlays`' Tier-2 branch, `confineFallback`) and
 `internal/agent/recipe.go` (`runScriptCall`); ADR 0087's dated amendment under D4 cites this one,
 and the contract's §4 ladder, CONTEXT.md's **Scratch dir** entry and the manual carry the prose.
+
+## Amendment (2026-10-10) — the project layer tightens only, except an Allow rule, which is live only by Adoption
+
+[ADR 0096](0096-project-config-grants-are-live-only-by-adoption.md) gives the "project config" this
+ADR has always named a home: `<Project root>/.apogee/config.yaml`, layered over the global file. Two
+of this ADR's statements change shape with it.
+
+**The project layer is tighten-only — with one exception, which is adoption-gated.** Keys a project
+may set either describe the project and widen nothing (project parameters) or only tighten
+(`dangerous-rules:` additions, `tools.disabled` additions, `url-safety.deny-hosts` additions); every
+other key — `confine-to-workspace`, `unconfined-hosts`, `mode`, Bypass among them — is global-only
+and ignored from a project with a notice (ADR 0096 §6). The exception is an **Allow rule**: a
+persisted yes that answers an ordinary Approval for a `terminal` command prefix or an MCP server. It
+is a grant, not a tightening, so it is **inert until the user adopts it**, and the adoption is pinned
+outside the repo to the entry's exact content — an edit, a pull or a write behind apogee's back
+re-proposes it (§2, §4). A rule never answers a Tier-1 refusal or a Tier-2 forced look (§3), so the
+dangerous-action guard's two tiers are untouched by it.
+
+**`dangerous-rules:` is the merge seam's feed.** The dangerous-action guard's "editable in global
+config (a user may add *or* remove); project config may only *add*" is wired through the
+`dangerous-rules:` key: `add:` entries (`id`, `pattern`, `tier: ask|refuse`, `reason`) from either
+layer, `remove:` by ID from the global layer only, both fed to `security.MergeDangerousRules` (§6).

@@ -3,7 +3,8 @@ package main
 // The shell write view, end to end (apogee-t74): internal/security's `write-git-control-plane` rule
 // reads the command line the registry's REAL Terminal declares (domain.ArgRoleShellCommand), rather
 // than the stub tool internal/security's own tests hand it. A driven run through the composition
-// root is the only place that declaration and the rule meet.
+// root is the only place that declaration and the rule meet — and the only place the Project root
+// the host resolves reaches the engine's `write-project-config` refusal (ADR 0096 §5).
 
 import (
 	"bytes"
@@ -19,11 +20,13 @@ import (
 // The two prompts testdata/stubllm/guard-controlplane.yaml answers, the wrap-ups it closes each
 // exchange with, and the rule's reason as the model is told it.
 const (
-	controlPlaneReadPrompt  = "List the git hooks dir with the terminal tool."
-	controlPlaneWritePrompt = "Overwrite the git config with the terminal tool."
+	controlPlaneReadPrompt   = "List the git hooks dir with the terminal tool."
+	controlPlaneWritePrompt  = "Overwrite the git config with the terminal tool."
+	projectConfigWritePrompt = "Overwrite the project config with the terminal tool."
 
 	controlPlaneReadWrapUp  = "That is what the hooks dir had to say."
 	controlPlaneWriteWrapUp = "The control plane stayed shut."
+	projectConfigWrapUp     = "The project config stayed shut."
 
 	// controlPlaneReason is the rule's Reason verbatim from internal/security's rule set, prefixed
 	// the way internal/agent hands a hard refusal to the model. A test that paraphrased it would
@@ -31,9 +34,17 @@ const (
 	controlPlaneReason = "refused by the dangerous-action guard: " +
 		"write or delete under a repository's git control plane (.git/hooks, .git/config)"
 
+	// projectConfigReason is the Project config refusal's Reason, prefixed the same way.
+	projectConfigReason = "refused by the dangerous-action guard: " +
+		"write, move or delete of the Project config (.apogee/config.yaml) or its .apogee folder"
+
 	// seededGitConfig is what the workspace's `.git/config` holds before either command runs — and
 	// after, if the write view did its job.
 	seededGitConfig = "[core]\n\trepositoryformatversion = 0\n"
+
+	// seededProjectConfig is the workspace's `.apogee/config.yaml`: a comment, so the file makes the
+	// workspace its Project root while stating nothing a layer would merge.
+	seededProjectConfig = "# the project's own settings\n"
 )
 
 // TestE2EGuardControlPlane drives a read and a write under the workspace's git control plane
@@ -41,6 +52,8 @@ const (
 // plane in its text and meets only the ordinary subprocess gate: the shell write view sees a read
 // leader and no redirect, so the rule stays at TierNone. The write (`echo hooked > .git/config`)
 // is hard-refused before it spawns, the model is told the rule's reason, and the file is untouched.
+// The Project config write (`echo hooked > .apogee/config.yaml`) is refused the same way, by the
+// rule the engine built from the Project root the host resolved for the workspace.
 func TestE2EGuardControlPlane(t *testing.T) {
 	ws := controlPlaneWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "guard-controlplane"))
@@ -75,13 +88,24 @@ func TestE2EGuardControlPlane(t *testing.T) {
 		t.Errorf(".git/config changed across the refused write:\nbefore: %q\nafter:  %q", before, after)
 	}
 
+	// The PROJECT CONFIG write: refused before dispatch like the git one, by its own rule.
+	submit(drv, projectConfigWritePrompt)
+	drv.WaitText(projectConfigWrapUp)
+	if !stubSawMessage(stub, projectConfigReason) {
+		t.Errorf("the project config write's tool result on the wire does not carry %q", projectConfigReason)
+	}
+	if after := readWorkspaceFile(t, ws, ".apogee", "config.yaml"); after != seededProjectConfig {
+		t.Errorf(".apogee/config.yaml changed across the refused write: %q", after)
+	}
+
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
 }
 
 // controlPlaneWorkspace is e2eWorkspace with a git control plane in it: the seeded `.git/config`
-// the write aims at and the `.git/hooks/` dir the read lists. It is seeded by hand rather than
+// the write aims at and the `.git/hooks/` dir the read lists — and a Project config, the seeded
+// `.apogee/config.yaml` that makes the workspace its Project root. It is seeded by hand rather than
 // `git init`-ed so the test needs no git binary, and it deliberately writes no HEAD — nothing here
 // asks git anything, and a tree git would refuse to call a repository is still a control plane
 // to the rule, which matches the path's text.
@@ -95,7 +119,24 @@ func controlPlaneWorkspace(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(ws, ".git", "config"), []byte(seededGitConfig), 0o600); err != nil {
 		t.Fatalf("seed the git config: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(ws, ".apogee"), 0o700); err != nil {
+		t.Fatalf("seed the project config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".apogee", "config.yaml"), []byte(seededProjectConfig), 0o600); err != nil {
+		t.Fatalf("seed the project config: %v", err)
+	}
 	return ws
+}
+
+// readWorkspaceFile returns the text of the workspace file the path elements name.
+func readWorkspaceFile(t *testing.T, ws string, elems ...string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(append([]string{ws}, elems...)...))
+	if err != nil {
+		t.Fatalf("read %s: %v", filepath.Join(elems...), err)
+	}
+	return string(data)
 }
 
 // readGitConfig returns the workspace's `.git/config` bytes.

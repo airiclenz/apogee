@@ -259,7 +259,7 @@ func (e *externalEdit) changed() (tui.ConfigReload, error) {
 
 	var applied []tui.AppliedSetting
 	for i, k := range config.KeyRegistry {
-		if k.GlobalOnly || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer {
+		if k.Interlocked || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer {
 			continue
 		}
 		if i >= len(before.rows) || i >= len(after.rows) {
@@ -300,14 +300,22 @@ func newNotices(before, after []string) []string {
 // be diffed against. A projection that fails leaves the previous baseline standing, for spec's reason:
 // a baseline that is a little stale reports one extra key, where a missing one would swallow the next
 // real edit whole.
-func (e *externalEdit) refresh() {
+func (e *externalEdit) refresh() { e.retake() }
+
+// retake is refresh that hands back what it projected, and whether it could: the files as they stand
+// NOW, layered, which is also the answer a targeted `/settings` save reports back to the pane
+// (settingsHost.SaveTo) — so the value the session applies and the baseline the watcher diffs against
+// are one reading of the files, and the save is neither applied as somebody else's edit nor reported
+// in the one spelling and diffed in another.
+func (e *externalEdit) retake() (fileProjection, bool) {
 	projected, err := e.projection()
 	if err != nil {
-		return
+		return fileProjection{}, false
 	}
 	e.mu.Lock()
 	e.baseline = projected
 	e.mu.Unlock()
+	return projected, true
 }
 
 // settingChanged reports whether the key at registry index i came back holding something else.
@@ -342,7 +350,8 @@ func appliedValue(row tui.SettingRow) string {
 	return row.Value
 }
 
-// projection reads the config file — and only the file — into the two views the diff needs. It runs
+// projection reads the config files — the global file with the Project config layered over it, and
+// nothing else — into the two views the diff needs. It runs
 // the STARTUP resolution (ApplyConfig) with no flags and no environment, which is what makes the two
 // sides of the diff comparable and the validation the real one rather than a second, weaker copy of
 // it; the rows come off that same resolution (settingsRows), so a key added to the registry is

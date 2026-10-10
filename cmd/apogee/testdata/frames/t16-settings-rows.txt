@@ -4,20 +4,20 @@
 │ Description: Autonomy mode: how tool calls are gated, from least to most autonomous.                                                     │
 │                                                                                                                                          │
 │                                                                                                                                          │
-│   servers                             1 server               · ⏎ opens $EDITOR                                                         ┃ │
-│   currency                            USD                    · ⏎ opens $EDITOR                                                         ┃ │
-│   server                              probe-target                                                                                     │ │
-│   sub-agents-server                   auto (session server)  · ⏎ opens $EDITOR                                                         │ │
-│   sub-agents-choice                   fixed                                                                                            │ │
+│   servers                             1 server               (global)   · ⏎ opens $EDITOR                                              ┃ │
+│   currency                            USD                    (default)  · ⏎ opens $EDITOR                                              ┃ │
+│   server                              probe-target           (global)                                                                  │ │
+│   sub-agents-server                   auto (session server)  (default)  · ⏎ opens $EDITOR                                              │ │
+│   sub-agents-choice                   fixed                  (default)                                                                 │ │
 │                                                                                                                                        │ │
 │   Autonomy                                                                                                                             │ │
-│ ❯ mode                                plan                                                                                             │ │
+│ ❯ mode                                plan                   (default)                                                                 │ │
 │                                                                                                                                        │ │
 │   System prompt                                                                                                                        │ │
-│   system-prompt-text                                                                                                                   │ │
-│   system-prompt-file                                                                                                                   │ │
-│   use-default-prompt                  true                                                                                             │ │
-│   system-prompt-models                none                   · ⏎ opens $EDITOR                                                         │ │
+│   system-prompt-text                                         (default)                                                                 │ │
+│   system-prompt-file                                         (default)                                                                 │ │
+│   use-default-prompt                  true                   (default)                                                                 │ │
+│   system-prompt-models                none                   (default)  · ⏎ opens $EDITOR                                              │ │
 │                                                                                                                                          │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -718,6 +718,14 @@
 // rather than a round, because the answer is a single key naming a single entry, and it gives way to
 // the key migration exactly as that gives way to the pre-bound ask.
 //
+// The FOURTH, adoption.go (ADR 0096 §4), is the same overlay over a different question: an Allow rule
+// in the Project config that no adoption or rejection is recorded for is proposed — inert — and earns
+// a three-row pane per rule, adopt, not now, reject, each answer one call to [ConfigHost.AdoptRules]
+// or [ConfigHost.RejectRules]. It gives way to everything above and to any turn or pane, waiting for
+// the Update tail (adoptAfterFold) to raise it at the first fold that finds the session idle with
+// nothing else up — which is how a rule a watched change proposes ([ConfigHost.ProposedRules]) is
+// asked about at the next turn boundary rather than in the middle of a turn.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the five
@@ -854,7 +862,8 @@
 // [Model.resolveApproval], [Model.sendApproval]) and the pane that paints it
 // ([Model.approvalPrompt] with its Sub-agent identity line and its argument block), so a row can
 // never be paintable and unreachable (the Model still owns the pending request and the menu
-// selection) — and the ARMING rule that makes the pane's keys answerable only after the human has
+// selection), the "Always in this project…" row's rule field that saves an Allow rule through
+// [ConfigHost.AddProjectRule] ([Model.projectRuleOffer], [Model.projectRuleKey]) — and the ARMING rule that makes the pane's keys answerable only after the human has
 // seen it: the decision letters and the ⏎ that takes the highlighted row go live one
 // when the terminal answers the SECOND drain marker, the one the answer to the fold's own asks from
 // behind the pane's frame ([approvalDrainMarker], [Model.foldInputDrained]) — a cursor report written

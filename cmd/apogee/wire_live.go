@@ -18,9 +18,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/gitexec"
@@ -34,9 +36,9 @@ import (
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
-// configWatchTiming is the seam onto how fast the session's `config.yaml` watcher runs (ADR 0041
-// decision 3). Its zero value — the production one — leaves internal/filewatch's own constants in
-// place: a poll every second, a quarter of a second of quiet before a save is reported, which is
+// configWatchTiming is the seam onto how fast the session's `config.yaml` watchers run — the global
+// file's and the Project config's alike (ADR 0041 decision 3). Its zero value — the production
+// one — leaves internal/filewatch's own constants in place: a poll every second, a quarter of a second of quiet before a save is reported, which is
 // what a feature that ends with a human saving a document should cost. The test suite's TestMain
 // replaces it once, for the whole binary, so a watcher step costs a tenth of a second instead of a
 // second and a half of the suite's budget — once rather than per test, because a per-test swap is a
@@ -65,6 +67,37 @@ func (t watchTiming) applyTo(w *filewatch.Watcher) {
 	if t.Settle > 0 {
 		w.Settle = t.Settle
 	}
+}
+
+// projectConfigWatchPath is the Project config file a session watches beside the global one, or ""
+// when there is no second file to watch: a resolution that reads the global config alone, the empty
+// Project root ("no project layer", the home guard), or a project file that is the global file
+// itself — a config home pointed at the project's own `.apogee/` — which the global watcher already
+// covers and which the layered load does not read twice either.
+func projectConfigWatchPath(opts config.Options, projectRoot string) string {
+	if opts.GlobalConfigOnly {
+		return ""
+	}
+	path := config.ProjectFilePath(projectRoot)
+	if path == "" || filepath.Clean(path) == filepath.Clean(config.FilePath(opts.ConfigDir)) {
+		return ""
+	}
+	return path
+}
+
+// adoptionWatchPath is the adoption record a session watches beside its config files, or "" when
+// there is none to watch: no Project config to watch (projectConfigWatchPath), or a Project root the
+// store cannot key a record on. The record need not exist yet — the first answer creates it, and
+// that creation is the change the watcher reports.
+func adoptionWatchPath(opts config.Options, roots stateRoots) string {
+	if projectConfigWatchPath(opts, roots.project) == "" {
+		return ""
+	}
+	store, err := adoption.New(config.WorkspacesDir(roots.config), roots.project)
+	if err != nil {
+		return ""
+	}
+	return store.Path()
 }
 
 // liveMCPHost is the process an MCP connect runs in: the environment's egress proxy for the HTTP
@@ -357,6 +390,29 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.configWatch = filewatch.New(config.FilePath(w.opts.ConfigDir))
 	configWatchTiming.applyTo(w.configWatch)
 	w.configWatch.Start()
+
+	// The Project config is the other file the live re-read is layered from (ADR 0096 §6), so a save
+	// to it reaches the same diff and the same dispatcher: one watcher per file, fanned into the one
+	// wait the renderer parks on (awaitConfigChangeOn). It watches the path whether or not the file
+	// is there yet — a project file created mid-session is reported as the change it is — and a run
+	// with no project layer watches nothing.
+	if path := projectConfigWatchPath(w.opts, w.roots.project); path != "" {
+		w.projectWatch = filewatch.New(path)
+		configWatchTiming.applyTo(w.projectWatch)
+		w.projectWatch.Start()
+	}
+
+	// The third file the effective Allow rules are resolved from (ADR 0096 §4): the Project root's
+	// adoption record under ~/.apogee/workspaces. An answer recorded outside this session —
+	// `apogee project adopt` in another terminal, another session's pane — writes only the record,
+	// so it is watched beside the two config files and fanned into the same wait; the re-read then
+	// installs the rules it settles to (configHost.ReloadConfig). A run with no project layer has no
+	// record to watch.
+	if path := adoptionWatchPath(w.opts, w.roots); path != "" {
+		w.adoptionWatch = filewatch.New(path)
+		configWatchTiming.applyTo(w.adoptionWatch)
+		w.adoptionWatch.Start()
+	}
 
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
 	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order

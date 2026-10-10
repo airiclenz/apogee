@@ -162,17 +162,18 @@ type Scheduler interface {
 	List() []schedule.Status
 }
 
-// SettingsHost is the `/settings` pane's whole seam: the rows it shows, the two writes a committed
-// row makes to the config file, and the live apply that puts a persisted key into effect on the
+// SettingsHost is the `/settings` pane's whole seam: the rows it shows, the writes a committed
+// row makes to the config files (the global file, or — for a project-capable key — the file the
+// human picks), and the live apply that puts a persisted key into effect on the
 // running session — ADR 0035's one key per deliberate edit and ADR 0037's validate → persist →
-// apply, named as one host capability rather than spelled as four bare funcs (ADR 0054). It is
+// apply, named as one host capability rather than spelled as six bare funcs (ADR 0054). It is
 // defined here like [SessionHost], so the renderer stays unit-testable with a fake while the
 // composition root owns the key registry, the schema, the file format, and the resolution from a
 // file-spelled value onto whatever live seam the key moves.
 //
 // A nil host means `/settings` is unwired whole: the pane has nothing to show and says so, the
 // nil-seam degrade every seam in [Options] takes. A host that IS wired but cannot do one of the
-// four says so in that method's own answer — no rows, an error out of Write or Reset, an Apply
+// six says so in that method's own answer — no rows, an error out of a write or a reset, an Apply
 // that reports nothing — so a Driver that persists without applying (ADR 0031) needs no second
 // interface to say it.
 type SettingsHost interface {
@@ -210,6 +211,21 @@ type SettingsHost interface {
 	// Same contract as Write in every other respect — synchronous, path-addressed, errors reported.
 	Reset(path string) error
 
+	// SaveTo is Write for a [SettingRow.ProjectCapable] key, into the file target names, and it
+	// answers what the files say for the key once the write has landed ([SettingOutcome]) — the
+	// value the pane applies and journals in place of the one it handed over, because the project
+	// layer may keep a different one in force. A global-only key, or a project target in a session
+	// with no Project config to write, is refused. The external-edit baseline is re-taken over both
+	// files, so the watcher does not report the save back as somebody's edit.
+	//
+	// Same contract as Write in every other respect — synchronous, path-addressed, errors reported.
+	SaveTo(target SettingTarget, path, value string) (SettingOutcome, error)
+
+	// ResetIn is Reset in the file target names: the key's line there is removed, and the answer is
+	// what the files then say for the key — the global file's value after a project reset, the
+	// project's after a global one, the default when neither sets it. Same contract as SaveTo.
+	ResetIn(target SettingTarget, path string) (SettingOutcome, error)
+
 	// Apply makes one persisted key take effect in the RUNNING session — the apply half of every
 	// `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path and
 	// value are Write's, so the pane hands the apply exactly what it handed the write and no second
@@ -231,11 +247,11 @@ type SettingsHost interface {
 	Apply(path, value string) (note string, err error)
 }
 
-// ConfigHost is the config FILE as one host capability: the eight acts a running session performs on
-// the file the composition root resolved — the host acknowledgement `/confine off --save` records,
-// the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers and the
-// `remember-model:` recording — named as one interface rather than spelled as eight bare funcs (ADR
-// 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
+// ConfigHost is the config FILE as one host capability: the thirteen acts a running session performs
+// on the files the composition root resolved — the host acknowledgement `/confine off --save` records,
+// the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers, the
+// `remember-model:` recording, the four Allow-rule acts on the Project config and its adoption
+// record (ADR 0096), and the read of the rules it proposes — named as one interface rather than spelled as bare funcs (ADR 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
 // the others lean on for their posture: every act here is "one small file, spliced and renamed",
 // synchronous, on a keypress the human is waiting on, with a failure REPORTED and never swallowed —
 // the [SettingsHost.Write] contract.
@@ -246,8 +262,9 @@ type SettingsHost interface {
 // A nil host means the config file is unwired whole — a bench or headless Driver that composes no
 // file (ADR 0031) — and every act degrades as its unwired func did: the acknowledgement says it was
 // not saved, the external edit says the row cannot open an editor, nothing is watched, no start-up
-// offer is raised, and every model pick is session-scoped ([configHostOrNoop]). A host that IS wired
-// but cannot do one act says so in that act's own answer (ADR 0054 decision 3).
+// offer is raised, every model pick is session-scoped, no Allow rule can be saved and none is
+// proposed ([configHostOrNoop]). A host that IS wired but cannot do one act says so in that act's own answer
+// (ADR 0054 decision 3).
 type ConfigHost interface {
 	// SaveHostAcknowledgement persists THIS host's `unconfined-hosts:` acknowledgement to the
 	// global config (the `/confine off --save` half) and returns the file it wrote, so the
@@ -372,6 +389,41 @@ type ConfigHost interface {
 	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses, a
 	// program this machine cannot run) and nothing is launched.
 	ExternalEditSpec(path string) (EditorCommand, error)
+
+	// AddProjectRule is the "Always in this project…" answer (ADR 0096 §4): text — a word prefix for
+	// a `terminal` rule, a server alias for an MCP one — is written into the Project config's
+	// `allow:` list of kind, its exact text is recorded as adopted, and the session's effective Allow
+	// rules are updated, so the next identical call — this agent's or a running sub-agent's — runs
+	// without asking. It says nothing about the call that raised the question: the Approver answers
+	// that one, exactly as it would have.
+	//
+	// The order is the safe one: the file first and the adoption after it, so a failure part-way
+	// leaves a rule PROPOSED — inert — and never an adoption of text no file holds. A rule the list
+	// already holds is adopted and nothing is written. The [SettingsHost.Write] contract otherwise:
+	// synchronous on the keypress, and a failure is REPORTED.
+	AddProjectRule(kind domain.AllowRuleKind, text string) error
+
+	// AdoptRules records the project rules the human accepted — the adoption pane's "adopt" — and
+	// brings them into force. Only the record moves: the Project config already holds them.
+	AdoptRules(rules []domain.AllowRule) error
+
+	// RejectRules records the project rules the human turned down; they stay inert, and are not
+	// offered again until their text changes. A rule that was in force leaves the effective set.
+	RejectRules(rules []domain.AllowRule) error
+
+	// RemoveRule takes a rule out of the file that holds it, so it grants nothing from the next call
+	// on: a project rule out of the Project config, its recorded answer dropped first; a global rule
+	// out of the global config, through that file's own splice writer. The `/settings` *Allow rules*
+	// section's removal (ADR 0096 §4).
+	RemoveRule(rule domain.AllowRule) error
+
+	// ProposedRules re-reads what the Project config proposes now: its rules no adoption or
+	// rejection is recorded for, resolved from the two files and the adoption record the way a
+	// relaunch would resolve them. The adoption pane asks after a watched change (adoption.go); the
+	// start-up's finding arrives as [Options.ProposedRules] instead. It writes nothing.
+	//
+	// An error — a config file that no longer resolves — is REPORTED, and nothing is offered.
+	ProposedRules() ([]domain.AllowRule, error)
 }
 
 // noopConfigHost is what a nil [ConfigHost] degrades to: every act answers exactly as its unwired
@@ -389,6 +441,7 @@ var (
 	errNoPlaintextKeyRecord  = errors.New("recording that answer is not available in this build")
 	errNoSubAgentsMigration  = errors.New("moving the sub-agents flag is not available in this build")
 	errNoExternalEdit        = errors.New(noExternalEditNote)
+	errNoProjectRules        = errors.New("saving an allow rule is not available in this build")
 )
 
 func (noopConfigHost) SaveHostAcknowledgement() (string, error) { return "", errNoHostAcknowledgement }
@@ -403,6 +456,11 @@ func (noopConfigHost) RecordModelChoice(string) (bool, error) { return false, ni
 func (noopConfigHost) ExternalEditSpec(string) (EditorCommand, error) {
 	return EditorCommand{}, errNoExternalEdit
 }
+func (noopConfigHost) AddProjectRule(domain.AllowRuleKind, string) error { return errNoProjectRules }
+func (noopConfigHost) AdoptRules([]domain.AllowRule) error               { return errNoProjectRules }
+func (noopConfigHost) RejectRules([]domain.AllowRule) error              { return errNoProjectRules }
+func (noopConfigHost) RemoveRule(domain.AllowRule) error                 { return errNoProjectRules }
+func (noopConfigHost) ProposedRules() ([]domain.AllowRule, error)        { return nil, nil }
 
 // configHostOrNoop is the ONE nil guard the family has: the wired host, or the degrade above when a
 // Driver composed none. Every act that can carry its refusal in its own answer calls through here
@@ -959,6 +1017,11 @@ type Engine interface {
 	// effect on the next tool call and affects only this Session — persisting the host
 	// acknowledgement is the binary's job, not the engine's.
 	SetConfineToWorkspace(bool)
+	// SetAllowRules installs the effective Allow rules (ADR 0096) — every global rule and every
+	// adopted project rule — that answer an ordinary Approval gate without asking, replacing the
+	// set the engine holds. Goroutine-safe like SetMode, and it reaches the whole agent tree, a
+	// sub-agent already running included: the next ordinary gate any of them reaches reads it.
+	SetAllowRules([]domain.AllowRule)
 	// ConfineToWorkspace reports the blast radius the NEXT tool call's Resolution will read —
 	// the live setting, so it already reflects any earlier SetConfineToWorkspace. The /confine
 	// status report renders it, and /confine off|on reads it to say whether the line changed
@@ -1102,6 +1165,13 @@ type Options struct {
 	Endpoint  string
 	Mode      domain.Mode
 	Workspace string
+
+	// ProjectRoot is the Project root this run resolved (internal/projectroot, ADR 0096 §1): the
+	// folder whose .apogee/skills the skills loader reads. The renderer never derives it and reads
+	// it only to NAME that source — the /skills report and the "/" menu label a skill found there
+	// "workspace", and an empty catalog names the folder discovery looked in. Empty ⇒ the
+	// Workspace, matching the loader's own fallback (skills.Sources.ProjectRoot).
+	ProjectRoot string
 
 	// ConfigHome is the resolved apogee home directory — `~/.apogee` by default, or whatever
 	// `--config` / `APOGEE_CONFIG` selected. The renderer never derives it (the binary owns path
@@ -1371,6 +1441,14 @@ type Options struct {
 	// file that has one is a file that never ran, and the choice between them is the human's. Empty —
 	// the ordinary case — raises nothing at all.
 	SubAgentsMigration []string
+
+	// ProposedRules are the Project config's Allow rules this start-up found PROPOSED (ADR 0096 §4):
+	// in the file, with no adoption or rejection recorded for their exact text, and so inert. The
+	// adoption pane offers them one at a time once nothing more urgent is up (adoption.go); a rule a
+	// file change proposes later is read through [ConfigHost.ProposedRules]. Empty — no Project
+	// config, or nothing in it unanswered — raises nothing, which is what a hand-built Options and
+	// every unattended Driver get: a rule cannot fire there, so there is nothing to ask.
+	ProposedRules []domain.AllowRule
 
 	// Launcher is the llama-launcher seam whole ([LauncherHost]): the Launch profiles this machine
 	// defines, the verb that activates one, the two that free or stop the server this session is on,
@@ -1744,22 +1822,75 @@ const (
 	// moves ([ServerHost.Switch]) and the move records the choice ([ServerHost.RecordChoice], ADR 0036
 	// decision 2), which is this key's whole persistence.
 	SettingServer SettingKind = "server"
+	// SettingRule is one Allow rule (ADR 0096 §4) — a row of the pane's *Allow rules* section, not a
+	// config key. The rule itself travels in [SettingRow.Rule] and where it stands in
+	// [SettingRow.RuleState], which is also its value cell. ⏎ on a proposed or rejected rule adopts it
+	// ([ConfigHost.AdoptRules]) and ⌫ then ⏎ removes it from the file that holds it
+	// ([ConfigHost.RemoveRule]) — never [SettingsHost.Reset], because what goes is a list entry and
+	// not a key's line. Neither act is journaled: the row's next paint, re-derived from the session's
+	// rules in force, is the whole report.
+	SettingRule SettingKind = "rule"
 )
 
-// SettingSource is which precedence source supplied the value a row shows. The zero value is the
-// ordinary case — the config file, or the built-in default below it — and the other two are the
-// higher-precedence sources that BEAT the file for that key this run (flag > env > file > default).
+// SettingRuleState is where a [SettingRule] row's rule stands: a global rule is live as written, and
+// a project rule is live only by Adoption — adopted, proposed (no answer recorded for its text) or
+// rejected (ADR 0096 §4).
+type SettingRuleState string
+
+const (
+	SettingRuleLive     SettingRuleState = "live"     // a global rule: the human's own line, in force as written
+	SettingRuleAdopted  SettingRuleState = "adopted"  // a project rule the human adopted: in force
+	SettingRuleProposed SettingRuleState = "proposed" // a project rule no answer is recorded for: inert
+	SettingRuleRejected SettingRuleState = "rejected" // a project rule the human turned down: inert
+)
+
+// adoptable reports whether a rule in this state is one ⏎ adopts: an inert project rule.
+func (s SettingRuleState) adoptable() bool {
+	return s == SettingRuleProposed || s == SettingRuleRejected
+}
+
+// SettingSource is which precedence source supplied the value a row shows, in the order they rank:
+// flag > env > project > global > default. The pane marks EVERY row with it, because a value reads
+// the same whichever layer supplied it: a row the environment is overriding must say so, or a value
+// the file does not contain would look like the file's and an edit persisted into the file would
+// appear to do nothing for as long as the override stands; and a row the Project config sets must
+// say so, or an edit written to the global file would be outranked by the project at the next start.
 //
-// The pane needs it for one reason: a row the environment is overriding must say so, because a
-// value the file does not contain would otherwise look like the file's, and an edit persisted into
-// the file would appear to do nothing for as long as the override stands.
+// The zero value is a row whose provider reported no source — a hand-built row, or a Driver that
+// composed rows without the binary's registry (ADR 0031) — and it is painted with no mark at all
+// rather than with a claim nobody made.
 type SettingSource string
 
 const (
-	SettingFromFile SettingSource = ""     // the config file or the built-in default; nothing overrode it
-	SettingFromEnv  SettingSource = "env"  // an APOGEE_* environment variable won
-	SettingFromFlag SettingSource = "flag" // an explicitly-set command-line flag won
+	SettingFromDefault SettingSource = "default" // nothing stated the key: the built-in default
+	SettingFromGlobal  SettingSource = "global"  // the global config file stated it
+	SettingFromProject SettingSource = "project" // the Project config stated it, over the global file
+	SettingFromEnv     SettingSource = "env"     // an APOGEE_* environment variable won
+	SettingFromFlag    SettingSource = "flag"    // an explicitly-set command-line flag won
 )
+
+// SettingTarget is the config file a `/settings` save lands in: the global file every key may be
+// written to, or this project's `.apogee/config.yaml`, which only a [SettingRow.ProjectCapable] key
+// is offered (ADR 0096 §6). The pane asks which on every commit of such a key, defaulting to the
+// file that supplies the key now, and journals the answer so the row reports where it went.
+type SettingTarget string
+
+const (
+	SettingTargetGlobal  SettingTarget = "global"  // ~/.apogee/config.yaml
+	SettingTargetProject SettingTarget = "project" // <Project root>/.apogee/config.yaml
+)
+
+// SettingOutcome is what the config files say for a key once a targeted save or reset has landed
+// ([SettingsHost.SaveTo], [SettingsHost.ResetIn]) — the LAYERED answer, re-resolved from both files,
+// rather than the value the pane handed over. The two differ exactly where the project layer has a
+// say: a global save under a project value leaves the project's value in force, a project reset
+// falls back to the global file's, and a tighten-only list saved to the project is the union of
+// both files' entries. The pane applies and journals this, so the running session and the row
+// agree with what the next start will resolve from the files.
+type SettingOutcome struct {
+	Value  string        // the layered value, in the spelling [SettingsHost.Apply] takes and the row shows
+	Source SettingSource // the file that now supplies it: default, global or project
+}
 
 // SettingRow is one row of the `/settings` pane: a config key as the binary resolved it this run.
 // It is plain data — the [ServerChoice] posture — projected from the binary's declarative key
@@ -1793,9 +1924,9 @@ type SettingRow struct {
 	// pane's worth of text on one line.
 	Text string
 
-	// Source and SourceName are the override marker: which higher-precedence source beat the file
-	// for this key this run, and what it is CALLED ("APOGEE_MODE", "--mode") so the note can name
-	// it. SourceName is empty exactly when Source is [SettingFromFile].
+	// Source and SourceName are the source marker: which source supplied this key's value this run,
+	// and — for an override — what it is CALLED ("APOGEE_MODE", "--mode") so the note can name it.
+	// SourceName is empty for every source but [SettingFromEnv] and [SettingFromFlag].
 	Source     SettingSource
 	SourceName string
 
@@ -1812,6 +1943,18 @@ type SettingRow struct {
 	// not a shape the renderer can read off a row. False for every editable row — those are written
 	// here — and false for the confinement pair, whose own pointer says where they go instead.
 	ExternalEdit bool
+
+	// ProjectCapable says a commit on this row may land in this project's config as well as the
+	// global one, so the pane asks which ([SettingTarget]) and saves through [SettingsHost.SaveTo]. It
+	// is the binary's call — a project-param or tighten-only key (ADR 0096 §6), editable here, in a
+	// session that has a Project config to write — and false for every other row, which is written
+	// to the global file through [SettingsHost.Write] without a question.
+	ProjectCapable bool
+
+	// Rule and RuleState are a [SettingRule] row's Allow rule — its kind, its text and the layer it
+	// came from — and where it stands. Both are zero on every other row.
+	Rule      domain.AllowRule
+	RuleState SettingRuleState
 }
 
 // EditorCommand is one resolved external edit — the OUT half of the round trip

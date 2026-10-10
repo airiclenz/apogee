@@ -358,6 +358,32 @@ func TestDaemonRefusesWhenAnotherDaemonHoldsTheLock(t *testing.T) {
 	}
 }
 
+// The daemon reads no Project config (ADR 0096): a workspace whose `.apogee/config.yaml` states a
+// global-only key would cost an interactive start the notice that ignores it, and the daemon's
+// start says nothing about it — the layer is never read.
+func TestDaemonTakesNoProjectLayer(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
+		t.Fatalf("create the project folder: %v", err)
+	}
+	project := filepath.Join(workspace, ".apogee", "config.yaml")
+	if err := os.WriteFile(project, []byte("mode: auto\nworkflow-retries: 9\n"), 0o600); err != nil {
+		t.Fatalf("write the project config: %v", err)
+	}
+	t.Setenv(config.EnvWorkspace, workspace)
+	h := newDaemonHarness(t)
+
+	h.stop()
+	wait := h.run(t)
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+
+	if strings.Contains(h.errOut.String(), "project config") {
+		t.Errorf("the daemon read the Project config; stderr said:\n%s", h.errOut.String())
+	}
+}
+
 // A daemon whose config cannot say which server it talks to has nothing to schedule, so it stops
 // where `apogee headless` and `apogee probe` do rather than starting a clock over no upstream.
 func TestDaemonRefusesWhenNoStartupServerIsResolved(t *testing.T) {

@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/airiclenz/apogee"
@@ -121,6 +122,13 @@ type lateEngine struct {
 	// no journal was ever handed here, so a bind leaves the Agent on construction's own in-memory
 	// funnel journal — ADR 0051 exactly, and a supported configuration (ADR 0074 decision 2).
 	pendingJournal *sessionJournal
+
+	// pendingAllowRules is the last effective Allow-rule set installed while there was no Agent to
+	// hold it (SetAllowRules), pendingScratch's shape: a rule adopted or added before a server is
+	// picked must not be one the eventual engine never hears about. nil means none was installed
+	// here, so a bind leaves the Agent on the rules its Config seeded — a pointer, because an
+	// installed EMPTY set (every rule removed) is a different instruction from "never moved".
+	pendingAllowRules *[]apogee.AllowRule
 }
 
 // sessionJournal is one opened undo journal together with the note that says why it is the journal
@@ -244,6 +252,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if j := e.pendingJournal; j != nil {
 		agent.SetJournal(j.journal, j.note)
+	}
+	if r := e.pendingAllowRules; r != nil {
+		agent.SetAllowRules(*r)
 	}
 	// The other remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
 	// released and the bind fails, which is exactly what a config carrying that profile at launch
@@ -437,6 +448,20 @@ func (e *lateEngine) SetConfineToWorkspace(confine bool) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetConfineToWorkspace(confine)
+	}
+}
+
+// SetAllowRules installs the effective Allow rules on the whole agent tree (Agent.SetAllowRules),
+// remembered while unbound for SetScratchDir's reason: a set installed before a server is chosen
+// is the set the engine that eventually binds must answer gates from.
+func (e *lateEngine) SetAllowRules(rules []apogee.AllowRule) {
+	held := slices.Clone(rules)
+	e.mu.Lock()
+	e.pendingAllowRules = &held
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetAllowRules(held)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
@@ -248,6 +249,72 @@ func TestLoadProjectSkillsGating(t *testing.T) {
 	}
 	if _, ok := on.Get("proj"); !ok {
 		t.Error("workspace skills/ was NOT loaded with UseProjectSkills=true")
+	}
+}
+
+// ADR 0096 §1: .apogee/skills hangs off the Project root, so a run started in a subfolder of the
+// project still loads the project's skills — while the bare skills/ folder stays the Workspace's.
+func TestLoadProjectRootSkillsFromASubfolder(t *testing.T) {
+	root := t.TempDir()
+	ws := filepath.Join(root, "sub", "dir")
+	writeSkill(t, filepath.Join(root, ".apogee", "skills"), "proj", "---\nid: proj\nsummary: project\n---\nbody")
+	writeSkill(t, filepath.Join(ws, "skills"), "bare", "---\nid: bare\nsummary: bare\n---\nbody")
+	writeSkill(t, filepath.Join(ws, ".apogee", "skills"), "nested", "---\nid: nested\nsummary: nested\n---\nbody")
+
+	cat, err := Load(Sources{Workspace: ws, ProjectRoot: root, UseProjectSkills: true})
+
+	if err != nil {
+		t.Fatalf("Load soft error: %v", err)
+	}
+	proj, ok := cat.Get("proj")
+	if !ok || proj.Dir != filepath.Join(root, ".apogee", "skills", "proj") {
+		t.Errorf("Project root skill = %+v (found %v), want it loaded from %s", proj.Dir, ok, root)
+	}
+	if _, ok := cat.Get("bare"); !ok {
+		t.Error("the Workspace's bare skills/ was not loaded beside the Project root's .apogee/skills")
+	}
+	if _, ok := cat.Get("nested"); ok {
+		t.Error("the Workspace's own .apogee/skills was loaded although the Project root is above it")
+	}
+}
+
+// An empty ProjectRoot — the host resolved none, or the workspace is the user's home (no project
+// layer) — leaves .apogee/skills under the Workspace, exactly where it was before the Project root.
+func TestLoadEmptyProjectRootSkillsFallBackToTheWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	writeSkill(t, filepath.Join(ws, ".apogee", "skills"), "local", "---\nid: local\nsummary: local\n---\nbody")
+
+	cat, err := Load(Sources{Workspace: ws})
+
+	if err != nil {
+		t.Fatalf("Load soft error: %v", err)
+	}
+	if _, ok := cat.Get("local"); !ok {
+		t.Error("with no ProjectRoot the Workspace's .apogee/skills was not loaded")
+	}
+	want := []string{filepath.Join(realDir(t, ws), ".apogee", "skills")}
+	if got := readRoots(Sources{Workspace: ws}); !slices.Equal(got, want) {
+		t.Errorf("readRoots() = %v, want the Workspace anchor %v", got, want)
+	}
+}
+
+// A workspace that IS the user's home resolves to the empty Project root (projectroot.Resolve's
+// home guard), and the skills anchor then falls back to the Workspace as it always has.
+func TestLoadHomeWorkspaceSkillsFallBackToTheWorkspace(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, ".apogee", "skills"), "homeskill", "---\nid: homeskill\nsummary: h\n---\nbody")
+
+	root := projectroot.Resolve(home, home)
+	cat, err := Load(Sources{Workspace: home, ProjectRoot: root})
+
+	if err != nil {
+		t.Fatalf("Load soft error: %v", err)
+	}
+	if root != "" {
+		t.Errorf("projectroot.Resolve(home, home) = %q, want the empty Project root", root)
+	}
+	if _, ok := cat.Get("homeskill"); !ok {
+		t.Error("the Workspace anchor was not used when the Project root is empty")
 	}
 }
 

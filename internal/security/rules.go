@@ -1,5 +1,13 @@
 package security
 
+import (
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
+
 // ----------------------------------------------------------------------------
 // The default dangerous-action ruleset + the config-merge semantics (ADR 0012)
 // ----------------------------------------------------------------------------
@@ -189,8 +197,8 @@ func DefaultDangerousRules() []Rule {
 		// runs it, `~/.apogee` included. What earns the softer tier is what a write there does:
 		// `.git/hooks|config` above is delayed code execution outside every confinement (the
 		// shell-rc class), while `~/.apogee` holds the global config.yaml — the one source a
-		// dangerous-rule REMOVAL would be honoured from (MergeDangerousRules below: the merge
-		// seam ADR 0012 fixes, which no config key calls today) — plus the skill library and
+		// dangerous-rule REMOVAL is honoured from (MergeDangerousRules below: the merge
+		// seam ADR 0012 fixes, which the `dangerous-rules:` key feeds) — plus the skill library and
 		// the session records, so a write here can dissolve this floor for every later run:
 		// catastrophic as a model's mistake, ordinary as the operator's own step
 		// (curating the skill library, editing a scheme), which is the shape a look answers and
@@ -271,10 +279,74 @@ func DefaultDangerousRules() []Rule {
 	}
 }
 
-// MergeDangerousRules is the config-merge seam ADR 0012 fixes. No config key calls it today —
-// the guard runs on DefaultDangerousRules as shipped, and this seam sits ready for the key that
-// would feed it (project-local config, apogee-089); the function and its tests stay because the
-// semantics below are the security-load-bearing part of that design. The merge:
+// ProjectConfigRuleID is the id of the rule ProjectConfigRule builds.
+const ProjectConfigRuleID = "write-project-config"
+
+// ProjectConfigRule builds the Tier-1 refusal that keeps the tools off the Project config (ADR 0096
+// §5): writing, moving or deleting `<projectRoot>/.apogee/config.yaml`, and deleting, moving or
+// replacing `<projectRoot>/.apogee` itself, is refused in every mode without a look. ok is false —
+// no rule — when projectRoot is empty: a workspace that is the user's home resolves to no Project
+// root, and the home's `~/.apogee` stays the forced look `write-apogee-control-plane` asks
+// (ADR 0049 §4), never a boundary. The host also builds none when the Project config IS the global
+// config file; that symlink question is the caller's, since this package reads no disk for it.
+//
+// The pattern is built from the absolute root rather than spelled once, because RE2 has no
+// lookbehind and a static `\.apogee/config\.yaml` would capture `~/.apogee` too. It matches a
+// whole token (whitespace on both sides, an optional trailing `/`) spelled from the absolute root
+// or, relative to workspaceDir, bare or `./`-led when the root is the workspace and as the `../`
+// chain that climbs to it when the root is above (the Project root is the workspace or one of its
+// ancestors) — so a nested repository's own `vendor/x/.apogee/config.yaml` and `.apogee/skills/`
+// never match. The rule reads the project-config write view (Rule.ProjectConfigView): git
+// commands, git_commit's staged files and a cp's sources are not writes there, which is what keeps
+// `git add .apogee/config.yaml` and `cp .apogee/config.yaml bak.yaml` ordinary — the Adoption
+// fingerprint, not this refusal, is what guards the file's content, and the refusal is the
+// footgun layer over it (a python_exec line that opens the file is out of its reach).
+func ProjectConfigRule(projectRoot, workspaceDir string) (Rule, bool) {
+	if projectRoot == "" {
+		return Rule{}, false
+	}
+	pattern := `(?:^|\s)(?:` + strings.Join(projectRootSpellings(projectRoot, workspaceDir), "|") +
+		`)\.apogee(?:/config\.yaml)?/?(?:\s|$)`
+	return Rule{
+		ID:     ProjectConfigRuleID,
+		Tier:   TierHardRefuse,
+		Reason: "write, move or delete of the Project config (.apogee/config.yaml) or its .apogee folder",
+		Hint: "the Project config changes only by the user's hand: say what should change and let " +
+			"the user edit it; .apogee/skills/ stays writable",
+		Pattern:           pattern,
+		WritesOnly:        true,
+		ProjectConfigView: true,
+	}, true
+}
+
+// projectRootSpellings returns the regexp prefixes, each ending in `/` (or empty, for the bare
+// relative spelling), a path under projectRoot may be written with in the normalized text the guard
+// inspects: the absolute root, and the relative spellings from workspaceDir when it is the root or
+// below it.
+func projectRootSpellings(projectRoot, workspaceDir string) []string {
+	spellings := []string{regexp.QuoteMeta(strings.TrimRight(normalize(projectRoot), "/")) + "/"}
+	if workspaceDir == "" {
+		return spellings
+	}
+	rel, err := filepath.Rel(workspaceDir, projectRoot)
+	if err != nil {
+		return spellings
+	}
+	if rel == "." {
+		return append(spellings, "", `\./`)
+	}
+	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
+		if segment != ".." {
+			return spellings
+		}
+	}
+	climb := regexp.QuoteMeta(filepath.ToSlash(rel)) + "/"
+	return append(spellings, climb, `\./`+climb)
+}
+
+// MergeDangerousRules is the config-merge seam ADR 0012 fixes, fed by the `dangerous-rules:` key
+// (ADR 0096 §6): the host merges the shipped set with the global file's additions and removals and
+// the Project config's additions, and the engine builds its guard from the result. The merge:
 //
 //   - base is the built-in default ruleset (the floor).
 //   - globalAdd / globalRemove come from the user's global config
@@ -304,7 +376,9 @@ func DefaultDangerousRules() []Rule {
 //     every match it had, and a call the project's pattern also matches is reported at
 //     the project's higher tier. This is the floor a project must not be able to lower.
 //
-// The merged slice is returned; pass it to NewDangerousActionGuard. It may therefore hold
+// The merged slice is returned — never nil, so a global remove-list that empties the floor
+// stays an empty ruleset rather than reading as "the shipped one"; pass it to
+// NewDangerousActionGuard. It may therefore hold
 // more than one rule with a given ID — only ever a project tighten sitting beside the rule
 // it tightened, never a base or global duplicate.
 func MergeDangerousRules(base, globalAdd []Rule, globalRemove []string, projectAdd []Rule) []Rule {
@@ -363,5 +437,64 @@ func MergeDangerousRules(base, globalAdd []Rule, globalRemove []string, projectA
 	add(base, true, false)
 	add(globalAdd, false, false)
 	add(projectAdd, false, true)
+	return out
+}
+
+// tierOfDomain maps the engine-side tier spelling onto the guard's Tier: ask is the forced look,
+// refuse the hard refusal, and anything else TierNone, which NewDangerousActionGuard drops.
+var tierOfDomain = map[domain.DangerousTier]Tier{
+	domain.DangerousTierAsk:    TierForceApproval,
+	domain.DangerousTierRefuse: TierHardRefuse,
+}
+
+// RulesFromDomain converts the engine-side ruleset (domain.Config.DangerousRules) into the guard's
+// own Rule, field for field. It keeps the nil/empty distinction the Config field draws: nil in is
+// nil out, and a non-nil empty slice stays a non-nil empty one. A rule whose tier is neither ask
+// nor refuse converts to TierNone and is dropped where the guard is built.
+func RulesFromDomain(rules []domain.DangerousRule) []Rule {
+	if rules == nil {
+		return nil
+	}
+	out := make([]Rule, len(rules))
+	for i, r := range rules {
+		out[i] = Rule{
+			ID:             r.ID,
+			Pattern:        r.Pattern,
+			Tier:           tierOfDomain[r.Tier],
+			Reason:         r.Reason,
+			Hint:           r.Hint,
+			WritesOnly:     r.WritesOnly,
+			ShellWriteView: r.ShellWriteView,
+		}
+	}
+	return out
+}
+
+// DomainRules is RulesFromDomain's inverse: the guard's rules spelled the engine's way, so a host
+// that merged them (MergeDangerousRules) can carry the result on domain.Config. Nil in is nil out
+// and an empty slice stays a non-nil empty one. A TierNone rule converts to an empty tier.
+func DomainRules(rules []Rule) []domain.DangerousRule {
+	if rules == nil {
+		return nil
+	}
+	out := make([]domain.DangerousRule, len(rules))
+	for i, r := range rules {
+		var tier domain.DangerousTier
+		switch r.Tier {
+		case TierForceApproval:
+			tier = domain.DangerousTierAsk
+		case TierHardRefuse:
+			tier = domain.DangerousTierRefuse
+		}
+		out[i] = domain.DangerousRule{
+			ID:             r.ID,
+			Pattern:        r.Pattern,
+			Tier:           tier,
+			Reason:         r.Reason,
+			Hint:           r.Hint,
+			WritesOnly:     r.WritesOnly,
+			ShellWriteView: r.ShellWriteView,
+		}
+	}
 	return out
 }

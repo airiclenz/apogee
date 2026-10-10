@@ -569,8 +569,9 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 			// be ranked down for the name it did NOT match through.
 			min(slashMatchRank(partial, sk.ID), slashMatchRank(partial, sk.DisplayName)),
 			// The one row fact the SKILL.md does not author, carried from the only place that holds
-			// the Dir it is read off (Options.ConfigHome/Workspace are the loader's own roots).
-			skillSource(sk.Dir, m.opts.ConfigHome, m.opts.Workspace),
+			// the Dir it is read off (Options.ConfigHome/Workspace/ProjectRoot are the loader's
+			// own roots).
+			skillSource(sk.Dir, m.opts.skillRoots()),
 		))
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].rank < items[j].rank })
@@ -802,7 +803,7 @@ func (m *Model) openSuggestMenu() {
 		}
 		// The matcher answered strongest first, so a row's PLACE in that answer is its rank here: the
 		// same lowest-is-best scale the "/" menu sorts on, carrying the one ordering this menu has.
-		items = append(items, skillRow(sk, len(items), skillSource(sk.Dir, m.opts.ConfigHome, m.opts.Workspace)))
+		items = append(items, skillRow(sk, len(items), skillSource(sk.Dir, m.opts.skillRoots())))
 	}
 	if len(items) == 0 {
 		return

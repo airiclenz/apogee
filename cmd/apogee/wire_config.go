@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -43,6 +44,9 @@ func projectConfig(
 		Bypass:       opts.Bypass,
 		ConfigDir:    roots.config,
 		WorkspaceDir: roots.workspace,
+		// The Project root the layered load read the Project config from (ADR 0096 §1) — empty when
+		// the workspace is the user's home, and for a Firing, whose daemon reads no Project config.
+		ProjectRoot: roots.project,
 		// The OS confinement backend this run is fenced by — the host's real one (landlock on
 		// Linux, seatbelt on macOS, denyConfiner elsewhere — confinement-execution-contract §2.6),
 		// so Auto WORKS where fs-confinement exists and gates the subprocess surface where it does
@@ -202,9 +206,63 @@ func projectConfig(
 		// spelling into the other — so a guard the human took away, in the file or in `/settings`,
 		// is taken away for the runs nobody watches too.
 		Floor: floorFromOptions(opts),
+		// The dangerous-action guard's ruleset (ADR 0012), merged here once from the shipped set and
+		// the `dangerous-rules:` key, so every Driver builds its guard from the same rules.
+		DangerousRules: dangerousRulesFromOptions(opts),
+		// The effective Allow rules (ADR 0096 §2, §3): every global rule, then every ADOPTED project
+		// rule — the loader has already set the proposed and rejected ones aside — that answer an
+		// ordinary gate without asking. They ride the Config so the engine applies them for every
+		// Driver; today only a session reaches an ordinary gate, since an unattended run's Approver
+		// denies and its gates are refused before a rule is read.
+		AllowRules: allowRulesFromOptions(opts),
 		// Whether the engine's context-fill notice is on (ADR 0077): the `context-fill-notice`
 		// key, default off. Not a Floor guard, so it is carried as is — no negation — beside
 		// Bypass, which switches it off with the rest of the advise class.
 		ContextFillNotice: opts.ContextFillNotice,
 	}
+}
+
+// allowRulesFromOptions is the `allow:` key's effective rules in the engine's spelling, each tagged
+// with the layer it came from — what the transcript names when a rule answers a call. Nil when the
+// key grants nothing.
+func allowRulesFromOptions(opts config.Options) []apogee.AllowRule {
+	return engineAllowRules(opts.AllowRules.Rules)
+}
+
+// engineAllowRules is rules in the engine's spelling, each tagged with the layer it came from — the
+// one conversion the effective set and the proposed one (the adoption pane's) both take. Nil when
+// rules is empty.
+func engineAllowRules(rules []config.AllowRule) []apogee.AllowRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]apogee.AllowRule, len(rules))
+	for i, r := range rules {
+		kind := apogee.AllowRuleTerminal
+		if r.Kind == config.AllowMCPServers {
+			kind = apogee.AllowRuleMCPServer
+		}
+		layer := apogee.AllowRuleGlobal
+		if r.Layer == config.SourceProject {
+			layer = apogee.AllowRuleProject
+		}
+		out[i] = apogee.AllowRule{Kind: kind, Text: r.Text, Layer: layer}
+	}
+	return out
+}
+
+// dangerousRulesFromOptions merges the shipped dangerous-action rules with the `dangerous-rules:`
+// key through the one seam that knows how far each file is trusted (security.MergeDangerousRules,
+// ADR 0096 §6): the global file's additions and removals, then the Project config's additions,
+// which may only add — a same-id project rule stands beside the rule it tightens, never in its
+// place. The result is never nil, so a global `remove:` of every shipped id is an empty ruleset
+// at the engine rather than the nil that means "the shipped set".
+func dangerousRulesFromOptions(opts config.Options) []apogee.DangerousRule {
+	set := opts.DangerousRules
+	return security.DomainRules(security.MergeDangerousRules(
+		security.DefaultDangerousRules(),
+		security.RulesFromDomain(set.Add),
+		set.Remove,
+		security.RulesFromDomain(set.ProjectAdd),
+	))
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -83,6 +87,17 @@ func fabricatedSettings() config.Options {
 			}},
 		},
 		Overrides: map[string]config.Source{"mode": config.SourceFlag, "server": config.SourceEnv},
+		DangerousRules: config.DangerousRuleSet{
+			Add:    []domain.DangerousRule{{ID: "no-prod-deploy", Pattern: `kubectl .*prod`, Tier: domain.DangerousTierAsk}},
+			Remove: []string{"sudo-escalation"},
+		},
+		AllowRules: config.AllowRules{
+			Rules: []config.AllowRule{
+				{Kind: config.AllowTerminal, Text: "go test", Layer: config.SourceGlobal},
+				{Kind: config.AllowMCPServers, Text: "docs", Layer: config.SourceProject},
+			},
+			Proposed: []config.AllowRule{{Kind: config.AllowTerminal, Text: "make lint", Layer: config.SourceProject}},
+		},
 	}
 }
 
@@ -404,6 +419,8 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"tools.enabled":           "[]", // unset: nothing is added back, which is the whole default menu
 		"url-safety.allow-hosts":  "[docs.example.com]",
 		"url-safety.deny-hosts":   "[]", // unset: a list row's empty spelling, and every host is still floored
+		"dangerous-rules":         "1 rule added, 1 removed",
+		"allow":                   "2 rules, 1 proposed",
 		"use-project-skills":      "false",
 		"use-shipped-skills":      "false",
 		"auto-compact":            "true",
@@ -506,13 +523,17 @@ func TestSettingsRowsSubAgentsServerIsAReadOnlyServerRow(t *testing.T) {
 	}
 }
 
-// A key an environment variable or a flag overrode is marked, and the marker NAMES the source, so
-// the pane can say which variable is standing in front of the file. Everything else reports the
-// file — the ordinary case, which carries no name.
+// Every row is marked with the source that supplied its value. An override NAMES itself, so the
+// pane can say which variable is standing in front of the file; the two config files and the
+// built-in default carry no name. A key the Project config sets is marked `project` and is read-only
+// here, pointing at the project config rather than at an editor on the global file.
 func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 	t.Parallel()
 
-	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
+	opts := fabricatedSettings()
+	opts.GlobalKeys = map[string]bool{"servers": true, "bypass": true, "workflow-retries": true}
+	opts.ProjectKeys = map[string]bool{"workflow-retries": true}
+	byPath := rowsByPath(t, settingsRows(opts))
 	if got := byPath["mode"]; got.Source != tui.SettingFromFlag || got.SourceName != "--mode" {
 		t.Errorf("mode row source = {%q %q}; want the flag marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromFlag, "--mode")
@@ -521,11 +542,22 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 		t.Errorf("server row source = {%q %q}; want the env marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromEnv, config.EnvServer)
 	}
-	for _, path := range []string{"servers", "bypass", "auto-compact"} {
-		got := byPath[path]
-		if got.Source != tui.SettingFromFile || got.SourceName != "" {
-			t.Errorf("row %q source = {%q %q}; want the unmarked file source", path, got.Source, got.SourceName)
+	for path, want := range map[string]tui.SettingSource{
+		"servers":          tui.SettingFromGlobal,
+		"bypass":           tui.SettingFromGlobal,
+		"auto-compact":     tui.SettingFromDefault,
+		"workflow-retries": tui.SettingFromProject,
+	} {
+		if got := byPath[path]; got.Source != want || got.SourceName != "" {
+			t.Errorf("row %q source = {%q %q}; want {%q \"\"}", path, got.Source, got.SourceName, want)
 		}
+	}
+	if got := byPath["workflow-retries"]; got.Editable || got.EditPointer != pointerProject || got.ExternalEdit {
+		t.Errorf("workflow-retries row = {editable %v pointer %q externalEdit %v}; want read-only, "+
+			"pointing at the project config, opening no editor", got.Editable, got.EditPointer, got.ExternalEdit)
+	}
+	if got := byPath["bypass"]; !got.Editable {
+		t.Error("bypass row is read-only; a key the global file sets is written from this pane")
 	}
 }
 
@@ -568,7 +600,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
 		"system-prompt-layers", "model-profiles", "sub-agents-server", "tools.enabled",
-		"reactions"} {
+		"dangerous-rules", "allow", "reactions"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}
@@ -700,5 +732,194 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 				t.Errorf("row %q value = %q; want %q", tc.path, got, tc.want)
 			}
 		})
+	}
+}
+
+// A tighten-only list holding entries the Project config added shows the union of both files, so a
+// /settings commit of it would write the project's entries into the global file. The row is
+// therefore read-only, pointing at the editor; the same list with nothing from the project layer
+// stays editable.
+func TestSettingsRowsHoldProjectEntriesOutOfTheGlobalFile(t *testing.T) {
+	t.Parallel()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeConfigHomeFor(t, home, "http://127.0.0.1:1", "tools:\n  disabled: [web_fetch]\n"+
+		"url-safety:\n  deny-hosts: [x.example]\n")
+	if err := os.MkdirAll(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
+		t.Fatalf("create the project folder: %v", err)
+	}
+	project := "tools:\n  disabled: [terminal]\nurl-safety:\n  deny-hosts: [x.example]\n"
+	if err := os.WriteFile(filepath.Join(workspace, ".apogee", "config.yaml"), []byte(project), 0o600); err != nil {
+		t.Fatalf("write the project config: %v", err)
+	}
+	opts := config.Options{ConfigDir: home, Workspace: workspace}
+	var undetermined *config.StartupUndetermined
+	err := config.ApplyConfig(&opts, noFlagChanged, noEnvironment, os.ReadFile, func(string) {})
+	if err != nil && !errors.As(err, &undetermined) {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	byPath := rowsByPath(t, settingsRows(opts))
+
+	if got := byPath["tools.disabled"]; got.Value != "[web_fetch, terminal]" || got.Editable ||
+		got.EditPointer != pointerExternalEdit {
+		t.Errorf("tools.disabled row = {value %q editable %v pointer %q}; want the union, read-only, "+
+			"pointing at the editor", got.Value, got.Editable, got.EditPointer)
+	}
+	if got := byPath["url-safety.deny-hosts"]; !got.Editable {
+		t.Error("url-safety.deny-hosts is read-only; the project added nothing to it, so a commit " +
+			"writes only the global file's own entries")
+	}
+}
+
+// layeredSettingsHost is the `/settings` host the composition root wires, over a global file holding
+// global and a workspace outside any repository — its own Project root — whose `.apogee/` holds
+// project, or no config at all when project is empty. It answers the Project config's path beside it.
+func layeredSettingsHost(t *testing.T, global, project string) (settingsHost, string) {
+	t.Helper()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeConfigHomeFor(t, home, "http://127.0.0.1:1", global)
+	root := projectroot.Resolve(workspace, "")
+	projectPath := config.ProjectFilePath(root)
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatalf("create the project folder: %v", err)
+	}
+	if project != "" {
+		writeSettingsFixture(t, projectPath, project)
+	}
+	opts := config.Options{ConfigDir: home, Workspace: workspace}
+	var undetermined *config.StartupUndetermined
+	if err := config.ApplyConfig(&opts, noFlagChanged, noEnvironment, os.ReadFile, func(string) {}); err != nil &&
+		!errors.As(err, &undetermined) {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	return settingsHost{
+		opts:          opts,
+		configPath:    config.FilePath(home),
+		projectRoot:   projectSaveRoot(opts, root),
+		workspacesDir: config.WorkspacesDir(home),
+		edits:         newExternalEdit(opts, workspace, noEnvironment),
+		apply:         func(string, string) (string, error) { return "", nil },
+	}, projectPath
+}
+
+// A param key saved to this project lands in `.apogee/config.yaml`, reports `project`, and is not
+// reported back by the watcher's re-read as somebody else's edit — so no "config changed on disk".
+func TestSettingsHostSavesAParamKeyToTheProjectConfig(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "", "")
+
+	outcome, err := h.SaveTo(tui.SettingTargetProject, "use-project-skills", "false")
+
+	if err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	if data, _ := os.ReadFile(projectPath); !strings.Contains(string(data), "use-project-skills: false") {
+		t.Errorf("project config =\n%s\nwant the saved key", data)
+	}
+	if global, _ := os.ReadFile(h.configPath); strings.Contains(string(global), "use-project-skills: false") {
+		t.Errorf("the project save reached the global file:\n%s", global)
+	}
+	if want := (tui.SettingOutcome{Value: "false", Source: tui.SettingFromProject}); outcome != want {
+		t.Errorf("outcome = %+v, want %+v", outcome, want)
+	}
+	if reload, err := h.edits.changed(); err != nil || len(reload.Applied) != 0 {
+		t.Errorf("re-read after the save = %+v (err %v); want nothing changed on disk", reload.Applied, err)
+	}
+}
+
+// A tighten-only list saved to the project is unioned with the global entries, and the outcome is
+// that union: a global `tools.disabled: [terminal]` with `[web_fetch]` saved to the project keeps
+// terminal disabled, and the project file holds only what was saved.
+func TestSettingsHostProjectSaveOfATightenOnlyListAnswersTheUnion(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "tools:\n  disabled: [terminal]\n", "")
+
+	outcome, err := h.SaveTo(tui.SettingTargetProject, "tools.disabled", "[web_fetch]")
+
+	if err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	if want := (tui.SettingOutcome{Value: "[terminal, web_fetch]", Source: tui.SettingFromProject}); outcome != want {
+		t.Errorf("outcome = %+v, want %+v — terminal must stay disabled", outcome, want)
+	}
+	if data, _ := os.ReadFile(projectPath); strings.Contains(string(data), "terminal") {
+		t.Errorf("project config =\n%s\nwant only the saved entry", data)
+	}
+	if _, err := h.SaveTo(tui.SettingTargetGlobal, "tools.disabled", outcome.Value); err == nil {
+		t.Error("a global save of the union was accepted; it would copy the project's entries into the global file")
+	}
+}
+
+// Resetting a project row removes the project's line and answers the global value it uncovers;
+// resetting the global line under a project value answers the project's, which still outranks it.
+func TestSettingsHostResetInAnswersTheLayeredValue(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "use-project-skills: false\n", "use-project-skills: true\n")
+
+	underProject, err := h.ResetIn(tui.SettingTargetGlobal, "use-project-skills")
+	if err != nil {
+		t.Fatalf("ResetIn(global): %v", err)
+	}
+	if want := (tui.SettingOutcome{Value: "true", Source: tui.SettingFromProject}); underProject != want {
+		t.Errorf("global reset outcome = %+v, want the project's %+v", underProject, want)
+	}
+
+	if err := os.WriteFile(h.configPath, []byte("use-project-skills: false\n"+startupServerYAMLFor("http://127.0.0.1:1")), 0o600); err != nil {
+		t.Fatalf("rewrite the global config: %v", err)
+	}
+	uncovered, err := h.ResetIn(tui.SettingTargetProject, "use-project-skills")
+	if err != nil {
+		t.Fatalf("ResetIn(project): %v", err)
+	}
+	if want := (tui.SettingOutcome{Value: "false", Source: tui.SettingFromGlobal}); uncovered != want {
+		t.Errorf("project reset outcome = %+v, want the global %+v", uncovered, want)
+	}
+	if data, _ := os.ReadFile(projectPath); strings.Contains(string(data), "use-project-skills") {
+		t.Errorf("project config =\n%s\nwant the line gone", data)
+	}
+}
+
+// A project save is refused for a key only the global file may state, and in a session with no
+// Project config to write; neither touches a file.
+func TestSettingsHostRefusesAProjectSaveItCannotMake(t *testing.T) {
+	t.Parallel()
+	h, projectPath := layeredSettingsHost(t, "", "")
+	global := h
+	global.projectRoot = ""
+
+	if _, err := h.SaveTo(tui.SettingTargetProject, "bypass", "true"); err == nil {
+		t.Error("SaveTo(project, bypass) = nil; want a refusal for a global-only key")
+	}
+	if _, err := global.SaveTo(tui.SettingTargetProject, "use-project-skills", "false"); !errors.Is(err, errNoProjectConfig) {
+		t.Errorf("SaveTo with no Project config = %v; want %v", err, errNoProjectConfig)
+	}
+	if _, err := os.Stat(projectPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused save created %s (stat err %v)", projectPath, err)
+	}
+}
+
+// Which rows are offered the project target is the registry's class, an editable row, and a session
+// with a Project config to write: a param key the project sets is editable here now rather than read-only.
+func TestSettingsRowsOfferTheProjectTargetByClass(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "use-project-skills: false\n")
+
+	byPath := rowsByPath(t, h.Rows())
+	global := h
+	global.projectRoot = ""
+	noProject := rowsByPath(t, global.Rows())
+
+	if got := byPath["use-project-skills"]; !got.Editable || !got.ProjectCapable || got.EditPointer != "" ||
+		got.Source != tui.SettingFromProject {
+		t.Errorf("use-project-skills row = %+v; want an editable, project-capable project row", got)
+	}
+	if got := byPath["tools.disabled"]; !got.ProjectCapable {
+		t.Error("tools.disabled is not offered the project target; a project may add to a tighten-only list")
+	}
+	if got := byPath["bypass"]; got.ProjectCapable {
+		t.Error("bypass is offered the project target; it is global-only")
+	}
+	if got := noProject["use-project-skills"]; got.ProjectCapable {
+		t.Error("a session with no Project config to write offered the project target")
 	}
 }

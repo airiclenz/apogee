@@ -513,6 +513,9 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if next, cmd, claimed := m.settingsPaste(msg); claimed {
 		return next, cmd
 	}
+	if next, cmd, claimed := m.projectRuleMsg(msg); claimed {
+		return next, cmd // the approval pane's rule field is the surface being typed at (approval.go)
+	}
 	if !m.inputEditable() {
 		return m, nil
 	}
@@ -574,6 +577,9 @@ func (m Model) attachPastedImage(content string) (Model, tea.Cmd, bool) {
 // lineEditor.editMsg).
 func (m Model) foldWidgetMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
+		return next, cmd
+	}
+	if next, cmd, claimed := m.projectRuleMsg(msg); claimed {
 		return next, cmd
 	}
 	m.fitWrapMemo() // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)

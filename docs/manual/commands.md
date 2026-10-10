@@ -258,10 +258,20 @@ phrase the row is holding; see [the effort dial](configuration.md#how-hard-a-mod
 
 An ordinary gated call offers the same four rows — `Allow`, `Always allow this session`, `Deny` and
 `Cancel` — and the decision keys behind them arm a moment after the prompt appears, exactly as the
-keys above describe. What that second row actually remembers is worth knowing before you press `s`
+keys above describe. Where a saved Allow rule could answer the call — a `terminal` line the rule
+matcher can read, or a named MCP server — a fifth row, `Always in this project…` (`p`), sits above
+`Deny`: it opens a line holding the suggested rule (`go test` for `go test ./...`) to edit, and `⏎`
+saves it to the project's `.apogee/config.yaml` and allows the call (`esc` goes back to the menu);
+for an MCP server it reads ``Always allow server `<alias>` in this project`` and saves the server at
+once. A rule saved this way is adopted as it is written, so it answers the next matching call
+without a prompt, and the transcript names it in place of your answer
+(``approval allowed by project rule `go test`: terminal``); the
+[Allow rules](configuration.md#commands-that-run-without-asking--allow) section of the configuration
+page says what such a rule matches, and that allowing `go test` runs whatever the repository's
+tests do. What that second row actually remembers is worth knowing before you press `s`
 — and which prompts never offer it at all (the last paragraph of this section).
 
-**The mouse answers it too, in two clicks.** A click on one of the four rows moves the `❯` onto it,
+**The mouse answers it too, in two clicks.** A click on one of the rows moves the `❯` onto it,
 the way `↑`/`↓` do; a **second** click on that same row takes it, the way `⏎` does. It is always two,
 and the row a second click can take is the row *you* clicked onto — the `Allow` the prompt opens on
 is never one press away from being granted, and the arming latch gates the deciding click exactly as
@@ -580,9 +590,16 @@ Both verbs **run at idle** — typed while the model works, they queue and run o
 
 `/settings` opens a **full-height pane** over your whole configuration: one row per setting,
 in registry order — roughly the order the starter `config.yaml` documents them — and grouped under section headings,
-each row showing the value **this run resolved** for it. Where a higher-precedence source
-beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
-file and another on screen explains itself. Two rows answer from the **running session**
+each row showing the value **this run resolved** for it and where that value came from —
+`(default)`, `(global)` for `~/.apogee/config.yaml`, `(project)` for the project's
+`.apogee/config.yaml`, or `(env)` / `(flag)` for an override — so a key that reads one way in the
+file and another on screen explains itself. Saving a key a project may set — the context files, the
+project-skills switch, `tools.disabled`, `url-safety.deny-hosts` — asks **Save to: global / this
+project** (`←/→` choose, `⏎` save, `esc` back), opening on the file that supplies the key now; every
+other key is written to the global file as before. The row then shows what the two files resolve
+to together — a list saved to the project still carries the global entries, and a global save
+under a project value notes `· saved to global; the project config outranks it`. A row the project
+sets that the pane cannot write there points at it (`· set in the project config`). Two rows answer from the **running session**
 instead of that resolution — `mode:` and `confine-to-workspace:` show what apogee is running
 right now — and the rows are re-derived at every paint, not read once when the pane opens, so a
 `shift+tab` or a `/confine off` is already on the row whenever the pane paints, and
@@ -601,7 +618,8 @@ opens a multi-line field over the list, where `⏎` makes a new line, `ctrl+s` s
 discards. A buffer is a real field: the arrow keys, `home`/`end` and word jumps move the
 caret, and the mouse seats it and drags a selection exactly as it does in the prompt box —
 `backspace` or `delete` over a selection removes the selected text and leaves the caret where it
-began. Each committed edit is spliced straight into `~/.apogee/config.yaml` — your
+began. Each committed edit is spliced straight into `~/.apogee/config.yaml` — or into the project's
+`.apogee/config.yaml`, when you chose **this project** — your
 comments, your layout and every other key untouched, the result re-parsed and compared
 against the original before it replaces the file — and a top-level key that was still one of the
 commented examples lands directly below it; a nested key joins the end of its block when the
@@ -674,3 +692,12 @@ like any other boolean and applied to the running session: `tool-call-repair`, `
 them is the same kind of row — `on`/`off`, applied to the running session the moment you commit it
 — but it is not a Floor guard and starts `off`.
 
+**Allow rules have a section of their own.** Below `Model profiles` comes `Allow rules`, one row per
+[Allow rule](configuration.md#commands-that-run-without-asking--allow) the session knows — the rules
+in force first, then the project's proposed and rejected ones — keyed by list and text
+(`terminal: go test`), with where the rule stands as its value (`live` for one of your global rules,
+`adopted`, `proposed`, `rejected`) and the file it came from as its source mark. `⏎` on a proposed or
+rejected rule adopts it; `backspace` arms the rule's removal from the file that holds it and `⏎`
+confirms (`⏎ confirm remove · esc cancel`). A session with no rules shows no such section. Rules
+the project proposes are also asked about on their own, at start-up and from a shell with
+`apogee project adopt` — see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml).

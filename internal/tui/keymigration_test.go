@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -26,6 +28,11 @@ type fakeConfigHost struct {
 	migrateSubAgentsServer  func(entry string) (string, error)
 	recordModelChoice       func(model string) (bool, error)
 	externalEditSpec        func(path string) (EditorCommand, error)
+	addProjectRule          func(kind domain.AllowRuleKind, text string) error
+	adoptRules              func(rules []domain.AllowRule) error
+	rejectRules             func(rules []domain.AllowRule) error
+	removeRule              func(rule domain.AllowRule) error
+	proposedRules           func() ([]domain.AllowRule, error)
 }
 
 func (h fakeConfigHost) SaveHostAcknowledgement() (string, error) {
@@ -82,6 +89,41 @@ func (h fakeConfigHost) ExternalEditSpec(path string) (EditorCommand, error) {
 		return noopConfigHost{}.ExternalEditSpec(path)
 	}
 	return h.externalEditSpec(path)
+}
+
+func (h fakeConfigHost) AddProjectRule(kind domain.AllowRuleKind, text string) error {
+	if h.addProjectRule == nil {
+		return noopConfigHost{}.AddProjectRule(kind, text)
+	}
+	return h.addProjectRule(kind, text)
+}
+
+func (h fakeConfigHost) AdoptRules(rules []domain.AllowRule) error {
+	if h.adoptRules == nil {
+		return noopConfigHost{}.AdoptRules(rules)
+	}
+	return h.adoptRules(rules)
+}
+
+func (h fakeConfigHost) RejectRules(rules []domain.AllowRule) error {
+	if h.rejectRules == nil {
+		return noopConfigHost{}.RejectRules(rules)
+	}
+	return h.rejectRules(rules)
+}
+
+func (h fakeConfigHost) RemoveRule(rule domain.AllowRule) error {
+	if h.removeRule == nil {
+		return noopConfigHost{}.RemoveRule(rule)
+	}
+	return h.removeRule(rule)
+}
+
+func (h fakeConfigHost) ProposedRules() ([]domain.AllowRule, error) {
+	if h.proposedRules == nil {
+		return noopConfigHost{}.ProposedRules()
+	}
+	return h.proposedRules()
 }
 
 // configSeams is the [ConfigHost] fake opts carries, created on the spot when it carries none —

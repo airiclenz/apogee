@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -215,7 +217,7 @@ func (a *Agent) exchangeAborted() {
 // its parent instead (delegation.seed). Empty and per-process, every one of them, because this
 // Agent IS the session's root: nothing above it holds an instance to share.
 func (a *Agent) seedTopLevel(cfg domain.Config) {
-	a.guards = security.NewDefaultGuards()
+	a.guards = guardsFor(cfg)
 	a.dial = dialProvider                                  // the real provider client, until the constructor that took WithDialer says otherwise (New, Resume)
 	a.effortDialect = toProviderDialect(cfg.EffortDialect) // the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
@@ -224,6 +226,76 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
+	// The tree's Allow rules, seeded HERE and never by a delegate: a child's Config is a copy of the
+	// parent's construction seed, and storing it again would put back rules a SetAllowRules had
+	// since replaced.
+	treeAllowRules(cfg.Approver).store(cfg.AllowRules)
+}
+
+// guardsFor is the top-level guardrail bundle cfg asks for: the production breaker, and the
+// dangerous-action guard built from cfg.DangerousRules — the shipped ruleset when the field is nil,
+// exactly the rules it holds otherwise, so a non-nil empty slice is a guard with no rules (a global
+// `remove:` of every shipped id) rather than the shipped set brought back — plus the Project
+// config's Tier-1 refusal for cfg.ProjectRoot (projectConfigRule, ADR 0096 §5), which rides beside
+// the configured set rather than in it: it is built from the root, so no `dangerous-rules:` entry
+// spells or removes it. A delegate never builds its own: it shares this one read-only
+// (Guards.ForSubAgent), so the floor cannot be re-derived one level down.
+func guardsFor(cfg domain.Config) security.Guards {
+	guards := security.NewDefaultGuards()
+	rules := security.DefaultDangerousRules()
+	if cfg.DangerousRules != nil {
+		rules = security.RulesFromDomain(cfg.DangerousRules)
+	}
+	if rule, ok := projectConfigRule(cfg); ok {
+		rules = append(rules, rule)
+	}
+	guards.Dangerous = security.NewDangerousActionGuard(rules)
+	return guards
+}
+
+// projectConfigRule is security.ProjectConfigRule for cfg's Project root and workspace — none when
+// there is no Project root, and none when the Project config IS the global config file under
+// another name (the root's `.apogee/` is the apogee home or links to it, or its `config.yaml` links
+// to the global one): that file keeps the forced look `write-apogee-control-plane` asks, the same
+// skip the host's layered load makes so the global file is never layered over itself.
+func projectConfigRule(cfg domain.Config) (security.Rule, bool) {
+	if isGlobalConfigFile(cfg.ProjectRoot, cfg.ConfigDir) {
+		return security.Rule{}, false
+	}
+	return security.ProjectConfigRule(cfg.ProjectRoot, cfg.WorkspaceDir)
+}
+
+// projectConfigDirName and configFileName spell where a config file lives under a Project root
+// and under the apogee home.
+const (
+	projectConfigDirName = ".apogee"
+	configFileName       = "config.yaml"
+)
+
+// isGlobalConfigFile reports whether projectRoot's config is the global config file reached through
+// another name: its `.apogee/` is the apogee home at configDir, or its `config.yaml` is the global
+// file, each compared as the file system resolves it. Either path empty is no match.
+func isGlobalConfigFile(projectRoot, configDir string) bool {
+	if projectRoot == "" || configDir == "" {
+		return false
+	}
+	projectDir := filepath.Join(projectRoot, projectConfigDirName)
+	return sameFile(projectDir, configDir) ||
+		sameFile(filepath.Join(projectDir, configFileName), filepath.Join(configDir, configFileName))
+}
+
+// sameFile reports whether a and b both exist and are the same file once every symlink on the
+// way is followed.
+func sameFile(a, b string) bool {
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(aInfo, bInfo)
 }
 
 // seed copies the delegation into the Agent under construction — every fact once, before anything
@@ -327,6 +399,7 @@ type queuedApprover struct {
 	slot  *domain.PromptSlot // this seam's own surface; the context's wins where one is designated
 	inner domain.Approver
 	cache *approvalCache // the Session's allow-for-session memory, shared by the whole agent tree
+	rules *allowRuleSet  // the effective Allow rules, shared by the whole agent tree (Agent.SetAllowRules)
 }
 
 // Approve takes the prompt slot, re-checks the Session's memory on the far side of the wait, and
@@ -380,7 +453,10 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 //
 // That same idempotence is what gives the tree ONE allow-for-session memory: the cache is created
 // here, with the wrapper, so re-using a parent's wrapper re-uses its memory — a child neither
-// inherits a copy nor starts empty, it reads and writes the very map its parent does.
+// inherits a copy nor starts empty, it reads and writes the very map its parent does. The tree's
+// effective Allow rules ride the wrapper for the same reason (allowRuleSet): created empty here,
+// seeded by the top-level Agent alone (seedTopLevel), and swapped by SetAllowRules, so a rule the
+// host installs mid-session answers a sub-agent that was already running.
 //
 // A nil Approver stays nil. "No Approver configured" is a FACT the resolver reads
 // (resolutionInput.approverPresent — a Gate with no Approver folds to a Refuse, Resolution D5), so
@@ -392,7 +468,7 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 	if _, already := ap.(*queuedApprover); already {
 		return ap
 	}
-	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap, cache: &approvalCache{}}
+	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap, cache: &approvalCache{}, rules: &allowRuleSet{}}
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;

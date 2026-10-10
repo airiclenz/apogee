@@ -399,6 +399,59 @@ func fileMCPServers(o *Options, fc fileConfig) error {
 	return nil
 }
 
+// fileDangerousRules projects `dangerous-rules:` — the file's added rules and the shipped ids it
+// removes. A rule the guard could not run as written is a startup refusal naming it: the guard
+// itself drops an empty, tierless or uncompilable rule without a word (NewDangerousActionGuard),
+// which for a rule the human wrote to stop something would be a floor that silently is not there.
+// The Project config's additions are not read here: the layered load carries them apart
+// (DangerousRuleSet.ProjectAdd), and a project file reaches this pass only to be checked alone.
+func fileDangerousRules(o *Options, fc fileConfig) error {
+	o.DangerousRules = DangerousRuleSet{}
+	if fc.DangerousRules == nil {
+		return nil
+	}
+	add, err := fc.DangerousRules.rules()
+	if err != nil {
+		return err
+	}
+	o.DangerousRules = DangerousRuleSet{Add: add, Remove: slices.Clone(fc.DangerousRules.Remove)}
+	return nil
+}
+
+// dangerousTiers maps a rule's `tier:` spelling onto the engine's.
+var dangerousTiers = map[string]domain.DangerousTier{
+	string(domain.DangerousTierAsk):    domain.DangerousTierAsk,
+	string(domain.DangerousTierRefuse): domain.DangerousTierRefuse,
+}
+
+// rules validates the block's `add:` entries and converts them, in file order. An entry needs an id,
+// a pattern that compiles as a Go regexp, and a tier of ask or refuse; the reason is optional. The
+// error names the entry by its id where it has one and by its position where it does not.
+func (dc *dangerousRulesConfig) rules() ([]domain.DangerousRule, error) {
+	if len(dc.Add) == 0 {
+		return nil, nil
+	}
+	out := make([]domain.DangerousRule, 0, len(dc.Add))
+	for i, r := range dc.Add {
+		id := strings.TrimSpace(r.ID)
+		if id == "" {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add entry %d has no id", i+1)
+		}
+		if r.Pattern == "" {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add %q has no pattern", id)
+		}
+		if _, err := regexp.Compile(r.Pattern); err != nil {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add %q: pattern does not compile: %w", id, err)
+		}
+		tier, ok := dangerousTiers[strings.TrimSpace(r.Tier)]
+		if !ok {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add %q: tier %q is not one of ask, refuse", id, r.Tier)
+		}
+		out = append(out, domain.DangerousRule{ID: id, Pattern: r.Pattern, Tier: tier, Reason: r.Reason})
+	}
+	return out, nil
+}
+
 // fileModelProfiles projects `model-profiles:`, ordered by pattern on the way in
 // (toProfileEntries) so the same file always resolves to the same slice; the map is carried whole
 // rather than merged pattern by pattern (ADR 0044).
@@ -1103,6 +1156,14 @@ type fileConfig struct {
 	// one. File-only, like the roster above it: which hosts a machine may reach is a per-machine
 	// fact, not an invocation one.
 	URLSafety *urlSafetyConfig `yaml:"url-safety"`
+	// DangerousRules adds rules to the dangerous-action guard and, in the global file only, removes
+	// shipped ones by id (ADR 0096 §6, the ADR 0012 merge seam). A pointer so an absent block reads
+	// as the shipped ruleset untouched. File-only, like the host lists above it.
+	DangerousRules *dangerousRulesConfig `yaml:"dangerous-rules"`
+	// Allow is the Allow rules (ADR 0096 §2): terminal word prefixes and MCP server names that run
+	// without asking at an ordinary gate. A pointer so an absent block reads as no rules. File-only:
+	// the global file's rules are live as written, a Project config's only once adopted (allow.go).
+	Allow *allowConfig `yaml:"allow"`
 	// ModelProfiles describes how a model speaks the wire (CONTEXT: Model profile) — its tool-call
 	// format and inline thinking-channel style — keyed by a PATTERN the model name contains
 	// (ADR 0044) — and, since ADR 0057, the tool roster that model is offered. File-only, no
@@ -2415,6 +2476,25 @@ type toolsConfig struct {
 	Enabled []string `yaml:"enabled"`
 }
 
+// dangerousRulesConfig is the on-disk `dangerous-rules:` block (ADR 0096 §6): the rules this file
+// adds to the dangerous-action guard and the shipped ids it removes.
+type dangerousRulesConfig struct {
+	// Add is the rules this file adds, each an id, a pattern, a tier and a reason.
+	Add []dangerousRuleConfig `yaml:"add"`
+	// Remove is the ids of shipped rules this file removes — honoured from the global file alone; an
+	// id that names no shipped rule is ignored.
+	Remove []string `yaml:"remove"`
+}
+
+// dangerousRuleConfig is the on-disk schema for one added dangerous-action rule. Tier is `ask` (the
+// call needs approval even in Auto) or `refuse` (the call is refused in every mode).
+type dangerousRuleConfig struct {
+	ID      string `yaml:"id"`
+	Pattern string `yaml:"pattern"`
+	Tier    string `yaml:"tier"`
+	Reason  string `yaml:"reason"`
+}
+
 // urlSafetyConfig is the on-disk `url-safety:` block — the host allow/deny layer the network tools'
 // guard applies on top of its always-on SSRF floor. Both keys are HOST lists: the scheme allow-set
 // stays code-level, because widening it is exactly the loosening this block must not be able to do.
@@ -2848,23 +2928,41 @@ func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify f
 // into one exported call.
 func parseConfigFile(path string, readFile func(string) ([]byte, error), notify func(string),
 	mayMigrate bool) (fileConfig, error) {
+	data, present, err := readConfigData(path, readFile, notify, mayMigrate)
+	if err != nil || !present {
+		return fileConfig{}, err
+	}
+	return decodeConfigData(path, data, notify)
+}
+
+// readConfigData reads the global config file and runs the legacy migration over it, answering the
+// migrated bytes and whether there was a file at all: an empty path and an absent file both answer
+// present=false with no error, since a config file is optional.
+func readConfigData(path string, readFile func(string) ([]byte, error), notify func(string),
+	mayMigrate bool) ([]byte, bool, error) {
 	if path == "" {
-		return fileConfig{}, nil
+		return nil, false, nil
 	}
 	data, err := readFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return fileConfig{}, nil
+			return nil, false, nil
 		}
-		return fileConfig{}, fmt.Errorf("apogee: read config %q: %w", path, err)
+		return nil, false, fmt.Errorf("apogee: read config %q: %w", path, err)
 	}
 	data, note, err := migrateLegacyConfig(path, data, time.Now(), mayMigrate)
 	if err != nil {
-		return fileConfig{}, err
+		return nil, false, err
 	}
 	if note != "" {
 		notify(note)
 	}
+	return data, true, nil
+}
+
+// decodeConfigData decodes the migrated bytes of the global file into the schema, announces the
+// keys the schema does not spell, and runs the whole-file checks (checkFileConfig).
+func decodeConfigData(path string, data []byte, notify func(string)) (fileConfig, error) {
 	var fc fileConfig
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return fileConfig{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
@@ -2878,17 +2976,25 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	for _, unknown := range unknownKeys(data) {
 		notify(fmt.Sprintf(unknownKeyNotice, path, unknown.key, unknown.line))
 	}
-	canonicaliseServers(&fc)
-	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
-		return fileConfig{}, err
-	}
-	if err := validateReactionBlocks(fc.Reactions); err != nil {
-		return fileConfig{}, err
-	}
-	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {
+	if err := checkFileConfig(&fc); err != nil {
 		return fileConfig{}, err
 	}
 	return fc, nil
+}
+
+// checkFileConfig canonicalises the decoded `servers:` list and refuses the blocks whose defects
+// are facts about the decoded document as a whole — the model profiles, the Reactions and the
+// top-level reply share. It runs on the global file alone and again on the document a Project
+// config was layered into (layer.go), so both are judged by one set of checks.
+func checkFileConfig(fc *fileConfig) error {
+	canonicaliseServers(fc)
+	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
+		return err
+	}
+	if err := validateReactionBlocks(fc.Reactions); err != nil {
+		return err
+	}
+	return validateResponseReserveFraction(fc.ResponseReserve)
 }
 
 // legacyFileConfig is the retired half of the schema — and ONLY that half: the top-level
@@ -3025,16 +3131,39 @@ func applyFlags(o *Options, flags Options, changed func(string) bool) {
 	}
 }
 
-// Source names which precedence source supplied a key's value. The zero value is the
-// ordinary case — the config file, or the built-in default below it — and the other two are the
-// sources that can BEAT the file (flag > env > file > default).
+// Source names which precedence source supplied a key's value, in the order they rank:
+// flag > env > project > global > default. The project and global sources are the two config files
+// (ADR 0096: the Project config is layered over the global file), and default is neither file nor
+// an override stating the key. [Options.SourceOf] answers it per key; there is no zero value a
+// resolution reports.
 type Source string
 
 const (
-	SourceFile Source = ""     // the config file, or the default below it: nothing overrode the key
-	SourceEnv  Source = "env"  // an APOGEE_* variable set the key
-	SourceFlag Source = "flag" // an explicitly-set command-line flag set the key
+	SourceDefault Source = "default" // no file, variable or flag stated the key: the built-in default
+	SourceGlobal  Source = "global"  // the global config file stated the key
+	SourceProject Source = "project" // the Project config stated the key, over the global file
+	SourceEnv     Source = "env"     // an APOGEE_* variable set the key
+	SourceFlag    Source = "flag"    // an explicitly-set command-line flag set the key
 )
+
+// SourceOf reports which source supplied the value this run resolved for the key at the registry
+// path: an override (Overrides) first, then the Project config layer (ProjectKeys), then the global
+// file (GlobalKeys), and the built-in default otherwise. It reads the three facts resolution
+// recorded because the resolved value no longer carries them — precedence collapsed the layers.
+// A tighten-only list counts as the project's only when the project layer added an entry the
+// global list lacks, which is exactly what ProjectKeys records for it.
+func (o *Options) SourceOf(path string) Source {
+	switch {
+	case o.Overrides[path] != "":
+		return o.Overrides[path]
+	case o.ProjectKeys[path]:
+		return SourceProject
+	case o.GlobalKeys[path]:
+		return SourceGlobal
+	default:
+		return SourceDefault
+	}
+}
 
 // overrideSources reports which higher-precedence source beat the config file for each key this
 // run, keyed by registry path. Resolution COLLAPSES the layers into one value, so afterwards the
@@ -3046,7 +3175,8 @@ const (
 // The predicates are deliberately the SAME two the passes themselves are gated on (applyFlags'
 // changed, applyEnv's non-empty getenv), read off the same registry rows, so the marker cannot
 // claim a source that did not actually win. Keys absent from the map resolved from the file or the
-// default, which is the majority and needs no entry.
+// default, which is the majority and needs no entry; which of those three it was is the files'
+// fact, which [Options.SourceOf] reads off ProjectKeys and GlobalKeys.
 func overrideSources(changed func(string) bool, getenv func(string) string) map[string]Source {
 	sources := make(map[string]Source, len(KeyRegistry))
 	for _, k := range KeyRegistry {
@@ -3065,16 +3195,19 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // ----------------------------------------------------------------------------
 
 // ResolveOptions resolves every configured value onto opts, in precedence order: the built-in
-// defaults and the config file first (one pass, since the file is the only source below the
-// defaults), then the APOGEE_* variables, then the explicitly-set flags — so a flag beats a
-// variable beats the file beats the default. Every source writes onto opts itself, which is what
-// makes applying them in that order the precedence rule; the file pass writes every key of the
-// schema, so no value from a previous resolution survives it.
+// defaults and the config files first (one pass over the one document the Project config is
+// layered into the global file as — see parseLayeredConfig), then the APOGEE_* variables, then the
+// explicitly-set flags — so a flag beats a variable beats the files beat the default. Every source
+// writes onto opts itself, which is what makes applying them in that order the precedence rule;
+// the file pass writes every key of the schema, so no value from a previous resolution survives it.
 //
-// The config file lives at <apogee-home>/config.yaml, where the home follows
+// The global config file lives at <apogee-home>/config.yaml, where the home follows
 // --config > APOGEE_CONFIG > ~/.apogee; the file cannot set the home (it lives inside it), so
 // --config / APOGEE_CONFIG are resolved onto opts first. The workspace honours
-// --workspace > APOGEE_WORKSPACE > cwd the same way. changed, getenv and readFile are injected so
+// --workspace > APOGEE_WORKSPACE > cwd the same way, and the Project config is read from the
+// Project root that workspace resolves to (internal/projectroot) — unless opts.GlobalConfigOnly
+// says this Driver takes no project layer. Which keys each file stated is recorded on
+// opts.GlobalKeys and opts.ProjectKeys. changed, getenv and readFile are injected so
 // the whole chain is testable end-to-end, and so is hostID — the machine identity the Host
 // acknowledgement ladder is selected by (ADR 0012, amendment 2026-07-21) — which is what lets a
 // test pin that ladder off whatever host it runs on. [ApplyConfig] passes the live platform.HostID().
@@ -3099,8 +3232,14 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	}
 	// The one reader that may MIGRATE: this is the startup pass, so a config still written in a
 	// retired shape is folded here and announced through notify. Every live re-read goes through
-	// LoadFileConfig, which refuses rather than rewriting a file a session is running on.
-	fc, err := parseConfigFile(FilePath(opts.ConfigDir), readFile, notify, true)
+	// LoadFileConfig, which refuses rather than rewriting a file a session is running on. The
+	// migration is the global file's alone: the Project config is layered over the migrated global
+	// document (layer.go) and is never rewritten.
+	projectRoot := ""
+	if !opts.GlobalConfigOnly {
+		projectRoot = resolveProjectRoot(opts.Workspace, notify)
+	}
+	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify, true)
 	if err != nil {
 		return nil, err
 	}
@@ -3113,6 +3252,9 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	if err := applyFile(opts, fc); err != nil {
 		return nil, err
 	}
+	opts.GlobalKeys, opts.ProjectKeys = stated.global, stated.project
+	opts.DangerousRules.ProjectAdd = stated.projectDangerous
+	opts.AllowRules = stated.projectAllow.effective(opts.AllowRules.Rules)
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}

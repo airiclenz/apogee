@@ -88,6 +88,7 @@ func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, 
 	w.skillProvider = skills.NewProvider(skills.Sources{
 		Home:             roots.config,
 		Workspace:        roots.workspace,
+		ProjectRoot:      roots.project,
 		UseProjectSkills: opts.UseProjectSkills,
 		UseShippedSkills: opts.UseShippedSkills,
 	})

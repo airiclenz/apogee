@@ -369,6 +369,19 @@ type Options struct {
 	URLAllowHosts []string
 	URLDenyHosts  []string
 
+	// DangerousRules is the resolved `dangerous-rules:` key (ADR 0096 §6): what this configuration
+	// adds to and removes from the dangerous-action guard's shipped ruleset. The composition root
+	// merges it over the shipped set (security.MergeDangerousRules) and the engine builds its guard
+	// from the result. File-only, no flag or env: a hostile invocation environment must not be able
+	// to dissolve the floor.
+	DangerousRules DangerousRuleSet
+
+	// AllowRules is the resolved `allow:` key (ADR 0096 §2, §4): the effective Allow rules — the
+	// global file's, live as written, then the Project config's the user adopted — each tagged with
+	// its layer, beside the project rules still proposed or rejected, which grant nothing. File-only,
+	// no flag or env: a rule widens what runs unasked, so only the user's own answers build it.
+	AllowRules AllowRules
+
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
 	// (default-empty). ApplyConfig sets it from settings; the composition root matches the BOUND
@@ -431,8 +444,45 @@ type Options struct {
 	// APOGEE_MODEL was set). It is the one resolution fact the resolved values above cannot carry:
 	// precedence collapses the layers into a single value, and the /settings pane has to mark a row
 	// whose value this run is not taking from the file. ApplyConfig fills it (overrideSources);
-	// absent from the map ⇒ the file or the built-in default, which is the majority of keys.
+	// absent from the map ⇒ a config file or the built-in default, which is the majority of keys —
+	// and which of those is what [Options.SourceOf] reads off GlobalKeys and ProjectKeys.
 	Overrides map[string]Source
+
+	// GlobalConfigOnly says this resolution reads the global config alone and takes no Project
+	// config layer (ADR 0096). Not flag-bound: a Driver sets it before ApplyConfig — the daemon
+	// does, since a Firing's workspace is not the one the daemon starts in. False ⇒ the layer is
+	// read from the workspace's Project root, which is what every interactive and one-shot command
+	// wants.
+	GlobalConfigOnly bool
+
+	// ProjectKeys records which keys the Project config layer contributed to this run, keyed by
+	// registry path: a project-param key the project file states, and a tighten-only list the
+	// project file added entries to that the global file does not carry. Resolution collapses the
+	// layers into one value, so this is how a surface tells that a value is not the global file's
+	// alone — a /settings commit of a tighten-only list holding project entries would write them
+	// into the global file. ApplyConfig fills it; empty when no project layer was read.
+	ProjectKeys map[string]bool
+
+	// GlobalKeys records which keys the global config file states, keyed by registry path: a key
+	// written with a value, whatever that value is (a bare `key:` states nothing). It is the fact
+	// that splits a value the file supplies from the built-in default below it — the two read
+	// alike once resolved — so a /settings row can say `global` or `default` ([Options.SourceOf]).
+	// ApplyConfig fills it, like Overrides; empty when there is no global file, and left empty by
+	// the live block re-reads (LoadFileConfig, LoadLayeredConfig), which project values, not rows.
+	GlobalKeys map[string]bool
+}
+
+// DangerousRuleSet is the `dangerous-rules:` key resolved, split by the source each half came from,
+// because MergeDangerousRules (internal/security) trusts the two files differently. Add and Remove
+// are the global file's: it may add rules — a same-id add redefining the shipped rule — and remove
+// shipped rules by id. ProjectAdd is the Project config's `add:` alone, carried apart from the
+// layered merge so it reaches the seam as a project add: it may only add, and a same-id add stands
+// only beside the rule it tightens, at a strictly higher tier. A project `remove:` never gets this
+// far (layer.go drops it with a notice). The zero value adds and removes nothing — the shipped set.
+type DangerousRuleSet struct {
+	Add        []domain.DangerousRule
+	Remove     []string
+	ProjectAdd []domain.DangerousRule
 }
 
 // The two words `workflow-wake:` takes (ADR 0089). They are words rather than a YAML bool because

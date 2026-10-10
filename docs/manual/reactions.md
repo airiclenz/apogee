@@ -106,7 +106,7 @@ passing.
 | `turn-finished` | Every top-level turn boundary, whatever its outcome. A turn that closed its exchange fires **both** this and `exchange-finished`, in that order. | Top-level only |
 | `file-changed` | A workspace write tool succeeded. A delete, copy or move reports its **destination**, because that is the path whose content changed. A refused or failed write fires nothing. | Any, sub-agents included |
 | `approval-requested` | An approval was **raised** and is waiting on you — before you answer, not after. | Any, sub-agents included |
-| `approval-decided` | That same approval reached its verdict, which the payload carries as `decision`. | Any, sub-agents included |
+| `approval-decided` | That same approval reached its verdict, which the payload carries as `decision` — or an [allow rule](configuration.md) answered an ordinary approval in your place, with no `approval-requested` before it. | Any, sub-agents included |
 | `error` | A localised, recovered engine fault. A Reaction's own failure never becomes one of these, because an entry subscribed to `error` would then fire on itself and loop. | Any, sub-agents included |
 | `pre-request-finished` | The `pre-request` seam's pass finished: the outgoing request is as the loop will send it. Full working value; only serialized when you subscribe. | Top-level only |
 | `post-response-finished` | The `post-response` seam's pass finished, on the model's answer. Full working value; only serialized when you subscribe. | Top-level only |
@@ -156,7 +156,7 @@ Per notice, added to that block:
 | `remedy` | The two approval notices | The optional one-line route out of the condition that forced it. |
 | `sub_agent_name` | The two approval notices | The display name of the child whose call it is, when it has one. |
 | `scope` | The two approval notices | What the call reaches beyond what its arguments name, when that is stated. |
-| `decision` | `approval-decided` | The verdict: `allow`, `deny` or `allow-for-session`. |
+| `decision` | `approval-decided` | The verdict: `allow`, `deny` or `allow-for-session`, or `allowed-by-rule` when an allow rule answered the approval instead of you. |
 | `source` | `error` | What faulted — a tool name, a reaction id, or `loop`. |
 | `error` | `error` | The fault's message. |
 | `seam` | The five seam-closing notices | The seam whose pass closed, in its own spelling — `pre-request`, `post-response`, `pre-tool-exec`, `post-tool-result` or `history-rewrite`. |
@@ -293,7 +293,10 @@ host you did not name. A webhook that redirects must be configured at the URL it
 A running session's own webhooks keep the lists it started with: an edit to `url-safety:` reaches
 them at the next start. A `/schedule` firing raised after the edit composes its webhooks from the
 settings the session is running then, so it follows the edit; `apogee headless` and
-`apogee daemon` read the lists once, at start, like the rest of `config.yaml`.
+`apogee daemon` read the lists once, at start, like the rest of their configuration — for a
+headless run that includes a project's `url-safety.deny-hosts`, which a
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to; the daemon
+reads the global file alone.
 
 ## Advising the model
 
@@ -494,6 +497,9 @@ whole, and the session keeps firing the Reactions it already had.
 
 `apogee headless` and `apogee daemon` read the list **once**, at start. A daemon watches its
 `schedules.yaml`, but not `config.yaml`, so an edit here reaches it at its next restart.
+`reactions:` is a global-only key: a `reactions:` block in a project's `.apogee/config.yaml` is
+ignored with a start-up notice, so a repository you clone cannot add a Reaction to your sessions
+(see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml)).
 
 ## Migrating from `hooks:`
 

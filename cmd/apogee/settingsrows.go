@@ -47,9 +47,15 @@ const noneSettingValue = "none"
 // acknowledgement interlock (a distinct affirmative act, never a default-yes) stays single-homed in
 // /confine (ADR 0012), so the pane sends the human there rather than growing a second way to loosen
 // a blast radius.
+//
+// pointerProject is the third: a row whose value the Project config sets and which this pane cannot
+// save back there — a granting key, whose project entries are live only by Adoption (ADR 0096) — is
+// not written here at all, so the row says where its value comes from instead and its ⏎ does
+// nothing. A project-param row the project sets is written here, to the file the human picks.
 const (
 	pointerExternalEdit = "⏎ opens $EDITOR"
 	pointerConfine      = "use /confine"
+	pointerProject      = "set in the project config"
 )
 
 // The two registry paths whose value the ENGINE holds rather than the resolution — the pair
@@ -107,6 +113,11 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 	section := ""
 	next := 0
 	for _, k := range config.KeyRegistry {
+		source, sourceName := settingSource(k, &opts)
+		heldByProject := setInProject(k, source)
+		if carriesProjectEntries(k, opts) || heldByProject {
+			k.Editable = false
+		}
 		if next < len(settingSections) && settingSections[next].Opens == k.Path {
 			section = settingSections[next].Name
 			next++
@@ -127,7 +138,10 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 		if k.Text != nil {
 			text = k.Text(opts)
 		}
-		source, sourceName := settingSource(k, opts.Overrides)
+		pointer, external := editPointer(k), externallyEdited(k)
+		if heldByProject {
+			pointer, external = pointerProject, false
+		}
 		rows = append(rows, tui.SettingRow{
 			Path:         k.Path,
 			Section:      section,
@@ -140,9 +154,12 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 			EnumValues:   k.EnumValues,
 			Editable:     k.Editable,
 			Masked:       k.Masked,
-			EditPointer:  editPointer(k),
-			ExternalEdit: externallyEdited(k),
+			EditPointer:  pointer,
+			ExternalEdit: external,
 			Desc:         k.Desc,
+			// A key a project may state is offered the project target wherever this pane writes it;
+			// the host takes the offer back in a session with no Project config (withoutProjectTarget).
+			ProjectCapable: k.Editable && savableToProject(k),
 		})
 	}
 	return rows
@@ -258,23 +275,63 @@ func settingKind(kind config.Kind) tui.SettingKind {
 	}
 }
 
-// settingSource reports the override marker for a row: which higher-precedence source beat the
-// file for this key this run, and what that source is CALLED, so the pane's note can name it
-// ("APOGEE_MODE", "--mode") instead of saying "something".
-func settingSource(k config.Key, overrides map[string]config.Source) (tui.SettingSource, string) {
-	switch overrides[k.Path] {
+// settingSource reports the source marker for a row: which source supplied this key's value this
+// run (config.Options.SourceOf) and, for an override, what that source is CALLED, so the pane's note
+// can name it ("APOGEE_MODE", "--mode") instead of saying "something".
+func settingSource(k config.Key, opts *config.Options) (tui.SettingSource, string) {
+	switch opts.SourceOf(k.Path) {
 	case config.SourceEnv:
 		return tui.SettingFromEnv, k.EnvVar
 	case config.SourceFlag:
 		return tui.SettingFromFlag, "--" + k.FlagName
+	case config.SourceProject:
+		return tui.SettingFromProject, ""
+	case config.SourceGlobal:
+		return tui.SettingFromGlobal, ""
 	default:
-		return tui.SettingFromFile, ""
+		return tui.SettingFromDefault, ""
 	}
+}
+
+// setInProject reports whether the Project config sets this row's value and the pane cannot save it
+// back there (ADR 0096): a granting key, whose project entries go live only by Adoption and have a
+// writer of their own, or a project-param key this pane does not write at all — whose ⏎ would
+// otherwise open the GLOBAL file in the editor. Such a row is read-only here and points at the
+// project config. An editable project-param row is NOT one of these — the pane asks which file its
+// save goes to — and neither is
+// a tighten-only list the project added entries to: its value is the union of both files, and
+// carriesProjectEntries already sends it to the editor, where the global half of it is edited.
+func setInProject(k config.Key, source tui.SettingSource) bool {
+	if source != tui.SettingFromProject || k.Class == config.ClassTightenOnly {
+		return false
+	}
+	return !k.Editable || !savableToProject(k)
+}
+
+// savableToProject reports whether a `/settings` save of this key may land in the Project config:
+// a project-param key, which the project file states outright, or a tighten-only list, whose
+// project entries are unioned with the global ones (ADR 0096 §6). Every other class is the global
+// file's alone, or — the granting `allow:` — written by its own seam.
+func savableToProject(k config.Key) bool {
+	return k.Class == config.ClassProjectParam || k.Class == config.ClassTightenOnly
+}
+
+// withoutProjectTarget is rows with the project target taken off every one of them — the host's
+// answer in a session with no Project config to write (settingsHost.projectRoot), where every save
+// goes to the global file without a question. The rows are copied rather than written through, the
+// overlayLiveSettings posture.
+func withoutProjectTarget(rows []tui.SettingRow) []tui.SettingRow {
+	global := make([]tui.SettingRow, len(rows))
+	copy(global, rows)
+	for i := range global {
+		global[i].ProjectCapable = false
+	}
+	return global
 }
 
 // editPointer says where a key this pane will not write is edited instead — empty for an editable
 // key. The confinement pair is the one case that does not open an editor: their acknowledgement
-// interlock stays single-homed in /confine (ADR 0012), and GlobalOnly is exactly the property that
+// interlock stays single-homed in /confine (ADR 0012), and Interlocked is exactly the property that
 // marks them, so the pointer follows the registry rather than a second list of paths.
 func editPointer(k config.Key) string {
 	switch {
@@ -287,6 +344,14 @@ func editPointer(k config.Key) string {
 	}
 }
 
+// carriesProjectEntries reports whether a tighten-only list's value holds entries the Project config
+// added (ADR 0096 §6): the row shows the union of both files, so a commit from this pane would write
+// the project's entries into the global file. Such a row is read-only here and its ⏎ opens the
+// editor instead, like any other key the pane will not write.
+func carriesProjectEntries(k config.Key, opts config.Options) bool {
+	return k.Class == config.ClassTightenOnly && opts.ProjectKeys[k.Path]
+}
+
 // externallyEdited reports whether ⏎ on this key's row suspends into the human's own editor — the
 // affordance the pointer above advertises, stated as a predicate so the row's flag and its wording
 // cannot come to describe different sets of keys.
@@ -296,5 +361,72 @@ func editPointer(k config.Key) string {
 // not a shape test: a key that became read-only for some other reason tomorrow should reach the
 // editor like the rest.
 func externallyEdited(k config.Key) bool {
-	return !k.Editable && !k.GlobalOnly
+	return !k.Editable && !k.Interlocked
+}
+
+// allowRulesSection is the header the Allow rules' rows sit under — the section that follows the
+// registry's last, because its rows are no registry key's (ADR 0096 §4).
+const allowRulesSection = "Allow rules"
+
+// allowRuleRows is the *Allow rules* section: one row per rule the session holds — the rules in
+// force first (every global rule, then every adopted project rule, each in file order), then the
+// proposed and the rejected project rules — each carrying its layer as the source mark and where it
+// stands as its value. No rules, no rows: the section is a list of rules, and an empty one has
+// nothing under its header to act on.
+func allowRuleRows(set config.AllowRules) []tui.SettingRow {
+	rows := make([]tui.SettingRow, 0, len(set.Rules)+len(set.Proposed)+len(set.Rejected))
+	for _, r := range set.Rules {
+		state := tui.SettingRuleAdopted
+		if r.Layer != config.SourceProject {
+			state = tui.SettingRuleLive
+		}
+		rows = append(rows, allowRuleRow(r, state))
+	}
+	for _, r := range set.Proposed {
+		rows = append(rows, allowRuleRow(r, tui.SettingRuleProposed))
+	}
+	for _, r := range set.Rejected {
+		rows = append(rows, allowRuleRow(r, tui.SettingRuleRejected))
+	}
+	return rows
+}
+
+// allowRuleRow is one rule's row: keyed by its list and its text as the file spells them
+// ("terminal: go test"), with the rule in the engine's spelling for the act a keypress on it makes.
+func allowRuleRow(r config.AllowRule, state tui.SettingRuleState) tui.SettingRow {
+	rule := engineAllowRules([]config.AllowRule{r})[0]
+	source := tui.SettingFromGlobal
+	if rule.Layer == apogee.AllowRuleProject {
+		source = tui.SettingFromProject
+	}
+	return tui.SettingRow{
+		Path:      string(r.Kind) + ": " + r.Text,
+		Section:   allowRulesSection,
+		Kind:      tui.SettingRule,
+		Value:     string(state),
+		Source:    source,
+		Editable:  true,
+		Desc:      allowRuleDesc(r, state),
+		Rule:      rule,
+		RuleState: state,
+	}
+}
+
+// allowRuleDesc is a rule row's description: which rule it is and where it stands, then what it
+// lets run — in the conditional for a rule that grants nothing until it is adopted.
+func allowRuleDesc(r config.AllowRule, state tui.SettingRuleState) string {
+	subject := "commands starting with `" + r.Text + "`"
+	if r.Kind == config.AllowMCPServers {
+		subject = "calls to the MCP server `" + r.Text + "`"
+	}
+	switch state {
+	case tui.SettingRuleLive:
+		return "Your global rule, live as written: " + subject + " run without asking at an ordinary gate."
+	case tui.SettingRuleAdopted:
+		return "A project rule you adopted: " + subject + " run without asking at an ordinary gate."
+	case tui.SettingRuleRejected:
+		return "A project rule you turned down, inert: " + subject + " would run without asking."
+	}
+	return "A project rule proposed by the project config, inert until adopted: " + subject +
+		" would run without asking."
 }

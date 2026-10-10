@@ -5577,7 +5577,7 @@ func TestPromptWheelWalksTheApprovalMenu(t *testing.T) {
 	t.Parallel()
 	m := approvalPaneModel(t)
 	_, y := promptRect(t, m)
-	last := len(approvalMenu) - 1
+	last := approvalMenuLen(t, m) - 1
 
 	down := wheelAt(t, m, tea.MouseWheelDown, y)
 	if down.approvalSel.selected != 1 {
@@ -6089,7 +6089,7 @@ func TestApprovalClickHighlightsThenTheSecondClickRules(t *testing.T) {
 
 	m = step(t, m, leftClick(x, y))
 
-	if got := m.approvalSel.highlight(len(approvalMenu)); got != denyRow {
+	if got := m.approvalSel.highlight(approvalMenuLen(t, m)); got != denyRow {
 		t.Fatalf("approvalSel = %d after a click on Deny, want the highlight seated on %d", got, denyRow)
 	}
 	if !m.clickArmed.holds(panePrompt, denyRow) {
@@ -6129,8 +6129,8 @@ func TestApprovalClickOnTheDefaultHighlightArmsAndGrantsNothing(t *testing.T) {
 	t.Parallel()
 	m, reply := approvalClickModel(t)
 	m = armApproval(t, m)
-	if m.approvalSel.highlight(len(approvalMenu)) != 0 {
-		t.Fatalf("setup: the pane opened on row %d, want Allow", m.approvalSel.highlight(len(approvalMenu)))
+	if m.approvalSel.highlight(approvalMenuLen(t, m)) != 0 {
+		t.Fatalf("setup: the pane opened on row %d, want Allow", m.approvalSel.highlight(approvalMenuLen(t, m)))
 	}
 	x, y := frameCell(t, m, "Allow")
 
@@ -6164,7 +6164,7 @@ func TestApprovalClickBeforeTheLatchRulesNothing(t *testing.T) {
 
 	m = step(t, m, leftClick(x, y))
 
-	if got := m.approvalSel.highlight(len(approvalMenu)); got != 2 {
+	if got := m.approvalSel.highlight(approvalMenuLen(t, m)); got != 2 {
 		t.Fatalf("approvalSel = %d before the latch, want the highlight to move anyway (2)", got)
 	}
 
@@ -6789,4 +6789,27 @@ func TestStageRowClickOpensBySingleStagePredicate(t *testing.T) {
 			t.Errorf("a click on the band left the stage view standing (stage %+v)", m.transcript.stage)
 		}
 	})
+}
+
+// The open rule field's save is ⏎'s alone: a click on the field — first or second — is the pane's
+// and takes nothing, and the wheel walks no menu under it.
+func TestApprovalClickOnTheRuleFieldSavesNothing(t *testing.T) {
+	t.Parallel()
+
+	m, reply, saved := projectRulePane(t, terminalGate("go test ./..."), nil)
+	m = step(t, m, keyRune('p'))
+	x, y := frameCell(t, m, "Rule: go test")
+
+	m = step(t, m, leftClick(x, y))
+	m = step(t, m, leftClick(x, y))
+	m = step(t, m, tea.MouseWheelMsg{X: x, Y: y, Button: tea.MouseWheelDown})
+
+	if !m.editingProjectRule() || len(*saved) != 0 {
+		t.Errorf("a click on the field changed it: editing %v, saved %+v", m.editingProjectRule(), *saved)
+	}
+	select {
+	case d := <-reply:
+		t.Fatalf("a click on the field ruled %q", d)
+	default:
+	}
 }

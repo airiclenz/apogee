@@ -12,6 +12,7 @@
 │                                                          │
 │ ❯ Allow                      [a]                         │
 │ · Always allow this session  [s]                         │
+│ · Always in this project…    [p]                         │
 │ · Deny                       [d]                         │
 │ · Cancel                     [esc]                       │
 ╰──────────────────────────────────────────────────────────╯
