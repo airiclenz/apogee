@@ -100,7 +100,7 @@ func TestNewcomerFollowsTheDocs(t *testing.T) {
 		Item:  "T-23",
 		Claim: "a newcomer reaches a working session using only README Install + Quick start, with no step that had to be corrected to work",
 		PassWhen: "a newcomer reaches a working session using only README Install + Quick start, every one " +
-			"of the eight `APOGEE_*` variables behaves as documented (including the two parse errors), the " +
+			"of the nine `APOGEE_*` variables behaves as documented (including the two parse errors), the " +
 			"trace flags work while staying out of `--help`, and the `url-safety:` prose in both the manual " +
 			"and the seeded template describes live, MCP-covering lists.",
 		FailsIf: "any command must be corrected to work; a documented variable, flag, config key or tool " +

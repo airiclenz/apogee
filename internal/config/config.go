@@ -1102,6 +1102,12 @@ type fileConfig struct {
 	// Only an explicit pick records — a rebind the heartbeat merely observed, and the one-shot
 	// `--model`/`APOGEE_MODEL` overrides, never do.
 	RememberModel *bool `yaml:"remember-model"`
+	// UpdateCheck gates the interactive TUI's boot check for a newer published release (ADR 0097):
+	// one HEAD request to github.com per TUI start, whose answer only ever becomes a notice on the
+	// startup box's version row. A pointer so an explicit `update-check: false` is distinguishable
+	// from an absent key (default true). No flag, and no variable that carries the key's value:
+	// APOGEE_NO_UPDATE_CHECK can only force it OFF, which ResolveOptions applies by hand.
+	UpdateCheck *bool `yaml:"update-check"`
 	// ContextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env),
 	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the heartbeat
 	// observes on its own cadence, live, across a model switch; a positive value is never overridden by a
@@ -3059,22 +3065,41 @@ func (lc legacyFileConfig) block() string {
 
 // Environment variable names, prefixed APOGEE_ to namespace the process environment.
 //
-// They fall in three groups. EnvServer/EnvMode/EnvBypass are read through the registry rows their
+// They fall in four groups. EnvServer/EnvMode/EnvBypass are read through the registry rows their
 // keys carry (Key.EnvVar). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
 // they name the roots resolution itself runs in and so cannot be config keys. EnvEndpoint/
 // EnvModel/EnvAPIKey are the raw startup overrides ADR 0036 DETACHED from the schema: they no
 // longer describe config keys — they build or overlay the startup server entry — so they are
 // named here and resolved by the startup-override resolver rather than by a layer.
+// EnvNoUpdateCheck is the one switch that forces a config key without carrying its value: any
+// non-empty value turns `update-check` off (ADR 0097), so it is applied by hand after the env
+// pass (applyNoUpdateCheck) rather than through the row, whose Set would read `1` as true.
 const (
-	EnvEndpoint  = "APOGEE_ENDPOINT"
-	EnvServer    = "APOGEE_SERVER"
-	EnvModel     = "APOGEE_MODEL"
-	EnvMode      = "APOGEE_MODE"
-	EnvBypass    = "APOGEE_BYPASS"
-	EnvAPIKey    = "APOGEE_API_KEY"
-	EnvConfig    = "APOGEE_CONFIG"
-	EnvWorkspace = "APOGEE_WORKSPACE"
+	EnvEndpoint      = "APOGEE_ENDPOINT"
+	EnvServer        = "APOGEE_SERVER"
+	EnvModel         = "APOGEE_MODEL"
+	EnvMode          = "APOGEE_MODE"
+	EnvBypass        = "APOGEE_BYPASS"
+	EnvAPIKey        = "APOGEE_API_KEY"
+	EnvConfig        = "APOGEE_CONFIG"
+	EnvWorkspace     = "APOGEE_WORKSPACE"
+	EnvNoUpdateCheck = "APOGEE_NO_UPDATE_CHECK"
 )
+
+// updateCheckPath is the registry path EnvNoUpdateCheck forces, named once for the two hand-coded
+// sites that read the variable: the override itself and its /settings marker.
+const updateCheckPath = "update-check"
+
+// applyNoUpdateCheck forces `update-check` off when EnvNoUpdateCheck is set to any non-empty value.
+// It is the one override ADR 0043 does not route through the registry row: the row carries no
+// EnvVar because the variable does not spell the key's value — applyEnv would hand `1` to the row's
+// bool Set and turn the check ON. ResolveOptions calls it right after applyEnv, so it ranks where
+// every other variable does: above both files. There is no flag to outrank it.
+func applyNoUpdateCheck(o *Options, getenv func(string) string) {
+	if getenv(EnvNoUpdateCheck) != "" {
+		o.UpdateCheck = false
+	}
+}
 
 // applyEnv overlays the APOGEE_* variables; an unset (or empty) variable leaves the value below it
 // standing. Which variable carries which key is the registry's to say (Key.EnvVar), so this reads
@@ -3187,6 +3212,11 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 			sources[k.Path] = SourceEnv
 		}
 	}
+	// The hand-coded override's marker, read off applyNoUpdateCheck's own predicate (the ADR 0043
+	// exception above): its row names no variable, so the loop cannot see it.
+	if getenv(EnvNoUpdateCheck) != "" {
+		sources[updateCheckPath] = SourceEnv
+	}
 	return sources
 }
 
@@ -3258,6 +3288,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}
+	applyNoUpdateCheck(opts, getenv)
 	applyFlags(opts, flags, changed)
 	// The one collapse no row can make, so it runs here and last: confine-to-workspace's EFFECTIVE
 	// value also depends on whether a Host acknowledgement names THIS machine (ADR 0012 + its

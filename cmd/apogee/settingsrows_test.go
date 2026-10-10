@@ -73,6 +73,7 @@ func fabricatedSettings() config.Options {
 		ServerStats:           false,
 		AutoTitle:             false,
 		RememberModel:         true,
+		UpdateCheck:           false,
 		ContextWindow:         32768,
 		WorkingWindow:         16384,
 		ResponseReserve:       0.35,
@@ -447,6 +448,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"server-stats":            "false", // switched off in the fixture: the row reports the value, never the default
 		"auto-title":              "false",
 		"remember-model":          "true",
+		"update-check":            "false", // switched off in the fixture: the row reports the value, never the default
 		"context-window":          "32768",
 		"working-window":          "16384",
 		"response-reserve":        "0.35", // the shortest spelling that reads back as the same share
@@ -561,6 +563,24 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 	}
 }
 
+// APOGEE_NO_UPDATE_CHECK is the one environment override whose row names no variable (config
+// applies it by hand), so the row's marker has to name it from the override alone: a resolution
+// that recorded the variable's win shows update-check as false with the env marker naming
+// APOGEE_NO_UPDATE_CHECK, not a blank name the pane would render as "something".
+func TestSettingsRowsNameTheNoUpdateCheckOverride(t *testing.T) {
+	t.Parallel()
+	opts := fabricatedSettings()
+	opts.UpdateCheck = false
+	opts.Overrides = map[string]config.Source{"update-check": config.SourceEnv}
+
+	got := rowsByPath(t, settingsRows(opts))["update-check"]
+
+	if got.Source != tui.SettingFromEnv || got.SourceName != config.EnvNoUpdateCheck || got.Value != "false" {
+		t.Errorf("update-check row = {source %q name %q value %q}; want {%q %q %q}",
+			got.Source, got.SourceName, got.Value, tui.SettingFromEnv, config.EnvNoUpdateCheck, "false")
+	}
+}
+
 // A row this pane will not write says where the key IS edited: the human's own editor for a
 // structured block, opened on that key's line (ADR 0037 decision 5), and /confine for the two
 // confinement keys, whose acknowledgement interlock stays single-homed there (ADR 0012). An editable
@@ -600,7 +620,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
 		"system-prompt-layers", "model-profiles", "sub-agents-server", "tools.enabled",
-		"dangerous-rules", "allow", "reactions"} {
+		"dangerous-rules", "allow", "reactions", "update-check"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

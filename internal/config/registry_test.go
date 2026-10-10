@@ -975,6 +975,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"workflow-continuations": "WorkflowContinuations",
 		"server-stats":           "ServerStats",
 		"auto-title":             "AutoTitle", "remember-model": "RememberModel",
+		"update-check":   "UpdateCheck",
 		"context-window": "ContextWindow", "working-window": "WorkingWindow",
 		"response-reserve":  "ResponseReserve",
 		"present.auto-open": "Present", "present.command": "Present", "present.port": "Present",

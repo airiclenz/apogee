@@ -335,6 +335,12 @@ type Options struct {
 	// TUI restores what was recorded at the next startup. ApplyConfig sets it from settings.
 	RememberModel bool
 
+	// UpdateCheck gates the interactive TUI's boot check for a newer published release (default
+	// true, ADR 0097): one HEAD request to github.com per TUI start, async, its answer only ever a
+	// notice on the startup box's version row. Read once at boot, so it is not live-editable. The
+	// file sets it; APOGEE_NO_UPDATE_CHECK set to any non-empty value forces it off.
+	UpdateCheck bool
+
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), loaded from
 	// the config file only (default-empty ⇒ MCP dormant). ApplyConfig sets it from settings.
 	MCPServers []mcp.ServerConfig

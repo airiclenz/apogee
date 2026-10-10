@@ -277,10 +277,15 @@ func settingKind(kind config.Kind) tui.SettingKind {
 
 // settingSource reports the source marker for a row: which source supplied this key's value this
 // run (config.Options.SourceOf) and, for an override, what that source is CALLED, so the pane's note
-// can name it ("APOGEE_MODE", "--mode") instead of saying "something".
+// can name it ("APOGEE_MODE", "--mode") instead of saying "something". An environment override on
+// a row that names no variable is APOGEE_NO_UPDATE_CHECK's, the one override config applies by hand
+// rather than through the row (ADR 0043's exception, ADR 0097): it forces `update-check` off.
 func settingSource(k config.Key, opts *config.Options) (tui.SettingSource, string) {
 	switch opts.SourceOf(k.Path) {
 	case config.SourceEnv:
+		if k.EnvVar == "" {
+			return tui.SettingFromEnv, config.EnvNoUpdateCheck
+		}
 		return tui.SettingFromEnv, k.EnvVar
 	case config.SourceFlag:
 		return tui.SettingFromFlag, "--" + k.FlagName

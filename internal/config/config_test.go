@@ -229,6 +229,11 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.RememberModel = false },
 		},
 		{
+			name: "update-check defaults true and a file false turns it off",
+			file: fileConfig{UpdateCheck: boolptr(false)},
+			want: func(o *Options) { o.UpdateCheck = false },
+		},
+		{
 			name: "context-window is file-only (default 0 ⇒ discover)",
 			file: fileConfig{ContextWindow: 65536},
 			want: func(o *Options) { o.ContextWindow = 65536 },
@@ -412,7 +417,7 @@ func wantDefaults() Options {
 		WorkflowWake:          true,
 		ServerStats:           true,
 		Currency:              DefaultCurrency,
-		AutoTitle:             true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
+		AutoTitle:             true, RememberModel: true, UpdateCheck: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -609,7 +614,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ServerStats":           true,
 		"UseShippedSkills":      true,
 		"UseDefaultPrompt":      true,
-		"AutoTitle":             true, "RememberModel": true,
+		"AutoTitle":             true, "RememberModel": true, "UpdateCheck": true,
 		"ContextWindow": true, "WorkingWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "DangerousRules": true, "AllowRules": true, "ModelProfiles": true,
@@ -676,6 +681,7 @@ func everyKeyFileConfig() fileConfig {
 		WorkflowWake:          "off",
 		ServerStats:           boolptr(false),
 		RememberModel:         boolptr(false),
+		UpdateCheck:           boolptr(false),
 		ContextWindow:         64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
@@ -6475,6 +6481,17 @@ func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 			env:     map[string]string{EnvServer: "workstation"},
 			want:    map[string]Source{"bypass": SourceFlag, "server": SourceEnv},
 		},
+		{
+			// The hand-coded override's row names no variable, so the marker is its own predicate's.
+			name: "the no-update-check variable marks update-check as the environment's",
+			env:  map[string]string{EnvNoUpdateCheck: "1"},
+			want: map[string]Source{"update-check": SourceEnv},
+		},
+		{
+			name: "an empty no-update-check variable is not a setting",
+			env:  map[string]string{EnvNoUpdateCheck: ""},
+			want: map[string]Source{},
+		},
 	}
 
 	for _, tc := range cases {
@@ -6510,6 +6527,59 @@ func TestApplyConfigRecordsOverrideSources(t *testing.T) {
 	want := map[string]Source{"server": SourceEnv, "mode": SourceFlag}
 	if !reflect.DeepEqual(opts.Overrides, want) {
 		t.Errorf("opts.overrides = %v; want %v", opts.Overrides, want)
+	}
+}
+
+// update-check resolves on the file and the default like any bool key, and APOGEE_NO_UPDATE_CHECK set
+// to ANY non-empty value — `1`, `true`, even `false` — forces it off over a file `true`, because the
+// variable says "no check", never a bool. Driven through ApplyConfig rather than resolveSources: the
+// override is applied after the env pass and marked beside the other overrides, and both halves are
+// what /settings reads.
+func TestApplyConfigUpdateCheck(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		fileYAML     string
+		env          string
+		want         bool
+		wantOverride bool
+	}{
+		{name: "absent key ⇒ on", want: true},
+		{name: "an explicit false turns it off", fileYAML: "update-check: false\n", want: false},
+		{name: "the seeded template ships it on", fileYAML: string(defaultConfigYAML), want: true},
+		{name: "the variable beats a file true", fileYAML: "update-check: true\n", env: "1",
+			want: false, wantOverride: true},
+		{name: "any non-empty value is off, even the word false", fileYAML: "update-check: true\n",
+			env: "false", want: false, wantOverride: true},
+		{name: "an empty variable is not a setting", fileYAML: "update-check: true\n", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			if tt.fileYAML != "" {
+				writeConfigHome(t, home, tt.fileYAML)
+			}
+			getenv := func(name string) string {
+				if name == EnvNoUpdateCheck {
+					return tt.env
+				}
+				return ""
+			}
+			opts := Options{ConfigDir: home}
+
+			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+
+			if opts.UpdateCheck != tt.want {
+				t.Errorf("opts.UpdateCheck = %v; want %v", opts.UpdateCheck, tt.want)
+			}
+			if got := opts.Overrides["update-check"] == SourceEnv; got != tt.wantOverride {
+				t.Errorf("update-check marked as the environment's = %v; want %v (overrides %v)",
+					got, tt.wantOverride, opts.Overrides)
+			}
+		})
 	}
 }
 

@@ -877,6 +877,17 @@ auto-title: true
 remember-model: true
 
 # =============================================================================
+# Check for a newer apogee release. With this on, each time the interactive TUI starts it sends one
+# HEAD request to https://github.com/airiclenz/apogee/releases/latest — nothing about you, your
+# workspace or your sessions is sent — and, when a newer release is out, names it and the upgrade
+# command for the way you installed apogee on the startup box's version row. The check runs in the
+# background and never delays the start; offline, it fails silently. Headless runs, the daemon, the
+# bench and probe never check, and the check never downloads or replaces anything. No flag;
+# setting APOGEE_NO_UPDATE_CHECK to any non-empty value turns it off for that run. Read once at
+# start-up. Default: true.
+update-check: true
+
+# =============================================================================
 # The model's context window in tokens. This one IS a pin: the heartbeat never overrides
 # it, so a model switch still rebinds but the window stays exactly what you set here. Leave it unset
 # to discover the window from the server, live — including when the server switches models. Set it

@@ -228,6 +228,9 @@ func (c KeyClass) String() string {
 // (applyFile, applyEnv, applyFlags) and the override marker (overrideSources) range over this
 // table and call the row's own projections, so a key described here is a key resolution reads by
 // the act of being described, and the variable and flag NAMES (EnvVar, FlagName) have one home.
+// One override is the exception to ADR 0043's one-table rule: APOGEE_NO_UPDATE_CHECK forces
+// `update-check` off without spelling its value, so it is applied and marked by hand
+// (applyNoUpdateCheck, overrideSources) and the row names no EnvVar.
 type Key struct {
 	Path        string
 	Kind        Kind
@@ -852,6 +855,16 @@ var KeyRegistry = bindRows([]Key{
 		Desc:     "Record the model you pick into its servers: entry and come back on it next start.",
 		field: boolField(func(o *Options) *bool { return &o.RememberModel },
 			func(fc fileConfig) *bool { return fc.RememberModel }),
+	},
+	{
+		// Read once, at the interactive TUI's boot (ADR 0097), so the pane does not write it. It names
+		// no EnvVar on purpose: APOGEE_NO_UPDATE_CHECK only forces it off and is applied by hand
+		// (applyNoUpdateCheck) — the one override ADR 0043 lets bypass this row.
+		Path: "update-check", Kind: KindBool, Default: "true",
+		Desc: "On each TUI start, ask github.com once whether a newer release is out and name the " +
+			"upgrade command on the version row.",
+		field: boolField(func(o *Options) *bool { return &o.UpdateCheck },
+			func(fc fileConfig) *bool { return fc.UpdateCheck }),
 	},
 	{
 		Path: "context-window", Kind: KindInt, Default: "0",

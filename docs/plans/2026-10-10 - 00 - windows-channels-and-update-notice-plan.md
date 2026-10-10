@@ -110,7 +110,15 @@ NOTES (2026-10-10): consequential edit — version.go: the versionFile doc said 
 **Acceptance:** `go test -race -count=1 ./internal/update/ .`; `grep -n distBuild Makefile`; `make dist` then `grep -ac release-archive` on the host-arch archive's binary (non-zero count).
 **Commit:** `feat(update): detect how apogee was installed`
 
-## 4. Config key `update-check`
+## 4. Config key `update-check` — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): the env override is a named helper, applyNoUpdateCheck, called in ResolveOptions right after applyEnv; its marker is written in overrideSources (so both the unit and ApplyConfig paths record it), sharing one unexported updateCheckPath const. The helper's comment names it the one ADR 0043 exception, and so does registry.go's Key doc.
+
+NOTES (2026-10-10): the row is Editable: false ("not live-editable"), so /settings carries the $EDITOR pointer for it; "update-check" was added to TestSettingsRowsPointReadOnlyKeysAtTheirEditor's hand-written list of externally edited keys, and the settingsrows fixture sets UpdateCheck false so the value row is not the default.
+
+NOTES (2026-10-10): the starter template ships `update-check: true` as an active line, after remember-model, and the registry row sits at that same position. The template and manual prose deliberately leave out `apogee update`, which item 8 has not shipped yet.
+
+NOTES (2026-10-10): consequential edit — docs/manual/configuration.md (opening paragraph): "Every other key is file-only (no flag or env)" now names update-check as the exception, made necessary by the new env override.
 
 **What:**
 Recast at the regression check (2026-10-10).

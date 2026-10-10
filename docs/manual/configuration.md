@@ -13,7 +13,8 @@ apogee already recommends. Three keys carry all four layers —
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
 model profile, [MCP servers](#external-mcp-servers--mcp-servers), [the web-search
 endpoint](#where-web_search-looks--web-search-endpoint) and the seven Floor-guard
-switches among them. Three raw overrides are not config keys at all — `--endpoint`
+switches among them — bar [`update-check:`](#update-check), which an environment variable can
+switch off but never on. Three raw overrides are not config keys at all — `--endpoint`
 / `APOGEE_ENDPOINT` runs one session against a server the file does not list,
 while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
 and model hint or overlay those two fields of the listed entry a session starts
@@ -380,7 +381,7 @@ writable.
 
 ## Environment overrides
 
-Eight `APOGEE_*` variables are read, and they divide by what each one can reach. Three of them carry
+Nine `APOGEE_*` variables are read, and they divide by what each one can reach. Three of them carry
 ordinary config keys and so ride the four-layer precedence above — flag, then variable, then file,
 then default: `APOGEE_SERVER` (`--server`) names the `servers:` entry this session starts on,
 `APOGEE_MODE` (`--mode`) the autonomy mode it starts in, and `APOGEE_BYPASS` (`--bypass`) the
@@ -397,6 +398,12 @@ and `APOGEE_API_KEY` carries that server's bearer token. The key has **no flag**
 secret typed on the command line lands in your shell history and in `ps` output (see
 [The upstream API key](#the-upstream-api-key)). Inside each pair the flag still beats the variable,
 and a flag you spelled out wins even when what you spelled is empty.
+
+One more forces a key off without carrying its value: `APOGEE_NO_UPDATE_CHECK`, set to any
+non-empty value, turns [`update-check`](#update-check) off for that run — `1`, `yes` and even
+`false` all mean "no check", and an empty value is not a setting. It has no flag, and nothing it
+can do turns the check on. `/settings` shows `update-check` as `false` with this variable named as
+the override that won.
 
 The last two the config file cannot set at all, because they say WHERE resolution itself runs — the
 file would have to be found before it could name them. `APOGEE_CONFIG` (`--config`, then the
@@ -424,6 +431,27 @@ compaction, the Budget, all seven Floor guards, the rest of the
 loop — so the floor is a working agent rather than a naked model. The same switch is
 the `bypass` row in `/settings`, and it is live: flip it mid-session and the next Reaction to fire
 already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the full definition.
+
+## update-check
+
+```yaml
+# ~/.apogee/config.yaml
+update-check: true     # on each TUI start, ask github.com whether a newer release is out
+```
+
+With this on, each time the interactive TUI starts apogee sends **one** `HEAD` request to
+`https://github.com/airiclenz/apogee/releases/latest` and reads the newest published release's tag
+from the redirect. Nothing about you, your workspace or your sessions is in that request, and only
+published releases count — never a draft or a pre-release. When the release is newer than the binary
+you are running, the startup box's version row names it and the upgrade command for the way you
+installed apogee. The check runs in the background, so it never delays the start, and any failure —
+offline, a timeout, an unexpected answer — means simply no notice. Headless runs, the daemon, the
+bench and `apogee probe` never check, and the check never downloads or replaces anything
+([ADR 0097](../adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md)).
+
+`update-check: false` turns it off, and so does `APOGEE_NO_UPDATE_CHECK` set to any non-empty value
+(see [Environment overrides](#environment-overrides)); there is no flag. The key is read once, at
+start-up, so `/settings` shows it but does not write it — edit the line in your config file.
 
 ## What the network tools may reach — `url-safety:`
 
