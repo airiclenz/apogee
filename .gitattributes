@@ -30,3 +30,7 @@ VERSION text eol=lf
 # Git hooks are POSIX sh scripts run by Git Bash on Windows: a core.autocrlf=true checkout
 # would end every line in a carriage return and break them, so they stay LF everywhere.
 .beads/hooks/** text eol=lf
+
+# The release scripts run under bash, Git Bash included: a core.autocrlf=true checkout would end
+# every line in a carriage return and break them, so they stay LF everywhere.
+scripts/*.sh text eol=lf

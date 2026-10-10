@@ -247,7 +247,13 @@ Also (reviewer guards, verified): build it as `newUpdateCommandWith(updateDeps{�
 **Acceptance:** `go test -race -count=1 -run 'Update' ./cmd/apogee/`; `go run ./cmd/apogee update --help`
 **Commit:** `feat(cli): add apogee update for archive installs`
 
-## 9. Scoop manifest publisher
+## 9. Scoop manifest publisher — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — .gitattributes: made necessary by the item's LF guard for the new script; `scripts/*.sh text eol=lf` keeps a core.autocrlf=true (Git Bash) checkout from breaking it (the existing scripts were already LF, so nothing renormalizes).
+
+NOTES (2026-10-10): scripts/release-scoop.sh is staged (`git add`) so the index records mode 100755 and `TestReleaseScoopScriptIsExecutable` passes before the commit; the test skips without git or outside a checkout.
+
+NOTES (2026-10-10): added `BUCKET_URL=` (plain `git clone` of that URL instead of `gh repo clone`) so the publish half can be exercised against a local bare repo; verified by hand that way (commit `apogee 9.8.7` pushed, a re-run reports nothing to publish). docs/manual/building.md is left to item 11, which owns the Releasing section.
 
 **What:**
 **Goal:** `make release-scoop` (script `scripts/release-scoop.sh`) writes `bucket/apogee.json` into a clone of `$BUCKET_REPO` (default `airiclenz/scoop-bucket`) for `$VERSION`, then commits `apogee <bare>` and pushes. `DRY_RUN=1` prints the manifest instead.

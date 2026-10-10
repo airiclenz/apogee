@@ -241,6 +241,16 @@ home-census:
 release-smoke:
 	@VERSION="$(VERSION)" ./scripts/release-smoke.sh
 
+## release-scoop: publish a PUBLISHED release's Scoop manifest to the bucket (make release-scoop VERSION=v0.25.0)
+#
+# Writes bucket/apogee.json into a fresh clone of airiclenz/scoop-bucket (BUCKET_REPO=) with the
+# two Windows archives' hashes from the release's SHA256SUMS, commits `apogee <version>` and
+# pushes. Run it after the Homebrew tap step; DRY_RUN=1 prints the manifest and publishes
+# nothing. Never part of `make check` — it reaches the network and writes another repository.
+.PHONY: release-scoop
+release-scoop:
+	@VERSION="$(VERSION)" ./scripts/release-scoop.sh
+
 ## fmt: format all Go source in place
 .PHONY: fmt
 fmt:
