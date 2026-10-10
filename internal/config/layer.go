@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/projectroot"
 	"gopkg.in/yaml.v3"
@@ -22,7 +23,8 @@ import (
 // one tighten-only key that is not a list, `dangerous-rules:`, is carried apart from the merge:
 // its `add:` reaches the security seam as the project's additions and its `remove:` is dropped with
 // a notice. A granting key is never layered here — its project entries are live only by Adoption, so
-// they are carried apart from this merge.
+// they are carried apart from this merge: `allow:`'s rules are checked alone with the rest of the
+// file, then sorted by the user's adoption record (allow.go), and only the adopted ones grant.
 //
 // The merge happens on the YAML node tree, before the decode, so the file pass (applyFile) reads
 // one document exactly as it reads the global file alone. The project file is a guest: it never
@@ -48,6 +50,10 @@ const projectDangerousRemoveNotice = "apogee: project config %s: ignoring danger
 // layer carries apart from the node merge rather than unioning into it.
 const dangerousRulesPath = "dangerous-rules"
 
+// allowPath is the `allow:` key's registry path, the granting key whose project rules the layer
+// carries apart to the adoption record.
+const allowPath = "allow"
+
 // projectRootNotice is the line a workspace whose Project root cannot be resolved costs.
 const projectRootNotice = "apogee: project config: %v; the project layer is skipped"
 
@@ -57,12 +63,14 @@ const projectGlobalOnlyNotice = "apogee: project config %s: ignoring global-only
 	"the global config %s"
 
 // projectLayer is a project file that passed every check alone: its path, the entries the merge
-// applies, in file order, and the dangerous-action rules its `dangerous-rules: {add: …}` states,
-// which never enter the merge — they reach the security seam as its project additions.
+// applies, in file order, the dangerous-action rules its `dangerous-rules: {add: …}` states, which
+// never enter the merge — they reach the security seam as its project additions — and the Allow
+// rules its `allow:` states, which never enter it either: they wait on the adoption record.
 type projectLayer struct {
 	path         string
 	entries      []projectEntry
 	dangerousAdd []domain.DangerousRule
+	allow        []adoption.Entry
 }
 
 // projectEntry is one project-capable key the project file states: its registry path, its class
@@ -91,6 +99,7 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 	}
 	o.ProjectKeys = stated.project
 	o.DangerousRules.ProjectAdd = stated.projectDangerous
+	o.AllowRules = stated.projectAllow.effective(o.AllowRules.Rules)
 	return o, nil
 }
 
@@ -99,11 +108,13 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 // layer was merged). They are what tell a key's source apart once the files collapse into one
 // value ([Options.SourceOf]). projectDangerous rides beside them: the project layer's
 // dangerous-action additions, which the merge never sees and resolution lands on
-// DangerousRuleSet.ProjectAdd after the file pass.
+// DangerousRuleSet.ProjectAdd after the file pass, and projectAllow, the project layer's Allow
+// rules sorted by the adoption record, which resolution joins to the global rules after it.
 type layerKeys struct {
 	global           map[string]bool
 	project          map[string]bool
 	projectDangerous []domain.DangerousRule
+	projectAllow     projectAllowRules
 }
 
 // parseLayeredConfig is parseConfigFile for the global file with the Project config of projectRoot
@@ -135,6 +146,11 @@ func parseLayeredConfig(globalPath, projectRoot string, readFile func(string) ([
 				if len(layer.dangerousAdd) > 0 {
 					projectKeys[dangerousRulesPath] = true
 					stated.projectDangerous = layer.dangerousAdd
+				}
+				stated.projectAllow = classifyProjectRules(layer.allow, layer.path,
+					workspacesDirOf(globalPath), projectRoot, notify)
+				if len(stated.projectAllow.adopted) > 0 {
+					projectKeys[allowPath] = true
 				}
 				stated.project = projectKeys
 				return fc, stated, nil
@@ -267,8 +283,9 @@ func readProjectLayer(path, globalPath string, readFile func(string) ([]byte, er
 		notify(fmt.Sprintf(projectSkippedNotice, path, sansPrefix{err}.Error()))
 		return projectLayer{}, false
 	}
-	layer := projectLayer{path: path, entries: walk.entries, dangerousAdd: checked.DangerousRules.Add}
-	return layer, len(layer.entries) > 0 || len(layer.dangerousAdd) > 0
+	layer := projectLayer{path: path, entries: walk.entries, dangerousAdd: checked.DangerousRules.Add,
+		allow: allowEntries(checked.AllowRules.Rules)}
+	return layer, len(layer.entries) > 0 || len(layer.dangerousAdd) > 0 || len(layer.allow) > 0
 }
 
 // sameConfigFile reports whether the symlink-resolved project file is the global config file —
@@ -288,8 +305,8 @@ func sameConfigFile(resolvedProject, globalPath string) bool {
 // checkProjectLayer decodes the project-capable part of the project file ALONE and runs the checks
 // resolution would refuse it with — every row's file pass, and the context-files names — so a
 // project value that would refuse the start skips the layer instead. What it answers is that part
-// resolved alone, which is where the layer reads its dangerous-action additions from: the same file
-// pass that judged each rule has converted it.
+// resolved alone, which is where the layer reads its dangerous-action additions and its Allow rules
+// from: the same file pass that judged each rule has converted it.
 func checkProjectLayer(checked *yaml.Node) (Options, error) {
 	var fc fileConfig
 	if err := checked.Decode(&fc); err != nil {
@@ -307,7 +324,8 @@ func checkProjectLayer(checked *yaml.Node) (Options, error) {
 
 // projectWalk sorts the keys of a project file by their registry class: entries the merge applies,
 // global-only paths it drops, and checked — a document of everything the layer keeps, which is what
-// is decoded alone before anything is merged. droppedRemove records a `dangerous-rules: {remove: …}`
+// is decoded alone before anything is merged. A granting key goes into checked alone, never into
+// entries: its rules are judged with the rest of the file and then wait on the adoption record. droppedRemove records a `dangerous-rules: {remove: …}`
 // the layer refused; the block's `add:` goes into checked alone and never into entries.
 type projectWalk struct {
 	entries       []projectEntry
@@ -357,6 +375,8 @@ func (w *projectWalk) key(k Key, value *yaml.Node) {
 	switch k.Class {
 	case ClassProjectParam, ClassTightenOnly:
 		w.entries = append(w.entries, projectEntry{path: k.Path, class: k.Class, value: value})
+		setAtPath(w.checked, k.Path, value)
+	case ClassGranting:
 		setAtPath(w.checked, k.Path, value)
 	case ClassGlobalOnly:
 		w.dropped = append(w.dropped, k.Path)

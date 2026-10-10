@@ -583,6 +583,18 @@ var KeyRegistry = bindRows([]Key{
 		fromFile:  fileDangerousRules,
 	},
 	{
+		// Granting, the one class whose project entries the layered merge never applies: a project
+		// rule is carried apart (layer.go) and grants only once the user has adopted its exact text
+		// (allow.go, internal/adoption); a global rule is live as written. Structured and file-only,
+		// summarized by how many rules are live and how many wait on an answer.
+		Path: "allow", Kind: KindStructured,
+		Class:     ClassGranting,
+		Desc:      "Commands and MCP servers that run without asking at an ordinary gate; a project config's rules count only once adopted.",
+		Read:      func(o Options) string { return allowRulesSummary(o.AllowRules) },
+		Structure: func(o Options) any { return o.AllowRules },
+		fromFile:  fileAllowRules,
+	},
+	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
 		Class:    ClassProjectParam,
 		Editable: true,

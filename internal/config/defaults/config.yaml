@@ -597,6 +597,24 @@ context-files:
 #   remove: [sudo-escalation]
 
 # =============================================================================
+# Allow rules: commands and MCP servers that run without asking where the mode would otherwise ask
+# (ask-before, allow-edits, and auto's prompt for a call it cannot confine). A terminal: rule is a
+# word prefix that EVERY command of the line must start with — `go test` allows `go test ./...` but
+# not `go testify` or `go test && rm x`; a redirect, $(…), backticks, a heredoc, a wrapper (sudo,
+# env, timeout, …) or a NAME=value prefix always asks, and so does every line on Windows cmd. A rule
+# under mcp-servers names a whole server. No rule ever answers a refusal, the dangerous-action
+# guard's forced prompt, or a reaction's ask or deny. An empty rule refuses the start.
+#
+# Rules written here are yours and live as written. A project's .apogee/config.yaml may carry rules
+# too, but each one grants nothing until you adopt its exact text; an edited rule is proposed
+# again. Allowing `go test` runs whatever the repository's tests do. Config-file only (no flag or
+# env). Default: no rules.
+#
+# allow:
+#   terminal: [go test, make lint]
+#   mcp-servers: [docs]
+
+# =============================================================================
 # Discover skills from the workspace's bare skills/ folder, in addition to the global library
 # (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder
 # containing a SKILL.md (YAML frontmatter — id/name, displayName, summary/description — plus a

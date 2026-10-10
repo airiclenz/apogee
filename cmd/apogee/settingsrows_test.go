@@ -90,6 +90,13 @@ func fabricatedSettings() config.Options {
 			Add:    []domain.DangerousRule{{ID: "no-prod-deploy", Pattern: `kubectl .*prod`, Tier: domain.DangerousTierAsk}},
 			Remove: []string{"sudo-escalation"},
 		},
+		AllowRules: config.AllowRules{
+			Rules: []config.AllowRule{
+				{Kind: config.AllowTerminal, Text: "go test", Layer: config.SourceGlobal},
+				{Kind: config.AllowMCPServers, Text: "docs", Layer: config.SourceProject},
+			},
+			Proposed: []config.AllowRule{{Kind: config.AllowTerminal, Text: "make lint", Layer: config.SourceProject}},
+		},
 	}
 }
 
@@ -412,6 +419,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"url-safety.allow-hosts":  "[docs.example.com]",
 		"url-safety.deny-hosts":   "[]", // unset: a list row's empty spelling, and every host is still floored
 		"dangerous-rules":         "1 rule added, 1 removed",
+		"allow":                   "2 rules, 1 proposed",
 		"use-project-skills":      "false",
 		"use-shipped-skills":      "false",
 		"auto-compact":            "true",
@@ -591,7 +599,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
 		"system-prompt-layers", "model-profiles", "sub-agents-server", "tools.enabled",
-		"dangerous-rules", "reactions"} {
+		"dangerous-rules", "allow", "reactions"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

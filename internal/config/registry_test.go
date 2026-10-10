@@ -320,6 +320,7 @@ func TestRegistryKeyClassesArePinned(t *testing.T) {
 		"tools.disabled":         ClassTightenOnly,
 		"url-safety.deny-hosts":  ClassTightenOnly,
 		"dangerous-rules":        ClassTightenOnly,
+		"allow":                  ClassGranting,
 	}
 	got := map[string]KeyClass{}
 	for _, k := range KeyRegistry {

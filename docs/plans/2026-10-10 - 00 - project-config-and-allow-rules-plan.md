@@ -243,7 +243,13 @@ NOTES (2026-10-10): user decision, builtins allowlisted — allowCandidates now 
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Allow|Suggest' ./internal/security/`
 **Commit:** `feat(security): word-prefix allow-rule matcher and suggestion`
 
-## 10. `allow:` key and effective rules
+## 10. `allow:` key and effective rules — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from the assumption that item 4's walker lives in config.go — it is internal/config/layer.go (projectWalk, readProjectLayer, parseLayeredConfig, LoadLayeredConfig), so the granting-key carry-apart, the adoption classification hook and the layer-file doc landed there.
+NOTES (2026-10-10): consequential edit — internal/config/registry_test.go: made necessary by the new `allow` row (TestRegistryKeyClassesArePinned enumerates every non-global-only key and its class).
+NOTES (2026-10-10): consequential edit — internal/config/config_test.go: made necessary by the new `allow` row (everyKeyFileConfig and TestEveryConfigKeyReachesTheOptions enumerate every schema key and the Options field it owns).
+NOTES (2026-10-10): cmd/apogee/testdata/frames/t16-settings-rows.txt needed no change — TestE2ELiveStateFollowsTheRunningSession passes against the existing golden (the new row sits below the first screen).
+NOTES (2026-10-10): exported config.WorkspacesDir(configDir) as the one spelling of `~/.apogee/workspaces`; the layered load derives it from the global config file's folder, and an unknown home classifies every project rule as proposed. `ProjectKeys["allow"]` (source `project`) is set only when at least one adopted project rule is live.
 
 **What:**
 **Goal:** `allow: {terminal: [..], mcp-servers: [..]}` is a granting-class key; the effective rule set is the global rules plus the adopted project rules, each tagged with its layer, and the unadopted ones are reported as proposals.

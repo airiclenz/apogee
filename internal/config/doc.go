@@ -64,7 +64,11 @@
 // read and checked alone, its keys sorted by registry class, and merged into the global document
 // before the one decode — project-param keys overlaid, tighten-only lists unioned, global-only keys
 // dropped with a notice, and `dangerous-rules:` carried apart: its `add:` to the security seam as the
-// project's additions, its `remove:` dropped with a notice. unknownkeys.go is the walk that
+// project's additions, its `remove:` dropped with a notice. allow.go is the `allow:` key, the one
+// granting key (ADR 0096 §2, §4): the on-disk Allow rules, the global file's live as written, the
+// Project config's carried apart from the merge and sorted by the user's adoption record
+// (internal/adoption) — only the adopted ones join the effective set, the rest are reported as
+// proposed or rejected — and where those records live (`~/.apogee/workspaces`). unknownkeys.go is the walk that
 // announces, at startup, every key of the migrated file the schema does not spell — a notice, never
 // a refusal — and the yaml-tag reader it shares with the registry bijection test. The one-goroutine
 // poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows

@@ -2661,6 +2661,40 @@ malformed rule in the project file costs the project layer, not the start — on
 session runs on the global config alone. The key is file-only (no flag, no environment variable),
 and the guard is built when a session starts, so an edit reaches the next session.
 
+## Commands that run without asking — `allow:`
+
+An **Allow rule** is a yes you give once instead of at every prompt. `allow:` holds two lists:
+`terminal:` rules, each a word prefix of a command line, and `mcp-servers:` rules, each the name of
+one MCP server whose tool calls it answers:
+
+```yaml
+# ~/.apogee/config.yaml
+allow:
+  terminal: [go test, make lint]
+  mcp-servers: [docs]
+```
+
+A terminal rule matches only when **every** command of the line starts with its words: `go test`
+allows `go test ./...` and `cd internal && go test -run TestX`, but not `go testify`, not
+`go test && rm x`, and not `go test > out.txt`. A file redirect, `$(…)`, backticks, a heredoc, a
+line apogee cannot parse, a wrapper (`sudo`, `env`, `timeout`, …) or a `NAME=value` prefix always
+asks; a `cd` into a folder inside the workspace counts as matched, any other `cd` asks. There are no
+wildcards, and no rule applies on Windows `cmd`. File edits get no rules — `allow-edits` is that
+choice. A rule answers only the ordinary prompt — ask-before's, allow-edits', and auto's for a call
+it cannot confine — never a refusal, never the dangerous-action guard's forced prompt, and never a
+Reaction's `ask` or `deny`. An empty or blank rule refuses the start with an error naming it,
+because it would match everything.
+
+Rules in `~/.apogee/config.yaml` are yours and live as written. A Project config
+(`.apogee/config.yaml` at the Project root) may carry rules too, but a repository can be cloned,
+pulled or written to behind your back, so each project rule grants nothing until you **adopt** it.
+apogee records the answer outside the repository, in `~/.apogee/workspaces/`, pinned to the rule's
+exact text: a rule edited after you adopted it — whitespace included — is proposed again, and a rule
+you rejected stays quiet until it changes. The `/settings` row counts the live rules and the
+proposed ones. Allowing `go test` or `make lint` runs whatever the repository's code does when
+you run it, and in `allow-edits` the model may edit that code. The key is file-only (no flag, no
+environment variable).
+
 ## The Console family
 
 Nearly every tool apogee gives a model is one shot: `terminal` runs a command, the command ends,

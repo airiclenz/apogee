@@ -376,6 +376,12 @@ type Options struct {
 	// to dissolve the floor.
 	DangerousRules DangerousRuleSet
 
+	// AllowRules is the resolved `allow:` key (ADR 0096 §2, §4): the effective Allow rules — the
+	// global file's, live as written, then the Project config's the user adopted — each tagged with
+	// its layer, beside the project rules still proposed or rejected, which grant nothing. File-only,
+	// no flag or env: a rule widens what runs unasked, so only the user's own answers build it.
+	AllowRules AllowRules
+
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
 	// (default-empty). ApplyConfig sets it from settings; the composition root matches the BOUND

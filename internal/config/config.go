@@ -1160,6 +1160,10 @@ type fileConfig struct {
 	// shipped ones by id (ADR 0096 §6, the ADR 0012 merge seam). A pointer so an absent block reads
 	// as the shipped ruleset untouched. File-only, like the host lists above it.
 	DangerousRules *dangerousRulesConfig `yaml:"dangerous-rules"`
+	// Allow is the Allow rules (ADR 0096 §2): terminal word prefixes and MCP server names that run
+	// without asking at an ordinary gate. A pointer so an absent block reads as no rules. File-only:
+	// the global file's rules are live as written, a Project config's only once adopted (allow.go).
+	Allow *allowConfig `yaml:"allow"`
 	// ModelProfiles describes how a model speaks the wire (CONTEXT: Model profile) — its tool-call
 	// format and inline thinking-channel style — keyed by a PATTERN the model name contains
 	// (ADR 0044) — and, since ADR 0057, the tool roster that model is offered. File-only, no
@@ -3250,6 +3254,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	}
 	opts.GlobalKeys, opts.ProjectKeys = stated.global, stated.project
 	opts.DangerousRules.ProjectAdd = stated.projectDangerous
+	opts.AllowRules = stated.projectAllow.effective(opts.AllowRules.Rules)
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}
