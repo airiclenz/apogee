@@ -47,9 +47,14 @@ const noneSettingValue = "none"
 // acknowledgement interlock (a distinct affirmative act, never a default-yes) stays single-homed in
 // /confine (ADR 0012), so the pane sends the human there rather than growing a second way to loosen
 // a blast radius.
+//
+// pointerProject is the third: a row whose value the Project config sets is not written here at
+// all (ADR 0096) — the pane writes the global file, which the project outranks — so the row says
+// where its value comes from instead and its ⏎ does nothing.
 const (
 	pointerExternalEdit = "⏎ opens $EDITOR"
 	pointerConfine      = "use /confine"
+	pointerProject      = "set in the project config"
 )
 
 // The two registry paths whose value the ENGINE holds rather than the resolution — the pair
@@ -107,7 +112,9 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 	section := ""
 	next := 0
 	for _, k := range config.KeyRegistry {
-		if carriesProjectEntries(k, opts) {
+		source, sourceName := settingSource(k, &opts)
+		heldByProject := setInProject(k, source)
+		if carriesProjectEntries(k, opts) || heldByProject {
 			k.Editable = false
 		}
 		if next < len(settingSections) && settingSections[next].Opens == k.Path {
@@ -130,7 +137,10 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 		if k.Text != nil {
 			text = k.Text(opts)
 		}
-		source, sourceName := settingSource(k, opts.Overrides)
+		pointer, external := editPointer(k), externallyEdited(k)
+		if heldByProject {
+			pointer, external = pointerProject, false
+		}
 		rows = append(rows, tui.SettingRow{
 			Path:         k.Path,
 			Section:      section,
@@ -143,8 +153,8 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 			EnumValues:   k.EnumValues,
 			Editable:     k.Editable,
 			Masked:       k.Masked,
-			EditPointer:  editPointer(k),
-			ExternalEdit: externallyEdited(k),
+			EditPointer:  pointer,
+			ExternalEdit: external,
 			Desc:         k.Desc,
 		})
 	}
@@ -261,18 +271,32 @@ func settingKind(kind config.Kind) tui.SettingKind {
 	}
 }
 
-// settingSource reports the override marker for a row: which higher-precedence source beat the
-// file for this key this run, and what that source is CALLED, so the pane's note can name it
-// ("APOGEE_MODE", "--mode") instead of saying "something".
-func settingSource(k config.Key, overrides map[string]config.Source) (tui.SettingSource, string) {
-	switch overrides[k.Path] {
+// settingSource reports the source marker for a row: which source supplied this key's value this
+// run (config.Options.SourceOf) and, for an override, what that source is CALLED, so the pane's note
+// can name it ("APOGEE_MODE", "--mode") instead of saying "something".
+func settingSource(k config.Key, opts *config.Options) (tui.SettingSource, string) {
+	switch opts.SourceOf(k.Path) {
 	case config.SourceEnv:
 		return tui.SettingFromEnv, k.EnvVar
 	case config.SourceFlag:
 		return tui.SettingFromFlag, "--" + k.FlagName
+	case config.SourceProject:
+		return tui.SettingFromProject, ""
+	case config.SourceGlobal:
+		return tui.SettingFromGlobal, ""
 	default:
-		return tui.SettingFromFile, ""
+		return tui.SettingFromDefault, ""
 	}
+}
+
+// setInProject reports whether the Project config sets this row's value outright — a project-param
+// key the project file states (ADR 0096). Such a row is read-only here until the pane can ask which
+// file a save goes to: a commit would land in the global file, which the project outranks at the
+// next start. A tighten-only list is NOT one of these even when the project added entries to it:
+// its value is the union of both files, and carriesProjectEntries already sends it to the editor,
+// where the global half of it is edited.
+func setInProject(k config.Key, source tui.SettingSource) bool {
+	return source == tui.SettingFromProject && k.Class != config.ClassTightenOnly
 }
 
 // editPointer says where a key this pane will not write is edited instead — empty for an editable

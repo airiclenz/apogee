@@ -388,8 +388,8 @@ type settingsHost struct {
 	promptSeed func() string
 }
 
-// Rows is every key the registry describes, with the value this run resolved and the marker for a
-// key an environment variable or a flag overrode (settingsrows.go), and — for the two keys the
+// Rows is every key the registry describes, with the value this run resolved and the source mark
+// that says which layer supplied it (settingsrows.go), and — for the two keys the
 // engine rather than the file holds — the value the session is RUNNING (overlayLiveSettings). The
 // one text row's prose is seeded with apogee's embedded default prompt where that default is what
 // the session resolves (seedPromptEditor), so the editor ⏎ opens starts from the prompt in force

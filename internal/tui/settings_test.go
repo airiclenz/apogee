@@ -2039,6 +2039,73 @@ func TestSettingsPaneOverriddenRowSaysTheOverrideOutranksItAtTheNextStart(t *tes
 	}
 }
 
+// A row the Project config supplies is outranked at the next start just as an override is: the pane
+// writes the global file, and the project's value sits above it (ADR 0096). The note names the
+// project config, since a project row carries no source name of its own.
+func TestSettingsPaneProjectRowSaysTheProjectConfigOutranksItAtTheNextStart(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{{
+		Path: "retries", Section: "Session", Kind: SettingBool, Value: "true", Default: "false",
+		Source: SettingFromProject, Editable: true, Desc: "Retries.",
+	}}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	want := "· project config outranks at next launch"
+	if got := m.settingsNote(rows[0]); got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "(project)") || !strings.Contains(pane, want) {
+		t.Errorf("the pane does not carry both the project marker and the note:\n%s", pane)
+	}
+}
+
+// An edit to a row the built-in default or the global file supplies lands in the very file the next
+// start reads, so it earns no outranks note — the value cell's ` *` says it all — while the row still
+// carries its source mark.
+func TestSettingsPaneDefaultAndGlobalRowsAddNoNoteOnEdit(t *testing.T) {
+	t.Parallel()
+	for _, source := range []SettingSource{SettingFromDefault, SettingFromGlobal} {
+		rows := []SettingRow{{
+			Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
+			Source: source, Editable: true, Desc: "Run with Mechanisms off.",
+		}}
+		log := &settingsWriteLog{}
+		m, _ := settingsEditModel(t, rows, log)
+
+		m = step(t, m, keyEnter())
+
+		if len(log.writes) != 1 {
+			t.Fatalf("%s row: writes = %+v, want the one edit", source, log.writes)
+		}
+		if got := m.settingsNote(rows[0]); got != "" {
+			t.Errorf("%s row: note = %q, want none", source, got)
+		}
+		if pane := strip(m.renderSettings()); !strings.Contains(pane, "("+string(source)+")") {
+			t.Errorf("%s row: the pane does not carry the source mark:\n%s", source, pane)
+		}
+	}
+}
+
+// Every reported source is marked by name; a row reported without one is marked with nothing.
+func TestSettingsSourceMarkerNamesEverySource(t *testing.T) {
+	t.Parallel()
+	for source, want := range map[SettingSource]string{
+		SettingFromDefault: "(default)",
+		SettingFromGlobal:  "(global)",
+		SettingFromProject: "(project)",
+		SettingFromEnv:     "(env)",
+		SettingFromFlag:    "(flag)",
+		"":                 "",
+	} {
+		if got := settingsSourceMarker(source); got != want {
+			t.Errorf("settingsSourceMarker(%q) = %q, want %q", source, got, want)
+		}
+	}
+}
+
 // Nothing this pane paints defers to a restart any more (ADR 0037 decision 8). Every edit idiom the
 // surface has — a renderer-owned toggle, a buffered string, a masked write, an overridden key, a key
 // with a boundary note, and a reset — leaves the same thing behind: the value the session is running

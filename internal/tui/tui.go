@@ -1753,19 +1753,24 @@ const (
 	SettingServer SettingKind = "server"
 )
 
-// SettingSource is which precedence source supplied the value a row shows. The zero value is the
-// ordinary case — the config file, or the built-in default below it — and the other two are the
-// higher-precedence sources that BEAT the file for that key this run (flag > env > file > default).
+// SettingSource is which precedence source supplied the value a row shows, in the order they rank:
+// flag > env > project > global > default. The pane marks EVERY row with it, because a value reads
+// the same whichever layer supplied it: a row the environment is overriding must say so, or a value
+// the file does not contain would look like the file's and an edit persisted into the file would
+// appear to do nothing for as long as the override stands; and a row the Project config sets must
+// say so, or an edit written to the global file would be outranked by the project at the next start.
 //
-// The pane needs it for one reason: a row the environment is overriding must say so, because a
-// value the file does not contain would otherwise look like the file's, and an edit persisted into
-// the file would appear to do nothing for as long as the override stands.
+// The zero value is a row whose provider reported no source — a hand-built row, or a Driver that
+// composed rows without the binary's registry (ADR 0031) — and it is painted with no mark at all
+// rather than with a claim nobody made.
 type SettingSource string
 
 const (
-	SettingFromFile SettingSource = ""     // the config file or the built-in default; nothing overrode it
-	SettingFromEnv  SettingSource = "env"  // an APOGEE_* environment variable won
-	SettingFromFlag SettingSource = "flag" // an explicitly-set command-line flag won
+	SettingFromDefault SettingSource = "default" // nothing stated the key: the built-in default
+	SettingFromGlobal  SettingSource = "global"  // the global config file stated it
+	SettingFromProject SettingSource = "project" // the Project config stated it, over the global file
+	SettingFromEnv     SettingSource = "env"     // an APOGEE_* environment variable won
+	SettingFromFlag    SettingSource = "flag"    // an explicitly-set command-line flag won
 )
 
 // SettingRow is one row of the `/settings` pane: a config key as the binary resolved it this run.
@@ -1800,9 +1805,9 @@ type SettingRow struct {
 	// pane's worth of text on one line.
 	Text string
 
-	// Source and SourceName are the override marker: which higher-precedence source beat the file
-	// for this key this run, and what it is CALLED ("APOGEE_MODE", "--mode") so the note can name
-	// it. SourceName is empty exactly when Source is [SettingFromFile].
+	// Source and SourceName are the source marker: which source supplied this key's value this run,
+	// and — for an override — what it is CALLED ("APOGEE_MODE", "--mode") so the note can name it.
+	// SourceName is empty for every source but [SettingFromEnv] and [SettingFromFlag].
 	Source     SettingSource
 	SourceName string
 

@@ -2598,18 +2598,21 @@ absolute width cap, the one rule no surface bends. It is the ladder the pane tit
 spends its width by: the mark that no longer fits is dropped, and the words keep the block. The rule
 holds wherever a hang is composed — the transcript's markers and list bullets, a tool block's branch
 and gutter, and these rows alike. The
-**`/settings` pane's key rows are four-cell** — the key, its value, an `(env)`/`(flag)` mark where a
-higher-precedence source beat the file, and a last tier carrying whatever else is true of the row:
+**`/settings` pane's key rows are four-cell** — the key, its value, a source mark naming where the
+value came from — `(default)`, `(global)`, `(project)`, `(env)` or `(flag)` — and a last tier
+carrying whatever else is true of the row:
 the reason the last act on it was refused, else the answer to an act that landed and moved no row —
 `· already on macStudio`, or the `· opened in your editor` of an editor started **detached**, which
 opened in its own window and left this pane standing where it was — else the boundary note of an
 edit that landed at a boundary this session will cross rather than at once
-(`· applies at next clear`), else — on a row an environment variable or a flag is overriding — that
-the override wins again at the next start, else
-the `· ⏎ opens $EDITOR` or `· use /confine` pointer of a key this pane will not write. That
+(`· applies at next clear`), else — on a row an environment variable, a flag or the Project config
+supplies — that the source wins again at the next start, else
+the `· ⏎ opens $EDITOR`, `· use /confine` or `· set in the project config` pointer of a key this
+pane will not write. That
 tier is one column rather than three because a row is only ever one of those things at a time, and
-it and the mark before it both collapse away on a configuration with nothing overridden, nothing
-read-only and nothing edited yet — the same collapse that costs the `/` menu nothing for its
+it collapses away on a configuration with nothing read-only and nothing edited yet; the mark before
+it is on every row the binary reports a source for, so its column collapses only for rows reported
+without one — the same collapse that costs the `/` menu nothing for its
 `— runs at idle` tag. **A key this session changed here wears a ` *` on its value cell** — `false *` —
 and nothing else: an edit applies on the `⏎` that persists it (ADR 0037), so there is no pending
 value to point at and what is left worth saying is which rows were touched. Its **section headings

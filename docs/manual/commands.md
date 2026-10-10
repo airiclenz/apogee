@@ -580,9 +580,11 @@ Both verbs **run at idle** — typed while the model works, they queue and run o
 
 `/settings` opens a **full-height pane** over your whole configuration: one row per setting,
 in registry order — roughly the order the starter `config.yaml` documents them — and grouped under section headings,
-each row showing the value **this run resolved** for it. Where a higher-precedence source
-beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
-file and another on screen explains itself. Two rows answer from the **running session**
+each row showing the value **this run resolved** for it and where that value came from —
+`(default)`, `(global)` for `~/.apogee/config.yaml`, `(project)` for the project's
+`.apogee/config.yaml`, or `(env)` / `(flag)` for an override — so a key that reads one way in the
+file and another on screen explains itself. A row the project config sets is read-only here
+(`· set in the project config`): the pane writes the global file, which the project outranks. Two rows answer from the **running session**
 instead of that resolution — `mode:` and `confine-to-workspace:` show what apogee is running
 right now — and the rows are re-derived at every paint, not read once when the pane opens, so a
 `shift+tab` or a `/confine off` is already on the row whenever the pane paints, and

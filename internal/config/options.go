@@ -431,7 +431,8 @@ type Options struct {
 	// APOGEE_MODEL was set). It is the one resolution fact the resolved values above cannot carry:
 	// precedence collapses the layers into a single value, and the /settings pane has to mark a row
 	// whose value this run is not taking from the file. ApplyConfig fills it (overrideSources);
-	// absent from the map ⇒ the file or the built-in default, which is the majority of keys.
+	// absent from the map ⇒ a config file or the built-in default, which is the majority of keys —
+	// and which of those is what [Options.SourceOf] reads off GlobalKeys and ProjectKeys.
 	Overrides map[string]Source
 
 	// GlobalConfigOnly says this resolution reads the global config alone and takes no Project
@@ -448,6 +449,14 @@ type Options struct {
 	// alone — a /settings commit of a tighten-only list holding project entries would write them
 	// into the global file. ApplyConfig fills it; empty when no project layer was read.
 	ProjectKeys map[string]bool
+
+	// GlobalKeys records which keys the global config file states, keyed by registry path: a key
+	// written with a value, whatever that value is (a bare `key:` states nothing). It is the fact
+	// that splits a value the file supplies from the built-in default below it — the two read
+	// alike once resolved — so a /settings row can say `global` or `default` ([Options.SourceOf]).
+	// ApplyConfig fills it, like Overrides; empty when there is no global file, and left empty by
+	// the live block re-reads (LoadFileConfig, LoadLayeredConfig), which project values, not rows.
+	GlobalKeys map[string]bool
 }
 
 // The two words `workflow-wake:` takes (ADR 0089). They are words rather than a YAML bool because

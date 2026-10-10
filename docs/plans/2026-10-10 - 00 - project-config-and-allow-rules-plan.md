@@ -138,7 +138,17 @@ cmd/apogee/daemon_test.go — daemonHarness.run (builds its own Options; runDaem
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/config/ && go test -race -count=1 -run 'TestDaemonTakesNoProjectLayer|SettingsRows' ./cmd/apogee/`
 **Commit:** `feat(config): layer the Project config over the global file`
 
-## 5. Source split through /settings
+## 5. Source split through /settings — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from "parseLayeredConfig/ResolveOptions in config.go": item 4 moved the layered parse into `internal/config/layer.go`. It now returns a `layerKeys{global, project}` pair. A new `statedKeys` records the registry paths the global document states; a bare `key:` states nothing and YAML merge keys are not followed. The new `Options.GlobalKeys` field lives in `internal/config/options.go`.
+NOTES (2026-10-10): `config.SourceFile` ("") is replaced by `SourceDefault`, `SourceGlobal` and `SourceProject`. The new `(*Options).SourceOf(path)` ranks Overrides > ProjectKeys > GlobalKeys > default. `Overrides` still holds only env/flag. Only ApplyConfig/ResolveOptions fill GlobalKeys; LoadFileConfig and LoadLayeredConfig leave it empty, which keeps item 4's identical-load test and the embedded-template test unchanged.
+NOTES (2026-10-10): `tui.SettingFromFile` is replaced by `SettingFromDefault`, `SettingFromGlobal` and `SettingFromProject`. The zero value "" now means "no source reported" (hand-built rows) and paints no mark, so tui goldens built from hand rows are unchanged. Every binary-built row now carries a mark, so the marker column no longer collapses in the real pane.
+NOTES (2026-10-10): a project-param row whose source is `project` is read-only, with the new pointer `set in the project config` and ExternalEdit=false (⏎ does nothing, because the editor would open the global file). A tighten-only row carrying project entries keeps item 4's `⏎ opens $EDITOR` pointer, since its global half is still edited there.
+NOTES (2026-10-10): consequential edit — cmd/apogee/e2e_livestate_test.go: made necessary by the source mark now ending every row; the ` ~` / ` *` suffix checks read the row through a new `sansSourceMark` helper.
+NOTES (2026-10-10): consequential edit — cmd/apogee/wire_options.go: made necessary by the marker change (the `settingsHost.Rows` doc named only env/flag).
+NOTES (2026-10-10): consequential edit — docs/layout/settings-screen-layout.md: made necessary by the marker change (prose, key-list mockup and edited-row/field snippets now carry source marks).
+NOTES (2026-10-10): consequential edit — docs/manual/commands.md: made necessary by the marker change (the /settings paragraph named only `(env)`/`(flag)`).
+NOTES (2026-10-10): the rows' source comes from the boot resolution (`settingsHost.opts`). An external save or a pane edit does not move a row's mark until relaunch: a default row edited in the pane reads `true * (default)`. The live `mode` row also reads its boot source.
 
 **What:**
 **Goal:** every setting reports its source as `default`, `global`, `project`, `env` or `flag`, and `/settings` shows it per row.

@@ -509,13 +509,17 @@ func TestSettingsRowsSubAgentsServerIsAReadOnlyServerRow(t *testing.T) {
 	}
 }
 
-// A key an environment variable or a flag overrode is marked, and the marker NAMES the source, so
-// the pane can say which variable is standing in front of the file. Everything else reports the
-// file — the ordinary case, which carries no name.
+// Every row is marked with the source that supplied its value. An override NAMES itself, so the
+// pane can say which variable is standing in front of the file; the two config files and the
+// built-in default carry no name. A key the Project config sets is marked `project` and is read-only
+// here, pointing at the project config rather than at an editor on the global file.
 func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 	t.Parallel()
 
-	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
+	opts := fabricatedSettings()
+	opts.GlobalKeys = map[string]bool{"servers": true, "bypass": true, "workflow-retries": true}
+	opts.ProjectKeys = map[string]bool{"workflow-retries": true}
+	byPath := rowsByPath(t, settingsRows(opts))
 	if got := byPath["mode"]; got.Source != tui.SettingFromFlag || got.SourceName != "--mode" {
 		t.Errorf("mode row source = {%q %q}; want the flag marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromFlag, "--mode")
@@ -524,11 +528,22 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 		t.Errorf("server row source = {%q %q}; want the env marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromEnv, config.EnvServer)
 	}
-	for _, path := range []string{"servers", "bypass", "auto-compact"} {
-		got := byPath[path]
-		if got.Source != tui.SettingFromFile || got.SourceName != "" {
-			t.Errorf("row %q source = {%q %q}; want the unmarked file source", path, got.Source, got.SourceName)
+	for path, want := range map[string]tui.SettingSource{
+		"servers":          tui.SettingFromGlobal,
+		"bypass":           tui.SettingFromGlobal,
+		"auto-compact":     tui.SettingFromDefault,
+		"workflow-retries": tui.SettingFromProject,
+	} {
+		if got := byPath[path]; got.Source != want || got.SourceName != "" {
+			t.Errorf("row %q source = {%q %q}; want {%q \"\"}", path, got.Source, got.SourceName, want)
 		}
+	}
+	if got := byPath["workflow-retries"]; got.Editable || got.EditPointer != pointerProject || got.ExternalEdit {
+		t.Errorf("workflow-retries row = {editable %v pointer %q externalEdit %v}; want read-only, "+
+			"pointing at the project config, opening no editor", got.Editable, got.EditPointer, got.ExternalEdit)
+	}
+	if got := byPath["bypass"]; !got.Editable {
+		t.Error("bypass row is read-only; a key the global file sets is written from this pane")
 	}
 }
 

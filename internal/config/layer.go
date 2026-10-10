@@ -67,7 +67,7 @@ type projectEntry struct {
 // defect in the project file is a notice and the global file alone answers.
 func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]byte, error),
 	notify func(string)) (Options, error) {
-	fc, projectKeys, err := parseLayeredConfig(globalPath, projectRoot, readFile, notify, false)
+	fc, stated, err := parseLayeredConfig(globalPath, projectRoot, readFile, notify, false)
 	if err != nil {
 		return Options{}, err
 	}
@@ -75,42 +75,73 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 	if err := applyFile(&o, fc); err != nil {
 		return Options{}, err
 	}
-	o.ProjectKeys = projectKeys
+	o.ProjectKeys = stated.project
 	return o, nil
 }
 
+// layerKeys is which registry paths each file of a layered load stated: global, the keys the global
+// file writes a value for, and project, the paths the project layer contributed to (nil when no
+// layer was merged). They are what tell a key's source apart once the files collapse into one
+// value ([Options.SourceOf]).
+type layerKeys struct {
+	global  map[string]bool
+	project map[string]bool
+}
+
 // parseLayeredConfig is parseConfigFile for the global file with the Project config of projectRoot
-// merged into it, answering the decoded schema and the registry paths the project layer
-// contributed to (nil when no layer was merged). Only the global file's defects are errors.
+// merged into it, answering the decoded schema and the keys each file stated. Only the global
+// file's defects are errors.
 func parseLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]byte, error),
-	notify func(string), mayMigrate bool) (fileConfig, map[string]bool, error) {
+	notify func(string), mayMigrate bool) (fileConfig, layerKeys, error) {
 	data, present, err := readConfigData(globalPath, readFile, notify, mayMigrate)
 	if err != nil {
-		return fileConfig{}, nil, err
+		return fileConfig{}, layerKeys{}, err
 	}
 	var global fileConfig
+	var stated layerKeys
 	if present {
 		if global, err = decodeConfigData(globalPath, data, notify); err != nil {
-			return fileConfig{}, nil, err
+			return fileConfig{}, layerKeys{}, err
 		}
+		stated.global = statedKeys(data)
 	}
 	layer, ok := readProjectLayer(projectFilePath(projectRoot), globalPath, readFile, notify)
 	if !ok {
-		return global, nil, nil
+		return global, stated, nil
 	}
 	merged, projectKeys, err := mergeProjectLayer(data, layer)
 	if err == nil {
 		var fc fileConfig
 		if err = merged.Decode(&fc); err == nil {
 			if err = checkFileConfig(&fc); err == nil {
-				return fc, projectKeys, nil
+				stated.project = projectKeys
+				return fc, stated, nil
 			}
 		}
 	}
 	// Unreachable for a project file that passed its checks alone, which is every one that gets
 	// here — but a layer must never be the reason a start fails, so it degrades like the rest.
 	notify(fmt.Sprintf(projectSkippedNotice, layer.path, sansPrefix{err}.Error()))
-	return global, nil, nil
+	return global, stated, nil
+}
+
+// statedKeys is the registry paths the config document in data writes a value for — a bare `key:`
+// states nothing, the projectWalk rule. data has already decoded, so a document that fails to
+// parse here answers no keys rather than an error. YAML merge keys (`<<:`) are not followed: a
+// key stated only through one reads as the default's.
+func statedKeys(data []byte) map[string]bool {
+	doc, err := Document(data)
+	if err != nil || doc == nil || len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	stated := make(map[string]bool)
+	for _, k := range KeyRegistry {
+		if value := valueAtPath(root, k.Path); value != nil && !isNullNode(value) {
+			stated[k.Path] = true
+		}
+	}
+	return stated
 }
 
 // projectFilePath is the Project config's path under projectRoot, or "" for the empty root that

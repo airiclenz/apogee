@@ -3051,16 +3051,39 @@ func applyFlags(o *Options, flags Options, changed func(string) bool) {
 	}
 }
 
-// Source names which precedence source supplied a key's value. The zero value is the
-// ordinary case — the config file, or the built-in default below it — and the other two are the
-// sources that can BEAT the file (flag > env > file > default).
+// Source names which precedence source supplied a key's value, in the order they rank:
+// flag > env > project > global > default. The project and global sources are the two config files
+// (ADR 0096: the Project config is layered over the global file), and default is neither file nor
+// an override stating the key. [Options.SourceOf] answers it per key; there is no zero value a
+// resolution reports.
 type Source string
 
 const (
-	SourceFile Source = ""     // the config file, or the default below it: nothing overrode the key
-	SourceEnv  Source = "env"  // an APOGEE_* variable set the key
-	SourceFlag Source = "flag" // an explicitly-set command-line flag set the key
+	SourceDefault Source = "default" // no file, variable or flag stated the key: the built-in default
+	SourceGlobal  Source = "global"  // the global config file stated the key
+	SourceProject Source = "project" // the Project config stated the key, over the global file
+	SourceEnv     Source = "env"     // an APOGEE_* variable set the key
+	SourceFlag    Source = "flag"    // an explicitly-set command-line flag set the key
 )
+
+// SourceOf reports which source supplied the value this run resolved for the key at the registry
+// path: an override (Overrides) first, then the Project config layer (ProjectKeys), then the global
+// file (GlobalKeys), and the built-in default otherwise. It reads the three facts resolution
+// recorded because the resolved value no longer carries them — precedence collapsed the layers.
+// A tighten-only list counts as the project's only when the project layer added an entry the
+// global list lacks, which is exactly what ProjectKeys records for it.
+func (o *Options) SourceOf(path string) Source {
+	switch {
+	case o.Overrides[path] != "":
+		return o.Overrides[path]
+	case o.ProjectKeys[path]:
+		return SourceProject
+	case o.GlobalKeys[path]:
+		return SourceGlobal
+	default:
+		return SourceDefault
+	}
+}
 
 // overrideSources reports which higher-precedence source beat the config file for each key this
 // run, keyed by registry path. Resolution COLLAPSES the layers into one value, so afterwards the
@@ -3072,7 +3095,8 @@ const (
 // The predicates are deliberately the SAME two the passes themselves are gated on (applyFlags'
 // changed, applyEnv's non-empty getenv), read off the same registry rows, so the marker cannot
 // claim a source that did not actually win. Keys absent from the map resolved from the file or the
-// default, which is the majority and needs no entry.
+// default, which is the majority and needs no entry; which of those three it was is the files'
+// fact, which [Options.SourceOf] reads off ProjectKeys and GlobalKeys.
 func overrideSources(changed func(string) bool, getenv func(string) string) map[string]Source {
 	sources := make(map[string]Source, len(KeyRegistry))
 	for _, k := range KeyRegistry {
@@ -3102,8 +3126,8 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // --config / APOGEE_CONFIG are resolved onto opts first. The workspace honours
 // --workspace > APOGEE_WORKSPACE > cwd the same way, and the Project config is read from the
 // Project root that workspace resolves to (internal/projectroot) — unless opts.GlobalConfigOnly
-// says this Driver takes no project layer. Which keys the project layer stated is recorded on
-// opts.ProjectKeys. changed, getenv and readFile are injected so
+// says this Driver takes no project layer. Which keys each file stated is recorded on
+// opts.GlobalKeys and opts.ProjectKeys. changed, getenv and readFile are injected so
 // the whole chain is testable end-to-end, and so is hostID — the machine identity the Host
 // acknowledgement ladder is selected by (ADR 0012, amendment 2026-07-21) — which is what lets a
 // test pin that ladder off whatever host it runs on. [ApplyConfig] passes the live platform.HostID().
@@ -3135,7 +3159,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	if !opts.GlobalConfigOnly {
 		projectRoot = resolveProjectRoot(opts.Workspace, notify)
 	}
-	fc, projectKeys, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify, true)
+	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify, true)
 	if err != nil {
 		return nil, err
 	}
@@ -3148,7 +3172,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	if err := applyFile(opts, fc); err != nil {
 		return nil, err
 	}
-	opts.ProjectKeys = projectKeys
+	opts.GlobalKeys, opts.ProjectKeys = stated.global, stated.project
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}

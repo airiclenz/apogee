@@ -269,7 +269,7 @@ const (
 const settingsCaret = "▏"
 
 // settingsValueColumn is which column of a row the VALUE is laid out in — the second, by the fixed
-// schema settingRowCells composes ("key", "value", "(env)", "· note"). It is stated once because the
+// schema settingRowCells composes ("key", "value", "(global)", "· note"). It is stated once because the
 // MOUSE needs it: a click seating the caret in the edit field has to know which cell of the painted
 // row that field is, and counting the schema out a second time is how the two come to disagree.
 const settingsValueColumn = 1
@@ -334,16 +334,28 @@ const noSettingsNote = "settings are unavailable — no configuration is wired"
 // which the degrade above keeps from ever being the opening state.
 const noSettingsRow = "no configuration to show"
 
-// settingsSourceMarker is the "(env)" | "(flag)" cell a row earns when a higher-precedence source
-// beat the config file for that key THIS run ([SettingRow.Source]). It is a cell of its own rather
-// than a suffix on the value, the currentRowCell posture: the popup module styles rows whole and
-// aligns them by column, so the marks of every overridden row land in one column and the column
-// collapses away entirely on a config nothing is overriding.
+// settingsSourceMarker is the "(default)" | "(global)" | "(project)" | "(env)" | "(flag)" cell that
+// says which source supplied a row's value THIS run ([SettingRow.Source]). It is a cell of its own
+// rather than a suffix on the value, the currentRowCell posture: the popup module styles rows whole
+// and aligns them by column, so every row's mark lands in one column — and that column collapses
+// away only on rows whose provider reported no source at all.
 func settingsSourceMarker(source SettingSource) string {
-	if source == SettingFromFile {
+	if source == "" {
 		return ""
 	}
 	return "(" + string(source) + ")"
+}
+
+// outranksAtNextLaunch reports whether a row's source will beat a value this pane writes to the
+// global file when apogee next starts: an override (env, flag) or the Project config. A default or
+// global row is the file this pane writes, so an edit to it is what the next start reads.
+func outranksAtNextLaunch(source SettingSource) bool {
+	switch source {
+	case SettingFromProject, SettingFromEnv, SettingFromFlag:
+		return true
+	default:
+		return false
+	}
 }
 
 // runSettingsCommand drives the /settings verb: it opens the pane, or — with no rows to show —
@@ -1338,12 +1350,12 @@ func (m Model) settingsPaneHint(rows []SettingRow) string {
 	return settingsHint
 }
 
-// settingRowCells is one key's row in the pane's fixed column schema — ["key", "value", "(env)",
+// settingRowCells is one key's row in the pane's fixed column schema — ["key", "value", "(global)",
 // "· use /confine"] — so the values line up in one column however long the keys beside them
-// run, the override marks in the next, and the last carries whatever else is true of the row. A tier
-// a key does not state is an EMPTY cell, which still pads, so a key with no override cannot slide the
+// run, the source marks in the next, and the last carries whatever else is true of the row. A tier
+// a key does not state is an EMPTY cell, which still pads, so a key with no note cannot slide the
 // note of the row under it sideways; a tier NO key states collapses away entirely (layoutPopupRow),
-// which is what keeps a config nothing overrides from paying for a marker column.
+// which is what keeps rows reported without a source from paying for a marker column.
 //
 // The last cell is one column and not two on purpose: a row either cannot be written here (its
 // pointer) or can and this pane wrote it (its marker) — never both — so one column says whichever is
@@ -1469,10 +1481,12 @@ func settingsTextSummary(text string) string {
 //     ([settingAnswer]) — and which the value cell, showing what it showed before, cannot say;
 //   - the apply's own boundary note for an edit that landed at a boundary rather than at once
 //     ("· applies at next clear"), which is the only deferral wording this surface has;
-//   - on a row an environment variable or a flag is overriding, that the override will win again at
-//     the next start (ADR 0037 decision 4). The edit itself DID apply — a pane edit outranks an
-//     override for the running session — so the sentence is about precedence at the next start and
-//     not about the edit having failed to land;
+//   - on a row an environment variable, a flag or the Project config supplies, that the source will
+//     win again at the next start (ADR 0037 decision 4; ADR 0096) — "project config outranks at next
+//     launch". The edit itself DID apply — a pane edit outranks an override for the running session —
+//     so the sentence is about precedence at the next start and not about the edit having failed to
+//     land. A default or global row says nothing: its edit lands in the very file the next start
+//     reads;
 //   - nothing at all for every other edit, because settingsValueCell already shows what was written
 //     and its ` *` already says this session wrote it; and
 //   - the read-only row's pointer, which is the registry's own fact and the only one of these a pane
@@ -1491,7 +1505,7 @@ func (m Model) settingsNote(row SettingRow) string {
 	switch {
 	case edited && edit.note != "":
 		return "· " + edit.note // applied, at a boundary this session will cross (ADR 0037 decision 3)
-	case edited && row.Source != SettingFromFile:
+	case edited && outranksAtNextLaunch(row.Source):
 		return "· " + settingsSourceLabel(row) + " outranks at next launch"
 	case edited:
 		return "" // applied live: the value cell and its marker say it
@@ -1537,14 +1551,19 @@ func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 	return width
 }
 
-// settingsSourceLabel names the source that beat the file for a row — "APOGEE_MODE", "--mode" — for
-// the override note to point at. A row that carries a source but no name for it falls back to the kind
-// of source it was, so the sentence still says something true rather than trailing off.
+// settingsSourceLabel names the source that outranks the global file for a row — "APOGEE_MODE",
+// "--mode", "project config" — for the outranks note to point at. An override that carries no name
+// for itself falls back to the kind of source it was, so the sentence still says something true
+// rather than trailing off.
 func settingsSourceLabel(row SettingRow) string {
-	if row.SourceName != "" {
+	switch {
+	case row.SourceName != "":
 		return row.SourceName
+	case row.Source == SettingFromProject:
+		return "project config"
+	default:
+		return "the " + string(row.Source)
 	}
-	return "the " + string(row.Source)
 }
 
 // settingsBody is the pane's DESCRIPTION HEADER: the "Description:" label, what the SELECTED key is
