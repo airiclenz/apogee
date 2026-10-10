@@ -1893,8 +1893,8 @@ func TestModelApprovalPromptPopupChrome(t *testing.T) {
 		}
 		seen++
 	}
-	if seen != len(approvalMenu) {
-		t.Errorf("drew %d menu rows, want %d:\n%s", seen, len(approvalMenu), got)
+	if seen != approvalMenuLen(t, m) {
+		t.Errorf("drew %d menu rows, want %d:\n%s", seen, approvalMenuLen(t, m), got)
 	}
 }
 
@@ -1951,7 +1951,7 @@ func TestModelApprovalEnterOnCancelStopsTheWorker(t *testing.T) {
 	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 	cancelled := startStubWorker(t, &m)
 
-	for range len(approvalMenu) - 1 { // walk to the last row: Cancel
+	for range approvalMenuLen(t, m) - 1 { // walk to the last row: Cancel
 		m = step(t, m, keyDown())
 	}
 	m = step(t, m, keyEnter())
@@ -1985,10 +1985,10 @@ func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
 	if m.approvalSel.selected != 0 {
 		t.Errorf("↑ on the first row moved to %d; the menu must not wrap", m.approvalSel.selected)
 	}
-	for range len(approvalMenu) + 2 {
+	for range approvalMenuLen(t, m) + 2 {
 		m = step(t, m, keyDown())
 	}
-	if want := len(approvalMenu) - 1; m.approvalSel.selected != want {
+	if want := approvalMenuLen(t, m) - 1; m.approvalSel.selected != want {
 		t.Errorf("↓ past the last row selects %d, want it clamped to %d", m.approvalSel.selected, want)
 	}
 
@@ -2616,8 +2616,8 @@ func TestModelApprovalMenuSpacing(t *testing.T) {
 	if !blank(allow - 1) {
 		t.Errorf("the line above the menu = %q, want the blank line setting it off from the body:\n%s", rows[allow-1], got)
 	}
-	if cancel != allow+len(approvalMenu)-1 {
-		t.Errorf("the menu spans %d lines, want its %d options adjacent:\n%s", cancel-allow+1, len(approvalMenu), got)
+	if cancel != allow+approvalMenuLen(t, m)-1 {
+		t.Errorf("the menu spans %d lines, want its %d options adjacent:\n%s", cancel-allow+1, approvalMenuLen(t, m), got)
 	}
 	if cancel != len(rows)-2 {
 		t.Errorf("%d lines sit between the last option and the bottom border, want none:\n%s", len(rows)-2-cancel, got)
@@ -2845,7 +2845,7 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 				// The demand is the pane's own (approvalPrompt): its menu in LINES, the blank line it
 				// sets the menu off by included, because a test budgeting for a shape the pane does not
 				// compose would look for the marker at a window the pane never puts it on.
-				menuLines := popupRowBlockLines(popupFlatRowHeights(len(approvalMenu)), 0, popupRowPadLines(true, false))
+				menuLines := popupRowBlockLines(popupFlatRowHeights(len(m.approvalMenuFor(req))), 0, popupRowPadLines(true, false))
 				if maxBody, _, _ := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome, popupFloor{}); maxBody == 1 {
 					if first := strings.Trim(rows[1], "│ "); !elisionMarkerPattern.MatchString(first) {
 						t.Errorf("body row = %q, want the marker counting the prose the pane dropped:\n%s", first, flat)

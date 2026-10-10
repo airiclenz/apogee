@@ -1620,8 +1620,10 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 	if !inRect {
 		return m, nil, false // outside the box: unclaimed, and the chain goes on with it
 	}
-	if !onRow {
-		return m, nil, true // the pane's chrome: claimed, with no row to take
+	if !onRow || m.editingProjectRule() {
+		// The pane's chrome — or the open rule field, whose save is ⏎'s alone: claimed, with no row to
+		// take.
+		return m, nil, true
 	}
 	if m.clickArmed.holds(panePrompt, row) {
 		if !m.approvalArmed {
@@ -1633,7 +1635,7 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		next, cmd := acceptedModel(m.resolveApproval())
 		return next, cmd, true
 	}
-	m.approvalSel.seat(row, len(approvalMenuFor(req)))
+	m.approvalSel.seat(row, len(m.approvalMenuFor(req)))
 	m.clickArmed = clickArm{pane: panePrompt, row: row, top: top, ok: true}
 	return m, nil, true
 }

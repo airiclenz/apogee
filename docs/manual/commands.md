@@ -258,10 +258,15 @@ phrase the row is holding; see [the effort dial](configuration.md#how-hard-a-mod
 
 An ordinary gated call offers the same four rows — `Allow`, `Always allow this session`, `Deny` and
 `Cancel` — and the decision keys behind them arm a moment after the prompt appears, exactly as the
-keys above describe. What that second row actually remembers is worth knowing before you press `s`
+keys above describe. Where a saved Allow rule could answer the call — a `terminal` line the rule
+matcher can read, or a named MCP server — a fifth row, `Always in this project…` (`p`), sits above
+`Deny`: it opens a line holding the suggested rule (`go test` for `go test ./...`) to edit, and `⏎`
+saves it to the project's `.apogee/config.yaml` and allows the call (`esc` goes back to the menu);
+for an MCP server it reads ``Always allow server `<alias>` in this project`` and saves the server at
+once. What that second row actually remembers is worth knowing before you press `s`
 — and which prompts never offer it at all (the last paragraph of this section).
 
-**The mouse answers it too, in two clicks.** A click on one of the four rows moves the `❯` onto it,
+**The mouse answers it too, in two clicks.** A click on one of the rows moves the `❯` onto it,
 the way `↑`/`↓` do; a **second** click on that same row takes it, the way `⏎` does. It is always two,
 and the row a second click can take is the row *you* clicked onto — the `Allow` the prompt opens on
 is never one press away from being granted, and the arming latch gates the deciding click exactly as

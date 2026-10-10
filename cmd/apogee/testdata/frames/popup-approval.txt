@@ -1,7 +1,6 @@
-│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                                  version  <version>    │ │
 │     ▌        ▄▄▘                                                                               │ │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────╯ │
-                                                                                                   ┃
+                                                                                                   │
 · context window unknown — apogee bounds each request by a conservative assumption and the Budget  ┃
   is inactive; set context-window: in config.yaml                                                  ┃
 ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ┃
@@ -18,6 +17,7 @@
 │                                                                                                  │
 │ ❯ Allow                      [a]                                                                 │
 │ · Always allow this session  [s]                                                                 │
+│ · Always in this project…    [p]                                                                 │
 │ · Deny                       [d]                                                                 │
 │ · Cancel                     [esc]                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

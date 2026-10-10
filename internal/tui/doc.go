@@ -854,7 +854,8 @@
 // [Model.resolveApproval], [Model.sendApproval]) and the pane that paints it
 // ([Model.approvalPrompt] with its Sub-agent identity line and its argument block), so a row can
 // never be paintable and unreachable (the Model still owns the pending request and the menu
-// selection) — and the ARMING rule that makes the pane's keys answerable only after the human has
+// selection), the "Always in this project…" row's rule field that saves an Allow rule through
+// [ConfigHost.AddProjectRule] ([Model.projectRuleOffer], [Model.projectRuleKey]) — and the ARMING rule that makes the pane's keys answerable only after the human has
 // seen it: the decision letters and the ⏎ that takes the highlighted row go live one
 // when the terminal answers the SECOND drain marker, the one the answer to the fold's own asks from
 // behind the pane's frame ([approvalDrainMarker], [Model.foldInputDrained]) — a cursor report written

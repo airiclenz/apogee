@@ -54,6 +54,31 @@ The rules both menus follow on screen — height, pointer, chrome — are `layou
 > adjacent. Nothing else about the box changes — the menu is still set off by one blank and the last
 > option still closes on the bottom border.
 
+> Amended 2026-10-10 by `docs/plans/2026-10-10 - 00 - project-config-and-allow-rules-plan.md` item 14
+> (ADR 0096 §4): an ordinary gate whose call a saved **Allow rule** could answer gains a fifth
+> option, `Always in this project…` `[p]`, between `Always allow this session` and `Deny`. It is
+> offered only for a `terminal` line the rule matcher could ever match (no redirect, substitution,
+> wrapper, Windows `cmd`, …) and for a named MCP server — where it reads
+> ``Always allow server `<alias>` in this project`` and saves the server at once — and never on a
+> forced pane or where no config file is wired. The sketch below shows no such row: its line starts
+> with a `cd` out of the workspace root, which no rule can match. Taking the `terminal` row turns
+> the menu into one editable field seeded with the suggested rule (one per simple command, joined by
+> `; `); every key but `ctrl+c` and `ctrl+l` edits it, `⏎` saves it to the Project config and allows
+> the call, `esc` goes back to the menu, and an empty field or a refused save is said on the hint row:
+>
+> ```
+> ╭─────────────── Approve terminal? ───────────────╮
+> │ Reason: subprocess execution                    │
+> │                                                 │
+> │ command:                                        │
+> │   go test ./...                                 │
+> │                                                 │
+> │ ❯ Rule: go test▏  [⏎]                           │
+> │                                                 │
+> │ ⏎ save to this project's config · esc back      │
+> ╰─────────────────────────────────────────────────╯
+> ```
+
 ╭────────────────────────── Approve terminal? ───────────────────────────╮
 │ Reason: subprocess execution                                           │
 │                                                                        │
