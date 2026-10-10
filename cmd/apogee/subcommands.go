@@ -15,6 +15,8 @@ import "github.com/spf13/cobra"
 // the fifth: `apogee mcp login|logout <name>`, the OAuth login of an `auth: oauth` MCP server that
 // a session refreshes but never prompts for once it is running. `project` is the sixth: `apogee
 // project adopt`, the terminal answer to the Allow rules a Project config proposes (ADR 0096 §4).
+// `update` is the seventh: `apogee update`, the explicit upgrade of a release-archive install and
+// the refusal that names every other channel's own upgrade (ADR 0097).
 // Registering a child is what makes a
 // Commands section appear under `apogee --help` — the one permitted output delta of the
 // Phase-5 subcommand work.
@@ -25,5 +27,5 @@ import "github.com/spf13/cobra"
 // fails with the same `unknown command` error it does today.
 func subcommands() []*cobra.Command {
 	return []*cobra.Command{newProbeCommand(), newHeadlessCommand(), newDaemonCommand(), newUndoCommand(), newMCPCommand(),
-		newProjectCommand()}
+		newProjectCommand(), newUpdateCommand()}
 }

@@ -155,7 +155,11 @@
 // undo.go `apogee undo <session-id> [confirm <generation>]`, the revert an unattended
 // Firing has nobody to offer — it holds the session, opens its snapshot store from a fresh
 // process and shows `/undo`'s own listing; the confirm quotes the generation the preview
-// printed, as `/undo confirm` does (ADR 0074).
+// printed, as `/undo confirm` does (ADR 0074);
+// update.go `apogee update [--yes] [--check]`, which refuses a managed install with its channel's
+// upgrade command and replaces a release-archive install — staged, `--version`-checked, swapped —
+// plus the start-up sweep of a Windows swap's `<exe>.old`; update_swap_unix.go its one-rename
+// swap, and update_swap_windows.go the move-aside swap that renames back on failure (ADR 0097).
 //
 // The platform helper: confined_exec_linux.go intercepts the __confined-exec sentinel
 // before Cobra, so the landlock backend can confine a subprocess by re-invoking this

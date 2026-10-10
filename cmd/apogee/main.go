@@ -16,6 +16,10 @@ func main() {
 	// and no subcommand may be reachable before it, whatever the tree grows into.
 	maybeDispatchConfinedExec()
 
+	// A previous `apogee update` on Windows leaves the replaced binary at `<exe>.old`, which only a
+	// later process can delete. After the sentinel, never before it: nothing may run ahead of that.
+	sweepLeftoverExecutable()
+
 	cmd := newRootCommand(tui.Run, subcommands()...)
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, err)

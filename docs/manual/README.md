@@ -14,6 +14,7 @@ install it, what it can do. These pages are the full detail:
 | [Diagnosing a host — `apogee probe`](probe.md) | What this machine can enforce, what the model can do, what the terminal really does, what the config file says, what apogee puts in front of the model at Turn 1 (`probe context`) |
 | [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines, the `--format json` Event lines, and `apogee undo` to put one back |
 | [Standing schedules — `apogee daemon`](daemon.md) | Prompts on a clock that outlive the session |
+| [Updating apogee — `apogee update`](updating.md) | The update notice on the startup box, the upgrade command for each install channel, and `apogee update` replacing a release-archive install |
 | [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation |
 
 Working on the codebase itself? [`AGENTS.md`](../../AGENTS.md) is the map of

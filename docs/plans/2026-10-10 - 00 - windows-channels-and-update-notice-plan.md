@@ -210,7 +210,15 @@ NOTES (2026-10-10): the entry is matched by exact name and must be a regular fil
 **Acceptance:** `go test -race -count=1 ./internal/update/`
 **Commit:** `feat(update): download and verify a release binary`
 
-## 8. `apogee update` subcommand
+## 8. `apogee update` subcommand — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): consequential edit — cmd/apogee/doc.go: made necessary by the new update.go / update_swap_unix.go / update_swap_windows.go (TestDocMapNamesEveryFile requires every file in the map).
+
+NOTES (2026-10-10): the `<exe>.old` start-up sweep runs only where the swap makes one (Windows, `swapLeavesOldExecutable`); on Unix it is a no-op so it can never delete a user's own `apogee.old` backup — the Unix swap never leaves a `.old`. The deletion itself (removeLeftoverExecutable) is tested on every OS.
+
+NOTES (2026-10-10): updateDeps carries no separate exe-path or out field: the replaced file is the detection seam's `Inputs.ExePath` (one source, so the Method and the swapped file cannot disagree), and output goes to cobra's `cmd.OutOrStdout()`, which tests capture with SetOut.
+
+NOTES (2026-10-10): writer's calls — a declined prompt prints `Update cancelled.` and exits 0; `--check` on a managed install still refuses with exit 1 (the Goal's refusal is unconditional); the stub release binary is a `/bin/sh` script, so the three exec tests skip on Windows (cmd/apogee tests do not run in the Windows CI leg) and run serially to avoid ETXTBSY from parallel forks.
 
 **Depends on items 3, 7.**
 **What:**
