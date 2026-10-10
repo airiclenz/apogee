@@ -369,6 +369,13 @@ type Options struct {
 	URLAllowHosts []string
 	URLDenyHosts  []string
 
+	// DangerousRules is the resolved `dangerous-rules:` key (ADR 0096 §6): what this configuration
+	// adds to and removes from the dangerous-action guard's shipped ruleset. The composition root
+	// merges it over the shipped set (security.MergeDangerousRules) and the engine builds its guard
+	// from the result. File-only, no flag or env: a hostile invocation environment must not be able
+	// to dissolve the floor.
+	DangerousRules DangerousRuleSet
+
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
 	// (default-empty). ApplyConfig sets it from settings; the composition root matches the BOUND
@@ -457,6 +464,19 @@ type Options struct {
 	// ApplyConfig fills it, like Overrides; empty when there is no global file, and left empty by
 	// the live block re-reads (LoadFileConfig, LoadLayeredConfig), which project values, not rows.
 	GlobalKeys map[string]bool
+}
+
+// DangerousRuleSet is the `dangerous-rules:` key resolved, split by the source each half came from,
+// because MergeDangerousRules (internal/security) trusts the two files differently. Add and Remove
+// are the global file's: it may add rules — a same-id add redefining the shipped rule — and remove
+// shipped rules by id. ProjectAdd is the Project config's `add:` alone, carried apart from the
+// layered merge so it reaches the seam as a project add: it may only add, and a same-id add stands
+// only beside the rule it tightens, at a strictly higher tier. A project `remove:` never gets this
+// far (layer.go drops it with a notice). The zero value adds and removes nothing — the shipped set.
+type DangerousRuleSet struct {
+	Add        []domain.DangerousRule
+	Remove     []string
+	ProjectAdd []domain.DangerousRule
 }
 
 // The two words `workflow-wake:` takes (ADR 0089). They are words rather than a YAML bool because

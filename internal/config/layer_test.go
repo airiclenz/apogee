@@ -227,6 +227,9 @@ func TestLayeredConfigSkipsAProjectFileThatFailsItsChecks(t *testing.T) {
 		"list where a block goes":   "workflow-retries: 5\ntools: [terminal]\n",
 		"top level is not settings": "- workflow-retries\n",
 		"two documents":             "workflow-retries: 5\n---\nworkflow-retries: 6\n",
+		"malformed dangerous rule": "workflow-retries: 5\ndangerous-rules:\n  add:\n" +
+			"    - {id: r1, pattern: '(', tier: ask}\n",
+		"dangerous rules not a block": "workflow-retries: 5\ndangerous-rules: [r1]\n",
 	}
 	for name, project := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -302,6 +302,13 @@ type Config struct {
 	// workspace so a file-edit task never escapes its sandbox (ADR 0001 isolation).
 	WorkspaceDir string
 
+	// ProjectRoot is the Project root (ADR 0096 §1): the folder whose `.apogee/` holds the project's
+	// config and skills — the nearest `.apogee/` from WorkspaceDir up to the git top-level, the
+	// workspace itself otherwise. Empty ⇒ no Project root, which is what a workspace that is the
+	// user's home resolves to and what an embedder that names none gets. The host resolves it; the
+	// engine only reads it.
+	ProjectRoot string
+
 	// ReadMounts names the read-only trees OUTSIDE WorkspaceDir that the built-in READ-ONLY file
 	// tools (read_file, list_dir, grep, find_files, present_document) may reach — plus copy_file's
 	// SOURCE, which is itself a read (2026-08-12); that tool's destination stays workspace-fenced
@@ -496,6 +503,16 @@ type Config struct {
 	// every one of them ON: an embedder that constructs a bare Config gets the floor.
 	Floor FloorConfig
 
+	// DangerousRules is the dangerous-action guard's ruleset (ADR 0012): the rules the floor that
+	// hard-refuses or force-gates a catastrophic call runs on, already merged by the host from the
+	// shipped set and the `dangerous-rules:` key (security.MergeDangerousRules — a global file may
+	// add and remove, a Project config only add, and only stricter). Nil ⇒ the shipped ruleset as
+	// it is (security.DefaultDangerousRules), so an embedder that constructs a bare Config gets
+	// the floor; a non-nil EMPTY slice ⇒ no rules at all, which is what a global `remove:` of every
+	// shipped id asks for and must not bring the shipped set back. Like Floor it is structural and
+	// stays on under Bypass; the circuit breaker beside the guard is not configured here.
+	DangerousRules []DangerousRule
+
 	// UndoSnapshots is the human's `undo-snapshots:` answer carried to the Driver that opens the
 	// session's undo store — the snapshot-backed journal that makes `/undo` survive a relaunch and
 	// reach every write, not only the ones that went through apogee's own funnel (ADR 0074).
@@ -529,6 +546,34 @@ func (s ServerPrice) Of(prompt, cached, completion int) (int64, bool) {
 		return 0, false
 	}
 	return s.Rate.Of(prompt, cached, completion), true
+}
+
+// DangerousTier is the severity a DangerousRule asserts when it matches, spelled the way the
+// `dangerous-rules:` key spells it.
+type DangerousTier string
+
+const (
+	// DangerousTierAsk forces the Approver even in Auto — Tier 2, a speed-bump the human answers.
+	DangerousTierAsk DangerousTier = "ask"
+	// DangerousTierRefuse refuses the call outright, in every mode — Tier 1, no per-call override.
+	DangerousTierRefuse DangerousTier = "refuse"
+)
+
+// DangerousRule is one rule of the dangerous-action guard (Config.DangerousRules), the engine-side
+// spelling of security.Rule, which the engine converts it to when it builds the guard. ID is the
+// stable name a global config removes a rule by; Pattern is a Go regexp matched against the call's
+// normalized text (whitespace-collapsed, lower-cased, `\` folded to `/`); Reason is the human-facing
+// why and Hint the model-facing way out. WritesOnly and ShellWriteView carry the two inspection
+// classes a shipped rule may opt into (see security.Rule); a rule written in a config file sets
+// neither, so it is matched against the full text of every call.
+type DangerousRule struct {
+	ID             string
+	Pattern        string
+	Tier           DangerousTier
+	Reason         string
+	Hint           string
+	WritesOnly     bool
+	ShellWriteView bool
 }
 
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only

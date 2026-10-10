@@ -179,7 +179,16 @@ NOTES (2026-10-10): `apogee probe config`'s report header now reads "the files a
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Watch|Live|ExternalEdit|ProbeConfig' ./cmd/apogee/`
 **Commit:** `feat(config): watch the Project config beside the global file`
 
-## 7. `dangerous-rules:` feeds the merge seam
+## 7. `dangerous-rules:` feeds the merge seam — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): domain.DangerousRule carries Hint, WritesOnly and ShellWriteView besides the plan's (id, pattern, tier, reason): the merged set includes the shipped rules, and a four-field type would strip write-git-control-plane's ShellWriteView and every shipped Hint on the round trip (pinned by TestDangerousRulesConvertBetweenTheEngineAndTheGuard). Config-file rules set only the four fields.
+NOTES (2026-10-10): the merge runs once in cmd/apogee (dangerousRulesFromOptions, called from projectConfig) through new security.RulesFromDomain / DomainRules converters; the agent builds the guard in a new guardsFor helper that seedTopLevel calls (nil ⇒ NewDefaultGuards as before, non-nil ⇒ that ruleset, breaker kept). domain.Config.ProjectRoot is filled from roots.project for item 12.
+NOTES (2026-10-10): project `add:` reaches Options.DangerousRules.ProjectAdd via a new layerKeys.projectDangerous field (set after the file pass in LoadLayeredConfig and ResolveOptions); checkProjectLayer now returns its scratch Options so the project rules are validated and converted by the same file pass. ProjectKeys marks `dangerous-rules` when the project adds rules.
+NOTES (2026-10-10): a mid-session edit of `dangerous-rules:` gets no settingsTable entry, so the live re-read refuses it by name and the change reaches the next session (stated in the manual); cmd/apogee/testdata/frames/t16-settings-rows.txt needed no change (the new row sits below the frame the golden records).
+NOTES (2026-10-10): consequential edit — internal/config/doc.go: made necessary by layer.go now carrying `dangerous-rules:` apart from the merge.
+NOTES (2026-10-10): consequential edit — cmd/apogee/wire_config_test.go: made necessary by projectConfig filling two new Config keys (DangerousRules, ProjectRoot), added to the projection enumeration in assertCarriesProjection, plus TestProjectConfigMergesTheDangerousRules.
+NOTES (2026-10-10): internal/security/rules_test.go (not in Files) gains the converter round-trip test for the two new security functions; gofmt realigned three neighbouring lines of everyKeyFileConfig in internal/config/config_test.go.
+NOTES (2026-10-10): improvement idea — a user pattern is matched against lower-cased text, so a pattern with an upper-case literal never fires; the manual and template say so, but the loader does not warn.
 
 **What:** Recast at the regression check (2026-10-10).
 **Goal:** a `dangerous-rules:` key adds rules (global and project) and removes shipped rules by ID (global only), the guard is built from `security.MergeDangerousRules`, and a malformed rule fails config load with an error naming it.

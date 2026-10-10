@@ -167,6 +167,19 @@ type WorkflowConfig = domain.WorkflowConfig
 // type still gets it.
 type FloorConfig = domain.FloorConfig
 
+// DangerousRule is one rule of the dangerous-action guard (Config.DangerousRules, ADR 0012): nil
+// there is the shipped ruleset, a non-nil empty slice no rules at all. See domain.DangerousRule.
+type DangerousRule = domain.DangerousRule
+
+// DangerousTier is a DangerousRule's severity: DangerousTierAsk forces approval even in Auto,
+// DangerousTierRefuse refuses the call in every mode.
+type DangerousTier = domain.DangerousTier
+
+const (
+	DangerousTierAsk    = domain.DangerousTierAsk
+	DangerousTierRefuse = domain.DangerousTierRefuse
+)
+
 // ContextFilesReport is what a session's workspace context files (Config.ContextFiles)
 // contributed and what the standing system content costs against its Budget share — the
 // read-only view Agent.ContextFilesReport returns for the host's session notice.

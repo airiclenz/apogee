@@ -60,7 +60,8 @@
 // `sub-agents: true` flag onto the root `sub-agents-server:` key. layer.go is the Project config layer (ADR 0096 §6): the project file
 // read and checked alone, its keys sorted by registry class, and merged into the global document
 // before the one decode — project-param keys overlaid, tighten-only lists unioned, global-only keys
-// dropped with a notice. unknownkeys.go is the walk that
+// dropped with a notice, and `dangerous-rules:` carried apart: its `add:` to the security seam as the
+// project's additions, its `remove:` dropped with a notice. unknownkeys.go is the walk that
 // announces, at startup, every key of the migrated file the schema does not spell — a notice, never
 // a refusal — and the yaml-tag reader it shares with the registry bijection test. The one-goroutine
 // poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows

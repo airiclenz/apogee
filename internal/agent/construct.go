@@ -215,7 +215,7 @@ func (a *Agent) exchangeAborted() {
 // its parent instead (delegation.seed). Empty and per-process, every one of them, because this
 // Agent IS the session's root: nothing above it holds an instance to share.
 func (a *Agent) seedTopLevel(cfg domain.Config) {
-	a.guards = security.NewDefaultGuards()
+	a.guards = guardsFor(cfg)
 	a.dial = dialProvider                                  // the real provider client, until the constructor that took WithDialer says otherwise (New, Resume)
 	a.effortDialect = toProviderDialect(cfg.EffortDialect) // the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
@@ -224,6 +224,20 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
+}
+
+// guardsFor is the top-level guardrail bundle cfg asks for: the production breaker, and the
+// dangerous-action guard built from cfg.DangerousRules — the shipped ruleset when the field is nil,
+// exactly the rules it holds otherwise, so a non-nil empty slice is a guard with no rules (a global
+// `remove:` of every shipped id) rather than the shipped set brought back. A delegate never builds
+// its own: it shares this one read-only (Guards.ForSubAgent), so the floor cannot be re-derived one
+// level down.
+func guardsFor(cfg domain.Config) security.Guards {
+	guards := security.NewDefaultGuards()
+	if cfg.DangerousRules != nil {
+		guards.Dangerous = security.NewDangerousActionGuard(security.RulesFromDomain(cfg.DangerousRules))
+	}
+	return guards
 }
 
 // seed copies the delegation into the Agent under construction — every fact once, before anything

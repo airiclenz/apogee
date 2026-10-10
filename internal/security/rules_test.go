@@ -1,6 +1,7 @@
 package security
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -564,5 +565,31 @@ func TestMergeDangerousRules_DefaultRulesetMergesCleanly(t *testing.T) {
 	g := NewDangerousActionGuard(merged)
 	if len(g.Rules()) == 0 {
 		t.Fatal("default ruleset produced an empty guard")
+	}
+}
+
+// The engine-side spelling of a rule (domain.DangerousRule) converts to the guard's and back without
+// losing a field — the shipped rules' Hint, WritesOnly and ShellWriteView included, which a lossy
+// conversion would silently strip from the floor — and both directions keep the nil/empty split
+// domain.Config.DangerousRules draws: nil is the shipped set, a non-nil empty slice no rules.
+func TestDangerousRulesConvertBetweenTheEngineAndTheGuard(t *testing.T) {
+	t.Parallel()
+
+	shipped := DefaultDangerousRules()
+	if back := RulesFromDomain(DomainRules(shipped)); !reflect.DeepEqual(back, shipped) {
+		t.Errorf("the shipped rules did not survive a round trip:\n  got  %+v\n  want %+v", back, shipped)
+	}
+	if RulesFromDomain(nil) != nil || DomainRules(nil) != nil {
+		t.Error("nil converted to a non-nil ruleset; nil means the shipped set")
+	}
+	if got := RulesFromDomain([]domain.DangerousRule{}); got == nil || len(got) != 0 {
+		t.Errorf("an empty engine ruleset converted to %#v; want a non-nil empty one", got)
+	}
+	if got := DomainRules([]Rule{}); got == nil || len(got) != 0 {
+		t.Errorf("an empty guard ruleset converted to %#v; want a non-nil empty one", got)
+	}
+	unknown := RulesFromDomain([]domain.DangerousRule{{ID: "r", Pattern: "x", Tier: "block"}})
+	if unknown[0].Tier != TierNone {
+		t.Errorf("an unknown tier converted to %v; want TierNone, which the guard drops", unknown[0].Tier)
 	}
 }

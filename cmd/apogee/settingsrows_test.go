@@ -86,6 +86,10 @@ func fabricatedSettings() config.Options {
 			}},
 		},
 		Overrides: map[string]config.Source{"mode": config.SourceFlag, "server": config.SourceEnv},
+		DangerousRules: config.DangerousRuleSet{
+			Add:    []domain.DangerousRule{{ID: "no-prod-deploy", Pattern: `kubectl .*prod`, Tier: domain.DangerousTierAsk}},
+			Remove: []string{"sudo-escalation"},
+		},
 	}
 }
 
@@ -407,6 +411,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"tools.enabled":           "[]", // unset: nothing is added back, which is the whole default menu
 		"url-safety.allow-hosts":  "[docs.example.com]",
 		"url-safety.deny-hosts":   "[]", // unset: a list row's empty spelling, and every host is still floored
+		"dangerous-rules":         "1 rule added, 1 removed",
 		"use-project-skills":      "false",
 		"use-shipped-skills":      "false",
 		"auto-compact":            "true",
@@ -586,7 +591,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	// while this one fails when a new read-only key reaches the pane without anyone naming it here.
 	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models",
 		"system-prompt-layers", "model-profiles", "sub-agents-server", "tools.enabled",
-		"reactions"} {
+		"dangerous-rules", "reactions"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

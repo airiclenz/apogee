@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -52,6 +53,86 @@ func TestNewAgentBuildsATopLevelAgent(t *testing.T) {
 	if a.effortDialect != toProviderDialect(domain.EffortDialectKwargs) {
 		t.Errorf("effortDialect = %q, want the Config's %q", a.effortDialect, domain.EffortDialectKwargs)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The dangerous-action ruleset (Config.DangerousRules → the top-level guard)
+// ---------------------------------------------------------------------------
+
+// TestDangerousGuardOfAZeroConfigIsTheShippedFloor pins the nil half of Config.DangerousRules: an
+// embedder that names no rules gets the shipped ruleset, rule for rule, and the circuit breaker
+// beside it — the floor is the default, never something to opt into.
+func TestDangerousGuardOfAZeroConfigIsTheShippedFloor(t *testing.T) {
+	t.Parallel()
+
+	guards := guardsFor(domain.Config{})
+
+	if guards.Breaker == nil {
+		t.Error("a zero Config built no circuit breaker; the breaker is not configured by the ruleset")
+	}
+	if got, want := ruleIDs(guards.Dangerous.Rules()), ruleIDs(security.DefaultDangerousRules()); !sameIDs(got, want) {
+		t.Errorf("zero Config guard rules = %v, want the shipped %v", got, want)
+	}
+}
+
+// TestDangerousGuardOfAnEmptyRulesetHoldsNoRules pins the other half: a non-nil EMPTY ruleset is
+// exactly what it says — the shape a global `remove:` of every shipped id merges to — and must not
+// read as nil and bring the shipped set back.
+func TestDangerousGuardOfAnEmptyRulesetHoldsNoRules(t *testing.T) {
+	t.Parallel()
+
+	guards := guardsFor(domain.Config{DangerousRules: []domain.DangerousRule{}})
+
+	if rules := guards.Dangerous.Rules(); len(rules) != 0 {
+		t.Errorf("an empty ruleset built %d rules (%v); want none", len(rules), ruleIDs(rules))
+	}
+	if guards.Breaker == nil {
+		t.Error("an empty ruleset dropped the circuit breaker")
+	}
+}
+
+// TestDangerousGuardForceGatesACallMatchingAnAddedAskRule drives a call through the loop: a rule the
+// configuration added at the ask tier forces the Approver even in Auto, where the call would
+// otherwise have run confined without a word.
+func TestDangerousGuardForceGatesACallMatchingAnAddedAskRule(t *testing.T) {
+	t.Parallel()
+	sink := &recordingSink{}
+	sub := &subprocTool{name: "terminal"}
+	cfg := autoConfig(sink, &fakeConfiner{caps: capsBoth()}, true, sub)
+	cfg.DangerousRules = append(security.DomainRules(security.DefaultDangerousRules()), domain.DangerousRule{
+		ID: "no-prod-deploy", Pattern: `\bkubectl\s+.*--context[= ]prod\b`,
+		Tier: domain.DangerousTierAsk, Reason: "deploy to the production cluster",
+	})
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	cfg.Approver = approver
+
+	driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"kubectl apply -f app.yaml --context prod"}`)
+
+	if req := requestOnApproval(t, sink.events); req.Reason != forceApprovalReason {
+		t.Errorf("approval reason = %q, want the forced look %q", req.Reason, forceApprovalReason)
+	}
+	if approver.calls != 1 || sub.ranCount() != 0 {
+		t.Errorf("Approver calls = %d, tool runs = %d; want one forced look and no run after the no",
+			approver.calls, sub.ranCount())
+	}
+}
+
+// ruleIDs is the ids of rules, in order.
+func ruleIDs(rules []security.Rule) []string {
+	ids := make([]string, len(rules))
+	for i, r := range rules {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
+// sameIDs reports whether two id lists hold the same ids, order aside — the guard sorts its rules
+// by tier, so the order it hands back is not the order they were written in.
+func sameIDs(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -43,6 +44,9 @@ func projectConfig(
 		Bypass:       opts.Bypass,
 		ConfigDir:    roots.config,
 		WorkspaceDir: roots.workspace,
+		// The Project root the layered load read the Project config from (ADR 0096 §1) — empty when
+		// the workspace is the user's home, and for a Firing, whose daemon reads no Project config.
+		ProjectRoot: roots.project,
 		// The OS confinement backend this run is fenced by — the host's real one (landlock on
 		// Linux, seatbelt on macOS, denyConfiner elsewhere — confinement-execution-contract §2.6),
 		// so Auto WORKS where fs-confinement exists and gates the subprocess surface where it does
@@ -202,9 +206,28 @@ func projectConfig(
 		// spelling into the other — so a guard the human took away, in the file or in `/settings`,
 		// is taken away for the runs nobody watches too.
 		Floor: floorFromOptions(opts),
+		// The dangerous-action guard's ruleset (ADR 0012), merged here once from the shipped set and
+		// the `dangerous-rules:` key, so every Driver builds its guard from the same rules.
+		DangerousRules: dangerousRulesFromOptions(opts),
 		// Whether the engine's context-fill notice is on (ADR 0077): the `context-fill-notice`
 		// key, default off. Not a Floor guard, so it is carried as is — no negation — beside
 		// Bypass, which switches it off with the rest of the advise class.
 		ContextFillNotice: opts.ContextFillNotice,
 	}
+}
+
+// dangerousRulesFromOptions merges the shipped dangerous-action rules with the `dangerous-rules:`
+// key through the one seam that knows how far each file is trusted (security.MergeDangerousRules,
+// ADR 0096 §6): the global file's additions and removals, then the Project config's additions,
+// which may only add — a same-id project rule stands beside the rule it tightens, never in its
+// place. The result is never nil, so a global `remove:` of every shipped id is an empty ruleset
+// at the engine rather than the nil that means "the shipped set".
+func dangerousRulesFromOptions(opts config.Options) []apogee.DangerousRule {
+	set := opts.DangerousRules
+	return security.DomainRules(security.MergeDangerousRules(
+		security.DefaultDangerousRules(),
+		security.RulesFromDomain(set.Add),
+		set.Remove,
+		security.RulesFromDomain(set.ProjectAdd),
+	))
 }

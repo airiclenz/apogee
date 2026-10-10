@@ -570,6 +570,19 @@ var KeyRegistry = bindRows([]Key{
 			}),
 	},
 	{
+		// Tighten-only, and not by the list union the two neighbours above take: a project's `add:`
+		// is carried apart from the layered merge (layer.go) to the seam that judges it
+		// (security.MergeDangerousRules — a project rule stands only as a new id, or beside the
+		// rule it tightens at a strictly higher tier), and its `remove:` is dropped with a notice.
+		// Structured and file-only, summarized by what the file changes about the shipped set.
+		Path: "dangerous-rules", Kind: KindStructured,
+		Class:     ClassTightenOnly,
+		Desc:      "Rules the dangerous-action guard adds, or shipped rules it drops by id; a project config may only add.",
+		Read:      func(o Options) string { return dangerousRulesSummary(o.DangerousRules) },
+		Structure: func(o Options) any { return o.DangerousRules },
+		fromFile:  fileDangerousRules,
+	},
+	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
 		Class:    ClassProjectParam,
 		Editable: true,
@@ -1610,6 +1623,19 @@ func distinctReactionIDs(list []domain.Reaction) int {
 		ids[r.ID] = struct{}{}
 	}
 	return len(ids)
+}
+
+// dangerousRulesSummary summarizes `dangerous-rules:` by what it changes about the shipped set —
+// "2 rules added, 1 removed" — counting both files' additions; empty when it changes nothing.
+func dangerousRulesSummary(set DangerousRuleSet) string {
+	parts := make([]string, 0, 2)
+	if added := len(set.Add) + len(set.ProjectAdd); added > 0 {
+		parts = append(parts, countSummary(added, "rule")+" added")
+	}
+	if removed := len(set.Remove); removed > 0 {
+		parts = append(parts, strconv.Itoa(removed)+" removed")
+	}
+	return strings.Join(parts, ", ")
 }
 
 // countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns

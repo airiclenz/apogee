@@ -319,6 +319,7 @@ func TestRegistryKeyClassesArePinned(t *testing.T) {
 		"workflow-wake":          ClassProjectParam,
 		"tools.disabled":         ClassTightenOnly,
 		"url-safety.deny-hosts":  ClassTightenOnly,
+		"dangerous-rules":        ClassTightenOnly,
 	}
 	got := map[string]KeyClass{}
 	for _, k := range KeyRegistry {

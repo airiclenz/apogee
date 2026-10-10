@@ -399,6 +399,59 @@ func fileMCPServers(o *Options, fc fileConfig) error {
 	return nil
 }
 
+// fileDangerousRules projects `dangerous-rules:` — the file's added rules and the shipped ids it
+// removes. A rule the guard could not run as written is a startup refusal naming it: the guard
+// itself drops an empty, tierless or uncompilable rule without a word (NewDangerousActionGuard),
+// which for a rule the human wrote to stop something would be a floor that silently is not there.
+// The Project config's additions are not read here: the layered load carries them apart
+// (DangerousRuleSet.ProjectAdd), and a project file reaches this pass only to be checked alone.
+func fileDangerousRules(o *Options, fc fileConfig) error {
+	o.DangerousRules = DangerousRuleSet{}
+	if fc.DangerousRules == nil {
+		return nil
+	}
+	add, err := fc.DangerousRules.rules()
+	if err != nil {
+		return err
+	}
+	o.DangerousRules = DangerousRuleSet{Add: add, Remove: slices.Clone(fc.DangerousRules.Remove)}
+	return nil
+}
+
+// dangerousTiers maps a rule's `tier:` spelling onto the engine's.
+var dangerousTiers = map[string]domain.DangerousTier{
+	string(domain.DangerousTierAsk):    domain.DangerousTierAsk,
+	string(domain.DangerousTierRefuse): domain.DangerousTierRefuse,
+}
+
+// rules validates the block's `add:` entries and converts them, in file order. An entry needs an id,
+// a pattern that compiles as a Go regexp, and a tier of ask or refuse; the reason is optional. The
+// error names the entry by its id where it has one and by its position where it does not.
+func (dc *dangerousRulesConfig) rules() ([]domain.DangerousRule, error) {
+	if len(dc.Add) == 0 {
+		return nil, nil
+	}
+	out := make([]domain.DangerousRule, 0, len(dc.Add))
+	for i, r := range dc.Add {
+		id := strings.TrimSpace(r.ID)
+		if id == "" {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add entry %d has no id", i+1)
+		}
+		if r.Pattern == "" {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add %q has no pattern", id)
+		}
+		if _, err := regexp.Compile(r.Pattern); err != nil {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add %q: pattern does not compile: %w", id, err)
+		}
+		tier, ok := dangerousTiers[strings.TrimSpace(r.Tier)]
+		if !ok {
+			return nil, fmt.Errorf("apogee: dangerous-rules.add %q: tier %q is not one of ask, refuse", id, r.Tier)
+		}
+		out = append(out, domain.DangerousRule{ID: id, Pattern: r.Pattern, Tier: tier, Reason: r.Reason})
+	}
+	return out, nil
+}
+
 // fileModelProfiles projects `model-profiles:`, ordered by pattern on the way in
 // (toProfileEntries) so the same file always resolves to the same slice; the map is carried whole
 // rather than merged pattern by pattern (ADR 0044).
@@ -1103,6 +1156,10 @@ type fileConfig struct {
 	// one. File-only, like the roster above it: which hosts a machine may reach is a per-machine
 	// fact, not an invocation one.
 	URLSafety *urlSafetyConfig `yaml:"url-safety"`
+	// DangerousRules adds rules to the dangerous-action guard and, in the global file only, removes
+	// shipped ones by id (ADR 0096 §6, the ADR 0012 merge seam). A pointer so an absent block reads
+	// as the shipped ruleset untouched. File-only, like the host lists above it.
+	DangerousRules *dangerousRulesConfig `yaml:"dangerous-rules"`
 	// ModelProfiles describes how a model speaks the wire (CONTEXT: Model profile) — its tool-call
 	// format and inline thinking-channel style — keyed by a PATTERN the model name contains
 	// (ADR 0044) — and, since ADR 0057, the tool roster that model is offered. File-only, no
@@ -2415,6 +2472,25 @@ type toolsConfig struct {
 	Enabled []string `yaml:"enabled"`
 }
 
+// dangerousRulesConfig is the on-disk `dangerous-rules:` block (ADR 0096 §6): the rules this file
+// adds to the dangerous-action guard and the shipped ids it removes.
+type dangerousRulesConfig struct {
+	// Add is the rules this file adds, each an id, a pattern, a tier and a reason.
+	Add []dangerousRuleConfig `yaml:"add"`
+	// Remove is the ids of shipped rules this file removes — honoured from the global file alone; an
+	// id that names no shipped rule is ignored.
+	Remove []string `yaml:"remove"`
+}
+
+// dangerousRuleConfig is the on-disk schema for one added dangerous-action rule. Tier is `ask` (the
+// call needs approval even in Auto) or `refuse` (the call is refused in every mode).
+type dangerousRuleConfig struct {
+	ID      string `yaml:"id"`
+	Pattern string `yaml:"pattern"`
+	Tier    string `yaml:"tier"`
+	Reason  string `yaml:"reason"`
+}
+
 // urlSafetyConfig is the on-disk `url-safety:` block — the host allow/deny layer the network tools'
 // guard applies on top of its always-on SSRF floor. Both keys are HOST lists: the scheme allow-set
 // stays code-level, because widening it is exactly the loosening this block must not be able to do.
@@ -3173,6 +3249,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 		return nil, err
 	}
 	opts.GlobalKeys, opts.ProjectKeys = stated.global, stated.project
+	opts.DangerousRules.ProjectAdd = stated.projectDangerous
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}

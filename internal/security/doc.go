@@ -39,8 +39,8 @@
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
 //     floor, two tiers (hard-refuse / force-approval), narrow precision-over-recall
 //     literal/regex matching, with config-merge semantics (global may add OR remove,
-//     project may only add — MergeDangerousRules, the ADR 0012 merge seam no config key
-//     calls today; apogee-089 would wire it). It matches a call's ACTION text —
+//     project may only add — MergeDangerousRules, the ADR 0012 merge seam the
+//     `dangerous-rules:` key feeds). It matches a call's ACTION text —
 //     the tool, its target paths, its command lines and code — and never the payload a
 //     write carries, so a document that merely quotes a guarded path is not an action.
 //     That payload exemption is the calling tool's OWN declaration (domain.ArgRolePayload —
@@ -93,7 +93,9 @@
 // content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment
 // per rule saying where its boundary is, and MergeDangerousRules, which encodes who may loosen it
 // (global may add or remove, project may only add — ADR 0012) — the merge seam that ADR fixes,
-// called by no config key today (apogee-089 would wire it). shellwrites.go is the shell
+// fed by the `dangerous-rules:` key (ADR 0096 §6), and RulesFromDomain / DomainRules, the
+// conversions between Rule and the engine's domain.DangerousRule that domain.Config carries the
+// merged set in. shellwrites.go is the shell
 // write view those two lean on: writeTargetsOf, the verb-aware reading of a command line that
 // keeps its redirect targets, the operands of mutating or unknown leaders and the files an output
 // option or verb writes (`--output=file`, `uniq in out`, `sed 'w file'`) and drops what a

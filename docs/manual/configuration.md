@@ -2623,11 +2623,43 @@ security boundary**: it catches a small model's obvious catastrophic *mistakes*,
 trivially bypassable by anything determined to get around it, and it is never what makes
 `confine-to-workspace: false` safe. Only a VM is.
 
-The ruleset is built into this build. There is no config key for it yet, so nothing in a
-config file adds, removes or re-tiers a rule. ADR 0012 does record the shape a merge should
-take when such keys land — the global config file may add rules *or* remove them, because
-it is your machine, while a project's config may only *add* — but that asymmetry describes
-a recorded decision, not wiring that ships today.
+#### Adding and removing rules — `dangerous-rules:`
+
+The ruleset ships built in, and `dangerous-rules:` changes it. `add:` takes rules of your own —
+each an `id`, a `pattern`, a `tier` and a `reason` — and `remove:` takes the ids of shipped rules
+to drop:
+
+```yaml
+# ~/.apogee/config.yaml
+dangerous-rules:
+  add:
+    - id: no-prod-deploy
+      pattern: '\bkubectl\s+.*--context[= ]prod\b'
+      tier: ask                 # ask: the approval prompt, even in auto; refuse: refused in every mode
+      reason: deploy to the production cluster
+  remove: [sudo-escalation]     # the shipped rules' ids
+```
+
+A `pattern` is a Go regular expression (RE2) matched against the call's action text after it has
+been normalised: whitespace runs collapsed to one space, lower-cased, and `\` folded to `/` — so
+write it in lower case with forward slashes, and one pattern covers a Windows path too. It is
+matched against everything the call does, the same text the shipped rules see. A rule with no id,
+no pattern, a pattern that does not compile, or a tier other than `ask` or `refuse` refuses the
+start with an error naming it, because a rule the guard silently dropped would be a floor that is
+not there. The shipped ids are `rm-rf-root-home-system`, `rm-fr-root-home-system`, `fork-bomb`,
+`write-ssh-keys`, `write-credential-persistence`, `write-git-control-plane`,
+`write-apogee-control-plane`, `overwrite-block-device`, `remote-pipe-to-shell` and
+`sudo-escalation`; an id in `remove:` that names none of them is ignored. An `add:` that reuses a
+shipped id replaces that rule. `commit-secrets` is not one of these rules and no key removes it.
+
+A Project config (`.apogee/config.yaml` at the Project root) may only tighten. Its `add:` entries
+join the global file's, but a project rule that reuses an id stands only when it is strictly
+stricter than the rule it shadows — `refuse` over a shipped `ask` — and then *beside* it, never in its place, so the
+shipped pattern keeps every match it had; at an equal or lower tier it is dropped. Its `remove:` is
+ignored with a startup notice naming the file: a repository you cloned cannot take a rule away. A
+malformed rule in the project file costs the project layer, not the start — one notice, and the
+session runs on the global config alone. The key is file-only (no flag, no environment variable),
+and the guard is built when a session starts, so an edit reaches the next session.
 
 ## The Console family
 
