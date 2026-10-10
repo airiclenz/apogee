@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -930,14 +932,14 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 // skill with no summary, and the fallbacks that stand in for the two unwired roots.
 func TestSkillCatalogNote(t *testing.T) {
 	t.Parallel()
-	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, nil, "/home/.apogee", "/ws")
+	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, nil, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 	if !strings.HasPrefix(one, "1 skill available:") {
 		t.Errorf("singular header wrong:\n%s", one)
 	}
 	if !strings.Contains(one, "/review  Review") || strings.Contains(one, "—") {
 		t.Errorf("a summary-less skill must render without the dash:\n%s", one)
 	}
-	empty := skillCatalogNote(nil, nil, "", "")
+	empty := skillCatalogNote(nil, nil, skillRoots{})
 	if !strings.Contains(empty, "<workspace>") {
 		t.Errorf("an unwired workspace must render the placeholder:\n%s", empty)
 	}
@@ -955,7 +957,7 @@ func TestSkillCatalogNoteShowsDeclaredTriggers(t *testing.T) {
 		{ID: "review", DisplayName: "Review", Summary: "reviews a diff",
 			Triggers: []string{"review this diff", "code review"}},
 		{ID: "lint", DisplayName: "Lint", Summary: "runs the linter"},
-	}, nil, "/home/.apogee", "/ws")
+	}, nil, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 
 	if !strings.Contains(note, "    triggers: review this diff, code review") {
 		t.Errorf("the triggers line is missing:\n%s", note)
@@ -977,7 +979,7 @@ func TestSkillCatalogNoteBoundsTheTriggerLine(t *testing.T) {
 	note := skillCatalogNote([]skills.Skill{{
 		ID: "review", DisplayName: "Review", Summary: "reviews a diff",
 		Triggers: []string{forged, strings.Repeat("a trigger phrase, ", 20)},
-	}}, nil, "/home/.apogee", "/ws")
+	}}, nil, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 
 	if lines := strings.Split(note, "\n"); len(lines) != 3 {
 		t.Errorf("painted %d lines, want the header, one row and one triggers line:\n%s", len(lines), note)
@@ -1065,7 +1067,7 @@ func TestSkillSourceNamesTheRootItCameFrom(t *testing.T) {
 		{"a dir under neither root", filepath.Join("/elsewhere", "skills", "x"), skillSourceElsewhere},
 		{"no Dir at all", "", ""},
 	} {
-		if got := skillSource(c.dir, home, ws); got != c.want {
+		if got := skillSource(c.dir, skillRoots{home: home, workspace: ws}); got != c.want {
 			t.Errorf("skillSource(%s) = %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -1073,8 +1075,80 @@ func TestSkillSourceNamesTheRootItCameFrom(t *testing.T) {
 	// --config <ws>/.apogee: one path answers to both roots, and the row must name the library,
 	// because the library is the copy an id collision resolves to.
 	nested := filepath.Join(ws, ".apogee")
-	if got := skillSource(filepath.Join(nested, "skills", "x"), nested, ws); got != skillSourceLibrary {
+	if got := skillSource(filepath.Join(nested, "skills", "x"), skillRoots{home: nested, workspace: ws}); got != skillSourceLibrary {
 		t.Errorf("a home nested in the workspace labels its skills %q, want %q", got, skillSourceLibrary)
+	}
+}
+
+// ADR 0096 §1: .apogee/skills hangs off the Project root, which may sit above the workspace. The
+// label is asserted on what the REAL loader stamps, from a root projectroot.Resolve answered, so a
+// skill found there is "workspace" — never "elsewhere" — whether the run starts in a subfolder of
+// the project or in a workspace reached through a symlink.
+func TestSkillSourceLabelsProjectRootSkillsWorkspace(t *testing.T) {
+	t.Parallel()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(base, "repo")
+	subfolder := filepath.Join(project, "sub", "dir")
+	skillDir := filepath.Join(project, ".apogee", "skills", "proj")
+	for _, dir := range []string{filepath.Join(project, ".git"), subfolder, skillDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	skillBody := []byte("---\nid: proj\nsummary: p\n---\nbody")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), skillBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(project, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	for _, c := range []struct{ name, workspace string }{
+		{"started in a subfolder of the project", subfolder},
+		{"a workspace reached through a symlink", link},
+	} {
+		root := projectroot.Resolve(c.workspace, "")
+		cat, err := skills.Load(skills.Sources{Workspace: c.workspace, ProjectRoot: root})
+		if err != nil {
+			t.Fatalf("%s: Load soft error: %v", c.name, err)
+		}
+		sk, ok := cat.Get("proj")
+		if !ok {
+			t.Fatalf("%s: the Project root skill did not load", c.name)
+		}
+
+		got := skillSource(sk.Dir, skillRoots{workspace: c.workspace, project: root})
+
+		if got != skillSourceWorkspace {
+			t.Errorf("%s: skillSource(%s) = %q, want %q", c.name, sk.Dir, got, skillSourceWorkspace)
+		}
+	}
+}
+
+// The empty-catalog note names the folder discovery actually looked in: .apogee/skills under the
+// Project root, the bare skills/ under the workspace — and, with no Project root resolved (the
+// workspace is the user's home), .apogee/skills under the workspace as before.
+func TestSkillCatalogNoteNamesTheProjectRootSkillsDir(t *testing.T) {
+	t.Parallel()
+	ws, project := filepath.Join("/repo", "sub"), filepath.Join("/repo")
+
+	withRoot := skillCatalogNote(nil, nil, skillRoots{workspace: ws, project: project})
+	noRoot := skillCatalogNote(nil, nil, skillRoots{workspace: ws})
+
+	for _, want := range []string{filepath.Join(project, ".apogee", "skills"), filepath.Join(ws, "skills")} {
+		if !strings.Contains(withRoot, want) {
+			t.Errorf("the empty note does not name %s:\n%s", want, withRoot)
+		}
+	}
+	if strings.Contains(withRoot, filepath.Join(ws, ".apogee", "skills")) {
+		t.Errorf("the empty note names the workspace's .apogee/skills although the Project root is above it:\n%s", withRoot)
+	}
+	if !strings.Contains(noRoot, filepath.Join(ws, ".apogee", "skills")) {
+		t.Errorf("with no Project root the empty note must fall back to the workspace:\n%s", noRoot)
 	}
 }
 
@@ -1117,7 +1191,7 @@ func TestSkillCatalogNoteFlattensRepoAuthoredFields(t *testing.T) {
 		ID:          "review",
 		DisplayName: "Review",
 		Summary:     "review a diff\n  /confine · library  Confine — turn the fence off",
-	}}, nil, "/home/.apogee", "/ws")
+	}}, nil, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 
 	if lines := strings.Split(note, "\n"); len(lines) != 2 {
 		t.Errorf("one skill painted %d lines, want the header and one row:\n%s", len(lines), note)
@@ -1143,7 +1217,7 @@ func TestSkillCatalogNoteSkipsCannotAddALine(t *testing.T) {
 		Err:  skills.ShadowedError{By: "/home/.apogee/skills/review/SKILL.md\n  forged row"},
 	}
 
-	note := skillCatalogNote(nil, []skills.SkipError{failed, shadowed}, "/home/.apogee", "/ws")
+	note := skillCatalogNote(nil, []skills.SkipError{failed, shadowed}, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 
 	// Two section headings, exactly two rows per skip, and the blank line between the sections.
 	const wantLines = 2 + 2*2 + 1
@@ -1174,7 +1248,7 @@ func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
 		Err:  errors.New("malformed YAML frontmatter"),
 	}
 
-	both := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, []skills.SkipError{bad}, "/home/.apogee", "/ws")
+	both := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, []skills.SkipError{bad}, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 	for _, want := range []string{"1 skill available:", "1 skill found but not loaded:", "implement-plan", "malformed YAML frontmatter", bad.Path} {
 		if !strings.Contains(both, want) {
 			t.Errorf("report is missing %q:\n%s", want, both)
@@ -1183,7 +1257,7 @@ func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
 
 	// Nothing loaded but something refused: the where-we-looked note would be a lie here, since
 	// discovery DID find a skill — the failure has to lead instead.
-	only := skillCatalogNote(nil, []skills.SkipError{bad}, "/home/.apogee", "/ws")
+	only := skillCatalogNote(nil, []skills.SkipError{bad}, skillRoots{home: "/home/.apogee", workspace: "/ws"})
 	if strings.Contains(only, "no skills found") {
 		t.Errorf("a refused skill must not be reported as nothing found:\n%s", only)
 	}
@@ -1212,7 +1286,7 @@ func TestSkillCatalogNoteSeparatesShadowedFromBroken(t *testing.T) {
 	note := skillCatalogNote(
 		[]skills.Skill{{ID: "review", DisplayName: "Review"}},
 		[]skills.SkipError{bad, shadowed},
-		"/home/.apogee", "/ws",
+		skillRoots{home: "/home/.apogee", workspace: "/ws"},
 	)
 	for _, want := range []string{
 		"1 skill found but not loaded:", bad.Path, "malformed YAML frontmatter",
@@ -1245,7 +1319,7 @@ func TestSkillCatalogNoteShadowOnlyClaimsNoFailure(t *testing.T) {
 	note := skillCatalogNote(
 		[]skills.Skill{{ID: "review", DisplayName: "Review"}},
 		[]skills.SkipError{shadowed},
-		"/home/.apogee", "/ws",
+		skillRoots{home: "/home/.apogee", workspace: "/ws"},
 	)
 	if strings.Contains(note, "not loaded") {
 		t.Errorf("a shadowed skill is reported as a load failure:\n%s", note)
@@ -1265,7 +1339,7 @@ func TestSkillCatalogNoteNamesTheExportVerb(t *testing.T) {
 	note := skillCatalogNote([]skills.Skill{
 		{ID: "planning", DisplayName: "Planning", Dir: skills.ShippedMountPrefix + "planning"},
 		{ID: "clean-code", DisplayName: "Clean Code", Dir: filepath.Join(ws, ".apogee", "skills", "clean-code")},
-	}, nil, home, ws)
+	}, nil, skillRoots{home: home, workspace: ws})
 
 	if !strings.Contains(note, "edit a skill apogee ships: /skills export <id>") {
 		t.Errorf("the listing does not name the export verb:\n%s", note)
@@ -1303,7 +1377,7 @@ func TestSkillCatalogNoteWithholdsTheExportHint(t *testing.T) {
 		{"no shipped skill in the listing", local, home},
 		{"a shipped skill but no apogee home", shipped, ""},
 	} {
-		note := skillCatalogNote(c.list, nil, c.home, ws)
+		note := skillCatalogNote(c.list, nil, skillRoots{home: c.home, workspace: ws})
 		if strings.Contains(note, "/skills export") {
 			t.Errorf("%s still offers the export hint:\n%s", c.name, note)
 		}
@@ -1324,7 +1398,7 @@ func TestExportHintNamesTheFolderTheExportWrites(t *testing.T) {
 
 	lines := exportShippedHintLines(
 		[]skills.Skill{{ID: id, DisplayName: id, Dir: skills.ShippedMountPrefix + id}},
-		home, filepath.Join("/ws"),
+		skillRoots{home: home, workspace: filepath.Join("/ws")},
 	)
 	if len(lines) != 2 {
 		t.Fatalf("the hint rendered %d lines, want two: %q", len(lines), lines)

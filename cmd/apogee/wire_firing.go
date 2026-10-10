@@ -249,6 +249,7 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 		skillProvider = skills.NewProvider(skills.Sources{
 			Home:             in.roots.config,
 			Workspace:        in.roots.workspace,
+			ProjectRoot:      in.roots.project,
 			UseProjectSkills: in.opts.UseProjectSkills,
 			// Both skill gates come off the SAME resolved options a session reads, so an unattended
 			// run's catalog is the session's catalog (ADR 0031's Driver parity). Leaving this one out

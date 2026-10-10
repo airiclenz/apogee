@@ -1103,6 +1103,13 @@ type Options struct {
 	Mode      domain.Mode
 	Workspace string
 
+	// ProjectRoot is the Project root this run resolved (internal/projectroot, ADR 0096 §1): the
+	// folder whose .apogee/skills the skills loader reads. The renderer never derives it and reads
+	// it only to NAME that source — the /skills report and the "/" menu label a skill found there
+	// "workspace", and an empty catalog names the folder discovery looked in. Empty ⇒ the
+	// Workspace, matching the loader's own fallback (skills.Sources.ProjectRoot).
+	ProjectRoot string
+
 	// ConfigHome is the resolved apogee home directory — `~/.apogee` by default, or whatever
 	// `--config` / `APOGEE_CONFIG` selected. The renderer never derives it (the binary owns path
 	// resolution) and reads it to NAME a path in a report: /skills tells an empty catalog

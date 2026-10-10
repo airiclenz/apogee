@@ -699,7 +699,10 @@ every payload field, the exec posture, the webhook contract, the advice fence, t
 
 A **skill** is a folder holding a `SKILL.md` — frontmatter naming it, and a Markdown body of
 instructions. Apogee always scans two places for them: your global library at `~/.apogee/skills`,
-and the project's own `.apogee/skills`. `use-project-skills:` (default `true`) adds a third, the
+and the project's own `.apogee/skills`. That one sits at the project root — the nearest folder
+holding a `.apogee/`, from the workspace up to its git top-level (never your home folder) — so a
+session started in a subfolder of the project still finds the project's skills; outside a
+repository it is the workspace's own. `use-project-skills:` (default `true`) adds a third, the
 workspace's bare `skills/` folder — the convention a repository follows when its skills are meant
 for whichever agent shows up.
 
@@ -717,7 +720,8 @@ a repository can contribute a **new** skill id but can never quietly replace one
 muscle memory; the copy it displaced is recorded rather than dropped, and
 [`/skills`](commands.md) names both the live one and the shadowed one. And the skill folders the
 model may read are mounted **read-only**, by their resolved real path — a `skills/` or
-`.apogee/skills` that is a symlink pointing out of the workspace is neither loaded nor mounted,
+`.apogee/skills` that is a symlink pointing out of the workspace (out of the project root, for
+`.apogee/skills`) is neither loaded nor mounted,
 so a repository cannot use one to widen what the file tools can reach.
 
 The flip is live: commit the `use-project-skills` row in `/settings`, or save the file, and the

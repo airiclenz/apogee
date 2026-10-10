@@ -74,6 +74,10 @@ func (w *rootWiring) options() tui.Options {
 		Endpoint:  w.opts.Endpoint,
 		Mode:      w.mode,
 		Workspace: w.roots.workspace,
+		// The Project root the skills loader hangs .apogee/skills off (stateRoots.project), so a
+		// skill loaded from a Project root above the workspace is labelled "workspace" rather than
+		// "elsewhere", and the empty-catalog note names the folder discovery actually looked in.
+		ProjectRoot: w.roots.project,
 		// The apogee home THIS run resolved (--config / APOGEE_CONFIG included), so a report that
 		// names a path — /skills telling an empty catalog where discovery looked — names the folder
 		// the run actually walks rather than the ~/.apogee default it may not be using.

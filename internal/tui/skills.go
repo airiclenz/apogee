@@ -92,7 +92,7 @@ func (m *Model) noteSkillCatalog() {
 		// beside half of another.
 		list, skipped = m.opts.Skills.Report()
 	}
-	m.transcript.addNote(skillCatalogNote(list, skipped, m.opts.ConfigHome, m.opts.Workspace))
+	m.transcript.addNote(skillCatalogNote(list, skipped, m.opts.skillRoots()))
 }
 
 // skillCatalogNote renders the /skills report from one scan's halves: the skills that loaded, the
@@ -107,20 +107,20 @@ func (m *Model) noteSkillCatalog() {
 // exactly when the human most needs the reason. Only a genuinely empty scan — nothing loaded,
 // nothing refused — gets the where-we-looked note.
 //
-// The two roots are what the report answers "where from?" with, in both directions: an empty scan
+// The roots are what the report answers "where from?" with, in both directions: an empty scan
 // names the dirs discovery LOOKED in, and a loaded skill is labelled with the one it CAME from
 // (skillSource).
-func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, workspace string) string {
+func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, roots skillRoots) string {
 	if len(list) == 0 && len(skipped) == 0 {
-		return strings.Join(emptyCatalogLines(home, workspace), "\n")
+		return strings.Join(emptyCatalogLines(roots), "\n")
 	}
 	failed, shadowed := partitionSkips(skipped)
 	var lines []string
 	for _, section := range [][]string{
-		loadedSkillLines(list, home, workspace),
+		loadedSkillLines(list, roots),
 		failedSkillLines(failed),
 		shadowedSkillLines(shadowed),
-		exportShippedHintLines(list, home, workspace),
+		exportShippedHintLines(list, roots),
 	} {
 		if len(section) == 0 {
 			continue
@@ -141,20 +141,25 @@ func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, wor
 // same reason the loader's
 // Sources are (ADR 0001): home is the apogee home this run resolved — `--config` /
 // APOGEE_CONFIG move it, and naming `~/.apogee` at a run that is not using it would send the
-// human to the wrong folder — and workspace is the project root the two project-local dirs hang
-// off. An empty root renders its spelling/placeholder rather than a bogus relative path.
-func emptyCatalogLines(home, workspace string) []string {
-	lib := home
+// human to the wrong folder — the bare skills/ hangs off the workspace, and .apogee/skills off the
+// Project root, which may sit above it (ADR 0096 §1). An empty root renders its spelling/placeholder
+// rather than a bogus relative path.
+func emptyCatalogLines(roots skillRoots) []string {
+	lib := roots.home
 	if lib == "" {
 		lib = filepath.Join("~", ".apogee")
 	}
-	ws := workspace
+	ws := roots.workspace
 	if ws == "" {
 		ws = "<workspace>"
 	}
+	project := roots.projectBase()
+	if project == "" {
+		project = ws
+	}
 	return []string{
 		"no skills found — a skill is a folder holding a SKILL.md, discovered under:",
-		"  " + filepath.Join(ws, ".apogee", "skills"),
+		"  " + filepath.Join(project, ".apogee", "skills"),
 		"  " + filepath.Join(ws, "skills") + "  (only when use-project-skills is on)",
 		"  " + filepath.Join(lib, "skills") + "  (your global library — wins an id clash)",
 	}
@@ -182,7 +187,7 @@ func emptyCatalogLines(home, workspace string) []string {
 // (sourceDirs and the embedded tree, internal/skills/load.go), not a trust level: trust is the
 // human's call, and the label's job is to hand them the fact they need to make it.
 const (
-	skillSourceWorkspace = "workspace" // <ws>/.apogee/skills or <ws>/skills — the project's own
+	skillSourceWorkspace = "workspace" // <project root>/.apogee/skills or <ws>/skills — the project's own
 	skillSourceLibrary   = "library"   // <home>/skills — the user's global library (ADR 0032)
 	skillSourceShipped   = "shipped"   // compiled into the binary — apogee's own (ADR 0065)
 	skillSourceElsewhere = "elsewhere" // under neither root: a relocated or unwired source dir
@@ -193,17 +198,40 @@ const (
 // more of the token — which "/clean-code workspace" would.
 const skillSourceSep = " · "
 
-// skillSource names which source dir a loaded skill came from, given the two roots this run
-// resolved: home is [Options.ConfigHome] and workspace is [Options.Workspace] — the same pair the
-// composition root builds skills.Sources from, so the answer is derived from the loader's own
-// layering rather than guessed at.
+// skillRoots are the roots this run resolved that a skill's source is measured against: home is
+// [Options.ConfigHome], workspace is [Options.Workspace] and project is [Options.ProjectRoot] — the
+// same three the composition root builds skills.Sources from, so a label is derived from the
+// loader's own layering rather than guessed at.
+type skillRoots struct {
+	home      string
+	workspace string
+	project   string
+}
+
+// skillRoots gathers the three roots the skill surfaces label and list sources against.
+func (o Options) skillRoots() skillRoots {
+	return skillRoots{home: o.ConfigHome, workspace: o.Workspace, project: o.ProjectRoot}
+}
+
+// projectBase is the folder .apogee/skills hangs off: the Project root, or the workspace when none
+// was resolved — the loader's own fallback (skills.Sources.ProjectRoot), restated so the label and
+// the walk agree on one folder.
+func (r skillRoots) projectBase() string {
+	if r.project != "" {
+		return r.project
+	}
+	return r.workspace
+}
+
+// skillSource names which source dir a loaded skill came from, given the roots this run resolved
+// (skillRoots).
 //
 // An empty Dir discloses NOTHING (the empty string) rather than guessing: a catalog assembled
 // without one — a fake in a test, a future in-memory source — has no source to name, and inventing
 // "elsewhere" for it would put a word on the row that says less than silence. A Dir that answers to
 // neither root is the case that DOES earn "elsewhere": something loaded it, and the human should
 // see that this run cannot account for where.
-func skillSource(dir, home, workspace string) string {
+func skillSource(dir string, roots skillRoots) string {
 	if dir == "" {
 		return ""
 	}
@@ -218,12 +246,14 @@ func skillSource(dir, home, workspace string) string {
 	// because a home may legitimately sit inside the workspace (--config <ws>/.apogee): when one
 	// path answers to both roots, the label must name the source the catalog resolved the id
 	// through, not the outer folder that happens to contain it.
-	if home != "" && underSkillRoot(dir, filepath.Join(home, "skills")) {
+	if roots.home != "" && underSkillRoot(dir, filepath.Join(roots.home, "skills")) {
 		return skillSourceLibrary
 	}
-	if workspace != "" &&
-		(underSkillRoot(dir, filepath.Join(workspace, ".apogee", "skills")) ||
-			underSkillRoot(dir, filepath.Join(workspace, "skills"))) {
+	if project := roots.projectBase(); project != "" &&
+		underSkillRoot(dir, filepath.Join(project, ".apogee", "skills")) {
+		return skillSourceWorkspace
+	}
+	if roots.workspace != "" && underSkillRoot(dir, filepath.Join(roots.workspace, "skills")) {
 		return skillSourceWorkspace
 	}
 	return skillSourceElsewhere
@@ -290,7 +320,7 @@ func skillIDCell(id string) string {
 // SKILL.md whose summary carries a newline would otherwise write further lines into this report —
 // lines it could shape as another skill's row, source label and all, under a heading that counted
 // one fewer. The strip itself stays with addNote, the seam that owns it.
-func loadedSkillLines(list []skills.Skill, home, workspace string) []string {
+func loadedSkillLines(list []skills.Skill, roots skillRoots) []string {
 	if len(list) == 0 {
 		return nil
 	}
@@ -301,7 +331,7 @@ func loadedSkillLines(list []skills.Skill, home, workspace string) []string {
 	lines := make([]string, 0, len(list)+1)
 	lines = append(lines, head)
 	for _, sk := range list {
-		line := "  " + skillTokenLabel(sk.ID, skillSource(sk.Dir, home, workspace))
+		line := "  " + skillTokenLabel(sk.ID, skillSource(sk.Dir, roots))
 		if name := flattenField(sk.DisplayName); name != "" {
 			line += "  " + name
 		}
@@ -446,13 +476,13 @@ func shadowedSkillLines(shadowed []skills.SkipError) []string {
 // The folder is composed from the SAME home the export composes its library root from, so the hint
 // and the write can never name different places; `<id>` stays a placeholder because the row is
 // about the verb rather than about any one skill in the list above it.
-func exportShippedHintLines(list []skills.Skill, home, workspace string) []string {
-	if home == "" {
+func exportShippedHintLines(list []skills.Skill, roots skillRoots) []string {
+	if roots.home == "" {
 		return nil
 	}
 	shipped := false
 	for _, sk := range list {
-		if skillSource(sk.Dir, home, workspace) == skillSourceShipped {
+		if skillSource(sk.Dir, roots) == skillSourceShipped {
 			shipped = true
 			break
 		}
@@ -462,6 +492,6 @@ func exportShippedHintLines(list []skills.Skill, home, workspace string) []strin
 	}
 	return []string{
 		"edit a skill apogee ships: /skills export <id>",
-		"  copies it into " + filepath.Join(home, "skills", "<id>") + ", where your copy wins",
+		"  copies it into " + filepath.Join(roots.home, "skills", "<id>") + ", where your copy wins",
 	}
 }

@@ -680,7 +680,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 		tr.addNote(skillCatalogNote(
 			[]skills.Skill{{ID: "review", DisplayName: "Rev" + osc52 + "iew", Summary: "su" + csi + "mmary"}},
 			[]skills.SkipError{{Path: "/lib/bad/SKILL.md", Err: errors.New("yaml: " + osc52 + "broken")}},
-			"/home/me/.apogee", "/ws",
+			skillRoots{home: "/home/me/.apogee", workspace: "/ws"},
 		))
 		assertTranscriptNoESC(t, tr)
 		if got := plainRender(tr); !strings.Contains(got, "iew") {

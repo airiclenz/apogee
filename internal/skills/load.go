@@ -80,9 +80,11 @@ const (
 const ShippedMountPrefix = shippedSource + ":"
 
 // Sources are the injected roots Load discovers skills under (ADR 0001 — no implicit ~/.apogee).
-// Home is the apogee home (its skills/ subdir is the global library); Workspace is the project
-// root (its .apogee/skills and, when UseProjectSkills, its skills/ folder). An empty Home or
-// Workspace simply contributes no dirs.
+// Home is the apogee home (its skills/ subdir is the global library); Workspace is the folder the
+// run works in (its skills/ folder, when UseProjectSkills); ProjectRoot is the Project root
+// (internal/projectroot — its .apogee/skills), and empty means the Workspace, so a Sources built
+// without one reads .apogee/skills from the Workspace exactly as it always did (ADR 0096 §1). An
+// empty Home, or an empty Workspace with no ProjectRoot, simply contributes no dirs.
 //
 // UseShippedSkills is the odd one out: it names no root at all, because the shipped source is
 // embedded in the binary rather than found on disk. Its ZERO VALUE is off, so a Sources built
@@ -91,6 +93,7 @@ const ShippedMountPrefix = shippedSource + ":"
 type Sources struct {
 	Home             string
 	Workspace        string
+	ProjectRoot      string
 	UseProjectSkills bool
 	UseShippedSkills bool
 }
@@ -124,8 +127,8 @@ func Load(src Sources) (*Catalog, error) {
 	return cat, cat.skipError()
 }
 
-// skillAnchor is one source dir kept in two halves: the BASE it belongs to (the workspace root, or
-// the apogee home — both operator-chosen) and the path of the source dir below it. The split is
+// skillAnchor is one source dir kept in two halves: the BASE it belongs to (the workspace root or
+// the Project root, or the apogee home — all operator-chosen) and the path of the source dir below it. The split is
 // what lets loadDir pin its fence at the base and reach the source dir THROUGH it, so every
 // component below the base — `.apogee`, `skills` — is resolved inside that fence and an untrusted
 // repo cannot relocate the walk by shipping any of them as a symlink. trusted marks the one anchor
@@ -143,7 +146,7 @@ func (a skillAnchor) dir() string { return filepath.Join(a.base, filepath.FromSl
 
 // sourceAnchors lists the skill dirs in DECREASING priority (an earlier one wins an id collision
 // with a later one): the user's global library FIRST, then the project's bare skills/ (gated by
-// UseProjectSkills), then the project's .apogee/skills. Home going first is the ADR 0032 rule —
+// UseProjectSkills) under the Workspace, then .apogee/skills under the Project root. Home going first is the ADR 0032 rule —
 // the user's own library wins any cross-source id collision, so a cloned repo can contribute a
 // NEW skill id but can never silently replace a skill the user invokes by muscle memory. The
 // workspace dirs keep their relative order among themselves.
@@ -157,7 +160,10 @@ func (a skillAnchor) dir() string { return filepath.Join(a.base, filepath.FromSl
 // into the lowest-priority source, and a collision keeps the FIRST copy (Catalog.set), which
 // reaches the identical "home wins, bare skills/ beats .apogee/skills" outcome from the other end.
 //
-// An empty Home/Workspace drops its dirs rather than producing a bogus relative path. The home
+// An empty Home/Workspace drops its dirs rather than producing a bogus relative path; an empty
+// ProjectRoot hangs .apogee/skills off the Workspace (projectSkillsBase). The .apogee/skills fence
+// is pinned at the Project root, so its walk may reach no further than the folder the run resolved
+// as the project's. The home
 // anchor is the trusted one: the apogee home is the operator's control plane, so the path naming
 // the library may be a symlink the operator placed and discovery follows it (openAnchor).
 //
@@ -170,13 +176,23 @@ func sourceAnchors(src Sources) []skillAnchor {
 	if src.Home != "" {
 		anchors = append(anchors, skillAnchor{base: src.Home, rel: "skills", trusted: true})
 	}
-	if src.Workspace != "" {
-		if src.UseProjectSkills {
-			anchors = append(anchors, skillAnchor{base: src.Workspace, rel: "skills"})
-		}
-		anchors = append(anchors, skillAnchor{base: src.Workspace, rel: ".apogee/skills"})
+	if src.Workspace != "" && src.UseProjectSkills {
+		anchors = append(anchors, skillAnchor{base: src.Workspace, rel: "skills"})
+	}
+	if base := projectSkillsBase(src); base != "" {
+		anchors = append(anchors, skillAnchor{base: base, rel: ".apogee/skills"})
 	}
 	return anchors
+}
+
+// projectSkillsBase is the folder .apogee/skills hangs off: the Project root, or the Workspace when
+// the host resolved none — an empty ProjectRoot is also the answer for a workspace that is the
+// user's home, where there is no project layer and the anchor stays where it has always been.
+func projectSkillsBase(src Sources) string {
+	if src.ProjectRoot != "" {
+		return src.ProjectRoot
+	}
+	return src.Workspace
 }
 
 // sourceDirs renders the same list as plain host paths, for the callers that only DISPLAY the

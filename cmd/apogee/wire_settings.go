@@ -1446,7 +1446,7 @@ func applySkillSourceGate(
 		return "", err
 	}
 	src := a.skills.Sources()
-	src.Home, src.Workspace = a.roots.config, a.roots.workspace
+	src.Home, src.Workspace, src.ProjectRoot = a.roots.config, a.roots.workspace, a.roots.project
 	set(&src, landed)
 	a.skills.SetSources(src)
 	// The scan's error is soft and is dropped here for the reason the "/" menu's reload drops it:

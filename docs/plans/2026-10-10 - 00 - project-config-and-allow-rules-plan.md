@@ -82,7 +82,16 @@ NOTES (2026-10-10): CONTEXT.md's Dangerous-action guard entry now names `dangero
 **Acceptance:** `grep -l '0096' docs/adr/0076-*.md docs/adr/0012-*.md docs/adr/0032-*.md docs/adr/0041-*.md AGENTS.md` lists all five; `grep -c '^\*\*Adoption\*\*:' CONTEXT.md` prints 1.
 **Commit:** `docs(adr): ADR 0096 — project config grants are live only by adoption`
 
-## 2. Project root resolver; skills follow it
+## 2. Project root resolver; skills follow it — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from the assumed signature `Resolve(workspace, home string, fs FS) (string, error)` — shipped as `Resolve(workspace, home string) string`: the writer decision "Resolve never fails" leaves no error to return, and symlink resolution (filepath.EvalSymlinks) needs the real filesystem, so an FS port would have had one adapter; tests use t.TempDir like the skills loader's.
+NOTES (2026-10-10): the home folder ends the walk unexamined for `.apogee`; when the home folder is itself the git top (a dotfiles repo), a `.apogee/` between the workspace and home still counts — "never past the git top, never $HOME" read literally (test "a home git repo is the git top for a .apogee below it").
+NOTES (2026-10-10): resolveRoots takes the home from os.UserHomeDir via a small `userHome` helper; when the platform names no home only the home guard is off (the walk still stops at the git top), and resolveRoots' error set is unchanged.
+NOTES (2026-10-10): the TUI's (home, workspace) string pair became one `skillRoots{home, workspace, project}` value (Options.skillRoots) carried by skillSource, skillCatalogNote, emptyCatalogLines, loadedSkillLines and exportShippedHintLines, so the third root cannot be passed out of order.
+NOTES (2026-10-10): consequential edit — internal/tui/autocomplete.go: made necessary by the skillSource signature change (the "/" menu and the skill-hint rows label against the Project root too)
+NOTES (2026-10-10): consequential edit — internal/tui/skill_test.go: made necessary by the skillSource/skillCatalogNote signature change (existing call sites; new label and empty-note tests added)
+NOTES (2026-10-10): consequential edit — internal/tui/transcript_test.go: made necessary by the skillCatalogNote signature change
+NOTES (2026-10-10): consequential edit — docs/manual/configuration.md: made necessary by `.apogee/skills` moving to the Project root (the "Skills a repository ships" section said the project's own `.apogee/skills`, read as the workspace's)
 
 **What:**
 **Goal:** one exported resolver returns the Project root for a workspace, and the skills loader reads `.apogee/skills` from it while bare `skills/` stays at the workspace.
