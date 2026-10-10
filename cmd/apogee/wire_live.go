@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/gitexec"
@@ -82,6 +83,21 @@ func projectConfigWatchPath(opts config.Options, projectRoot string) string {
 		return ""
 	}
 	return path
+}
+
+// adoptionWatchPath is the adoption record a session watches beside its config files, or "" when
+// there is none to watch: no Project config to watch (projectConfigWatchPath), or a Project root the
+// store cannot key a record on. The record need not exist yet — the first answer creates it, and
+// that creation is the change the watcher reports.
+func adoptionWatchPath(opts config.Options, roots stateRoots) string {
+	if projectConfigWatchPath(opts, roots.project) == "" {
+		return ""
+	}
+	store, err := adoption.New(config.WorkspacesDir(roots.config), roots.project)
+	if err != nil {
+		return ""
+	}
+	return store.Path()
 }
 
 // liveMCPHost is the process an MCP connect runs in: the environment's egress proxy for the HTTP
@@ -384,6 +400,18 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		w.projectWatch = filewatch.New(path)
 		configWatchTiming.applyTo(w.projectWatch)
 		w.projectWatch.Start()
+	}
+
+	// The third file the effective Allow rules are resolved from (ADR 0096 §4): the Project root's
+	// adoption record under ~/.apogee/workspaces. An answer recorded outside this session —
+	// `apogee project adopt` in another terminal, another session's pane — writes only the record,
+	// so it is watched beside the two config files and fanned into the same wait; the re-read then
+	// installs the rules it settles to (configHost.ReloadConfig). A run with no project layer has no
+	// record to watch.
+	if path := adoptionWatchPath(w.opts, w.roots); path != "" {
+		w.adoptionWatch = filewatch.New(path)
+		configWatchTiming.applyTo(w.adoptionWatch)
+		w.adoptionWatch.Start()
 	}
 
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and

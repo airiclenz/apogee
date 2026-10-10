@@ -259,6 +259,7 @@ type rootWiring struct {
 	externalEdits *externalEdit
 	configWatch   *filewatch.Watcher
 	projectWatch  *filewatch.Watcher
+	adoptionWatch *filewatch.Watcher
 	mover         sessionMover
 	launcherPath  *launcherPath
 	launcherSeams launcherWiring
@@ -299,6 +300,9 @@ func (w *rootWiring) close() {
 	}
 	if w.projectWatch != nil {
 		w.projectWatch.Stop()
+	}
+	if w.adoptionWatch != nil {
+		w.adoptionWatch.Stop()
 	}
 
 	// The Reactions go after the Firings and BEFORE the engine, for the Firings' own reason: a

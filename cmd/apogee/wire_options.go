@@ -295,15 +295,25 @@ func (h configHost) SaveHostAcknowledgement() (string, error) { return h.saveHos
 // against the baseline the spec took, and the loader's notices that are new against it
 // (settingsedit.go). Nothing here applies anything — the pane applies through the same two homes an
 // in-pane commit uses, so the file's authority and the apply's single path both stay where they were.
-func (h configHost) ReloadConfig() (tui.ConfigReload, error) { return h.w.externalEdits.changed() }
+//
+// The one thing it does put in force itself is the effective Allow rules, when the re-read moved
+// them (followReloadedAllowRules): a rule is no setting a row applies, and a hand-edited `allow:` or
+// an answer recorded outside this session has to reach the engine whatever the row shows.
+func (h configHost) ReloadConfig() (tui.ConfigReload, error) {
+	reload, err := h.w.externalEdits.changed()
+	if err != nil {
+		return reload, err
+	}
+	return h.w.followReloadedAllowRules(reload), nil
+}
 
 // AwaitConfigChange is the trigger that needs no editor at all (ADR 0041 decision 3): one wait on the
-// watchers started in the assembly — the global file's and the Project config's — answered when
-// either file changes. What the renderer does with the
+// watchers started in the assembly — the global file's, the Project config's and the adoption
+// record's — answered when any of the three changes. What the renderer does with the
 // news is exactly what it does when an editor exits — re-read through ReloadConfig, apply through the
 // two homes above — so a saved file applies whoever saved it (decision 5).
 func (h configHost) AwaitConfigChange(ctx context.Context) bool {
-	return awaitConfigChangeOn(h.w.configWatch, h.w.projectWatch)(ctx)
+	return awaitConfigChangeOn(h.w.configWatch, h.w.projectWatch, h.w.adoptionWatch)(ctx)
 }
 
 // MigrateKey answers the key-migration offer's "move it" (keymigrate.go, ADR 0047): the store write,

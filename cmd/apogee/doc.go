@@ -33,7 +33,8 @@
 // Firing composer share — every key both Drivers fill identically, filled once (ADR 0031);
 // wire_live.go the live-session assembly, from the MCP connections
 // and the tool registry through the engine and Upstream holders and the bind that fills
-// them to the config watcher and the out-of-band work; wire_verbs.go the composition
+// them to the config watchers (the global file, the Project config and its adoption
+// record) and the out-of-band work; wire_verbs.go the composition
 // root's own verbs — the rebind, the beat wrapper, and the three ways a session arrives
 // on or records an Upstream; wire_options.go the projection of all of it onto
 // tui.Options, the renderer's whole view of this host, and the two host capabilities
@@ -74,7 +75,8 @@
 // argv out, the list of changed keys back (ADR 0037 decision 5); projectrules.go the four
 // Allow-rule acts of the config host (ADR 0096 §4) — a project rule written into the Project
 // config, adopted, rejected or removed, then the baseline re-taken and the effective rules
-// re-resolved and installed on the engine.
+// re-resolved and installed on the engine — and the same install behind a watched re-read
+// that moved the `allow:` key.
 //
 // The session's wiring: upstream.go the holder owning the CURRENT heartbeat Monitor and
 // binding — so a `/server` switch is a composition-root move the renderer never sees —
@@ -144,6 +146,8 @@
 // it on a local desktop and a pasted redirect URL as the fallback, whichever arrives first;
 // mcp_cmd.go `apogee mcp login|logout <name>` over that fetcher, and the startup login that
 // offers an `auth: oauth` server with no usable token a login on stderr before the connect;
+// project_cmd.go `apogee project adopt`, the terminal answer to each Allow rule the Project
+// config proposes — adopt, not now or reject — which a running session applies live;
 // undo.go `apogee undo <session-id> [confirm <generation>]`, the revert an unattended
 // Firing has nobody to offer — it holds the session, opens its snapshot store from a fresh
 // process and shows `/undo`'s own listing; the confirm quotes the generation the preview

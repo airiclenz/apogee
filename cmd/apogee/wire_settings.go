@@ -1164,6 +1164,16 @@ var settingsTable = slices.Concat([]settingsEntry{
 		apply: applyURLSafetyHosts,
 	},
 	{
+		key: settingKeyAllow,
+		apply: func(settingsApplier, string, string) (string, error) {
+			// The rules are in force before this row is reached: the re-read that reported the key
+			// moved has already re-resolved and installed them (followReloadedAllowRules), because a
+			// set that empties reaches the pane as an empty value it journals without applying. The
+			// key is not Editable, so a re-read is the only way here; answering it is the whole apply.
+			return "", nil
+		},
+	},
+	{
 		key: "use-project-skills",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			return applySkillSourceGate(a, key, value, func(src *skills.Sources, landed config.Options) {

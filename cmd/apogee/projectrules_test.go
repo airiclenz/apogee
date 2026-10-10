@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -357,4 +358,141 @@ func childRanTheCommand(srv *stubllm.Server) bool {
 		}
 	}
 	return false
+}
+
+// awaitAndReload is what the renderer does with a watched change: wait for the report — bounded, so
+// a chain that never reports fails rather than hanging — then re-read through the config host.
+func awaitAndReload(t *testing.T, host configHost, why string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), configWatchTestDeadline)
+	defer cancel()
+	if !host.AwaitConfigChange(ctx) {
+		t.Fatalf("no change reported for %s", why)
+	}
+	reload, err := host.ReloadConfig()
+	if err != nil {
+		t.Fatalf("ReloadConfig after %s: %v", why, err)
+	}
+	hasMoved := false
+	for _, a := range reload.Applied {
+		hasMoved = hasMoved || a.Path == settingKeyAllow
+	}
+	if !hasMoved {
+		t.Fatalf("the re-read after %s = %+v; want the allow key reported moved", why, reload)
+	}
+}
+
+// An adoption made by `apogee project adopt` in another terminal writes only the adoption record;
+// the session's watcher on that record reports it, and the re-read puts the rule in force with no
+// restart — the next identical call runs without asking.
+func TestProjectRuleCLIAdoptionAppliesLiveWithoutARestart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	srv := scriptedTerminalModel(t)
+	approver := &e2eApprover{}
+	w := projectRuleWiring(t, srv.URL, approver, &e2eSink{})
+	host := configHost{w: w}
+	writeProjectAllow(t, w.roots.project, projectRuleCommand)
+	// The session started with the rule already proposed: that is its baseline, not a change.
+	w.externalEdits.refresh()
+	path := adoptionWatchPath(config.Options{ConfigDir: w.roots.config}, w.roots)
+	if path == "" {
+		t.Fatal("no adoption record to watch for a session with a Project config")
+	}
+	w.adoptionWatch = startConfigWatcher(t, path)
+
+	runE2EExchange(t, ctx, w.engine, "run a command")
+	if got := approver.requests(); len(got) != 1 {
+		t.Fatalf("approval requests with the rule proposed = %d, want the gate", len(got))
+	}
+
+	if out, err := runProjectAdopt(t, w.roots.config, w.roots.project, true, "y"); err != nil {
+		t.Fatalf("project adopt: %v\n%s", err, out)
+	}
+	awaitAndReload(t, host, "an adoption made by the CLI")
+
+	approver.reset()
+	runE2EExchange(t, ctx, w.engine, "run it again")
+	if got := approver.requests(); len(got) != 0 {
+		t.Errorf("approval requests after the CLI adoption = %+v, want none — the rule applies live", got)
+	}
+}
+
+// A global `allow:` entry written into config.yaml by hand applies as soon as the watcher reports
+// the save, and taking it out again — the edit that empties the rule set — puts the gate back.
+func TestProjectRuleHandEditedGlobalAllowAppliesLive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	srv := scriptedTerminalModel(t)
+	approver := &e2eApprover{}
+	w := projectRuleWiring(t, srv.URL, approver, &e2eSink{})
+	host := configHost{w: w}
+	original, err := os.ReadFile(w.configPath())
+	if err != nil {
+		t.Fatalf("read config.yaml: %v", err)
+	}
+	w.configWatch = startConfigWatcher(t, w.configPath())
+
+	runE2EExchange(t, ctx, w.engine, "run a command")
+	if got := approver.requests(); len(got) != 1 {
+		t.Fatalf("approval requests before any rule = %d, want the gate", len(got))
+	}
+
+	edited := string(original) + "allow:\n  terminal:\n    - " + projectRuleCommand + "\n"
+	writeSettingsFixture(t, w.configPath(), edited)
+	awaitAndReload(t, host, "a hand-edited global allow entry")
+	approver.reset()
+	runE2EExchange(t, ctx, w.engine, "run it again")
+	if got := approver.requests(); len(got) != 0 {
+		t.Errorf("approval requests after the hand edit = %+v, want none — the global rule applies live", got)
+	}
+
+	writeSettingsFixture(t, w.configPath(), string(original))
+	awaitAndReload(t, host, "the global allow entry taken out")
+	approver.reset()
+	runE2EExchange(t, ctx, w.engine, "and once more")
+	if got := approver.requests(); len(got) != 1 {
+		t.Errorf("approval requests after the entry is gone = %d, want the gate back", len(got))
+	}
+}
+
+// The adoption-record watcher is one of the run's closers: tearing the session down stops it and
+// closes the channel the renderer's wait parks on.
+func TestProjectRuleAdoptionWatcherStopsWithTheSession(t *testing.T) {
+	t.Parallel()
+	watch := filewatch.New(filepath.Join(t.TempDir(), "record.yaml"))
+	watch.Start()
+	w := &rootWiring{adoptionWatch: watch}
+
+	w.close()
+
+	select {
+	case _, ok := <-watch.Changes():
+		if ok {
+			t.Error("the adoption watcher reported a change at teardown, want its channel closed")
+		}
+	case <-time.After(configWatchTestDeadline):
+		t.Fatal("the adoption watcher is still running after the session closed")
+	}
+}
+
+// A session watches an adoption record only where there is a Project config to answer for: a run
+// that takes no project layer watches none.
+func TestProjectRuleAdoptionWatchPathFollowsTheProjectLayer(t *testing.T) {
+	t.Parallel()
+	home, root := t.TempDir(), t.TempDir()
+	roots := stateRoots{config: home, workspace: root, project: root}
+	store, err := adoption.New(config.WorkspacesDir(home), root)
+	if err != nil {
+		t.Fatalf("adoption.New: %v", err)
+	}
+	if got := adoptionWatchPath(config.Options{ConfigDir: home}, roots); got != store.Path() {
+		t.Errorf("adoptionWatchPath = %q, want the root's record %q", got, store.Path())
+	}
+	if got := adoptionWatchPath(config.Options{ConfigDir: home, GlobalConfigOnly: true}, roots); got != "" {
+		t.Errorf("adoptionWatchPath with no project layer = %q, want none", got)
+	}
+	if got := adoptionWatchPath(config.Options{ConfigDir: home}, stateRoots{config: home}); got != "" {
+		t.Errorf("adoptionWatchPath with no Project root = %q, want none", got)
+	}
 }

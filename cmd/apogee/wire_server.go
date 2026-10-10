@@ -162,16 +162,18 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 // re-reads through [tui.ConfigHost.ReloadConfig] when this returns true, which is the same call an
 // editor's exit makes — one apply path, two triggers.
 //
-// It fans in the two files the live re-read is layered from (ADR 0096 §6): the global config's
-// watcher and the Project config's, which is nil for a run with no project layer. A report from
-// either is the same news — the re-read resolves both files and diffs the result — so the wait does
-// not say which file moved.
+// It fans in the three files the live re-read is resolved from (ADR 0096 §4, §6): the global
+// config's watcher, the Project config's, and the Project root's adoption record's — the last two
+// nil for a run with no project layer. The record is watched because an answer given outside this
+// session (`apogee project adopt`, another session's pane) moves which project rules are in force
+// without touching either config file. A report from any of them is the same news — the re-read
+// resolves all three and diffs the result — so the wait does not say which file moved.
 //
 // It answers false on two ends, and they mean the same thing to the caller: the program's context is
 // done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
-// watcher), or a watch has been stopped and closed its channel — teardown stops both together.
+// watcher), or a watch has been stopped and closed its channel — teardown stops them together.
 // Either way there will never be another report, and the chain retires.
-func awaitConfigChangeOn(global, project *filewatch.Watcher) func(context.Context) bool {
+func awaitConfigChangeOn(global, project, adoptions *filewatch.Watcher) func(context.Context) bool {
 	return func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():
@@ -179,6 +181,8 @@ func awaitConfigChangeOn(global, project *filewatch.Watcher) func(context.Contex
 		case _, ok := <-changesOf(global):
 			return ok
 		case _, ok := <-changesOf(project):
+			return ok
+		case _, ok := <-changesOf(adoptions):
 			return ok
 		}
 	}

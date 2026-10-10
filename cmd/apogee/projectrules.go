@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // ----------------------------------------------------------------------------
@@ -23,7 +25,10 @@ import (
 //
 // Beside the four answers is the one read the adoption pane asks after a watched change
 // (ProposedRules): the rules the Project config proposes now, resolved exactly as the settling
-// resolves the rules in force.
+// resolves the rules in force. And beside that is the live refresh: a watched change to any of the
+// three files the rules resolve from — the global config, the Project config, the adoption record —
+// that moved them is installed the same way (followReloadedAllowRules), so a hand-edited `allow:`
+// or an `apogee project adopt` in another terminal applies without a restart.
 //
 // The order of the two writes is always the safe one. An adoption is recorded only after the file
 // holds the rule, and dropped before the file loses it, so a failure part-way leaves a rule
@@ -129,6 +134,9 @@ func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 	return w.settleAllowRules()
 }
 
+// settingKeyAllow is the `allow:` key's registry path — the name a re-read reports the rules moved by.
+const settingKeyAllow = "allow"
+
 // adoptionAnswer is one of the adoption store's three record writes — Adopt, Reject or Forget.
 type adoptionAnswer func(*adoption.Store, ...adoption.Entry) error
 
@@ -151,9 +159,40 @@ func (w *rootWiring) settleAllowRules() error {
 	if w.externalEdits != nil {
 		w.externalEdits.refresh()
 	}
+	if err := w.installAllowRules(); err != nil {
+		return fmt.Errorf("apogee: the answer is saved, but the rules in force could not be refreshed: %w", err)
+	}
+	return nil
+}
+
+// followReloadedAllowRules is the live refresh behind a watched re-read (configHost.ReloadConfig):
+// when the re-read found the `allow:` key moved — a hand edit to either config file, or an answer
+// recorded outside this session — the effective rules are re-resolved and installed exactly as an
+// act's settling installs them. It is keyed on the re-read rather than on the row's apply because
+// a rule set that empties summarizes as an empty value, which the pane journals without applying.
+// A resolution that fails leaves the rules in force as they were and says so as a notice beside the
+// re-read's own.
+func (w *rootWiring) followReloadedAllowRules(reload tui.ConfigReload) tui.ConfigReload {
+	hasMoved := slices.ContainsFunc(reload.Applied, func(a tui.AppliedSetting) bool { return a.Path == settingKeyAllow })
+	if !hasMoved {
+		return reload
+	}
+	if err := w.installAllowRules(); err != nil {
+		reload.Notices = append(reload.Notices, fmt.Sprintf(
+			"apogee: the allow rules changed on disk, but the rules in force could not be refreshed: %v", err))
+	}
+	return reload
+}
+
+// installAllowRules re-resolves the effective Allow rules from the two files and the adoption
+// record — the resolution a relaunch would make — and installs them on the live-settings holder and
+// the engine.
+//
+// Errors: a global config that no longer resolves; nothing is installed then.
+func (w *rootWiring) installAllowRules() error {
 	resolved, err := w.layeredOptions()
 	if err != nil {
-		return fmt.Errorf("apogee: the answer is saved, but the rules in force could not be refreshed: %w", err)
+		return err
 	}
 	if w.live != nil {
 		w.live.update(func(o *config.Options) { o.AllowRules = resolved.AllowRules })

@@ -370,7 +370,13 @@ NOTES (2026-10-10): the pane reuses keyMigrationHint ("⏎ choose · esc close")
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'Adoption' ./internal/tui/ && go test -race -count=1 -run 'Adoption' ./cmd/apogee/`
 **Commit:** `feat(tui): offer proposed project rules for adoption`
 
-## 16. `apogee project adopt` and live rule refresh
+## 16. `apogee project adopt` and live rule refresh — ✅ DONE (2026-10-10)
+
+NOTES (2026-10-10): re-derived from the assumption that a watched re-read already reaches the engine's Allow rules once the adoption record is watched. `allow` had no `settingsTable` entry, so a watched change would have been refused on its row (`cannotApply`), and a rule set that empties summarizes as "", which the pane journals but never applies. So the install runs on the re-read itself: `configHost.ReloadConfig` (wire_options.go) calls `followReloadedAllowRules` (projectrules.go) whenever `allow` is among the moved keys, and wire_settings.go gains an `allow` entry that does nothing, because by the time the row is reached the rules are already in force. `settleAllowRules` now shares `installAllowRules` with that path.
+NOTES (2026-10-10): consequential edit — cmd/apogee/wire_settings.go: made necessary by the watched re-read reporting `allow` moved (without an entry the row shows "cannot be applied to the running session").
+NOTES (2026-10-10): consequential edit — cmd/apogee/configwatch_apply_test.go: made necessary by `awaitConfigChangeOn` gaining the adoption-record watcher parameter (two call sites pass nil).
+NOTES (2026-10-10): `apogee project adopt` reports "proposes no rule that is waiting on an answer" and exits 0 whether or not stdin is a terminal; the non-terminal refusal fires only when there is something to ask. A workspace with no Project config is refused, naming the workspace. Questions and the closing count go to stdout. Each answer is recorded before the next question, so a run cut off part-way keeps the answers already given.
+NOTES (2026-10-10): the tests proving headless and the daemon stay silent live in project_cmd_test.go (`TestProjectCmdHeadlessIsSilentAboutProposedRules`, `TestProjectCmdDaemonIsSilentAboutProposedRules`). They are not parallel because of `t.Setenv`. The manual entry for `apogee project adopt` is left to item 19.
 
 **What:** Recast at the regression check (2026-10-10).
 **Goal:** `apogee project adopt` lists proposed rules for the current workspace's Project root and adopts or rejects each from a terminal; a running session recomputes its effective Allow rules on any watched change (global file, Project config, adoption store) and applies them live; headless runs and the daemon stay silent about proposals and leave them inert.
