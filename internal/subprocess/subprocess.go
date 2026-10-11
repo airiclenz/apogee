@@ -70,6 +70,19 @@ type SubprocessSpec struct {
 	// (see CappedBuffer). RunSubprocessTo implies it: there the payload leaves through the
 	// caller's writer instead.
 	SplitStdout bool
+	// DecodeConsoleOutput asks for each line of CombinedOutput that is not valid UTF-8 to be
+	// decoded from ConsoleCodepage (platform.DecodeConsoleOutput), so a Windows console program
+	// that prints in the OEM codepage reaches the model as text rather than mojibake. Valid UTF-8
+	// lines in the same capture pass untouched, and the truncation marker and any diagnostic the
+	// run appends are added after the decode, never through it. Only a caller that SHOWS the
+	// model what a command printed sets it — the terminal tool; a caller that consumes the bytes
+	// (a reaction's JSON payload, git, run_tests, python_exec) leaves it false and keeps them raw.
+	DecodeConsoleOutput bool
+	// ConsoleCodepage is the codepage DecodeConsoleOutput decodes from. Zero means
+	// platform.ConsoleOutputCodepage(), which every production caller leaves it at — 65001, a
+	// pass-through, off Windows; a test names one (850) to reach the decode on any host. It is
+	// ignored while DecodeConsoleOutput is false.
+	ConsoleCodepage uint32
 	// WatchMergedStdout asks a CONFINED run to watch its standard output for a denial too, not
 	// its stderr alone: a caller whose shell line merges its own streams (`2>&1`, `>&2`, `&>`,
 	// `|&`) AND chains more commands after the merge sets it, because such a line's denials
@@ -365,7 +378,7 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		return SubprocessResult{}, ctx.Err()
 	}
 
-	res := SubprocessResult{CombinedOutput: out.String(), Stdout: stdoutOnly.String(), Confined: confined, Box: box}
+	res := SubprocessResult{CombinedOutput: combinedOutput(&out, spec), Stdout: stdoutOnly.String(), Confined: confined, Box: box}
 	res.TimedOut = runCtx.Err() == context.DeadlineExceeded
 	// A streamed stdout went to the caller's writer uncapped, so only the capped paths truncate.
 	if streamStdout == nil {
@@ -404,6 +417,23 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	res.FailFast = spec.FailFast
 	res.Dir = spec.Dir
 	return res, nil
+}
+
+// combinedOutput renders the buffer that holds what the model reads: raw for a spec that left
+// DecodeConsoleOutput false, and otherwise with each non-UTF-8 line decoded from the spec's
+// codepage — before the truncation marker is appended, so the marker stays the UTF-8 it was
+// written as.
+func combinedOutput(out *CappedBuffer, spec SubprocessSpec) string {
+	if !spec.DecodeConsoleOutput {
+		return out.String()
+	}
+	codepage := spec.ConsoleCodepage
+	if codepage == 0 {
+		codepage = platform.ConsoleOutputCodepage()
+	}
+	return out.stringWith(func(b []byte) string {
+		return platform.DecodeConsoleOutput(b, codepage)
+	})
 }
 
 // ConfinementHandoff is the ONE rule for "a Confinement handle on ctx" — what the one-shot
@@ -556,9 +586,16 @@ func (b *CappedBuffer) overran() bool {
 // String returns the captured output, with a truncation marker appended when output was
 // discarded so the model knows the tail is missing.
 func (b *CappedBuffer) String() string {
+	return b.stringWith(func(p []byte) string { return string(p) })
+}
+
+// stringWith is String with the captured bytes rendered by render rather than taken as they are:
+// render sees only what the child printed, and the truncation marker is appended to its result,
+// so a decode of the output can never reach the marker.
+func (b *CappedBuffer) stringWith(render func([]byte) string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s := b.buf.String()
+	s := render(b.buf.Bytes())
 	if b.discarded > 0 {
 		s += fmt.Sprintf("\n… [output truncated: %d more bytes]", b.discarded)
 	}

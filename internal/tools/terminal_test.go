@@ -668,6 +668,25 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 	}
 }
 
+// TestTerminal_DecodesConsoleOutput pins that the terminal tool opts its run into the console
+// codepage decode: what a command printed is shown to the model, so a Windows console program's
+// OEM-codepage output must reach it as text. The codepage is left at zero — the host's own
+// console codepage — so no platform is pinned to one.
+func TestTerminal_DecodesConsoleOutput(t *testing.T) {
+	t.Parallel()
+	h, captured := capturedRunHost(t)
+
+	if _, err := newTerminal(t.TempDir(), nil, h).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !captured.DecodeConsoleOutput {
+		t.Error("spec.DecodeConsoleOutput = false, want the terminal's output decoded from the console codepage")
+	}
+	if captured.ConsoleCodepage != 0 {
+		t.Errorf("spec.ConsoleCodepage = %d, want 0 (the host's console codepage)", captured.ConsoleCodepage)
+	}
+}
+
 // TestTerminal_ArmsMergedStdoutWatchOnlyForAChainedMergingLine pins which lines get the
 // merged-stdout denial watch: a line that merges its own streams — `2>&1`, `>&2`, `&>`, `|&` —
 // arms it only when a command separator (`&&`, `||`, `;`, a separating `&`, a newline) chains

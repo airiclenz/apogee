@@ -379,6 +379,25 @@ func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
 	}
 }
 
+// TestRunTestsLeavesConsoleDecodeOff pins that run_tests keeps the runner's output raw: the
+// console codepage decode is the terminal's alone, and a runner's report is parsed as data.
+func TestRunTestsLeavesConsoleDecodeOff(t *testing.T) {
+	t.Parallel()
+	program := filepath.Join(t.TempDir(), "go")
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, program)
+
+	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
+	runTestsCallOn(t, root, h, nil)
+
+	if len(captured.Argv) == 0 {
+		t.Fatal("no spec reached the host's run: the runner never launched")
+	}
+	if captured.DecodeConsoleOutput {
+		t.Error("spec.DecodeConsoleOutput = true, want the runner's output kept raw")
+	}
+}
+
 // TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment pins the caller-named half of
 // the same subtraction: a variable the host named — the `api-key-env:` credential an operator
 // exported into the shell apogee was started from (ADR 0047) — is dropped from the runner's

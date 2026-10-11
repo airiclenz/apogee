@@ -269,6 +269,10 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// denials to stdout ahead of commands that run on, so that stream is watched too
 		// (anchored signature only); every other line keeps the stderr-only watch.
 		WatchMergedStdout: watchMergedStdout,
+		// What the command printed is shown to the model, and a Windows console program prints
+		// in the console's OEM codepage, so each non-UTF-8 line is decoded from it; a UTF-8 line
+		// (git's, say) passes untouched, and off Windows the codepage is a pass-through.
+		DecodeConsoleOutput: true,
 		// The command line runs in the operator's own environment — minus the credential
 		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -618,6 +619,84 @@ func TestRunSubprocessReportsTruncatedStdout(t *testing.T) {
 				t.Errorf("Truncated = %v, want %v", res.Truncated, tc.wantTruncated)
 			}
 		})
+	}
+}
+
+// TestRunSubprocessDecodesConsoleOutputFromTheCodepage pins the opt-in console decode on a real
+// child: a spec that sets DecodeConsoleOutput gets each non-UTF-8 line of CombinedOutput decoded
+// from its codepage — cp850's 0xFF is U+00A0, the thousands separator the 83 293 mojibake came
+// from — while a valid UTF-8 line beside it stays as printed, and a spec that leaves the flag
+// false keeps the raw bytes. Codepage 0 is the host's console codepage, a pass-through off
+// Windows. The fixtures are POSIX octal escapes: dash prints a `\xff` escape literally.
+func TestRunSubprocessDecodesConsoleOutputFromTheCodepage(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the decode it pins is platform-independent")
+	}
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		script   string
+		decode   bool
+		codepage uint32
+		want     string
+	}{
+		{name: "cp850 line decodes", script: `printf '83\377293'`, decode: true, codepage: 850, want: "83\u00a0293"},
+		{
+			name:   "utf-8 line beside a cp850 line",
+			script: `printf 'f\303\274r\n83\377293\n'`, decode: true, codepage: 850,
+			want: "f\u00fcr\n83\u00a0293\n",
+		},
+		{name: "flag off keeps raw bytes", script: `printf '83\377293'`, codepage: 850, want: "83\xff293"},
+		{name: "codepage 0 off windows passes through", script: `printf '83\377293'`, decode: true, want: "83\xff293"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			res, err := RunSubprocess(context.Background(), SubprocessSpec{
+				Argv:                []string{"/bin/sh", "-c", tc.script},
+				DecodeConsoleOutput: tc.decode,
+				ConsoleCodepage:     tc.codepage,
+			})
+
+			if err != nil {
+				t.Fatalf("RunSubprocess err = %v, want nil", err)
+			}
+			if res.CombinedOutput != tc.want {
+				t.Errorf("CombinedOutput = %q, want %q", res.CombinedOutput, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunSubprocessDecodeLeavesTheTruncationMarkerIntact pins the decode on a capped run: a run
+// past the cap whose kept bytes are cp850 decodes them, and the cap's marker — appended after the
+// decode — still ends the output exactly as written, its UTF-8 ellipsis included.
+func TestRunSubprocessDecodeLeavesTheTruncationMarkerIntact(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the marker it pins is platform-independent")
+	}
+	t.Parallel()
+
+	res, err := RunSubprocess(context.Background(), SubprocessSpec{
+		Argv:                []string{"/bin/sh", "-c", `yes "$(printf '83\377293')" | head -c ` + strconv.Itoa(oversizeStdoutBytes)},
+		DecodeConsoleOutput: true,
+		ConsoleCodepage:     850,
+	})
+
+	if err != nil {
+		t.Fatalf("RunSubprocess err = %v, want nil", err)
+	}
+	marker := fmt.Sprintf("\n… [output truncated: %d more bytes]", oversizeStdoutBytes-MaxSubprocessOutputBytes)
+	if !strings.HasSuffix(res.CombinedOutput, marker) {
+		t.Errorf("CombinedOutput lacks the UTF-8 marker %q — it was decoded as cp850", marker)
+	}
+	if !strings.HasPrefix(res.CombinedOutput, "83\u00a0293\n") {
+		t.Errorf("CombinedOutput starts %q, want the kept cp850 bytes decoded", res.CombinedOutput[:16])
+	}
+	if strings.ContainsRune(res.CombinedOutput, utf8.RuneError) {
+		t.Error("CombinedOutput holds U+FFFD: a cp850 byte or the marker was mangled")
 	}
 }
 

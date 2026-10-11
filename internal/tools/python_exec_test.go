@@ -322,6 +322,29 @@ func TestPythonExec_SkipsACandidateWhoseProbeFails(t *testing.T) {
 	}
 }
 
+// TestPythonExecLeavesConsoleDecodeOff pins that python_exec keeps its snippet's output raw: the
+// console codepage decode is the terminal's alone, and python_exec's own Windows output encoding
+// is a separate question from the console's OEM codepage.
+func TestPythonExecLeavesConsoleDecodeOff(t *testing.T) {
+	t.Parallel()
+	python, _, look := candidatePaths(t)
+	h, captured := capturedRunHost(t)
+	h.look = look
+	h = withFakePythonProbe(h, func(string) subprocess.SubprocessResult {
+		return pythonVersionAnswer(3, 12)
+	})
+
+	if _, err := newPythonExec(t.TempDir(), nil, h).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if len(captured.Argv) == 0 || captured.Argv[0] != python {
+		t.Fatalf("argv = %q, want the snippet run on %q", captured.Argv, python)
+	}
+	if captured.DecodeConsoleOutput {
+		t.Error("spec.DecodeConsoleOutput = true, want python_exec's output kept raw")
+	}
+}
+
 // TestPythonExec_FallsBackWhenNoProbeSucceeds pins the version-manager case: when every
 // candidate's probe fails, the first resolved candidate still runs the snippet, isolated, rather
 // than the tool reporting no Python at all.
