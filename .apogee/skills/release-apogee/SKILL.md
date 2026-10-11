@@ -120,11 +120,11 @@ version. Substitute `NOTES_SRC_VALUE`, `TMP_VALUE` and the version:
 
 ```bash
 NF="TMP_VALUE/release-notes-apogee-vX.Y.Z.md"
-{ printf '# apogee — %s — %s\n' "vX.Y.Z" "$(date +%F)"; tail -n +2 "NOTES_SRC_VALUE"; } > "$NF"
-head -n 3 "$NF"; echo "NF=$NF"
+{ printf '# apogee — %s — %s\n' "vX.Y.Z" "$(date +%F)"; tail -n +2 "NOTES_SRC_VALUE"; } > "$NF.tmp" &&
+mv "$NF.tmp" "$NF"; head -n 3 "$NF"; echo "NF=$NF"
 ```
 
-Skip this step on a resume that reuses an existing `NF`.
+Skip it on a resume that reuses `NF`; the temp file guards `NOTES_SRC` = `NF`.
 
 ## 7 — Dry run, then the one confirmation
 
