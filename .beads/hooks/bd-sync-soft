@@ -12,7 +12,8 @@
 # It is soft on purpose: `bd sync` halts on a conflict it cannot settle safely, and that
 # must not block a git pull or push. It reports and exits 0; resolving the conflict is an
 # operator's call (`bd dolt pull --strategy ours|theirs` after inspecting `bd diff`), never
-# something to automate. Set APOGEE_BEADS_NO_SYNC=1 to skip it (offline, or mid-rebase).
+# something to automate. Set APOGEE_BEADS_NO_SYNC=1 to skip it (offline, or mid-rebase);
+# APOGEE_BEADS_SYNC_TIMEOUT (seconds, default 90) bounds how long it may take.
 #
 # This file is not a git hook name, so git never runs it directly, and it sits outside
 # bd's managed hook files, so `bd hooks install` leaves it alone.
@@ -29,8 +30,33 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY \
 APOGEE_BEADS_SYNCING=1
 export APOGEE_BEADS_SYNCING
 
-bd sync
+# Bound the sync: a bd that hangs must never hold up a git pull or push, nor outlive the
+# Claude Code hook's 120s timeout — on Windows that timeout kills only this shell, and the
+# orphaned bd.exe goes on holding the database lock that every later bd call waits on
+# (2026-10-11: one orphan wedged a `git pull` in post-merge for half an hour). bd runs in
+# the background with stdin closed and its output in a file, so neither an unkillable bd
+# nor its open pipe keeps this script alive past the limit.
+_bd_sync_limit=${APOGEE_BEADS_SYNC_TIMEOUT:-90}
+_bd_sync_log=$(mktemp 2>/dev/null) || _bd_sync_log="${TMPDIR:-/tmp}/bd-sync-soft.$$"
+bd sync >"$_bd_sync_log" 2>&1 </dev/null &
+_bd_sync_pid=$!
+_bd_sync_waited=0
+while kill -0 "$_bd_sync_pid" 2>/dev/null; do
+  if [ "$_bd_sync_waited" -ge "$_bd_sync_limit" ]; then
+    kill "$_bd_sync_pid" 2>/dev/null
+    cat "$_bd_sync_log"
+    rm -f "$_bd_sync_log"
+    echo "beads: bd sync did not finish in ${_bd_sync_limit}s and was stopped (APOGEE_BEADS_SYNC_TIMEOUT)."
+    echo "beads: if bd keeps hanging, look for a leftover 'bd sync' process holding the database lock."
+    exit 0
+  fi
+  sleep 1
+  _bd_sync_waited=$((_bd_sync_waited + 1))
+done
+wait "$_bd_sync_pid"
 _bd_sync_status=$?
+cat "$_bd_sync_log"
+rm -f "$_bd_sync_log"
 if [ "$_bd_sync_status" -ne 0 ]; then
   echo "beads: bd sync exited $_bd_sync_status — this replica's issue database is NOT in sync"
   echo "beads: with the remote. Resolve before writing issues: inspect with"
