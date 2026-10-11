@@ -103,6 +103,29 @@ or Moment is a **minor** bump, not a breaking change.
 
 - **The release runbook describes the in-repo pipeline.** `docs/manual/building.md` §Releasing now walks the `release-apogee` skill and the by-hand cut — `go run ./cmd/release status` (the CI gate, no bypass) → `prepare` → `publish --notes-file` (dry run first) → re-run to converge — with the smoke test and the one-time Scoop/winget setup recast around `publish`; the make table gains `make release-status` and names no retired target, and building needs nothing beyond the Go toolchain. ADR 0098 §5 now states the ratified gate: HEAD with its trailing `CHANGELOG.md`/`VERSION`-only commits peeled off, cleared by a green `ci.yml` run on that commit or on a peeled commit `origin/main` contains.
 
+- **`make check` no longer gets the race-enabled `internal/tui` test process OOM-killed.**
+  - **Cause.** A `Model` is ~120 KB by value. Each case of the three parallel frame-fit tables (1,720 cases, among them `TestFrameNeverExceedsTheTerminalHeight`) reserved a 360–480 KB stack frame before `t.Parallel` parked it, and the cases stayed parked for most of the run. The process grew to ~4 GB.
+  - **Fix.** The cases now park on a small stack and take the body's frame only when they run, asserting exactly what they did.
+  - **Result.** The largest table under `-race` drops from 1.5 GB to 0.24 GB. The package's unraced run drops from 293 s to 136 s, since the GC no longer scans a gigabyte of parked stacks.
+
+- **`make test` runs the suite as short-lived processes over a fixed number of lanes.**
+  - `scripts/test-shards.sh` builds each heavy package's test binary once (`go test -c`) and packs its tests into chunks of about two minutes and at most 400 tests. The other packages are packed whole into batches. Each lane runs the next item as a fresh process, so no process lives long enough to grow to the gigabytes a whole package reached under `-race`.
+  - A chunk killed by a signal is reported as such, naming the tests it was running.
+  - The knobs:
+    - `APOGEE_TEST_LANES=n` sets the lane count.
+    - `APOGEE_TEST_SHARDS=n` still works and is read as n per heavy package + 1 lanes.
+    - `APOGEE_TEST_SLOW=1` is three lanes, every process `-parallel 1`.
+    - CI runs five lanes.
+  - The timings cache now costs a test as the larger of its own duration and the sum of its direct subtests', so a parent of `t.Parallel` subtests is no longer cached at 0.00 s.
+  - `docs/manual/building.md` notes that `GOMEMLIMIT` does not bound a race-enabled test process.
+
+- **The slowest tests no longer wait on fixed clocks or redo shared work.**
+  - The heartbeat cadence is a renderer option, `tui.Options.BeatInterval`; zero keeps `heartbeat.Interval`, and the binary never sets it. `TestE2ESeatDelegationsLineSurvivesATargetDownBeat` beats once a second through the new `launchTUIOnBeating` helper: 122 s → 5 s.
+  - The leak kit's self-test passes a 200 ms grace through `checkLeaks(t, grace)`: 60 s → 0.2 s.
+  - `cmd/apogee`'s `TestMain` skips the e2e build when only listing tests.
+  - The two `internal/tools` exec-seam guards share one source importer: 46 s → 24 s at `-parallel 1`.
+  - `internal/doctext` deflates each inflate-bomb fixture once per size: 177 s → 58 s.
+
 ## [0.24.11] — 2026-10-08
 
 - **Docs: ADR 0095 — MCP OAuth tokens are persisted by apogee.** A `streamable-http` MCP server opts in with `auth: oauth` (refused on `sse`/`stdio`, and beside an `Authorization` header); apogee registers itself by Dynamic Client Registration (or uses a preregistered `client-id:` / `client-secret-env:`), logs in with PKCE at startup on stderr or through `apogee mcp login <name>`, and keeps the token and registration in one 0600 file per server under `~/.apogee/mcp-auth/` (dir 0700, atomic write, keyed by name and normalised endpoint). The authorize URL is always printed and opens only on Enter; the loopback callback on `127.0.0.1:0` races a pasted redirect URL for remote hosts; nothing prompts mid-session; a declined or TTY-less startup login aborts the launch; `apogee mcp logout <name>` deletes the local file only. ADR 0047 carries a dated amendment narrowing its "stores nothing itself" to secrets the user brings.
