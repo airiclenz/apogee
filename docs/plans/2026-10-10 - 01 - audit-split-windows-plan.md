@@ -87,7 +87,13 @@ git listing, each through the listing seam, parallel).
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/auditsplit/`
 **Commit:** `feat(auditsplit): list and split an audit scope in Go`
 
-## 2. auditsplit: run folder, receipt and flags
+## 2. auditsplit: run folder, receipt and flags — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — internal/auditsplit/doc.go: made necessary by the new split.go, which the package doc's "The files, one line each" map now names.
+NOTES (2026-10-11): the internal entry is split(ctx, splitRequest, w), splitRequest carrying item 1's planRequest (knobs and the gitexec.Host listing seam) plus run and focus; Split fills it from os.Getenv and gitexec.OS() with context.Background(), and converts its int partBytes to the plan's digit string (zero or negative = unknown budget = 8000 lines).
+NOTES (2026-10-11): Split prints only the receipt to w; split.sh's duplicate of the failure on stderr is left to the item-3 subcommand, which gets the same text as the returned error. No scratch folder is created inside the run (split.sh's `.split.$$`).
+NOTES (2026-10-11): parity was checked against the embedded split.sh with a throwaway differential test (300 random fixtures over PART_LINES/PART_FILES/GROUP_PARTS, nested test dirs and `x`/`x-y` siblings: receipt and every run-folder file byte-identical after RUN substitution); deleted, not committed. One known divergence by construction: a file name holding a tab, which split.sh's awk field splitting truncated in tests-<part> lists, is kept whole.
+NOTES (2026-10-11): split.go is ~550 lines, over the ~400-line guideline, because the item's Files list names it as the one implementation file.
 
 Depends on item 1.
 

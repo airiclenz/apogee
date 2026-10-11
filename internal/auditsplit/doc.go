@@ -28,4 +28,6 @@
 //
 // plan.go is the split's plan step — the bounds and their environment knobs, the listing, the
 // classification and the four split mechanics — computed in memory, with no file written.
+// split.go is the run folder: Split writes the plan as the part, group and list files and prints
+// the receipt; Flags reads the ground truth's concurrency answer.
 package auditsplit
