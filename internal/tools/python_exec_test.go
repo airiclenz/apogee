@@ -29,22 +29,41 @@ func isPythonVersionProbe(spec subprocess.SubprocessSpec) bool {
 	return len(spec.Argv) == 3 && spec.Argv[1] == "-c" && spec.Argv[2] == pythonVersionProgram
 }
 
-// withFakePythonVersion returns h with its run answering the version probe by argv — a clean
-// "major.minor" line when ok, a failed probe otherwise — and handing every other spec (the
-// snippet) to h's own run. It pins what the probe reports, so the isolation decision is
-// testable on either side of the 3.11 boundary without depending on the Python the host ships.
-func withFakePythonVersion(h execHost, major, minor int, ok bool) execHost {
+// withFakePythonProbe returns h with its run answering the version probe of each interpreter
+// with answer(interp) — interp being the probe's argv[0] — and handing every other spec (the
+// snippet) to h's own run. It lets a test give each candidate its own probe outcome: a clean
+// version, unreadable output, a timeout, or the non-zero exit of a stub that is no interpreter.
+func withFakePythonProbe(h execHost, answer func(interp string) subprocess.SubprocessResult) execHost {
 	next := h.run
 	h.run = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
 		if !isPythonVersionProbe(spec) {
 			return next(ctx, spec)
 		}
-		if !ok {
-			return subprocess.SubprocessResult{ExitCode: 1}, nil
-		}
-		return subprocess.SubprocessResult{CombinedOutput: fmt.Sprintf("%d.%d\n", major, minor)}, nil
+		return answer(spec.Argv[0]), nil
 	}
 	return h
+}
+
+// pythonVersionAnswer is the probe result of an interpreter reporting major.minor cleanly.
+func pythonVersionAnswer(major, minor int) subprocess.SubprocessResult {
+	return subprocess.SubprocessResult{CombinedOutput: fmt.Sprintf("%d.%d\n", major, minor)}
+}
+
+// unreadableVersionAnswer is the probe result of an interpreter that exits 0 but prints nothing
+// parseable as a version: it is used, isolated.
+var unreadableVersionAnswer = subprocess.SubprocessResult{CombinedOutput: "Python ?\n"}
+
+// withFakePythonVersion returns h with its run answering every interpreter's version probe — a
+// clean "major.minor" line when ok, an exit-0 probe whose output is unreadable otherwise — and
+// handing every other spec (the snippet) to h's own run. It pins what the probe reports, so the
+// isolation decision is testable on either side of the 3.11 boundary without depending on the
+// Python the host ships.
+func withFakePythonVersion(h execHost, major, minor int, ok bool) execHost {
+	answer := unreadableVersionAnswer
+	if ok {
+		answer = pythonVersionAnswer(major, minor)
+	}
+	return withFakePythonProbe(h, func(string) subprocess.SubprocessResult { return answer })
 }
 
 // envValue returns the value of key in a "KEY=value" environment, and whether it is present.
@@ -215,24 +234,24 @@ func TestPythonExec_IsolationFollowsTheInterpreterVersion(t *testing.T) {
 	t.Parallel()
 	const interp = "/usr/bin/python3"
 	cases := []struct {
-		name         string
-		major, minor int
-		known        bool
-		wantArgv     []string
+		name     string
+		probe    subprocess.SubprocessResult
+		wantArgv []string
 	}{
-		{"3.11 honours PYTHONSAFEPATH, so no flag", 3, 11, true, []string{interp, "-"}},
-		{"3.13 honours PYTHONSAFEPATH, so no flag", 3, 13, true, []string{interp, "-"}},
-		{"4.0 is past the floor, so no flag", 4, 0, true, []string{interp, "-"}},
-		{"3.9 ignores it silently, so -I", 3, 9, true, []string{interp, "-I", "-"}},
-		{"2.7 ignores it silently, so -I", 2, 7, true, []string{interp, "-I", "-"}},
-		{"an unreadable version isolates", 0, 0, false, []string{interp, "-I", "-"}},
+		{"3.11 honours PYTHONSAFEPATH, so no flag", pythonVersionAnswer(3, 11), []string{interp, "-"}},
+		{"3.13 honours PYTHONSAFEPATH, so no flag", pythonVersionAnswer(3, 13), []string{interp, "-"}},
+		{"4.0 is past the floor, so no flag", pythonVersionAnswer(4, 0), []string{interp, "-"}},
+		{"3.9 ignores it silently, so -I", pythonVersionAnswer(3, 9), []string{interp, "-I", "-"}},
+		{"2.7 ignores it silently, so -I", pythonVersionAnswer(2, 7), []string{interp, "-I", "-"}},
+		{"an unreadable version isolates", unreadableVersionAnswer, []string{interp, "-I", "-"}},
+		{"a timed-out probe isolates", subprocess.SubprocessResult{ExitCode: -1, TimedOut: true}, []string{interp, "-I", "-"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h, captured := capturedRunHost(t)
 			h.look = fakeLook(true, interp)
-			h = withFakePythonVersion(h, tc.major, tc.minor, tc.known)
+			h = withFakePythonProbe(h, func(string) subprocess.SubprocessResult { return tc.probe })
 
 			if _, err := newPythonExec(t.TempDir(), nil, h).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 				t.Fatalf("Execute err = %v, want nil", err)
@@ -247,6 +266,82 @@ func TestPythonExec_IsolationFollowsTheInterpreterVersion(t *testing.T) {
 				t.Error("PYTHONPATH must never be set by the tool: its entries precede the stdlib")
 			}
 		})
+	}
+}
+
+// failedProbeAnswer is the probe result of a candidate that is no usable interpreter: it ran (or
+// failed to start) and exited non-zero without timing out. 9009 is what the Windows App Execution
+// Alias stub for python3 exits with when no Store Python is installed.
+var failedProbeAnswer = subprocess.SubprocessResult{ExitCode: 9009, CombinedOutput: "Python was not found; run without arguments to install from the Microsoft Store\n"}
+
+// candidatePaths returns two absolute interpreter paths outside the workspace, one per entry of
+// pythonCandidates, and a look answering each candidate with its own path. A Windows literal would
+// not be filepath.IsAbs on Linux, and ResolveProgram refuses a relative program, so the paths are
+// built under a temp dir.
+func candidatePaths(t *testing.T) (python3, python string, look func(string) (string, error)) {
+	t.Helper()
+	dir := t.TempDir()
+	python3 = filepath.Join(dir, "stub", "python3")
+	python = filepath.Join(dir, "real", "python")
+	look = func(name string) (string, error) {
+		switch name {
+		case "python3":
+			return python3, nil
+		case "python":
+			return python, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	return python3, python, look
+}
+
+// TestPythonExec_SkipsACandidateWhoseProbeFails pins that a candidate whose version probe exits
+// non-zero is no interpreter — the Windows Store stub for python3 is the case — and the next
+// candidate runs the snippet instead.
+func TestPythonExec_SkipsACandidateWhoseProbeFails(t *testing.T) {
+	t.Parallel()
+	stub, python, look := candidatePaths(t)
+	h, captured := capturedRunHost(t)
+	h.look = look
+	h = withFakePythonProbe(h, func(interp string) subprocess.SubprocessResult {
+		if interp == stub {
+			return failedProbeAnswer
+		}
+		return pythonVersionAnswer(3, 12)
+	})
+
+	res, err := newPythonExec(t.TempDir(), nil, h).Execute(context.Background(), pythonCall("c1", "print(1)"))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if res.IsError {
+		t.Fatalf("result = %q, want the snippet run on %q", res.Content, python)
+	}
+	if want := []string{python, "-"}; !slices.Equal(captured.Argv, want) {
+		t.Errorf("argv = %q, want %q (the stub's failed probe must hand over to the next candidate)", captured.Argv, want)
+	}
+}
+
+// TestPythonExec_FallsBackWhenNoProbeSucceeds pins the version-manager case: when every
+// candidate's probe fails, the first resolved candidate still runs the snippet, isolated, rather
+// than the tool reporting no Python at all.
+func TestPythonExec_FallsBackWhenNoProbeSucceeds(t *testing.T) {
+	t.Parallel()
+	first, _, look := candidatePaths(t)
+	h, captured := capturedRunHost(t)
+	h.look = look
+	h = withFakePythonProbe(h, func(interp string) subprocess.SubprocessResult {
+		if interp == first {
+			return failedProbeAnswer
+		}
+		return subprocess.SubprocessResult{ExitCode: -1, CombinedOutput: "exec: never started\n"}
+	})
+
+	if _, err := newPythonExec(t.TempDir(), nil, h).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if want := []string{first, "-I", "-"}; !slices.Equal(captured.Argv, want) {
+		t.Errorf("argv = %q, want %q (the first resolved candidate, isolated)", captured.Argv, want)
 	}
 }
 
@@ -425,12 +520,15 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	py := NewPythonExec(root, nil)
 	// The tool's own probe, over the same workspace the run below uses: it only reports which
 	// mechanism that run exercises.
-	major, minor, known := py.interpreterVersion(context.Background(), interp)
-	if !known {
+	probe, err := py.interpreterVersion(context.Background(), interp)
+	switch {
+	case err != nil:
+		t.Fatalf("version probe of %s: %v", interp, err)
+	case probe.verdict != probeVersioned:
 		t.Logf("%s did not report a version; the run below exercises the -I fallback", interp)
-	} else {
-		t.Logf("interpreter %s reports %d.%d, so this run exercises %s", interp, major, minor,
-			map[bool]string{true: "PYTHONSAFEPATH", false: "the -I fallback"}[honoursSafePath(major, minor, known)])
+	default:
+		t.Logf("interpreter %s reports %d.%d, so this run exercises %s", interp, probe.major, probe.minor,
+			map[bool]string{true: "PYTHONSAFEPATH", false: "the -I fallback"}[probe.honoursSafePath()])
 	}
 
 	marker := filepath.Join(root, "SHADOWED")

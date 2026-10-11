@@ -87,23 +87,65 @@ const (
 	// pythonVersionProgram prints the interpreter's own major.minor. `sys` is a BUILT-IN
 	// module, resolved before any sys.path entry is consulted, so the probe cannot itself be
 	// shadowed by the workspace it exists to protect against; print() with a single argument
-	// also parses under Python 2, so an ancient interpreter reports itself rather than
-	// erroring into "unknown".
+	// also parses under Python 2, so an ancient interpreter reports itself rather than failing
+	// the probe and being skipped as no interpreter (probeUnusable).
 	pythonVersionProgram = "import sys; print('%d.%d' % sys.version_info[:2])"
 )
 
-// interpreterVersion reports interp's own (major, minor) version, with ok=false when the probe
-// could not be run or its output could not be read. The probe is one more subprocess of the
-// tool's host (t.host.run), with its own PATH scoped out of the workspace through the host's
-// shell rules (pythonVersionSpec) — so a test pins either side of the 3.11 boundary by handing
-// the tool a host whose run answers the probe's argv, never by depending on the Python the host
-// happens to ship.
-func (t *PythonExec) interpreterVersion(ctx context.Context, interp string) (major, minor int, ok bool) {
+// probeVerdict is what an interpreter's version probe says about that interpreter.
+type probeVerdict int
+
+const (
+	// probeVersioned: the probe exited 0 and printed a readable major.minor.
+	probeVersioned probeVerdict = iota
+	// probeUnreadable: the interpreter ran but its version could not be read — the probe exited
+	// 0 with output that does not parse, or it hit its own timeout. The interpreter is still
+	// used, isolated with -I (honoursSafePath's fail-closed direction).
+	probeUnreadable
+	// probeUnusable: the probe returned without a Go error but exited non-zero without timing
+	// out — the program never started (ExitCode -1) or refused the probe outright, as the
+	// Windows App Execution Alias stub for python3 does (it exits 9009 and prints a Store
+	// hint). The candidate is skipped in favour of the next one.
+	probeUnusable
+)
+
+// pythonProbe is one interpreter's version-probe outcome: the verdict, plus the (major, minor)
+// version when the verdict is probeVersioned.
+type pythonProbe struct {
+	verdict      probeVerdict
+	major, minor int
+}
+
+// honoursSafePath reports whether the probed interpreter honours PYTHONSAFEPATH; any verdict
+// other than probeVersioned answers false, so the caller isolates.
+func (p pythonProbe) honoursSafePath() bool {
+	return honoursSafePath(p.major, p.minor, p.verdict == probeVersioned)
+}
+
+// interpreterVersion probes interp's own (major, minor) version and says whether the interpreter
+// is usable at all (pythonProbe's verdict). A non-nil error is the probe run's own Go error —
+// ctx cancellation, or a confinement-unavailable demotion — which the caller returns exactly as
+// it returns the snippet run's. The probe is one more subprocess of the tool's host (t.host.run),
+// with its own PATH scoped out of the workspace through the host's shell rules
+// (pythonVersionSpec) — so a test pins either side of the 3.11 boundary by handing the tool a
+// host whose run answers the probe's argv, never by depending on the Python the host happens to
+// ship.
+func (t *PythonExec) interpreterVersion(ctx context.Context, interp string) (pythonProbe, error) {
 	res, err := t.host.run(ctx, pythonVersionSpec(t.host, interp, t.root, t.secretEnv))
-	if err != nil || res.ExitCode != 0 {
-		return 0, 0, false
+	if err != nil {
+		return pythonProbe{}, err
 	}
-	return parsePythonVersion(res.CombinedOutput)
+	if res.TimedOut {
+		return pythonProbe{verdict: probeUnreadable}, nil
+	}
+	if res.ExitCode != 0 {
+		return pythonProbe{verdict: probeUnusable}, nil
+	}
+	major, minor, ok := parsePythonVersion(res.CombinedOutput)
+	if !ok {
+		return pythonProbe{verdict: probeUnreadable}, nil
+	}
+	return pythonProbe{verdict: probeVersioned, major: major, minor: minor}, nil
 }
 
 // pythonVersionSpec is the version probe's subprocess spec, named so a test can read the
@@ -232,34 +274,24 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return errorResult(call.ID, "code is required"), nil
 	}
 
-	// The candidates are probed in preference order, each resolved AND fenced in one step.
-	// A fence refusal on a candidate that was FOUND is terminal, never a fall-through: an
-	// interpreter the model can write is not an interpreter, and silently running the next
-	// candidate would hide the in-workspace PATH entry (typically an activated .venv) that
-	// the refusal exists to name. That refusal is deliberately NOT the graceful "python not
-	// available" below — that message would send the operator installing a Python they
-	// already have.
-	var interp string
-	box := confinementBox(ctx)
-	for _, candidate := range pythonCandidates {
-		path, err := security.ResolveProgram(t.host.look, candidate, t.root, box)
-		if err == nil {
-			interp = path
-			break
-		}
-		if errors.Is(err, security.ErrExecFromWritablePath) {
-			return errorResult(call.ID, err.Error()), nil
-		}
+	// The working directory is resolved before any candidate is probed, so an out-of-root
+	// workdir is refused with no subprocess — the version probe included — launched.
+	dir, err := resolveWorkdirInRoot(args.Workdir, t.root)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
+
+	interp, probe, refusal, err := t.selectInterpreter(ctx)
+	if err != nil {
+		return domain.ToolResult{}, err
+	}
+	if refusal != "" {
+		return errorResult(call.ID, refusal), nil
 	}
 	if interp == "" {
 		// Graceful degradation (§3a): no interpreter is an unavailable result, not a crash
 		// and not a hard dependency.
 		return errorResult(call.ID, "python not available: no Python interpreter found on PATH (looked for "+strings.Join(pythonCandidates, ", ")+")"), nil
-	}
-
-	dir, err := resolveWorkdirInRoot(args.Workdir, t.root)
-	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
 	}
 
 	// The workspace must not precede the standard library on sys.path: PYTHONSAFEPATH is set
@@ -268,7 +300,7 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// Both are decided here rather than in the snippet, so nothing is injected into the `code`
 	// the operator approved.
 	spec := subprocess.SubprocessSpec{
-		Argv:    pythonArgv(interp, !honoursSafePath(t.interpreterVersion(ctx, interp))),
+		Argv:    pythonArgv(interp, !probe.honoursSafePath()),
 		Dir:     dir,
 		Timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		Stdin:   args.Code,
@@ -279,6 +311,48 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return domain.ToolResult{}, err
 	}
 	return subprocessToolResult(call.ID, res), nil
+}
+
+// selectInterpreter picks the interpreter the snippet runs on, returning it with its probe
+// outcome; an empty interp with an empty refusal means no candidate resolved at all.
+//
+// The candidates are tried in preference order, each resolved AND fenced in one step, then
+// probed. A fence refusal on a candidate that was FOUND is terminal, never a fall-through: an
+// interpreter the model can write is not an interpreter, and silently running the next
+// candidate would hide the in-workspace PATH entry (typically an activated .venv) that the
+// refusal exists to name. That refusal comes back as refusal, deliberately NOT the graceful
+// "python not available" — that message would send the operator installing a Python they
+// already have.
+//
+// A candidate whose probe is probeUnusable is skipped, so a python3 that is only the Windows
+// Store stub falls through to a real python. When no candidate's probe succeeds, the FIRST
+// resolved candidate runs anyway, isolated: a version-manager shim (asdf, mise, pyenv) can fail
+// the probe from the interpreter's own directory yet run the snippet fine, and refusing it would
+// turn a working setup into "python not available". A non-nil error is the probe's own Go error,
+// returned as Execute returns the run's.
+func (t *PythonExec) selectInterpreter(ctx context.Context) (interp string, probe pythonProbe, refusal string, err error) {
+	box := confinementBox(ctx)
+	var firstResolved string
+	for _, candidate := range pythonCandidates {
+		path, resolveErr := security.ResolveProgram(t.host.look, candidate, t.root, box)
+		if errors.Is(resolveErr, security.ErrExecFromWritablePath) {
+			return "", pythonProbe{}, resolveErr.Error(), nil
+		}
+		if resolveErr != nil {
+			continue
+		}
+		probe, err := t.interpreterVersion(ctx, path)
+		if err != nil {
+			return "", pythonProbe{}, "", err
+		}
+		if probe.verdict != probeUnusable {
+			return path, probe, "", nil
+		}
+		if firstResolved == "" {
+			firstResolved = path
+		}
+	}
+	return firstResolved, pythonProbe{verdict: probeUnusable}, "", nil
 }
 
 var (
