@@ -46,7 +46,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	// stderr is the last place a failure can be told; one that cannot be written there has
 	// nowhere left to go, and the exit code still carries it.
-	fmt.Fprintln(stderr, err)
+	_, _ = fmt.Fprintln(stderr, err)
 	return exitFailed
 }
 
