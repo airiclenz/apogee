@@ -123,7 +123,9 @@ type terminalArgs struct {
 // apogee's own credentials and with its PATH scoped out of the workspace
 // (subprocessEnvScopedPath): a shell line the model chose has no use for the key apogee
 // authenticates to its inference server with, and must not resolve its programs out of the box
-// the model can write.
+// the model can write. A line an Allow rule answered (domain.RuleAnswered) also runs without
+// CDPATH, BASH_ENV, ENV and exported bash functions (scrubRuleAnsweredEnv), which the matcher that
+// cleared it cannot see.
 //
 // On the POSIX path every script runs under a fail-fast preamble
 // (platform.FailFastPreamble: `set -e`, plus `set -o pipefail` where the host sh accepts
@@ -272,6 +274,11 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// and minus the PATH entries that resolve inside the workspace, which would let the
 		// model plant the programs its own command line then executes.
 		Env: t.host.subprocessEnvScopedPath(t.root, t.secretEnv),
+	}
+	if domain.RuleAnswered(ctx) {
+		// No human saw this line: an Allow rule cleared it by its words alone, so nothing the line
+		// inherits may redirect a `cd` or run code ahead of it (scrubRuleAnsweredEnv).
+		spec.Env = scrubRuleAnsweredEnv(spec.Env)
 	}
 	res, err := t.host.run(ctx, spec)
 	if err != nil {

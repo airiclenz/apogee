@@ -2846,7 +2846,9 @@ wildcards, and no rule applies on Windows `cmd`. File edits get no rules — `al
 choice. A rule answers only the ordinary prompt — ask-before's, allow-edits', and auto's for a call
 it cannot confine — never a refusal, never the dangerous-action guard's forced prompt, and never a
 Reaction's `ask` or `deny`. An empty or blank rule refuses the start with an error naming it,
-because it would match everything.
+because it would match everything. A line a rule answered runs without the inherited `CDPATH`,
+`BASH_ENV` and `ENV` variables and without exported bash functions, since each changes what the line
+does without appearing in it; a line you approved yourself keeps your full environment.
 
 A call a rule cleared is never silent: the transcript names the rules in place of your answer —
 ``approval allowed by project rule `go test`: terminal``, or `global rule` for one of yours — and the

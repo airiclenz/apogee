@@ -56,7 +56,7 @@ internal/agent/dispatch_test.go — ruleTerminal, allowRuleConfig, newRuleAgent,
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAllowRule' ./internal/agent/`
 **Commit:** `feat(agent): mark a rule-answered call on its context`
 
-## 2. Scrub env vectors from rule-answered terminal lines
+## 2. Scrub env vectors from rule-answered terminal lines — ✅ DONE (2026-10-11)
 
 **What:** fixes `apogee-allow-cd-cdpath` and the CDPATH/BASH_FUNC half of `apogee-allow-rule-env-vectors`: a rule-covered `cd sub` follows an inherited CDPATH out of Root, and exported bash functions or BASH_ENV/ENV run code the matcher never saw. Depends on item 1.
 **Goal:** when `domain.RuleAnswered(ctx)` holds, the terminal child's environment carries no `CDPATH`, `BASH_ENV`, `ENV` or `BASH_FUNC_*` entry; without the marker the child environment is unchanged.

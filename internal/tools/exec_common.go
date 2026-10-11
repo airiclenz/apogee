@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -98,6 +99,36 @@ func isApogeeSecretEnv(entry string) bool {
 		}
 	}
 	return false
+}
+
+// ruleAnsweredEnvVars names the inherited variables that change what a POSIX shell line does
+// without appearing in the line: CDPATH sends a relative `cd` out of the directory the matcher
+// resolved it against, and BASH_ENV and ENV name a file the shell sources before the line runs.
+// bashFuncEnvPrefix opens an exported bash function's entry (`BASH_FUNC_name%%=() { … }`), which
+// a bash child imports and runs in place of the command the line names.
+var ruleAnsweredEnvVars = []string{"CDPATH", "BASH_ENV", "ENV"}
+
+const bashFuncEnvPrefix = "BASH_FUNC_"
+
+// scrubRuleAnsweredEnv returns env without the entries that would run, or steer, code the Allow
+// rule matcher never saw (ruleAnsweredEnvVars, bashFuncEnvPrefix). Terminal.Execute applies it
+// only to a call an Allow rule answered (domain.RuleAnswered): the matcher reads the line alone,
+// so what the line inherits must not change what it does, while a human who approved a line did
+// so in their own environment and keeps it whole (ADR 0096 §3).
+//
+// Names compare exactly on the key before `=`: a rule never answers a non-POSIX shell, whose
+// case-insensitive names are the only reason to fold case, and a lookalike (`CDPATHX`) is an
+// ordinary variable the shell does not read.
+func scrubRuleAnsweredEnv(env []string) []string {
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if slices.Contains(ruleAnsweredEnvVars, key) || strings.HasPrefix(key, bashFuncEnvPrefix) {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
 
 // confinementDenialLabel is the line appended to a FAILED confined result whose output looks

@@ -145,6 +145,52 @@ func TestTerminal_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *testin
 	}
 }
 
+// TestTerminal_RuleAnsweredLineDropsEnvVectors pins the scrub a line an Allow rule answered runs
+// under: CDPATH, BASH_ENV, ENV and an exported bash function are absent from the child environment
+// when the call's context carries domain.WithRuleAnswered, and all four are inherited when it does
+// not — a human-approved line keeps the operator's full environment. Asserted on the captured
+// spec, never on a shell's `env` output, because dash drops BASH_FUNC_* from its own children.
+func TestTerminal_RuleAnsweredLineDropsEnvVectors(t *testing.T) {
+	// Not parallel: t.Setenv.
+	vectors := map[string]string{
+		"CDPATH":            "/elsewhere",
+		"BASH_ENV":          "/elsewhere/rc",
+		"ENV":               "/elsewhere/rc",
+		"BASH_FUNC_probe%%": "() { echo planted; }",
+	}
+	for name, value := range vectors {
+		t.Setenv(name, value)
+	}
+
+	cases := []struct {
+		name        string
+		ctx         context.Context
+		wantPresent bool
+	}{
+		{name: "rule answered", ctx: domain.WithRuleAnswered(context.Background()), wantPresent: false},
+		{name: "human approved", ctx: context.Background(), wantPresent: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, captured := capturedRunHost(t)
+
+			if _, err := newTerminal(t.TempDir(), nil, h).Execute(tc.ctx, terminalCall("c1", "cd sub")); err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+
+			for name, value := range vectors {
+				got, present := envValue(captured.Env, name)
+				if present != tc.wantPresent {
+					t.Errorf("%s present = %v (value %q), want %v", name, present, got, tc.wantPresent)
+				}
+				if present && got != value {
+					t.Errorf("%s = %q, want the inherited %q", name, got, value)
+				}
+			}
+		})
+	}
+}
+
 // TestTerminal_ScopesTheWorkspaceOffTheChildPATH pins the second subtraction the shell tool makes
 // from the operator's environment (the first is apogee's credentials): a PATH entry that resolves
 // inside the workspace is dropped, so a `git` or a `curl` the model planted in the box cannot be

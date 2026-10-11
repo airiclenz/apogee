@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -2994,6 +2995,52 @@ func TestAllowRuleMarksTheCallContext(t *testing.T) {
 				t.Errorf("rule-answered marks = %v, want %v", marks, tc.wantMarks)
 			}
 		})
+	}
+}
+
+// A rule-covered `cd sub` lands in the workspace's own `sub` even when the operator exported a
+// CDPATH naming an outside directory that holds a `sub` too: the matcher resolved the operand
+// against the workspace, and the real terminal runs the rule-answered line without CDPATH, so the
+// shell never searches it.
+func TestAllowRuleCdIgnoresCDPATH(t *testing.T) {
+	// Not parallel: t.Setenv.
+	if runtime.GOOS == "windows" {
+		t.Skip("a rule never answers a line bound for cmd.exe")
+	}
+	ws, outside := t.TempDir(), t.TempDir()
+	for _, dir := range []string{filepath.Join(ws, "sub"), filepath.Join(outside, "sub")} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CDPATH", outside)
+	pwdRule := domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: "pwd", Layer: domain.AllowRuleProject}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	cfg := allowRuleConfig(t, &recordingSink{}, approver, []domain.AllowRule{pwdRule}, tools.NewTerminal(ws, nil))
+	cfg.WorkspaceDir = ws
+	a := newRuleAgent(t, cfg)
+	call := domain.ToolCall{ID: "c1", Tool: shellToolName, Arguments: []byte(`{"command":"cd sub && pwd"}`)}
+
+	result, outcome := prepareAndRun(a, call)
+
+	if outcome != dispatchDone || result.IsError || approver.calls != 0 {
+		t.Fatalf("outcome %v, result %+v, asked %d — want the rule to run the line unasked", outcome, result, approver.calls)
+	}
+	output := strings.TrimSpace(domain.StripCwdLine(result.Content))
+	if strings.Contains(output, outside) {
+		t.Errorf("output %q names the CDPATH directory %q, want the line kept in the workspace", output, outside)
+	}
+	lines := strings.Split(output, "\n")
+	printed, err := filepath.EvalSymlinks(lines[len(lines)-1])
+	if err != nil {
+		t.Fatalf("pwd printed %q: %v", lines[len(lines)-1], err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(ws, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if printed != want {
+		t.Errorf("pwd = %q, want the workspace's own %q", printed, want)
 	}
 }
 

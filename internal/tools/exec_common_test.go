@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -115,6 +116,43 @@ func TestSubprocessEnvAppendsExtrasAfterTheScrub(t *testing.T) {
 	}
 	if got := env[len(env)-1]; got != "PYTHONSAFEPATH=1" {
 		t.Errorf("last entry = %q, want the extra last so it wins over an inherited spelling", got)
+	}
+}
+
+// TestScrubRuleAnsweredEnv pins the names a rule-answered line runs without: CDPATH, BASH_ENV,
+// ENV and every exported bash function, matched exactly on the key — a lookalike name, a value
+// that merely mentions one, and the operator's other variables all travel.
+func TestScrubRuleAnsweredEnv(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		entry    string
+		wantKept bool
+	}{
+		{name: "CDPATH", entry: "CDPATH=/elsewhere", wantKept: false},
+		{name: "BASH_ENV", entry: "BASH_ENV=/tmp/rc", wantKept: false},
+		{name: "ENV", entry: "ENV=/tmp/rc", wantKept: false},
+		{name: "empty CDPATH", entry: "CDPATH=", wantKept: false},
+		{name: "exported function", entry: "BASH_FUNC_git%%=() { echo planted; }", wantKept: false},
+		{name: "lookalike name", entry: "CDPATHX=/elsewhere", wantKept: true},
+		{name: "lower-case spelling", entry: "cdpath=/elsewhere", wantKept: true},
+		{name: "name in the value", entry: "NOTE=CDPATH=/elsewhere", wantKept: true},
+		{name: "ordinary variable", entry: "HOME=/home/someone", wantKept: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := scrubRuleAnsweredEnv([]string{"PATH=/usr/bin", tc.entry})
+
+			if kept := slices.Contains(got, tc.entry); kept != tc.wantKept {
+				t.Errorf("scrubRuleAnsweredEnv kept %q = %v, want %v (got %q)", tc.entry, kept, tc.wantKept, got)
+			}
+			if !slices.Contains(got, "PATH=/usr/bin") {
+				t.Errorf("scrubRuleAnsweredEnv(%q) = %q dropped PATH, want the neighbour kept", tc.entry, got)
+			}
+		})
 	}
 }
 
