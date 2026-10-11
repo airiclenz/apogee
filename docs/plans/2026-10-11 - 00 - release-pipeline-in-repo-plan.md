@@ -292,7 +292,13 @@ Depends on item 10.
 **Acceptance:** combined `wc -l` ≤ 220; `grep -niE 'MAP|recon' ` over the three prints nothing.
 **Commit:** `feat(skills): add the release-notes-apogee scouts`
 
-## 12. `release-notes-apogee`: merge, verify, notes, trace-check
+## 12. `release-notes-apogee`: merge, verify, notes, trace-check — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the inventory header is `# Release inventory — apogee — <VERSION> — <baseline.tag> (<published date>) → HEAD`, filled from the dispatch's `VERSION:` key and `status --json`'s `baseline.tag`/`baseline.published` (the personal prompt's `Next version (declared):`/`Baseline ref:` lines and the `basename` git call are gone; the project name is fixed); the plans-only `## Not shipped` section is dropped, and the row uses `_inventory-format.md`'s `Refs:` field in place of `Plan hints:`.
+
+NOTES (2026-10-11): the merge, verify and trace-check receipts are the personal ones trimmed; trace-check's `RESULT=GAPS` FLAG carries the gap list (≤ 30 words) because SKILL.md re-dispatches `notes` with it as the `GAPS:` line, which the notes prompt now reads; the leak grep is a runnable `grep -nE` whose hits are judged (version numbers, deliberate `apogee-…` names), and it adds bead ids to the personal id list.
+
+NOTES (2026-10-11): verify diffs `git diff <baseline.tag> -- <files>` (range plus uncommitted work), matching the surface scout; skill total is 795 lines (`cat SKILL.md prompts/*.md | wc -l`), and `grep -rn 'P-\|PLANS'` over the skill dir prints nothing.
 
 Depends on item 11.
 
