@@ -163,7 +163,15 @@ Depends on item 1.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`
 **Commit:** `feat(release): render the Homebrew formula and Scoop manifest from templates`
 
-## 6. `publish`: gate, push, tag, archives and the GitHub release
+## 6. `publish`: gate, push, tag, archives and the GitHub release — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — cmd/release/main.go: made necessary by the new verb; registers `newPublishCommand` on the root and lists the `publish` usage line in the package doc.
+
+NOTES (2026-10-11): consequential edit — cmd/release/probes.go: made necessary by the release step needing the same `gh release view --json assets` read as the probe; extracted `readReleaseAssets` and `missingAssets` from `probeRelease` (probe behaviour and details unchanged, its tests pass untouched) instead of duplicating the call and its parsing in publish.go.
+
+NOTES (2026-10-11): choices within the approach: the bump commit is `git log -1 --format=%H HEAD -- VERSION`; the fetched tag is checked annotated locally with `git cat-file -t`; VERSION at HEAD is read with `git show HEAD:VERSION`; the clone's VERSION is checked against the version before dist runs; `gh release upload` passes `--clobber` (only never-uploaded or failed-state names are ever passed); git/gh writes run with `GIT_TERMINAL_PROMPT=0`/`GH_PROMPT_DISABLED=1`; an `unknown` probe on either step refuses the run before anything changes; a failed step re-probes so the printed table shows the remote as it now stands. `--notes-file` is a required flag (missing = usage error, exit 2) and is checked readable and non-empty on every run, dry runs included.
+
+NOTES (2026-10-11): a release that exists without SHA256SUMS has nothing to check the already-uploaded archives against; publish relies on dist's byte-identical rebuild and uploads its own sums (stated in convergeRelease's doc comment). Acceptance: `go run ./cmd/release publish v0.24.11 --notes-file README.md --dry-run` printed tag and release `done` (exit 0) with `git status --porcelain` unchanged; no real publish was performed.
 
 Depends on items 1, 3, 4.
 

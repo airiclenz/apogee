@@ -121,12 +121,33 @@ func probeTag(ctx context.Context, commands runner, dir string, version releaseV
 // the six archives and SHA256SUMS, each fully uploaded.
 func probeRelease(ctx context.Context, commands runner, dir string, version releaseVersion) stepReport {
 	tag := version.String()
-	output, err := commands.run(ctx, dir, nil, "gh", "release", "view", tag, "--json", "assets")
+	uploaded, isFound, err := readReleaseAssets(ctx, commands, dir, version)
+	if err != nil {
+		return unknownStep(stepRelease, "could not read GitHub release %s: %v", tag, err)
+	}
+	if !isFound {
+		return stepReport{Name: stepRelease, State: statePending, Detail: fmt.Sprintf("no GitHub release %s", tag)}
+	}
+
+	want := releaseAssetNames(version)
+	missing := missingAssets(want, uploaded)
+	if len(missing) > 0 {
+		return stepReport{Name: stepRelease, State: statePending, Detail: fmt.Sprintf(
+			"release %s lacks %d of its %d assets: %s", tag, len(missing), len(want), strings.Join(missing, ", "))}
+	}
+	return stepReport{Name: stepRelease, State: stateDone, Detail: fmt.Sprintf("release %s with all %d assets", tag, len(want))}
+}
+
+// readReleaseAssets reads the GitHub release of version: whether it exists and, when it does, the
+// names of its fully uploaded assets — an asset in any other state is a failed or unfinished
+// upload, not one the release carries.
+func readReleaseAssets(ctx context.Context, commands runner, dir string, version releaseVersion) ([]string, bool, error) {
+	output, err := commands.run(ctx, dir, nil, "gh", "release", "view", version.String(), "--json", "assets")
 	if err != nil {
 		if strings.Contains(err.Error(), "release not found") {
-			return stepReport{Name: stepRelease, State: statePending, Detail: fmt.Sprintf("no GitHub release %s", tag)}
+			return nil, false, nil
 		}
-		return unknownStep(stepRelease, "could not read GitHub release %s: %v", tag, err)
+		return nil, false, err
 	}
 	var release struct {
 		Assets []struct {
@@ -135,7 +156,7 @@ func probeRelease(ctx context.Context, commands runner, dir string, version rele
 		} `json:"assets"`
 	}
 	if err := json.Unmarshal([]byte(output), &release); err != nil {
-		return unknownStep(stepRelease, "could not parse gh release view output: %v", err)
+		return nil, false, fmt.Errorf("parse gh release view output: %w", err)
 	}
 
 	uploaded := make([]string, 0, len(release.Assets))
@@ -144,18 +165,18 @@ func probeRelease(ctx context.Context, commands runner, dir string, version rele
 			uploaded = append(uploaded, asset.Name)
 		}
 	}
-	want := releaseAssetNames(version)
+	return uploaded, true, nil
+}
+
+// missingAssets returns the names in want that uploaded lacks, in want's order.
+func missingAssets(want, uploaded []string) []string {
 	var missing []string
 	for _, name := range want {
 		if !slices.Contains(uploaded, name) {
 			missing = append(missing, name)
 		}
 	}
-	if len(missing) > 0 {
-		return stepReport{Name: stepRelease, State: statePending, Detail: fmt.Sprintf(
-			"release %s lacks %d of its %d assets: %s", tag, len(missing), len(want), strings.Join(missing, ", "))}
-	}
-	return stepReport{Name: stepRelease, State: stateDone, Detail: fmt.Sprintf("release %s with all %d assets", tag, len(want))}
+	return missing
 }
 
 // releaseAssetNames are the files a release of version carries: one archive per release

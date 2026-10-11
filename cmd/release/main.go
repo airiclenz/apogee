@@ -6,6 +6,7 @@
 //	go run ./cmd/release dist [--src DIR] [--out DIR]
 //	go run ./cmd/release status [vX.Y.Z] [--json]
 //	go run ./cmd/release prepare vX.Y.Z
+//	go run ./cmd/release publish vX.Y.Z --notes-file F [--dry-run] [--tag-timeout D]
 //
 // Every external command it runs goes through one runner seam (runner.go), so its tests never
 // reach the network, a real `git` or a real toolchain.
@@ -52,6 +53,7 @@ func newRootCommand(commands runner) *cobra.Command {
 	cmd.AddCommand(newDistCommand(commands))
 	cmd.AddCommand(newStatusCommand(commands))
 	cmd.AddCommand(newPrepareCommand(commands))
+	cmd.AddCommand(newPublishCommand(commands))
 	return cmd
 }
 
