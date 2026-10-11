@@ -35,8 +35,10 @@ type statusReport struct {
 	HighestTag string         `json:"highestTag"`
 	Gate       gateReport     `json:"gate"`
 	Baseline   baselineReport `json:"baseline"`
-	// Steps lists each publish step's state. No step is probed yet, so it is always empty.
-	Steps []any `json:"steps"`
+	// Steps is each publish step's probed state, in publish order. It is empty when no version
+	// was asked about and the checkout's VERSION is not above the baseline: there is no release
+	// in progress to probe.
+	Steps []stepReport `json:"steps"`
 }
 
 // baselineReport is the release the next one is measured from: the latest *published* GitHub
@@ -55,13 +57,16 @@ func newStatusCommand(commands runner) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "status [vX.Y.Z]",
-		Short: "Report the release gate and the release baseline",
+		Short: "Report the release gate, the release baseline and each publish step",
 		Long: "status is read-only apart from fetching origin. It reports the release gate — a clean\n" +
 			"tree, the gate commit (HEAD past its CHANGELOG.md/VERSION-only commits) on origin/main,\n" +
 			"origin/main contained in HEAD, and a successful ci.yml run — naming each condition that\n" +
 			"blocks it; the baseline (the latest published release and the commits since); and the\n" +
-			"highest release tag. The version defaults to VERSION; a bare X.Y.Z reads as vX.Y.Z.\n" +
-			"It exits 0 when the gate clears and 1 when it is blocked or a check could not run.",
+			"highest release tag. It probes each publish step (tag, release, homebrew, scoop,\n" +
+			"winget, smoke) for the version: done, pending, setup-pending or unknown. The version\n" +
+			"defaults to VERSION, whose steps are probed only when it is above the baseline; a bare\n" +
+			"X.Y.Z reads as vX.Y.Z. It exits 0 when the gate clears and 1 when it is blocked or a\n" +
+			"check or probe could not run.",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) > 1 {
 				return fmt.Errorf("status takes at most one version, got %d arguments", len(args))
@@ -88,9 +93,10 @@ func newStatusCommand(commands runner) *cobra.Command {
 // it found.
 func runStatus(ctx context.Context, commands runner, output io.Writer, options statusOptions) error {
 	var problems []error
-	report := statusReport{Version: options.version, Steps: []any{}}
+	report := statusReport{Version: options.version, Steps: []stepReport{}}
 
-	if report.Version == "" {
+	isFromCheckout := report.Version == ""
+	if isFromCheckout {
 		version, err := readCheckoutVersion(options.dir)
 		if err != nil {
 			problems = append(problems, err)
@@ -114,6 +120,15 @@ func runStatus(ctx context.Context, commands runner, output io.Writer, options s
 	}
 	report.Baseline = baseline
 
+	if version, isProbed := stepsVersion(report, isFromCheckout); isProbed {
+		report.Steps = probeSteps(ctx, commands, options.dir, version)
+		for _, step := range report.Steps {
+			if step.State == stateUnknown {
+				problems = append(problems, fmt.Errorf("could not probe the %s step: %s", step.Name, step.Detail))
+			}
+		}
+	}
+
 	if err := printStatus(output, report, options.isJSON); err != nil {
 		return err
 	}
@@ -124,6 +139,24 @@ func runStatus(ctx context.Context, commands runner, output io.Writer, options s
 		return errGateBlocked
 	}
 	return nil
+}
+
+// stepsVersion returns the version whose publish steps status probes, and whether it probes them
+// at all: always for a version asked about, and for the checkout's VERSION only when it is above
+// the baseline — at or below it, no release is in progress.
+func stepsVersion(report statusReport, isFromCheckout bool) (releaseVersion, bool) {
+	version, err := parseReleaseVersion(report.Version)
+	if err != nil {
+		return releaseVersion{}, false
+	}
+	if !isFromCheckout {
+		return version, true
+	}
+	baseline, err := parseReleaseVersion(report.Baseline.Tag)
+	if err != nil {
+		return releaseVersion{}, false
+	}
+	return version, version.compare(baseline) > 0
 }
 
 // readCheckoutVersion reads the checkout's VERSION file as a release version.
@@ -205,7 +238,27 @@ func printStatus(output io.Writer, report statusReport, isJSON bool) error {
 	for _, failure := range report.Gate.Failures {
 		_, _ = fmt.Fprintf(table, "\t- %s\n", failure)
 	}
+	if len(report.Steps) == 0 {
+		notProbed := "not probed"
+		if report.Version != "" && report.Baseline.Tag != "" {
+			notProbed = fmt.Sprintf("not probed: %s is not above the baseline %s", report.Version, report.Baseline.Tag)
+		}
+		_, _ = fmt.Fprintf(table, "steps\t%s\n", notProbed)
+	}
 	if err := table.Flush(); err != nil {
+		return fmt.Errorf("write the report: %w", err)
+	}
+	if len(report.Steps) == 0 {
+		return nil
+	}
+
+	// The steps are a table of their own, so their widths do not stretch the one above.
+	_, _ = fmt.Fprintln(output, "steps")
+	steps := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
+	for _, step := range report.Steps {
+		_, _ = fmt.Fprintf(steps, "  %s\t%s\t%s\n", step.Name, step.State, step.Detail)
+	}
+	if err := steps.Flush(); err != nil {
 		return fmt.Errorf("write the report: %w", err)
 	}
 	return nil

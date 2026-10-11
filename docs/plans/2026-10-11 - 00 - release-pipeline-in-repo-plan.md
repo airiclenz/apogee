@@ -100,7 +100,19 @@ The peel lists a commit's paths with the two-tree form `git diff-tree -r --name-
 - `go run ./cmd/release status --json` prints parseable JSON (`| python3 -m json.tool`) with baseline tag equal to `gh release view --json tagName -q .tagName`.
 **Commit:** `feat(release): status reports the CI gate and the release baseline`
 
-## 3. `status`: per-channel step probes
+## 3. `status`: per-channel step probes — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — cmd/release/gate_test.go: made necessary by the step probes status now runs (fakeRepo gains a `remote fakeRemote` field and hands commands it does not answer to it, so the existing status tests' fake answers the probes)
+
+NOTES (2026-10-11): cmd/release/status_test.go is outside the item's Files: its assertions that `steps` is the empty array (item 2's placeholder) now pin the six probed rows and the step keys {name, state, detail}, and it gains the VERSION-above-baseline, unknown-step-exit and steps-table tests
+
+NOTES (2026-10-11): a lightweight tag reports `unknown` (the Goal names four states and "a failure, not done" is neither done nor pending — publish cannot create a tag that exists), and any `unknown` step makes status exit 1 after printing, as a probe that errored
+
+NOTES (2026-10-11): the release probe counts an asset only in GitHub's `uploaded` state, so a half-finished upload is pending, not done
+
+NOTES (2026-10-11): winget's "merged" check reads the X.Y.Z directory from the one `manifests/a/AiricLenz/Apogee` listing already fetched for the setup-pending check instead of a second contents call; an open pull request counts only when its title names `AiricLenz.Apogee` and exactly X.Y.Z as whole words (the search for 0.24.1 also finds 0.24.11)
+
+NOTES (2026-10-11): an unparseable Scoop manifest is `pending` (publish rewrites it); without a version argument and with VERSION not above the baseline (or the baseline unread), `steps` stays `[]` and the text table says "not probed"
 
 Depends on item 2.
 

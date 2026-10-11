@@ -62,12 +62,23 @@ func TestStatusReportsTheGateBaselineAndHighestTag(t *testing.T) {
 			Range:     "v0.24.11..HEAD",
 			Commits:   7,
 		},
-		Steps: []any{},
 	}
+	steps := report.Steps
+	report.Steps = nil
 	gotJSON, _ := json.Marshal(report)
 	wantJSON, _ := json.Marshal(want)
 	if !bytes.Equal(gotJSON, wantJSON) {
 		t.Errorf("report = %s\nwant     %s", gotJSON, wantJSON)
+	}
+
+	// Nothing is published for v0.24.14 and no channel's one-time setup has landed.
+	var states []string
+	for _, step := range steps {
+		states = append(states, step.Name+" "+string(step.State))
+	}
+	wantStates := []string{"tag pending", "release pending", "homebrew pending", "scoop setup-pending", "winget setup-pending", "smoke pending"}
+	if !slices.Equal(states, wantStates) {
+		t.Errorf("steps = %q, want %q", states, wantStates)
 	}
 }
 
@@ -105,8 +116,82 @@ func TestStatusJSONKeysArePinned(t *testing.T) {
 			t.Errorf("%s keys = %v, want %v", name, got, keys.want)
 		}
 	}
-	if got := string(report["steps"]); got != "[]" {
-		t.Errorf("steps = %s, want an empty array", got)
+	var steps []map[string]json.RawMessage
+	if err := json.Unmarshal(report["steps"], &steps); err != nil {
+		t.Fatalf("steps is not an array of objects: %v", err)
+	}
+	if len(steps) != len(publishSteps) {
+		t.Fatalf("steps has %d entries, want %d", len(steps), len(publishSteps))
+	}
+	for _, step := range steps {
+		if got, want := slices.Sorted(maps.Keys(step)), []string{"detail", "name", "state"}; !slices.Equal(got, want) {
+			t.Errorf("step keys = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestStatusProbesTheVersionFileOnlyAboveTheBaseline pins when status probes the publish steps
+// for the checkout's VERSION: above the baseline a release is in progress and every step is
+// probed; at the baseline none is, and no probe command runs.
+func TestStatusProbesTheVersionFileOnlyAboveTheBaseline(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		version   string
+		wantSteps int
+	}{
+		"above the baseline": {version: "v0.24.14", wantSteps: len(publishSteps)},
+		"at the baseline":    {version: "v0.24.11", wantSteps: 0},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, versionFile), []byte(tc.version+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			commands := clearedRepo().runner()
+			var output bytes.Buffer
+
+			err := runStatus(t.Context(), commands, &output, statusOptions{dir: dir, isJSON: true})
+
+			if err != nil {
+				t.Fatalf("status failed: %v\n%s", err, output.String())
+			}
+			var report statusReport
+			if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+				t.Fatalf("status --json printed no JSON report: %v", err)
+			}
+			if len(report.Steps) != tc.wantSteps {
+				t.Errorf("steps = %d, want %d", len(report.Steps), tc.wantSteps)
+			}
+			if tc.wantSteps == 0 && len(commands.recorded("gh")) != 3 {
+				t.Errorf("gh ran %d times, want 3 (the gate's two run lists and the baseline): no probe", len(commands.recorded("gh")))
+			}
+		})
+	}
+}
+
+// TestStatusFailsOnAStepItCouldNotProbe pins that an unknown step is a run failure (exit 1) even
+// when the gate clears, and that the report naming it is still printed.
+func TestStatusFailsOnAStepItCouldNotProbe(t *testing.T) {
+	t.Parallel()
+	repo := clearedRepo()
+	repo.remote.failing = "gh api repos/" + tapRepo
+
+	report, err := statusJSON(t, repo, "v0.24.14")
+
+	if err == nil || exitCodeFor(err) != exitRunFailed {
+		t.Fatalf("status = %v, want a run failure", err)
+	}
+	if !strings.Contains(err.Error(), "could not probe the homebrew step") {
+		t.Errorf("error = %v, want it to name the homebrew step", err)
+	}
+	if !report.Gate.IsOK {
+		t.Errorf("gate failures = %q, want a cleared gate", report.Gate.Failures)
+	}
+	if len(report.Steps) != len(publishSteps) || report.Steps[2].State != stateUnknown {
+		t.Errorf("steps = %+v, want homebrew unknown", report.Steps)
 	}
 }
 
@@ -238,6 +323,9 @@ func TestStatusTextNamesTheBlockingConditions(t *testing.T) {
 		"baseline     v0.24.11 (published 2026-10-08T19:24:24Z), v0.24.11..HEAD: 7 commits",
 		"gate         BLOCKED at 200000000000",
 		"- the working tree is not clean",
+		"\nsteps\n",
+		"  tag       pending        origin has no tag v0.24.14\n",
+		"  scoop     setup-pending  no airiclenz/scoop-bucket repository yet\n",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("output lacks %q:\n%s", want, output)
