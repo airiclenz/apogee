@@ -156,7 +156,11 @@ line; `--help` output does not name `audit-split`.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAuditSplit|TestDocMap' ./cmd/apogee/`
 **Commit:** `feat(cli): hidden audit-split subcommand`
 
-## 4. `{apogee}` placeholder in the engine
+## 4. `{apogee}` placeholder in the engine — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): cmd/apogee/wire_config_test.go — the two-Driver table of TestEveryDriverCarriesTheProjectedConfig was lifted unchanged into projectedDrivers() so the new TestProjectConfigNamesTheRunningExecutable drives the same session and Firing assemblies; assertCarriesProjection also compares ApogeeExecutable.
+NOTES (2026-10-11): the reserved name is exported as workflow.ApogeeInputName and the engine's apogeePlaceholder is spelled from it, so the validation and the placeholder cannot drift; a non-NotExist stat failure (e.g. permission) gets its own "cannot be reached" error rather than the restart sentence; if os.Executable fails the field stays empty and a `{apogee}` stage fails with the unset sentence.
+NOTES (2026-10-11): pre-existing, not this item's: inputs named `workflow_dir` or `part_bytes` pass ValidateInputs and would shadow those placeholders the same way `apogee` would have; `{apogee}` is rendered with the POSIX shellQuote until item 6's platform quoting lands.
 
 Depends on item 3.
 

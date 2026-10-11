@@ -485,6 +485,14 @@ type Config struct {
 	// does.
 	Workflow WorkflowConfig
 
+	// ApogeeExecutable is the path of the apogee binary a recipe's script stage names as
+	// `{apogee}` — how a shipped recipe calls apogee's own hidden subcommands (`{apogee}
+	// audit-split`) on every OS without a shell script. apogee's own Drivers set it to the running
+	// binary (os.Executable); the engine reads no process global to find it (ADR 0001). An
+	// embedder whose recipes write `{apogee}` must set it to an apogee binary; empty ⇒ such a stage
+	// fails with a sentence naming this field, and every other stage runs as before.
+	ApogeeExecutable string
+
 	// OffersBackground is an embedder's opt-in to background Workflows (ADR 0089 D1) on the tool
 	// set the ENGINE composes (Config.Tools nil, a WorkspaceDir set): true hands it to the roster
 	// assembly, so fan_out publishes `background` and the workflow control tool is offered wherever

@@ -575,6 +575,75 @@ func TestRecipe_ShellToolNameIsTheTerminals(t *testing.T) {
 	}
 }
 
+// A script stage's {apogee} renders to the configured apogee executable, quoted as one shell word,
+// and a stage naming it fails with a sentence when there is no binary to run: the embedder's unset
+// field names the field, and a binary gone since the session started asks for a restart.
+func TestRender_TheApogeePlaceholder(t *testing.T) {
+	t.Parallel()
+
+	present := filepath.Join(t.TempDir(), "apogee bin")
+	if err := os.WriteFile(present, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "apogee")
+	tests := []struct {
+		name       string
+		executable string
+		command    string
+		want       string
+		wantErr    []string
+	}{
+		{
+			name:       "expands to the quoted executable",
+			executable: present,
+			command:    "{apogee} audit-split {part_bytes}",
+			want:       "'" + present + "' audit-split 4096",
+		},
+		{
+			name:       "a command without it needs no executable",
+			executable: "",
+			command:    "sh run.sh {part_bytes}",
+			want:       "sh run.sh 4096",
+		},
+		{
+			name:       "an unset executable names the Config field",
+			executable: "",
+			command:    "{apogee} audit-split",
+			wantErr:    []string{"Config.ApogeeExecutable", "apogee binary"},
+		},
+		{
+			name:       "a vanished executable asks for a restart",
+			executable: gone,
+			command:    "{apogee} audit-split",
+			wantErr:    []string{gone, "upgraded or moved since this session started", "restart apogee"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			scripts := &recipeScripts{agent: &Agent{cfg: domain.Config{ApogeeExecutable: tt.executable}}, split: 4096}
+
+			got, err := scripts.render(workflow.ScriptSpec{Command: tt.command, Dir: t.TempDir()})
+
+			if tt.wantErr == nil {
+				if err != nil || got != tt.want {
+					t.Errorf("render = (%q, %v), want %q", got, err, tt.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("render = %q, want an error", got)
+			}
+			for _, part := range tt.wantErr {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("render error = %q, want it to say %q", err, part)
+				}
+			}
+		})
+	}
+}
+
 func TestBindPlanInputs(t *testing.T) {
 	t.Parallel()
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"maps"
+	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -119,6 +120,9 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	if !reflect.DeepEqual(got.AllowRules, want.AllowRules) {
 		t.Errorf("Config.AllowRules = %+v, want the projection's %+v", got.AllowRules, want.AllowRules)
 	}
+	if got.ApogeeExecutable != want.ApogeeExecutable {
+		t.Errorf("Config.ApogeeExecutable = %q, want %q", got.ApogeeExecutable, want.ApogeeExecutable)
+	}
 	if got.UndoSnapshots != want.UndoSnapshots {
 		t.Errorf("Config.UndoSnapshots = %v, want %v", got.UndoSnapshots, want.UndoSnapshots)
 	}
@@ -184,10 +188,50 @@ func callRoots(mount func() []string) []string {
 func TestEveryDriverCarriesTheProjectedConfig(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		assemble func(t *testing.T) (got, want apogee.Config)
-	}{
+	for _, tt := range projectedDrivers() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, want := tt.assemble(t)
+
+			assertCarriesProjection(t, got, want)
+		})
+	}
+}
+
+// Both Drivers name the running binary as the apogee a recipe's `{apogee}` stage runs: the
+// projection reads it from os.Executable, and the session and the Firing each carry it.
+func TestProjectConfigNamesTheRunningExecutable(t *testing.T) {
+	t.Parallel()
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Skipf("os.Executable: %v", err)
+	}
+	for _, tt := range projectedDrivers() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, _ := tt.assemble(t)
+
+			if got.ApogeeExecutable != executable {
+				t.Errorf("Config.ApogeeExecutable = %q, want the running binary %q", got.ApogeeExecutable, executable)
+			}
+		})
+	}
+}
+
+// projectedDriver is one Config assembly that shares projectConfig: assemble returns the Config the
+// Driver built and the projection called on the inputs that Driver projected from.
+type projectedDriver struct {
+	name     string
+	assemble func(t *testing.T) (got, want apogee.Config)
+}
+
+// projectedDrivers are the two Config assemblies of this binary — the session's boot phase and the
+// Firing composer — each driven on the same fully-set Options.
+func projectedDrivers() []projectedDriver {
+	return []projectedDriver{
 		{
 			name: "the session's boot phase",
 			assemble: func(t *testing.T) (apogee.Config, apogee.Config) {
@@ -227,15 +271,6 @@ func TestEveryDriverCarriesTheProjectedConfig(t *testing.T) {
 				return cfg, projectConfig(opts, roots, fenceableHost, domain.ModeAuto, provider)
 			},
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, want := tt.assemble(t)
-
-			assertCarriesProjection(t, got, want)
-		})
 	}
 }
 

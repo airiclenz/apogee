@@ -192,3 +192,18 @@ func TestBindInputsRefusesWithAnErrorNamingTheProblem(t *testing.T) {
 		})
 	}
 }
+
+// An input may not be called apogee: a script stage's {apogee} names the apogee executable, and an
+// input bound before the stage renders would replace it. Any other well-formed name is accepted.
+func TestValidateInputsReservesTheApogeeName(t *testing.T) {
+	t.Parallel()
+
+	problems := ValidateInputs([]InputDecl{{Name: "scope"}, {Name: ApogeeInputName}})
+
+	if len(problems) != 1 {
+		t.Fatalf("ValidateInputs = %+v, want one problem for the reserved name", problems)
+	}
+	if got := problems[0]; got.Field != "inputs" || !strings.Contains(got.Message, `"apogee" is reserved`) {
+		t.Errorf("problem = %+v, want the inputs field and a message naming the reserved name", got)
+	}
+}

@@ -13,6 +13,7 @@ package main
 // the human seams (Approver, Asker, Presenter, the pre-emption door).
 
 import (
+	"os"
 	"slices"
 
 	"github.com/airiclenz/apogee"
@@ -201,6 +202,10 @@ func projectConfig(
 			Continuations: &opts.WorkflowContinuations,
 			Wake:          &opts.WorkflowWake,
 		},
+		// The binary a recipe's script stage runs as `{apogee}` — this one, so a shipped recipe calls
+		// apogee's own hidden subcommands with no shell script (ADR 0087 D6). The engine reads no
+		// process global for it (ADR 0001); both Drivers carry the running binary from here.
+		ApogeeExecutable: runningExecutable(),
 		// Which Floor guards this run goes WITHOUT (ADR 0071). The seven keys are positive in the
 		// file and negative at the engine, and floorFromOptions is the one place that turns one
 		// spelling into the other — so a guard the human took away, in the file or in `/settings`,
@@ -220,6 +225,16 @@ func projectConfig(
 		// Bypass, which switches it off with the rest of the advise class.
 		ContextFillNotice: opts.ContextFillNotice,
 	}
+}
+
+// runningExecutable is the path of the running apogee binary, or "" when the OS cannot name it —
+// a `{apogee}` stage then fails with the engine's sentence rather than this process at boot.
+func runningExecutable() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return executable
 }
 
 // allowRulesFromOptions is the `allow:` key's effective rules in the engine's spelling, each tagged

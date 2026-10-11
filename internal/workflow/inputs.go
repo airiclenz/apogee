@@ -22,12 +22,17 @@ type InputDecl struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
+// ApogeeInputName is the name a recipe input may not take: a script stage's `{apogee}` names the
+// apogee executable, and an input's `{<name>}` is bound before the stage renders it, so an input
+// called apogee would silently replace the binary a stage runs.
+const ApogeeInputName = "apogee"
+
 // inputNameRe is the shape an input name takes: a letter, then letters, digits, `_` or `-`. It
 // keeps a name one `key=value` token — no whitespace, no `=`, no quote.
 var inputNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 // ValidateInputs reports every way a recipe's input declarations fall short: a missing or
-// malformed name, or a name declared twice. Each Problem names the field `inputs` and says how to
+// malformed name, the reserved name ApogeeInputName, or a name declared twice. Each Problem names the field `inputs` and says how to
 // fix it; an empty result means the declarations are usable.
 func ValidateInputs(decls []InputDecl) []Problem {
 	var problems []Problem
@@ -42,6 +47,11 @@ func ValidateInputs(decls []InputDecl) []Problem {
 			problems = append(problems, Problem{Field: "inputs", Message: fmt.Sprintf(
 				"input name %q is not one word; start with a letter and use only letters, digits, _ or -",
 				decl.Name,
+			)})
+		case decl.Name == ApogeeInputName:
+			problems = append(problems, Problem{Field: "inputs", Message: fmt.Sprintf(
+				"input name %q is reserved: a script stage's {%s} names the apogee executable; rename the input",
+				decl.Name, ApogeeInputName,
 			)})
 		case seen[decl.Name]:
 			problems = append(problems, Problem{Field: "inputs", Message: fmt.Sprintf(

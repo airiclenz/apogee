@@ -55,10 +55,23 @@ const (
 
 // The placeholders a script stage's `run:` is rendered with as it runs, beside the recipe's own
 // inputs: the skill's folder (a copy staged into the workflow folder for a shipped skill, whose
-// `shipped:` address no shell can open), the workflow folder, and the split budget a part may hold.
+// `shipped:` address no shell can open), the workflow folder, the split budget a part may hold, and
+// the apogee executable (Config.ApogeeExecutable) — the name workflow.ValidateInputs reserves, so no
+// input shadows it.
 const (
 	workflowDirPlaceholder = "{workflow_dir}"
 	partBytesPlaceholder   = "{part_bytes}"
+	apogeePlaceholder      = "{" + workflow.ApogeeInputName + "}"
+)
+
+// The sentences a stage naming {apogee} fails with when there is no binary to run: the field an
+// embedder left unset, or a path that was the running binary when the session started and is gone
+// now — a stage that ran it would only exit 127 with the shell's own words.
+const (
+	apogeeUnsetMessage = "this recipe runs apogee as {apogee}, but no apogee executable is configured: " +
+		"set Config.ApogeeExecutable to an apogee binary"
+	apogeeGoneFormat = "this recipe runs apogee as {apogee}, but %s is gone: apogee was upgraded or moved " +
+		"since this session started; restart apogee and run the recipe again"
 )
 
 // stagedSkillDir is where a shipped skill's scripts are staged inside the workflow folder.
@@ -449,7 +462,8 @@ func (s *recipeScripts) RunScript(ctx context.Context, spec workflow.ScriptSpec)
 }
 
 // render fills the command's run-time placeholders: {{SKILL_DIR}} (staging each file it names for
-// a shipped skill), {workflow_dir} and {part_bytes}.
+// a shipped skill), {apogee} (refused when no executable is there to run), {workflow_dir} and
+// {part_bytes}.
 func (s *recipeScripts) render(spec workflow.ScriptSpec) (string, error) {
 	command := spec.Command
 	if strings.Contains(command, domain.SkillDirToken) {
@@ -459,13 +473,35 @@ func (s *recipeScripts) render(spec workflow.ScriptSpec) (string, error) {
 		}
 		command = strings.ReplaceAll(command, domain.SkillDirToken, shellQuote(dir))
 	}
+	if strings.Contains(command, apogeePlaceholder) {
+		executable, err := s.apogeeExecutable()
+		if err != nil {
+			return "", err
+		}
+		command = strings.ReplaceAll(command, apogeePlaceholder, shellQuote(executable))
+	}
 	return strings.NewReplacer(
 		workflowDirPlaceholder, shellQuote(spec.Dir),
 		partBytesPlaceholder, strconv.Itoa(int(s.split)),
 	).Replace(command), nil
 }
 
-// skillDir is the folder a command's {{SKILL_DIR}} names: the skill's own for one on disk, and for
+// apogeeExecutable is the binary a command's {apogee} names (Config.ApogeeExecutable), or the
+// sentence the stage fails with when the field is unset or the file is no longer there.
+func (s *recipeScripts) apogeeExecutable() (string, error) {
+	executable := s.agent.cfg.ApogeeExecutable
+	if executable == "" {
+		return "", errors.New(apogeeUnsetMessage)
+	}
+	if _, err := os.Stat(executable); errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf(apogeeGoneFormat, executable)
+	} else if err != nil {
+		return "", fmt.Errorf("the apogee executable %s cannot be reached: %w", executable, err)
+	}
+	return executable, nil
+}
+
+// skillDir is the folder a command's {{SKILL_DIR}} names:the skill's own for one on disk, and for
 // a shipped skill a folder in the workflow's, into which every `{{SKILL_DIR}}/<path>` the command
 // names is copied first — the embedded tree has no host path a shell could run a script from.
 func (s *recipeScripts) skillDir(command, workflowDir string) (string, error) {
