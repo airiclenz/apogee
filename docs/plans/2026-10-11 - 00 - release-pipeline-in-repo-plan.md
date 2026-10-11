@@ -311,7 +311,11 @@ Depends on item 11.
 **Acceptance:** `cat .apogee/skills/release-notes-apogee/{SKILL.md,prompts/*.md} | wc -l` between 600 and 800; `grep -rn 'P-\|PLANS' .apogee/skills/release-notes-apogee` prints nothing.
 **Commit:** `feat(skills): complete the release-notes-apogee pipeline`
 
-## 13. `release-apogee` skill, Claude Code pointers and a load test
+## 13. `release-apogee` skill, Claude Code pointers and a load test — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): release-apogee runs the notes skill with no version argument (the version is chosen from its inventory), so step 6 writes the versioned notes file with the title line rewritten from `unreleased` to vX.Y.Z — the notes format puts the version in the title, and the file is the GitHub release body.
+
+NOTES (2026-10-11): resume is detected from HEAD's two commit subjects (`chore(version): bump version to vX` over `chore(release): cut vX`), not from `status` steps — micro-bump tags make `steps` non-empty with the tag done for every shipped feature, so a done tag does not mean a release is in flight.
 
 Depends on items 2, 4, 6, 12.
 
