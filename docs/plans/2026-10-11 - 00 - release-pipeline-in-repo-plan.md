@@ -271,7 +271,15 @@ NOTES (2026-10-11): the five files total exactly 380 lines (the acceptance ceili
 **Acceptance:** `wc -l` of these five ≤ 380; `grep -rniE 'claude/skills|subagent_type|recon|plans\.md|P-[0-9]' .apogee/skills/release-notes-apogee` prints nothing.
 **Commit:** `feat(skills): add the release-notes-apogee coordinator`
 
-## 11. `release-notes-apogee`: the three blind scouts
+## 11. `release-notes-apogee`: the three blind scouts — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): "runs no git" for the changelog scout keeps `_shared.md`'s before/after `git status --porcelain` tree check — the one git command every sub-agent runs; it reads no history.
+
+NOTES (2026-10-11): the surface scout diffs `git diff <baseline.tag> -- <paths>` (tag against the working tree, so uncommitted edits ride along) rather than `<baseline>..HEAD` plus a separate uncommitted diff; its sub-surfaces are `_apogee.md`'s eight User surfaces rows (no Routes row — apogee has none), and its `absent` verdict now means `_apogee.md` drifted from the tree.
+
+NOTES (2026-10-11): the commits scout and surface scout are kept blind to the changelog by construction — commits excludes `CHANGELOG.md` from every `git show`/`git diff` pathspec, surface reads no commit subjects (`git log --format=%h`); the personal prompt's stash hand-off to a plans agent is dropped with that agent.
+
+NOTES (2026-10-11): the three files total exactly 220 lines (the acceptance ceiling); both greps (`MAP|recon` over the three, item 10's sweep over the skill dir) print nothing.
 
 Depends on item 10.
 
