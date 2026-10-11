@@ -74,10 +74,16 @@ badly. The owner settled the split on 2026-10-11, in a grill over the handoff
    running `publish` again. There is no local state file, because the remote is the truth, and a
    second run cannot duplicate a commit or a pull request. `status` reports these same probes.
 
-5. **The gate is green CI on the exact commit, not a local `make check`.** `status` refuses to
-   clear a cut unless `HEAD` equals `origin/main` and `ci.yml` has a successful run for that SHA.
-   CI runs the full check on a clean machine, Windows leg included, and gives the same answer
-   whichever OS cuts the release. The two `prepare` commits touch only `CHANGELOG.md` and
+5. **The gate is green CI on the gated commit, not a local `make check`.** The gate commit G is
+   `HEAD` with its trailing first-parent commits that touch only `CHANGELOG.md` and/or `VERSION`
+   peeled off; the peel stops at any commit whose parent count is not 1, so a merge is never
+   peeled. `status` refuses to clear a cut unless the tree is clean, G is an ancestor of or equal
+   to `origin/main`, `origin/main` is an ancestor of or equal to `HEAD`, and `ci.yml` has a
+   successful run for G or for any peeled commit that `origin/main` contains. The peeled commits
+   count because a push runs CI on its head alone: a feature pushed with its micro-bump leaves
+   the green run on the bump, not on the feature. CI runs the full check on a clean machine,
+   Windows leg included, and gives the same answer whichever OS cuts the release. The two
+   `prepare` commits, like every micro-bump the peel walks past, touch only `CHANGELOG.md` and
    `VERSION`, so the commit that was gated is, in effect, the commit that ships. The gate has no
    bypass: red CI, flaky or not, blocks the release until it is fixed.
 

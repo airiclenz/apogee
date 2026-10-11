@@ -31,9 +31,10 @@ A `Makefile` wraps the common Go invocations:
 | `make vulncheck` | Run `govulncheck` over the dependency graph — needs the network |
 | `make actionlint` | Lint the GitHub workflow files with the pinned `actionlint` |
 | `make cross` | Cross-compile every package for all six release targets (Linux/macOS/Windows × amd64/arm64), as a check |
-| `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, `GOOS=windows go vet` over `internal/platform`, `internal/probe`, `internal/console` and `internal/auditsplit`, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
-| `make release-smoke VERSION=vX.Y.Z` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
+| `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` — a wrapper over `go run ./cmd/release dist` |
+| `make check` | The full acceptance gate — gofmt, `GOOS=windows go vet` over `internal/platform`, `internal/probe`, `internal/console`, `internal/auditsplit` and `cmd/release`, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make release-status [VERSION=vX.Y.Z]` | Report the release gate, the baseline and each publish step — a wrapper over `go run ./cmd/release status` (see [Releasing](#releasing)) |
+| `make release-smoke [VERSION=vX.Y.Z]` | Verify a **published** release from the outside — a wrapper over `go run ./cmd/release smoke`, which `publish` also runs last (see [Releasing](#releasing)) |
 | `make clean` | Remove the built binary |
 | `make help` | List every target |
 
@@ -57,15 +58,15 @@ proxy.golang.org retains immutably are retracted in `go.mod`, so `@latest` no lo
 resolves to them.)
 
 **Versions and tags.** The top-level `VERSION` file is the single source of truth for the
-release version — one line, carrying the leading `v` (`vX.Y.Z`); `make dist` strips that
-`v` for the archive names and nothing else re-states the number. Pushing a commit that
+release version — one line, carrying the leading `v` (`vX.Y.Z`); the `dist` step strips
+that `v` for the archive names and nothing else re-states the number. Pushing a commit that
 changes `VERSION` to `main` is what creates the tag: a CI workflow
 (`.github/workflows/tag-on-version-bump.yml`) puts an **annotated** tag on that exact
 commit, named verbatim from the file, one per bump the push carries. So a version bump is
 always a commit of its own and, at a release cut, the *last* one — the `CHANGELOG.md`
-rollup lands first, so the tree the tag pins already contains it. Publishing a GitHub
-Release on top of that tag, with the archives `make dist` packs, stays a separate manual
-act; CI creates the tag and nothing more.
+rollup lands first, so the tree the tag pins already contains it. CI creates the tag and
+nothing more: the GitHub Release on top of it, and every package channel after that, are
+published by `go run ./cmd/release publish` (see [Releasing](#releasing)).
 
 ## Testing
 
@@ -158,64 +159,125 @@ dev box whose kernel lacks landlock ABI 4, where the skip is the honest result.
 
 ## Releasing
 
-Cutting a release is four acts, in this order, and only the first two are automated.
+The release process lives in this repo and needs nothing outside it
+([ADR 0098](../adr/0098-the-repo-owns-its-release-pipeline.md)): a clone, the Go toolchain,
+`git`, `gh` logged in with push access to this repository, the Homebrew tap and the Scoop
+bucket, and — for winget — `komac`. It runs the same from Linux, macOS or Windows. The work
+is split in two. A Go maintainer program, `cmd/release` (run as `go run ./cmd/release <verb>`,
+never a release asset), does everything deterministic; two committed skills do the judgment —
+which changes shipped, how the notes read, which version to cut.
 
-1. **Roll the changelog up.** `CHANGELOG.md`'s `[Unreleased]` section gains its release
-   heading, on a commit of its own. It lands *first*, so the tree the tag pins already
-   carries it.
-2. **Bump `VERSION`, alone, last.** One line, leading `v`. Pushing that commit to `main`
-   is what creates the annotated tag — `tag-on-version-bump.yml` puts `vX.Y.Z` on that exact
-   commit and does nothing else. Never move or delete a tag afterwards.
-3. **Publish.** `make dist` packs the six archives plus `SHA256SUMS` into `dist/`; attach
-   all seven files to a GitHub Release on that tag, then point the Homebrew tap's formula
-   (`airiclenz/tap`) at the new assets and their checksums. After the tap, publish the two
-   Windows channels from the published release: `make release-scoop VERSION=vX.Y.Z` writes
-   `bucket/apogee.json` — both Windows archives' hashes, read from the release's
-   `SHA256SUMS` — into `airiclenz/scoop-bucket`, commits `apogee X.Y.Z` and pushes it; then
-   `make release-winget VERSION=vX.Y.Z` runs `komac update AiricLenz.Apogee` with both
-   Windows archives' URLs and `--submit`, opening the manifest pull request against
-   `microsoft/winget-pkgs`, which merges later, after winget's own validation and review.
-   `DRY_RUN=1` on either prints what it would publish and publishes nothing.
-4. **Smoke it from the outside.** `make release-smoke VERSION=vX.Y.Z` is the only step that
-   can run *after* the release exists, and it is the one that catches a release nobody can
-   install. It checks that the tag is remote and annotated rather than lightweight, that
-   `make dist` still packs six verifying archives, that all six published assets download
-   and match the release's own `SHA256SUMS`, that each of those binaries carries the tagged
-   commit in its embedded build stamp (`go version -m`) — the checksums only prove the assets
-   match the list the release itself published, the stamp is what ties them to the tree — and
-   that the archive for *this* machine unpacks to a binary reporting the released version.
-   Where Homebrew is installed and already has apogee, it also runs
-   `brew update && brew upgrade apogee` and expects the upgraded binary
-   to report the same version — the one claim only a real tap and a real release can make.
-   Last, it reads the Scoop bucket's `bucket/apogee.json` and checks that it names the
-   release and lists both Windows archives' hashes exactly as the release's `SHA256SUMS`
-   does. Only the latest release belongs in the bucket, so smoking an older tag skips that
-   check, naming the bucket's version, rather than failing it; the winget half has no such
-   check, since its pull request merges on winget's schedule, not the release's.
-   Every check that needs a tool this machine lacks (`gh`, `brew`, `unzip` for the two
-   Windows archives' stamp, `jq` for the bucket's manifest) — or a bucket it cannot reach —
-   says `SKIP` and names it, so a partial run is never mistaken for a pass. A binary built
-   from a modified tree only warns — untracked files flip that flag.
+**The usual way: run the `release-apogee` skill.** It is canonical under
+`.apogee/skills/release-apogee/`, so apogee loads it as a project skill, and Claude Code
+reaches it through the pointer `.claude/skills/release-apogee/SKILL.md`. It checks the gate
+with `status`, drafts the notes with `release-notes-apogee`, proposes a version for you to
+confirm, makes the two local commits with `prepare`, shows a `publish --dry-run`, and runs
+`publish` only after one explicit confirmation. `release-notes-apogee` on its own is
+read-only: it answers "what shipped since the last release?" and drafts the notes without
+cutting anything.
 
-**One-time setup for the Windows channels.** `make release-scoop` and `make release-winget` publish into repositories that have to exist
-first, and the first winget submission is a different command from every later one. Done
-once, by the owner, before the first release that ships on Scoop and winget:
+**By hand,** the same cut is four steps:
+
+1. **Check the gate: `go run ./cmd/release status [vX.Y.Z]`** (or
+   `make release-status [VERSION=vX.Y.Z]`). Read-only apart from fetching `origin`, it
+   reports the release gate, the baseline — the latest published release and the commits
+   since — and the highest release tag, then probes each publish step (tag, release,
+   homebrew, scoop, winget, smoke) for the version as `done`, `pending`, `setup-pending` or
+   `unknown`. The version defaults to `VERSION`; a bare `X.Y.Z` reads as `vX.Y.Z`. It exits
+   0 when the gate clears and 1 when it is blocked or a check could not run. The gate is
+   green CI, not a local `make check`. Its gate commit is `HEAD` with the trailing commits
+   that touch only `CHANGELOG.md` and/or `VERSION` peeled off — a release's own two commits
+   and any per-feature micro-bumps. It clears when the tree is clean, the gate commit is on
+   `origin/main`, `origin/main` is contained in `HEAD`, and `ci.yml` has a successful run for
+   the gate commit or for a peeled commit `origin/main` already contains (a push runs CI on
+   its head alone, so a feature pushed with its micro-bump leaves the green run on the
+   bump). There is no bypass: red CI, flaky or not, blocks the release until it is fixed.
+2. **Make the two release commits: `go run ./cmd/release prepare vX.Y.Z`.** It makes exactly
+   two **local** commits and pushes nothing: `chore(release): cut vX.Y.Z`, which gives every
+   bullet under `## [Unreleased]` its `## [X.Y.Z] — YYYY-MM-DD` heading, then
+   `chore(version): bump version to vX.Y.Z` — the bump alone, last, so the tree the tag pins
+   already carries the rollup. It refuses, writing nothing, when the version is not strictly
+   above the highest `v0.*` release tag, `VERSION` already reads it, the tree is dirty,
+   `[Unreleased]` is missing or empty, or `CHANGELOG.md` already has a heading for the
+   version. An aborted cut is undone with
+   `git reset --keep HEAD~2`.
+3. **Publish: `go run ./cmd/release publish vX.Y.Z --notes-file <path>`.** Write the release
+   notes to a file outside the repo, run it once with `--dry-run` — the gate and the probes,
+   then what each pending step would do, changing nothing — and then for real. It is the
+   only verb that changes anything outside the machine, it never prompts or reads stdin, and
+   it runs these steps in order:
+   - **tag** — while the tag is not on `origin`, it refuses unless the gate clears and
+     `VERSION` at `HEAD` reads the version; it then pushes `HEAD` to `main`, where
+     `tag-on-version-bump.yml` puts the **annotated** `vX.Y.Z` tag on the bump commit, and
+     waits for it (`--tag-timeout`, default 10m). It never creates a tag itself. Never move
+     or delete a tag afterwards.
+   - **release** — builds the six archives plus `SHA256SUMS` in a fresh `git clone` checked
+     out at the tag, in a temporary directory and never in your checkout, and creates the
+     GitHub Release with `gh release create --verify-tag`, titled with the tag and carrying
+     the notes file and all seven assets.
+   - **homebrew** and **scoop** — render the formula and the manifest whole from the
+     templates in `cmd/release/templates/`, filling in the version and the hashes from the
+     release's `SHA256SUMS`, and commit `apogee X.Y.Z` straight to `airiclenz/homebrew-tap`
+     and `airiclenz/scoop-bucket` (`bucket/apogee.json`), pushing only when the file
+     changes. Both files are generated output: a hand edit in the tap or the bucket is
+     overwritten at the next release, so change the template here instead.
+   - **winget** — runs `komac update AiricLenz.Apogee` with both Windows archives' release
+     URLs and `--submit`, opening the manifest pull request against `microsoft/winget-pkgs`,
+     which merges later, after winget's own validation and review. komac takes its token
+     from `GITHUB_TOKEN`, else `gh auth token`.
+   - **smoke** — last, the smoke test below, over everything the other steps published.
+
+   It prints the step table whatever happens and exits 1 when a step fails.
+4. **Re-run to converge.** Before each step `publish` asks the remote whether that step is
+   already done and skips it if so, so a half-finished release — a failed step, an
+   interrupted run, a tag that took longer than the timeout — is resumed by running the
+   same command again. There is no local state file: the remote is the truth, and a second
+   run cannot duplicate a commit or a pull request. A channel whose one-time setup (below)
+   is pending is skipped and named, not failed; once that setup lands, running `publish`
+   again converges the missing channel.
+
+**The smoke test.** `go run ./cmd/release smoke [vX.Y.Z]` (or
+`make release-smoke [VERSION=vX.Y.Z]`) runs on its own too, against any published release,
+and it is the check that catches a release nobody can install. It checks that the tag is
+on `origin` and annotated rather than lightweight; with `--dist-dir` (which `publish` passes
+its own build to), that the local build's `SHA256SUMS` equals the published one; that all
+six published assets download and match the release's own `SHA256SUMS`; that each of those
+binaries carries the tagged commit in its embedded build stamp — the checksums only prove
+the assets match the list the release itself published, the stamp is what ties them to the
+tree — and that the archive for *this* machine holds a binary reporting the released
+version. Where apogee is installed through Homebrew, it also runs
+`brew update && brew upgrade apogee` and expects the upgraded binary to report the same
+version — the one claim only a real tap and a real release can make. Last, it reads the
+Scoop bucket's `bucket/apogee.json` and checks that it names the release and lists both
+Windows archives' hashes exactly as the release's `SHA256SUMS` does. Only the latest release
+belongs in the bucket, so smoking an older tag skips that check, naming the bucket's
+version, rather than failing it; the winget half has no such check, since its pull request
+merges on winget's schedule, not the release's. Every check whose tool or input is missing —
+`gh`, Homebrew, an archive for this host, a bucket it cannot read — says `SKIP` and names
+it, so a partial run is never mistaken for a pass. A binary built from a modified tree only
+warns — untracked files flip that flag.
+
+**One-time setup for the Windows channels.** `publish`'s scoop and winget steps publish into
+repositories that have to exist first, and the first winget submission is a different
+command from every later one. Until each is done, `status` reports that channel
+`setup-pending` and `publish` skips it. Done once, by the owner, before the first release
+that ships on Scoop and winget:
 
 1. **Create the Scoop bucket.** A public GitHub repository `airiclenz/scoop-bucket`; the
-   script writes `bucket/apogee.json` into it, creating the directory on its first run. It
-   clones and pushes with `gh` (or plain `git` when `BUCKET_URL=` names the clone URL), so
-   that login needs push access to the bucket.
+   scoop step writes `bucket/apogee.json` into it, creating the directory on its first run.
+   It clones with `gh repo clone` and pushes with `git`, so that `gh` login needs push
+   access to the bucket.
 2. **Fork `microsoft/winget-pkgs`** to the account that submits. komac pushes each manifest
    branch to that fork and opens the pull request from it.
 3. **Install komac** from [its repository](https://github.com/russellbanks/Komac), which
    lists the package-manager and prebuilt installs.
 4. **Submit the first manifest with `komac new AiricLenz.Apogee`.** `komac update` — what
-   `make release-winget` runs — can only update a package winget already knows, so the
+   the winget step runs — can only update a package winget already knows, so the
    first release goes in through `komac new`'s interactive questions: the version, both
    Windows archives' release URLs, `apogee_<version>_windows_<arch>/apogee.exe` as the
    nested portable executable with the command alias `apogee`, and the package's
    publisher, name, licence and description. Let it submit, and wait for that pull request
-   to merge before the next release's `make release-winget`.
+   to merge; until it has, the winget step stays `setup-pending`.
 5. **The token.** komac opens pull requests with `GITHUB_TOKEN`, or `gh auth token` when
    that is unset: a classic personal access token with the **`public_repo`** scope, which
    is enough to push to the fork and open a pull request on `microsoft/winget-pkgs`.
@@ -232,8 +294,9 @@ vulnerabilities your code actually reaches; it is the one gate that needs the ne
 it fails with the tool's own error when the database is unreachable rather than passing
 quietly. Both run in CI too.
 Windows-tagged tests run on a `windows-latest` job; `make check` on a Linux or macOS box
-vets the four trees that job tests (`GOOS=windows go vet ./internal/platform/...
-./internal/probe/... ./internal/console/... ./internal/auditsplit/...`) but cannot run them.
+vets the five trees that job tests (`GOOS=windows go vet ./internal/platform/...
+./internal/probe/... ./internal/console/... ./internal/auditsplit/... ./cmd/release/...`) but
+cannot run them.
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` builds the same binary, minus
 one field of provenance: `make build` injects the build number — the commit count, via
@@ -246,9 +309,9 @@ them: the tree is CGO-free, so `make dist` builds and packs the entire published
 matrix on whichever machine cuts the release (`make cross` is the compile check beside
 it — the same six targets, but compiling every package, `./...`, to `/dev/null`, where
 `dist` builds only `./cmd/apogee`, with `-trimpath`), and every OS-specific backend is behind a build tag
-rather than a separate artifact. `make dist` needs `zip` on the box for the two
-Windows archives; everything else it reaches for is either the Go toolchain itself or
-standard on any Unix-like box (`tar`, `sed`, and `sha256sum`/`shasum`).
+rather than a separate artifact. `make dist` needs nothing beyond the Go toolchain: the
+`dist` verb of `cmd/release` packs the archives and writes `SHA256SUMS` with the standard
+library, so it runs the same on Linux, macOS and Windows.
 
 **Reading the code?** [`AGENTS.md`](../../AGENTS.md) is the single map: it says where each
 kind of knowledge lives — `CONTEXT.md` for the domain language, `docs/adr/` for the

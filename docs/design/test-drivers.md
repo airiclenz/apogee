@@ -1040,7 +1040,7 @@ whose twenty-five seconds ARE the claim (see below).
 | newcomer container | no | needs BOTH `docker` on PATH and the judge gate, and Linux (the host can bind on the docker bridge gateway there only, which is where the stub upstream listens); local-only, outside the budget |
 | workflow gates | not a Go test | `scripts/check-pins.sh` and `actionlint` run from `make check` and from the CI check job |
 | lint and dependency vulnerabilities | not a Go test | `golangci-lint` (`.golangci.yml`) and `govulncheck` run from `make lint` and `make vulncheck`, which `make check` and the CI check job both call; `govulncheck` needs the network and fails offline by design |
-| release smoke | not a Go test | `make release-smoke VERSION=vX.Y.Z`, by hand, only once the release is published |
+| release smoke | not a Go test | the last step of `go run ./cmd/release publish`, or `make release-smoke [VERSION=vX.Y.Z]` by hand, only once the release is published |
 
 No build tags and no `-short`: a test that only runs when someone remembers a flag is a test nobody
 runs. The in-process e2e set runs in **every plain `go test`**, on every platform, with no gate at

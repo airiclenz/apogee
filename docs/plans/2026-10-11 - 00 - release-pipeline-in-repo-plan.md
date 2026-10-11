@@ -329,7 +329,13 @@ Depends on items 2, 4, 6, 12.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run TestRepoReleaseSkillsLoad ./internal/skills/`; `git check-ignore -q --no-index .claude/skills/release-apogee/SKILL.md` exits 1; `wc -l .apogee/skills/release-apogee/SKILL.md` ≤ 180.
 **Commit:** `feat(skills): add the release-apogee skill and Claude Code pointers`
 
-## 14. Rewrite the release runbook and amend ADR 0098 §5
+## 14. Rewrite the release runbook and amend ADR 0098 §5 — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the Windows vet/test trees in `.github/workflows/ci.yml` and the `Makefile` already listed `./cmd/release/...` (item 9), so only building.md's make-check row and "four trees" paragraph (now "five trees") changed for that rule.
+
+NOTES (2026-10-11): test-drivers.md's "release smoke" row, which said the smoke runs only by hand, now also names it as `publish`'s last step; the plan expected no change there, but "by hand, only" became false once `publish` runs smoke.
+
+NOTES (2026-10-11): ADR 0097's mentions of `make release-scoop`/`release-winget` stay as history (accepted ADRs other than 0098 are not rewritten); the retired-name grep prints only `docs/adr/` lines.
 
 Depends on items 9, 13.
 
