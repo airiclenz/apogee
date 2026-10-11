@@ -5310,6 +5310,40 @@ func TestPickerClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
 	}
 }
 
+// The adoption pane is LATCHED (picker.latched): its second click on a row is gated on the arming
+// latch exactly as the approval pane's is (TestApprovalClickBeforeTheLatchRulesNothing). Before the
+// pane arms, the first click still moves the highlight, but the second adopts nothing and leaves the
+// arm standing, so the first click after the tick takes the row.
+func TestAdoptionClickBeforeTheLatchAdoptsNothing(t *testing.T) {
+	t.Parallel()
+	log := &adoptionLog{}
+	m := newTestModelEng(t, &fakeEngine{}, adoptionOpts(log, goTestRule))
+	if m.picker.isArmed() {
+		t.Fatal("setup: the pane armed itself; there is no latch left to assert against")
+	}
+	x, y := frameCell(t, m, "runs without asking here")
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.picker.selected != adoptionAdopt {
+		t.Fatalf("selected = %d before the latch, want the highlight to move anyway (adopt)", m.picker.selected)
+	}
+
+	m = step(t, m, leftClick(x, y))
+
+	assertNothingAnswered(t, log)
+	if !m.clickArmed.holds(panePicker, adoptionAdopt) {
+		t.Errorf("the swallowed click dropped the arm (%+v); the latch must not cost a third click", m.clickArmed)
+	}
+
+	m = armAdoption(t, m)
+	m = step(t, m, leftClick(x, y))
+
+	if !reflect.DeepEqual(log.adopted, []domain.AllowRule{goTestRule}) {
+		t.Errorf("AdoptRules calls = %v after the pane armed, want the clicked rule", log.adopted)
+	}
+}
+
 // The clicked row is resolved through the FILTER, exactly as ⏎ resolves it (ADR 0053 D5): with
 // "hour" typed the pane paints 1h and 4h, and a click on the first painted row takes 1h — not the
 // 1m that stands first in the unfiltered offering.

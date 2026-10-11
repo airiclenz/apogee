@@ -1467,6 +1467,10 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 // names (pickerView.offeringIndex) exactly as it does for ⏎, so a filtered list can never move the
 // session somewhere the human never saw.
 //
+// A latched pane (the adoption pane — picker.latched) gates that second click on its arming latch
+// exactly as the approval pane does (handleApprovalClick): an unarmed accepting click is swallowed
+// and leaves the arm STANDING, so once the pane arms the next click on that row takes it.
+//
 // Outside the box: dismissed and CLAIMED, the browser's answer above, because the picker is modal
 // too. The dismissal zeroes the whole overlay — the half-built Schedule and the migration round with
 // it — which is what esc already does to it (pickerKey), and the open gate keeps a frame carrying no
@@ -1494,6 +1498,9 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 		return m, nil, true // a filter matching nothing: the pane is up, and it offers no row
 	}
 	if m.clickArmed.holds(panePicker, row) {
+		if !m.picker.isArmed() {
+			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
+		}
 		m.clickArmed = clickArm{}
 		next, cmd := acceptedModel(m.acceptPicker())
 		return next, cmd, true

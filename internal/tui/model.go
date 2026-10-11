@@ -722,11 +722,12 @@ func (m *Model) takeContextEstimate() {
 //   - askChecked the ticked set of a MULTI-SELECT ask_user question: one bool per offered choice,
 //     ␣-toggled on the highlighted row, and nil for a single-select question — which has no checked
 //     set at all, so every single-select path stays exactly what it always was.
-//   - approvalArmed is the decision panes' arming latch (approval.go) — the approval pane's and the
+//   - decisionLatch is the decision panes' arming latch (approval.go) — the approval pane's and the
 //     ask_user pane's alike, since only one of them stands at a time: it rides here because it is
 //     per-QUESTION state, so the one call that forgets the question forgets it too and no dead pane
 //     leaves its keys armed for the next one. The generation that WRITES it is not per-question and
-//     lives on the Model itself (Model.approvalSeq).
+//     lives on the Model itself (Model.approvalSeq). A latched picker carries its own copy of the same
+//     state (picker.latch), for the same reason.
 //
 // The state↔payload invariant lives where it always did (finishWorker and the two folds that open a
 // question): pending is non-nil exactly in stateAwaitingApproval, pendingAsk exactly in
@@ -742,27 +743,39 @@ type pendingDecision struct {
 	pending    *approvalReqMsg
 	pendingAsk *askReqMsg
 	askChecked []bool
-	// approvalArmed reports whether the open decision pane's DECISION keys (on an approval pane
-	// a/s/d and the ⏎ that takes the highlighted row; on an ask_user pane the ⏎ and the second click
-	// that send the answer) are live yet. False from the fold until the terminal answers the
-	// pane's drain marker — or, on a terminal that answers none, until the approvalArmedMsg that
-	// approvalArmBackstop schedules lands — so a keystroke already in flight when the pane appeared
-	// cannot answer a call the human has not read (approval.go). Esc is deliberately outside it.
-	approvalArmed bool
-	// approvalDrainMark is the marker answer THIS pane arms on: its place in the queue of markers the
-	// session has asked the terminal for (Model.inputDrainAsked). It rides here beside the latch
-	// because it is per-QUESTION state — the one call that forgets the question forgets the mark with
-	// it, so no answer left over from a dead pane is still owed to anything. Zero means no pane is
-	// waiting on a marker. A plain int (ADR 0011).
-	approvalDrainMark int
-	// approvalDrainRelayed records that the pane's first marker has come home and the fold has asked
-	// the second, the one whose answer arms it: the first left ahead of the pane's own frame, so it
-	// proves only that the frame was written (approvalDrainMarker, approval.go).
-	approvalDrainRelayed bool
+	// decisionLatch is the question's arming state ([decisionLatch]), embedded so the approval and
+	// ask_user paths read and write approvalArmed and its two markers as the question's own.
+	decisionLatch
 	// ruleEdit is the approval pane's "Always in this project…" sub-step — the rule field and the
 	// note a refused save left (approval.go). Per-REQUEST state like the latch above, so the reset
 	// that forgets the request closes the field with it.
 	ruleEdit projectRuleEdit
+}
+
+// decisionLatch is the arming state of ONE latched decision surface — an approval or ask_user
+// question (pendingDecision), or a picker its opener latched (picker.latch, adoption.go): whether its
+// deciding keys answer yet, and which drain-marker answer brings them to life. It lives on the
+// surface rather than on the Model so the one call that forgets the surface — the question's reset,
+// a picker's whole-struct zeroing — forgets its latch too, and no dead pane leaves its keys armed for
+// the next one. The generation and the marker queue that WRITE it are not per-surface and live on
+// the Model (Model.approvalSeq, Model.inputDrainAsked). Plain values (ADR 0011).
+type decisionLatch struct {
+	// approvalArmed reports whether the open surface's DECISION keys (on an approval pane a/s/d and
+	// the ⏎ that takes the highlighted row; on an ask_user pane, and on a latched picker, the ⏎ and
+	// the second click that send the answer) are live yet. False from the open until the terminal
+	// answers the surface's drain marker — or, on a terminal that answers none, until the
+	// approvalArmedMsg that approvalArmBackstop schedules lands — so a keystroke already in flight
+	// when the surface appeared cannot answer a question the human has not read (approval.go). Esc is
+	// deliberately outside it.
+	approvalArmed bool
+	// approvalDrainMark is the marker answer THIS surface arms on: its place in the queue of markers
+	// the session has asked the terminal for (Model.inputDrainAsked). Zero means no surface is waiting
+	// on a marker.
+	approvalDrainMark int
+	// approvalDrainRelayed records that the surface's first marker has come home and the fold has
+	// asked the second, the one whose answer arms it: the first left ahead of the surface's own frame,
+	// so it proves only that the frame was written (approvalDrainMarker, approval.go).
+	approvalDrainRelayed bool
 }
 
 // reset lets go of the question and its payload together — the whole value, so a payload added to it
@@ -776,8 +789,9 @@ func (d *pendingDecision) reset() {
 }
 
 // questionOpen reports whether a decision pane — an approval or an ask_user question — is standing,
-// which is what the decision latch arms ([Model.foldInputDrained], [Model.foldApprovalArmed]): the
-// latch is shared by both panes, so an answer or a tick that finds neither has nothing to arm.
+// which with a latched picker is what the decision latch arms ([Model.latchedSurface],
+// [Model.foldInputDrained], [Model.foldApprovalArmed]): the latch is shared by every latched
+// surface, so an answer or a tick that finds none of them has nothing to arm.
 func (d pendingDecision) questionOpen() bool {
 	return d.pending != nil || d.pendingAsk != nil
 }
@@ -911,6 +925,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// a rule that is not adopted only keeps asking before a call runs, while those questions are about
 	// a session that cannot run as its owner meant. Where something is up, they wait, and the Update
 	// tail raises the pane at the first fold that finds the session idle with nothing else up.
+	// The pane it raises is latched, and its arming Cmds leave from Init (startupLatchCmds).
 	if opts.Config != nil {
 		m.queueAdoption(opts.ProposedRules)
 	}
@@ -1114,8 +1129,23 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 //
 // This is also the ONLY place the boot restore is issued from, which is what makes it interactive-TUI
 // only: a headless run builds no Model, so it never reaches an Init and never actuates a server.
+//
+// A latched surface newModel already raised — the adoption pane at start-up (adoption.go) — took its
+// generation and its place in the marker queue there, but construction returns no Cmd, so its drain
+// marker and backstop leave from here (startupLatchCmds).
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd())
+	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd(),
+		m.startupLatchCmds())
+}
+
+// startupLatchCmds issues the arming Cmds for a latched surface newModel opened, and nothing when
+// none stands or it has armed already.
+func (m Model) startupLatchCmds() tea.Cmd {
+	latch := m.latchedSurface()
+	if latch == nil || latch.approvalArmed {
+		return nil
+	}
+	return decisionLatchCmds(m.approvalSeq)
 }
 
 // ----------------------------------------------------------------------------
@@ -1154,7 +1184,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// the fold that ends the turn, and one that changed while idle at the fold that saw it.
 	defer func() {
 		next = resumeAfterFold(next)
-		next = adoptAfterFold(next)
+		next, cmd = adoptAfterFold(next, cmd)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))
@@ -1288,13 +1318,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldApprovalRequest(msg)
 
 	case approvalArmedMsg:
-		// The BACKSTOP tick an approval or ask_user fold scheduled ([Model.openDecisionLatch]) has
+		// The BACKSTOP tick an approval, ask_user or adoption open scheduled ([Model.openDecisionLatch]) has
 		// landed without the terminal ever answering the pane's drain marker: the decision keys are armed anyway, because a pane
 		// with no way to say yes is not a decision surface (approvalArmBackstop, approval.go).
 		return m.foldApprovalArmed(msg)
 
 	case tea.CursorPositionMsg:
-		// The terminal's answer to a decision pane's drain marker (approval or ask_user) — the one thing apogee asks a
+		// The terminal's answer to a decision pane's drain marker (approval, ask_user or adoption) — the one thing apogee asks a
 		// cursor position for. It reports from BEHIND every byte the human had already typed, so
 		// its arrival is what arms the pane those keys must not have answered (approval.go). The
 		// position itself is read by nothing.

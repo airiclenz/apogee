@@ -19,9 +19,10 @@ import (
 // first idle moment after a config file changed mid-session, so a rule never arrives in the middle
 // of a turn it would have answered for.
 //
-// It is the start-up offers' posture (keymigration.go) in every respect but the question: the shared
-// picker over three fixed rows, raised unasked under a notice saying why, one rule per pane with the
-// rest queued on the overlay, esc ending the round. Esc is "not now" for every rule left, and "not
+// It is the start-up offers' posture (keymigration.go) in every respect but the question and its
+// guard: the shared picker over three fixed rows, raised unasked under a notice saying why, one rule
+// per pane with the rest queued on the overlay, esc ending the round. Because "adopt" makes a granting
+// entry live, each pane opens on "not now" and LATCHED, as the approval pane does (raiseAdoption). Esc is "not now" for every rule left, and "not
 // now" persists nothing — the rule stays proposed, so the next start-up asks again. "Adopt" and
 // "reject" are one call each to a seam the binary owns ([ConfigHost.AdoptRules],
 // [ConfigHost.RejectRules]): the adoption record, its fingerprints and the rules in force are the
@@ -66,34 +67,53 @@ func (m *Model) queueAdoption(proposed []domain.AllowRule) {
 }
 
 // openAdoption raises the pane over the waiting rules, the first one asked about and the rest queued
-// behind it. It gives way to everything: the start-up offers and the pre-bound ask are up first at
-// construction, a turn, an approval or an open pane all hold it, and the rules simply keep waiting —
-// the Update tail asks again at every fold (adoptAfterFold), so the pane comes up the moment the
-// session is idle with nothing else up. No [ConfigHost] means no pane: whether the question exists
-// is decided ABOUT the host before any act is called (ADR 0054 decision 3a).
-func (m *Model) openAdoption() {
+// behind it, and returns the Cmds its arming latch waits on (raiseAdoption). It gives way to
+// everything: the start-up offers and the pre-bound ask are up first at construction, a turn, an
+// approval or an open pane all hold it, and the rules simply keep waiting — the Update tail asks
+// again at every fold (adoptAfterFold), so the pane comes up the moment the session is idle with
+// nothing else up. No [ConfigHost] means no pane: whether the question exists is decided ABOUT the
+// host before any act is called (ADR 0054 decision 3a). A pane that did not open returns no Cmd.
+func (m *Model) openAdoption() tea.Cmd {
 	if len(m.adoption.waiting) == 0 || m.opts.Config == nil {
-		return
+		return nil
 	}
 	if m.picker.open || m.settings.open || !m.canWake() {
-		return
+		return nil
 	}
 	queue := m.adoption.waiting
 	m.adoption.offered = append(m.adoption.offered, queue...)
 	m.adoption.waiting = nil
 	m.transcript.addNote(adoptionNotice(queue))
-	m.picker = picker{open: true, kind: pickerAdoption, adoption: queue}
+	return m.raiseAdoption(queue)
+}
+
+// raiseAdoption puts up the pane asking about rules[0], with the rest queued behind it — the ONE way
+// an adoption pane opens, for the first rule of a round (openAdoption) and for each one after it
+// (acceptAdoption). The pane is a decision surface whose "adopt" makes a granting entry live, so it
+// opens the way the approval pane does: LATCHED ([Model.openDecisionLatch]), its ⏎ and its second
+// click dead until the terminal has answered from behind the pane's frame, so a key or a click already
+// in flight when it appeared — the ⏎ that answered the rule before it, above all — answers nothing.
+// And it opens on "not now", the one answer that changes nothing, rather than on "adopt". The
+// returned Cmds are the latch's marker and backstop; the caller hands them on.
+func (m *Model) raiseAdoption(rules []domain.AllowRule) tea.Cmd {
+	m.picker = picker{open: true, kind: pickerAdoption, adoption: rules, latched: true}
+	m.picker.seat(adoptionNotNow, len(adoptionRows()))
+	return m.openDecisionLatch()
 }
 
 // adoptAfterFold is the Update tail's adoption half: when rules are waiting, it tries the pane now
-// (openAdoption). Anything but the Model, or a Model with nothing waiting, passes through untouched.
-func adoptAfterFold(next tea.Model) tea.Model {
+// (openAdoption) and batches the pane's arming Cmds onto the fold's own. Anything but the Model, or a
+// Model with nothing waiting, passes through untouched.
+func adoptAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	m, ok := next.(Model)
 	if !ok || len(m.adoption.waiting) == 0 {
-		return next
+		return next, cmd
 	}
-	m.openAdoption()
-	return m
+	open := m.openAdoption()
+	if open == nil {
+		return m, cmd
+	}
+	return m, tea.Batch(cmd, open)
 }
 
 // refreshAdoption re-reads what the config files propose after a watched change and queues what no
@@ -171,10 +191,10 @@ func (m Model) acceptAdoption(choice int) (tea.Model, tea.Cmd) {
 	}
 
 	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the filter
-	// above all — survives into the next rule's question.
+	// and the latch above all — survives into the next rule's question, which re-arms from scratch.
 	m.picker = picker{}
 	if len(rest) > 0 {
-		m.picker = picker{open: true, kind: pickerAdoption, adoption: rest}
+		return m, m.raiseAdoption(rest)
 	}
 	return m, nil
 }

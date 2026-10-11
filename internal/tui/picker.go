@@ -138,6 +138,21 @@ type picker struct {
 	// rules still to be asked about, the one being asked about now at the front — migration's shape,
 	// so the same whole-struct zeroing ends the round and esc leaves every remaining rule proposed.
 	adoption []domain.AllowRule
+	// latched marks a pane whose ⏎ and second click ANSWER a question the human has to have read —
+	// set only by an opener that goes through [Model.openDecisionLatch] (raiseAdoption, adoption.go).
+	// Every other kind leaves it false and stays armed from the moment it opens.
+	latched bool
+	// latch is a latched pane's arming state, the approval pane's [decisionLatch] on the overlay: it
+	// rides here so the whole-struct zeroing every close and accept already does forgets it, and no
+	// dead pane leaves its keys armed for the next one.
+	latch decisionLatch
+}
+
+// isArmed reports whether the pane's deciding gestures — ⏎ and the second click on a row — answer
+// yet: always on a pane nobody latched, and on a latched one only once its drain marker (or the
+// backstop) has armed it. The highlight, the filter, the wheel and esc are outside it.
+func (p picker) isArmed() bool {
+	return !p.latched || p.latch.approvalArmed
 }
 
 // maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
@@ -1111,6 +1126,9 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.picker = picker{}
 		return m, nil
 	case listAccepts:
+		if !m.picker.isArmed() {
+			return m, nil // the latch: a ⏎ in flight when the pane opened answers nothing (openDecisionLatch)
+		}
 		return m.acceptPicker()
 	case listSwallowed, listUnclaimed:
 		// Both end the same way here: the surface either spent the key or found no use for it, and a

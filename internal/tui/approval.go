@@ -184,23 +184,48 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	return m, latch
 }
 
-// openDecisionLatch closes the decision latch over the question the caller has just folded in —
-// an approval pane (foldApprovalRequest) or an ask_user pane (foldAskRequest), whichever of
-// pending/pendingAsk is live — and returns the two Cmds that open it again: the drain marker the
-// latch really arms on and the backstop tick for a terminal that answers none. It is the ONE place
-// both panes take a generation and a place in the marker queue, so an answer or a tick left over
-// from either kind of pane can never arm the other kind that follows it.
+// openDecisionLatch closes the decision latch over the surface the caller has just opened — an
+// approval pane (foldApprovalRequest), an ask_user pane (foldAskRequest), or a picker its opener
+// latched (raiseAdoption, adoption.go), whichever [Model.latchedSurface] finds standing — and
+// returns the two Cmds that open it again: the drain marker the latch really arms on and the
+// backstop tick for a terminal that answers none. It is the ONE place every latched surface takes a
+// generation and a place in the marker queue, so an answer or a tick left over from any kind of
+// surface can never arm the kind that follows it. A caller that opened nothing latched gets no Cmd.
 func (m *Model) openDecisionLatch() tea.Cmd {
-	m.approvalArmed = false // a key already in flight must not answer the pane it arrived with
+	latch := m.latchedSurface()
+	if latch == nil {
+		return nil
+	}
 	m.approvalSeq++
-	seq := m.approvalSeq
 	m.inputDrainAsked++
-	m.approvalDrainMark = m.inputDrainAsked // the answer this pane relays from, and no earlier one
-	m.approvalDrainRelayed = false          // the first answer asks again; only the second arms
+	// Closed — a key already in flight must not answer the surface it arrived with — and waiting on
+	// this surface's own marker answer, the first of the two it relays through.
+	*latch = decisionLatch{approvalDrainMark: m.inputDrainAsked}
+	return decisionLatchCmds(m.approvalSeq)
+}
+
+// decisionLatchCmds is the pair of Cmds a latch of generation seq arms on: the drain marker and the
+// backstop tick. openDecisionLatch issues it from the Update that opened the surface; Init issues it
+// for a surface newModel opened, which no Update has yet had the chance to return a Cmd for.
+func decisionLatchCmds(seq int) tea.Cmd {
 	return tea.Batch(
 		approvalDrainMarker(),
 		tea.Tick(approvalArmBackstop, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} }),
 	)
+}
+
+// latchedSurface is the arming state of the latched surface that stands — the approval or ask_user
+// question's when one is up, else a latched picker's — and nil when none does. It is the one answer
+// to "is anything waiting on the decision latch", which [Model.foldInputDrained] and
+// [Model.foldApprovalArmed] ask before they arm.
+func (m *Model) latchedSurface() *decisionLatch {
+	switch {
+	case m.questionOpen():
+		return &m.decisionLatch
+	case m.picker.open && m.picker.latched:
+		return &m.picker.latch
+	}
+	return nil
 }
 
 // foldInputDrained counts one answer to a drain marker and, when it is the answer the open pane is
@@ -223,16 +248,17 @@ func (m Model) foldInputDrained() (tea.Model, tea.Cmd) {
 	if m.inputDrainSeen < m.inputDrainAsked {
 		m.inputDrainSeen++
 	}
-	if !m.questionOpen() || m.approvalDrainMark == 0 || m.inputDrainSeen < m.approvalDrainMark {
+	latch := m.latchedSurface()
+	if latch == nil || latch.approvalDrainMark == 0 || m.inputDrainSeen < latch.approvalDrainMark {
 		return m, nil
 	}
-	if !m.approvalDrainRelayed {
-		m.approvalDrainRelayed = true
+	if !latch.approvalDrainRelayed {
+		latch.approvalDrainRelayed = true
 		m.inputDrainAsked++
-		m.approvalDrainMark = m.inputDrainAsked
+		latch.approvalDrainMark = m.inputDrainAsked
 		return m, approvalDrainMarker()
 	}
-	m.approvalArmed = true
+	latch.approvalArmed = true
 	return m, nil
 }
 
@@ -242,10 +268,11 @@ func (m Model) foldInputDrained() (tea.Model, tea.Cmd) {
 // generation, or a pane that has since been answered or cancelled, leaves the latch exactly where it
 // was — so a tick can never arm a pane the human has been looking at for less than the backstop.
 func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
-	if !m.questionOpen() || msg.seq != m.approvalSeq {
+	latch := m.latchedSurface()
+	if latch == nil || msg.seq != m.approvalSeq {
 		return m, nil
 	}
-	m.approvalArmed = true
+	latch.approvalArmed = true
 	return m, nil
 }
 
