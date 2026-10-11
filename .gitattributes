@@ -32,6 +32,12 @@ VERSION text eol=lf
 # a carriage return on each line, and the `/audit` split would hand its parts to the model that way.
 internal/skills/shipped/** text eol=lf
 
+# The release program's package-channel templates are go:embed'd as well: a core.autocrlf=true
+# checkout (windows-latest) would bake a carriage return into every line, so the formula
+# byte-equality test against testdata/apogee-0.24.11.rb goes red on Windows CI and a Windows-host
+# publish pushes a CRLF formula and manifest to the tap and the bucket.
+cmd/release/templates/** text eol=lf
+
 # Git hooks are POSIX sh scripts run by Git Bash on Windows: a core.autocrlf=true checkout
 # would end every line in a carriage return and break them, so they stay LF everywhere.
 .beads/hooks/** text eol=lf
