@@ -96,6 +96,15 @@ type leak struct {
 // cleanup runs last, after every other cleanup has had its chance to stop things.
 func CheckLeaks(t testing.TB) {
 	t.Helper()
+	checkLeaks(t, leakGrace)
+}
+
+// checkLeaks is [CheckLeaks] with the grace stated. Every driver test takes [leakGrace]; the grace is
+// a parameter only so this package's own test of a leak that DOES happen can report it without
+// sitting out the full minute a slow box's teardown is allowed — a real leak spends the whole
+// grace by definition, and the attribution under test does not depend on how long it is.
+func checkLeaks(t testing.TB, grace time.Duration) {
+	t.Helper()
 
 	id := strconv.FormatUint(leakCheckSeq.Add(1), 10)
 	pprof.SetGoroutineLabels(pprof.WithLabels(context.Background(), pprof.Labels(leakLabel, id)))
@@ -103,7 +112,7 @@ func CheckLeaks(t testing.TB) {
 		// The cleanup runs on the test's own goroutine, which wears the id like everything it
 		// started; without this it would count itself.
 		pprof.SetGoroutineLabels(context.Background())
-		deadline := time.Now().Add(leakGrace)
+		deadline := time.Now().Add(grace)
 		for {
 			profile, err := goroutineProfile()
 			if err != nil {
@@ -116,7 +125,7 @@ func CheckLeaks(t testing.TB) {
 			}
 			if !time.Now().Before(deadline) {
 				t.Errorf("%d goroutine(s) outlived the test by %s:\n\n%s",
-					goroutinesIn(left), leakGrace, stacksOf(left))
+					goroutinesIn(left), grace, stacksOf(left))
 				return
 			}
 			time.Sleep(50 * time.Millisecond)

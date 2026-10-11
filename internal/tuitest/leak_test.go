@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // parkedForTest blocks in a frame this package owns, which is exactly what a leaked driver
@@ -14,6 +15,11 @@ func parkedForTest(started chan<- struct{}, stop <-chan struct{}) {
 	started <- struct{}{}
 	<-stop
 }
+
+// selfTestGrace is the grace this package's own tests give a check whose leak is deliberate. The
+// goroutines it parks never stop until the test says so, so no grace would save them, and the
+// production [leakGrace] would only make the report a minute late.
+const selfTestGrace = 200 * time.Millisecond
 
 // recordingTB stands in for the *testing.T of a test that leaks, so a test can call [CheckLeaks],
 // run the cleanup itself and read back what it reported instead of failing on it. testing.TB cannot
@@ -170,6 +176,10 @@ func TestCheckLeaksIgnoresWhatWasRunningBefore(t *testing.T) {
 // stalled the sharded suite for the full test timeout. A goroutine wears its labels exactly as a
 // subtest's goroutine does (CheckLeaks labels the goroutine it is called on, and what that
 // goroutine starts inherits them), so the attribution under test is the same.
+//
+// Both checks take [selfTestGrace] rather than [leakGrace]: the leaker's cleanup spends its whole
+// grace before it reports, which at the production grace is a minute of the suite for a claim about
+// WHOM the report names, not about how long it waited.
 func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
 	t.Parallel()
 
@@ -182,7 +192,7 @@ func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
 
 	go func() { // leaks two goroutines
 		defer wg.Done()
-		CheckLeaks(leaker)
+		checkLeaks(leaker, selfTestGrace)
 
 		started := make(chan struct{})
 		go parkedForTest(started, stop)
@@ -196,7 +206,7 @@ func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
 
 	go func() { // leaks nothing
 		defer wg.Done()
-		CheckLeaks(clean)
+		checkLeaks(clean, selfTestGrace)
 		// Look only once the neighbour's goroutines are parked, or there is nothing to misattribute.
 		<-leaking
 		clean.runCleanups()
@@ -208,7 +218,7 @@ func TestCheckLeaksBlamesOnlyTheLeakingSubtest(t *testing.T) {
 		t.Fatalf("CheckLeaks reported %d time(s), want 1:\n%s", len(leaker.reports), strings.Join(leaker.reports, "\n"))
 	}
 	report := leaker.reports[0]
-	if !strings.HasPrefix(report, "2 goroutine(s) outlived the test by "+leakGrace.String()) {
+	if !strings.HasPrefix(report, "2 goroutine(s) outlived the test by "+selfTestGrace.String()) {
 		t.Errorf("the report does not open with the count of what leaked:\n%s", report)
 	}
 	if !strings.Contains(report, "tuitest.parkedForTest+0x") {
