@@ -35,9 +35,10 @@ func (c *cursorAnswers) keySent() { c.atKey = c.pumped }
 // sinceKey is how many reports have gone in behind the last key. The caller holds writeMu.
 func (c *cursorAnswers) sinceKey() int { return c.pumped - c.atKey }
 
-// PaneArmAnswers is how many cursor-position reports a decision pane's keys arm on: its first drain
-// marker leaves ahead of the pane's own frame and only relays, the second arms (internal/tui
-// approval.go, foldInputDrained).
+// PaneArmAnswers is how many cursor-position reports a decision pane's keys arm on — an approval
+// pane's, an ask_user pane's, or a latched picker's (the adoption pane, the start-up migration
+// offers): its first drain marker leaves ahead of the pane's own frame and only relays, the second
+// arms (internal/tui approval.go, foldInputDrained).
 const PaneArmAnswers = 2
 
 // awaitingCursorAnswers names the wait for n reports in a timeout message.

@@ -360,7 +360,10 @@ root, pinned to each rule's exact text. A session that finds a proposed rule ope
 at start-up — ``allow `go test` without asking in this project?`` — with three answers: **adopt**
 (it runs without asking here, until the entry changes), **not now** (it stays inert, and the offer
 comes back at the next start-up; `esc` answers this for every rule left) and **reject** (it stays
-inert and is not offered again until the entry changes). A rule that a pull, a teammate's commit or
+inert and is not offered again until the entry changes). The pane opens on **not now**, the one
+answer that changes nothing, and it takes no `⏎` for a moment after it appears — until the terminal
+confirms the pane has been drawn — so a `⏎` you were already pressing when it rose cannot adopt,
+defer or reject anything; the arrows and `esc` work at once. A rule that a pull, a teammate's commit or
 an edit made behind apogee's back adds or changes mid-session is offered at the next idle moment,
 never in the middle of a turn it would answer for. A rule you write yourself from the approval
 pane (`Always in this project…`) is adopted as it is saved, and the `/settings` *Allow rules*
@@ -1864,7 +1867,8 @@ session's own server; where apogee finds one it says so at start-up and offers
 one edit — `move it` writes `sub-agents-server: <name>`, drops the retired flag,
 and re-points this session's delegations at that entry there and then. `not now`
 leaves the file exactly as it is and the offer comes back at the next start-up.
-An unattended `apogee headless` run never prompts, so it gets a stderr notice
+The pane arms like the plaintext-key offer: a `⏎` already in flight when it
+appears answers nothing. An unattended `apogee headless` run never prompts, so it gets a stderr notice
 naming the entries instead — the same bargain a plaintext key gets:
 
     apogee: cheaper still carries the retired sub-agents: true flag in ~/.apogee/config.yaml, and headless runs never prompt, so apogee cannot offer to migrate it. The flag no longer routes anything — set sub-agents-server: <entry> at the root of the file and drop the flag.
@@ -2234,7 +2238,9 @@ apogee can use — the macOS Keychain, or a Secret Service keyring via
 the offer stores the key, reads it back through the very `api-key-cmd:` line
 about to be written, and only on a match rewrites the entry — one line, comments
 and layout untouched. "Not now" asks again next start; "never for this entry"
-writes `plaintext-key-ok: true` beside the key and is not asked again. A machine
+writes `plaintext-key-ok: true` beside the key and is not asked again. Like the
+approval prompt, the offer takes no `⏎` for a moment after it appears, so a key
+you were already pressing cannot answer it. A machine
 with no usable store — and every unattended `apogee headless` run — gets a notice
 naming the entries and the alternatives instead.
 

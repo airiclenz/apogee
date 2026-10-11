@@ -144,7 +144,8 @@ lands on that same row; a key or a notch re-centres the list as it always has. I
 in one: the row an activating click may take is the row the *pointer* highlighted, so a pane's own
 opening highlight — `Allow` on the approval prompt, `/clear` at the top of the `/` menu — can never
 be turned into an answer nobody gave. The approval prompt's arming delay gates that second click
-exactly as it gates `⏎`, and a click on an ask pane's choice is swallowed while the input box holds
+exactly as it gates `⏎` — and so does the same delay on the ask prompt, the adoption pane and the
+two start-up offers, which share it — and a click on an ask pane's choice is swallowed while the input box holds
 a typed answer, the same guard the arrows take there. A click inside the box but on no row — the
 title, a blank, the hint, the border — belongs to the pane and does nothing. (The `/settings` pane
 is the one that is not answering a question: a click there selects a key row outright, as it always
@@ -2577,7 +2578,12 @@ the next start-up. One note first, naming the entries and the store; then one pa
 `key for <name> — move it into <store>?`, over three rows in two columns — `move it`, `— store it in
 <store> and point the entry at it`; `not now`, `— leave the file alone; the offer comes back at the
 next start-up`; `never for this entry`, `— record plaintext-key-ok: true and stop asking`. The hint
-reads `⏎ choose`, because nothing here switches anything. Every answer prints one line saying what
+reads `⏎ choose`, because nothing here switches anything. The pane is **armed before it answers**,
+on the one latch the approval and ask prompts share: its `⏎`, and the second click that takes a
+row, do nothing until the terminal has answered the drain marker asked from behind the pane's frame
+(or the two-second backstop lands), so a `⏎` already in flight when the pane rose — the one that
+answered the entry before it, above all — moves no key. `↑`/`↓`, the filter and `esc` are live at
+once. Every answer prints one line saying what
 was done and which file says so — a failed move included, since a key that did not move must never
 look like one that did — and the next entry's pane opens where the last one closed. `esc` ends the
 round outright: whatever is left is a `not now`, and nothing is written. On a machine with no such
@@ -2593,7 +2599,8 @@ asked about one at a time. The note comes first —
 now` — and under it a pane titled `delegate to <name> — move the flag into sub-agents-server:?`
 over two rows in two columns: `move it`, `— write sub-agents-server: <name> and drop the retired
 flag`; `not now`, `— leave the file alone; the offer comes back at the next start-up`. The hint is
-`⏎ choose` again, since nothing here switches anything. There is no third row: the flag is dead
+`⏎ choose` again, since nothing here switches anything, and the pane arms exactly as the key offer
+does. There is no third row: the flag is dead
 weight its owner removes once, so an answer that made the question permanent would preserve a line
 nothing reads. Either answer prints one line — the move naming the file it wrote, a failed move
 saying so, `not now` saying the offer comes back — and closes the pane for the rest of the session;
@@ -2617,7 +2624,14 @@ same spelling, so a round of several can never be answered for the wrong rule. L
 title it is cut to the pane's width, never wrapped. Under it, three rows in two columns: `adopt`,
 `— it runs without asking here, until the entry changes`; `not now`, `— it stays inert; the offer
 comes back at the next start-up`; `reject`, `— it stays inert, and is not offered again until the
-entry changes`. The pane opens with `adopt` highlighted, and the hint reads `⏎ choose`. Every answer
+entry changes`. The pane opens with `not now` highlighted — the one answer that changes nothing,
+because `adopt` makes a granting entry live — and the hint reads `⏎ choose`. It arms as the offers
+above do, on the approval prompt's latch: its `⏎` and the second click that takes a row answer
+nothing until the terminal has answered the drain marker asked from behind the pane's frame (or the
+two-second backstop lands), so a `⏎` already in flight when the pane rose — the one that answered
+the rule before it, above all — adopts, defers and rejects nothing, and the deliberate `⏎` that
+follows takes `not now` unless the highlight was moved. `↑`/`↓`, the filter and `esc` are live at
+once. Every answer
 prints one line — `adopted <rule> — it runs without asking in this project`, `<rule> stays
 proposed — the offer comes back at the next start-up`, `rejected <rule> — it is not offered again
 until the entry changes` — and a failed adopt or reject says so with the reason, `could not adopt

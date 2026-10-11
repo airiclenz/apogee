@@ -16,12 +16,15 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/airiclenz/apogee/internal/adoption"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -239,6 +242,143 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	}
 }
 
+// adoptionTitleMarker is the adoption pane's title as the driver finds it: only the pane's own
+// question carries the question mark, so neither the notice it opens under nor the note an
+// "adopt" leaves behind can stand in for it.
+const adoptionTitleMarker = "without asking in this project?"
+
+// adoptionStaysProposed is the note "not now" — and only "not now" — leaves in the transcript.
+const adoptionStaysProposed = "stays proposed"
+
+// adoptionAnswers are the notes the pane's three answers leave in the transcript — adopt, not now,
+// reject, in that order — each worded so that neither the pane's own rows nor the notice it opens
+// under carry it.
+var adoptionAnswers = []string{"runs without asking in this project", adoptionStaysProposed, "it is not offered again"}
+
+// adoptionAnswered reports whether frame shows any answer to the adoption pane.
+func adoptionAnswered(frame tuitest.Frame) bool {
+	return slices.ContainsFunc(adoptionAnswers, func(note string) bool { return shows(frame, note) })
+}
+
+// shows reports whether text is on one of frame's rows.
+func shows(frame tuitest.Frame, text string) bool {
+	_, _, ok := frame.Find(text)
+	return ok
+}
+
+// adoptionRuleCommand is the terminal rule the driven adoption test proposes.
+const adoptionRuleCommand = "go test"
+
+// TestE2EAdoptionKeysAreArmedAfterPaint is T-13's claim on the adoption pane, the decision surface
+// whose "adopt" makes a granting entry live (ADR 0096 §4): a ⏎ held through the moment the pane
+// rises never answers it, and the ⏎ a human gives it once it has armed takes the row it opened on,
+// "not now", which leaves the rule exactly as proposed as it was.
+//
+// The pane is raised by the PROGRAM, not by a key: the Project config is written while ⏎ is already
+// being held at an idle prompt, and the fast config watcher the suite runs on (configWatchTiming,
+// TestMain) reports the save, which proposes the rule and opens the pane mid-hold. A ⏎ at the
+// empty prompt before that does nothing, so every press the hold sends is either harmless or lands
+// on the pane before it armed.
+func TestE2EAdoptionKeysAreArmedAfterPaint(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "guard"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	ws := e2eWorkspace(t)
+	sess := launchTUIIn(t, drv, stub, ws, "")
+	waitIdle(drv)
+
+	release := holdKey(drv, string(tuitest.Enter), adoptionTitleMarker)
+	writeProjectAllow(t, ws, adoptionRuleCommand)
+	// The pane, or the note an answer to it leaves: a pane a held ⏎ answered in the frame it opened
+	// in may never be seen at all, and that is the failure, not a pane that never rose.
+	drv.WaitFor(func() bool {
+		frame := drv.Frame()
+		return shows(frame, adoptionTitleMarker) || adoptionAnswered(frame)
+	}, tuitest.Awaiting("the adoption pane, or the note an answer to it leaves"))
+	held := release()
+	if held == 0 {
+		t.Fatal("the hold sent no ⏎ before the pane rose; there is nothing to assert the latch against")
+	}
+
+	drv.WaitQuiet(settled)
+	frame := drv.Frame()
+	if !shows(frame, adoptionTitleMarker) {
+		t.Fatalf("the adoption pane was answered by a ⏎ that arrived before it painted:\n%s", frame)
+	}
+	if adoptionAnswered(frame) {
+		t.Fatalf("a held ⏎ answered the adoption pane before it armed:\n%s", frame)
+	}
+	assertAdoptionRecord(t, sess, ws, adoption.Proposed)
+
+	answerAdoptionArmed(t, drv)
+	drv.WaitFor(func() bool { return adoptionAnswered(drv.Frame()) },
+		tuitest.Awaiting("the note the armed ⏎ leaves"))
+	if frame := drv.Frame(); !shows(frame, adoptionStaysProposed) {
+		t.Fatalf("the armed ⏎ on the row the pane opened on was not a not now:\n%s", frame)
+	}
+	assertAdoptionRecord(t, sess, ws, adoption.Proposed)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// answerAdoptionArmed gives the standing adoption pane the ⏎ a human gives it once it has armed, and
+// waits for it to go.
+//
+// It cannot anchor on [awaitArmed]: that counts cursor answers from the last key sent, and the hold
+// before it sends keys on a schedule of its own — the pane's first drain marker moves the screen,
+// which lets the next held ⏎ out before the pane's frame paints — so the count may start after the
+// first of the pane's two answers and wait for one that never comes. So it presses, and presses
+// again only while the pane still stands: a ⏎ the latch swallowed is exactly what a human who
+// pressed too early would repeat. The bound is the latch's own backstop ceiling (internal/tui
+// approvalArmBackstop, two seconds) with room to spare — past it, the pane has armed whether or
+// not the terminal answered, so a pane still standing is one the ⏎ cannot reach.
+func answerAdoptionArmed(t *testing.T, drv *tuitest.Driver) {
+	t.Helper()
+
+	const armCeiling = 4 * time.Second
+	deadline := time.Now().Add(armCeiling)
+	for {
+		drv.Press(tuitest.Enter)
+		for until := time.Now().Add(settled); time.Now().Before(until); {
+			if !shows(drv.Frame(), adoptionTitleMarker) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the adoption pane took no ⏎ within %v of rising:\n%s", armCeiling, drv.Frame())
+		}
+	}
+}
+
+// assertAdoptionRecord holds the session's adoption record to the answer it carries for the
+// proposed rule: the record a "not now" — or a ⏎ the latch swallowed — must leave untouched.
+func assertAdoptionRecord(t *testing.T, sess *e2eSession, root string, want adoption.State) {
+	t.Helper()
+
+	store, err := adoption.New(config.WorkspacesDir(sess.home), root)
+	if err != nil {
+		t.Fatalf("adoption.New: %v", err)
+	}
+	sorted, err := store.Classify([]adoption.Entry{{Kind: string(config.AllowTerminal), Text: adoptionRuleCommand}})
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	got := adoption.Proposed
+	switch {
+	case len(sorted.Adopted) == 1:
+		got = adoption.Adopted
+	case len(sorted.Rejected) == 1:
+		got = adoption.Rejected
+	}
+	if got != want {
+		t.Errorf("the adoption record answers %q for %q, want %q", got, adoptionRuleCommand, want)
+	}
+}
+
 // TestJudgeForcedApprovalPaneReadsAsHelp is T-10's steps 5 and 6 — the half the checklist wrote the
 // item for. Everything about the pane a cell can settle is settled above; what is left is whether
 // the hint reads as help beside a question that is still open, given that it says a command "is
@@ -336,8 +476,9 @@ func decideOn(drv *tuitest.Driver, key, marker string) {
 	drv.WaitGone(marker)
 }
 
-// awaitArmed waits for the decision pane the last key raised — an approval pane or an ask_user
-// pane, which share the latch — to bring its decision keys to life. They arm on the terminal's
+// awaitArmed waits for the decision pane the last key raised — an approval pane, an ask_user pane
+// or a latched picker (the adoption pane, the start-up migration offers), which all share the latch
+// — to bring its decision keys to life. They arm on the terminal's
 // answer to the pane's SECOND drain marker (internal/tui approval.go), and arming paints nothing,
 // so a settled screen is no evidence of it: on a loaded runner the round trip outlasted the settle
 // window, and the letter typed into the pane was swallowed, as an unarmed letter is. Waiting for

@@ -97,8 +97,10 @@ func (m Model) approvalKeysFor(req domain.ApprovalRequest) map[string]approvalOp
 	return approvalMenuKeys(m.approvalMenuFor(req))
 }
 
-// approvalDrainMarker is the question whose ANSWER arms the approval pane: a cursor-position report
-// (DSR/CPR), asked of the terminal on the Update that opened the pane. The terminal writes its reply
+// approvalDrainMarker is the question whose ANSWER arms the approval pane — and every other latched
+// surface: the ask_user pane, the adoption pane and the two start-up migration offers
+// ([Model.openDecisionLatch]) — a cursor-position report (DSR/CPR), asked of the terminal on the
+// Update that opened the pane. The terminal writes its reply
 // into the very input stream the keyboard writes to, BEHIND every byte already typed — so a reply
 // that comes back is proof that everything the human had pressed before the pane existed has been
 // read, parsed and delivered. That POSITION in the input is what the pane's promise is really about:

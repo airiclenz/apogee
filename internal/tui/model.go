@@ -327,7 +327,8 @@ type Model struct {
 	// (ADR 0011).
 	approvalSel listCursor
 	// approvalSeq is the decision panes' generation clock: incremented every time an approval
-	// request or an ask_user question is folded in ([Model.openDecisionLatch]), carried by that pane's arming tick, and matched when the tick lands so a tick
+	// request or an ask_user question is folded in, or a latched picker opens — the adoption pane and
+	// the two start-up migration offers ([Model.openDecisionLatch]) — carried by that pane's arming tick, and matched when the tick lands so a tick
 	// outliving its pane arms nothing (approval.go). It is the spinner's and the heartbeat's gen
 	// idiom, and like theirs it lives on the Model rather than on the payload it names — a clock
 	// that is reset with the question it timed would hand the next pane a number a tick still in
@@ -337,7 +338,8 @@ type Model struct {
 	// really arm on: how many input-drain markers have been asked of the terminal
 	// (approvalDrainMarker, approval.go) and how many of their answers have come back. A terminal
 	// answers in the order it was asked, so the two counters give every pane a place in the queue
-	// (pendingDecision.approvalDrainMark) that an answer meant for an earlier pane can never reach.
+	// (decisionLatch.approvalDrainMark, on the question or on a latched picker) that an answer meant
+	// for an earlier pane can never reach.
 	// They live on the Model rather than on the question for the same reason approvalSeq does — a
 	// clock reset with the question it timed would hand the next pane a number an answer still in
 	// flight already carries. Two plain ints, riding the value-copied Model (ADR 0011).
@@ -1319,13 +1321,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldApprovalRequest(msg)
 
 	case approvalArmedMsg:
-		// The BACKSTOP tick an approval, ask_user or adoption open scheduled ([Model.openDecisionLatch]) has
+		// The BACKSTOP tick an approval, ask_user, adoption or migration-offer open scheduled ([Model.openDecisionLatch]) has
 		// landed without the terminal ever answering the pane's drain marker: the decision keys are armed anyway, because a pane
 		// with no way to say yes is not a decision surface (approvalArmBackstop, approval.go).
 		return m.foldApprovalArmed(msg)
 
 	case tea.CursorPositionMsg:
-		// The terminal's answer to a decision pane's drain marker (approval, ask_user or adoption) — the one thing apogee asks a
+		// The terminal's answer to a decision pane's drain marker (approval, ask_user, adoption or a migration offer) — the one thing apogee asks a
 		// cursor position for. It reports from BEHIND every byte the human had already typed, so
 		// its arrival is what arms the pane those keys must not have answered (approval.go). The
 		// position itself is read by nothing.

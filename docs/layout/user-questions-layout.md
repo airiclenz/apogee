@@ -43,6 +43,14 @@ The rules both menus follow on screen — height, pointer, chrome — are `layou
 > `␣` (and a first click that ticks or highlights), and `esc`. A stale arm — a backstop tick or a
 > drain answer left over from an earlier approval or question — never arms a later prompt.
 
+> Amended 2026-10-11 by the P1/P2 bugs plan (`2026-10-11 - 01 - p1-p2-bugs-plan.md`, items 1–3):
+> the latch is no longer the two prompts' alone. Every pane that answers a question the human has
+> to have read and that apogee raises unasked over the shared picker — the adoption pane for a rule
+> the Project config proposes, and the two start-up offers (a plaintext key, a retired
+> `sub-agents: true` flag) — arms on it too: its `⏎` and its deciding second click are dead until the
+> same second drain answer (or the backstop), while `↑↓`, the filter and `esc` are live at once. The
+> adoption pane also opens on `not now`, the answer that changes nothing, rather than on `adopt`.
+
 
 # User Approval:
 

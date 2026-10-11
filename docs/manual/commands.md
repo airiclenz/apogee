@@ -177,7 +177,13 @@ cancels — the pane's hint reads `esc cancel` — because backing out of a ques
 abandoning a turn you lost track of; and on a multi-select question `space` ticks and un-ticks
 the highlighted row. A question's `⏎` arms exactly as an approval's decision keys do — it takes
 effect a moment after the question appears, so a keystroke already in flight cannot send an
-answer you have not read — while typing an answer, `↑`/`↓`, `space` and `esc` are live at once. `⌥↑`/`⌥↓` light a
+answer you have not read — while typing an answer, `↑`/`↓`, `space` and `esc` are live at once.
+The panes apogee raises without being asked — the start-up offers to move a plaintext key and a
+retired `sub-agents: true` flag, and the pane asking whether to adopt a rule the project proposes
+(see [a project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml)) — arm the same way: their `⏎` takes effect a moment after
+the pane appears, so the `⏎` that answered the pane before it cannot answer the next one, while
+`↑`/`↓` and `esc` are live at once. The project-rule pane opens on `not now`, the answer that
+changes nothing. `⌥↑`/`⌥↓` light a
 bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
 the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
 the bar, and `esc`, or simply typing your next message, gives the keys back. `^x` on a
@@ -275,7 +281,8 @@ tests do. What that second row actually remembers is worth knowing before you pr
 the way `↑`/`↓` do; a **second** click on that same row takes it, the way `⏎` does. It is always two,
 and the row a second click can take is the row *you* clicked onto — the `Allow` the prompt opens on
 is never one press away from being granted, and the arming latch gates the deciding click exactly as
-it gates `⏎` — on a question from the model as on an approval. The same two-click rule runs every other pane that asks you something: the `/sessions`
+it gates `⏎` — on a question from the model as on an approval, and on the panes apogee raises
+without being asked. The same two-click rule runs every other pane that asks you something: the `/sessions`
 browser, the `/model` and `/server` pickers, a question from the model, and the `/` | `@` menu, where
 the second click completes the token the way `⇥` does. A click **outside** one of these boxes never
 answers or cancels it — that stays `esc`'s job. It closes the pickers and the browser, closes the `/`

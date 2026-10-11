@@ -709,19 +709,25 @@
 // several entries rides the overlay's own queue — one pane each, the next opening where the last
 // closed, esc ending the round with nothing persisted — and the whole offer gives way to the
 // pre-bound ask above, because a session with no server has the more urgent question and "not now"
-// is what this one already means.
+// is what this one already means. Each pane is LATCHED as the approval pane is
+// ([Model.openDecisionLatch]): its ⏎ and its second click answer nothing until the terminal has
+// answered the pane's drain marker, so a ⏎ already in flight when the pane rose — the one that
+// answered the entry before it, above all — moves no key. Esc and the arrows stay live at once.
 //
 // A THIRD unasked pane sits behind that one in the same file (ADR 0045): a `servers:` entry still
 // spelling the retired `sub-agents: true` flag earns a two-row question — move it, not now — and
 // taking it calls [ConfigHost.MigrateSubAgentsServer], which rewrites the file onto the root
 // `sub-agents-server:` key and re-points this session's delegations at the entry. It is one question
 // rather than a round, because the answer is a single key naming a single entry, and it gives way to
-// the key migration exactly as that gives way to the pre-bound ask.
+// the key migration exactly as that gives way to the pre-bound ask. It is latched on the same terms.
 //
 // The FOURTH, adoption.go (ADR 0096 §4), is the same overlay over a different question: an Allow rule
 // in the Project config that no adoption or rejection is recorded for is proposed — inert — and earns
 // a three-row pane per rule, adopt, not now, reject, each answer one call to [ConfigHost.AdoptRules]
-// or [ConfigHost.RejectRules]. It gives way to everything above and to any turn or pane, waiting for
+// or [ConfigHost.RejectRules]. Because "adopt" makes a granting entry live, each pane opens on "not
+// now", the answer that changes nothing, and is latched like the approval pane
+// ([Model.openDecisionLatch]): a ⏎ in flight when it rose answers nothing, and the one that does
+// get through after it arms costs nothing unless the human moved the highlight. It gives way to everything above and to any turn or pane, waiting for
 // the Update tail (adoptAfterFold) to raise it at the first fold that finds the session idle with
 // nothing else up — which is how a rule a watched change proposes ([ConfigHost.ProposedRules]) is
 // asked about at the next turn boundary rather than in the middle of a turn.
@@ -870,7 +876,9 @@
 // from behind the frame and every byte the human had already typed, so an input backlog can never answer a pane it outlived, with [approvalArmBackstop] as the
 // backstop for a terminal that answers none ([Model.foldApprovalArmed]) — because the paint cannot
 // write the Model (View is a value receiver, [Model.frameOverlays] is pure) so "the frame has been
-// shown" is only knowable from Update; Esc
+// shown" is only knowable from Update. The same latch arms the ask_user pane below and every picker
+// whose ⏎ answers a question the human must have read — the adoption pane and the two start-up
+// migration offers, which raise themselves unasked (picker.latched); Esc
 // stays live throughout, since the safe direction is never the one made harder to reach; ask.go the ask_user pane lifted out of model.go beside approval.go (ADR 0043) and
 // shaped like it, both halves in one file — the fold that borrows the input box for a question
 // ([Model.foldAskRequest]), the keys the offering claims while that box is still empty
