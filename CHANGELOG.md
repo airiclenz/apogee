@@ -9,6 +9,12 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **A terminal line an Allow rule answered no longer inherits `CDPATH`, `BASH_ENV`, `ENV` or exported bash functions.** Each of them changes what a shell line does without appearing in it — a rule-covered `cd sub` could follow an inherited `CDPATH` out of the workspace, and `BASH_ENV`/`ENV` or an exported function could run code the rule matcher never saw. The scrub applies only to rule-answered lines; a line you approved yourself keeps your full environment.
+
+- **A subprocess whose every PATH entry is scoped away no longer searches the workspace for programs.** When workspace scoping dropped every entry — a PATH of `.`, `:` or only in-workspace directories — the child was handed an empty `PATH=`, which a POSIX shell searches as the current directory, the workspace itself. On POSIX it now gets `PATH=/usr/bin:/bin` instead (those two directories filtered against the workspace like any other entry, PATH left out if neither survives); on Windows the PATH entry is left out. This covers the shell and interpreter tools, rule-answered terminal lines among them, and the allowlisted environments of git hooks, MCP servers and toolchain probes. An absent PATH stays absent, and a call with no workspace keeps PATH untouched.
+
+- **The approval pane no longer suggests a bare interpreter as an allow rule.** A versioned interpreter (`python3.12`, `ruby3.2`, `lua5.4`) and the interpreters the suggestion did not know (`dash`, `ksh`, `mksh`, `yash`, `fish`, `csh`, `tcsh`, `nodejs`, `php`, `lua`, `luajit`, `tclsh`, `Rscript`, `pwsh` and the awk family) now get a rule naming their script, or none at all — never the bare name, which would have allowed any program. Matching stays literal; a command such as `base64` that merely ends in digits is suggested as before.
+
 ## [0.25.0] — 2026-10-11
 
 - Changed (development): a rebasing `git pull` now syncs the beads issue database too. A new `.beads/hooks/post-rewrite` runs `bd-sync-soft` after every finished rebase, since `git pull --rebase` (or `pull.rebase = true`) fires no `post-merge`; an amend does not sync (apogee-beads-replica-drift).
