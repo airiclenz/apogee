@@ -626,6 +626,12 @@ translation — for the escape sequences the emulator consumes without a trace o
 a copy writes is the case (`e2e_copy_test.go`). The recorder is held on the session, so a
 `RelaunchWith` records into the same writer, and it is supplied at the launch rather than attached
 after, because the launch waits for the first frame and a late recorder would miss it.
+`launchTUIOnBeating(t, drv, stub, home, ws, beat)` is `launchTUIOn` on a heartbeat cadence of `beat`
+instead of `heartbeat.Interval`: the launcher closure sets `tui.Options.BeatInterval` on every launch
+of that session. It is for the claim that is about what a run of beats leads to — the seat suite's
+two failed beats before "unavailable" (`TestE2ESeatDelegationsLineSurvivesATargetDownBeat`) — which
+at the production minute a beat cost two minutes of wall clock. It is per session rather than a
+`TestMain` package var, so no other run's footer, notices or probe log move with it.
 
 `openerLookPath` (`cmd/apogee/wire_present.go`) is the same family of seam as `tuiScheduleClock`,
 `liveLauncherOps` and `configWatchTiming`: a package var that is nil in production. It becomes

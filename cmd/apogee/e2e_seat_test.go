@@ -20,9 +20,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
-	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -70,6 +70,12 @@ const seatDelegationsPrefix = "- Delegations: "
 // is configured and not there. Port 1 refuses immediately, which is what makes "the target is down"
 // a fact one beat resolves rather than a wait.
 const seatUnreachable = "http://127.0.0.1:1"
+
+// seatBeat is the heartbeat cadence of the one case whose claim is what a run of beats leads to
+// ([e2eSession.beat]). A second keeps the run's settle waits clear of the beats between them while
+// the two failed beats the notice owes cost seconds instead of the two minutes heartbeat.Interval
+// would charge.
+const seatBeat = time.Second
 
 // TestE2ESeatChoiceSessionAskKeepsTheChildOnTheSessionServer is the near seat: a delegation that
 // names `run_on: "session"` runs on the box the conversation is on, while a perfectly usable
@@ -137,7 +143,7 @@ func TestE2ESeatChoiceSubAgentsAskRunsTheChildOnTheTarget(t *testing.T) {
 func TestE2ESeatFallbackNoteRidesTheResultWhenTheTargetIsDown(t *testing.T) {
 	t.Parallel()
 
-	run := launchSeatSessionOn(t, seatChoiceModel, seatUnreachable, "down-model")
+	run := launchSeatSessionOn(t, seatChoiceModel, seatUnreachable, "down-model", 0)
 
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable")
 	submit(run.drv, seatSubAgentPrompt)
@@ -227,7 +233,7 @@ func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T)
 func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	t.Parallel()
 
-	run := launchSeatSession(t, seatChoiceModel)
+	run := launchSeatSessionBeating(t, seatChoiceModel, seatBeat)
 
 	awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)
 	submit(run.drv, seatPlainPrompt)
@@ -236,14 +242,14 @@ func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	before := seatLastDelegationsLine(t, run.session)
 
 	// The far box goes away, and the notice waits for TWO consecutive failed beats
-	// (delegationFailureThreshold) before it says so. Beats land on heartbeat.Interval, which is
-	// longer than the kit's default wait, so this one is given room for the pair — the second beat
-	// lands at most two intervals after the close — plus the kit's own default for the paint that
-	// follows. The allowance is ADDED to the pair rather than multiplied by the interval, so a
-	// cadence derived from the probe budget cannot compound into a wait nothing else bounds.
+	// (delegationFailureThreshold) before it says so. This session beats on seatBeat rather than
+	// heartbeat.Interval — a minute a beat would make the pair cost two — so the wait is given room
+	// for the pair, the second beat landing at most two intervals after the close, plus the kit's
+	// own default for the paint that follows. The allowance is ADDED to the pair rather than
+	// multiplied by the interval, so a slower cadence cannot compound into a wait nothing else bounds.
 	run.target.Close()
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable",
-		tuitest.Within(2*heartbeat.Interval+tuitest.DefaultTimeout))
+		tuitest.Within(2*seatBeat+tuitest.DefaultTimeout))
 
 	sent := len(run.session.Requests())
 	submit(run.drv, seatPlainPrompt)
@@ -290,21 +296,29 @@ func (r seatRun) quit(t *testing.T) {
 // `sub-agents-choice:` the home is written with.
 func launchSeatSession(t *testing.T, choice string) seatRun {
 	t.Helper()
+	return launchSeatSessionBeating(t, choice, 0)
+}
+
+// launchSeatSessionBeating is [launchSeatSession] on a heartbeat of beat — zero for
+// heartbeat.Interval — for the case whose claim is what a run of beats leads to.
+func launchSeatSessionBeating(t *testing.T, choice string, beat time.Duration) seatRun {
+	t.Helper()
 
 	target := stubllm.New(t, loadScript(t, "seat-target"))
-	run := launchSeatSessionOn(t, choice, target.URL, target.Model)
+	run := launchSeatSessionOn(t, choice, target.URL, target.Model, beat)
 	run.target = target
 	return run
 }
 
-// launchSeatSessionOn is [launchSeatSession] against a Sub-agent server the CALLER names, which is
-// how a case reaches a target that is configured and not there.
-func launchSeatSessionOn(t *testing.T, choice, targetEndpoint, targetModel string) seatRun {
+// launchSeatSessionOn is [launchSeatSessionBeating] against a Sub-agent server the CALLER names,
+// which is how a case reaches a target that is configured and not there.
+func launchSeatSessionOn(t *testing.T, choice, targetEndpoint, targetModel string, beat time.Duration) seatRun {
 	t.Helper()
 
 	session := stubllm.New(t, loadScript(t, "seat-session"))
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIOn(t, drv, session, seatHome(t, session, choice, targetEndpoint, targetModel), "")
+	home := seatHome(t, session, choice, targetEndpoint, targetModel)
+	sess := launchTUIOnBeating(t, drv, session, home, "", beat)
 	waitIdle(drv)
 	drv.WaitQuiet(settled)
 	return seatRun{session: session, sess: sess, drv: drv}

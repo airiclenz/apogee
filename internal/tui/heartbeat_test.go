@@ -231,6 +231,31 @@ func TestBeatChainReArmsAndStaleGenIsInert(t *testing.T) {
 	}
 }
 
+// The chain runs on the host's stated cadence when it states one, and on heartbeat.Interval when it
+// does not: the tick a landed beat schedules fires one BeatInterval later. That is the seam a driven
+// test watches two failed beats through without sitting out two minutes of wall clock.
+func TestBeatTickRunsOnTheStatedInterval(t *testing.T) {
+	t.Parallel()
+
+	if got := wireHeartbeat(t, testOpts, &fakeHeartbeat{}).beatInterval(); got != heartbeat.Interval {
+		t.Errorf("an unstated cadence is %v, want heartbeat.Interval (%v)", got, heartbeat.Interval)
+	}
+
+	opts := testOpts
+	opts.BeatInterval = 10 * time.Millisecond
+	m := wireHeartbeat(t, opts, &fakeHeartbeat{})
+	tick := make(chan tea.Msg, 1)
+	go func() { tick <- m.beatTick()() }()
+	select {
+	case msg := <-tick:
+		if got, ok := msg.(heartbeatTickMsg); !ok || got.gen != m.hb.gen {
+			t.Errorf("the tick yielded %#v, want the live chain's heartbeatTickMsg (gen %d)", msg, m.hb.gen)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no tick five seconds into a 10ms cadence — the stated BeatInterval was not used")
+	}
+}
+
 // An unwired monitor is completely inert: no chain is armed, Init returns nothing to run, a stray
 // beat is not folded, and nothing is ever blocked. This is what keeps every hand-built test
 // Options — and any embedder that wires no monitor — behaving exactly as before the heartbeat.

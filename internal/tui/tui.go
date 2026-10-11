@@ -1435,6 +1435,14 @@ type Options struct {
 	// nil ⇒ unwired whole, and every degrade that follows from it is [ServerHost]'s to state.
 	Server ServerHost
 
+	// BeatInterval is the heartbeat's cadence: how long after a beat LANDS the next one is fired
+	// ([Model.beatTick]). Zero ⇒ heartbeat.Interval, which is what the binary leaves it at — the
+	// cadence is a named constant, not a config key. It is a field so a Driver that observes the
+	// heartbeat's consequences can do so without waiting out minutes of wall clock: a driven test
+	// asking what two failed beats lead to. A cadence shorter than a probe never overlaps beats,
+	// because the next one is armed only from a landed one; it only observes more often.
+	BeatInterval time.Duration
+
 	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3, 4
 	// and 7). The zero value is the ordinary start — the binary determined a startup server and the
 	// engine was constructed before the program began — and everything below it is unchanged.

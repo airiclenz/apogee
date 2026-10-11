@@ -213,12 +213,21 @@ func (m *Model) armBeat() tea.Cmd {
 	return m.beatCmd()
 }
 
-// beatTick schedules the next beat one heartbeat.Interval after the beat that just landed. Timing
+// beatTick schedules the next beat one [Model.beatInterval] after the beat that just landed. Timing
 // the wait from the landing (rather than from a fixed clock) is what makes overlap impossible: the
 // observation and its wait are strictly sequential, whatever the server's latency.
 func (m Model) beatTick() tea.Cmd {
 	gen := m.hb.gen
-	return tea.Tick(heartbeat.Interval, func(time.Time) tea.Msg { return heartbeatTickMsg{gen: gen} })
+	return tea.Tick(m.beatInterval(), func(time.Time) tea.Msg { return heartbeatTickMsg{gen: gen} })
+}
+
+// beatInterval is the cadence the tick chain runs on: the host's [Options.BeatInterval] when it
+// states one, heartbeat.Interval otherwise.
+func (m Model) beatInterval() time.Duration {
+	if m.opts.BeatInterval > 0 {
+		return m.opts.BeatInterval
+	}
+	return heartbeat.Interval
 }
 
 // foldBeatMsg folds one landed observation of the Upstream and re-arms the chain from HERE —

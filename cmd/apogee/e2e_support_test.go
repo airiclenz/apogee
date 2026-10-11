@@ -57,6 +57,12 @@ type e2eSession struct {
 	// writer, and supplied before the first launch because [e2eSession.start] waits for that
 	// launch's first frame: a recorder attached afterwards would miss what it wrote.
 	rec io.Writer
+	// beat, when non-zero, is the heartbeat cadence every launch of this session runs on in place of
+	// heartbeat.Interval ([tui.Options.BeatInterval]). Zero for every launch but the few whose claim
+	// is about what a run of beats leads to — a minute a beat would make such a claim cost minutes —
+	// and set per session rather than for the binary, so no other run's footer, notices or probes
+	// move. Held on the session, and supplied before the first launch, for [e2eSession.rec]'s reasons.
+	beat time.Duration
 
 	drv  *tuitest.Driver
 	out  strings.Builder
@@ -130,6 +136,16 @@ func launchTUIOn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, 
 	return launchTUIOnWith(t, drv, stub, home, ws, rootDeps{}, args...)
 }
 
+// launchTUIOnBeating is [launchTUIOn] on a heartbeat of beat rather than heartbeat.Interval (see
+// [e2eSession.beat]).
+func launchTUIOnBeating(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
+	beat time.Duration) *e2eSession {
+	t.Helper()
+
+	e2eGuards(t)
+	return beginSession(drv, &e2eSession{t: t, home: home, ws: ws, stub: stub, beat: beat})
+}
+
 // launchTUIOnWith is [launchTUIOn] with the boot's dependencies stated by the caller (rootDeps), as
 // [launchTUIInWith] is for launchTUIIn.
 func launchTUIOnWith(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
@@ -161,11 +177,17 @@ func e2eGuards(t *testing.T) {
 func startSession(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
 	deps rootDeps, rec io.Writer, args ...string) *e2eSession {
 	t.Helper()
+	return beginSession(drv, &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args, deps: deps, rec: rec})
+}
 
-	if ws == "" {
-		ws = e2eWorkspace(t)
+// beginSession starts the first launch of a session the caller has filled in, taking the seeded
+// scratch workspace when it names none.
+func beginSession(drv *tuitest.Driver, s *e2eSession) *e2eSession {
+	s.t.Helper()
+
+	if s.ws == "" {
+		s.ws = e2eWorkspace(s.t)
 	}
-	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args, deps: deps, rec: rec}
 	s.start(drv)
 	return s
 }
@@ -205,6 +227,9 @@ func (s *e2eSession) start(drv *tuitest.Driver) {
 	drv.Attach(nil, cancel)
 
 	launch := func(ctx context.Context, eng tui.Engine, br *tui.Bridge, opts tui.Options) error {
+		if s.beat > 0 {
+			opts.BeatInterval = s.beat
+		}
 		program, cleanup, err := tui.Build(ctx, eng, br, opts, out, drv.ProgramOptions()...)
 		if err != nil {
 			return err
