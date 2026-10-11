@@ -4,6 +4,7 @@
 // the committed release skills.
 //
 //	go run ./cmd/release dist [--src DIR] [--out DIR]
+//	go run ./cmd/release status [vX.Y.Z] [--json]
 //
 // Every external command it runs goes through one runner seam (runner.go), so its tests never
 // reach the network, a real `git` or a real toolchain.
@@ -48,6 +49,7 @@ func newRootCommand(commands runner) *cobra.Command {
 		SilenceErrors: true,
 	}
 	cmd.AddCommand(newDistCommand(commands))
+	cmd.AddCommand(newStatusCommand(commands))
 	return cmd
 }
 

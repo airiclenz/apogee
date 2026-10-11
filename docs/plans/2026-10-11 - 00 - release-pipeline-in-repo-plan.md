@@ -71,7 +71,19 @@ NOTES (2026-10-11): the root command declares no `Args` (unlike cmd/stubllm's `c
 - `d=$(mktemp -d) && go run ./cmd/release dist --out "$d" && ls "$d" | wc -l` prints 7, and `grep -ac release-archive` finds the stamp in the extracted linux_arm64 binary.
 **Commit:** `feat(release): add cmd/release with a stdlib dist verb`
 
-## 2. `status`: version helpers, the CI gate and the baseline
+## 2. `status`: version helpers, the CI gate and the baseline — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — cmd/release/main.go: made necessary by the new status verb (registered in newRootCommand; its usage line added to the package doc)
+
+NOTES (2026-10-11): status-level tests (baseline, JSON keys pinned, version argument and VERSION default, exit status, text table) live in a new cmd/release/status_test.go rather than being folded into gate_test.go/version_test.go; the gate's own tests stay in gate_test.go and the version helpers' in version_test.go
+
+NOTES (2026-10-11): internal/update.Newer is not reused: its parsed version type and retraction bounds are unexported and it refuses a bare X.Y.Z, so version.go keeps its own parser (same tag pattern, `v` optional) and the same [v1.0.0, v1.8.0] bounds; prepare's "strictly above the highest tag" check can still call update.Newer
+
+NOTES (2026-10-11): a commit that changes no path at all is not peeled (the gate stops at it), reading "touch only CHANGELOG.md and/or VERSION" as touching at least one of them
+
+NOTES (2026-10-11): `git merge-base --is-ancestor` is read by exit status through an ExitCode() interface on the runner's error (exec.ExitError carries it), so exit 1 means "no" and anything else is a check that could not run; runner.go is unchanged
+
+NOTES (2026-10-11): status prints its report before failing, so a blocked gate or a check that could not run (gh missing, fetch failed) still shows what was found; a check that could not run inside the gate is named as a gate failure, and a baseline or tag-list error is returned after printing
 
 Depends on item 1.
 
