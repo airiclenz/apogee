@@ -41,9 +41,10 @@
 //
 // # The files, one line each
 //
-// Twenty-seven files, in five groups: the shell/path Host every OS-touching caller reads, the
+// Thirty files, in six groups: the shell/path Host every OS-touching caller reads, the
 // Confiner backends, the process-tree teardown every spawner reuses (with the Windows
-// pseudoconsole launcher built on it), the per-machine identity, and the single-instance lock. The Windows label mechanism is a module of its own beside them
+// pseudoconsole launcher built on it), the console-output codepage, the per-machine identity,
+// and the single-instance lock. The Windows label mechanism is a module of its own beside them
 // (internal/platform/winlabel).
 //
 // The Host abstraction. platform.go is the interface set — Shell (the argv, the raw command
@@ -117,6 +118,13 @@
 // launcher (StartPseudoConsole): it creates a ConPTY, starts a verbatim command line inside it
 // suspended, joins it to the handle-keyed job and resumes it — the Windows backend of the Console
 // tools, and the only spawner whose tree is held from its first instruction.
+//
+// The console-output codepage. consolecp.go is DecodeConsoleOutput, pure and untagged so it
+// unit-tests on any host: a line of captured output that is not valid UTF-8 is decoded through a
+// table from Windows codepage to golang.org/x/text encoding, while a UTF-8 line, a byte-capped
+// trailing rune and a codepage with no table entry pass through. consolecp_windows.go reads the
+// codepage — the console's output page, else the system OEM page through a lazy GetOEMCP — and
+// consolecp_other.go reports 65001, the pass-through value, everywhere else.
 //
 // The per-machine fact. hostid.go computes HostID once per process from the systemd or dbus
 // machine-id file, falling back to the hostname, and reports whether the result is the
