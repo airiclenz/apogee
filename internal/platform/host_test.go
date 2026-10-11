@@ -187,6 +187,47 @@ func TestQuoteIsLiteralForThePlatformShell(t *testing.T) {
 	}
 }
 
+// CmdOuterQuote wraps only a cmd line that opens with a quote, in exactly one pair; a POSIX
+// line, and a cmd line that opens with anything else, pass through untouched.
+func TestCmdOuterQuoteWrapsOnlyACmdLineOpeningWithAQuote(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		shell Shell
+		line  string
+		want  string
+	}{
+		{"posix quoted program", posixRules(), `'/opt/a b/apogee' audit-split '/w d'`, `'/opt/a b/apogee' audit-split '/w d'`},
+		{"posix double-quoted program", posixRules(), `"/opt/a b/apogee" x`, `"/opt/a b/apogee" x`},
+		{"cmd quoted program", WindowsShell(), `"C:\a b\apogee.exe" audit-split "C:\w d"`, `""C:\a b\apogee.exe" audit-split "C:\w d""`},
+		{"cmd caret-escaped program", WindowsShell(), `^"a\^"b^" x`, `^"a\^"b^" x`},
+		{"cmd bare program", WindowsShell(), `apogee.exe audit-split "C:\w d"`, `apogee.exe audit-split "C:\w d"`},
+		{"cmd empty line", WindowsShell(), ``, ``},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CmdOuterQuote(tt.shell, tt.line); got != tt.want {
+				t.Errorf("CmdOuterQuote(%s) = %s, want %s", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+// WindowsShell is the Windows rule set on every target: cmd, and cmd's quoting.
+func TestWindowsShellQuotesForCmdOnEveryTarget(t *testing.T) {
+	t.Parallel()
+
+	shell := WindowsShell()
+	if !IsCmd(shell) || IsCmd(posixRules()) {
+		t.Errorf("IsCmd(WindowsShell()) = %v, IsCmd(posix) = %v; want true, false", IsCmd(shell), IsCmd(posixRules()))
+	}
+	if got, want := shell.Quote(`C:\pro be`), `"C:\pro be"`; got != want {
+		t.Errorf("WindowsShell().Quote = %s, want %s", got, want)
+	}
+}
+
 func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 	t.Parallel()
 

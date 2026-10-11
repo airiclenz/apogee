@@ -232,7 +232,10 @@ the start-/audit-again sentence; the `load_test.go` contract test matches receip
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Audit|Shipped' ./internal/skills/`
 **Commit:** `fix(audit): run the split as apogee audit-split, not sh`
 
-## 6. Platform quoting for recipe values
+## 6. Platform quoting for recipe values — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the exported platform surface is three package functions in host.go — `WindowsShell()` (the Windows-rules constructor), `IsCmd(Shell)` (the quoter's safe-set choice, keyed on `Shell()` naming `cmd`) and `CmdOuterQuote(Shell, line)` (the wrap; identity for POSIX); `shellQuote` was replaced by the agent's `recipeQuoter` (quote + finish), and production passes nil (→ platform.Current) to `bindPlanInputs` and leaves `recipeScripts.shell` unset.
+NOTES (2026-10-11): the POSIX agent tests (`TestShellQuote`, `TestBindPlanInputs`, `TestRender_TheApogeePlaceholder`) keep their expected strings and use the nil default, so they assert POSIX only on a POSIX host; internal/agent is not in the test-windows CI job.
 
 Depends on item 5.
 

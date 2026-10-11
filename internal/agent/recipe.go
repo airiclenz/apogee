@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -113,8 +114,13 @@ var exitCodeMarker = regexp.MustCompile(`\[exit code (-?\d+)`)
 // command runs or reads from the skill's folder.
 var skillFileRef = regexp.MustCompile(regexp.QuoteMeta(domain.SkillDirToken) + `/([^\s'"]+)`)
 
-// shellSafeValue is a value that needs no quoting in either platform shell.
-var shellSafeValue = regexp.MustCompile(`^[A-Za-z0-9_./:=@%+,-]+$`)
+// shellSafeValue is a value POSIX sh reads as one literal word, so it needs no quoting there;
+// cmdSafeValue is the same under cmd.exe, which expands %VAR% and gives a backslash run escape
+// meaning before a quote, so a value holding % or \ is quoted there.
+var (
+	shellSafeValue = regexp.MustCompile(`^[A-Za-z0-9_./:=@%+,-]+$`)
+	cmdSafeValue   = regexp.MustCompile(`^[A-Za-z0-9_./:=@+,-]+$`)
+)
 
 // RecipeLaunch is a Driver's request to start a recipe: the recipe skill's id, the user's text
 // its inputs bind from (the line after "/<id>"), and whether it runs in the background. It is
@@ -344,10 +350,11 @@ func completeInputs(decls []workflow.InputDecl, given map[string]string) (map[st
 
 // bindPlanInputs is recipe's plan with every `{<input>}` replaced by its value — in a stage's
 // task, question, default, item source, output path, context files and pick file as written, in a
-// script's command shell-quoted — and each prompt path kept relative to the skill's folder, where
-// the spawner reads it (recipe.Files). The plan is named after the recipe when it has no name.
-func bindPlanInputs(recipe workflow.Recipe, inputs map[string]string) workflow.Plan {
-	plain, quoted := inputReplacers(inputs)
+// script's command quoted for shell (nil: the host's own, platform.Current) — and each prompt path
+// kept relative to the skill's folder, where the spawner reads it (recipe.Files). The plan is
+// named after the recipe when it has no name.
+func bindPlanInputs(recipe workflow.Recipe, inputs map[string]string, shell platform.Shell) workflow.Plan {
+	plain, quoted := inputReplacers(inputs, newRecipeQuoter(shell))
 	plan := workflow.Plan{Name: recipe.Plan.Name, Stages: make([]workflow.Stage, len(recipe.Plan.Stages))}
 	if plan.Name == "" {
 		plan.Name = recipe.ID
@@ -389,8 +396,8 @@ func folderRelativePrompt(prompt, dir string) string {
 }
 
 // inputReplacers are the two renderings of `{<input>}`: the value as written, and the value
-// shell-quoted for a script's command. A reserved brief placeholder is never an input's.
-func inputReplacers(inputs map[string]string) (plain, quoted *strings.Replacer) {
+// quoted by quoter for a script's command. A reserved brief placeholder is never an input's.
+func inputReplacers(inputs map[string]string, quoter recipeQuoter) (plain, quoted *strings.Replacer) {
 	var plainPairs, quotedPairs []string
 	for name, value := range inputs {
 		if slices.Contains(reservedInputNames, name) {
@@ -398,7 +405,7 @@ func inputReplacers(inputs map[string]string) (plain, quoted *strings.Replacer) 
 		}
 		placeholder := "{" + name + "}"
 		plainPairs = append(plainPairs, placeholder, value)
-		quotedPairs = append(quotedPairs, placeholder, shellQuote(value))
+		quotedPairs = append(quotedPairs, placeholder, quoter.quote(value))
 	}
 	return strings.NewReplacer(plainPairs...), strings.NewReplacer(quotedPairs...)
 }
@@ -415,13 +422,42 @@ func replaceAll(replacer *strings.Replacer, list []string) []string {
 	return out
 }
 
-// shellQuote is value as one shell word: unchanged when it holds nothing a shell reads specially,
-// else single-quoted for POSIX sh.
-func shellQuote(value string) string {
-	if shellSafeValue.MatchString(value) {
+// recipeQuoter quotes the values a recipe substitutes into a script stage's command for the shell
+// the terminal tool runs that command under: `sh -c` on POSIX, `cmd /c` on Windows. A value made
+// only of that shell's safe bytes stays bare — so a POSIX line reads as it always has — and any
+// other is quoted by the shell's own rules (platform.Shell.Quote), so a path with a space, & or ^
+// stays one argument. Under cmd a quoted value still expands %VAR%: cmd reads variables before
+// any quoting and offers no in-line escape (platform's windowsQuote), so a recipe value is not
+// protected from expansion there.
+type recipeQuoter struct {
+	shell platform.Shell
+	safe  *regexp.Regexp
+}
+
+// newRecipeQuoter is the quoter for shell, or for the host's own shell when shell is nil.
+func newRecipeQuoter(shell platform.Shell) recipeQuoter {
+	if shell == nil {
+		shell = platform.Current()
+	}
+	if platform.IsCmd(shell) {
+		return recipeQuoter{shell: shell, safe: cmdSafeValue}
+	}
+	return recipeQuoter{shell: shell, safe: shellSafeValue}
+}
+
+// quote is value as one word of the shell's command line: unchanged when it holds nothing the
+// shell reads specially, else quoted by the shell's own rules.
+func (q recipeQuoter) quote(value string) string {
+	if q.safe.MatchString(value) {
 		return value
 	}
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+	return q.shell.Quote(value)
+}
+
+// finish is the fully rendered command as the shell must be handed it: under cmd a line opening
+// with a quote takes one outer pair, which `cmd /c` strips (platform.CmdOuterQuote).
+func (q recipeQuoter) finish(command string) string {
+	return platform.CmdOuterQuote(q.shell, command)
 }
 
 // recipeAsker puts an `ask` stage's question to the human through the Agent's Asker.
@@ -441,6 +477,8 @@ type recipeScripts struct {
 	turn   int
 	recipe workflow.Recipe
 	split  workflow.SplitBudget
+	// shell is the shell the command is quoted for; nil is the host's own (platform.Current).
+	shell platform.Shell
 }
 
 // RunScript renders the stage's command and runs it through the Agent's terminal Resolution: a
@@ -468,29 +506,32 @@ func (s *recipeScripts) RunScript(ctx context.Context, spec workflow.ScriptSpec)
 	return scriptOutput(result)
 }
 
-// render fills the command's run-time placeholders: {{SKILL_DIR}} (staging each file it names for
-// a shipped skill), {apogee} (refused when no executable is there to run), {workflow_dir} and
-// {part_bytes}.
+// render fills the command's run-time placeholders, every path quoted for the shell: {{SKILL_DIR}}
+// (staging each file it names for a shipped skill), {apogee} (refused when no executable is there
+// to run), {workflow_dir} and {part_bytes}. Its last step, once every placeholder has landed,
+// hands the line to the shell whole (recipeQuoter.finish).
 func (s *recipeScripts) render(spec workflow.ScriptSpec) (string, error) {
+	quoter := newRecipeQuoter(s.shell)
 	command := spec.Command
 	if strings.Contains(command, domain.SkillDirToken) {
 		dir, err := s.skillDir(command, spec.Dir)
 		if err != nil {
 			return "", err
 		}
-		command = strings.ReplaceAll(command, domain.SkillDirToken, shellQuote(dir))
+		command = strings.ReplaceAll(command, domain.SkillDirToken, quoter.quote(dir))
 	}
 	if strings.Contains(command, apogeePlaceholder) {
 		executable, err := s.apogeeExecutable()
 		if err != nil {
 			return "", err
 		}
-		command = strings.ReplaceAll(command, apogeePlaceholder, shellQuote(executable))
+		command = strings.ReplaceAll(command, apogeePlaceholder, quoter.quote(executable))
 	}
-	return strings.NewReplacer(
-		workflowDirPlaceholder, shellQuote(spec.Dir),
+	command = strings.NewReplacer(
+		workflowDirPlaceholder, quoter.quote(spec.Dir),
 		partBytesPlaceholder, strconv.Itoa(int(s.split)),
-	).Replace(command), nil
+	).Replace(command)
+	return quoter.finish(command), nil
 }
 
 // apogeeExecutable is the binary a command's {apogee} names (Config.ApogeeExecutable), or the

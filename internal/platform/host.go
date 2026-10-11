@@ -540,6 +540,32 @@ func caretEscape(line string) string {
 	return b.String()
 }
 
+// WindowsShell returns the Windows rule set's Shell on every build target, so a caller that
+// builds a line for `cmd /c` — the agent's recipe quoting — can assert it from a Linux or macOS
+// test run as well as natively. It carries none of the OS path resolvers Current wires on
+// Windows; a Shell needs none.
+func WindowsShell() Shell { return windowsRules() }
+
+// IsCmd reports whether shell hands its lines to cmd.exe (`cmd /c`), whose quoting and
+// expansion rules differ from POSIX `sh -c` in ways a caller building a line must follow.
+func IsCmd(shell Shell) bool { return shell.Shell() == "cmd" }
+
+// CmdOuterQuote returns the finished line as shell must be handed it to run line itself. On
+// POSIX it is line unchanged. `cmd /c` strips the first and last character of a line that opens
+// with a double quote — unless the line meets cmd's narrow keep-the-quotes conditions — so a
+// line opening with a quoted program path, `"C:\Program Files\x.exe" "an arg"`, loses the
+// quote that opens it and the one that closes its last argument. Such a line is wrapped in one
+// more pair: with four or more quotes cmd always strips, it strips exactly that pair, and the
+// line reaches the program as built — the documented way to give cmd both a quoted executable
+// and quoted arguments of its own. Apply it once, as the last step: a line wrapped twice keeps
+// one surplus pair.
+func CmdOuterQuote(shell Shell, line string) string {
+	if !IsCmd(shell) || !strings.HasPrefix(line, `"`) {
+		return line
+	}
+	return `"` + line + `"`
+}
+
 // failFastPreamble is the fail-fast prefix the terminal tool prepends to every POSIX script.
 // It is a CONSTANT — the same bytes on every host, composed once at compile time — because the
 // line self-detects pipefail instead of asking a subprocess whether the host shell has it.

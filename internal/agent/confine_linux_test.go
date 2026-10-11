@@ -119,7 +119,7 @@ func TestRecipe_APlanScriptWritesOnlyItsWorkflowFolder(t *testing.T) {
 	escape := filepath.Join(workspace, "escape.txt")
 	out, err = scripts.RunScript(ctx, workflow.ScriptSpec{
 		Workflow: "wf-1", Stage: "outside", Dir: folder,
-		Command: "echo leaked > " + shellQuote(escape),
+		Command: "echo leaked > " + newRecipeQuoter(nil).quote(escape),
 	})
 	if err == nil && out.ExitCode == 0 {
 		t.Errorf("a write into the workspace ran in Plan mode: %+v", out)

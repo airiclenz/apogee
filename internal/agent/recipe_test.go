@@ -16,6 +16,7 @@ import (
 	"testing/fstest"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -645,6 +646,95 @@ func TestRender_TheApogeePlaceholder(t *testing.T) {
 	}
 }
 
+// Rendered under cmd's rules, every placeholder is quoted for cmd and a line that then opens with
+// a quote is wrapped in exactly one outer pair, after the last placeholder has landed — the
+// shipped audit split line, which opens with the quoted {apogee}, included.
+func TestRender_QuotesForCmdAndWrapsTheLineOnce(t *testing.T) {
+	t.Parallel()
+
+	executable := filepath.Join(t.TempDir(), "apogee bin", "apogee.exe")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	skillDir := filepath.Join(t.TempDir(), "my skill")
+	workflowDir := filepath.Join(t.TempDir(), "wf dir")
+	q := platform.WindowsShell().Quote
+	tests := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name:    "a line opening with a quoted value is wrapped once",
+			command: "{apogee} audit-split {workflow_dir} {part_bytes}",
+			want:    `"` + q(executable) + " audit-split " + q(workflowDir) + ` 4096"`,
+		},
+		{
+			name:    "a line opening with a bare word is not wrapped",
+			command: "py {{SKILL_DIR}}/run.py {workflow_dir}",
+			want:    "py " + q(skillDir) + "/run.py " + q(workflowDir),
+		},
+		{
+			name:    "a line opening with the skill folder is wrapped once",
+			command: "{{SKILL_DIR}}/run.cmd {workflow_dir}",
+			want:    `"` + q(skillDir) + "/run.cmd " + q(workflowDir) + `"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			scripts := &recipeScripts{
+				agent:  &Agent{cfg: domain.Config{ApogeeExecutable: executable}},
+				recipe: workflow.Recipe{ID: "r", Dir: skillDir},
+				split:  4096,
+				shell:  platform.WindowsShell(),
+			}
+
+			got, err := scripts.render(workflow.ScriptSpec{Command: tt.command, Dir: workflowDir})
+
+			if err != nil || got != tt.want {
+				t.Errorf("render = (%s, %v), want %s", got, err, tt.want)
+			}
+		})
+	}
+
+	t.Run("the shipped audit split line", func(t *testing.T) {
+		t.Parallel()
+
+		recipe, ok := skills.NewProvider(skills.Sources{UseShippedSkills: true}).Recipe("audit")
+		if !ok {
+			t.Fatal("the shipped audit recipe is not served")
+		}
+		plan := bindPlanInputs(recipe, map[string]string{"scope": `C:\my repo\src`, "focus": "all"}, platform.WindowsShell())
+		var run string
+		for _, stage := range plan.Stages {
+			if stage.Name == "split" {
+				run = stage.Run
+			}
+		}
+		scripts := &recipeScripts{
+			agent:  &Agent{cfg: domain.Config{ApogeeExecutable: executable}},
+			recipe: recipe,
+			split:  4096,
+			shell:  platform.WindowsShell(),
+		}
+
+		got, err := scripts.render(workflow.ScriptSpec{Command: run, Dir: workflowDir})
+
+		want := `"` + q(executable) + " audit-split " + q(workflowDir) + ` "C:\my repo\src" all 4096"`
+		if err != nil || got != want {
+			t.Errorf("render = (%s, %v), want %s", got, err, want)
+		}
+		if strings.HasPrefix(got, `""`+`"`) {
+			t.Errorf("render = %s, wrapped more than once", got)
+		}
+	})
+}
+
 // A plan an older apogee stored (RerunFailed and a resume read it back) still runs the shipped
 // audit split as `sh {{SKILL_DIR}}/split.sh`, a file the skill no longer carries: render fails with
 // a sentence that asks for a fresh /audit instead of a staging error naming an embedded path.
@@ -681,7 +771,7 @@ func TestBindPlanInputs(t *testing.T) {
 			Over: &workflow.ItemSource{Files: "{scope}/*.go"}},
 	}}}
 
-	plan := bindPlanInputs(recipe, map[string]string{"scope": "internal", "focus": "error handling", "item": "x"})
+	plan := bindPlanInputs(recipe, map[string]string{"scope": "internal", "focus": "error handling", "item": "x"}, nil)
 
 	if plan.Name != "r" {
 		t.Errorf("plan name = %q, want the recipe id", plan.Name)
@@ -700,6 +790,25 @@ func TestBindPlanInputs(t *testing.T) {
 	}
 	if recipe.Plan.Stages[1].Over.Files != "{scope}/*.go" {
 		t.Errorf("binding rewrote the recipe's own plan")
+	}
+}
+
+// Bound under cmd's rules, a script's input values are quoted for cmd; the other fields keep the
+// values as written.
+func TestBindPlanInputsQuotesForCmd(t *testing.T) {
+	t.Parallel()
+
+	recipe := workflow.Recipe{ID: "r", Plan: workflow.Plan{Stages: []workflow.Stage{
+		{Name: "s", Kind: workflow.StageScript, Run: "sh x {scope} {focus}", Task: "{scope}"},
+	}}}
+
+	plan := bindPlanInputs(recipe, map[string]string{"scope": `C:\my repo`, "focus": "a&b"}, platform.WindowsShell())
+
+	if got, want := plan.Stages[0].Run, `sh x "C:\my repo" "a&b"`; got != want {
+		t.Errorf("run = %s, want %s", got, want)
+	}
+	if got, want := plan.Stages[0].Task, `C:\my repo`; got != want {
+		t.Errorf("task = %s, want %s", got, want)
 	}
 }
 
@@ -729,7 +838,7 @@ func TestBindPlanInputsPromptsOpenThroughFiles(t *testing.T) {
 				{Name: "f", Kind: workflow.StageFanout, Prompt: tc.prompt, Over: &workflow.ItemSource{List: []string{"a"}}},
 			}}}
 
-			plan := bindPlanInputs(recipe, nil)
+			plan := bindPlanInputs(recipe, nil, nil)
 
 			if got := plan.Stages[0].Prompt; got != tc.wantRel {
 				t.Errorf("prompt = %q, want %q", got, tc.wantRel)
@@ -752,8 +861,33 @@ func TestShellQuote(t *testing.T) {
 		{"", "''"},
 		{"$(rm -rf /)", "'$(rm -rf /)'"},
 	} {
-		if got := shellQuote(tc.in); got != tc.want {
-			t.Errorf("shellQuote(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := newRecipeQuoter(nil).quote(tc.in); got != tc.want {
+			t.Errorf("quote(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// Under cmd's rules a recipe value is quoted the way cmd and the child's argv splitter read it
+// back as one argument: a space, &, ^ or ' is quoted, a value holding % or \ is quoted rather
+// than left bare, and a plain word stays bare.
+func TestShellQuoteForCmd(t *testing.T) {
+	t.Parallel()
+
+	quoter := newRecipeQuoter(platform.WindowsShell())
+	for _, tc := range []struct{ in, want string }{
+		{"internal/agent", "internal/agent"},
+		{"two words", `"two words"`},
+		{"a&b", `"a&b"`},
+		{"x^y", `"x^y"`},
+		{"it's", `"it's"`},
+		{"50%", `"50%"`},
+		{`C:\Work`, `"C:\Work"`},
+		{`C:\Work\`, `"C:\Work\\"`},
+		{"", `""`},
+		{`say "hi"`, `^"say \^"hi\^"^"`},
+	} {
+		if got := quoter.quote(tc.in); got != tc.want {
+			t.Errorf("quote(%q) = %s, want %s", tc.in, got, tc.want)
 		}
 	}
 }

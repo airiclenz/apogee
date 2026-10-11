@@ -104,6 +104,51 @@ func TestWindowsQuoteDoesNotNeutraliseEnvironmentExpansion(t *testing.T) {
 	}
 }
 
+// A whole line built the way the agent renders a recipe's script command — a quoted program path
+// with a space, then quoted arguments, finished by CmdOuterQuote — runs through a real `cmd /c`
+// launched with CommandLine, and the program reads every argument back byte for byte.
+func TestCmdOuterQuotedLineRoundTripsThroughCmd(t *testing.T) {
+	t.Parallel()
+
+	// A copy of the test binary under a folder with a space — "C:\Program Files\…" is where an
+	// installed apogee ordinarily lives — so the line opens with a quoted program path.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate the test binary: %v", err)
+	}
+	binary, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatalf("read the test binary: %v", err)
+	}
+	dir := filepath.Join(t.TempDir(), "apo gee")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", dir, err)
+	}
+	program := filepath.Join(dir, "platform.test.exe")
+	if err := os.WriteFile(program, binary, 0o700); err != nil {
+		t.Fatalf("copy the test binary: %v", err)
+	}
+	args := []string{`C:\work tree\repo`, `a & b`, `x ^ y`, `it's`, `C:\Work\`, `say "hi"`, `plain`}
+	host := Current()
+	line := host.Quote(program) + " " + quoteEchoSentinel
+	want := ""
+	for _, arg := range args {
+		line += " " + host.Quote(arg)
+		want += "<" + arg + ">"
+	}
+	line = CmdOuterQuote(host, line)
+
+	cmd := exec.Command("cmd")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: host.CommandLine(line)}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cmd /c %s: %v (output %q)", line, err, out)
+	}
+	if got := strings.TrimRight(string(out), "\r\n"); got != want {
+		t.Errorf("cmd /c %s reached the program as %s, want %s", line, got, want)
+	}
+}
+
 func TestWindowsShellLineSurvivesQuotingOnlyThroughCommandLine(t *testing.T) {
 	// A directory whose name contains a space is the ordinary case (%USERPROFILE% is
 	// "C:\Users\First Last" on most machines), and it is exactly the case os/exec's argv

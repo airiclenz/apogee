@@ -160,7 +160,7 @@ func (a *Agent) launchRunner(launch workflowLaunch) (builtLaunch, error) {
 			if err != nil {
 				return builtLaunch{}, err
 			}
-			built.plan = bindPlanInputs(recipe, inputs)
+			built.plan = bindPlanInputs(recipe, inputs, nil)
 		}
 		runner, err := a.newLaunchRunner(launch, &recipe)
 		if err != nil {
