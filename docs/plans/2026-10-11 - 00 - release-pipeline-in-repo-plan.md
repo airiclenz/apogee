@@ -125,7 +125,13 @@ Depends on item 2.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`; `go run ./cmd/release status v0.24.11` shows tag/release/homebrew `done`, scoop and winget not `done`.
 **Commit:** `feat(release): status probes every publish step`
 
-## 4. `prepare` verb
+## 4. `prepare` verb — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — cmd/release/main.go: made necessary by the new verb; registers `newPrepareCommand` on the root and lists `prepare vX.Y.Z` in the package doc's usage lines (the Files line named only prepare.go/prepare_test.go).
+
+NOTES (2026-10-11): the version is parsed in RunE, not in Cobra's Args, so a malformed version is a refused run (exit 1) as the item states; a missing or extra argument stays a usage error (exit 2). Refusals are collected and reported together rather than stopping at the first. Commits run `git commit --quiet -m <subject>` (subject only, no body). A CRLF CHANGELOG keeps its line ending in the inserted heading.
+
+NOTES (2026-10-11): acceptance run in a scratch clone with `core.hooksPath=/dev/null`, so the clone's beads hooks did not fire; `git log -2 --name-only` showed the two subjects with `VERSION` and `CHANGELOG.md` alone, and a second run refused (exit 1) naming the VERSION and existing-heading guards.
 
 Depends on item 2.
 
