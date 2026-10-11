@@ -517,9 +517,19 @@ documented wire format, never prose, a log line or a summary, which stay semanti
 the reason above.
 
 Redactions are not optional for a frame that carries a `t.TempDir()` path, the build version, a
-session title with today's date in it, or a relative age: without them the golden churns on every
-run. `Redact(pattern, with)` builds one; `-update` records the **redacted** text, so what is on
-disk is what a later comparison sees. The in-process driver supplies the default set (plan item 5).
+session title with today's date in it, a relative age, or the live star: without them the golden
+churns on every run. `Redact(pattern, with)` builds one; `-update` records the **redacted** text, so
+what is on disk is what a later comparison sees. The in-process driver supplies the default set
+(plan item 5).
+
+The live star is the one volatile fact the default set leaves to the test: a tool block still
+holding an open call blinks its `✦` against a bare cell twice a second (`layout.md`, "The live
+star"), and while an approval or ask pane is up the phase freezes wherever it was when the request
+arrived — so which phase a pane golden caught says nothing about the view. Every golden taken
+while a pane is up passes `liveStarRedaction(label)` (`cmd/apogee/e2e_support_test.go`) for the
+block the pane answers for — `"Terminal"` or `"Ask User"` — which rewrites that header row to its
+`✦` phase in place, so the recorded frame and its columns are unchanged. It is label-specific on
+purpose: a bare `^[✦ ] ` would rewrite every row a two-space body indent begins.
 
 A value the surface pads a column out to takes `RedactPadded(pattern, with)` instead: it swallows
 the run of spaces behind the value along with it and pads the token back out to the same width, so

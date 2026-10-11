@@ -255,7 +255,7 @@ func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
 	pane := awaitApprovalPane(drv)
 	assertArgumentHangsUnderItsIndent(t, pane)
 	assertNoLeakedColour(t, pane, red)
-	tuitest.Golden(t, "t12-pane-60", pane, goldenRedactions(sess)...)
+	tuitest.Golden(t, "t12-pane-60", pane, append(goldenRedactions(sess), liveStarRedaction("Terminal"))...)
 
 	stopRun(t, drv)
 	drv.WaitGone(approvalMarker)

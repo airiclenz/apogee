@@ -349,11 +349,13 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
 	waitIdle(drv)
+	// Every ask golden is taken while its Ask User block's star is frozen at either blink phase.
+	askRedactions := append(goldenRedactions(sess), liveStarRedaction("Ask User"))
 
 	// The approval pane.
 	submit(drv, popupApprovalPrompt)
 	pane := awaitApprovalPane(drv)
-	tuitest.Golden(t, "popup-approval", pane, goldenRedactions(sess)...)
+	tuitest.Golden(t, "popup-approval", pane, append(goldenRedactions(sess), liveStarRedaction("Terminal"))...)
 	decide(drv, "a")
 	drv.WaitText("That is what the command had to say.")
 
@@ -362,7 +364,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.WaitText(askChoiceHint)
 	awaitArmed(drv)
 	drv.WaitQuiet(settled)
-	tuitest.Golden(t, "popup-ask-single", drv.Frame(), goldenRedactions(sess)...)
+	tuitest.Golden(t, "popup-ask-single", drv.Frame(), askRedactions...)
 	drv.Press(tuitest.Enter)
 	drv.WaitText(askReply)
 
@@ -374,7 +376,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.Press(tuitest.Space)
 	drv.WaitText("[✔]")
 	drv.WaitQuiet(settled)
-	tuitest.Golden(t, "popup-ask-multi", drv.Frame(), goldenRedactions(sess)...)
+	tuitest.Golden(t, "popup-ask-multi", drv.Frame(), askRedactions...)
 	drv.Press(tuitest.Enter)
 	drv.WaitGone(askChoiceHint)
 
@@ -386,7 +388,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.Type("Do the config first")
 	drv.WaitText("Do the config first")
 	drv.WaitQuiet(settled)
-	tuitest.Golden(t, "popup-ask-typed", drv.Frame(), goldenRedactions(sess)...)
+	tuitest.Golden(t, "popup-ask-typed", drv.Frame(), askRedactions...)
 	drv.Press(tuitest.Enter)
 	drv.WaitGone(askChoiceHint)
 
@@ -394,7 +396,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	submit(drv, popupFreePrompt)
 	drv.WaitText(askFreeHint)
 	drv.WaitQuiet(settled)
-	tuitest.Golden(t, "popup-ask-free", drv.Frame(), goldenRedactions(sess)...)
+	tuitest.Golden(t, "popup-ask-free", drv.Frame(), askRedactions...)
 	drv.Type("popups")
 	drv.WaitText("popups")
 	drv.Press(tuitest.Enter)

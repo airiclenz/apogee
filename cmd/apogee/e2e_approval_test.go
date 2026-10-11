@@ -96,7 +96,7 @@ func TestE2EApprovalForcesALookAtTheControlPlane(t *testing.T) {
 	if _, _, ok := pane.Find(approvalMarker); ok {
 		t.Errorf("the forced pane offers %q, a row the engine would not honour:\n%s", approvalMarker, pane)
 	}
-	tuitest.Golden(t, "t10-forced-pane", pane, goldenRedactions(sess)...)
+	tuitest.Golden(t, "t10-forced-pane", pane, append(goldenRedactions(sess), liveStarRedaction("Terminal"))...)
 
 	// Step 7 — deny it, and the same hint reaches the MODEL, appended to the denial. The claim is
 	// about what the model was TOLD, so it is made against the request the stub received rather than

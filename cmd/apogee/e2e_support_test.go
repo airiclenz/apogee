@@ -566,6 +566,53 @@ func TestFrameRedactionsSurviveAVersionWidthChange(t *testing.T) {
 	}
 }
 
+// liveStarGlyph is the assistant and tool-header star (internal/tui's glyphAssistant). A tool
+// block still holding an open call blinks it: half a second showing, half a second a bare cell that
+// holds its column (layout.md, "The live star").
+const liveStarGlyph = "✦"
+
+// liveStarRedaction normalises the header row of the block a pane is answering for — label is its
+// tool label, "Terminal" or "Ask User" — to the star's showing phase. While an approval or ask pane
+// is up the blink phase freezes at whatever it was when the request arrived, so which of the two a
+// golden caught says nothing about the view: recorded at ✦, a frame painted in the other phase
+// diffs ✦ against a blank cell. The row is rewritten in place to ✦, so the recorded frames and
+// their columns stay exactly as they were. The pattern is label-specific because a bare
+// `^[✦ ] ` would also rewrite every row a two-space body indent begins.
+func liveStarRedaction(label string) tuitest.Redaction {
+	return tuitest.Redact(
+		`(?m)^[`+liveStarGlyph+` ] `+regexp.QuoteMeta(label),
+		liveStarGlyph+" "+strings.ReplaceAll(label, "$", "$$"),
+	)
+}
+
+// TestLiveStarRedactionNormalisesBothPhases pins that a pane golden is the same frame at either
+// blink phase: the live row painted blank and the live row painted with its star redact to the
+// same text, and a settled row and a body row that merely mention the label are left alone.
+func TestLiveStarRedactionNormalisesBothPhases(t *testing.T) {
+	t.Parallel()
+
+	for _, label := range []string{"Terminal", "Ask User"} {
+		t.Run(label, func(t *testing.T) {
+			t.Parallel()
+
+			frame := func(cell string) string {
+				return "✦ Noted, thank you.\n" +
+					cell + " " + label + "                                    │\n" +
+					"  the body names " + label + " on its own row\n"
+			}
+			redact := liveStarRedaction(label)
+			blank := tuitest.ApplyRedactions(frame(" "), redact)
+			star := tuitest.ApplyRedactions(frame(liveStarGlyph), redact)
+			if blank != star {
+				t.Errorf("the two blink phases redact differently:\n blank = %q\n star  = %q", blank, star)
+			}
+			if star != frame(liveStarGlyph) {
+				t.Errorf("the star phase is not left as recorded:\n got  = %q\n want = %q", star, frame(liveStarGlyph))
+			}
+		})
+	}
+}
+
 // e2eHome writes an apogee home whose one configured server is the stub, and returns it. A nil stub
 // leaves an unreachable endpoint, which is a legitimate thing to test and never a hang: nothing
 // asks the server anything at startup (ADR 0024 decision 8).
