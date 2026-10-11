@@ -396,6 +396,15 @@ func TestSuggestAllowRules(t *testing.T) {
 		{"printf suggests nothing", "printf '%s' x", nil},
 		{"echo is safe", "echo hello", []string{"echo hello"}},
 		{"pwd is safe", "pwd", []string{"pwd"}},
+		{"dash with no script suggests nothing", "dash -c 'x'", nil},
+		{"ksh with no script suggests nothing", "ksh -c 'x'", nil},
+		{"a versioned interpreter with no script suggests nothing", "python3.12 -c 'print(1)'", nil},
+		{"nodejs with no script suggests nothing", "nodejs -e 'x'", nil},
+		{"php with no script suggests nothing", "php -r 'x'", nil},
+		{"an awk program suggests nothing", "awk '{print}' f", nil},
+		{"a versioned interpreter takes its script path", "python3.12 tool.py", []string{"python3.12 tool.py"}},
+		{"a versioned interpreter by path takes its script path", "/usr/bin/lua5.4 x.lua", []string{"/usr/bin/lua5.4 x.lua"}},
+		{"a name ending in digits is no interpreter", "base64 f", []string{"base64 f"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

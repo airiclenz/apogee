@@ -96,7 +96,7 @@ internal/platform/host_test.go — TestScopeInheritedEnvScopesOnlyPATH, TestScop
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestScopeInheritedEnv|TestScopeEnv' ./internal/platform/`
 **Commit:** `fix(platform): fall back to /usr/bin:/bin when scoping leaves no PATH entry`
 
-## 4. Interpreter suggestions cover versioned and unlisted interpreters
+## 4. Interpreter suggestions cover versioned and unlisted interpreters — ✅ DONE (2026-10-11)
 
 **What:** fixes `apogee-allow-suggest-interpreters`: `SuggestAllowRules` offers the bare name for `dash -c`, `ksh -c`, `python3.12 -c`, `nodejs -e`, `php -r`, `awk '…'`, a rule that would allow any script. Matching (`MatchAllowRules`) stays literal.
 **Goal:** for any leader whose basename, exactly or with a trailing `[0-9.]+` version stripped, names an interpreter in the ratified set, `SuggestAllowRules` returns either `<leader> <literal script operand>` or nil — never the bare leader; a non-interpreter whose name ends in digits (`base64`) is suggested as before.

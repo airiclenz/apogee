@@ -78,9 +78,10 @@ func MatchAllowRules(command string, rules []string, site AllowSite) (used []int
 // SuggestAllowRules proposes the rules that would let a `terminal` command line through, one
 // per distinct simple command in first-use order, for the approval pane's editable line: the
 // leader plus the next word when that word is plain (allowSuggestionOperand) — `go test ./...`
-// suggests `go test`, `ls -la` suggests `ls`. An interpreter (allowInterpreters) takes its script
-// path instead — `python3 scripts/x.py` suggests itself — and one running no script file
-// (`python3 -c …`, `bash -s`) suggests nothing, since its bare name would allow any program.
+// suggests `go test`, `ls -la` suggests `ls`. An interpreter (isAllowInterpreter, which also
+// reads a versioned name such as `python3.12` or `lua5.4`) takes its script path instead —
+// `python3 scripts/x.py` suggests itself — and one running no script file (`python3 -c …`,
+// `bash -s`, `awk '{print}'`) suggests nothing, since its bare name would allow any program.
 // An in-workspace `cd` needs no rule, and a line led by an unsafe builtin (`test`, `trap`,
 // `read`) suggests nothing, since no rule can let it through. The answer is nil when the line could never match
 // (MatchAllowRules' reasons) or holds a command no literal rule could name; every rule it does
@@ -118,11 +119,27 @@ var allowWrapperLeaders = map[string]bool{
 }
 
 // allowInterpreters are the leaders whose suggested rule names the script they run rather
-// than a subcommand: the interpreter alone would allow any program at all. `.` and `source`
-// run a script in the shell itself, so `. ./x.sh` suggests itself, never a bare `.`.
+// than a subcommand: the interpreter alone would allow any program at all. The set holds the
+// shells, the scripting runtimes and the awk family, each by its unversioned name —
+// isAllowInterpreter strips a trailing version. `.` and `source` run a script in the shell
+// itself, so `. ./x.sh` suggests itself, never a bare `.`.
 var allowInterpreters = map[string]bool{
-	"python": true, "python3": true, "node": true, "bash": true, "sh": true, "zsh": true,
-	"ruby": true, "perl": true, "deno": true, "bun": true, ".": true, "source": true,
+	"python": true, "python3": true, "node": true, "nodejs": true, "deno": true, "bun": true,
+	"ruby": true, "perl": true, "php": true, "lua": true, "luajit": true, "tclsh": true,
+	"Rscript": true, "pwsh": true,
+	"bash": true, "sh": true, "zsh": true, "dash": true, "ksh": true, "mksh": true,
+	"yash": true, "fish": true, "csh": true, "tcsh": true,
+	"awk": true, "gawk": true, "mawk": true, "nawk": true,
+	".": true, "source": true,
+}
+
+// isAllowInterpreter reports whether leader runs a script its rule must name
+// (allowInterpreters): its basename names one exactly or with a trailing version stripped —
+// `python3.12`, `ruby3.2` and `lua5.4` are interpreters, while `base64` stays a plain command
+// because `base` is none.
+func isAllowInterpreter(leader string) bool {
+	name := path.Base(leader)
+	return allowInterpreters[name] || allowInterpreters[strings.TrimRight(name, "0123456789.")]
 }
 
 // allowReservedWords are the shell's reserved words: as a leader the view reads one as the
@@ -322,7 +339,7 @@ func suggestRule(words []string) (string, bool) {
 	if !isLiteralRuleWord(leader) {
 		return "", false
 	}
-	if allowInterpreters[path.Base(leader)] {
+	if isAllowInterpreter(leader) {
 		if len(words) < 2 || strings.HasPrefix(words[1], "-") || !isLiteralRuleWord(words[1]) {
 			return "", false
 		}
