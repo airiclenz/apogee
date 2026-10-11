@@ -113,6 +113,16 @@ scripting language (the Claude Code workflow shape). That means a new runtime an
 plans that cannot be checked before they run. apogee ships a built-in recipe, `audit` (a user's own `code-audit` skill keeps its name), as the
 bench subject and the reference example.
 
+> **Amended 2026-10-10 ([ADR 0042](0042-external-programs-are-optional-enhancements-never-prerequisites.md) §2–§3).** The shipped `audit`'s split is no
+> longer a bundled `split.sh`: a stage running `sh` and coreutils made them prerequisites, so on
+> a stock Windows box (`cmd /c`, no `sh`) the split blocked and every later stage was skipped.
+> The split is now apogee's own hidden `apogee audit-split` subcommand, and the stage stays a
+> `script` stage, its `run:` calling `{apogee} audit-split …`. `{apogee}` is a script-stage
+> placeholder naming the apogee executable that runs the workflow (the input name `apogee` is
+> reserved for it), and every value a `run:` line substitutes is quoted for the host's shell —
+> `sh -c` on POSIX, `cmd /c` on Windows. "Anything computed is a `script` stage" holds; the
+> mention of `split.sh` above is historical.
+
 **D7 — The fan-out ceiling binds `sub_agent` alone.** A `fan_out` runs its items in waves of the
 Parallel-agents width and has no ceiling: receipts are one line each, so the ceiling's premise (a
 coordinator committing to more reports than it can read) does not hold for it. `sub_agent` keeps the

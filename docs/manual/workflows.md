@@ -251,10 +251,19 @@ the confinement box with its own workflow folder as the only place it may write 
 workspace fails in the sandbox), and on a host with no confinement backend it is refused — so a
 read-only `audit` works in Plan, the default mode of headless runs and daemon firings. A stdout line whose key
 the stage's `returns:` declares becomes that field (`summary=` sets the summary); every other line
-is ignored. The status is `ok` on exit 0 and `blocked` otherwise. Its `run:` may use three
+is ignored. The status is `ok` on exit 0 and `blocked` otherwise. Its `run:` may use four
 placeholders beside the inputs: `{{SKILL_DIR}}` (the skill's folder — a copy staged into the
-workflow folder for a skill apogee ships), `{workflow_dir}` and `{part_bytes}` (how many bytes a
-`split` part may hold — sized to a helper's context window).
+workflow folder for a skill apogee ships), `{workflow_dir}`, `{part_bytes}` (how many bytes a
+`split` part may hold — sized to a helper's context window) and `{apogee}` (the apogee executable
+that is running the workflow, so a stage can call apogee itself — the shipped `audit`'s split is
+`{apogee} audit-split …`).
+
+The command runs through the host's own shell: `sh -c` on macOS and Linux, `cmd /c` on Windows,
+and every placeholder and input value is quoted for that shell, so a path with spaces, `&` or `^`
+stays one argument. A recipe meant to run on both calls `{apogee}` or a program that exists
+natively on each — `sh`, `grep` and the other POSIX tools are not on a stock Windows box. One
+limit on Windows: `cmd` expands `%VAR%` even inside quotes, so a value carrying `%NAME%` is not
+neutralised there.
 
 An **ask** takes its `default` wherever no one can answer — a headless run, a daemon firing — and
 says so on its result line: `(default taken: no one to ask)`. A workflow that is resumed never asks
@@ -265,8 +274,9 @@ a question you already answered, nor re-runs a script that already produced a re
 `inputs:` declares what the text after `/<id>` fills in. Each entry has a `name` (one word:
 letters, digits, `_` or `-`, starting with a letter), and optionally `required: true`, a `default`
 and a `description`. `{<name>}` then stands for the input's value in a brief, a question, an item
-source, an output path, a context file, or — shell-quoted — a script's command. A run with other
-inputs is another workflow, with a folder of its own.
+source, an output path, a context file, or — shell-quoted — a script's command. The name `apogee`
+is reserved for the `{apogee}` placeholder. A run with other inputs is another workflow, with a
+folder of its own.
 
 The text binds with no model call:
 
@@ -317,8 +327,9 @@ an enum does not allow is caught when the skill loads, not half-way through a ru
   model loads a recipe skill with `load_skill`, it is told how the recipe is started: through
   `fan_out` when it has that tool, by you with `/<id>` when it does not.
 
-The shipped `audit` is the worked example: its header, prompts and split script are in
-[`internal/skills/shipped/audit/`](../../internal/skills/shipped/audit/SKILL.md), and
+The shipped `audit` is the worked example: its header and prompts are in
+[`internal/skills/shipped/audit/`](../../internal/skills/shipped/audit/SKILL.md) — its split is
+apogee's own `{apogee} audit-split`, so it needs no shell tools on any OS — and
 `/skills export audit` copies it into your library to make your own.
 
 ### Watching a workflow in the TUI

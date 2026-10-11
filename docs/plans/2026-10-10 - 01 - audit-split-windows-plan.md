@@ -295,7 +295,11 @@ Makefile — check target GOOS=windows go vet; docs/manual/building.md — Windo
 - `grep -q 'internal/auditsplit' Makefile && grep -q 'internal/auditsplit' docs/manual/building.md`
 **Commit:** `build: pin shipped skills to LF and test auditsplit on Windows`
 
-## 8. Docs and ADR amendments
+## 8. Docs and ADR amendments — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the third Acceptance grep still prints hits, all in code and tests items 1, 2, 5 and 7 landed (internal/auditsplit comments naming split.sh as the ported parity reference; internal/agent/recipe_test.go's legacy-plan refusal test; internal/skills/load_test.go's assertion that the embedded audit folder no longer carries split.sh). None names split.sh as live, which is the Goal's bar, so they stay; rewording a test string to dodge the grep would game it. Every docs/ hit outside plans, reviews and ADR bodies is gone (`git grep -n 'split\.sh' -- docs ':!docs/plans' ':!docs/reviews' ':!docs/adr'` prints nothing).
+NOTES (2026-10-11): workflows.md also states the `apogee` input name is reserved (item 4's ValidateInputs rule) in the Inputs paragraph, and its worked-example line no longer says the audit folder holds a "split script".
+NOTES (2026-10-11): the ADR amendments cite ADR 0042 §2–§3 — that ADR numbers its decisions 1–5, not D2/D3 as the plan's Sources line spells them.
 
 Depends on items 5 and 6.
 

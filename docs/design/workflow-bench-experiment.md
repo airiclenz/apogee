@@ -123,7 +123,7 @@ of seeded defects and a matcher for each one. The shape follows apogee-sim ADR 0
 seeded defect is one a careful reviewer would report, traceable to the code, never a trick. The
 subjects form their own frozen, versioned pool (an audit pool), because a Task Pool task is a
 coding job with an acceptance suite, not a review target. The pool spans the class by size (from a
-single package up to a scope `split.sh` cuts into several parts) and by defect kind (a correctness
+single package up to a scope the recipe's split cuts into several parts) and by defect kind (a correctness
 bug, a security hole, a concurrency defect, a missing test on a critical path, drift from the
 project's own rules). The Band is read over it as for any Campaign.
 

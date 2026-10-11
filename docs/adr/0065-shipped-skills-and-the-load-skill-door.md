@@ -59,6 +59,12 @@ is recorded through the same skip channel ADR 0032 built, so `/skills` names bot
 > unchanged: it is the lowest-priority claim on its id, a user's own `code-audit` skill is
 > untouched, and a user's own `audit` shadows it.
 
+> **Amended 2026-10-10 ([ADR 0087](0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md) D6, [ADR 0042](0042-external-programs-are-optional-enhancements-never-prerequisites.md) §2–§3).** `audit` no
+> longer bundles a split script: its `split` stage runs apogee's own hidden `apogee audit-split`
+> subcommand through the `{apogee}` placeholder, so the recipe needs no `sh` or coreutils and
+> runs on Windows. Its folder carries only `SKILL.md` and its prompts; the rules above bind it
+> unchanged.
+
 **2. Shipped skills are never installed.** No `~/.apogee/skills/<id>/` is written on first run and
 no directory is auto-created. The catalog serves the embedded bytes directly, and an upgrade
 therefore refreshes every shipped skill for every user — the freeze ADR 0064 §1 removed from the
