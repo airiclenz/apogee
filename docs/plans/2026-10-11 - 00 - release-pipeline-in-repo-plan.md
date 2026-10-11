@@ -51,7 +51,13 @@
 - 7 (re-check): channel steps inherit item 6's tag-done convergence (What line; "tag done, VERSION moved on, dirty tree → winget still converges" test).
 - 14 (re-check): guard folded — the Windows-trees `git grep` also matches the bare `internal/auditsplit` of building.md's make-check row.
 
-## 1. `cmd/release` skeleton, runner seam and the `dist` verb
+## 1. `cmd/release` skeleton, runner seam and the `dist` verb — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): each archive also carries the top-level `<stem>/` directory entry (mode 0755), as `tar -czf`/`zip -qr` in `make dist` wrote it; LICENSE and README.md are packed straight from `--src` rather than copied into the staging dir first; staging lives in an OS temp dir removed on exit.
+
+NOTES (2026-10-11): added beyond the item text — a guard refusing an `--out` that is or contains `--src` (it would be emptied), and a failing `git rev-list`/`git log` is a run failure (exit 1) rather than an omitted build number; an empty count still omits it as the item says.
+
+NOTES (2026-10-11): the root command declares no `Args` (unlike cmd/stubllm's `cobra.NoArgs`), so an unknown verb exits 2 instead of printing help and exiting 0.
 
 **What:**
 **Goal:** `go run ./cmd/release dist [--src DIR] [--out DIR]` writes the six release archives and `SHA256SUMS` with the exact names, layout and ldflags `make dist` produces, using only the Go stdlib for packing and hashing, byte-identical across two runs over the same tree.
