@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -198,6 +199,8 @@ type publishRunResult struct {
 	commands  *fakeRunner
 	pauses    int
 	notesPath string
+	// smokes are the smoke runs publish asked for, in order.
+	smokes []smokeOptions
 }
 
 // runTestPublish runs publish of publishVersion over fake with a written notes file, pausing
@@ -211,12 +214,18 @@ func runTestPublish(t *testing.T, fake *publishFake, isDryRun bool) publishRunRe
 
 // runTestPublishWith runs publish of publishVersion over fake with options, filling in the
 // version, the test poll timing, a counting sleep and, unless options has one, an environment
-// with nothing set.
+// with nothing set and a smoke step that records what it was asked to check and passes.
 func runTestPublishWith(t *testing.T, fake *publishFake, options publishOptions) publishRunResult {
 	t.Helper()
 	result := publishRunResult{commands: fake.runner(), notesPath: options.notesFile}
 	if options.getenv == nil {
 		options.getenv = func(string) string { return "" }
+	}
+	if options.smoke == nil {
+		options.smoke = func(_ context.Context, _ io.Writer, smoke smokeOptions) error {
+			result.smokes = append(result.smokes, smoke)
+			return nil
+		}
 	}
 	options.dir = t.TempDir()
 	options.version = publishVersion

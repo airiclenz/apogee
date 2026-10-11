@@ -48,6 +48,8 @@ type publishOptions struct {
 	sleep        func(ctx context.Context, duration time.Duration) error
 	// getenv reads the environment: the winget step takes its GitHub token from it first.
 	getenv func(key string) string
+	// smoke runs the smoke verb over options: the last step, run whatever the probes say.
+	smoke func(ctx context.Context, output io.Writer, options smokeOptions) error
 }
 
 // publishRun is one publish run: what every step reads.
@@ -58,6 +60,11 @@ type publishRun struct {
 	version  releaseVersion
 	// notesPath is the notes file as an absolute path, so it reads the same from any directory.
 	notesPath string
+	// buildDir is the temporary directory the release step builds in, removed when the run ends;
+	// distDir is the directory in it holding the built assets, which the smoke step compares
+	// against. Both stay empty when this run builds nothing.
+	buildDir string
+	distDir  string
 }
 
 // publishAction is one step publish converges: what a dry run says it would do, the work itself,
@@ -72,14 +79,19 @@ type publishAction struct {
 
 // publishActions are the steps publish converges, in the order it runs them; each one's probe
 // is the publishSteps entry of the same name, so what status reports done is what publish skips.
-// The channel steps (channels.go) run after the release, whose SHA256SUMS they render from.
+// The channel steps (channels.go) run after the release, whose SHA256SUMS they render from, and
+// the smoke step (smoke.go) runs last, over everything the others published.
 var publishActions = []publishAction{
 	{name: stepTag, describe: describeTag, converge: convergeTag},
 	{name: stepRelease, describe: describeRelease, converge: convergeRelease},
 	{name: stepHomebrew, describe: describeHomebrew, converge: convergeHomebrew},
 	{name: stepScoop, describe: describeScoop, converge: convergeScoop},
 	{name: stepWinget, describe: describeWinget, converge: convergeWinget, doneDetail: wingetSubmittedDetail},
+	{name: stepSmoke, describe: describeSmoke, converge: convergeSmoke, doneDetail: smokePassedDetail},
 }
+
+// smokePassedDetail is the step table's line for a smoke test that passed.
+const smokePassedDetail = "passed by this run: no check failed"
 
 // newPublishCommand builds the publish verb.
 func newPublishCommand(commands runner) *cobra.Command {
@@ -89,6 +101,9 @@ func newPublishCommand(commands runner) *cobra.Command {
 		pollInterval: tagPollInterval,
 		sleep:        sleepContext,
 		getenv:       os.Getenv,
+	}
+	options.smoke = func(ctx context.Context, output io.Writer, smoke smokeOptions) error {
+		return runSmoke(ctx, commands, output, smoke)
 	}
 
 	cmd := &cobra.Command{
@@ -105,9 +120,11 @@ func newPublishCommand(commands runner) *cobra.Command {
 			"the tap and the bucket, pushing only when the file changes; the winget step submits\n" +
 			"the manifest update with komac (GITHUB_TOKEN, else `gh auth token`), which merges\n" +
 			"later. A channel whose one-time setup is pending is skipped and named, and the run\n" +
-			"still succeeds. It never prompts or reads stdin, and exits 1 after printing the step\n" +
-			"table when anything fails. --dry-run runs the gate and the probes and prints what each\n" +
-			"pending step would do, changing nothing.",
+			"still succeeds. Last, the smoke step checks the published release from the outside, as\n" +
+			"the smoke verb does, comparing its SHA256SUMS with this run's build when it made one; a\n" +
+			"failed check fails the run. It never prompts or reads stdin, and exits 1 after\n" +
+			"printing the step table when anything fails. --dry-run runs the gate and the probes\n" +
+			"and prints what each pending step would do, changing nothing.",
 		Args: cobra.ExactArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			options.version = args[0]
@@ -169,6 +186,7 @@ func runPublish(ctx context.Context, commands runner, output io.Writer, options 
 // named, since the run succeeds without it. A failed step stops the run, which prints the steps as
 // the remote now holds them.
 func (r *publishRun) converge(ctx context.Context, gate string, steps []stepReport) error {
+	defer r.removeBuildDir()
 	for index, action := range publishActions {
 		if steps[index].State == stateSetupPending {
 			_, _ = fmt.Fprintf(r.output, "%s: skipped, its one-time setup is pending: %s\n", action.name, steps[index].Detail)
@@ -373,11 +391,14 @@ func convergeRelease(ctx context.Context, run *publishRun) error {
 	if err != nil {
 		return fmt.Errorf("create the build directory: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(workDir) }()
+	// The build outlives this step: the smoke step compares the published sums against it, and
+	// the run removes it when it ends.
+	run.buildDir = workDir
 	outDir, err := buildReleaseAssets(ctx, run, workDir)
 	if err != nil {
 		return err
 	}
+	run.distDir = outDir
 
 	if !isFound {
 		args := []string{"release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", run.notesPath, "--latest"}
@@ -471,6 +492,28 @@ func checkPublishedSums(ctx context.Context, run *publishRun, outDir string, upl
 			strings.Join(mismatched, ", "), tag, checksumsFile, tag, strings.Join(mismatched, ", "))
 	}
 	return nil
+}
+
+// removeBuildDir removes the release step's build directory, if this run made one.
+func (r *publishRun) removeBuildDir() {
+	if r.buildDir != "" {
+		_ = os.RemoveAll(r.buildDir)
+	}
+}
+
+// describeSmoke says what the smoke step does.
+func describeSmoke(run *publishRun) string {
+	return fmt.Sprintf("smoke-test %s as published, comparing its %s with this run's build when it made one",
+		run.version, checksumsFile)
+}
+
+// convergeSmoke runs the smoke verb over the published release, handing it this run's build
+// directory so the published SHA256SUMS is compared against what the run itself built.
+func convergeSmoke(ctx context.Context, run *publishRun) error {
+	options := defaultSmokeOptions(run.options.dir)
+	options.version = run.version.String()
+	options.distDir = run.distDir
+	return run.options.smoke(ctx, run.output, options)
 }
 
 // assetPaths joins each asset name onto outDir.

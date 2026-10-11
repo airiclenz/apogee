@@ -204,7 +204,17 @@ Depends on items 5, 6.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`; `go run ./cmd/release publish v0.24.11 --notes-file README.md --dry-run` output (exit status not checked) names the scoop and winget lines.
 **Commit:** `feat(release): publish converges the tap, the Scoop bucket and winget`
 
-## 8. `smoke` verb, run last by `publish`
+## 8. `smoke` verb, run last by `publish` — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — cmd/release/main.go: made necessary by the new smoke verb (registered in the command tree; usage line added to the package doc)
+
+NOTES (2026-10-11): consequential edit — cmd/release/publish_test.go: made necessary by publish's new smoke step — `runTestPublishWith` fills the new `publishOptions.smoke` seam (like `getenv` and `sleep`) with a recording stub that passes, so the existing publish tests never run the real smoke over their fakes; `publishRunResult.smokes` records what it was asked
+
+NOTES (2026-10-11): publish reaches smoke through a `publishOptions.smoke` function seam, and the release step's temp build directory now lives until the run ends (`publishRun.buildDir`/`distDir`, removed by `converge`) instead of until the step ends, so the smoke step can compare against it; a run whose release step was already done passes no dist dir and the comparison SKIPs
+
+NOTES (2026-10-11): smoke reads the latest release with `gh release view --repo airiclenz/apogee --json tagName` rather than the script's curl redirect, passes `--repo airiclenz/apogee` to every `gh release` call, and skips (as the script did) when origin's tags cannot be listed or gh cannot read the tag's type; an invalid-JSON bucket manifest still fails as in the script
+
+NOTES (2026-10-11): acceptance run `go run ./cmd/release smoke v0.24.11` was made with linuxbrew dropped from PATH, so the brew check skipped instead of running `brew upgrade apogee` on this box: tag, assets and build stamps PASS (vcs.revision 58e8538712bf), host binary PASS, scoop SKIP (bucket empty), 4 passed / 0 failed / 3 skipped
 
 Depends on items 1, 6, 7.
 
