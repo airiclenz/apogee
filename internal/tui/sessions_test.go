@@ -1811,6 +1811,26 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 	return m
 }
 
+// runParallelCase runs body as a parallel subtest named name, and parks it on a stack sized for
+// waiting rather than for the body.
+//
+// A goroutine's stack holds its function's whole frame from the function's first instruction,
+// and a Model is ~120 KB by value. A t.Run literal that builds and renders one therefore has a
+// frame of a third of a megabyte or more, reserved BEFORE its t.Parallel call parks it. testing
+// parks every parallel subtest until its parent returns, then queues it behind the package's
+// other parallel tests. So the 1,008 cases of TestFrameNeverExceedsTheTerminalHeight held
+// ~0.5 GB of stack for most of the package's run, which every GC cycle scanned, and ~1.5 GB
+// under -race, whose shadow memory covers stacks too. Here the literal that parks is a few words
+// deep, and body's frame is taken only once the case runs. The three tables below are the
+// package's parallel fan-outs whose cases render a Model; a case of a few KB does not need this.
+func runParallelCase(t *testing.T, name string, body func(t *testing.T)) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+		body(t)
+	})
+}
+
 // TestFrameNeverExceedsTheTerminalHeight is the D2 property the audit measured broken: with eight
 // stored sessions the browser composed a 21-row frame on a 20-row terminal, and +5 / +9 rows on 16-
 // and 12-row ones — pushing the input box and the footer clean off the alternate screen, which is
@@ -1941,8 +1961,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			for _, draft := range []int{1, 3, 6, 12} {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
-						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", ov.name, staged, draft, width, height), func(t *testing.T) {
-							t.Parallel()
+						runParallelCase(t, fmt.Sprintf("%s+%d staged+%d draft/%d×%d", ov.name, staged, draft, width, height), func(t *testing.T) {
 							m := withStagedRows(ov.open(t, width, height, draft), staged)
 
 							content := m.View().Content
@@ -2040,8 +2059,7 @@ func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
 			for _, draft := range []int{1, 3, 6, 12} {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{1, 4, 6, 7, frameFloorRows, 9, 10, 11, smallestOverlayWindow} {
-						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", o.name, staged, draft, width, height), func(t *testing.T) {
-							t.Parallel()
+						runParallelCase(t, fmt.Sprintf("%s+%d staged+%d draft/%d×%d", o.name, staged, draft, width, height), func(t *testing.T) {
 							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
 							m = withDraft(t, o.open(m), draft)
 
@@ -2167,8 +2185,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 			for _, draft := range []int{1, 2, 3, 5, 8} {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16, 20, 24} {
-						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", p.name, staged, draft, width, height), func(t *testing.T) {
-							t.Parallel()
+						runParallelCase(t, fmt.Sprintf("%s+%d staged+%d draft/%d×%d", p.name, staged, draft, width, height), func(t *testing.T) {
 							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
 							m = p.raise(t, m, draft)
 
