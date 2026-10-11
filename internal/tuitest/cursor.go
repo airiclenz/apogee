@@ -35,6 +35,15 @@ func (c *cursorAnswers) keySent() { c.atKey = c.pumped }
 // sinceKey is how many reports have gone in behind the last key. The caller holds writeMu.
 func (c *cursorAnswers) sinceKey() int { return c.pumped - c.atKey }
 
+// mark is the tally as it stands now, for a caller to anchor a later count on. The caller holds
+// writeMu.
+func (c *cursorAnswers) mark() int { return c.pumped }
+
+// sinceMark is how many reports have gone in behind mark — a tally [cursorAnswers.mark] returned.
+// Unlike [cursorAnswers.sinceKey] no later key moves the anchor, which is what a wait needs when
+// keys keep going in after the one that raised the pane. The caller holds writeMu.
+func (c *cursorAnswers) sinceMark(mark int) int { return c.pumped - mark }
+
 // PaneArmAnswers is how many cursor-position reports a decision pane's keys arm on — an approval
 // pane's, an ask_user pane's, or a latched picker's (the adoption pane, the start-up migration
 // offers): its first drain marker leaves ahead of the pane's own frame and only relays, the second
@@ -44,4 +53,9 @@ const PaneArmAnswers = 2
 // awaitingCursorAnswers names the wait for n reports in a timeout message.
 func awaitingCursorAnswers(n int) Option {
 	return Awaiting(fmt.Sprintf("%d cursor-position answers to reach the program since the last key", n))
+}
+
+// awaitingCursorAnswersSince names the wait for n reports behind mark in a timeout message.
+func awaitingCursorAnswersSince(mark, n int) Option {
+	return Awaiting(fmt.Sprintf("%d cursor-position answers to reach the program since mark %d", n, mark))
 }

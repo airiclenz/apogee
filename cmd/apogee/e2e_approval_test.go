@@ -180,6 +180,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// keystroke the human never saw a frame for, which is the whole failure this item exists to
 	// catch.
 	submit(drv, controlPrompt)
+	raised := drv.CursorMark()
 	release := holdKey(drv, "a", approvalMarker)
 	drv.WaitText(approvalMarker)
 	held := release()
@@ -188,8 +189,12 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 		t.Fatalf("the pane was answered by keys that arrived before it painted:\n%s", drv.Frame())
 	}
 
-	// Step 4 — and the deliberate press costs nothing. The frame has been settled for longer than
-	// the latch, so the very next `a` rules.
+	// Step 4 — and the deliberate press costs nothing once the pane has armed. Arming paints
+	// nothing, so the settled frame above is no evidence of it ([awaitArmed]); the wait is for the
+	// pane's drain-marker answers, counted from the ⏎ that raised it. awaitArmed itself would count
+	// from the last held press, and a slow box can have answered both markers before that press
+	// went in — a count that then never reaches the latch's two.
+	drv.WaitCursorAnswersSince(raised, tuitest.PaneArmAnswers)
 	pressAndSettle(t, drv, "a")
 	clearPrompt(drv, held)
 	waitIdle(drv)
@@ -590,9 +595,9 @@ func clearPrompt(drv driven, held int) {
 }
 
 // pressAndSettle rules on a pane the way a deliberate operator does and asserts what T-13 step 4
-// asks: no perceptible wait. The frame has already been quiet, so the pane has long since armed on
-// the terminal's answer to its drain marker and the pane must be gone well inside the ceiling
-// below.
+// asks: no perceptible wait. Its caller has already waited for the pane to arm on the terminal's
+// answers to its drain markers ([awaitArmed], or a wait anchored at the key that raised the pane),
+// so the pane must be gone well inside the ceiling below.
 func pressAndSettle(t *testing.T, drv driven, key string) {
 	t.Helper()
 

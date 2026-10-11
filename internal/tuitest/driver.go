@@ -270,6 +270,27 @@ func (d *Driver) WaitCursorAnswers(n int) {
 	}, awaitingCursorAnswers(n))
 }
 
+// CursorMark is the count of cursor-position reports that have gone into the program's input so
+// far: the anchor [Driver.WaitCursorAnswersSince] counts from. Take it right after the key that
+// raises a pane, when more keys will follow before the wait — every key moves the anchor
+// [Driver.WaitCursorAnswers] counts from, and a mark stays where it was taken.
+func (d *Driver) CursorMark() int {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+	return d.cursor.mark()
+}
+
+// WaitCursorAnswersSince waits until n cursor-position reports have gone into the program's input
+// since mark, a count [Driver.CursorMark] returned. Keys sent after the mark do not restart it.
+func (d *Driver) WaitCursorAnswersSince(mark, n int) {
+	d.t.Helper()
+	d.WaitFor(func() bool {
+		d.writeMu.Lock()
+		defer d.writeMu.Unlock()
+		return d.cursor.sinceMark(mark) >= n
+	}, awaitingCursorAnswersSince(mark, n))
+}
+
 // WaitQuiet waits for the screen to stop changing for d — what a test does before pinning a golden.
 func (d *Driver) WaitQuiet(quiet time.Duration) {
 	d.t.Helper()

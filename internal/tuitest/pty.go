@@ -262,6 +262,25 @@ func (d *PTYDriver) WaitCursorAnswers(n int) {
 	}, awaitingCursorAnswers(n))
 }
 
+// CursorMark is [Driver.CursorMark] for the shipped binary: the count of cursor-position reports
+// that have gone into the child's input so far.
+func (d *PTYDriver) CursorMark() int {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+	return d.cursor.mark()
+}
+
+// WaitCursorAnswersSince is [Driver.WaitCursorAnswersSince] for the shipped binary: it waits until
+// n cursor-position reports have gone into the child's input since mark.
+func (d *PTYDriver) WaitCursorAnswersSince(mark, n int) {
+	d.t.Helper()
+	d.WaitFor(func() bool {
+		d.writeMu.Lock()
+		defer d.writeMu.Unlock()
+		return d.cursor.sinceMark(mark) >= n
+	}, awaitingCursorAnswersSince(mark, n))
+}
+
 // WaitQuiet waits for the screen to stop changing for quiet — the settle rule, unchanged from the
 // in-process driver, because it is a property of the picture and not of how the bytes arrived.
 func (d *PTYDriver) WaitQuiet(quiet time.Duration) {

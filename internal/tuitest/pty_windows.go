@@ -70,6 +70,12 @@ func (d *PTYDriver) WaitGone(string) { d.t.Skip(ptySkip) }
 // WaitCursorAnswers skips.
 func (d *PTYDriver) WaitCursorAnswers(int) { d.t.Skip(ptySkip) }
 
+// CursorMark skips.
+func (d *PTYDriver) CursorMark() int { d.t.Skip(ptySkip); return 0 }
+
+// WaitCursorAnswersSince skips.
+func (d *PTYDriver) WaitCursorAnswersSince(int, int) { d.t.Skip(ptySkip) }
+
 // WaitQuiet skips.
 func (d *PTYDriver) WaitQuiet(time.Duration) { d.t.Skip(ptySkip) }
 
