@@ -1585,6 +1585,75 @@ block is closed.
 
 ---
 
+## The start-up box
+
+**What it is, and where it sits.** The first entry of every transcript is a one-time card: the
+block-art `APOGEE` wordmark with the session's facts beside or under it.
+
+```
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                          host     workstation        │
+│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                         model    qwen3.6-27B-Q4_K_S │
+│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                          context  32k                │
+│     ▌        ▄▄▘                                 version  v0.25.0            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+It is a transcript entry like any other — it scrolls away with the scrollback — and it is laid out
+at the transcript's content width, so its right border lands on the column every other entry's
+content ends at, and it reflows on every repaint. Its frame is the prompt box's rounded `╭ ╮ ╰ ╯` in
+the same chrome tone with one column of padding inside, but with **no fill**: where the input box and
+the pop-up panes sit on solid black, the card is transparent. The wordmark is painted plain. The card
+is never written into a session record: `/clear` and a `/sessions` resume each empty the transcript
+and seed a fresh card at its top, and a resumed scrollback is replayed under one.
+
+**The rows.** Up to four label/value pairs — `host`, the server's alias or, without one, its
+endpoint; `model`, the bound model id with its directory and a weight-file extension (`.gguf`,
+`.ggml`, `.bin`, `.safetensors`) stripped, as the footer shows it; `context`, the window in the one
+size spelling ("How a size is spelled", under the status line's right slot); `version`, the clean
+release version rather than the provenance-tagged one the footer carries. The label is muted and
+padded to the widest label's column, then two spaces, then the value in the plain text colour. Host
+and model come from config, the CLI or the server, and are escape-stripped.
+
+**Two layouts, chosen by width.** The **wide** card is drawn whenever the room inside the border and
+its padding holds the wordmark, a gap of at least four columns and the info block: the wordmark on
+the left, the info block right-aligned so its widest row sits flush against the right padding and
+the shorter rows, left-aligned within the block, trail off toward it. Wordmark line *i* pairs with
+info row *i*, top-aligned, with no spacer row, and a fact with no value — an unknown context window,
+a model not bound yet — drops its row. Otherwise the **stacked** card is drawn: the wordmark, one
+blank line, then `host`, `model` and `version` beneath it, with no `context` row and all three
+present even when a value is empty. A stacked row too long for the card ends in `…` rather than being
+cut silently at the border — a port one digit short must not read as a fact — and is never wrapped
+onto a second line, since a host, a model and a version are single tokens a wrap would only cut one
+line lower. The wordmark is left to the border: block art has no tail to elide, and it overruns
+only far below the widths where the rows do.
+
+**Restated in place, never added twice.** The facts are frozen when the card is seeded, and when
+they change the same entry is restated where it already sits in the scrollback: a model the
+heartbeat binds late on a cold start (until then the card has no model to name), a heartbeat
+rebind, a `/server` switch, a server bound from the pre-bound ask, and the update check's answer
+below. A transcript with no card yet is left alone.
+
+**The version row names the upgrade (ADR 0097).** The interactive TUI asks once per launch, off the
+Update loop from `Init`, whether a newer release is published; the first frame never waits for the
+answer, so the card first paints the version alone. When the answer names a newer release the version
+value is restated as `<current> → <latest> · <command>` — `v0.24.11 → v0.25.0 · brew upgrade apogee`
+— where the command is the upgrade command for the way this binary was installed. It is the row's
+one value in the value's own plain colour: no style of its own, no extra row, no transcript note.
+Once found it holds for the whole launch, since every later card — re-seeded by `/clear` or a
+`/sessions` resume, restated by a rebind, a server switch or a bind — composes the version from the
+same answer.
+With nothing to say — no newer release, offline, any failure, `update-check: false`,
+`APOGEE_NO_UPDATE_CHECK`, a `dev` or `.dirty` build, an install whose upgrade command cannot be told,
+or any Driver but the TUI — the row is byte-identical to a card with no check at all. Were a host
+to answer with no command, the value would read `<current> → <latest>` with no `·` segment; the
+binary's own host never does, it answers nothing instead. With no current version there is nothing to point
+an arrow from, and the value stays as it is. The longer value widens the info block, so it can tip a
+card that was wide into the stacked layout — which drops the `context` row — and on a stacked card
+too narrow for it the row ends in `…` like any other.
+
+---
+
 ## The status line's spinner
 
 **Which animation.** The two braille cells opening the running status line above are the `snake`
@@ -2529,6 +2598,40 @@ weight its owner removes once, so an answer that made the question permanent wou
 nothing reads. Either answer prints one line — the move naming the file it wrote, a failed move
 saying so, `not now` saying the offer comes back — and closes the pane for the rest of the session;
 `esc` is a `not now` and writes nothing.
+
+**And the last, about a rule the project proposes.** An Allow rule in the Project config
+(`<Project root>/.apogee/config.yaml`) that no adoption or rejection is recorded for is *proposed* —
+inert until the human adopts it (ADR 0096 §4) — and it opens the same pane once more, one pane per
+rule. It gives way to everything: the pre-bound ask and both offers above are asked first, and so is
+whatever else holds the keyboard or the engine — a turn, an approval, an open picker, the `/settings`
+pane, a `/sessions` load. The rules simply wait, and the pane comes up at the first fold that finds
+the session idle with nothing else up. That fold is also how the pane returns mid-session: a config
+file that changes while apogee runs is re-read for what it proposes, and a rule no pane has raised
+this session — a new one, or one whose text changed — is asked about at once after an idle save and
+after the turn ends on a save that landed mid-turn, never in the middle of a turn it would have
+answered for. One note comes first, naming every rule in the round — ``this project's
+.apogee/config.yaml proposes `go test` and MCP server `docs` — no proposed rule applies until you
+adopt it`` — a `terminal` rule spelled as the backticked prefix it matches and a server rule as
+``MCP server `<alias>` ``; then a pane titled `allow <rule> without asking in this project?`, in that
+same spelling, so a round of several can never be answered for the wrong rule. Like every pane's
+title it is cut to the pane's width, never wrapped. Under it, three rows in two columns: `adopt`,
+`— it runs without asking here, until the entry changes`; `not now`, `— it stays inert; the offer
+comes back at the next start-up`; `reject`, `— it stays inert, and is not offered again until the
+entry changes`. The pane opens with `adopt` highlighted, and the hint reads `⏎ choose`. Every answer
+prints one line — `adopted <rule> — it runs without asking in this project`, `<rule> stays
+proposed — the offer comes back at the next start-up`, `rejected <rule> — it is not offered again
+until the entry changes` — and a failed adopt or reject says so with the reason, `could not adopt
+<rule>: <why>`, leaving the rule proposed, which is exactly where `not now` leaves it. The next rule's
+pane then opens where the last one closed, on a cleared filter. `esc` ends the round outright, and so
+does a click outside the pane, which is modal like every picker: whatever is left is a `not now`, no
+line is printed and nothing is written. A rule a pane has raised is not raised again in the same
+session, answered or not — a watched save of some unrelated key, or apogee's own write of an `Always
+in this project…` rule, does not put a `not now` back up — so the next start-up is where a deferred
+rule is asked about again. The rule's text is a repository file's, and it is escape-stripped
+everywhere the note, the title and the answer lines show it. With no config file wired (a Driver that
+composes none) nothing is proposed and the pane never opens. The same rules are listed with their
+state, and can be adopted later, in `/settings`' `Allow rules` section
+([`docs/layout/settings-screen-layout.md`](docs/layout/settings-screen-layout.md)).
 
 **The `/sessions` browser types too, which is why its verbs are chords.** The browser filters
 exactly as those panes do — any printable key builds the same case-insensitive filter over the row's

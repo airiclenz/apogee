@@ -148,6 +148,34 @@ _Avoid_: "server" (the engine is wire-silent and v1 has no listener; the future 
 surface is this Driver's composition), "the scheduler" (that names the library both Drivers
 share, not this Driver).
 
+**Boot update check**:
+The interactive TUI's one request, on every boot, for the latest published release: a `HEAD` of
+github.com's `releases/latest`, the tag read from the redirect. It runs asynchronously, never delays
+boot, keeps no cache and carries nothing about the user, session, code or model; any failure means
+no notice. When a newer release exists the startup box's version row names it and the upgrade
+command for this binary's **Install channel** (`v0.24.11 → v0.25.0 · brew upgrade apogee`); apogee
+never replaces itself in the background. On by default; `update-check: false` or a non-empty
+`APOGEE_NO_UPDATE_CHECK` turns it off. No other **Driver** makes it — headless, the daemon, the
+bench and `apogee probe` stay network-state-independent — and the code lives in `internal/update`,
+imported only by `cmd/apogee`, so the engine stays wire-silent (ADR 0031). See
+[ADR 0097](docs/adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md).
+_Avoid_: "auto-update" (nothing is replaced without an explicit command), "telemetry" / "phone
+home" (the request sends nothing about the user).
+
+**Install channel**:
+How the running binary was installed, which decides the upgrade command the **Boot update check**
+names and whether `apogee update` may replace the binary. Six exist (`update.Method`): Homebrew,
+Scoop, winget, `go install`, a source build and a release archive. `update.Detect` reads the executable's own
+path first, symlinks resolved — inside a Homebrew Cellar, a Scoop `apps/apogee` directory or
+winget's package directory it belongs to that package manager — and only then the build stamps: no
+commit stamp is a `go install`, a commit stamp without the release stamp `make dist` sets is a
+source build, and a stamped release binary anywhere else came from an archive. Only an archive install is
+apogee's to replace — on every other channel `apogee update` prints that channel's command and exits
+non-zero, never running a package manager for the user. See
+[ADR 0097](docs/adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md).
+_Avoid_: "install method" in docs (the code's `Method` names the same thing; prose says channel),
+"distribution" (that is the set of channels a release publishes to, not how one binary arrived).
+
 **Hook**:
 The colloquial alias for a **user**-origin **[Reaction](#reactions-and-moments)** — "what
 other tools call a hook" — offered in the manual's introduction and nowhere else in the glossary
@@ -1198,6 +1226,7 @@ privilege ladder**. Four:
   ADR 0012 reversed ADR 0004 here).
 _Avoid_: "permission level", "trust mode".
 
+<a id="floor-guard"></a>
 **Floor guard**:
 Plain **engine behaviour** that changes only what the model sees **after its own failure**, or
 shapes the request **without steering it** — so it needs no per-model proof and cannot regress
@@ -1302,6 +1331,21 @@ The user's recorded acceptance of one granting **Project config** entry, pinned 
 entry's exact content and **Project root**. An entry with no matching pin — new, edited, pulled from a
 teammate, or written behind apogee's back — is *proposed* and does nothing until adopted.
 _Avoid_: "trust" (adoption is per entry, never a whole-folder yes), "approval" (that is one call).
+
+**Key class**:
+What a **Project config** may do with one config key, carried by the key's registry row
+([ADR 0096](docs/adr/0096-project-config-grants-are-live-only-by-adoption.md) §6). Four exist.
+**Project parameters** describe the project and widen nothing, so the project's value outranks the
+global one and is live as written (`context-files.*`, `use-project-skills`, the three `workflow-*`
+limits). **Tighten-only** keys may narrow and never widen: the project's entries are added to the
+global ones, never put in their place (`tools.disabled`, `url-safety.deny-hosts`, `dangerous-rules:`
+whose project `remove:` is ignored). **Granting** is the **Allow rule**, inert until **Adoption**.
+**Global-only** is every other key and the default, so a new key is safe until marked otherwise: a
+project file that states one is ignored for it, with one start-up line naming the keys. Precedence
+for a key a project may set is default < global < project < env < flag; a tighten-only key unions
+instead. The **[Source mark](#safety-and-autonomy)** says which layer won.
+_Avoid_: "trust level" (the class belongs to the key, not to the repository), "override" for a
+tighten-only key (it adds to the global value, never replaces it).
 
 **Ask-user**:
 A free-text question the model puts to the human mid-task (via the `ask_user` tool), answered
@@ -1497,7 +1541,7 @@ precedence read their metadata from it, and a reflection **bijection guard** aga
 without a registry row a test failure — the screen cannot drift from the schema. The pane claims
 the **entire transcript row budget** while the frame floor (status line, input box, footer) stays
 drawn — a new pane class, `layout.md`'s first surface allowed to take all of it — lists every key
-with its resolved value and source marker under white section headings and a fixed two-line
+with its resolved value and **Source mark** under white section headings and a fixed two-line
 description header, and **persists one key per committed edit**: spliced
 into the file comment-preserving, re-parsed and verified against the original apart from the target
 path, written atomically; an inserted key lands below its commented example, and **reset deletes
@@ -1575,6 +1619,18 @@ pending — an edit applies on the ⏎ that persists it; the marker ADR 0035 int
 not narrowed), "`$EDITOR` round-trip" as the name of the whole mechanism (`$EDITOR` is one rung of
 four, and a detached launch has no round trip to come back from), "file watcher" in the
 `fsnotify`/inotify sense (it polls; there is no OS notification and no daemon).
+
+**Source mark**:
+The provenance a **Settings surface** row prints beside its resolved value — `(default)`,
+`(global)` for `~/.apogee/config.yaml`, `(project)` for the **Project config**, `(env)` or `(flag)`
+for an override — so a key that reads one way in a file and another on screen explains itself. It
+names the layer that won under the **[Key class](#safety-and-autonomy)** precedence, and it moves
+with a targeted save; on the *Allow rules* section it is the file a rule came from. Distinct from
+the session edit journal's ` *` (this surface changed the key this session) and from the row's note
+tier (a refusal, a boundary note, an override that wins again at the next start). Specced in
+`docs/layout/settings-screen-layout.md`.
+_Avoid_: "source marker" in new prose (the code and the specs say mark), "origin" (that is a
+**Reaction**'s user / engine / bench-armed axis).
 
 **Color scheme**:
 The **palette apogee draws with, as a file of semantic roles** — `ui.color-scheme` names it, and
@@ -2139,6 +2195,18 @@ apogee injects, not money), "spend" unqualified where money is meant (bare "spen
 session's `Usage` + `DelegateUsage`, and the token half of the `/sessions` cell), "bill" (apogee
 reports the configured price times reported tokens, not what a provider invoices).
 
+**Unpriced**:
+A provider call with no **Price** to apply: one made on a `servers:` entry without `price:` (the
+default, and right for a local server), or one a resumed session makes under a currency label other
+than its record's (`domain.Usage.Unpriced`). Its tokens and the call itself are counted, its money
+is not: apogee never borrows another server's price, never assumes zero for a hosted model and
+never estimates. The reading keeps priced and unpriced call counts apart, so a **Spend (money)**
+amount that covers only some of a session's calls reads as **partial**, and a record written before
+pricing existed reads as unpriced, never as zero spend. See
+[ADR 0093](docs/adr/0093-usage-is-priced-per-call-at-the-bound-server.md).
+_Avoid_: "free" / "zero-cost" (an unpriced call has no known amount, not an amount of zero),
+"estimated".
+
 **File reference (`@file`)**:
 A workspace file the user names with an `@path` token in their message. The loop resolves
 each reference at the start of the Turn — reading it within the workspace fence
@@ -2244,6 +2312,7 @@ and the sent block's `✦ name` row with its 2026-08-04 addendum, which paints t
 skill violet where it stands instead). Distinct from a **Reaction** (a loop behaviour
 that fires at a Moment).
 
+<a id="tool-result-capping"></a>
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
 with head/tail preservation, protecting the most recent Turn. A **[Floor guard](#floor-guard)**

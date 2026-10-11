@@ -11,6 +11,8 @@ v0.24.11 → v0.25.0 · brew upgrade apogee
 
 Running that command is always up to you
 ([ADR 0097](../adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md)).
+Only a clean release build asks — a `dev` build or one whose version ends `.dirty` never does —
+and headless runs, the daemon, the bench, `apogee probe` and `apogee undo` never check.
 
 ## Which command upgrades your install
 
@@ -18,7 +20,7 @@ Running that command is always up to you
 |---|---|
 | Homebrew (`airiclenz/tap`) | `brew upgrade apogee` |
 | Scoop (bucket `airiclenz/scoop-bucket`) | `scoop update apogee` |
-| winget (`AiricLenz.Apogee`) | `winget upgrade AiricLenz.Apogee` |
+| winget (`AiricLenz.Apogee`) — not live yet: its first submission still awaits review in `microsoft/winget-pkgs`, so until it lands install with Scoop or the archive | `winget upgrade AiricLenz.Apogee` |
 | `go install …@latest` | `go install github.com/airiclenz/apogee/cmd/apogee@latest` |
 | A source checkout (`make install`) | `git pull && make install` |
 | A release archive, unpacked by hand | `apogee update` |

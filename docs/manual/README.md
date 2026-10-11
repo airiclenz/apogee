@@ -15,7 +15,7 @@ install it, what it can do. These pages are the full detail:
 | [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines, the `--format json` Event lines, and `apogee undo` to put one back |
 | [Standing schedules — `apogee daemon`](daemon.md) | Prompts on a clock that outlive the session |
 | [Updating apogee — `apogee update`](updating.md) | The update notice on the startup box, the upgrade command for each install channel, and `apogee update` replacing a release-archive install |
-| [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation |
+| [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation, and the release runbook |
 
 Working on the codebase itself? [`AGENTS.md`](../../AGENTS.md) is the map of
 where knowledge lives; `CONTEXT.md` defines the domain language; `docs/adr/`

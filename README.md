@@ -99,14 +99,18 @@ winget install AiricLenz.Apogee
 apogee --version
 ```
 
+**Not live yet:** the package's first submission to `microsoft/winget-pkgs` is still
+awaiting review there, so `winget install AiricLenz.Apogee` finds nothing until it lands —
+until then, install on Windows with Scoop or the prebuilt archive below.
+
 `winget upgrade AiricLenz.Apogee` moves you to the next release. Each release reaches
 winget through a manifest pull request that winget's own reviewers merge, so it can
 arrive there a little after the releases page has it.
 
 **A prebuilt archive — Windows, macOS, or Linux, `amd64` or `arm64`.** Every release
 carries all six targets on the
-[releases page](https://github.com/airiclenz/apogee/releases/latest), each archive with
-a `SHA256SUMS` file beside it.
+[releases page](https://github.com/airiclenz/apogee/releases/latest), with one
+`SHA256SUMS` file covering every archive.
 
 ```bash
 # macOS / Linux — resolves the latest release; to pin one, set VERSION=<x.y.z> instead
@@ -135,8 +139,9 @@ and Windows SmartScreen may warn about an unrecognised publisher. `SHA256SUMS` i
 check worth making.
 
 **From source:** a clone plus `make build` — see
-[Building from source](docs/manual/building.md). `go install …@latest`, `@main` and
-`@<sha>` all work.
+[Building from source](docs/manual/building.md). Or, with Go installed,
+`go install github.com/airiclenz/apogee/cmd/apogee@latest` — `@main` and `@<sha>` work
+in place of `@latest` too.
 
 ## Quick start
 
@@ -227,6 +232,10 @@ The full tour is in [the manual](docs/manual/README.md).
   trims stale tool output, skips a re-read of a file that hasn't changed, and folds a
   sub-agent's own history while it works.
 - **PDFs read as text**, page by page, whether the model opens one or you attach it.
+- **Images for a model that reads them** — on a server marked
+  [`vision: true`](docs/manual/configuration.md#images--vision), attach one with
+  `@shot.png` or paste it with `⌃v`; it waits on an `attached:` row above the prompt and
+  goes out with your next message.
 
 ### Safety and control
 
@@ -238,7 +247,9 @@ The full tour is in [the manual](docs/manual/README.md).
   [Auto's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
 - **A dangerous-action guard in every mode** — the genuinely destructive commands are
   refused outright, the merely alarming ones are put in front of you first, and a
-  `git commit` that would carry a secret asks you in every mode.
+  `git commit` that would carry a secret asks you in every mode. Add rules of your own,
+  or drop shipped ones, with
+  [`dangerous-rules:`](docs/manual/configuration.md#adding-and-removing-rules--dangerous-rules).
 - **Approvals you grant once mean what you think they mean**: they are scoped to the
   call you approved and honoured across the whole sub-agent tree, and the prompt shows
   the path a call really resolves to before you answer.
@@ -264,8 +275,10 @@ The full tour is in [the manual](docs/manual/README.md).
   clicks — the first highlights, the second sends.
 - **Side-by-side diffs** for every file the agent writes.
 - **`/thinking`** shows the model's reasoning as plain text, **`/advice`** shows what
-  your `advise:` reactions told it, by Turn, **`/inspect`** (once `ui.inspector` is on)
-  shows every request and response, readable by default and raw on `ctrl+r`, and
+  your `advise:` reactions told it, by Turn, **`/inspect`** lists every attempt each
+  model call made — server, timings, tokens per second, outcome — and, once
+  `ui.inspector` is on, every request and response too, readable by default and raw on
+  `ctrl+r`, and
   **`/usage`** shows what the session cost — the main agent and each sub-agent, cache
   hits included, and the money spent in your currency once a server has a `price:`
   (the footer keeps the running total).
@@ -302,9 +315,9 @@ The full tour is in [the manual](docs/manual/README.md).
 
 - **A settings screen** — `/settings` shows every resolved setting, says where each
   value came from, and writes one key at a time with your comments and layout intact.
-- **A watched config** — edits to `~/.apogee/config.yaml` from anywhere apply to the
-  running session; a few keys (each marked in the configuration manual) take effect at the
-  next start.
+- **A watched config** — edits to `~/.apogee/config.yaml`, or to the project's own
+  `.apogee/config.yaml`, from anywhere apply to the running session; a few keys (each
+  marked in the configuration manual) take effect at the next start.
 - **A project config and Allow rules** — a repository's committable `.apogee/config.yaml` may
   set a few project keys, and `allow:` rules (`go test`, an MCP server) skip the prompt — a
   project's rules only once you adopt them, since allowing `go test` runs whatever the repo's
@@ -322,14 +335,14 @@ The [manual](docs/manual/README.md) carries the full reference:
 |---|---|
 | [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
 | [Sessions](docs/manual/sessions.md) | Saving, resuming, forking, browsing, renaming conversations |
-| [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers and wires, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
+| [Configuration](docs/manual/configuration.md) | `~/.apogee/config.yaml` and a project's `.apogee/config.yaml` end to end: servers and wires, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
 | [Workflows](docs/manual/workflows.md) | One brief over many items: `fan_out`, recipes, `/bg` background workflows, background `sub_agent`, `/workflows` |
 | [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did (`run:`), commands or webhooks that advise the model on a tool result (`advise:`) or gate a tool call (`gate:`), migrating from `hooks:` |
 | [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model and terminal can do, what the config file says, and what the model is sent at turn 1 |
 | [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts; the JSON event lines |
 | [`apogee daemon`](docs/manual/daemon.md) | Standing schedules that outlive the session |
 | [Updating apogee](docs/manual/updating.md) | The update notice on the startup box, the upgrade command for each install channel, `apogee update` for archive installs |
-| [Building from source](docs/manual/building.md) | Prerequisites, Makefile targets, cross-compilation |
+| [Building from source](docs/manual/building.md) | Prerequisites, Makefile targets, cross-compilation, the release runbook |
 
 Working on this repo *with* a coding agent? [`AGENTS.md`](AGENTS.md) is the agent-facing
 map — where the docs live, and the conventions that aren't derivable from the code.
@@ -338,10 +351,11 @@ map — where the docs live, and the conventions that aren't derivable from the 
 
 **Pre-production `0.x` on `main`.** Under SemVer a `0.x` version makes no API-stability
 promise — the Go API may still move while the tool hardens — but every release ships
-prebuilt binaries for all six targets and a Homebrew formula. Functionally the loop is
-complete: full tool suite, MCP client, parallel sub-agents, skills, sessions, schedules,
-and OS-confined Auto mode on all three platforms. What changed lately lives in the
-[CHANGELOG](CHANGELOG.md); what is next lives in the issue register (`bd`).
+prebuilt binaries for all six targets, a Homebrew formula, a Scoop manifest and a winget
+submission. Functionally the loop is complete: full tool suite, MCP client, parallel
+sub-agents, skills, sessions, schedules, and OS-confined Auto mode on all three platforms.
+What changed lately lives in the [CHANGELOG](CHANGELOG.md); what is next lives in the
+issue register (`bd`).
 
 ## Why Go
 

@@ -114,6 +114,17 @@ call the model only wrote in its text, the transcript says so in every view, as 
 from reply text: <tool names>`, so a tool never runs without your seeing that the reply asked for
 it. The call still meets your mode's approval like any other.
 
+**The circuit breaker — no key at all.** Beside the floor runs one backstop that nothing switches
+off — no key, no flag, no environment variable, and `--bypass` leaves it on. When the exact same
+call — same tool, same arguments — has failed three times back to back, the next one is refused
+without running, and the model is told `circuit-breaker open: this exact call failed 3 times in a
+row — run a different step first (fix the cause or change the arguments); the call is allowed again
+after another call runs`. Any other call that runs in between, succeeding or failing, resets the
+count and lets the refused call through again; a refused call counts for nothing. The trip is
+reported once, as an error. It is not `tool-loop-breaker`: that Floor guard steers a repeated call
+or an A-B-A-B alternation with a directive and can be turned off, where the breaker refuses only a
+call that keeps *failing*.
+
 What runs *above* the floor is the **Reaction** core
 ([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)) — the
 [`reactions:`](#reactions--reactions) list, and one built-in reaction of the engine's own, the
@@ -445,8 +456,10 @@ from the redirect. Nothing about you, your workspace or your sessions is in that
 published releases count — never a draft or a pre-release. When the release is newer than the binary
 you are running, the startup box's version row names it and the upgrade command for the way you
 installed apogee. The check runs in the background, so it never delays the start, and any failure —
-offline, a timeout, an unexpected answer — means simply no notice. Headless runs, the daemon, the
-bench and `apogee probe` never check, and the check never downloads or replaces anything
+offline, a timeout, an unexpected answer — means simply no notice. Only a clean release build asks:
+a `dev` build, or one whose version ends `.dirty` (built from a modified tree), never checks.
+Headless runs, the daemon, the bench, `apogee probe` and `apogee undo` never check, and the check
+never downloads or replaces anything
 ([ADR 0097](../adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md)).
 
 `update-check: false` turns it off, and so does `APOGEE_NO_UPDATE_CHECK` set to any non-empty value
@@ -562,6 +575,13 @@ apogee launches or `sse` / `streamable-http` for a server reached over http(s). 
 `command`, optional `args`, and optional `env`; an http one takes `endpoint`, and optional
 `headers` and `headers-env` — and a `streamable-http` one can instead log in with OAuth
 (`auth: oauth`, optionally with `client-id` and `client-secret-env`).
+
+A prefixed name the model providers would refuse — one outside `^[a-zA-Z0-9_-]{1,64}$`, because the
+server's or the tool's name holds a dot, a space or a non-ASCII letter, or the two run past 64
+characters — is offered to the model rewritten: every other character becomes `_`, the name is cut
+to fit, and a short hash of the full name is appended, so `files.read` and `files_read` stay two
+tools. A call still reaches the server under the tool's own name; a name that already fits is left
+as it is.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -739,6 +759,15 @@ refresh) runs under the SSRF floor and your
 [`url-safety:`](#what-the-network-tools-may-reach--url-safety) lists, with bounded replies, a
 30-second timeout and no redirects followed. Only an authorization server on the endpoint's own
 origin is reached over the endpoint's pinned connection.
+
+**Fixed limits.** Three bounds hold for every server, and none has a key. A tool call that has not
+answered after **5 minutes** ends as an error result, `mcp: call timed out after 5m0s`, that the
+model can route around; the Turn carries on, and cancelling the Turn still stops the call at once.
+A tool description past **8 KiB** is clipped and marked `[mcp description truncated at 8192
+bytes]`, so one server cannot flood the tool menu every request carries. And one message from a
+server — a stdio JSON value, an SSE event or a plain JSON reply body — past **4 MiB** fails the
+read with `apogee: mcp message exceeds the 4 MiB limit`; many small messages pass whatever their
+total, so a long-lived SSE stream is never cut.
 
 The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
 `⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
