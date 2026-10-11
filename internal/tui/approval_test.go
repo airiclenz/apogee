@@ -560,7 +560,7 @@ func TestModelApprovalAlwaysInThisProjectSavesTheEditedRule(t *testing.T) {
 	default:
 		t.Fatal("the save answered nothing; the call is still waiting")
 	}
-	if m.ruleEdit.field.isBuilt() || m.ruleEdit.note != "" {
+	if m.ruleEdit.open() || m.ruleEdit.note != "" {
 		t.Errorf("the rule field outlived the request it was opened for: %+v", m.ruleEdit)
 	}
 }

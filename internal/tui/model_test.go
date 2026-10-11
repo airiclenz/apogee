@@ -6259,6 +6259,30 @@ func TestModelNoBuilderByValue(t *testing.T) {
 	walk(reflect.TypeOf(Model{}), "Model")
 }
 
+// modelStackCeiling is the Go compiler's ceiling on a stack-allocated variable
+// (cmd/compile's ir.MaxStackVarSize, 128 KiB). A Model larger than this is moved to the heap
+// wherever the compiler materialises a copy of it as a local — every inlined value-receiver
+// call is one — so the copy Bubble Tea makes by design becomes an allocation of the whole
+// Model, hundreds of times a frame.
+const modelStackCeiling = 128 << 10
+
+// TestModelFitsTheStack pins the Model under [modelStackCeiling]. Crossing it is silent — no
+// test of behaviour notices — and slow: when the approval pane's rule field put a 13 KB
+// lineEditor on the Model by value (134,632 bytes against 120,840 before), every keypress in
+// /settings cost four times what it had under -race, and the driven settings walks in
+// cmd/apogee timed out on the loaded CI runner. A large field the Model needs only some of the
+// time belongs behind a pointer it replaces rather than writes through (projectRuleEdit), which
+// keeps the copy semantics ADR 0011 relies on.
+func TestModelFitsTheStack(t *testing.T) {
+	t.Parallel()
+
+	if size := reflect.TypeOf(Model{}).Size(); size >= modelStackCeiling {
+		t.Errorf("Model is %d bytes, at or over the %d-byte stack ceiling: every inlined value-receiver "+
+			"call now heap-allocates a copy of it — move a large, sometimes-used field behind a pointer",
+			size, modelStackCeiling)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Transcript scroll-follow, sticky header and auto-grow input (P2.7 — TUI presentation pass)
 // ----------------------------------------------------------------------------

@@ -484,7 +484,7 @@ func TestSettingsRowCellsStripEscapes(t *testing.T) {
 		EditPointer: "edit \x1b[31min config.yaml",
 	}
 
-	for i, cell := range (Model{}).settingRowCells(row) {
+	for i, cell := range (&Model{}).settingRowCells(row) {
 		if strings.ContainsRune(cell, 0x1b) {
 			t.Errorf("cell %d carries an ESC byte: %q", i, cell)
 		}

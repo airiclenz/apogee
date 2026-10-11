@@ -427,7 +427,7 @@ const settingsProjectOutranksNote = "saved to global; the project config outrank
 // settingsSourceOf is the source mark a row paints: the source a targeted save left supplying the key
 // (settingEdit.source) once one has landed, else the source the run resolved it from. An override
 // keeps its mark whatever was saved, because it outranks both files.
-func (m Model) settingsSourceOf(row SettingRow) SettingSource {
+func (m *Model) settingsSourceOf(row SettingRow) SettingSource {
 	if settingsOverride(row.Source) {
 		return row.Source
 	}
@@ -1413,7 +1413,7 @@ func (m Model) settingsEditing(row SettingRow) bool {
 // keystrokes too — a bracketed paste carrying an OSC 8 opener would otherwise reach the popup module,
 // which strips nothing (doc.go). The caret glyph is added before the strip because it is this
 // package's own and has nothing to strip.
-func (m Model) settingBufferCells(row SettingRow) popupRow {
+func (m *Model) settingBufferCells(row SettingRow) popupRow {
 	return popupRow{
 		stripEscapes(row.Path),
 		m.settingsEditText(),
@@ -1486,7 +1486,12 @@ func (m Model) settingsResetArmedHint() string {
 // and a file on this machine is no more trusted than a model's reply. The mask, the structured
 // summary and the pointer wording all arrived decided ([SettingRow]); nothing here
 // reformats a value or rules on what may be edited.
-func (m Model) settingRowCells(row SettingRow) popupRow {
+//
+// It and the per-row readers under it (settingRowCellsPending, settingsValueCell, settingsSourceOf,
+// settingsNote, settingEditOf) take a POINTER receiver though none of them writes: they run once per
+// row, several times a frame, and a value receiver copies the whole Model — over a hundred KB — at
+// every one of those calls, which under -race was most of what a keypress in the key list cost.
+func (m *Model) settingRowCells(row SettingRow) popupRow {
 	return m.settingRowCellsPending(row, settingEdit{})
 }
 
@@ -1500,7 +1505,7 @@ func (m Model) settingRowCells(row SettingRow) popupRow {
 // settingsNoteWidth, asked by an apply to size a note against the value column its own edit is about
 // to widen by the marker's two cells. The record-after-apply ordering that forces this is deliberate
 // and documented at [Model.settingsApplied]; measuring the pending row is what pays for it.
-func (m Model) settingRowCellsPending(row SettingRow, pending settingEdit) popupRow {
+func (m *Model) settingRowCellsPending(row SettingRow, pending settingEdit) popupRow {
 	value := m.settingsValueCell(row)
 	if pending.path != "" && pending.path == row.Path {
 		value = settingsEditedValueCell(row, pending)
@@ -1524,7 +1529,7 @@ func (m Model) settingRowCellsPending(row SettingRow, pending settingEdit) popup
 // (Shift+Tab), so the journal is not the last word on it and the provider is — the host overlays the
 // row from the live engine. The cell therefore shows the row's value whatever the journal holds, and
 // the journal decides only whether the marker is on it.
-func (m Model) settingsValueCell(row SettingRow) string {
+func (m *Model) settingsValueCell(row SettingRow) string {
 	edit, ok := m.settingEditOf(row.Path)
 	if !ok {
 		return row.Value
@@ -1613,7 +1618,7 @@ func settingsTextSummary(text string) string {
 //
 // A masked key has no note of its own: the marker on its still-masked value cell is the whole of what
 // a row says about a secret it persisted and does not hold (settingsEditedValue).
-func (m Model) settingsNote(row SettingRow) string {
+func (m *Model) settingsNote(row SettingRow) string {
 	if m.settings.failure.path == row.Path && m.settings.failure.msg != "" {
 		return "✗ " + m.settings.failure.msg
 	}

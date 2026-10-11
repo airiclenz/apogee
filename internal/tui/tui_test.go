@@ -230,7 +230,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 		if cmd != nil {
 			t.Error("⏎ on a structured row launched something with no host wired")
 		}
-		if got := next.(Model).settingsNote(structured); got != "✗ "+noExternalEditNote {
+		after := next.(Model)
+		if got := after.settingsNote(structured); got != "✗ "+noExternalEditNote {
 			t.Errorf("note = %q, want %q", got, "✗ "+noExternalEditNote)
 		}
 	})
@@ -245,7 +246,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 		if cmd != nil {
 			t.Error("the return trip applied something with no host wired")
 		}
-		if got := next.(Model).settingsNote(structured); got != "✗ "+noExternalEditNote {
+		after := next.(Model)
+		if got := after.settingsNote(structured); got != "✗ "+noExternalEditNote {
 			t.Errorf("note = %q, want %q", got, "✗ "+noExternalEditNote)
 		}
 	})

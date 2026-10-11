@@ -879,9 +879,17 @@ const (
 // suggested `terminal` rule is edited in, and the inline note a refused save left. It rides on
 // [pendingDecision] because it is per-REQUEST state — the reset that forgets the request forgets the
 // field with it, so no rule typed for one call is ever saved for the next. The field is open exactly
-// while it is built (lineEditor.isBuilt): the zero value a reset leaves is the closed sub-step.
+// while there is one ([projectRuleEdit.open]): the zero value a reset leaves is the closed sub-step.
+//
+// The field is held by POINTER, and replaced rather than written through ([projectRuleEdit.edit]).
+// The pointer is what keeps the Model under the compiler's 128 KiB stack-variable ceiling: a
+// lineEditor is a whole textarea, some 13 KB by value, and the Model past that ceiling is moved to
+// the heap at every inlined value-receiver call — hundreds of sites, each a fresh allocation of the
+// whole Model on every frame (TestModelFitsTheStack). The replace is what keeps the ADR 0011 copy
+// semantics a value field would have had: an edit builds a new field and points this copy at it, so
+// a Model copy taken before the keystroke still holds the field as it stood.
 type projectRuleEdit struct {
-	field lineEditor
+	field *lineEditor
 	// note is the refusal the last save met — an empty field, or the host's error — painted as the
 	// pane's hint until the next edit. "" when nothing was refused.
 	note string
@@ -943,7 +951,23 @@ func (m Model) projectRuleOffer(req domain.ApprovalRequest) (ruleOffer, bool) {
 // predicate the keys, the wheel, the click and the paint read, so none of them can believe the
 // field open over a pane that has gone.
 func (m Model) editingProjectRule() bool {
-	return m.state == stateAwaitingApproval && m.pending != nil && m.ruleEdit.field.isBuilt()
+	return m.state == stateAwaitingApproval && m.pending != nil && m.ruleEdit.open()
+}
+
+// open reports whether the sub-step holds a live field: one was opened, and it is a real field
+// rather than an inert zero value (lineEditor.isBuilt).
+func (r projectRuleEdit) open() bool {
+	return r.field != nil && r.field.isBuilt()
+}
+
+// edit applies one change to the field copy-on-write: the change lands on a copy, and this
+// sub-step is pointed at it, so the field a previous Model copy points at is never written
+// (projectRuleEdit). The caller has checked the field is open.
+func (r *projectRuleEdit) edit(change func(*lineEditor) tea.Cmd) tea.Cmd {
+	next := *r.field
+	cmd := change(&next)
+	r.field = &next
+	return cmd
 }
 
 // openProjectRule takes the project row: a `terminal` rule opens the field seeded with the
@@ -957,7 +981,8 @@ func (m Model) openProjectRule() (tea.Model, tea.Cmd) {
 	if offer.kind == domain.AllowRuleMCPServer {
 		return m.saveProjectRule(offer.kind, offer.text)
 	}
-	m.ruleEdit = projectRuleEdit{field: newPopupField(m.opts.CursorShape, m.th.surface, settingsCaret, offer.text)}
+	field := newPopupField(m.opts.CursorShape, m.th.surface, settingsCaret, offer.text)
+	m.ruleEdit = projectRuleEdit{field: &field}
 	return m, nil
 }
 
@@ -979,7 +1004,7 @@ func (m Model) projectRuleKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return next.(Model), cmd, true
 	}
 	m.ruleEdit.note = "" // an edit answers the refusal it was painted for
-	return m, m.ruleEdit.field.editKey(msg), true
+	return m, m.ruleEdit.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) }), true
 }
 
 // saveProjectRule saves the rules text holds into the Project config through the host
@@ -1025,5 +1050,5 @@ func (m Model) projectRuleMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	m.ruleEdit.note = ""
-	return m, m.ruleEdit.field.editMsg(msg), true
+	return m, m.ruleEdit.edit(func(f *lineEditor) tea.Cmd { return f.editMsg(msg) }), true
 }

@@ -725,7 +725,7 @@ func (m Model) recordSettingEdit(edit settingEdit) Model {
 // anything at all. A linear scan over at most one edit per config key is the right shape here: the list
 // is short, it is read once per row per frame, and a map would be a reference the Model's copies would
 // share.
-func (m Model) settingEditOf(path string) (settingEdit, bool) {
+func (m *Model) settingEditOf(path string) (settingEdit, bool) {
 	for _, e := range m.settingEdits {
 		if e.path == path {
 			return e, true
