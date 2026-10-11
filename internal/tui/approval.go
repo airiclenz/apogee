@@ -186,7 +186,8 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 
 // openDecisionLatch closes the decision latch over the surface the caller has just opened — an
 // approval pane (foldApprovalRequest), an ask_user pane (foldAskRequest), or a picker its opener
-// latched (raiseAdoption, adoption.go), whichever [Model.latchedSurface] finds standing — and
+// latched (raiseAdoption, adoption.go; raiseKeyMigration and openSubAgentsMigration,
+// keymigration.go), whichever [Model.latchedSurface] finds standing — and
 // returns the two Cmds that open it again: the drain marker the latch really arms on and the
 // backstop tick for a terminal that answers none. It is the ONE place every latched surface takes a
 // generation and a place in the marker queue, so an answer or a tick left over from any kind of

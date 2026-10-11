@@ -181,6 +181,17 @@ func offerModel(t *testing.T, w *configWriteLog, entries ...string) Model {
 	return newTestModelEng(t, &fakeEngine{}, offerOpts(w, entries...))
 }
 
+// armOffer arms a latched start-up pane the way a terminal that answers no drain marker does: with
+// the backstop tick of the pane's own generation (approvalArmBackstop, approval.go).
+func armOffer(t *testing.T, m Model) Model {
+	t.Helper()
+	m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
+	if !m.picker.isArmed() {
+		t.Fatalf("the %v pane did not arm on its own approvalArmedMsg", m.picker.kind)
+	}
+	return m
+}
+
 // The pane comes up unasked at construction, under a notice naming what was found and where it
 // could go instead, and it asks about the FIRST entry with the rest queued behind it.
 func TestKeyMigrationOfferOpensWithItsNotice(t *testing.T) {
@@ -275,6 +286,7 @@ func TestKeyMigrationNotNowPersistsNothing(t *testing.T) {
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation", "laptop")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyDown()) // "not now"
 	m = step(t, m, keyEnter())
 
@@ -301,6 +313,7 @@ func TestKeyMigrationNeverRecordsTheMarker(t *testing.T) {
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyDown())
 	m = step(t, m, keyDown()) // "never for this entry"
 	m = step(t, m, keyEnter())
@@ -329,6 +342,7 @@ func TestKeyMigrationMoveCallsTheSeamAndAdvances(t *testing.T) {
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation", "laptop")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyEnter()) // "move it" is the first row
 
 	if len(w.migrated) != 1 || w.migrated[0] != "workstation" {
@@ -356,6 +370,7 @@ func TestKeyMigrationReportsAFailedMove(t *testing.T) {
 	w := &configWriteLog{err: errors.New("the keychain refused the key")}
 	m := offerModel(t, w, "workstation")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyEnter())
 
 	if note := lastNote(m); !strings.Contains(note, "could not move") ||
@@ -381,6 +396,48 @@ func TestKeyMigrationEscEndsTheRound(t *testing.T) {
 	}
 	if len(w.migrated) != 0 || len(w.kept) != 0 {
 		t.Errorf("esc wrote something: migrated=%v kept=%v", w.migrated, w.kept)
+	}
+}
+
+// The pane is LATCHED: a ⏎ delivered in the frame it opens — one typed at whatever stood there before
+// it — moves no key, though "move it" is highlighted, and Init asks the drain marker the start-up
+// pane arms on. Once armed the same ⏎ takes the row, and the next entry's pane re-arms from scratch,
+// so the ⏎ after it — a double ⏎ — answers nothing. The pane keeps its opening row.
+func TestKeyMigrationEnterIsDeadUntilArmed(t *testing.T) {
+	t.Parallel()
+
+	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
+	m := offerModel(t, w, "workstation", "laptop")
+	if m.picker.isArmed() {
+		t.Fatal("setup: the pane opened armed; there is no latch left to assert against")
+	}
+	if m.picker.selected != keyMigrationMove {
+		t.Errorf("selected = %d, want the pane to keep opening on move it", m.picker.selected)
+	}
+	if !initAsksDrainMarker(t, m) {
+		t.Error("Init asked no drain marker for the pane newModel raised")
+	}
+
+	m = step(t, m, keyEnter())
+	if len(w.migrated) != 0 || len(w.kept) != 0 {
+		t.Fatalf("an unarmed ⏎ wrote something: migrated=%v kept=%v", w.migrated, w.kept)
+	}
+	if got := m.picker.migration; !m.picker.open || len(got) != 2 {
+		t.Fatalf("picker = %+v, want the first entry's pane still asking", m.picker)
+	}
+
+	m = armOffer(t, m)
+	m = step(t, m, keyEnter())
+	m = step(t, m, keyEnter())
+
+	if len(w.migrated) != 1 || w.migrated[0] != "workstation" {
+		t.Errorf("MigrateKey calls = %v, want only the armed pane's entry", w.migrated)
+	}
+	if got := m.picker.migration; len(got) != 1 || got[0] != "laptop" {
+		t.Fatalf("queue = %v, want laptop still asked about", got)
+	}
+	if m.picker.isArmed() {
+		t.Error("the next entry's pane opened armed; want it latched afresh")
 	}
 }
 
@@ -452,6 +509,7 @@ func TestSubAgentsMigrationMoveCallsTheSeam(t *testing.T) {
 	f := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := subAgentsOfferModel(t, f, "cheap", "spare")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyEnter()) // "move it" is the first row
 
 	if len(f.moved) != 1 || f.moved[0] != "cheap" {
@@ -474,6 +532,7 @@ func TestSubAgentsMigrationReportsAFailedMove(t *testing.T) {
 	f := &configWriteLog{err: errors.New("the servers: list has no entry named \"cheap\"")}
 	m := subAgentsOfferModel(t, f, "cheap")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyEnter())
 
 	if note := lastNote(m); !strings.Contains(note, "could not move") ||
@@ -501,6 +560,7 @@ func TestSubAgentsMigrationDeclinedPersistsNothing(t *testing.T) {
 			f := &configWriteLog{}
 			m := subAgentsOfferModel(t, f, "cheap")
 			if tc.down {
+				m = armOffer(t, m) // ⏎ is latched; esc is not, so the esc case answers unarmed
 				m = step(t, m, keyDown())
 			}
 			m = step(t, m, tc.key())
@@ -512,6 +572,44 @@ func TestSubAgentsMigrationDeclinedPersistsNothing(t *testing.T) {
 				t.Errorf("picker = %+v, want the offer closed", m.picker)
 			}
 		})
+	}
+}
+
+// The pane is LATCHED: a ⏎ delivered in the frame it opens rewrites no file, though "move it" is
+// highlighted, and Init asks the drain marker the start-up pane arms on. Once armed the same ⏎ takes
+// the row. The pane keeps its opening row.
+func TestSubAgentsMigrationEnterIsDeadUntilArmed(t *testing.T) {
+	t.Parallel()
+
+	f := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
+	m := subAgentsOfferModel(t, f, "cheap")
+	if m.picker.isArmed() {
+		t.Fatal("setup: the pane opened armed; there is no latch left to assert against")
+	}
+	if m.picker.selected != subAgentsMigrationMove {
+		t.Errorf("selected = %d, want the pane to keep opening on move it", m.picker.selected)
+	}
+	if !initAsksDrainMarker(t, m) {
+		t.Error("Init asked no drain marker for the pane newModel raised")
+	}
+
+	m = step(t, m, keyEnter())
+	if len(f.moved) != 0 {
+		t.Fatalf("an unarmed ⏎ wrote something: %v", f.moved)
+	}
+	if !m.picker.open || m.picker.kind != pickerSubAgentsMigration {
+		t.Fatalf("picker = %+v, want the offer still asking", m.picker)
+	}
+
+	m = step(t, m, tea.CursorPositionMsg{})
+	m = step(t, m, tea.CursorPositionMsg{})
+	if !m.picker.isArmed() {
+		t.Fatal("the pane did not arm on the answers to its markers")
+	}
+	m = step(t, m, keyEnter())
+
+	if len(f.moved) != 1 || f.moved[0] != "cheap" {
+		t.Errorf("MigrateSubAgentsServer calls = %v after the pane armed, want the entry asked about", f.moved)
 	}
 }
 
@@ -549,12 +647,14 @@ func TestKeyMigrationAnswersAreSettledByTheTail(t *testing.T) {
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation", "laptop")
 
+	m = armOffer(t, m)
 	m = step(t, m, keyEnter())
 	if !m.picker.open || len(m.picker.migration) != 1 {
 		t.Fatalf("precondition: the first answer left the pane open=%v with queue %v", m.picker.open, m.picker.migration)
 	}
 	assertSettled(t, m)
 
+	m = armOffer(t, m)
 	m = step(t, m, keyEnter())
 	if m.picker.open {
 		t.Fatal("precondition: the last answer left the pane open")

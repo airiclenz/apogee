@@ -1467,7 +1467,7 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 // names (pickerView.offeringIndex) exactly as it does for ⏎, so a filtered list can never move the
 // session somewhere the human never saw.
 //
-// A latched pane (the adoption pane — picker.latched) gates that second click on its arming latch
+// A latched pane (the adoption and start-up migration panes — picker.latched) gates that second click on its arming latch
 // exactly as the approval pane does (handleApprovalClick): an unarmed accepting click is swallowed
 // and leaves the arm STANDING, so once the pane arms the next click on that row takes it.
 //

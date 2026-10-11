@@ -240,10 +240,18 @@ func TestAdoptionGivesWayToTheKeyMigration(t *testing.T) {
 		t.Fatalf("picker = %+v, want the key migration first", m.picker)
 	}
 
+	// Each pane is latched: of a double ⏎, the first answers the armed key-migration pane and the
+	// second lands on the adoption pane in the frame it opens, unarmed, and adopts nothing.
+	m = armOffer(t, m)
 	m = step(t, m, keyDown()) // "not now"
+	m = step(t, m, keyEnter())
 	m = step(t, m, keyEnter())
 
 	assertAdoptionPane(t, m, goTestRule)
+	assertNothingAnswered(t, log)
+	if len(w.migrated) != 0 {
+		t.Errorf("MigrateKey calls = %v, want the not-now answer only", w.migrated)
+	}
 }
 
 // The pane is LATCHED: a ⏎ delivered in the frame it opens — one typed at whatever stood there before

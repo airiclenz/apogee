@@ -55,6 +55,9 @@ const keyMigrationHint = "type to filter · ↑/↓ select · ⏎ choose · esc 
 // offer is decided ABOUT before any act is called (ADR 0054 decision 3a), and a host that is wired
 // has the answers — the offer and the seams are set together (cmd/apogee/keymigrate.go).
 //
+// The pane is LATCHED (raiseKeyMigration). Construction returns no Cmd, so the latch's marker and
+// backstop leave from Init (startupLatchCmds, model.go).
+//
 // It gives way to anything already up. A pre-bound session opens the `/server` picker or the
 // `/settings` pane here, and that ask is the more urgent one — a session with no server can do
 // nothing at all, while a plaintext key is a file that has been readable for as long as it has
@@ -72,11 +75,19 @@ func (m *Model) openKeyMigration() {
 	m.transcript.addNote(keyMigrationNotice(offer))
 	// The queue is COPIED out of the Options: the overlay owns it from here (an answered entry is
 	// dropped from the front), and the Options keep describing what this start-up found.
-	m.picker = picker{
-		open:      true,
-		kind:      pickerKeyMigration,
-		migration: append([]string(nil), offer.Entries...),
-	}
+	m.raiseKeyMigration(append([]string(nil), offer.Entries...))
+}
+
+// raiseKeyMigration puts up the pane asking about entries[0], with the rest queued behind it — the
+// ONE way a key-migration pane opens, for the first entry (openKeyMigration) and for each one after
+// it (acceptKeyMigration). "Move it" rewrites a file and moves a secret, so the pane opens LATCHED
+// the way the approval and adoption panes do ([Model.openDecisionLatch]): its ⏎ and its second click
+// are dead until the terminal has answered from behind the pane's frame, so a key already in flight
+// when it appeared — the ⏎ that answered the entry before it, above all — answers nothing. It keeps
+// its opening row. The returned Cmds are the latch's marker and backstop; the caller hands them on.
+func (m *Model) raiseKeyMigration(entries []string) tea.Cmd {
+	m.picker = picker{open: true, kind: pickerKeyMigration, migration: entries, latched: true}
+	return m.openDecisionLatch()
 }
 
 // keyMigrationNotice is the line the unasked-for pane comes up under: what was found, and what the
@@ -153,10 +164,11 @@ func (m Model) acceptKeyMigration(choice int) (tea.Model, tea.Cmd) {
 	}
 
 	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the
-	// filter above all — can survive into the next entry's question.
+	// filter and the latch above all — can survive into the next entry's question, which re-arms from
+	// scratch.
 	m.picker = picker{}
 	if len(rest) > 0 {
-		m.picker = picker{open: true, kind: pickerKeyMigration, migration: rest}
+		return m, m.raiseKeyMigration(rest)
 	}
 	return m, nil
 }
@@ -215,6 +227,10 @@ const (
 // an unbound session are both more urgent than a routing key that has been wrong since the flag was
 // retired, and two unasked-for panes at once are a stack of questions the human clears without
 // reading.
+//
+// "Move it" rewrites the config file, so the pane opens LATCHED, as the key migration's does
+// (raiseKeyMigration), and keeps its opening row; its marker and backstop leave from Init
+// (startupLatchCmds, model.go), since construction returns no Cmd.
 func (m *Model) openSubAgentsMigration() {
 	if len(m.opts.SubAgentsMigration) == 0 || m.opts.Config == nil {
 		return
@@ -223,7 +239,8 @@ func (m *Model) openSubAgentsMigration() {
 		return
 	}
 	m.transcript.addNote(subAgentsMigrationNotice(m.opts.SubAgentsMigration))
-	m.picker = picker{open: true, kind: pickerSubAgentsMigration}
+	m.picker = picker{open: true, kind: pickerSubAgentsMigration, latched: true}
+	m.openDecisionLatch()
 }
 
 // subAgentsMigrationNotice is the line the unasked-for pane comes up under: which entries carry the

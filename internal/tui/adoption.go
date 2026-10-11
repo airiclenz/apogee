@@ -20,9 +20,10 @@ import (
 // of a turn it would have answered for.
 //
 // It is the start-up offers' posture (keymigration.go) in every respect but the question and its
-// guard: the shared picker over three fixed rows, raised unasked under a notice saying why, one rule
-// per pane with the rest queued on the overlay, esc ending the round. Because "adopt" makes a granting
-// entry live, each pane opens on "not now" and LATCHED, as the approval pane does (raiseAdoption). Esc is "not now" for every rule left, and "not
+// opening row: the shared picker over three fixed rows, raised unasked under a notice saying why, one
+// rule per pane with the rest queued on the overlay, esc ending the round, each pane LATCHED as the
+// approval pane is (raiseAdoption). Because "adopt" makes a granting entry live, each pane opens on
+// "not now" rather than on its first row. Esc is "not now" for every rule left, and "not
 // now" persists nothing — the rule stays proposed, so the next start-up asks again. "Adopt" and
 // "reject" are one call each to a seam the binary owns ([ConfigHost.AdoptRules],
 // [ConfigHost.RejectRules]): the adoption record, its fingerprints and the rules in force are the

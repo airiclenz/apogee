@@ -753,12 +753,13 @@ type pendingDecision struct {
 }
 
 // decisionLatch is the arming state of ONE latched decision surface — an approval or ask_user
-// question (pendingDecision), or a picker its opener latched (picker.latch, adoption.go): whether its
-// deciding keys answer yet, and which drain-marker answer brings them to life. It lives on the
-// surface rather than on the Model so the one call that forgets the surface — the question's reset,
-// a picker's whole-struct zeroing — forgets its latch too, and no dead pane leaves its keys armed for
-// the next one. The generation and the marker queue that WRITE it are not per-surface and live on
-// the Model (Model.approvalSeq, Model.inputDrainAsked). Plain values (ADR 0011).
+// question (pendingDecision), or a picker its opener latched (picker.latch; adoption.go,
+// keymigration.go): whether its deciding keys answer yet, and which drain-marker answer brings them
+// to life. It lives on the surface rather than on the Model so the one call that forgets the surface
+// — the question's reset, a picker's whole-struct zeroing — forgets its latch too, and no dead pane
+// leaves its keys armed for the next one. The generation and the marker queue that WRITE it are not
+// per-surface and live on the Model (Model.approvalSeq, Model.inputDrainAsked). Plain values (ADR
+// 0011).
 type decisionLatch struct {
 	// approvalArmed reports whether the open surface's DECISION keys (on an approval pane a/s/d and
 	// the ⏎ that takes the highlighted row; on an ask_user pane, and on a latched picker, the ⏎ and
@@ -1130,9 +1131,9 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // This is also the ONLY place the boot restore is issued from, which is what makes it interactive-TUI
 // only: a headless run builds no Model, so it never reaches an Init and never actuates a server.
 //
-// A latched surface newModel already raised — the adoption pane at start-up (adoption.go) — took its
-// generation and its place in the marker queue there, but construction returns no Cmd, so its drain
-// marker and backstop leave from here (startupLatchCmds).
+// A latched surface newModel already raised — a start-up migration pane (keymigration.go) or the
+// adoption pane (adoption.go) — took its generation and its place in the marker queue there, but
+// construction returns no Cmd, so its drain marker and backstop leave from here (startupLatchCmds).
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd(),
 		m.startupLatchCmds())
