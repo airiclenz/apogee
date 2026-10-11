@@ -494,7 +494,7 @@ func TestSmokeRunsTheHostsZipArchive(t *testing.T) {
 	}
 	var ran []string
 	for _, call := range result.commands.calls {
-		if len(call.args) == 1 && call.args[0] == "--version" && !strings.HasPrefix(call.name, smokeBrewPrefix) {
+		if len(call.args) == 1 && call.args[0] == "--version" && !strings.HasPrefix(call.name, filepath.FromSlash(smokeBrewPrefix)) {
 			ran = append(ran, call.name)
 		}
 	}
