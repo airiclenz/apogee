@@ -46,6 +46,8 @@ type publishOptions struct {
 	tagTimeout   time.Duration
 	pollInterval time.Duration
 	sleep        func(ctx context.Context, duration time.Duration) error
+	// getenv reads the environment: the winget step takes its GitHub token from it first.
+	getenv func(key string) string
 }
 
 // publishRun is one publish run: what every step reads.
@@ -58,19 +60,25 @@ type publishRun struct {
 	notesPath string
 }
 
-// publishAction is one step publish converges: what a dry run says it would do, and the work
-// itself, run only while the step's probe reports it pending.
+// publishAction is one step publish converges: what a dry run says it would do, the work itself,
+// run only while the step's probe reports it pending, and what the step table says once it has
+// run ("done by this run" when empty).
 type publishAction struct {
-	name     string
-	describe func(run *publishRun) string
-	converge func(ctx context.Context, run *publishRun) error
+	name       string
+	describe   func(run *publishRun) string
+	converge   func(ctx context.Context, run *publishRun) error
+	doneDetail string
 }
 
 // publishActions are the steps publish converges, in the order it runs them; each one's probe
 // is the publishSteps entry of the same name, so what status reports done is what publish skips.
+// The channel steps (channels.go) run after the release, whose SHA256SUMS they render from.
 var publishActions = []publishAction{
 	{name: stepTag, describe: describeTag, converge: convergeTag},
 	{name: stepRelease, describe: describeRelease, converge: convergeRelease},
+	{name: stepHomebrew, describe: describeHomebrew, converge: convergeHomebrew},
+	{name: stepScoop, describe: describeScoop, converge: convergeScoop},
+	{name: stepWinget, describe: describeWinget, converge: convergeWinget, doneDetail: wingetSubmittedDetail},
 }
 
 // newPublishCommand builds the publish verb.
@@ -80,20 +88,26 @@ func newPublishCommand(commands runner) *cobra.Command {
 		tagTimeout:   defaultTagTimeout,
 		pollInterval: tagPollInterval,
 		sleep:        sleepContext,
+		getenv:       os.Getenv,
 	}
 
 	cmd := &cobra.Command{
 		Use:   "publish vX.Y.Z --notes-file F",
-		Short: "Publish a prepared release: push, wait for the tag, create the GitHub release",
+		Short: "Publish a prepared release: push, wait for the tag, create the GitHub release, update the channels",
 		Long: "publish converges each publish step, skipping every step its probe reports done, so\n" +
 			"a half-finished release is resumed by running it again. While the tag is not on origin\n" +
 			"it refuses unless the release gate clears and VERSION at HEAD reads the version; it\n" +
 			"then pushes HEAD to main and waits (--tag-timeout) for the CI-made annotated tag — it\n" +
 			"never creates one. The release step builds the archives in a fresh clone at the tag\n" +
 			"and creates the GitHub release, or uploads only the assets it lacks after checking the\n" +
-			"rebuilt sums against its SHA256SUMS. It never prompts or reads stdin, and exits 1\n" +
-			"after printing the step table when anything fails. --dry-run runs the gate and the\n" +
-			"probes and prints what each pending step would do, changing nothing.",
+			"rebuilt sums against its SHA256SUMS. The homebrew and scoop steps render the formula\n" +
+			"and the manifest from the release's SHA256SUMS and commit `apogee X.Y.Z` straight to\n" +
+			"the tap and the bucket, pushing only when the file changes; the winget step submits\n" +
+			"the manifest update with komac (GITHUB_TOKEN, else `gh auth token`), which merges\n" +
+			"later. A channel whose one-time setup is pending is skipped and named, and the run\n" +
+			"still succeeds. It never prompts or reads stdin, and exits 1 after printing the step\n" +
+			"table when anything fails. --dry-run runs the gate and the probes and prints what each\n" +
+			"pending step would do, changing nothing.",
 		Args: cobra.ExactArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			options.version = args[0]
@@ -151,10 +165,14 @@ func runPublish(ctx context.Context, commands runner, output io.Writer, options 
 	return run.converge(ctx, gate, steps)
 }
 
-// converge runs every pending step in order; a done or setup-pending step is skipped. A failed
-// step stops the run, which prints the steps as the remote now holds them.
+// converge runs every pending step in order; a done or setup-pending step is skipped, the latter
+// named, since the run succeeds without it. A failed step stops the run, which prints the steps as
+// the remote now holds them.
 func (r *publishRun) converge(ctx context.Context, gate string, steps []stepReport) error {
 	for index, action := range publishActions {
+		if steps[index].State == stateSetupPending {
+			_, _ = fmt.Fprintf(r.output, "%s: skipped, its one-time setup is pending: %s\n", action.name, steps[index].Detail)
+		}
 		if steps[index].State != statePending {
 			continue
 		}
@@ -165,7 +183,11 @@ func (r *publishRun) converge(ctx context.Context, gate string, steps []stepRepo
 			}
 			return fmt.Errorf("the %s step failed: %w", action.name, err)
 		}
-		steps[index] = stepReport{Name: action.name, State: stateDone, Detail: "done by this run"}
+		detail := action.doneDetail
+		if detail == "" {
+			detail = "done by this run"
+		}
+		steps[index] = stepReport{Name: action.name, State: stateDone, Detail: detail}
 	}
 	return printPublish(r.output, r, gate, steps, false)
 }
@@ -421,10 +443,9 @@ func buildReleaseAssets(ctx context.Context, run *publishRun, workDir string) (s
 // published hash to equal the rebuilt one, naming the way out when one does not.
 func checkPublishedSums(ctx context.Context, run *publishRun, outDir string, uploaded []string) error {
 	tag := run.version.String()
-	published, err := run.commands.run(ctx, run.options.dir, nonInteractiveEnv,
-		"gh", "release", "download", tag, "--pattern", checksumsFile, "--output", "-")
+	published, err := downloadReleaseSums(ctx, run)
 	if err != nil {
-		return fmt.Errorf("download %s from GitHub release %s: %w", checksumsFile, tag, err)
+		return err
 	}
 	rebuilt, err := os.ReadFile(filepath.Join(outDir, checksumsFile))
 	if err != nil {

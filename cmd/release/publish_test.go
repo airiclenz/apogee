@@ -35,6 +35,9 @@ var mutatingCommands = []string{
 	"gh release create",
 	"gh release upload",
 	"gh release delete",
+	"gh repo clone",
+	"git commit",
+	"komac update",
 }
 
 // publishFake answers publish's commands the way git, go and gh would: the gate's and the
@@ -53,6 +56,8 @@ type publishFake struct {
 	tagCommit string
 	// publishedSums is the release's SHA256SUMS, as `gh release download` prints it.
 	publishedSums string
+	// channels is the tap, the bucket and the komac and gh installs the channel steps meet.
+	channels fakeChannels
 
 	mu             sync.Mutex
 	isPushed       bool
@@ -61,7 +66,8 @@ type publishFake struct {
 
 // newPublishFake is a first run of publishVersion: HEAD is the VERSION bump, one commit ahead of
 // origin/main, whose feature commit CI passed; nothing is tagged or released yet, and the
-// workflow tags the bump on the third poll after the push.
+// workflow tags the bump on the third poll after the push. The tap's formula already pins the
+// version and the Scoop and winget setups are pending, so the channel steps change nothing.
 func newPublishFake() *publishFake {
 	return &publishFake{
 		repo: fakeRepo{
@@ -69,6 +75,7 @@ func newPublishFake() *publishFake {
 			head:       bumpCommit,
 			originMain: featureCommit,
 			greenRuns:  []string{featureCommit},
+			remote:     fakeRemote{formula: testFormula},
 		},
 		headVersion:     publishVersion,
 		tagAppearsAfter: 2,
@@ -121,6 +128,9 @@ func (f *publishFake) respond(call recordedCall) (string, error) {
 		return "", os.WriteFile(output, []byte(stubBinary(call.env)), 0o755)
 	case command == "gh release download "+publishVersion+" --pattern SHA256SUMS --output -":
 		return f.publishedSums, nil
+	}
+	if output, isAnswered, err := f.respondChannel(call); isAnswered {
+		return output, err
 	}
 	return f.repo.respond(call)
 }
@@ -200,10 +210,14 @@ func runTestPublish(t *testing.T, fake *publishFake, isDryRun bool) publishRunRe
 }
 
 // runTestPublishWith runs publish of publishVersion over fake with options, filling in the
-// version, the test poll timing and a counting sleep.
+// version, the test poll timing, a counting sleep and, unless options has one, an environment
+// with nothing set.
 func runTestPublishWith(t *testing.T, fake *publishFake, options publishOptions) publishRunResult {
 	t.Helper()
 	result := publishRunResult{commands: fake.runner(), notesPath: options.notesFile}
+	if options.getenv == nil {
+		options.getenv = func(string) string { return "" }
+	}
 	options.dir = t.TempDir()
 	options.version = publishVersion
 	options.tagTimeout = testTagTimeout
@@ -240,6 +254,19 @@ func mutatingLines(commands *fakeRunner) []string {
 		}
 	}
 	return mutating
+}
+
+// hasRow reports whether output has a table row whose cells start with cells, in order: the
+// padding between cells, in the row and in cells alike, is collapsed first, so a row reads the
+// same however wide its columns are.
+func hasRow(output string, cells ...string) bool {
+	want := strings.Join(strings.Fields(strings.Join(cells, " ")), " ")
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(strings.Join(strings.Fields(line), " "), want) {
+			return true
+		}
+	}
+	return false
 }
 
 // lineIndex returns the index of the first line starting with prefix, -1 for none.
@@ -286,7 +313,7 @@ func TestPublishFirstRunConvergesTheTagThenTheRelease(t *testing.T) {
 		t.Errorf("paused %d times, want 2: the tag appears on the third poll after the push", result.pauses)
 	}
 	for _, want := range []string{"tag      done  done by this run", "release  done  done by this run"} {
-		if !strings.Contains(result.output, want) {
+		if !hasRow(result.output, want) {
 			t.Errorf("output lacks %q:\n%s", want, result.output)
 		}
 	}
@@ -363,7 +390,7 @@ func TestPublishChangesNothingWhenItHasNothingToDo(t *testing.T) {
 				t.Errorf("issued mutating commands %q, want none", mutating)
 			}
 			for _, want := range tc.wantOutput {
-				if !strings.Contains(result.output, want) {
+				if !hasRow(result.output, want) {
 					t.Errorf("output lacks %q:\n%s", want, result.output)
 				}
 			}
@@ -447,7 +474,7 @@ func TestPublishDryRunWithABlockedGateFailsButPrintsThePlan(t *testing.T) {
 		"  tag      push HEAD to origin/main",
 		"  release  build the 7 assets",
 	} {
-		if !strings.Contains(result.output, want) {
+		if !hasRow(result.output, want) {
 			t.Errorf("output lacks %q:\n%s", want, result.output)
 		}
 	}

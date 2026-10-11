@@ -186,7 +186,11 @@ The gate and the VERSION-at-HEAD == vX refusal apply only while the tag step is 
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`; `go run ./cmd/release publish v0.24.11 --notes-file README.md --dry-run` output shows tag and release `done` (exit status not checked) and `git status --porcelain` is unchanged.
 **Commit:** `feat(release): publish converges the tag and the GitHub release`
 
-## 7. `publish`: Homebrew tap, Scoop bucket and winget
+## 7. `publish`: Homebrew tap, Scoop bucket and winget — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — cmd/release/publish_test.go: made necessary by the three new steps in publishActions; the publish fake now answers the channel commands (through `respondChannel`, defined in channels_test.go), `newPublishFake`'s tap formula pins the version so item 6's tag/release tests keep their scope (Scoop and winget stay setup-pending), `runTestPublishWith` supplies an empty environment, `mutatingCommands` gains `gh repo clone`, `git commit` and `komac update`, and three step-table assertions go through a new `hasRow` helper that collapses column padding — the wider `homebrew` and `setup-pending` cells re-pad every row; no assertion's meaning changed.
+
+NOTES (2026-10-11): choices within the approach: emptiness of a cloned channel repository is read with `git rev-list --all --max-count=1` (empty output, exit 0) before writing, and the staged change with `git diff --cached --name-only` rather than `--quiet`'s exit code; `gh repo clone` passes `-- --quiet`; komac's presence is checked with `komac --version` through the runner (an `exec.ErrNotFound` is the install-hint failure); `publishOptions.getenv` (os.Getenv in production) is the seam the token lookup reads; the token is scrubbed from a failing komac's error; `publishAction.doneDetail` lets winget report "submitted by this run …" instead of "done by this run"; item 6's `checkPublishedSums` now shares `downloadReleaseSums` (same argv). Acceptance: `go run ./cmd/release publish v0.24.11 --notes-file README.md --dry-run` printed the scoop (pending, with its plan) and winget (setup-pending) lines, exit 0, `git status --porcelain` unchanged; no real publish was performed.
 
 Depends on items 5, 6.
 
