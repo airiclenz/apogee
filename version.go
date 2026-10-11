@@ -35,11 +35,11 @@ const commitShortLen = 12
 // This is build provenance, never a second source for the version.
 var buildCount string
 
-// distBuild is the release stamp: `make dist` sets it via
-// `-ldflags -X github.com/airiclenz/apogee.distBuild=release-archive` (see the Makefile), and no
-// other build path does, so it marks a binary shipped in a release archive apart from one built
-// from a checkout. Like buildCount it is provenance, never part of the version string. The value
-// is deliberately distinctive: `make dist` builds with -trimpath, which drops -ldflags from the
+// distBuild is the release stamp: `cmd/release dist` (behind `make dist`) sets it via
+// `-ldflags -X github.com/airiclenz/apogee.distBuild=release-archive`, and no other build path
+// does, so it marks a binary shipped in a release archive apart from one built from a checkout.
+// Like buildCount it is provenance, never part of the version string. The value is deliberately
+// distinctive: `cmd/release dist` builds with -trimpath, which drops -ldflags from the
 // embedded build info, so the stamp is only observable as this string in the binary itself.
 var distBuild string
 

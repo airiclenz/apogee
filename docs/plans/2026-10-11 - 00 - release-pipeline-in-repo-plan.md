@@ -228,7 +228,15 @@ Depends on items 1, 6, 7.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`; `go run ./cmd/release smoke v0.24.11` passes the tag, asset and buildinfo checks.
 **Commit:** `feat(release): port the release smoke test to cmd/release`
 
-## 9. Retire the bash release path; wire Make and CI
+## 9. Retire the bash release path; wire Make and CI — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): Makefile drops DIST_LDFLAGS (with its release-marker comment), DIST_DIR, DIST_VERSION and SHA256 — all dist-only; CROSS_TARGETS stays for `cross`. The `.gitattributes` `scripts/*.sh` pin stays (check-pins.sh, test-shards.sh remain), its comment reworded from "The release scripts" to "The scripts".
+
+NOTES (2026-10-11): consequential edit — cmd/release/render_test.go: made necessary by deleting scripts/release-scoop.sh (its comment named the script, which the item's acceptance `git grep` must not find; reworded to "the retired Scoop script").
+
+NOTES (2026-10-11): consequential edit — version.go: made necessary by replacing the Makefile's dist recipe (the distBuild comment said `make dist` sets the stamp "(see the Makefile)"; it now names `cmd/release dist`).
+
+NOTES (2026-10-11): building.md, test-drivers.md and ADR 0098 still name `make release-scoop`/`release-winget` and the old dist requirements — owned by item 14 (not yet done), left untouched as the item's regression guard directs.
 
 Depends on items 1–8.
 

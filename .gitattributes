@@ -42,6 +42,11 @@ cmd/release/templates/** text eol=lf
 # would end every line in a carriage return and break them, so they stay LF everywhere.
 .beads/hooks/** text eol=lf
 
-# The release scripts run under bash, Git Bash included: a core.autocrlf=true checkout would end
-# every line in a carriage return and break them, so they stay LF everywhere.
+# The scripts run under bash, Git Bash included: a core.autocrlf=true checkout would end every
+# line in a carriage return and break them, so they stay LF everywhere.
 scripts/*.sh text eol=lf
+
+# The repo's committed skills are read by an agent host byte-for-byte on every platform: a
+# core.autocrlf=true checkout would hand every SKILL.md and stage prompt over with a carriage
+# return on each line, so a Windows host would read different bytes than a POSIX one.
+.apogee/skills/** text eol=lf

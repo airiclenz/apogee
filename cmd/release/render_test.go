@@ -73,7 +73,7 @@ func TestRenderFormulaReproducesTheLiveFormula(t *testing.T) {
 	}
 }
 
-// TestRenderScoopManifest carries every assertion the retired release-scoop.sh dry-run test made
+// TestRenderScoopManifest carries every assertion the retired Scoop script's dry-run test made
 // to the rendered manifest: version, homepage, description, license, bin, checkver, both Windows
 // architectures and their autoupdate entries.
 func TestRenderScoopManifest(t *testing.T) {
