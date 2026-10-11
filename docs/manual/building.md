@@ -143,7 +143,9 @@ takes the test flags among `ARGS` in its own spelling (`-test.timeout=1h`). Ever
 such as `-tags`, goes to the `go test -c` that builds it.
 
 Chunks and batches are balanced from the previous run's per-test durations, cached in
-`.test-timings` (gitignored, rewritten every run). A checkout
+`.test-timings` (gitignored, rewritten every run). A test costs the larger of its own duration
+and the sum of its direct subtests' durations. A parent whose subtests call `t.Parallel`
+returns before they run, so its own line reads 0.00 s however long its subtests take. A checkout
 that has never run the suite (a CI runner, every time) has no cache. The script then falls back
 to the committed `scripts/test-timings.seed` (same format) and packs by those. The run says
 which it read (`test-shards: timings: …` on stderr). A missing or stale cache costs only a less

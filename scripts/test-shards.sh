@@ -291,8 +291,10 @@ running_tests() {
 }
 
 # harvest_timings writes `package<TAB>test<TAB>seconds` for every top-level test the log
-# resolved. Sub-tests are skipped (their result lines are indented): the packer schedules whole
-# top-level tests, because that is the grain `-run` selects at.
+# resolved: the grain `-run` selects at, so the grain the packer schedules. A test costs the
+# larger of its own duration and the sum of its direct subtests' (the result lines one indent
+# in): a parent whose subtests call t.Parallel returns before they run, so its own line reads
+# 0.00 s however long its subtests take — and those subtests are work its chunk has to do.
 #
 # With a package argument the log is one chunk's (a test binary's own output, which names no
 # package), and every result in it is that package's. Without one it is a batch's `go test`
@@ -301,11 +303,20 @@ running_tests() {
 harvest_timings() { # log [import path]
 	awk -v pkg="${2:-}" '
 		function seconds(line) { return match(line, /\(([0-9.]+)s\)$/) ? substr(line, RSTART + 1, RLENGTH - 3) + 0 : -1 }
-		function flush(p,    n) {
-			for (n in own) printf "%s\t%s\t%.2f\n", p, n, own[n]
+		function flush(p,    n, c) {
+			for (n in own) {
+				c = own[n]
+				if ((n in kids) && kids[n] > c) c = kids[n]
+				printf "%s\t%s\t%.2f\n", p, n, c
+			}
 			split("", own)
+			split("", kids)
 		}
 		/^--- (PASS|FAIL|SKIP): / { if ((s = seconds($0)) >= 0) own[$3] = s; next }
+		/^    --- (PASS|FAIL|SKIP): / {
+			if ((s = seconds($0)) >= 0) kids[substr($3, 1, index($3, "/") - 1)] += s
+			next
+		}
 		/^(ok|FAIL)[ \t]/ && pkg == "" { flush($2); next }
 		END { if (pkg != "") flush(pkg) }
 	' "$1"
