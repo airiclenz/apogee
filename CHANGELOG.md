@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-11
+
 - Changed (development): a rebasing `git pull` now syncs the beads issue database too. A new `.beads/hooks/post-rewrite` runs `bd-sync-soft` after every finished rebase, since `git pull --rebase` (or `pull.rebase = true`) fires no `post-merge`; an amend does not sync (apogee-beads-replica-drift).
 
 - **The project's `.apogee/skills` is found from a subfolder.** apogee now resolves the Project root — the nearest folder holding a `.apogee/`, from the workspace up to its git top-level, never your home folder — and reads the project's `.apogee/skills` from there, so a session started in a subfolder of a project still has the project's skills; the bare `skills/` folder stays the workspace's. `/skills` and the `/` menu label such a skill `workspace`, and an empty catalog names the folder discovery looked in. Outside a repository nothing changes.
