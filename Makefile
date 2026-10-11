@@ -162,18 +162,21 @@ install: build
 		*) echo "warning: $$dir is not on your PATH — add it (e.g. 'export PATH=\"$$dir:\$$PATH\"') to run '$(BINARY)' by name." >&2 ;; \
 	esac
 
-## test: run the full test suite with the race detector, sharded across processes
+## test: run the full test suite with the race detector, as a queue of short-lived processes over a few lanes
 #
 # The suite's wall time sits almost entirely in two packages, and both are `t.Parallel` inside
 # (serial only where a test itself `t.Setenv`s or swaps a package-level seam — directly or
-# through a helper — which a guard in each package pins); sharding is what balances the heavy
-# packages against each other and the rest — a split by PROCESS, which changes no test.
-# Each heavy shard gets a `-parallel` bound (its share of the process budget, 1 at the default
-# sizing), so the shards spend the box and a shard's own fan-out does not multiply the load.
-# scripts/test-shards.sh holds the reasoning and the shard plan; `go test -race -count=1 ./...`
+# through a helper — which a guard in each package pins). The script builds each heavy package's
+# test binary once, packs its tests into chunks of about two minutes, packs the other packages
+# into batches, and runs the queue over a fixed number of lanes, a fresh process per item — a
+# split by PROCESS, which changes no test, and which bounds how much memory any one process
+# holds. Each process gets a `-parallel` bound (its share of the process budget, 1 at the
+# default sizing), so the lanes spend the box and a process's own fan-out does not multiply the
+# load. scripts/test-shards.sh holds the reasoning and the plan; `go test -race -count=1 ./...`
 # remains the equivalent single-process run for a bisect or a one-off.
-# APOGEE_TEST_SLOW=1 is the slow-box plan (Raspberry-Pi class: four driven tests on the box at once);
-# APOGEE_TEST_RACE=0 drops -race for a kernel that cannot run it — both explained in the script's header.
+# APOGEE_TEST_LANES=n sets the lane count; APOGEE_TEST_SLOW=1 is the slow-box plan (Raspberry-Pi
+# class: three lanes, every process -parallel 1); APOGEE_TEST_RACE=0 drops -race for a kernel
+# that cannot run it — all explained in the script's header.
 .PHONY: test
 test:
 	@./scripts/test-shards.sh $(ARGS)
@@ -300,7 +303,7 @@ check:
 	@go build ./...
 	@echo "==> govulncheck"
 	@$(MAKE) --no-print-directory vulncheck
-	@echo "==> go test -race (sharded — scripts/test-shards.sh)"
+	@echo "==> go test -race (chunks over lanes — scripts/test-shards.sh)"
 	@$(MAKE) --no-print-directory test
 	@echo "==> workflow action pins (SHA + version comment)"
 	@./scripts/check-pins.sh

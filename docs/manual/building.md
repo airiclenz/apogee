@@ -21,8 +21,8 @@ A `Makefile` wraps the common Go invocations:
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
 | `make stubllm` | Compile the scripted test upstream to `./stubllm` — a dev tool, never a release asset |
 | `make demorig` | Compile the demo storyboard rig to `./demorig` — a dev tool, never a release asset (see `graphics/demo/README.md`, "Storyboards") |
-| `make test` | Run the test suite with the race detector, sharded across processes (see [Testing](#testing)); `ARGS="..."` passes extra `go test` flags to every shard |
-| `make test-timings-seed` | Copy the last run's `.test-timings` into the committed `scripts/test-timings.seed` the shards pack by on a fresh checkout (see [Testing](#testing)) |
+| `make test` | Run the test suite with the race detector, as a queue of short-lived processes over a few lanes (see [Testing](#testing)); `ARGS="..."` passes extra `go test` flags to every process |
+| `make test-timings-seed` | Copy the last run's `.test-timings` into the committed `scripts/test-timings.seed` the runner packs by on a fresh checkout (see [Testing](#testing)) |
 | `make live-eval` | Run the opt-in live-model eval and the judge tests against a real server, always `-count=1`; `LIVE_ENDPOINT=` (default `http://127.0.0.1:1111`) becomes `APOGEE_LIVE_ENDPOINT` and `JUDGE_ENDPOINT=` (default the same) `APOGEE_JUDGE_ENDPOINT`, with `APOGEE_LIVE_MODEL` / `APOGEE_JUDGE_MODEL` set in the environment to pin the models; fails if the real `~/.apogee` grew during the run |
 | `make home-census` | Print the entry counts of the real `~/.apogee` sessions and scratch dirs (what `live-eval` compares) |
 | `make fmt` | `gofmt -w` over the tree |
@@ -71,7 +71,7 @@ published by `go run ./cmd/release publish` (see [Releasing](#releasing)).
 ## Testing
 
 `make test` is the supported way to run the suite, and the shape to reach for when verifying
-work: it shards the two heavy packages and bounds how many tests each process runs at once. A
+work: it splits the suite into short-lived processes and bounds how many tests run at once. A
 raw multi-package `go test` — `./...`, or several packages named on one line — does neither.
 `go test` runs packages concurrently and gives each of them the whole box for its own
 `t.Parallel` fan-out, so the driven tests in `cmd/apogee` and `internal/tui` end up competing
@@ -90,61 +90,98 @@ itself — directly or through a helper — stays serial, and the testing packag
 before it releases the parallel ones; a guard in each package (`seams_guard_test.go`) fails
 any parallel test that swaps a seam, so the exception cannot creep back in unnoticed.
 
-`scripts/test-shards.sh` splits those two packages across several concurrent `go test`
-processes as well. A shard is a process of its own, so every test runs exactly as it does
-today — same flags but two, same isolation, nothing skipped or reordered within its shard —
-and the run is bounded by the slowest shard rather than the slowest package. Measured on a
-9-core box on 2026-09-06, before the `cmd/apogee` sweep: 212s in one process, 82s sharded cold (no timing
-cache) and around 55s warm.
+`scripts/test-shards.sh` runs the suite as a queue of short-lived test processes spread over a
+fixed number of **lanes**. It builds each of the two heavy packages' test binaries once
+(`go test -c`), reads each binary's roster from `-test.list`, and packs the tests into
+**chunks** of about two minutes of measured test time and at most 400 tests, longest first.
+Every other package is packed whole into **batches** by the same measure. Chunks and batches
+form one queue, longest first, and each lane takes the next item, runs it as a fresh process,
+and takes another when that process exits. A chunk is the prebuilt binary run in its package
+directory, as `go test` runs it, with `-test.run '^(TestA|TestB|…)$'`. A batch is
+`go test -p 1` over its packages. The run is bounded by the busiest lane rather than the
+slowest package.
+
+Short-lived processes are what bound the suite's memory. A test process grows with the number
+of tests it holds, not just with the test running now. The testing package parks every parallel
+test at its `t.Parallel` call until the serial ones are done, and each parked goroutine keeps the
+stack its test function's frame needs. In `internal/tui` those frames run to hundreds of KB,
+because a `Model` is about 120 KB by value. The race detector then shadows all of that again.
+One race-enabled process per package grew to several GB this way; a chunk holds a fraction of
+the package and gives it all back when it exits. When you add a table of parallel subtests
+whose cases build a `Model`, start each case through `runParallelCase`
+(`internal/tui/sessions_test.go`). It parks the case on a small stack and takes the body's
+frame only when the case runs.
+
+`GOMEMLIMIT` does not bound a race-enabled test process. It counts only the memory the Go
+runtime manages: the heap and goroutine stacks. The race detector's shadow memory is allocated
+outside it and is typically several times the program's own. Bound memory by running fewer,
+shorter processes, which the lanes and chunks above do; don't rely on a lower `GOMEMLIMIT`.
+
+Every test runs as `go test` would run it: nothing is skipped or weakened, and every process
+gets the same flags except for three the script sets itself. `-run` only picks a chunk's tests.
+One difference from `go test`: a prebuilt binary does not run `go test`'s vet subset first.
+golangci-lint's govet covers that in `make check` and in CI.
 
 The first flag is `-parallel`. `go test` runs a package's `t.Parallel` tests GOMAXPROCS at a
-time by default, as if it had the box to itself; a shard does not, and a shard that also fanned
-its tests out that wide would put shards × GOMAXPROCS driven e2e tests on the box at once —
-which is load, not logic, and is what makes the kit's waits time out and leak checks catch goroutines
-still unwinding. So the script divides its process budget among the processes it launches and
-passes each heavy shard that share as `-parallel`: 1 whenever the plan already fills the budget
-with processes (the default sizing, and CI's cap below), more only when `APOGEE_TEST_SHARDS`
-leaves slots over. The bound is the script's, not the tests': the isolated
-`go test -race -count=1 ./cmd/apogee/` keeps `go test`'s default and the whole box, which is
-where the `cmd/apogee` sweep's 202s → 66s (measured 2026-09-14) shows.
+time by default, as if it had the box to itself. A process here does not have the box to itself.
+If every lane also fanned its tests out that wide, lanes × GOMAXPROCS driven e2e tests would
+run on the box at once. That is load, not logic, and it is what makes the kit's waits time out
+and leak checks catch goroutines still unwinding. So the script divides its process budget
+(one per core, minus one, between 2 and 7) among the lanes, and passes each process its share
+as `-parallel`. The share is 1 whenever the lanes fill the budget, which is the default sizing
+and CI's. A batch of light packages takes at least 2, since those tests mostly sleep. The bound
+is the script's, not the tests'. The isolated `go test -race -count=1 ./cmd/apogee/` keeps
+`go test`'s default and the whole box, which is where the `cmd/apogee` sweep's 202s → 66s
+(measured 2026-09-14) shows.
 
-The second flag is `-timeout 30m`, and it follows from the first. `go test`'s default alarm is
-10 minutes per test binary, sized for a binary that fans its tests out; a shard running them
-one at a time takes close to the sum of its tests, which on a slow box passes 10 minutes with
-nothing hung — on a 4-core arm64 box with the race detector, `cmd/apogee` alone costs about
-20 minutes serial. 30 minutes still ends a real hang with a goroutine dump. A `-timeout` of your
-own wins (`make test ARGS=-timeout=1h`), since the extra flags come after the script's.
+The second flag is `-timeout 30m`. `go test`'s default alarm is 10 minutes per test binary,
+sized for a binary that fans its tests out. A chunk is sized by timings from whichever box
+measured them, and a slower box can take several times as long. 30 minutes covers that and
+still ends a real hang with a goroutine dump. A `-timeout` of your own wins
+(`make test ARGS=-timeout=1h`), since the extra flags come after the script's. A chunk's binary
+takes the test flags among `ARGS` in its own spelling (`-test.timeout=1h`). Every other flag,
+such as `-tags`, goes to the `go test -c` that builds it.
 
-Shards are balanced from the previous run's per-test durations, cached in `.test-timings`
-(gitignored, rewritten every run). A checkout that has never run the suite — a CI runner,
-every time — has no cache, so the script falls back to the committed
-`scripts/test-timings.seed` (same format) and packs by those; the run says which it read
-(`test-shards: timings: …` on stderr). A missing or stale cache costs only a less even split,
-never a skipped test: the roster comes from `go test -list`, and the script refuses to run a
-plan that does not cover every listed test. `APOGEE_TEST_SHARDS=n` overrides the per-package
-shard count; the script prints each shard's wall time so the balance can be read off a run.
-The seed goes stale as the suite's shape moves; refresh it with `make test-timings-seed`
-after a `make test` on a dev box (it copies `.test-timings` into the seed) and commit the
-result.
+Chunks and batches are balanced from the previous run's per-test durations, cached in
+`.test-timings` (gitignored, rewritten every run). A checkout
+that has never run the suite (a CI runner, every time) has no cache. The script then falls back
+to the committed `scripts/test-timings.seed` (same format) and packs by those. The run says
+which it read (`test-shards: timings: …` on stderr). A missing or stale cache costs only a less
+even split, never a skipped test. The roster comes from each binary's `-test.list`, and the
+script refuses to run a plan that does not cover every listed test. The seed goes stale as the
+suite's shape moves. Refresh it with `make test-timings-seed` after a `make test` on a dev box
+(it copies `.test-timings` into the seed), and commit the result.
 
-`go test -race -count=1 ./...` remains the equivalent single-process run — every test, nothing
-skipped — but it is not the supported shape, for the reason above: it hands every package the
-box at once, which is the load the shard plan exists to avoid. When bisecting or debugging,
-name the package and the test (`go test -race -count=1 -run TestX ./cmd/apogee/`) rather than
-the whole tree. CI runs `make test` under
-`APOGEE_TEST_SHARDS=2` — the same sharded form, capped because a hosted runner is a 4 vCPU
-box where each race-enabled shard carries its own memory cost.
+A failing chunk reports the failing tests' full output, just as `go test` does. A process that
+dies of a signal prints no verdict of its own. The script reports the signal and the tests the
+process was running: on Linux, a SIGKILL there is usually the kernel's OOM killer, so check
+`dmesg`. A passing run prints, per heavy package and for the batches, how many processes ran and
+the slowest of them, plus the run's wall time.
 
-Two opt-in knobs make the same script runnable on a box the default plan overloads, such as
-a Raspberry Pi 4 or 5. `APOGEE_TEST_SLOW=1` is the slow-box plan: one shard per heavy package
-(an explicit `APOGEE_TEST_SHARDS` still wins), every process `-parallel 1`, the rest `-p 2` —
-at most four driven tests on the box at once. It is explicit rather than sized off the core
-count because a Pi and CI's 4 vCPU runner report the same `nproc` and differ 3–5× per core.
-`APOGEE_TEST_RACE=0` drops the race detector: the stock Raspberry Pi OS arm64 kernels give
-39-bit (Pi 4) or 47-bit (Pi 5) virtual addresses and TSan requires 48
-(`FATAL: Found 39 - Supported 48`), so no `-race` binary runs on either at all. An unraced run announces itself on stderr and in its `==>` summary
-line, and it is not the `make check` gate — `make check` refuses to run with
-`APOGEE_TEST_RACE=0` set; race-enabled verification needs another box.
+The knobs:
+
+| Variable | Effect |
+| --- | --- |
+| `APOGEE_TEST_LANES=n` | How many test processes run at once. Default: the process budget above. |
+| `APOGEE_TEST_SHARDS=n` | The older knob, from when each heavy package ran as n long-lived shards. It is now read as `APOGEE_TEST_LANES` = n per heavy package + 1, the process count those shards came to. `APOGEE_TEST_LANES` wins. |
+| `APOGEE_TEST_SLOW=1` | The slow-box plan: three lanes (an explicit lane count still wins), every process `-parallel 1`. |
+| `APOGEE_TEST_RACE=0` | Drops the race detector (see below). |
+
+`go test -race -count=1 ./...` remains the equivalent single-process run (every test, nothing
+skipped), but it is not the supported shape. It hands every package the box at once, which is
+the load the lanes exist to avoid. When bisecting or debugging, name the package and the test
+(`go test -race -count=1 -run TestX ./cmd/apogee/`) rather than the whole tree. CI runs
+`make test` under `APOGEE_TEST_LANES=5`: a hosted runner is a 4 vCPU box, and each
+race-enabled process carries its own memory cost.
+
+`APOGEE_TEST_SLOW=1` makes the same script runnable on a box the default plan overloads, such as
+a Raspberry Pi 4 or 5. It is explicit rather than sized off the core count, because a Pi and
+CI's 4 vCPU runner report the same `nproc` and differ 3–5× per core. `APOGEE_TEST_RACE=0` drops
+the race detector. The stock Raspberry Pi OS arm64 kernels give 39-bit (Pi 4) or 47-bit (Pi 5)
+virtual addresses, and TSan requires 48 (`FATAL: Found 39 - Supported 48`), so no `-race` binary
+runs on either. An unraced run announces itself on stderr and in its `==>` summary line, and it
+is not the `make check` gate: `make check` refuses to run with `APOGEE_TEST_RACE=0` set. Run
+race-enabled verification on another box.
 
 `APOGEE_REQUIRE_LANDLOCK_NET=1` goes the other way: it makes a skip a failure. The landlock
 network test, `TestLandlockProbeNetwork` in `internal/platform`, normally skips on a host that

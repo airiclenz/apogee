@@ -1073,16 +1073,17 @@ sweep took `go test -race -count=1 ./cmd/apogee/` from **202 s** serial to **66 
 9-core box (three consecutive `-count=3` runs green at ≈ 62 s each), and it is what tipped the
 one wait that was already marginal at its default — the in-process 400-line reply, whose bound
 is now the named `streamReplyWait` its pty twin and the judge share (the streamed-fixture
-paragraph below has the arithmetic). That figure is the isolated package run. Under `make test` the shards
-already spend the box, so `scripts/test-shards.sh` passes each heavy shard a `-parallel` bound —
-its share of the process budget, 1 at the default sizing — and a shard runs its parallel tests
-that many at a time: the alternative, `go test`'s GOMAXPROCS-wide default in every shard at once,
-put up to thirty-six driven tests on the 9-core box and turned the sharded suite red on load
-alone (waits timing out, leak checks, PTY frames). The kit's waits stay sized for a shard that has
-its share of the box, not for one competing with seven others' fan-out. Which is also why
-`make test` is the supported way to run this package: a raw multi-package `go test` (`./...`, or
-`./cmd/apogee/... ./internal/tui/...` on one line) has no shard plan bounding it at all, and the
-driven tests report that load as a failure. One package at a time, narrowed with `-run`, is the
+paragraph below has the arithmetic). That figure is the isolated package run. Under `make test`
+the lanes already spend the box. `scripts/test-shards.sh` runs the package as chunks of about two
+minutes each, a fresh process per chunk, and passes each process a `-parallel` bound: its share
+of the process budget, 1 at the default sizing. A process runs its parallel tests that many at a
+time. The alternative, `go test`'s GOMAXPROCS-wide default in every process at once, put up to
+thirty-six driven tests on the 9-core box and turned the split suite red on load alone (waits
+timing out, leak checks, PTY frames). The kit's waits stay sized for a process that has its share
+of the box, not for one competing with six others' fan-out. Which is also why `make test` is the
+supported way to run this package: a raw multi-package `go test` (`./...`, or
+`./cmd/apogee/... ./internal/tui/...` on one line) has no plan bounding it at all, and the driven
+tests report that load as a failure. One package at a time, narrowed with `-run`, is the
 debugging shape.
 
 The per-test figures that follow are test time under `-race` on an idle box, not wall clock, and

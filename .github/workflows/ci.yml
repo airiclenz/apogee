@@ -48,16 +48,16 @@ jobs:
           fi
       - name: go build
         run: go build ./...
-      - name: go test (race, sharded)
-        # `make test` is scripts/test-shards.sh: the race-enabled suite split across several
-        # concurrent `go test` processes, the same command `make check` runs locally, so the
-        # suite has one definition (as with `make actionlint` above). The shard count is
-        # normally sized off nproc; a ubuntu-latest runner is 4 vCPU / 16 GB, and every shard
-        # is a race-enabled test binary with its own memory cost, so the cap keeps the run at
-        # two shards per heavy package rather than letting the runner OOM under more.
+      - name: go test (race, in lanes)
+        # `make test` is scripts/test-shards.sh: the race-enabled suite run as a queue of
+        # short-lived test processes over a fixed number of lanes, the same command `make check`
+        # runs locally, so the suite has one definition (as with `make actionlint` above). The
+        # lane count is normally sized off nproc; a ubuntu-latest runner is 4 vCPU / 16 GB, and
+        # every lane runs a race-enabled test binary with its own memory cost, so five lanes is
+        # the process count the old two-shards-per-heavy-package cap came to.
         run: make test
         env:
-          APOGEE_TEST_SHARDS: 2
+          APOGEE_TEST_LANES: 5
       - name: landlock UDP arm runs (row #13)
         # `make test` above counts a skipped TestLandlockProbeNetwork as a pass, so on its own it
         # cannot tell a runner that proved row #13's UDP arm from one where landlock, ABI >= 4 or
