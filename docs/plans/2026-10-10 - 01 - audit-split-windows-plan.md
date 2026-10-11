@@ -127,7 +127,11 @@ and a test that every absolute path written satisfies `filepath.IsAbs`.
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/auditsplit/`
 **Commit:** `feat(auditsplit): write the audit run folder and receipt`
 
-## 3. Hidden `apogee audit-split` subcommand
+## 3. Hidden `apogee audit-split` subcommand — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — internal/auditsplit/doc.go: made necessary by the new main.go, which the package doc's "The files, one line each" map now names.
+NOTES (2026-10-11): the one entry is `auditsplit.Main(args []string, stdout, stderr io.Writer) int` (args = the words after `audit-split`; workspace = os.Getwd()); exit 1 on every failure, a malformed argv included, as split.sh's die; the split form passes PART_BYTES to the internal split as the raw string, so a non-digit value is an unknown budget exactly as in split.sh (the public Split takes an int).
+NOTES (2026-10-11): the cobra command sets DisableFlagParsing (so `--flags` and dash-led scope words reach Main; `apogee audit-split --help` is therefore a usage refusal) and captures Main's stderr line into the returned exitError, so main prints the cause once and exits with Main's code.
 
 Depends on item 2.
 

@@ -160,6 +160,8 @@
 // upgrade command and replaces a release-archive install — staged, `--version`-checked, swapped —
 // plus the start-up sweep of a Windows swap's `<exe>.old`; update_swap_unix.go its one-rename
 // swap, and update_swap_windows.go the move-aside swap that renames back on failure (ADR 0097).
+// auditsplit.go is the hidden `apogee audit-split`, the shipped `audit` recipe's scope split in
+// Go — a thin shell over internal/auditsplit's Main, left out of --help as no public contract.
 //
 // The platform helper: confined_exec_linux.go intercepts the __confined-exec sentinel
 // before Cobra, so the landlock backend can confine a subprocess by re-invoking this

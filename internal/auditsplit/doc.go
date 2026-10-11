@@ -30,4 +30,6 @@
 // classification and the four split mechanics — computed in memory, with no file written.
 // split.go is the run folder: Split writes the plan as the part, group and list files and prints
 // the receipt; Flags reads the ground truth's concurrency answer.
+// main.go is the `apogee audit-split` command's argv over the two: Main, the one entry the
+// binary's hidden subcommand and a test binary standing in for apogee both call.
 package auditsplit

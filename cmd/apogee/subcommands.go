@@ -17,6 +17,9 @@ import "github.com/spf13/cobra"
 // project adopt`, the terminal answer to the Allow rules a Project config proposes (ADR 0096 §4).
 // `update` is the seventh: `apogee update`, the explicit upgrade of a release-archive install and
 // the refusal that names every other channel's own upgrade (ADR 0097).
+// `audit-split` is the eighth and the one hidden child: the shipped `audit` recipe's scope split,
+// which only that recipe's script stages call, so it is not a public contract and `apogee --help`
+// leaves it out.
 // Registering a child is what makes a
 // Commands section appear under `apogee --help` — the one permitted output delta of the
 // Phase-5 subcommand work.
@@ -27,5 +30,5 @@ import "github.com/spf13/cobra"
 // fails with the same `unknown command` error it does today.
 func subcommands() []*cobra.Command {
 	return []*cobra.Command{newProbeCommand(), newHeadlessCommand(), newDaemonCommand(), newUndoCommand(), newMCPCommand(),
-		newProjectCommand(), newUpdateCommand()}
+		newProjectCommand(), newUpdateCommand(), newAuditSplitCommand()}
 }
