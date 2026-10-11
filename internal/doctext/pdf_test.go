@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -276,9 +277,36 @@ func deflatedStream(t *testing.T, body string, entries ...string) string {
 // deflatedZeros returns the deflated form of `inflated` zero bytes, streamed through the
 // deflater in chunks so the test never holds the inflated bytes itself: eighty mebibytes of
 // zeros deflate to about eighty kibibytes, which is exactly the shape of a decompression bomb.
+//
+// The deflate is done once per size and kept ([zeroBombs]): it is deterministic, it costs about
+// fourteen seconds of CPU per eighty mebibytes under -race, and a dozen fixtures ask for the same
+// two sizes. Every caller gets its own copy, so no fixture can reach another's bytes.
 func deflatedZeros(t *testing.T, inflated int) []byte {
 	t.Helper()
 
+	entry, _ := zeroBombs.LoadOrStore(inflated, &zeroBomb{})
+	bomb := entry.(*zeroBomb)
+	bomb.once.Do(func() { bomb.deflated, bomb.err = deflateZeros(inflated) })
+	if bomb.err != nil {
+		t.Fatalf("deflate %d zero bytes: %v", inflated, bomb.err)
+	}
+	return bytes.Clone(bomb.deflated)
+}
+
+// zeroBombs holds [deflatedZeros]' fixtures by inflated size, each a *zeroBomb.
+var zeroBombs sync.Map
+
+// zeroBomb is one size's deflated zeros, made by whichever test asks for that size first. The error
+// is kept beside the bytes rather than failed on inside the once, so every test asking for a size
+// that could not be made fails on its own goroutine.
+type zeroBomb struct {
+	once     sync.Once
+	deflated []byte
+	err      error
+}
+
+// deflateZeros is [deflatedZeros]' deflate itself.
+func deflateZeros(inflated int) ([]byte, error) {
 	const chunk = 1 << 16
 
 	var compressed bytes.Buffer
@@ -286,13 +314,13 @@ func deflatedZeros(t *testing.T, inflated int) []byte {
 	zeros := make([]byte, chunk)
 	for written := 0; written < inflated; written += chunk {
 		if _, err := writer.Write(zeros[:min(chunk, inflated-written)]); err != nil {
-			t.Fatalf("deflate the zeros: %v", err)
+			return nil, err
 		}
 	}
 	if err := writer.Close(); err != nil {
-		t.Fatalf("close the deflater: %v", err)
+		return nil, fmt.Errorf("close the deflater: %w", err)
 	}
-	return compressed.Bytes()
+	return compressed.Bytes(), nil
 }
 
 // flateStreamObject wraps deflated bytes as a stream object body whose dictionary names
