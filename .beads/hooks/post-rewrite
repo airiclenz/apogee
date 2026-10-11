@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# beads Dolt pull after a rebase (apogee-beads-replica-drift).
+#
+# `git pull --rebase` (and `pull.rebase = true`) fires no post-merge, so the sync that
+# post-merge runs after a merging pull would be skipped. post-rewrite fires once a rebase
+# finishes; $1 is "rebase" or "amend", and an amend brings in nothing from the remote, so
+# only a rebase syncs. bd does not manage this hook, so `bd hooks install` leaves it
+# alone. It never fails: post-rewrite's exit status cannot undo the rebase anyway.
+[ "$1" = rebase ] || exit 0
+sh "$(git rev-parse --show-toplevel)/.beads/hooks/bd-sync-soft" </dev/null >&2
+exit 0

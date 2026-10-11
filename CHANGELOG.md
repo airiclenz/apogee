@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- Changed (development): a rebasing `git pull` now syncs the beads issue database too. A new `.beads/hooks/post-rewrite` runs `bd-sync-soft` after every finished rebase, since `git pull --rebase` (or `pull.rebase = true`) fires no `post-merge`; an amend does not sync (apogee-beads-replica-drift).
+
 - **The project's `.apogee/skills` is found from a subfolder.** apogee now resolves the Project root — the nearest folder holding a `.apogee/`, from the workspace up to its git top-level, never your home folder — and reads the project's `.apogee/skills` from there, so a session started in a subfolder of a project still has the project's skills; the bare `skills/` folder stays the workspace's. `/skills` and the `/` menu label such a skill `workspace`, and an empty catalog names the folder discovery looked in. Outside a repository nothing changes.
 
 - **Project config is read at startup.** A `<Project root>/.apogee/config.yaml` is now layered over `~/.apogee/config.yaml` before the environment and flags. Project-param keys (`context-files.*`, `use-project-skills`, `workflow-retries`, `workflow-continuations`, `workflow-wake`) take the project's value. Tighten-only lists (`tools.disabled`, `url-safety.deny-hosts`) are the union of both files. A global-only key in the project file is ignored, with one notice that names each one. If the project file fails to parse or validate, apogee prints one notice naming its path, skips the layer and keeps starting. `apogee daemon` reads no Project config. A /settings row for a tighten-only list that holds project entries is read-only, so a commit never writes project entries into the global file.
