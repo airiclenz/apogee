@@ -32,7 +32,7 @@ A `Makefile` wraps the common Go invocations:
 | `make actionlint` | Lint the GitHub workflow files with the pinned `actionlint` |
 | `make cross` | Cross-compile every package for all six release targets (Linux/macOS/Windows × amd64/arm64), as a check |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, `GOOS=windows go vet` over `internal/platform`, `internal/probe` and `internal/console`, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make check` | The full acceptance gate — gofmt, `GOOS=windows go vet` over `internal/platform`, `internal/probe`, `internal/console` and `internal/auditsplit`, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
 | `make release-smoke VERSION=vX.Y.Z` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
 | `make clean` | Remove the built binary |
 | `make help` | List every target |
@@ -232,8 +232,8 @@ vulnerabilities your code actually reaches; it is the one gate that needs the ne
 it fails with the tool's own error when the database is unreachable rather than passing
 quietly. Both run in CI too.
 Windows-tagged tests run on a `windows-latest` job; `make check` on a Linux or macOS box
-vets the three trees that job tests (`GOOS=windows go vet ./internal/platform/...
-./internal/probe/... ./internal/console/...`) but cannot run them.
+vets the four trees that job tests (`GOOS=windows go vet ./internal/platform/...
+./internal/probe/... ./internal/console/... ./internal/auditsplit/...`) but cannot run them.
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` builds the same binary, minus
 one field of provenance: `make build` injects the build number — the commit count, via

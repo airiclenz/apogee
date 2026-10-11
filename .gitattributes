@@ -27,6 +27,11 @@ cmd/apogee/defaults/** text eol=lf
 internal/config/defaults/** text eol=lf
 VERSION text eol=lf
 
+# The shipped skills are go:embed'd too, for the same reason: //go:embed bakes the bytes into the
+# binary verbatim, so a core.autocrlf=true checkout would ship every SKILL.md and stage prompt with
+# a carriage return on each line, and the `/audit` split would hand its parts to the model that way.
+internal/skills/shipped/** text eol=lf
+
 # Git hooks are POSIX sh scripts run by Git Bash on Windows: a core.autocrlf=true checkout
 # would end every line in a carriage return and break them, so they stay LF everywhere.
 .beads/hooks/** text eol=lf

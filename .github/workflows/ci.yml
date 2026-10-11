@@ -172,7 +172,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: go test (race)
-        # These three trees rather than `./...`: the rest of the suite is Linux-shaped (the
+        # These four trees rather than `./...`: the rest of the suite is Linux-shaped (the
         # landlock battery, the PTY drivers), while the Windows half of the product is the
         # confinement backend — `internal/platform` carries `winlabel`'s walk — whose tests
         # label the runner's own disk, throwaway by construction, and the ConPTY Console in
@@ -185,7 +185,12 @@ jobs:
         # of one; the leg is here so the package's untagged tests also prove themselves on
         # the Windows toolchain, and so a future tagged test has a home.
         #
+        # `internal/auditsplit` is here for the same reason: it is the shipped `/audit`
+        # recipe's split, which must run on a stock Windows box and write the same parts it
+        # writes on POSIX, so its untagged tests prove its path handling on the Windows
+        # toolchain rather than only on Linux.
+        #
         # -race needs cgo, which the runner's MinGW gcc satisfies. Should it ever fail to
         # link here, drop -race from this one job and say so in this comment — the C-20
         # race test then rests on its own iteration count alone.
-        run: go test -race -count=1 ./internal/platform/... ./internal/probe/... ./internal/console/...
+        run: go test -race -count=1 ./internal/platform/... ./internal/probe/... ./internal/console/... ./internal/auditsplit/...

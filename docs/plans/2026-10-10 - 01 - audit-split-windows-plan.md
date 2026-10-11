@@ -271,7 +271,9 @@ round-trips.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run Quote ./internal/platform/`
 **Commit:** `fix(agent): quote recipe values for the host's shell`
 
-## 7. LF pin and Windows CI coverage
+## 7. LF pin and Windows CI coverage — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): consequential edit — docs/manual/building.md: the `make check` row of the targets table also listed the Windows-vetted trees, so it names `internal/auditsplit` alongside the Windows-tagged-tests paragraph the item named.
 
 **What:**
 **Goal:** every file under `internal/skills/shipped/` is LF in any checkout, and the `test-windows` CI
