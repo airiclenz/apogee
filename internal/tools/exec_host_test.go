@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/platform"
@@ -206,6 +207,19 @@ var notASeam = 3
 	}
 }
 
+// sourceTypes is the one source importer both exec-seam guards type-check through. Importing this
+// package's dependencies from source is nearly all of a check's cost — half a minute apiece on a
+// slow box — and the importer keeps every package it has checked, so the second guard reuses the
+// first one's work. The importer is not safe for concurrent use (it marks a package in flight in a
+// plain map) and the guards run in parallel, so a check holds mu from its first parse to its last
+// lookup. fset is the importer's own, and every file a check parses joins it.
+var sourceTypes struct {
+	once     sync.Once
+	mu       sync.Mutex
+	fset     *token.FileSet
+	importer types.Importer
+}
+
 // packageExecSeams type-checks this package's non-test files — plus extra, fixture sources keyed
 // by file name, type-checked as members of the package — and reports every package-level var
 // whose underlying type is a function signature or whose type is platform.Host, sorted by
@@ -215,7 +229,14 @@ var notASeam = 3
 func packageExecSeams(t *testing.T, extra map[string]string) []string {
 	t.Helper()
 
-	fset := token.NewFileSet()
+	sourceTypes.once.Do(func() {
+		sourceTypes.fset = token.NewFileSet()
+		sourceTypes.importer = importer.ForCompiler(sourceTypes.fset, "source", nil)
+	})
+	sourceTypes.mu.Lock()
+	defer sourceTypes.mu.Unlock()
+
+	fset := sourceTypes.fset
 	var files []*ast.File
 	for _, path := range packageNonTestGoFiles(t) {
 		file, err := parser.ParseFile(fset, path, nil, 0)
@@ -237,7 +258,7 @@ func packageExecSeams(t *testing.T, extra map[string]string) []string {
 		files = append(files, file)
 	}
 
-	conf := types.Config{Importer: importer.ForCompiler(fset, "source", nil)}
+	conf := types.Config{Importer: sourceTypes.importer}
 	pkg, err := conf.Check("github.com/airiclenz/apogee/internal/tools", fset, files, nil)
 	if err != nil {
 		t.Fatalf("type-check internal/tools: %v", err)
