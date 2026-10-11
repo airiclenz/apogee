@@ -251,7 +251,15 @@ Depends on items 1–8.
 **Acceptance:** `make -n dist release-status release-smoke` shows only `go run ./cmd/release …`; `make help | grep -c release-scoop` prints 0; `make actionlint`; `go vet .`; `git grep -n 'release-\(scoop\|winget\|smoke\)\.sh' -- ':!CHANGELOG.md' ':!**/archived/**' ':!docs/plans/**' ':!.beads/**'` prints nothing.
 **Commit:** `build(release): make targets wrap cmd/release; retire the bash release scripts`
 
-## 10. `release-notes-apogee`: coordinator and shared formats
+## 10. `release-notes-apogee`: coordinator and shared formats — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the personal skill's `since` and `save` arguments and its stand-aside guard are not ported — the baseline is always `status --json` and nothing is written outside the run dir and the output file, per the item's read-only statement.
+
+NOTES (2026-10-11): the coordinator passes a `VERSION:` key (the normalised argument, else `unreleased`) to merge and notes, because `status --json`'s `version` is the micro-bumped checkout VERSION, not the release's number; `_apogee.md` documents this.
+
+NOTES (2026-10-11): `_inventory-format.md` renames the `Plan hints` field to `Refs` (plan item, ADR or bead id named in commits/changelog, recorded never opened) — with no plans scout, "do not open plan files, the plans phase does" had no owner; the Surface vocabulary drops `web-ui` and `library`, which apogee has no surface for. Items 11–12 emit against this shape.
+
+NOTES (2026-10-11): the five files total exactly 380 lines (the acceptance ceiling); a throwaway skills.Load over `Sources{ProjectRoot: <repo>}` (deleted after) loaded `release-notes-apogee` with no skips.
 
 **What:**
 **Goal:** `.apogee/skills/release-notes-apogee/SKILL.md` is a host-agnostic, read-only coordinator that builds the evidence inventory since the last published release and writes the release notes, plus its shared files `prompts/_shared.md`, `prompts/_apogee.md`, `prompts/_inventory-format.md`, `prompts/_notes-format.md`.
