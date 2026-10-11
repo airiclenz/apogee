@@ -3,10 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // stubLookup answers with a canned result and records the query it was asked, so a test can assert
@@ -193,6 +196,68 @@ func TestLoadSkillReportsAMiss(t *testing.T) {
 	}
 	if strings.Contains(res.Content, "<skill:") {
 		t.Errorf("a miss must carry no body:\n%s", res.Content)
+	}
+}
+
+// TestLoadSkillFindsASkillWrittenAfterStartUp pins the stale-catalogue fix: a skill written to disk
+// after the catalog was built is found by the next load_skill call, because a miss re-scans a
+// reloadable catalog before it is answered.
+func TestLoadSkillFindsASkillWrittenAfterStartUp(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	tool := NewLoadSkill(skills.NewProvider(skills.Sources{Home: home}))
+
+	dir := filepath.Join(home, "skills", "handoff")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nid: handoff\nsummary: write a handoff\n---\nCompact the conversation."
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := callLoadSkill(t, tool, "handoff")
+	if !strings.Contains(res.Content, "<skill:") || !strings.Contains(res.Content, "Compact the conversation.") {
+		t.Errorf("a skill written after start-up was not loaded:\n%s", res.Content)
+	}
+}
+
+// countingReloader is a stubLookup that can reload, counting the reloads it is asked for.
+type countingReloader struct {
+	stubLookup
+	reloads int
+}
+
+func (c *countingReloader) Reload() error {
+	c.reloads++
+	return nil
+}
+
+// TestLoadSkillHitDoesNotReload pins what a reload costs: a found skill answers from the snapshot
+// with no re-scan, and a miss — the empty rung or the candidates rung — re-scans exactly once.
+func TestLoadSkillHitDoesNotReload(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		res     domain.SkillLookupResult
+		reloads int
+	}{
+		{name: "hit", res: domain.SkillLookupResult{Found: true, Skill: domain.ResolvedSkill{ID: "debugging", Body: "b"}}, reloads: 0},
+		{name: "miss", res: domain.SkillLookupResult{}, reloads: 1},
+		{name: "candidates", res: domain.SkillLookupResult{Candidates: []domain.SkillCandidate{{ID: "a", Summary: "s"}}}, reloads: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			lookup := &countingReloader{stubLookup: stubLookup{res: tc.res}}
+			callLoadSkill(t, NewLoadSkill(lookup), "debugging")
+			if lookup.reloads != tc.reloads {
+				t.Errorf("reloads = %d, want %d", lookup.reloads, tc.reloads)
+			}
+		})
 	}
 }
 

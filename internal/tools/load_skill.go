@@ -50,6 +50,10 @@ type loadSkillArgs struct {
 // Execute always has a non-nil lookup; the defensive nil-check keeps a hand-built registry that
 // registers it anyway from panicking. Stateless across Turns (ADR 0008): one query, one answer, and
 // nothing about a call survives into the next.
+//
+// A miss re-scans the catalog once before it is answered, when the lookup can re-scan
+// (lookupFresh): the human-facing doors reload on use, and without this the model's door would
+// keep answering from the start-up snapshot.
 type LoadSkill struct {
 	toolSpec
 	lookup domain.SkillLookup
@@ -92,7 +96,35 @@ func (t *LoadSkill) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, "load_skill is unavailable: no skill catalog is configured"), nil
 	}
 
-	return okResult(call.ID, renderSkillLookup(query, t.lookup.LookupSkill(query), domain.FanOutOffered(ctx))), nil
+	return okResult(call.ID, renderSkillLookup(query, t.lookupFresh(query), domain.FanOutOffered(ctx))), nil
+}
+
+// skillReloader is the optional capability of a lookup that can re-scan its catalog —
+// *skills.Provider has it, a fixed *skills.Catalog does not. It is asserted for here rather than
+// added to domain.SkillLookup, so a lookup that cannot reload stays a valid catalog for this tool.
+type skillReloader interface {
+	Reload() error
+}
+
+// lookupFresh searches the catalog for query, and on a miss — no skill found, which includes the
+// candidates rung — reloads a reloadable lookup once and searches again, so a skill written to
+// disk after start-up is found by the next call rather than only after a human-facing rescan
+// ("/" menu, /skills). A hit costs no reload.
+//
+// The reload error is soft and deliberately dropped: Provider.Reload swaps in the partial catalog
+// regardless (Load's always-usable contract), and the skills it could not load are reported on
+// /skills, not to the model — so the second search runs against whatever the scan produced.
+func (t *LoadSkill) lookupFresh(query string) domain.SkillLookupResult {
+	res := t.lookup.LookupSkill(query)
+	if res.Found {
+		return res
+	}
+	reloader, ok := t.lookup.(skillReloader)
+	if !ok {
+		return res
+	}
+	_ = reloader.Reload()
+	return t.lookup.LookupSkill(query)
 }
 
 // The line a recipe skill's body is followed by (ADR 0087 D6): how the recipe is started. The
