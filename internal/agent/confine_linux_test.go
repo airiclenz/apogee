@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/auditsplit"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -24,12 +25,22 @@ import (
 // does. Without it a live confinement proof in this package would re-exec the test binary as an
 // ordinary test run instead of confining anything, because the landlock backend re-execs
 // os.Executable().
+//
+// It intercepts `audit-split` too: a live script stage runs this test binary as {apogee}
+// (livePlanScripts), so the shipped audit recipe's `{apogee} audit-split …` line reaches the same
+// entry the product binary's hidden subcommand runs, never a second run of this package's tests.
 func TestMain(m *testing.M) {
 	if len(os.Args) >= 2 && os.Args[1] == platform.ConfinedExecSentinel() {
 		os.Exit(runConfinedExecChild(os.Args[2:]))
 	}
+	if len(os.Args) >= 2 && os.Args[1] == auditSplitCommand {
+		os.Exit(auditsplit.Main(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	os.Exit(m.Run())
 }
+
+// auditSplitCommand is the hidden subcommand the shipped audit recipe's script stages run.
+const auditSplitCommand = "audit-split"
 
 // runConfinedExecChild mirrors cmd/apogee's sentinel dispatcher: argv is [<encoded-box>, "--",
 // <real argv...>]. On success ApplyLandlockAndExec replaces this process image and never returns.
@@ -52,7 +63,8 @@ func runConfinedExecChild(args []string) int {
 
 // livePlanScripts builds a Plan-mode Agent on the host's real Confiner and terminal over a fresh
 // workspace, and returns the script runner a recipe's stages use, the workspace and a workflow
-// folder under the session scratch dir. It skips where the kernel cannot enforce a box.
+// folder under the session scratch dir. Its apogee executable is this test binary, which TestMain
+// turns into `apogee audit-split`. It skips where the kernel cannot enforce a box.
 func livePlanScripts(t *testing.T, recipe workflow.Recipe) (scripts *recipeScripts, workspace, folder string) {
 	t.Helper()
 	confiner := platform.NewConfiner()
@@ -69,6 +81,11 @@ func livePlanScripts(t *testing.T, recipe workflow.Recipe) (scripts *recipeScrip
 	cfg.Confiner = confiner
 	cfg.WorkspaceDir = workspace
 	cfg.ScratchDir = scratch
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	cfg.ApogeeExecutable = executable
 	reg := domain.NewToolRegistry()
 	_ = reg.Register(tools.NewTerminal(workspace, nil))
 	cfg.Tools = reg
@@ -113,8 +130,9 @@ func TestRecipe_APlanScriptWritesOnlyItsWorkflowFolder(t *testing.T) {
 }
 
 // TestRecipe_TheShippedAuditSplitRunsInPlan runs the shipped audit recipe's split stage, exactly
-// as its header spells it, in Plan on a fixture workspace: the stage that used to be refused in
-// Plan (ADR 0087 D4, "a read-only audit works in Plan mode") lists the scope into its folder.
+// as its header spells it — `{apogee} audit-split …`, this test binary standing in for apogee — in
+// Plan on a fixture workspace: the stage that used to be refused in Plan (ADR 0087 D4, "a
+// read-only audit works in Plan mode") lists the scope into its folder and reports status=ok.
 func TestRecipe_TheShippedAuditSplitRunsInPlan(t *testing.T) {
 	t.Parallel()
 	recipe, ok := skills.NewProvider(skills.Sources{UseShippedSkills: true}).Recipe("audit")
@@ -122,9 +140,10 @@ func TestRecipe_TheShippedAuditSplitRunsInPlan(t *testing.T) {
 		t.Fatal("the shipped audit recipe is not served")
 	}
 	var command string
+	var returns workflow.ReceiptSpec
 	for _, stage := range recipe.Plan.Stages {
 		if stage.Name == "split" {
-			command = stage.Run
+			command, returns = stage.Run, stage.Returns
 		}
 	}
 	if command == "" {
@@ -147,6 +166,13 @@ func TestRecipe_TheShippedAuditSplitRunsInPlan(t *testing.T) {
 	}
 	if !strings.Contains(out.Stdout, "files=2") {
 		t.Errorf("split receipt = %q, want files=2", out.Stdout)
+	}
+	// A script stage is ok on exit 0 with every field its returns: declares (workflow's
+	// scriptReceipt), so each declared key must come back as a line of its own.
+	for key := range returns {
+		if !strings.Contains("\n"+out.Stdout, "\n"+key+"=") {
+			t.Errorf("split receipt = %q, want the declared %s= line for status=ok", out.Stdout, key)
+		}
 	}
 	if data, err := os.ReadFile(filepath.Join(folder, "scope.txt")); err != nil || string(data) != "main.go\nmain_test.go\n" {
 		t.Errorf("scope.txt = %q, %v; want both fixture files", data, err)

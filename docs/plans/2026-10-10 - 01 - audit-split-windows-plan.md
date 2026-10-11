@@ -194,7 +194,12 @@ named `apogee` is rejected.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run TestProjectConfig ./cmd/apogee/`
 **Commit:** `feat(workflow): {apogee} placeholder names the apogee executable`
 
-## 5. The audit recipe runs `{apogee} audit-split`
+## 5. The audit recipe runs `{apogee} audit-split` — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the Plan-mode test reads "status=ok" as the stage rule workflow's unexported scriptReceipt applies — exit 0 plus a line for every field the split stage's `returns:` declares — since auditsplit prints no literal `status=` line and scriptReceipt is not reachable from package agent.
+NOTES (2026-10-11): livePlanScripts sets Config.ApogeeExecutable to the test binary for every live Plan test (not only the audit one); TestMain's `audit-split` arm calls auditsplit.Main.
+NOTES (2026-10-11): the legacy-plan sentence lives in skillDir (it needs the recipe id), keyed on fs.ErrNotExist from stageSkillFile, so it covers any `{{SKILL_DIR}}/<file>` a shipped skill no longer carries, not split.sh alone.
+NOTES (2026-10-11): docs/ still name split.sh (manual, ADRs, design docs); item 8 owns those amendments.
 
 Depends on item 4.
 

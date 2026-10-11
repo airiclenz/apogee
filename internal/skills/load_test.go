@@ -5,17 +5,15 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/airiclenz/apogee/internal/auditsplit"
 	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -1192,7 +1190,8 @@ func TestLoadInvalidRecipeIsASkipNamingTheProblem(t *testing.T) {
 
 // The shipped audit skill is a recipe (ADR 0087 D6): it loads with its stages through
 // workflow.Validate, declares scope as its one required input and focus as an optional one, opens
-// on the split script it carries, asks the focus with `all` as the answer a human-less Driver
+// on the script stage that runs apogee's own split (no shell script rides in the skill folder),
+// asks the focus with `all` as the answer a human-less Driver
 // takes, and ends on the report merge.
 func TestShippedAuditRecipeLoads(t *testing.T) {
 	t.Parallel()
@@ -1216,11 +1215,11 @@ func TestShippedAuditRecipeLoads(t *testing.T) {
 		t.Fatalf("the loaded recipe does not validate: %v", problems)
 	}
 	split := stages[0]
-	if split.Kind != workflow.StageScript || !strings.Contains(split.Run, "{{SKILL_DIR}}/split.sh") {
-		t.Errorf("the first stage = %+v, want the script stage running the bundled split.sh", split)
+	if split.Kind != workflow.StageScript || !strings.HasPrefix(split.Run, "{apogee} audit-split ") {
+		t.Errorf("the first stage = %+v, want the script stage running {apogee} audit-split", split)
 	}
-	if _, err := fs.Stat(shippedFiles, shippedDir+"/audit/split.sh"); err != nil {
-		t.Errorf("the recipe runs split.sh, which the embedded skill folder does not carry: %v", err)
+	if _, err := fs.Stat(shippedFiles, shippedDir+"/audit/split.sh"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the embedded audit folder still carries split.sh (stat err %v); apogee audit-split replaced it", err)
 	}
 	at := slices.IndexFunc(stages, func(stage workflow.Stage) bool { return stage.Name == "focus" })
 	if at < 0 || stages[at].Kind != workflow.StageAsk || stages[at].Default != "all" {
@@ -1323,362 +1322,68 @@ func lastHeading(body string) (heading, tail string) {
 	return "", body
 }
 
-// The fixture tree the split tests cut: 360 source lines over three folders, one test file, one
-// file with a concurrency primitive, and the docs and prose a code audit never reads.
-func auditFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	lines := func(n int, extra string) string {
-		return strings.Repeat("x := 1\n", n-1) + extra + "\n"
+// The split and flags stages' receipts are apogee audit-split's: what auditsplit.Split and
+// auditsplit.Flags print is exactly the summary plus every field the stage's `returns:` declares,
+// one KEY=value a line, so the recipe and the subcommand cannot drift apart.
+func TestShippedAuditReceiptsMatchTheSubcommand(t *testing.T) {
+	t.Parallel()
+	recipe, ok := NewProvider(Sources{UseShippedSkills: true}).Recipe("audit")
+	if !ok {
+		t.Fatal("the shipped audit recipe is not served")
 	}
-	files := map[string]string{
-		"cmd/app/main.go":         lines(60, "x := 1"),
-		"internal/a/a1_test.go":   lines(20, "x := 1"),
-		"internal/b/b1.go":        lines(30, "go func() {}()"),
-		"README.md":               lines(10, "prose"),
-		"docs/design/notes.go":    lines(10, "x := 1"),
-		"internal/a/testdata/f.g": lines(10, "x := 1"),
-	}
-	for i := 1; i <= 6; i++ {
-		files[fmt.Sprintf("internal/a/a%d.go", i)] = lines(30, "x := 1")
-	}
-	for i := 2; i <= 4; i++ {
-		files[fmt.Sprintf("internal/b/b%d.go", i)] = lines(30, "x := 1")
-	}
-	for name, body := range files {
-		path := filepath.Join(root, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	workspace := t.TempDir()
+	for name, body := range map[string]string{
+		"main.go":      "package main\n\nfunc main() {}\n",
+		"main_test.go": "package main\n",
+	} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
-}
-
-// runAuditSplit runs the embedded split.sh from workspace over scope, as the recipe's script stage
-// does, with partLines as its PART_LINES ("" leaves it unset) and partBytes as the engine's split
-// budget, and returns the workflow folder and the receipt lines it printed.
-func runAuditSplit(t *testing.T, workspace, scope, partLines, partBytes string) (string, map[string]string) {
-	t.Helper()
-	// GIT_DIR at a missing folder makes `git ls-files` fail, so the listing takes the find
-	// fallback over the fixture whatever repository the temp dir happens to sit in.
-	env := append(os.Environ(), "PART_LINES="+partLines, "GIT_DIR="+filepath.Join(workspace, "no-git"))
-	return runAuditSplitWithEnv(t, workspace, scope, partBytes, env)
-}
-
-// runAuditSplitWithEnv runs the embedded split.sh as runAuditSplit does, in exactly env.
-func runAuditSplitWithEnv(t *testing.T, workspace, scope, partBytes string, env []string) (string, map[string]string) {
-	t.Helper()
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("no POSIX sh on this host to run split.sh")
-	}
-	script, err := fs.ReadFile(shippedFiles, shippedDir+"/audit/split.sh")
-	if err != nil {
-		t.Fatalf("read the embedded split.sh: %v", err)
 	}
 	run := t.TempDir()
-	scriptPath := filepath.Join(run, "split.sh")
-	if err := os.WriteFile(scriptPath, script, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("sh", scriptPath, run, scope, "", partBytes)
-	cmd.Dir = workspace
-	cmd.Env = env
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("split.sh failed: %v\n%s", err, out)
-	}
-	receipt := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		key, value, found := strings.Cut(line, "=")
-		if !found || key == "" || strings.ToLower(key) != key || strings.ContainsAny(key, " \t") {
-			t.Fatalf("split.sh printed %q, which is not one KEY=value line", line)
-		}
-		if _, repeated := receipt[key]; repeated {
-			t.Fatalf("split.sh printed the key %q twice", key)
-		}
-		receipt[key] = value
-	}
-	return run, receipt
-}
-
-// split.sh prints exactly the receipt the recipe's split stage declares — one KEY=value a line,
-// every declared field and a summary — and cuts the fixture into parts that each fit PART_LINES
-// and the file bound, losing no source file, filing every test file with a part, and leaving
-// docs and prose out of scope.
-func TestAuditSplitFitsPartsUnderTheBudget(t *testing.T) {
-	t.Parallel()
-	cat, _ := Load(Sources{UseShippedSkills: true})
-	sk, ok := cat.Get("audit")
-	if !ok || sk.Recipe == nil {
-		t.Fatalf("the shipped audit skill did not load with its recipe: %+v", cat.Skipped())
-	}
-	const partLines, partFiles = 100, 15
-	workspace := auditFixture(t)
-	run, receipt := runAuditSplit(t, workspace, ".", strconv.Itoa(partLines), "")
-
-	wantKeys := []string{workflow.FieldSummary}
-	for key := range sk.Recipe.Stages[0].Returns {
-		wantKeys = append(wantKeys, key)
-	}
-	gotKeys := make([]string, 0, len(receipt))
-	for key := range receipt {
-		gotKeys = append(gotKeys, key)
-	}
-	slices.Sort(wantKeys)
-	slices.Sort(gotKeys)
-	if !slices.Equal(gotKeys, wantKeys) {
-		t.Errorf("split.sh printed the keys %v, want the split stage's receipt %v", gotKeys, wantKeys)
-	}
-	if receipt["part_lines"] != strconv.Itoa(partLines) || receipt["focus"] != "none" {
-		t.Errorf("receipt = %v, want part_lines=%d read from PART_LINES and focus=none", receipt, partLines)
-	}
-
-	parts := readLines(t, filepath.Join(run, "parts.txt"))
-	if len(parts) < 2 || strconv.Itoa(len(parts)) != receipt["parts"] {
-		t.Fatalf("parts.txt lists %v; want several parts and parts=%s", parts, receipt["parts"])
-	}
-	var covered, tested []string
-	for _, part := range parts {
-		sources := readLines(t, filepath.Join(part, "scope.txt"))
-		total := 0
-		for _, source := range sources {
-			total += len(readLines(t, filepath.Join(workspace, source)))
-		}
-		if len(sources) > partFiles || total > partLines {
-			t.Errorf("part %s holds %d files and %d lines, over the %d-file, %d-line bound",
-				filepath.Base(part), len(sources), total, partFiles, partLines)
-		}
-		covered = append(covered, sources...)
-		tested = append(tested, readLines(t, filepath.Join(part, "tests.txt"))...)
-	}
-	slices.Sort(covered)
-	if src := readLines(t, filepath.Join(run, "src.txt")); !slices.Equal(covered, src) {
-		t.Errorf("the parts cover %v, want every source file exactly once: %v", covered, src)
-	}
-	if !slices.Contains(tested, "internal/a/a1_test.go") {
-		t.Errorf("the test file is filed with no part: %v", tested)
-	}
-	for _, name := range readLines(t, filepath.Join(run, "scope.txt")) {
-		if strings.HasPrefix(name, "docs/") || strings.HasSuffix(name, ".md") || strings.Contains(name, "testdata/") {
-			t.Errorf("scope.txt holds %q, which a code audit never reads", name)
-		}
-	}
-	if conc := readLines(t, filepath.Join(run, "conc-parts.txt")); len(conc) != 1 {
-		t.Errorf("conc-parts.txt = %v, want the one part holding b1.go's goroutine", conc)
-	}
-}
-
-// With no PART_LINES in the environment the part bound is the window: half the engine's split
-// budget at forty bytes a line, clamped to 200..8000, and 8000 when the budget is unknown.
-func TestAuditSplitTakesItsBoundFromTheWindow(t *testing.T) {
-	t.Parallel()
-	workspace := auditFixture(t)
-	for _, tc := range []struct {
-		name, partLines, partBytes, want string
+	tests := []struct {
+		stage   string
+		receipt func(w *strings.Builder) error
 	}{
-		{"PART_LINES wins", "150", "80000", "150"},
-		{"derived from the budget", "", "80000", "1000"},
-		{"clamped low", "", "400", "200"},
-		{"clamped high", "", "10000000", "8000"},
-		{"unknown window", "", "0", "8000"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			_, receipt := runAuditSplit(t, workspace, "internal", tc.partLines, tc.partBytes)
-			if receipt["part_lines"] != tc.want {
-				t.Errorf("part_lines = %q, want %s", receipt["part_lines"], tc.want)
-			}
-		})
+		{"split", func(w *strings.Builder) error { return auditsplit.Split(workspace, run, ".", "all", 0, w) }},
+		{"flags", func(w *strings.Builder) error { return auditsplit.Flags(run, w) }},
+	}
+	for _, tt := range tests {
+		at := slices.IndexFunc(recipe.Plan.Stages, func(stage workflow.Stage) bool { return stage.Name == tt.stage })
+		if at < 0 {
+			t.Fatalf("the shipped audit recipe has no %s stage", tt.stage)
+		}
+		var out strings.Builder
+		if err := tt.receipt(&out); err != nil {
+			t.Fatalf("%s: %v\n%s", tt.stage, err, out.String())
+		}
+		wantKeys := []string{workflow.FieldSummary}
+		for key := range recipe.Plan.Stages[at].Returns {
+			wantKeys = append(wantKeys, key)
+		}
+		gotKeys := receiptKeys(t, out.String())
+		slices.Sort(wantKeys)
+		slices.Sort(gotKeys)
+		if !slices.Equal(gotKeys, wantKeys) {
+			t.Errorf("the %s receipt carries the keys %v, want the stage's returns plus summary %v", tt.stage, gotKeys, wantKeys)
+		}
 	}
 }
 
-// hostCanName reports whether this host's file system can hold name: Windows refuses `*`, `?`,
-// `"` and newlines in a file name, so a fixture holding one is skipped there.
-func hostCanName(name string) bool {
-	return runtime.GOOS != "windows" || !strings.ContainsAny(name, "*?\"\n")
-}
-
-// writeSplitFixture writes files (slash-separated name to body) under root, skipping the names
-// this host cannot hold, and returns the names it wrote, sorted.
-func writeSplitFixture(t *testing.T, root string, files map[string]string) []string {
+// receiptKeys is the keys of a receipt's KEY=value lines, failing on a line of another shape or a
+// key printed twice.
+func receiptKeys(t *testing.T, receipt string) []string {
 	t.Helper()
-	var written []string
-	for name, body := range files {
-		if !hostCanName(name) {
-			continue
+	var keys []string
+	for line := range strings.SplitSeq(strings.TrimSpace(receipt), "\n") {
+		key, _, found := strings.Cut(line, "=")
+		if !found || key == "" || strings.ToLower(key) != key || strings.ContainsAny(key, " \t") {
+			t.Fatalf("the receipt line %q is not one KEY=value line", line)
 		}
-		path := filepath.Join(root, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+		if slices.Contains(keys, key) {
+			t.Fatalf("the receipt prints the key %q twice", key)
 		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		written = append(written, name)
+		keys = append(keys, key)
 	}
-	slices.Sort(written)
-	return written
-}
-
-// splitTableLine is one split.txt line: `<part> <files> <lines> conc=<yes|no> group=<name>`,
-// read from the right so a part name holding spaces stays whole.
-var splitTableLine = regexp.MustCompile(`^(.*) ([0-9]+) ([0-9]+) conc=(yes|no) group=(.*)$`)
-
-// split.sh reads every path as one name: a tree whose file and directory names hold spaces, `*`,
-// `?` and `[`, sized over PART_LINES so the directory split, re-split and merge all run, lands
-// every file in exactly one part, counts it in src=, and gives each part the line count wc -l
-// gives its files. A name holding a newline is skipped, and no scope line names anything but a
-// regular file.
-func TestAuditSplitReadsPathsWithSpacesAndGlobCharacters(t *testing.T) {
-	t.Parallel()
-	const partLines = 100
-	workspace := t.TempDir()
-	lines := func(n int, extra string) string {
-		return strings.Repeat("x := 1\n", n-1) + extra + "\n"
-	}
-	sources := writeSplitFixture(t, workspace, map[string]string{
-		"a b.go":                          lines(20, "x := 1"),
-		"x*y.go":                          lines(20, "x := 1"),
-		"q?.go":                           lines(20, "x := 1"),
-		"[z].go":                          lines(20, "x := 1"),
-		"z.go":                            lines(20, "x := 1"),
-		"dir with space/one.go":           lines(30, "go func() {}()"),
-		"dir with space/two.go":           lines(30, "x := 1"),
-		"dir with space/sub dir/three.go": lines(30, "x := 1"),
-		"dir with space/sub dir/four.go":  lines(30, "x := 1"),
-		"[g]/g1.go":                       lines(30, "x := 1"),
-		"[g]/g2.go":                       lines(30, "x := 1"),
-		"[g]/g3.go":                       lines(30, "x := 1"),
-		"[g]/h/g4.go":                     lines(30, "x := 1"),
-	})
-	newlineName := "new\nline.go"
-	if hostCanName(newlineName) {
-		if err := os.WriteFile(filepath.Join(workspace, newlineName), []byte(lines(20, "x := 1")), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	run, receipt := runAuditSplit(t, workspace, ".", strconv.Itoa(partLines), "")
-
-	if receipt["src"] != strconv.Itoa(len(sources)) || receipt["files"] != strconv.Itoa(len(sources)) {
-		t.Errorf("receipt = %v, want files=src=%d, one for every fixture file", receipt, len(sources))
-	}
-	for _, name := range readLines(t, filepath.Join(run, "scope.txt")) {
-		if info, err := os.Stat(filepath.Join(workspace, filepath.FromSlash(name))); err != nil || !info.Mode().IsRegular() {
-			t.Errorf("scope.txt names %q, which is no regular file (err %v)", name, err)
-		}
-	}
-
-	tableLines := map[string]string{}
-	for _, line := range readLines(t, filepath.Join(run, "split.txt")) {
-		fields := splitTableLine.FindStringSubmatch(line)
-		if fields == nil {
-			t.Fatalf("split.txt line %q is not `<part> <files> <lines> conc= group=`", line)
-		}
-		tableLines[fields[1]] = fields[3]
-	}
-	parts := readLines(t, filepath.Join(run, "parts.txt"))
-	if len(parts) < 4 {
-		t.Fatalf("parts.txt lists %v; want the directory split to cut several parts", parts)
-	}
-	var covered []string
-	for _, part := range parts {
-		files := readLines(t, filepath.Join(part, "scope.txt"))
-		total := 0
-		for _, name := range files {
-			data, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(name)))
-			if err != nil {
-				t.Fatalf("part %s names %q, which does not read: %v", filepath.Base(part), name, err)
-			}
-			total += strings.Count(string(data), "\n")
-		}
-		name := strings.TrimPrefix(filepath.Base(part), "part-")
-		if tableLines[name] != strconv.Itoa(total) {
-			t.Errorf("split.txt gives part %q %q lines, want %d, the wc -l over its files %v", name, tableLines[name], total, files)
-		}
-		if total > partLines {
-			t.Errorf("part %q holds %d lines, over the %d-line bound", name, total, partLines)
-		}
-		covered = append(covered, files...)
-	}
-	slices.Sort(covered)
-	if !slices.Equal(covered, sources) {
-		t.Errorf("the parts cover %q, want every fixture file exactly once: %q", covered, sources)
-	}
-	if conc := readLines(t, filepath.Join(run, "conc-parts.txt")); len(conc) != 1 ||
-		!slices.Contains(readLines(t, filepath.Join(conc[0], "scope.txt")), "dir with space/one.go") {
-		t.Errorf("conc-parts.txt = %v, want the one part holding `dir with space/one.go`'s goroutine", conc)
-	}
-}
-
-// The scope input splits on whitespace into its entries and no entry is glob-expanded: a literal
-// `*` names no file (there is none called `*`) and `[z].go` names itself, never `z.go`. A pin —
-// the scope loop already ran under `set -f` before split.sh read paths one a line.
-func TestAuditSplitNeverGlobsTheScope(t *testing.T) {
-	t.Parallel()
-	workspace := t.TempDir()
-	writeSplitFixture(t, workspace, map[string]string{
-		"[z].go":   "x := 1\n",
-		"z.go":     "x := 1\n",
-		"a/one.go": "x := 1\n",
-	})
-	run, receipt := runAuditSplit(t, workspace, "* [z].go", "", "")
-	if scope := readLines(t, filepath.Join(run, "scope.txt")); !slices.Equal(scope, []string{"[z].go"}) {
-		t.Errorf("scope.txt = %q for the scope `* [z].go`, want only [z].go", scope)
-	}
-	if receipt["files"] != "1" {
-		t.Errorf("receipt = %v, want files=1", receipt)
-	}
-}
-
-// In a git repository split.sh lists through git unquoted, so a name git would quote by default —
-// a non-ASCII `café.go`, a `q"t.go` — reaches scope.txt as it is on disk.
-func TestAuditSplitListsGitNamesUnquoted(t *testing.T) {
-	t.Parallel()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("no git on this host")
-	}
-	workspace := t.TempDir()
-	sources := writeSplitFixture(t, workspace, map[string]string{
-		"café.go":  "x := 1\n",
-		"q\"t.go":  "x := 1\n",
-		"plain.go": "x := 1\n",
-	})
-	// The fixture's own repository alone: no inherited GIT_* (a hook's GIT_DIR, GIT_INDEX_FILE)
-	// and no system or global config.
-	var env []string
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GIT_") && !strings.HasPrefix(entry, "PART_LINES=") {
-			env = append(env, entry)
-		}
-	}
-	env = append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
-	initRepo := exec.Command("git", "init", "-q")
-	initRepo.Dir = workspace
-	initRepo.Env = env
-	if out, err := initRepo.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
-	run, _ := runAuditSplitWithEnv(t, workspace, ".", "", env)
-	if scope := readLines(t, filepath.Join(run, "scope.txt")); !slices.Equal(scope, sources) {
-		t.Errorf("scope.txt = %q, want every git-listed file as named on disk: %q", scope, sources)
-	}
-}
-
-// readLines is a file's non-blank lines.
-func readLines(t *testing.T, path string) []string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var lines []string
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) != "" {
-			lines = append(lines, line)
-		}
-	}
-	return lines
+	return keys
 }

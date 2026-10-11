@@ -18,7 +18,7 @@ inputs:
 recipe:
   - name: split
     kind: script
-    run: "sh {{SKILL_DIR}}/split.sh {workflow_dir} {scope} {focus} {part_bytes}"
+    run: "{apogee} audit-split {workflow_dir} {scope} {focus} {part_bytes}"
     returns:
       files: int
       src: int
@@ -53,7 +53,7 @@ recipe:
   - name: flags
     kind: script
     when: "split.status == ok"
-    run: "sh {{SKILL_DIR}}/split.sh --flags {workflow_dir}"
+    run: "{apogee} audit-split --flags {workflow_dir}"
     returns:
       concurrency: "yes|no"
   - name: parts
@@ -183,7 +183,7 @@ lockfiles, changelogs, vendored or generated code, fixtures and build output are
 
 ## The stages
 
-1. **split** — the split script (`{{SKILL_DIR}}/split.sh`, readable for reference) lists the
+1. **split** — apogee's own split (`{apogee} audit-split`, built into the binary) lists the
    source files under the scope and cuts them into parts sized to a child's context window:
    one part when the scope fits, otherwise parts by folder, each under its line and file bounds,
    with the test files filed next to the part they test and the parts gathered into rollup

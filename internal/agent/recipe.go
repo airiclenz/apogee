@@ -77,6 +77,13 @@ const (
 // stagedSkillDir is where a shipped skill's scripts are staged inside the workflow folder.
 const stagedSkillDir = "skill"
 
+// skillFileGoneFormat is the sentence a stage fails with when its command names a
+// `{{SKILL_DIR}}/<path>` the shipped skill no longer carries: a plan stored by an older apogee
+// (RerunFailed, a resume) still names a script this version replaced, so the recipe is started
+// afresh rather than re-run.
+const skillFileGoneFormat = "this workflow runs %s/%s, which the /%s skill no longer carries: the workflow was " +
+	"planned by an older apogee; start /%s again"
+
 // The brief placeholders a stage's task is rendered with (workflow's renderBrief): an input by
 // either name is left unbound, so neither is ever shadowed.
 var reservedInputNames = []string{"item", "out"}
@@ -501,9 +508,10 @@ func (s *recipeScripts) apogeeExecutable() (string, error) {
 	return executable, nil
 }
 
-// skillDir is the folder a command's {{SKILL_DIR}} names:the skill's own for one on disk, and for
+// skillDir is the folder a command's {{SKILL_DIR}} names: the skill's own for one on disk, and for
 // a shipped skill a folder in the workflow's, into which every `{{SKILL_DIR}}/<path>` the command
-// names is copied first — the embedded tree has no host path a shell could run a script from.
+// names is copied first — the embedded tree has no host path a shell could run a script from. A
+// file the shipped skill no longer carries fails with skillFileGoneFormat's sentence.
 func (s *recipeScripts) skillDir(command, workflowDir string) (string, error) {
 	if filepath.IsAbs(s.recipe.Dir) {
 		return s.recipe.Dir, nil
@@ -513,7 +521,11 @@ func (s *recipeScripts) skillDir(command, workflowDir string) (string, error) {
 	}
 	staged := filepath.Join(workflowDir, stagedSkillDir)
 	for _, match := range skillFileRef.FindAllStringSubmatch(command, -1) {
-		if err := stageSkillFile(s.recipe.Files, match[1], staged); err != nil {
+		err := stageSkillFile(s.recipe.Files, match[1], staged)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf(skillFileGoneFormat, domain.SkillDirToken, match[1], s.recipe.ID, s.recipe.ID)
+		}
+		if err != nil {
 			return "", err
 		}
 	}

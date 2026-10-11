@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
@@ -641,6 +642,33 @@ func TestRender_TheApogeePlaceholder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A plan an older apogee stored (RerunFailed and a resume read it back) still runs the shipped
+// audit split as `sh {{SKILL_DIR}}/split.sh`, a file the skill no longer carries: render fails with
+// a sentence that asks for a fresh /audit instead of a staging error naming an embedded path.
+func TestRender_AStoredLegacyAuditPlanAsksForAFreshAudit(t *testing.T) {
+	t.Parallel()
+
+	recipe, ok := skills.NewProvider(skills.Sources{UseShippedSkills: true}).Recipe("audit")
+	if !ok {
+		t.Fatal("the shipped audit recipe is not served")
+	}
+	scripts := &recipeScripts{agent: &Agent{}, recipe: recipe, split: 4096}
+
+	got, err := scripts.render(workflow.ScriptSpec{
+		Command: "sh {{SKILL_DIR}}/split.sh {workflow_dir} . all {part_bytes}",
+		Dir:     t.TempDir(),
+	})
+
+	if err == nil {
+		t.Fatalf("render = %q, want the legacy split.sh refused", got)
+	}
+	for _, part := range []string{"{{SKILL_DIR}}/split.sh", "older apogee", "start /audit again"} {
+		if !strings.Contains(err.Error(), part) {
+			t.Errorf("render error = %q, want it to say %q", err, part)
+		}
 	}
 }
 
