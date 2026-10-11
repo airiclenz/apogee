@@ -103,7 +103,10 @@ func TestMain(m *testing.M) {
 	// Built for every ordinary run of the suite — never for the key-command fixture's re-exec of
 	// this binary (keysource_test.go), which happens several times per run and only ever prints a
 	// key. Building there multiplies one build by every re-exec, measured at +10 s on the package.
-	if !keyFixtureInvocation() {
+	// Nor for a run that only LISTS the tests (`go test -list`, which scripts/test-shards.sh plans
+	// its shards with): nothing runs, so nothing needs the binary, and the build was most of that
+	// listing's cost.
+	if !keyFixtureInvocation() && !listingOnly(os.Args[1:]) {
 		e2eBinary, e2eBuildErr = buildE2EBinary(home)
 	}
 
@@ -117,6 +120,21 @@ func TestMain(m *testing.M) {
 // last argument, exactly as the fixture itself reads it.
 func keyFixtureInvocation() bool {
 	return len(os.Args) > 0 && strings.HasPrefix(os.Args[len(os.Args)-1], keyFixtureMarker)
+}
+
+// listingOnly reports whether args — the test binary's own, after its name — ask it only to name its
+// tests: `go test -list` hands the binary -test.list, and the testing package then prints the names
+// and runs nothing. Either dash spelling, with the pattern after `=` or as the next argument.
+func listingOnly(args []string) bool {
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			continue // a flag's value, or an argument after the flags, never the flag itself
+		}
+		if name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "="); name == "test.list" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildE2EBinary compiles the package under test into dir and returns the binary's path. It is
@@ -155,6 +173,30 @@ func TestNoTestWritesTheRealApogeeHome(t *testing.T) {
 
 	if realUserHome != "" && home == realUserHome {
 		t.Fatalf("suite home is the real user home %q — a test reset HOME; every ConfigDir:\"\" wiring now writes to ~/.apogee", home)
+	}
+}
+
+// TestListingOnlyReadsTheListFlag pins what keeps a `go test -list` from building the binary under
+// test, and what keeps every other run building it: only -test.list, in any of the spellings the
+// flag package accepts, is a listing.
+func TestListingOnlyReadsTheListFlag(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"-test.list=.", "-test.paniconexit0"}, want: true},
+		{args: []string{"-test.paniconexit0", "-test.list", "^TestE2E"}, want: true},
+		{args: []string{"--test.list=."}, want: true},
+		{args: []string{"-test.paniconexit0", "-test.run=^TestE2ESmokeInProcess$"}, want: false},
+		{args: []string{"-test.run", "test.list"}, want: false},
+		{args: nil, want: false},
+	}
+	for _, tc := range cases {
+		if got := listingOnly(tc.args); got != tc.want {
+			t.Errorf("listingOnly(%q) = %v, want %v", tc.args, got, tc.want)
+		}
 	}
 }
 
