@@ -62,16 +62,23 @@ type Shell interface {
 	// PATH is the one value the scrub INSPECTS rather than copies: entries inside
 	// workspaceRoot (and every entry that is not an absolute location, which names a
 	// directory relative to the child's own cwd) are dropped, so a subprocess and its
-	// children cannot resolve a program out of the box the model can write. An empty
-	// workspaceRoot scopes nothing — a caller with no workspace has no fence to apply.
+	// children cannot resolve a program out of the box the model can write. When that
+	// leaves no entry, PATH is not emitted empty — a POSIX shell searches the current
+	// directory under an empty PATH, and under an absent one through bash's compiled-in
+	// default — so on POSIX it becomes the fixed fallback /usr/bin:/bin (its directories
+	// filtered the same way, the entry omitted if neither survives), and on Windows the
+	// entry is omitted. An absent PATH stays absent. An empty workspaceRoot scopes
+	// nothing — a caller with no workspace has no fence to apply.
 	ScopeEnv(workspaceRoot string, keys []string, lookup func(string) (string, bool)) []string
 
 	// ScopeInheritedEnv returns env — a whole inherited environment, each entry
-	// "KEY=value" — with exactly one value rewritten: PATH, scoped to workspaceRoot
-	// under the same per-entry rule ScopeEnv applies (entries inside the workspace,
-	// and entries that are not absolute locations, are dropped). Every other variable
-	// is passed through byte for byte, in the order given, and an entry that is not a
-	// "KEY=value" pair at all is passed through as it stands.
+	// "KEY=value" — with exactly one entry rewritten: PATH, scoped to workspaceRoot
+	// under the same rule ScopeEnv applies (entries inside the workspace, and entries
+	// that are not absolute locations, are dropped; an emptied PATH becomes the POSIX
+	// fallback /usr/bin:/bin or, on Windows or when not even that survives, is
+	// omitted). Every other variable is passed through byte for byte, in the order
+	// given, and an entry that is not a "KEY=value" pair at all is passed through as
+	// it stands.
 	//
 	// It is the shape ScopeEnv cannot express. The tools that hand the MODEL a shell
 	// or an interpreter inherit the operator's environment whole — an allowlist there

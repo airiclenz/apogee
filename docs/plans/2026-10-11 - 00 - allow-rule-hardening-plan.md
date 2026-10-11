@@ -76,7 +76,12 @@ internal/tools/exec_host_test.go — capturedRunHost; internal/agent/confine_lin
 **Closes:** apogee-allow-cd-cdpath
 **Commit:** `fix(tools): scrub CDPATH, BASH_ENV, ENV and exported functions from rule-answered lines`
 
-## 3. A fully scoped PATH never searches the current directory
+## 3. A fully scoped PATH never searches the current directory — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the rule lives in one new helper, hostRules.scopePath (scopePathValue plus the emptied-PATH fallback/omission), called by both ScopeEnv and ScopeInheritedEnv; scopePathValue itself is unchanged.
+NOTES (2026-10-11): Tests line says a workspace root of `/usr` with `PATH=.` gives no PATH entry; guard (b) filters the fallback per entry "the same as every other entry", under which `/usr` keeps `/bin` — implemented per guard (b) and pinned as `PATH=/bin`; a root of `/` gives no PATH entry as specified.
+NOTES (2026-10-11): an empty-valued `PATH=` under a non-empty workspace root is treated like any other emptied PATH (fallback on POSIX, omitted on Windows), per the Goal's "never holds an empty `PATH=` entry".
+NOTES (2026-10-11): the new tests are siblings, TestScopeInheritedEnvNeverEmitsAnEmptyPATH and TestScopeEnvNeverEmitsAnEmptyPATH, both matched by the Acceptance -run pattern; Windows cases use `;`-separated values (`.;C:\Windows` → `PATH=C:\Windows`) in place of `.:/usr/bin`.
 
 **What:** Recast at the regression check (2026-10-11). fixes the PATH half of `apogee-allow-rule-env-vectors`. `hostRules.ScopeInheritedEnv` already drops empty, relative (`.`) and in-workspace PATH entries via `scopePathValue`, but when every entry is dropped it emits `PATH=`, which bash treats as the current directory.
 **Goal:** the env returned by `ScopeInheritedEnv` and `ScopeEnv` with a non-empty workspace root never holds an empty `PATH=` entry nor a PATH with an empty or relative element; when nothing survives scoping, the POSIX rules emit the fixed fallback `PATH=/usr/bin:/bin` and the Windows rules omit the `PATH` entry.

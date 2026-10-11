@@ -135,7 +135,9 @@ func (r hostRules) Quote(arg string) string {
 
 // ScopeEnv returns the scoped environment for a subprocess: every key in keys that is
 // present in the environment, in the order given, followed by this platform's essential
-// variables that keys did not already name — with PATH scoped to workspaceRoot.
+// variables that keys did not already name — with PATH scoped to workspaceRoot under
+// scopePath's rule, which may replace an emptied value with the POSIX fallback or omit the
+// entry altogether.
 func (r hostRules) ScopeEnv(workspaceRoot string, keys []string, lookup func(string) (string, bool)) []string {
 	if lookup == nil {
 		lookup = os.LookupEnv
@@ -160,7 +162,11 @@ func (r hostRules) ScopeEnv(workspaceRoot string, keys []string, lookup func(str
 			// isPathName is the one fold rule, shared with ScopeInheritedEnv, so this catches
 			// "Path" exactly where the OS would treat it as PATH and nowhere else.
 			if r.isPathName(key) {
-				value = r.scopePathValue(value, workspaceRoot)
+				scoped, keep := r.scopePath(value, workspaceRoot)
+				if !keep {
+					return
+				}
+				value = scoped
 			}
 			out = append(out, key+"="+value)
 		}
@@ -178,8 +184,9 @@ func (r hostRules) ScopeEnv(workspaceRoot string, keys []string, lookup func(str
 // entry untouched — the whole-environment counterpart to ScopeEnv's allowlist, for the callers
 // that must inherit everything and still not let the workspace supply their child's programs.
 //
-// The per-entry PATH rule is scopePathValue's, so the two callers scope identically; what
-// differs is only which VARIABLES survive, which is not this method's business. An entry
+// The PATH rule is scopePath's, so the two callers scope identically — including its fallback
+// when nothing survives, and its omission of the entry when not even the fallback does; what
+// differs is only which OTHER variables survive, which is not this method's business. An entry
 // carrying no "=" is not a variable this can judge, so it is passed through rather than dropped.
 func (r hostRules) ScopeInheritedEnv(workspaceRoot string, env []string) []string {
 	if workspaceRoot == "" {
@@ -192,9 +199,43 @@ func (r hostRules) ScopeInheritedEnv(workspaceRoot string, env []string) []strin
 			out = append(out, entry)
 			continue
 		}
-		out = append(out, key+"="+r.scopePathValue(value, workspaceRoot))
+		if scoped, keep := r.scopePath(value, workspaceRoot); keep {
+			out = append(out, key+"="+scoped)
+		}
 	}
 	return out
+}
+
+// posixFallbackPath is the PATH a POSIX subprocess gets when scoping leaves nothing of the
+// operator's: the two directories every POSIX system resolves its base utilities from.
+const posixFallbackPath = "/usr/bin:/bin"
+
+// scopePath returns the PATH value a scoped subprocess runs with, and whether the PATH entry
+// is emitted at all. It is scopePathValue's per-entry rule plus what to do when that rule
+// leaves nothing: an emptied PATH must never reach the child as "PATH=", because a POSIX
+// shell reads an empty PATH as the current directory — the workspace itself — which is the
+// very search scoping exists to remove. Omitting the variable is no better there: bash's
+// compiled-in default PATH ends in ".". So on POSIX an emptied PATH is replaced by
+// posixFallbackPath, itself put through the same in-workspace filter (a workspace root of
+// "/" contains both its directories), and the entry is omitted only when not even the
+// fallback survives. Windows has no such default to fall into, so there an emptied PATH is
+// simply omitted.
+//
+// An empty workspaceRoot scopes nothing: the value is returned as it stands, empty or not.
+func (r hostRules) scopePath(value, workspaceRoot string) (string, bool) {
+	if workspaceRoot == "" {
+		return value, true
+	}
+	if scoped := r.scopePathValue(value, workspaceRoot); scoped != "" {
+		return scoped, true
+	}
+	if r.windows {
+		return "", false
+	}
+	if fallback := r.scopePathValue(posixFallbackPath, workspaceRoot); fallback != "" {
+		return fallback, true
+	}
+	return "", false
 }
 
 // isPathName reports whether key names the PATH variable under this platform's rules. Windows
@@ -226,6 +267,9 @@ func (r hostRules) isPathName(key string) bool {
 // the workspace THROUGH a symlink outside it survives here. apogee's own exec sites resolve
 // argv[0] through symlinks before applying the fence, so the residual is bounded to programs
 // a subprocess resolves for itself. An empty workspaceRoot scopes nothing.
+//
+// The result may be empty — every entry dropped — and an empty PATH is not a value to hand a
+// child; scopePath, the only caller, decides what replaces it.
 func (r hostRules) scopePathValue(value, workspaceRoot string) string {
 	if workspaceRoot == "" || value == "" {
 		return value

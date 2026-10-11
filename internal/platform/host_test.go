@@ -395,6 +395,161 @@ func TestScopeInheritedEnvScopesOnlyPATH(t *testing.T) {
 	})
 }
 
+// pathScopingCase is one PATH value scoped against a workspace root, with the PATH entry the
+// scoped environment must carry — want is "" when no PATH entry may be emitted at all.
+type pathScopingCase struct {
+	name              string
+	root, value, want string
+}
+
+// emptiedPathCases are the PATH values scoping empties under the workspace root /work/repo: on
+// POSIX each must fall back to /usr/bin:/bin rather than reach the child as "PATH=", which a
+// shell reads as the current directory — the workspace itself.
+func emptiedPathCases() []pathScopingCase {
+	return []pathScopingCase{
+		{"a dot entry", "/work/repo", ".", "PATH=/usr/bin:/bin"},
+		{"two empty entries", "/work/repo", ":", "PATH=/usr/bin:/bin"},
+		{"an in-workspace entry", "/work/repo", "/work/repo/bin", "PATH=/usr/bin:/bin"},
+		{"an empty value", "/work/repo", "", "PATH=/usr/bin:/bin"},
+		{"a surviving entry needs no fallback", "/work/repo", ".:/usr/bin", "PATH=/usr/bin"},
+		// The fallback's own directories pass the same in-workspace filter as every other
+		// entry: a root of / contains both, so no PATH entry is emitted at all.
+		{"a root containing the whole fallback", "/", ".", ""},
+		{"a root containing part of the fallback", "/usr", ".", "PATH=/bin"},
+		// An empty root names no fence, so even the shapes scoping exists to remove pass
+		// through byte for byte.
+		{"an unscoped empty PATH", "", "", "PATH="},
+		{"an unscoped dot PATH", "", ".", "PATH=."},
+	}
+}
+
+// windowsEmptiedPathCases are the Windows counterparts: an emptied PATH is omitted, since
+// Windows has no compiled-in default PATH ending in "." to fall into.
+func windowsEmptiedPathCases() []pathScopingCase {
+	return []pathScopingCase{
+		{"a dot entry", `C:\work\repo`, ".", ""},
+		{"two empty entries", `C:\work\repo`, ";", ""},
+		{"an in-workspace entry", `C:\work\repo`, `C:\work\repo\bin`, ""},
+		{"a surviving entry needs no fallback", `C:\work\repo`, `.;C:\Windows`, `PATH=C:\Windows`},
+		{"an unscoped dot PATH", "", ".", "PATH=."},
+	}
+}
+
+// pathEntries returns the entries of env that are PATH (exact spelling), in order.
+func pathEntries(env []string) []string {
+	var out []string
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// wantPathEntries is the PATH entry list a case expects: none, or exactly its one entry.
+func wantPathEntries(want string) []string {
+	if want == "" {
+		return nil
+	}
+	return []string{want}
+}
+
+// TestScopeInheritedEnvNeverEmitsAnEmptyPATH pins the emptied-PATH rule on the whole-environment
+// scrub: scoping that removes every PATH entry must not hand the child "PATH=", which a POSIX
+// shell searches as the current directory — the workspace scoping exists to keep out.
+func TestScopeInheritedEnvNeverEmitsAnEmptyPATH(t *testing.T) {
+	t.Parallel()
+
+	for _, rules := range []struct {
+		name  string
+		rules hostRules
+		cases []pathScopingCase
+	}{
+		{"posix", posixRules(), emptiedPathCases()},
+		{"windows", windowsRules(), windowsEmptiedPathCases()},
+	} {
+		for _, tc := range rules.cases {
+			t.Run(rules.name+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				env := []string{"HOME=/home/u", "PATH=" + tc.value, "TERM=xterm"}
+				got := rules.rules.ScopeInheritedEnv(tc.root, env)
+				if paths := pathEntries(got); !reflect.DeepEqual(paths, wantPathEntries(tc.want)) {
+					t.Errorf("ScopeInheritedEnv(%q, PATH=%q) PATH entries = %q, want %q", tc.root, tc.value, paths, wantPathEntries(tc.want))
+				}
+				// Every other variable survives, in order, whatever happened to PATH.
+				others := make([]string, 0, len(got))
+				for _, entry := range got {
+					if !strings.HasPrefix(entry, "PATH=") {
+						others = append(others, entry)
+					}
+				}
+				if want := []string{"HOME=/home/u", "TERM=xterm"}; !reflect.DeepEqual(others, want) {
+					t.Errorf("ScopeInheritedEnv() other entries = %q, want %q", others, want)
+				}
+			})
+		}
+	}
+
+	t.Run("an absent PATH stays absent", func(t *testing.T) {
+		t.Parallel()
+		env := []string{"HOME=/home/u"}
+		for _, rules := range []hostRules{posixRules(), windowsRules()} {
+			if got := rules.ScopeInheritedEnv("/work/repo", env); !reflect.DeepEqual(got, env) {
+				t.Errorf("ScopeInheritedEnv() = %q, want %q — a missing PATH must not gain the fallback", got, env)
+			}
+		}
+	})
+}
+
+// TestScopeEnvNeverEmitsAnEmptyPATH is the same rule through the allowlisted scrub, which shares
+// scopePath with ScopeInheritedEnv and carries the git hooks', MCP servers' and toolchain probes'
+// environments.
+func TestScopeEnvNeverEmitsAnEmptyPATH(t *testing.T) {
+	t.Parallel()
+
+	for _, rules := range []struct {
+		name  string
+		rules hostRules
+		cases []pathScopingCase
+	}{
+		{"posix", posixRules(), emptiedPathCases()},
+		{"windows", windowsRules(), windowsEmptiedPathCases()},
+	} {
+		for _, tc := range rules.cases {
+			t.Run(rules.name+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				env := map[string]string{"PATH": tc.value, "HOME": "/home/u"}
+				got := rules.rules.ScopeEnv(tc.root, []string{"PATH", "HOME"}, func(key string) (string, bool) {
+					value, ok := env[key]
+					return value, ok
+				})
+				if paths := pathEntries(got); !reflect.DeepEqual(paths, wantPathEntries(tc.want)) {
+					t.Errorf("ScopeEnv(%q, PATH=%q) PATH entries = %q, want %q", tc.root, tc.value, paths, wantPathEntries(tc.want))
+				}
+				if !contains(got, "HOME=/home/u") {
+					t.Errorf("ScopeEnv() = %q, want HOME kept whatever happened to PATH", got)
+				}
+			})
+		}
+	}
+
+	t.Run("an absent PATH stays absent", func(t *testing.T) {
+		t.Parallel()
+		lookup := func(key string) (string, bool) {
+			if key == "HOME" {
+				return "/home/u", true
+			}
+			return "", false
+		}
+		for _, rules := range []hostRules{posixRules(), windowsRules()} {
+			got := rules.ScopeEnv("/work/repo", []string{"PATH", "HOME"}, lookup)
+			if paths := pathEntries(got); len(paths) != 0 {
+				t.Errorf("ScopeEnv() PATH entries = %q, want none — a missing PATH must not gain the fallback", paths)
+			}
+		}
+	})
+}
+
 func TestScopeEnvDefaultsToTheProcessEnvironment(t *testing.T) {
 	// No t.Parallel: t.Setenv mutates process state.
 	t.Setenv("APOGEE_SCOPEENV_PROBE", "set")
