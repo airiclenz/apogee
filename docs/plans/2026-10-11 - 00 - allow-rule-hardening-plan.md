@@ -36,7 +36,11 @@
 - 3 (re-check): recast — POSIX fallback `PATH=/usr/bin:/bin`, Windows omits PATH; supersedes the first round's omit (writer's decision).
 - 3 (re-check, follow-up): guard folded — fallback fires only for a non-empty root with a PATH entry present; its entries pass the in-workspace filter (PATH omitted if none survive); scoping doc comments updated (writer's decision).
 
-## 1. Mark a rule-answered call on its context
+## 1. Mark a rule-answered call on its context — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): executeGate installs the marker after the deny branch (only an allowed call runs), not before approve; a confineOnAllow gate is always forced, so a rule never answers it and the marker cannot reach executeConfineFallback — stated in the inline comment.
+NOTES (2026-10-11): the §11 row names `tools.Terminal.Execute` as reader, per the plan; that read lands with item 2, so until then the marker has no production reader.
+NOTES (2026-10-11): approve's doc comment gains "and mark the call's context (domain.WithRuleAnswered)" — a one-clause doc touch in a listed file, describing the new use of its returned rules.
 
 **What:**
 **Goal:** a tool executed because an allow rule answered its gate can tell so from its `context.Context` (`domain.RuleAnswered(ctx) == true`); a call approved by a human, a session allow, or the forced confinement fallback reads `false`.

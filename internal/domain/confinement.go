@@ -337,3 +337,23 @@ func WriteEscapePermitFrom(ctx context.Context) (WriteEscapePermit, bool) {
 	}
 	return p, true
 }
+
+// ruleAnsweredCtxKey is the unexported context key under which the rule-answered marker rides.
+type ruleAnsweredCtxKey struct{}
+
+// WithRuleAnswered returns a context marking the tool execution that runs under it as cleared by
+// an Allow rule rather than by a human (ADR 0096 §3). Only the engine installs it, and only where
+// a rule answered the call's gate: a human approval, a remembered allow-for-session and the
+// forced runtime-demote gate never carry it, since a rule answers none of them. A tool reads the
+// marker to withhold what the pure matcher that cleared the call cannot see.
+func WithRuleAnswered(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ruleAnsweredCtxKey{}, true)
+}
+
+// RuleAnswered reports whether ctx carries the marker WithRuleAnswered installs. It is false on
+// any context nobody marked — including a bare context.Background() — so an unmarked call keeps
+// whatever a human-approved call gets.
+func RuleAnswered(ctx context.Context) bool {
+	marked, _ := ctx.Value(ruleAnsweredCtxKey{}).(bool)
+	return marked
+}

@@ -189,6 +189,37 @@ func TestWriteEscapePermitIsADistinctKey(t *testing.T) {
 	}
 }
 
+// TestRuleAnsweredRoundTrips pins the rule-answered marker: absent on a bare context, present once
+// WithRuleAnswered installs it and on every context derived from that one, and never aliased by
+// the permit or confinement keys riding beside it.
+func TestRuleAnsweredRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	marked := WithRuleAnswered(context.Background())
+	cases := []struct {
+		name string
+		ctx  context.Context
+		want bool
+	}{
+		{name: "bare context", ctx: context.Background(), want: false},
+		{name: "marked", ctx: marked, want: true},
+		{name: "derived from a marked context", ctx: WithConfinement(marked, Confinement{}), want: true},
+		{name: "subprocess permit", ctx: WithSubprocessPermit(context.Background(), SubprocessPermit{}), want: false},
+		{name: "write-escape permit", ctx: WithWriteEscapePermit(context.Background(), WriteEscapePermit{Real: "/out/side"}), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := RuleAnswered(tc.ctx); got != tc.want {
+				t.Errorf("RuleAnswered = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if _, ok := WriteEscapePermitFrom(marked); ok {
+		t.Error("the rule-answered marker surfaced as a write-escape permit; the keys must be distinct")
+	}
+}
+
 // TestConfigConfinementBox pins the mapping the constructor exists to own: every box field comes
 // from its Config counterpart, none is dropped and none is crossed with another. Hand-assembling
 // the box at each call site is what let a site forget NetworkAllow and open a silent confinement

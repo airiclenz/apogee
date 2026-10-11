@@ -1223,6 +1223,12 @@ func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, cal
 		a.emitAudit(turn, call, verdict.auditDecision, verdict.auditReason, result)
 		return result, dispatchDone
 	}
+	if len(rules) > 0 {
+		// The tool learns that no human saw this call, so it can withhold what the pure matcher
+		// that cleared it cannot see. A confineOnAllow gate is always forced and a rule answers no
+		// forced gate, so the marker never reaches executeConfineFallback's demote run.
+		ctx = domain.WithRuleAnswered(ctx)
+	}
 	if verdict.confineOnAllow {
 		return a.executeConfine(ctx, turn, tool, call, verdict)
 	}
@@ -1444,7 +1450,7 @@ func malformedArgumentsResult(call domain.ToolCall) domain.ToolResult {
 // (ADR 0096 §3; allowRulesCovering): the call runs, the decided phase alone is announced with
 // Decision ApprovalAllowedByRule and the rules on it — nobody was waited on, but the call was
 // cleared without the human and that stays observable — and rules reports them so the caller can
-// book the audit. The test is `!force` and never the cache key, which is also empty for arguments
+// book the audit and mark the call's context (domain.WithRuleAnswered). The test is `!force` and never the cache key, which is also empty for arguments
 // that do not decode: force is what marks a Tier-2 speed-bump, a Reaction's `ask` and the runtime
 // confine demote, and a rule answers none of them, exactly as the remembered allow-for-session
 // does not. Auto's STATIC gate for a backend that cannot confine is not forced, so a rule answers

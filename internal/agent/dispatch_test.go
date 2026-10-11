@@ -2899,6 +2899,104 @@ func TestAllowRuleAnswersAnOrdinaryGate(t *testing.T) {
 	}
 }
 
+// markRecordingTerminal is a POSIX `terminal` double that records, for each run that gets past
+// confinement, whether its context carries the rule-answered marker. Handed a Confinement handle
+// it confines first and, like the real tools, returns the Confiner's error rather than running
+// unconfined, so dispatch can demote the call to Approval.
+type markRecordingTerminal struct {
+	marks *[]bool
+}
+
+func (t markRecordingTerminal) Name() string            { return shellToolName }
+func (t markRecordingTerminal) Description() string     { return "terminal (marker recorder)" }
+func (t markRecordingTerminal) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t markRecordingTerminal) ReadOnly() bool          { return false }
+func (t markRecordingTerminal) Subprocess() bool        { return true }
+func (t markRecordingTerminal) POSIXShell() bool        { return true }
+
+func (t markRecordingTerminal) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if conf, ok := domain.ConfinementFromContext(ctx); ok && conf.Confiner != nil {
+		if err := conf.Confiner.Confine(ctx, conf.Box, exec.Command("/bin/true")); err != nil {
+			return domain.ToolResult{}, fmt.Errorf("confine: %w", err)
+		}
+	}
+	*t.marks = append(*t.marks, domain.RuleAnswered(ctx))
+	return domain.ToolResult{CallID: call.ID, Content: "ok"}, nil
+}
+
+// A tool cleared by an Allow rule reads the marker on its context; one cleared by a human — an
+// approval, a remembered allow-for-session, or the forced gate a runtime confine failure demotes
+// to — does not, even where a rule covers the line.
+func TestAllowRuleMarksTheCallContext(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		configure func(t *testing.T, sink *recordingSink, approver domain.Approver, tool domain.Tool) domain.Config
+		decision  domain.ApprovalDecision
+		calls     int
+		wantAsked int
+		wantMarks []bool
+	}{
+		{
+			name: "rule answer",
+			configure: func(t *testing.T, sink *recordingSink, approver domain.Approver, tool domain.Tool) domain.Config {
+				return allowRuleConfig(t, sink, approver, []domain.AllowRule{goTestRule}, tool)
+			},
+			decision: domain.ApprovalDeny, calls: 1, wantAsked: 0, wantMarks: []bool{true},
+		},
+		{
+			name: "human approval",
+			configure: func(t *testing.T, sink *recordingSink, approver domain.Approver, tool domain.Tool) domain.Config {
+				return allowRuleConfig(t, sink, approver, nil, tool)
+			},
+			decision: domain.ApprovalAllow, calls: 1, wantAsked: 1, wantMarks: []bool{false},
+		},
+		{
+			name: "session allow",
+			configure: func(t *testing.T, sink *recordingSink, approver domain.Approver, tool domain.Tool) domain.Config {
+				return allowRuleConfig(t, sink, approver, nil, tool)
+			},
+			decision: domain.ApprovalAllowForSession, calls: 2, wantAsked: 1, wantMarks: []bool{false, false},
+		},
+		{
+			name: "forced confinement fallback",
+			configure: func(_ *testing.T, sink *recordingSink, approver domain.Approver, tool domain.Tool) domain.Config {
+				// Caps report FSWrite, so Auto Confines the call; the box then fails at run time and
+				// the call demotes to a forced gate the covering rule may not answer.
+				conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
+				cfg := autoConfig(sink, conf, true, tool)
+				cfg.Approver = approver
+				cfg.AllowRules = []domain.AllowRule{goTestRule}
+				return cfg
+			},
+			decision: domain.ApprovalAllow, calls: 1, wantAsked: 1, wantMarks: []bool{false},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			approver := &fakeApprover{decision: tc.decision}
+			var marks []bool
+			a := newRuleAgent(t, tc.configure(t, sink, approver, markRecordingTerminal{marks: &marks}))
+
+			for range tc.calls {
+				if result, outcome := prepareAndRun(a, goTestCall()); outcome != dispatchDone || result.IsError {
+					t.Fatalf("outcome %v, result %+v — want the call run", outcome, result)
+				}
+			}
+
+			if approver.calls != tc.wantAsked {
+				t.Errorf("the Approver was consulted %d times, want %d", approver.calls, tc.wantAsked)
+			}
+			if !slices.Equal(marks, tc.wantMarks) {
+				t.Errorf("rule-answered marks = %v, want %v", marks, tc.wantMarks)
+			}
+		})
+	}
+}
+
 // A gate a rule does not answer still asks: a forced Tier-2 look, a Reaction's `ask`, a line the
 // rule does not cover, and a shell the matcher cannot read. Plan refuses before any gate.
 func TestAllowRuleNeverAnswersWhatItDoesNotCover(t *testing.T) {
