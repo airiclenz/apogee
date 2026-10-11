@@ -71,6 +71,11 @@ The owner ratified the shape on 2026-10-10 (plan
    with `komac`. The one-time setup (creating the bucket repository, forking `winget-pkgs`, the
    first `komac new` submission) is manual and documented; no agent runs it.
 
+   > **Amended 2026-10-11 ([ADR 0098](0098-the-repo-owns-its-release-pipeline.md)).** The caller
+   > is no longer the personal `/cut-release`. The repo's own `cmd/release publish` publishes
+   > every channel, Homebrew tap included. `make release-scoop` and `make release-winget` are
+   > retired in its favour. The one-time setup is still manual.
+
 7. **The install channel is detected from a build stamp and the executable's location.** `make
    dist` stamps the release binaries it builds. A binary without that stamp is a source build — a
    local `make build`, `make install` or `go install` — and is told `git pull && make install`. A
