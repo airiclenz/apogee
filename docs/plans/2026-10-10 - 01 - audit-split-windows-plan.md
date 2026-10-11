@@ -52,7 +52,12 @@ Go reads as relative. `internal/skills/shipped/**` carries no LF pin.
 - `VERSION` / release changes.
 - Running the whole `/audit` on real Windows — the owner's manual step.
 
-## 1. auditsplit: scope listing and part split
+## 1. auditsplit: scope listing and part split — ✅ DONE (2026-10-11)
+
+NOTES (2026-10-11): the git listing runs through internal/gitexec's hardened Host (gitexec.go's own rule: the single place apogee launches git) rather than a raw git-path exec; the listing seam is therefore a gitexec.Host on planRequest (a fake Look forces the walk, fake Spawn/SpawnTo force the git-fails fallback, gitexec.OS() lists a real repo) — one behavioural consequence: a repository whose own config names a program git would execute is refused by gitexec and falls back to the walk.
+NOTES (2026-10-11): PART_FILES and GROUP_PARTS are validated as digit-only whole numbers like PART_LINES (split.sh left them unchecked and its `[ -gt ]` misbehaved), and all three knobs are parsed to ints, so a zero-padded knob ("007") would print as 7 where split.sh echoed it raw.
+NOTES (2026-10-11): plan.parts come in byte order of part name (split.sh's part_index order); the parts.txt glob order (byte order of `<name>.txt`, `a-b` before `a`) is available as globOrder for item 2. Per-part line count and concurrency flag (CONC_PATTERN) are computed in the plan step, so no file is written yet.
+NOTES (2026-10-11): parity was checked against the embedded split.sh with a throwaway differential test (1400 random fixtures: scope, src, tests, every part's files, conc parts — all identical); the test was deleted, not committed. plan.go is ~580 lines, over the ~400-line guideline, because the item's Files list names it as the one implementation file.
 
 **What:**
 **Goal:** a new package `internal/auditsplit` lists a workspace scope and splits its source files
