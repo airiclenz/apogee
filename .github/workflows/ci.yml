@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.x'
+          go-version-file: go.mod
       - name: action pins (scripts/check-pins.sh)
         run: ./scripts/check-pins.sh
       - name: actionlint
@@ -103,7 +103,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.x'
+          go-version-file: go.mod
       - name: golangci-lint
         # Pinned by MODULE VERSION rather than run as a third-party action, for the reasons
         # the actionlint step gives: an action would be another SHA to keep current and
@@ -125,7 +125,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.x'
+          go-version-file: go.mod
       - name: govulncheck
         # Same pinning rationale as the actionlint and golangci-lint steps: a `go run` of a
         # MODULE VERSION pinned in the Makefile (`GOVULNCHECK_VERSION`), not a third-party
@@ -154,7 +154,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.x'
+          go-version-file: go.mod
       - name: build all packages
         run: go build ./...
       - name: build the binary
@@ -170,7 +170,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.x'
+          go-version-file: go.mod
       - name: go test (race)
         # These three trees rather than `./...`: the rest of the suite is Linux-shaped (the
         # landlock battery, the PTY drivers), while the Windows half of the product is the
