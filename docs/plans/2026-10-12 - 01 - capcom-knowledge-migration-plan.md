@@ -106,8 +106,10 @@ CONTEXT.md — `**Mechanism**`, `**Hook point**`, `**Post-response decision**`, 
 - `capcom check && capcom fmt --check`
 **Commit:** `docs(knowledge): title the glossary terms and retire the retired ones`
 
-## 3. Decision records cut into a Note tree
+## 3. Decision records cut into a Note tree — ✅ DONE (2026-10-12)
 
+NOTES (2026-10-12): split_adr.py imports `note` and `rewrite_links` from item 1's split_glossary.py; banners before the H1 (most ADRs carry a `> Note (2026-10-0x)` there) and prose between the H1 and the first `##` both go into the record body, in file order, before `<!-- summary pending -->`; frontmatter lines keep their file order (Status, Supersedes, Amends).
+NOTES (2026-10-12): derived child titles extend the plan's amendment form to every dated heading (`ADR 0013 clarification of 2026-07-02: …`, `ADR 0016 runtime-surface realisation of 2026-07-19: …`, a `, second` date tail as `(second)`), name numbered headings `ADR 0083 part N: <rest>`, and split a `—` tail only outside parentheses (0011's `Phase-2 realisation (P2.2 — …)` stays whole, lowercased); 498 children in all, clash letter suffixes on 11 ids: 0011 `phase-2b` and same-day amendments/addenda in 0018, 0019, 0022, 0043, 0059, 0077, 0078.
 **What:** Depends on item 1.
 **Goal:** `.capcom/knowledge/decisions.md` lists all 98 records; `decisions/adr-NNNN.md` exists for 0001–0098 with one child per `##` section; `split_adr.py --verify` exits 0; `docs/adr/` is unchanged.
 **Approach (assumed at the header base):** write `docs/skill-runs/migrate-knowledge/split_adr.py` (reuse item 1's link rewriter; `CONTEXT.md#anchor` links → `text`):

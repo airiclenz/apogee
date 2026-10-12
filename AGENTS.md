@@ -54,5 +54,6 @@ Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#i
 
 Knowledge tree, top level:
 
+- `decisions`: apogee's decision records: one Note per record, with each of its sections as a child
 - `glossary`: apogee's domain glossary: the terms to use in code, docs and messages, one Note per term
 <!-- END CAPCOM -->

@@ -1,0 +1,102 @@
+---
+title: "apogee's decision records: one Note per record, with each of its sections as a child"
+---
+
+- `adr-0001` — The agent loop is an embeddable library, driven by an external bench
+- `adr-0002` — Tools are an open extension point; the Mechanism catalogue is curated
+- `adr-0003` — Mechanisms are a constraint-declared registry, not a fixed pipeline
+- `adr-0004` — Auto mode requires OS-level confinement — a capability matrix, not a binary
+- `adr-0005` — Sub-agent privileges are bounded by the parent
+- `adr-0006` — Bypass mode is the honest "Mechanisms-off" floor
+- `adr-0007` — Step, Turn, and the quiescent boundary
+- `adr-0008` — Tools are stateless across Turns; external effects are non-forkable
+- `adr-0009` — The A/B decision rule for Mechanism validation
+- `adr-0010` — Package layout: a domain core, an engine, and a thin root facade
+- `adr-0011` — The TUI is a thin event-driven renderer over a worker-goroutine engine
+- `adr-0012` — Confinement attaches to blast radius; Auto is `confine-to-workspace`-tunable — supersedes ADR 0004
+- `adr-0013` — The sub-agent orchestrator is a dispatch recursion point; its live guard state is isolated, its dangerous floor shared read-only
+- `adr-0014` — Guided decomposition steers the primary call and serializes delegation through the recursion point
+- `adr-0015` — Catalogued Mechanisms are enabled by ID through Config, and their descriptors are public
+- `adr-0016` — Curation is per-model: Validated sets keyed by the model fingerprint
+- `adr-0017` — The Exchange is a derived domain working value
+- `adr-0018` — Context overflow recovers structurally: the emergency fold and one retry
+- `adr-0019` — Documents are presented, not opened: one tool, a host-side presentation ladder
+- `adr-0020` — Windows confinement is a restricted low-integrity token, and the box is a label on the disk
+- `adr-0021` — `apogee probe` is two halves: the host report is free, the model battery is an explicit act
+- `adr-0022` — Sessions persist per-Turn as dual-representation records
+- `adr-0023` — The system prompt is a configured template, rendered per request
+- `adr-0024` — The heartbeat observes the Upstream; rebind applies the change at the boundary
+- `adr-0025` — Interjections commit at the between-Steps boundary
+- `adr-0026` — Workspace context files are discovered, session-scoped prompt DATA
+- `adr-0027` — One `/` namespace: skills are inline tokens, commands execute at accept
+- `adr-0028` — A server switch rehomes the session, and the first beat completes it
+- `adr-0029` — The launcher actuates local servers, and the beat completes every move
+- `adr-0030` — The TUI has one width authority, and it mirrors the painter
+- `adr-0031` — The local-platform north star binds every future layer to the embeddable engine
+- `adr-0032` — The user's skill library outranks the workspace
+- `adr-0033` — The scheduler is a library and the TUI is its first Driver surface
+- `adr-0034` — The daemon is an in-repo subcommand over a declarative trigger-action file
+- `adr-0035` — The settings surface persists one key per deliberate edit
+- `adr-0036` — The servers list is the single definition, and the last switch is the startup choice
+- `adr-0037` — Every settings edit applies to the running session
+- `adr-0038` — The Windows console is prepared before the alternate screen
+- `adr-0039` — Delegations fan out concurrently, bounded by the server's parallel-agents cap
+- `adr-0040` — Color schemes are embedded role palettes with user-file shadowing
+- `adr-0041` — The config file is watched
+- `adr-0042` — External programs are optional enhancements, never prerequisites
+- `adr-0043` — Files split by concern, and the config cluster gets a package
+- `adr-0044` — Model profiles are per-model, and mostly shipped
+- `adr-0045` — Sub-agents route to the flagged server, with its own posture
+- `adr-0046` — The engine bounds every reply with an output-token cap
+- `adr-0047` — API keys resolve through a per-entry key source
+- `adr-0048` — apogee remembers the model choice per server
+- `adr-0049` — An approved write escape executes through a permit pinned to the disclosed target
+- `adr-0050` — Thinking effort is a profile axis with one canonical wire mapping
+- `adr-0051` — Undo is a per-exchange in-memory pre-image journal
+- `adr-0052` — Diff bodies render as split diffs fed by tool-recorded Edit regions
+- `adr-0053` — Popup surfaces embed one list surface
+- `adr-0054` — Options groups host capabilities into named interfaces, one per family
+- `adr-0055` — Daemon Schedules bind to named servers and never actuate a model load
+- `adr-0056` — Terminal scripts fail fast, a confinement denial stops the call, and every session gets a scratch dir
+- `adr-0057` — The tool roster is a third Model-profile axis, resolved axis-wise
+- `adr-0058` — The thinking axis resolves as two sub-axes: channel style and effort
+- `adr-0059` — A Console is live host state the model drives across Turns, and its tools split along the classification line
+- `adr-0060` — Effort is detected passively, dialected per server, and picked from the model's own levels
+- `adr-0061` — Skill suggestions are Driver-side, painted over an engine-level matcher
+- `adr-0062` — Test drivers are Drivers
+- `adr-0063` — Sub-agent runs are user-addressable views
+- `adr-0064` — The system prompt ships an embedded default
+- `adr-0065` — Shipped skills and the load_skill door
+- `adr-0066` — Sub-agent routing follows the `sub-agents-server` root key
+- `adr-0067` — `system-prompt-layers` are an explicit additive channel
+- `adr-0068` — Unnamed delegations are named out of band, on the child's own Upstream
+- `adr-0069` — The top-level model picks the delegation seat
+- `adr-0070` — Off-ramp Mechanisms ship on by default
+- `adr-0071` — Floor guards are engine behaviour; the nudge catalogue retires
+- `adr-0072` — The task list is model-owned session state
+- `adr-0073` — Hooks are observe-only, Driver-side reactions to engine events
+- `adr-0074` — Undo is a per-Exchange snapshot pair in a session-owned git object database
+- `adr-0075` — The headless Event lines are a versioned Driver protocol over the engine's Event stream
+- `adr-0076` — One Reaction core: an origin × class policy matrix replaces the four-rung Reaction surface
+- `adr-0077` — The context-fill notice is the first engine advise Reaction: a top-level boolean, scaled to the compaction line
+- `adr-0078` — A server's wire is a per-entry codec inside the provider Client
+- `adr-0079` — Context cost is a first-class engine report
+- `adr-0080` — git_commit forces a look at staged secret material
+- `adr-0081` — Linux falls back to a namespace fence through bwrap
+- `adr-0082` — A silent stream is cut, and a transient fault is ridden out under a budget
+- `adr-0083` — The standing denials of the architecture reviews
+- `adr-0084` — The Budget reserves what the standing content measures
+- `adr-0085` — Apogee measures Upstreams and passes routing through
+- `adr-0086` — A delegation is stopped singly, and a named one stays continuable for the session
+- `adr-0087` — The engine runs workflows the model or a recipe asks for
+- `adr-0088` — Cancel settles and never rewinds finished work
+- `adr-0089` — A workflow may run in the background and wakes the agent when it ends
+- `adr-0090` — Workflow stages are enterable views
+- `adr-0091` — Endpoint `.local` names resolve over mDNS in-process
+- `adr-0092` — Replayed signed thinking is guarded by a prefix digest
+- `adr-0093` — Usage is priced per call at the bound server
+- `adr-0094` — sub_agent may run as a one-item background workflow
+- `adr-0095` — MCP OAuth tokens are persisted by apogee
+- `adr-0096` — Project config grants are live only by adoption
+- `adr-0097` — The TUI checks for a newer release and names the upgrade command
+- `adr-0098` — The repo owns its release pipeline: two committed skills write the notes, a Go maintainer program publishes

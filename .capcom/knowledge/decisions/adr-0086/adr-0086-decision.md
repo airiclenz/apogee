@@ -1,0 +1,94 @@
+---
+title: ADR 0086 decision
+---
+
+**We keep the blocking model and do not build asynchronous delegation.** A parent that spawns,
+messages, stops and waits on children that outlive its Turn — option A in the handoff — would
+supersede ADR 0013 §5 and ADR 0039 D4, reach about ten subsystems, and hand small local models
+four more tools to juggle. The Floor invariant would ship it off until the bench showed it helped,
+so it would deliver nothing to users for a long time. This ADR takes the smaller step, whose two
+parts are both prerequisites of A if A is ever grilled: the parent may go back to any named
+delegation it ran this session, and the **human** may stop one delegation without stopping the Turn.
+The parent itself still cannot stop a running child — it is not running while the child is.
+
+> **Amended 2026-09-27 (ADR 0089).** "We keep the blocking model and do not build asynchronous
+> delegation" now binds `sub_agent` alone. A Workflow (ADR 0087) may run in the background while the
+> conversation goes on, and its end wakes the agent with a one-line note (ADR 0089 D1–D3); the
+> `workflow` tool lets the model check, stop or message it (D4).
+
+> **Amended 2026-10-05 (ADR 0094).** The blocking model is now `sub_agent`'s default, not its
+> only shape. On a model class the bench approved for ADR 0089's background switch, a `sub_agent`
+> call may carry `background: true`: the engine runs that one delegation as a one-item Background
+> workflow and answers the call at once, and the child's report arrives in the finish note. While
+> such a child runs, the parent is running too, and it can stop the child with the `workflow` tool.
+> A named background child is retained on finish as D1 says; continuing it runs blocking, and a
+> call carrying both `continue` and `background: true` is refused.
+
+**D1 — A named delegation stays continuable for the whole session.** A delegation that completed
+normally is retained when the `sub_agent` call **named** it; naming is the parent's own opt-in, so
+no new text reaches the model and nothing changes for a model that never names. A name the
+out-of-band namer generated (ADR 0068) never reaches the model for a completed run and does not
+retain it. Capped, faulted and stopped (D4) delegations keep today's rule — retained under their
+name, generated or given, with the name spelled back as the continue line — because their result
+already tells the parent the handle. Retention no longer clears at the next Exchange: an entry lives
+until `/clear`, a fork that cuts it off, or the rollback of the Turn that made it (D3). The same name
+still replaces the earlier entry.
+
+**D2 — A continued delegation is seeded from its history, trimmed at use.** A child's conversation
+is still discarded when it ends — the continuation re-spawns from a summary, it does not resume, and
+ADR 0007's "suspended sub-agent" slot stays empty. What the entry keeps is the **original task** and
+one **round** per run under that name: the round's instructions (the first round's are the task) and
+its report — the child's own final report for a completed round, the engine fold and closing text
+for a capped, faulted or stopped one. No summary call is added for a completed round: its final
+report is the child's own account of the work. Nothing is trimmed on disk. When a `continue:` spawns,
+the rounds are laid in, newest first, until they fill the same 4096-token budget the fold is held to,
+and older rounds are dropped with a marker saying how many. The refusal for an unknown name lists the
+**16 most recently used** retained names and `(and N more)` past them, so the listing a confused
+model reads is bounded however long the session runs.
+
+**D3 — Retention is session state, and history operations carry it.** The retained entries are
+saved in the engine's snapshot as an additive `retained` key — no schema version bump, the precedent
+`Tasks` (ADR 0072) set — at the same quiescent boundaries every snapshot is taken at. Each entry
+records the conversation point its spawning result was committed at. The operations that move
+history treat it as follows:
+
+| Operation | Retention |
+|---|---|
+| `--resume`, `--continue`, live restore | loaded from the snapshot |
+| `/clear` | dropped whole |
+| fork (`CutSession`) | kept only for entries spawned before the cut |
+| a Turn rolled back by cancel | restored to its value at the Turn's start |
+| Compaction | untouched — a forgotten name is recovered from the refusal's listing |
+| `/undo` | untouched — it reverts files, not the conversation |
+
+Restoring on rollback also closes two existing leaks: a pooled sibling that capped before the
+cancel stays retained after its result is rolled back, and a continuation cancelled after it spawned
+loses the entry it consumed.
+
+> **Amended 2026-09-27 (ADR 0088 D2).** The table's cancel row no longer holds: a cancelled Turn is
+> settled, not rolled back, so the retained set is not restored to its Turn-start value. A finished
+> child's entry stands, a running child is stopped as D4 stops it and retained under its name, and
+> the two leaks above cannot arise. D1's "the rollback of the Turn that made it" reads the same way.
+
+**D4 — The human stops one delegation, and the Turn goes on.** A stop ends one child — and every
+child under it — with the parent's context still live. It is not a cancel: nothing is rolled back,
+the parent's Turn continues, and the delegation's tool result is committed like any other. The
+engine folds the child's conversation at the stop, as `finishAtFault` folds it at a fault — no
+wrap-up Turn, one summary call under one `stream-idle-timeout` of its own — because files the child
+already wrote stay written, and the parent must know what they are. A second stop while the fold is
+running skips it, leaving the unavailable marker in its place. The result's head is
+`[stopped by the user — engine summary follows]`, followed by the fold, the closing text, any
+undelivered interjections and the continue line. A pooled child stopped before it started runs
+nothing and folds nothing. The delegate ledger's outcome word is **`stopped`**, a fifth beside
+`completed | capped | faulted | cancelled | refused`: "stop" is now the human's single delegation,
+"cancel" the whole Turn, and an engine bound is "capped", never "stopped".
+
+**D5 — The stop is an engine capability addressed by run id.** The engine gains a per-child stop
+keyed by the delegation's **run id**, which ADR 0039's 2026-09-24 amendment already mints, alongside
+the interjection path that bead `apogee-interject-by-run-id` moves to the same key. The TUI binds
+it to **`ctrl+x`**, which is unbound today: inside a run view it stops the viewed run, and on a
+member row of the `✦ Sub-Agent (N)` umbrella it stops that row's run. The run view's hint reads
+`esc back · ^x stop`. There is no confirmation, because nothing is rolled back. `esc` keeps meaning
+back, and `esc×2` at the top level keeps cancelling the whole Turn. A bench, headless run or future
+daemon reaches the same engine call, so ADR 0031's doors stay open; no CLI surface for it is built
+here.
