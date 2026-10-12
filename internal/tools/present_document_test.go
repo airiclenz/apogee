@@ -660,3 +660,27 @@ func TestPresentDocument_SpecIsModelFacing(t *testing.T) {
 		t.Error("schema is missing the optional title property")
 	}
 }
+
+// TestPresentDocument_MissingMountRootAnswersNotFound pins the announced-path invariant for
+// present_document: a document under a configured root that does not exist yet answers "file not
+// found: <path>" without consulting the Presenter, and one under no root keeps the workspace
+// escape refusal.
+func TestPresentDocument_MissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, mounts, cases := missingMountRootFixture(t)
+	presenter := &scriptedPresenter{}
+	tool := NewPresentDocument(workspace, mounts, presenter)
+
+	assertMissingMountRootAnswers(t, cases, "file not found: ", func(t *testing.T, path string) domain.ToolResult {
+		t.Helper()
+		result, err := tool.Execute(context.Background(), presentCall(t, map[string]string{"path": path}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		return result
+	})
+	if presenter.calls != 0 {
+		t.Errorf("Presenter consulted %d times for paths no read accepts, want 0", presenter.calls)
+	}
+}

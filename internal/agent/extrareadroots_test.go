@@ -3,12 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // realTempDir returns a fresh t.TempDir() resolved through symlinks — the spelling every path
@@ -158,5 +160,93 @@ func TestExtraReadRootsAreLiveThroughTheEngine(t *testing.T) {
 	}
 	if !strings.Contains(content, "bundled bytes") {
 		t.Errorf("content %q does not carry the file under the newly mounted root", content)
+	}
+}
+
+// orientedPath returns the path a bullet of the rendered orientation block names, exactly as the
+// block spells it — the text between the bullet's label and the em dash its guidance follows —
+// failing the test when the block carries no such bullet.
+func orientedPath(t *testing.T, block, label string) string {
+	t.Helper()
+
+	for line := range strings.SplitSeq(block, "\n") {
+		rest, ok := strings.CutPrefix(line, "- "+label+": ")
+		if !ok {
+			continue
+		}
+		path, _, ok := strings.Cut(rest, " —")
+		if !ok {
+			t.Fatalf("the %q bullet carries no em dash: %q", label, line)
+		}
+		return path
+	}
+	t.Fatalf("the orientation block states no %q bullet:\n%s", label, block)
+	return ""
+}
+
+// TestMissingMountRootAnswersNotFound is the journey behind the announced-path invariant: the
+// orientation announces a library root and a scratch dir whether or not they exist yet, so a model
+// that takes either path from the block and reads under it before anything created it must be told
+// the path is ABSENT — never the workspace escape refusal, which it would read as a fence around a
+// directory its own host just told it to use. The calls go through the real dispatch path, each
+// with the path spelled exactly as the block emitted it.
+func TestMissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, parent := realTempDir(t), realTempDir(t)
+	library := filepath.Join(parent, "skills")
+	scratch := filepath.Join(parent, "scratch", "session")
+
+	// The Scratch mount is the driven Agent's own live scratch dir, the way the host wires it
+	// (cmd/apogee/wire_live.go) — the engine never defaults the field.
+	var driven *Agent
+	cfg := baseConfig(&recordingSink{})
+	cfg.WorkspaceDir = workspace
+	cfg.ScratchDir = scratch
+	cfg.ReadMounts = domain.ReadMounts{
+		Roots:   func() []string { return []string{library} },
+		Scratch: func() string { return driven.ScratchDir() },
+	}
+
+	// The block is rendered from the config alone, so a first Agent over the same config states
+	// exactly what the driven one does — the paths the script below calls with.
+	block := newProfileAgent(t, cfg, echoResponder(t, "unused")).orientationBlock()
+	announcedRoot := orientedPath(t, block, "Read-only library roots")
+	announcedScratch := orientedPath(t, block, "Scratch dir")
+
+	type step struct {
+		tool, path, want string
+	}
+	steps := []step{
+		{"list_dir", announcedRoot, "directory not found: " + announcedRoot},
+		{"list_dir", announcedRoot + "/x", "directory not found: " + announcedRoot + "/x"},
+		{"read_file", announcedRoot + "/x", "file not found: " + announcedRoot + "/x"},
+		{"list_dir", announcedScratch, "directory not found: " + announcedScratch},
+		{"read_file", announcedScratch + "/x", "file not found: " + announcedScratch + "/x"},
+	}
+	calls := make([]stubllm.ToolCall, 0, len(steps))
+	for i, s := range steps {
+		args, err := json.Marshal(map[string]string{"path": s.path})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		calls = append(calls, stubllm.ToolCall{ID: fmt.Sprintf("c%d", i), Name: s.tool, Arguments: string(args)})
+	}
+	responder := scriptedResponder(t, stubllm.Turn{ToolCalls: calls}, contentTurn("done"))
+	driven = newProfileAgent(t, cfg, responder)
+
+	runExchange(t, driven, "read the library")
+
+	results := toolResultContents(driven)
+	if len(results) != len(steps) {
+		t.Fatalf("got %d tool results, want %d: %q", len(results), len(steps), results)
+	}
+	for i, s := range steps {
+		if !strings.Contains(results[i], s.want) {
+			t.Errorf("%s %q answered %q, want %q", s.tool, s.path, results[i], s.want)
+		}
+		if strings.Contains(results[i], "outside the workspace") {
+			t.Errorf("%s %q answered the workspace fence for an announced path: %q", s.tool, s.path, results[i])
+		}
 	}
 }

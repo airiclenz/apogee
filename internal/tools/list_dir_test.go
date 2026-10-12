@@ -490,3 +490,22 @@ func TestListDir_Execute_MissingDirectorySuggestsSiblings(t *testing.T) {
 		})
 	}
 }
+
+// TestListDir_Execute_MissingMountRootAnswersNotFound pins the announced-path invariant for
+// list_dir: a directory under a configured root that does not exist yet answers "directory not
+// found: <path>", and one under no root keeps the workspace escape refusal.
+func TestListDir_Execute_MissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, mounts, cases := missingMountRootFixture(t)
+	tool := NewListDir(workspace, mounts)
+
+	assertMissingMountRootAnswers(t, cases, "directory not found: ", func(t *testing.T, path string) domain.ToolResult {
+		t.Helper()
+		result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{"path": path}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		return result
+	})
+}

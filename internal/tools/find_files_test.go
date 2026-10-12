@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // seedFindTree lays out the fixture the find_files tests read: files at the top level, in a
@@ -518,4 +520,23 @@ func TestFindFiles_Execute_MissingPathSuggestsSiblings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFindFiles_Execute_MissingMountRootAnswersNotFound pins the announced-path invariant for
+// find_files: a search path under a configured root that does not exist yet answers "path not
+// found: <path>", and one under no root keeps the workspace escape refusal.
+func TestFindFiles_Execute_MissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, mounts, cases := missingMountRootFixture(t)
+	tool := NewFindFiles(workspace, mounts)
+
+	assertMissingMountRootAnswers(t, cases, "path not found: ", func(t *testing.T, path string) domain.ToolResult {
+		t.Helper()
+		result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{"pattern": "*.md", "path": path}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		return result
+	})
 }

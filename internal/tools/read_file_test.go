@@ -1454,3 +1454,23 @@ func TestReadFile_Execute_RefusesABinaryFile(t *testing.T) {
 		t.Errorf("Content = %q, want %q", result.Content, want)
 	}
 }
+
+// TestReadFile_Execute_MissingMountRootAnswersNotFound pins the announced-path invariant for
+// read_file: a path under a configured library root or scratch dir that does not exist yet is
+// absent — "file not found: <path>" — never the workspace escape refusal the model would read as
+// a fence, while a path under no root keeps that refusal.
+func TestReadFile_Execute_MissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, mounts, cases := missingMountRootFixture(t)
+	tool := NewReadFile(workspace, mounts)
+
+	assertMissingMountRootAnswers(t, cases, "file not found: ", func(t *testing.T, path string) domain.ToolResult {
+		t.Helper()
+		result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{"path": path}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		return result
+	})
+}

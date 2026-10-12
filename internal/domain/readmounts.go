@@ -29,7 +29,8 @@ import "io/fs"
 // It is a generic seam: a skills library is the first thing mounted through it, but nothing in the
 // read tools knows that (ADR 0031 — engine seams stay driver-agnostic). Each disk root keeps its
 // own os.Root fence, so a symlink inside one that escapes it is still refused, and a root that does
-// not exist yet is skipped rather than failing the call.
+// not exist yet is skipped rather than failing the call — a path under it is answered as absent
+// ("not found"), never as the workspace escape refusal, because the host announces it regardless.
 type ReadMounts struct {
 	// Roots reports extra read-only DISK roots, each the host's symlink-RESOLVED real path (a root
 	// that is not its own real path is skipped by the read scope). It is also what the host

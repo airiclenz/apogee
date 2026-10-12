@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -244,7 +245,10 @@ func (s readScope) extraRoots(input string) []string {
 // resolve resolves input to a real path within the first root that contains it and returns
 // that root beside the resolved path. When no root accepts it, the error is the WORKSPACE's
 // ErrPathEscape, so the model reads the one uniform "outside the workspace" refusal whatever
-// the extra roots happen to be.
+// the extra roots happen to be — with ONE exception: a path lexically under a configured root
+// that does not exist yet (missingMountRoot) answers an error wrapping fs.ErrNotExist alone, so
+// each tool renders its own not-found message for a path its host announced, rather than a fence
+// the model would read as a refusal (the announced-path invariant, AGENTS.md).
 func (s readScope) resolve(input string) (root, resolved string, err error) {
 	resolved, err = security.ResolveInRoot(input, s.root)
 	if err == nil {
@@ -253,7 +257,56 @@ func (s readScope) resolve(input string) (root, resolved string, err error) {
 	if extraRoot, extraResolved, ok := matchRoot(input, s.extraRoots(input)); ok {
 		return extraRoot, extraResolved, nil
 	}
+	if missing, ok := s.missingMountRoot(input); ok {
+		return "", "", fmt.Errorf("%w: %s", fs.ErrNotExist, missing)
+	}
 	return "", "", err
+}
+
+// missingMountRoot answers the configured disk root that lexically contains input and does not
+// exist — a library root the creation-deferred convention has not created yet, or a scratch dir
+// nothing has written to yet. The orientation announces both regardless, so a path under one is
+// ABSENT, not fenced: nothing under a missing directory exists, which makes "not found" the true
+// answer and the workspace escape refusal a false one.
+//
+// The scratch dir is matched under BOTH its spellings: the real path extraRoots folds in, and the
+// announced one the model was told to use verbatim — under a dotfiles-linked home the two differ,
+// and only the announced one is a lexical prefix of the model's path.
+//
+// The only existence probe it takes is an os.Lstat of a configured ROOT, and only once the input
+// already sits lexically under it: a path outside every configured root is never probed, and a
+// root that exists — usable or not, a file in a directory's place included — is not missing, so
+// such a path keeps the workspace refusal.
+func (s readScope) missingMountRoot(input string) (string, bool) {
+	candidates := s.extraRoots(input)
+	if len(candidates) == 0 {
+		return "", false
+	}
+	if s.mounts.Scratch != nil {
+		if announced := s.mounts.Scratch(); announced != "" {
+			candidates = append(slices.Clip(candidates), announced)
+		}
+	}
+	cleaned := filepath.Clean(input)
+	for _, candidate := range candidates {
+		if candidate == "" || !lexicallyWithin(cleaned, filepath.Clean(candidate)) {
+			continue
+		}
+		if _, err := os.Lstat(candidate); errors.Is(err, fs.ErrNotExist) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// lexicallyWithin reports whether the cleaned absolute path is root itself or a descendant of it,
+// judged on the spelling alone — no link is followed and nothing is opened.
+func lexicallyWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // locate answers, for ONE read, BOTH halves of the question a fenced read asks: the root the
@@ -271,7 +324,8 @@ func (s readScope) resolve(input string) (root, resolved string, err error) {
 // by matchRoot's contract, so handing over the real path makes the two judgements agree.
 //
 // When no root accepts the input the error is the WORKSPACE's ErrPathEscape, so the refusal a
-// caller renders is the workspace's own whatever the extra roots happen to be.
+// caller renders is the workspace's own whatever the extra roots happen to be — unless the input
+// sits under a configured root that does not exist, which is resolve's fs.ErrNotExist.
 func (s readScope) locate(input string) (root, target string, err error) {
 	root, resolved, err := s.resolve(input)
 	if err != nil {
@@ -320,12 +374,17 @@ func (s readScope) open(input string) (*os.File, string, error) {
 //
 // A path no root accepts is read at the WORKSPACE root under its own name, which is where it
 // fails: the refusal the caller renders is then the workspace's own, exactly as it is with no
-// extra roots configured.
+// extra roots configured. A path under a configured root that does not exist is the exception:
+// it is absent, so it answers "file not found" in the model's own spelling, with no near misses —
+// there is no parent to look in.
 func (s readScope) readBounded(input string) ([]byte, string) {
 	if v, ok := s.virtualLocate(input); ok {
 		return v.readBounded()
 	}
 	root, target, err := s.locate(input)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, notFoundMessage("file not found: ", input, nil)
+	}
 	if err != nil {
 		return readWorkspaceFileBounded(input, s.root)
 	}
@@ -353,7 +412,9 @@ func withSiblingSuggestions(failure, root, target string) string {
 // readRoot answers the root a fenced read of input must be pinned to: the workspace when it
 // contains input (always, for a relative path), else the first extra root that does. When NO
 // root accepts it the answer is still the workspace root — the read then fails THERE, so the
-// refusal the caller renders is the workspace's own, exactly as it is without extra roots.
+// refusal the caller renders is the workspace's own, exactly as it is without extra roots (a
+// path under a missing configured root never gets this far: readBounded already answered it
+// not-found).
 //
 // It is locate's root half, and only that: a caller that also opens the file takes both halves
 // from locate instead, so the root and the spelling can never be chosen by two different rules.
@@ -400,6 +461,10 @@ func (s readScope) searchTarget(input, given string) (searchTarget, string) {
 	}
 
 	root, resolved, err := s.resolve(input)
+	if errors.Is(err, fs.ErrNotExist) {
+		// Under a configured root that does not exist: absent, with no parent to suggest from.
+		return searchTarget{}, notFoundMessage("path not found: ", given, nil)
+	}
 	if err != nil {
 		return searchTarget{}, err.Error()
 	}
@@ -477,8 +542,10 @@ func virtualSearchTarget(v virtualTarget, given string) (searchTarget, string) {
 
 // matchRoot reports the first root in roots that is usable AND contains input, with the path
 // input resolves to there. A root that is absent or is not a directory — the skills library on
-// a box where nothing has created it yet, the creation-deferred convention — is skipped: a
-// per-root refusal, never an error of its own.
+// a box where nothing has created it yet, the creation-deferred convention — is skipped here, so
+// a usable root listed after it still serves. An ABSENT root is not silent for long, though:
+// when nothing accepts the input, readScope.resolve answers a path under it not-found
+// (missingMountRoot) rather than with the workspace escape refusal.
 //
 // A root that is not its OWN real path — one reached through a symlink — is skipped the same way
 // (audit 2026-08-25 F-13): the host's contract (domain.ReadMounts.Roots) is that every root

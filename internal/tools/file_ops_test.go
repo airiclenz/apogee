@@ -1057,3 +1057,22 @@ func TestMoveFile_OverwriteStagesBothPaths(t *testing.T) {
 		t.Errorf("status = %q, want both paths fully staged with no leftovers", status)
 	}
 }
+
+// TestCopyFile_MissingMountRootAnswersNotFound pins the announced-path invariant for copy_file's
+// SOURCE: a source under a configured root that does not exist yet answers "file not found:
+// <path>" — never re-read at the workspace, whose fence would call it an escape — and one under no
+// root keeps the workspace escape refusal. Nothing lands in the workspace either way.
+func TestCopyFile_MissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, mounts, cases := missingMountRootFixture(t)
+	tool := NewCopyFile(workspace, mounts)
+
+	assertMissingMountRootAnswers(t, cases, "file not found: ", func(t *testing.T, path string) domain.ToolResult {
+		t.Helper()
+		return runFileOp(t, tool, map[string]any{"source": path, "destination": "copied.md"})
+	})
+	if _, err := os.Stat(filepath.Join(workspace, "copied.md")); err == nil {
+		t.Error("a refused source was copied into the workspace")
+	}
+}

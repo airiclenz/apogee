@@ -85,7 +85,9 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // configured extra read-only root that contains it — so a path component swapped to point
 // outside that root, including a concurrent swap by a confined subprocess mid-call, is
 // refused rather than followed (security review H1). A path under no root is refused with
-// the workspace's own uniform escape message, whatever the extra roots happen to be.
+// the workspace's own uniform escape message, whatever the extra roots happen to be; a path
+// under a configured root that does not exist yet is absent instead, and answers "file not
+// found" (readScope.readBounded).
 // The open, the size check and the read share ONE descriptor (readWorkspaceFileBounded),
 // so there is no check/use gap between them: a rename mid-call changes nothing the call
 // sees, and a file grown past the cap mid-read is refused (see the SCOPE note in

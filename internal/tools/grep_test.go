@@ -1256,3 +1256,22 @@ func matchTotal(content string) int {
 	}
 	return total
 }
+
+// TestGrep_Execute_MissingMountRootAnswersNotFound pins the announced-path invariant for grep: a
+// search path under a configured root that does not exist yet answers "path not found: <path>",
+// and one under no root keeps the workspace escape refusal.
+func TestGrep_Execute_MissingMountRootAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
+	workspace, mounts, cases := missingMountRootFixture(t)
+	tool := NewGrep(workspace, mounts)
+
+	assertMissingMountRootAnswers(t, cases, "path not found: ", func(t *testing.T, path string) domain.ToolResult {
+		t.Helper()
+		result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{"pattern": "bytes", "path": path}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		return result
+	})
+}

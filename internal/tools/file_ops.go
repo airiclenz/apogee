@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -130,8 +131,9 @@ func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool
 // file copies exactly as list_dir lists it (audit 2026-08-28 F-13). That one answer pins both the
 // pre-flight stat and the copy itself, so the two never disagree about which file is being
 // described. A source under no root at all is read at the workspace under its own name, which then
-// refuses it with the one uniform escape message. The destination is pinned to the workspace root,
-// the only end this call writes.
+// refuses it with the one uniform escape message — except a source under a configured root that
+// does not exist yet, which is absent and answered "file not found" without that fallback. The
+// destination is pinned to the workspace root, the only end this call writes.
 func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -146,6 +148,11 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	sourceRoot, source, err := t.scope.locate(args.Source)
+	if errors.Is(err, fs.ErrNotExist) {
+		// Under a configured root that does not exist yet: absent, never re-read at the workspace,
+		// whose fence would answer it as an escape.
+		return errorResult(call.ID, notFoundMessage("file not found: ", args.Source, nil)), nil
+	}
 	if err != nil {
 		sourceRoot, source = t.root, args.Source
 	}

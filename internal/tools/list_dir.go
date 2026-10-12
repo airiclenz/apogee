@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -82,6 +83,10 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	}
 
 	root, dir, err := t.scope.resolve(args.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		// Under a configured root that does not exist yet: absent, with no parent to suggest from.
+		return errorResult(call.ID, notFoundMessage("directory not found: ", args.Path, nil)), nil
+	}
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}

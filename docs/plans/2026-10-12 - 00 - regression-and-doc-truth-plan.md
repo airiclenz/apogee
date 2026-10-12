@@ -39,7 +39,7 @@ capcom Notes agree with the code and with each other.
 - 5: guard folded. ADR 0097 is amended wherever `detect.go`/`wire_update.go` contradicts it. Acceptance checks the 0089 gate and the 0097 Consequences.
 - 1 (re-check): guard folded. The missing-root check matches the announced Scratch() spelling as well as its real path, with a dotfiles-link case. The comment grep catches wrapped comments. The new per-tool tests are named so Acceptance's `-run` selects them.
 
-## 1. A missing mount root answers not-found, not the workspace fence
+## 1. A missing mount root answers not-found, not the workspace fence — ✅ DONE (2026-10-12)
 
 **What:** Recast at the regression check (2026-10-12). Regression (announced-path class, AGENTS.md) since `bbb99763`: orientation line 4 announces
 every read mount root, missing ones included (`skills.readRoots` keeps a missing dir), and the

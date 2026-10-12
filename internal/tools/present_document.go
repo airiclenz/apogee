@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -137,10 +139,14 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 	}
 
 	// Resolved over the read scope: the workspace first, then the mounts, and a path no root
-	// accepts is the workspace's own uniform escape refusal (readScope.resolve). The matched root
+	// accepts is the workspace's own uniform escape refusal (readScope.resolve) — unless it sits
+	// under a configured root that does not exist yet, which is plain absence. The matched root
 	// is what every fenced step below is pinned to — a document under a mount must not be
 	// measured against the workspace.
 	root, path, err := t.scope.resolve(args.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return errorResult(call.ID, notFoundMessage("file not found: ", args.Path, nil)), nil
+	}
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}

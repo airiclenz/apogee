@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -297,6 +299,19 @@ func TestReadScopeScratchRootIsLive(t *testing.T) {
 		t.Errorf("resolve(%q) of another session's scratch dir: err = %v, want ErrPathEscape", other, err)
 	}
 
+	// A scratch dir announced through the link but not created yet: the announced spelling is a
+	// lexical prefix of nothing extraRoots folds in (that is the real path), so only the announced
+	// spelling can tell absence from a fence — and a missing dir's path is absent.
+	scratch = filepath.Join(link, "session-missing")
+	missingScratch := filepath.Join(scratch, "x")
+	_, _, err = scope.resolve(missingScratch)
+	if !errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrPathEscape) {
+		t.Errorf("resolve(%q) under the missing announced scratch dir: err = %v, want fs.ErrNotExist and not ErrPathEscape", missingScratch, err)
+	}
+	if _, failMessage := scope.readBounded(missingScratch); failMessage != "file not found: "+missingScratch {
+		t.Errorf("readBounded(%q) = %q, want %q", missingScratch, failMessage, "file not found: "+missingScratch)
+	}
+
 	scratch = ""
 
 	if _, _, err := scope.resolve(spelled); !errors.Is(err, ErrPathEscape) {
@@ -341,8 +356,10 @@ func TestReadScopeScratchRootLeavesTheHostSliceAlone(t *testing.T) {
 }
 
 // TestReadScopeSkipsUnusableExtraRoot pins the creation-deferred convention: a configured
-// root that does not exist (or is not a directory) is a per-root refusal that falls through
-// silently — never an error of its own — and a usable root listed after it still serves.
+// root that does not exist (or is not a directory) is skipped, so a usable root listed after it
+// still serves. A path under a root that does not exist yet — one the orientation announces
+// regardless — is ABSENT: it answers fs.ErrNotExist, never the workspace's escape refusal and
+// never an inaccessible root, while a path outside every configured root keeps ErrPathEscape.
 func TestReadScopeSkipsUnusableExtraRoot(t *testing.T) {
 	t.Parallel()
 
@@ -361,13 +378,28 @@ func TestReadScopeSkipsUnusableExtraRoot(t *testing.T) {
 		t.Errorf("root = %q, want the usable root %q", root, extra)
 	}
 
-	// A path under the absent root alone is refused, with the workspace's message.
-	underMissing := filepath.Join(missing, "skill.md")
 	onlyMissing := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{missing} }}}
-	_, _, err = onlyMissing.resolve(underMissing)
-	_, wantErr := security.ResolveInRoot(underMissing, workspace)
+	for _, absent := range []string{missing, filepath.Join(missing, "skill.md")} {
+		_, _, err = onlyMissing.resolve(absent)
+		if !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("resolve(%q) under the missing root: err = %v, want fs.ErrNotExist", absent, err)
+		}
+		if errors.Is(err, ErrPathEscape) || errors.Is(err, security.ErrRootInaccessible) {
+			t.Errorf("resolve(%q) under the missing root: err = %v, must be neither a fence refusal nor an inaccessible root", absent, err)
+		}
+	}
+
+	// A root that exists but is not a directory is not missing: a path under it keeps the fence.
+	if _, _, err := onlyMissing.resolve(filepath.Join(notADir, "x")); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("resolve under a configured root that is not missing: err = %v, want ErrPathEscape", err)
+	}
+
+	// A path outside the workspace and every configured root is still the workspace's refusal.
+	outside := filepath.Join(tempRoot(t), "secret.txt")
+	_, _, err = onlyMissing.resolve(outside)
+	_, wantErr := security.ResolveInRoot(outside, workspace)
 	if err == nil || err.Error() != wantErr.Error() {
-		t.Errorf("resolve(%q) error = %v, want %v", underMissing, err, wantErr)
+		t.Errorf("resolve(%q) error = %v, want %v", outside, err, wantErr)
 	}
 }
 
@@ -645,6 +677,66 @@ func TestLooksBinary(t *testing.T) {
 
 			if got := looksBinary(tc.head); got != tc.want {
 				t.Errorf("looksBinary = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// missingMountCase is one path a MissingMountRoot test calls its tool with: under a configured
+// root that does not exist yet (absent ⇒ the tool's own not-found message, exactly), or under no
+// root at all (the workspace's escape refusal, unchanged).
+type missingMountCase struct {
+	name   string
+	path   string
+	absent bool
+}
+
+// missingMountRootFixture builds what every per-tool MissingMountRoot test drives: a workspace,
+// a library root and a scratch dir that are configured — and so announced by the orientation —
+// but not created yet, and an existing file under no root at all.
+func missingMountRootFixture(t *testing.T) (workspace string, mounts ReadMounts, cases []missingMountCase) {
+	t.Helper()
+
+	workspace = tempRoot(t)
+	parent := tempRoot(t)
+	library := filepath.Join(parent, "library")
+	scratch := filepath.Join(parent, "scratch", "session")
+	outside := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(outside, "notes.md"), "outside bytes")
+
+	mounts = ReadMounts{
+		Roots:   func() []string { return []string{library} },
+		Scratch: func() string { return scratch },
+	}
+	cases = []missingMountCase{
+		{name: "under a missing library root", path: filepath.Join(library, "notes.md"), absent: true},
+		{name: "under a missing scratch dir", path: filepath.Join(scratch, "notes.md"), absent: true},
+		{name: "outside every root", path: filepath.Join(outside, "notes.md"), absent: false},
+	}
+	return workspace, mounts, cases
+}
+
+// assertMissingMountRootAnswers runs each case through run and checks the answer: an absent path
+// gets EXACTLY prefix+path — the tool's own not-found wording with no near misses, since no parent
+// exists to look in — and a path under no root keeps ErrPathEscape's message.
+func assertMissingMountRootAnswers(t *testing.T, cases []missingMountCase, prefix string, run func(t *testing.T, path string) domain.ToolResult) {
+	t.Helper()
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := run(t, tc.path)
+
+			if !result.IsError {
+				t.Fatalf("IsError = false, want a refusal (content: %q)", result.Content)
+			}
+			if tc.absent {
+				if want := prefix + tc.path; result.Content != want {
+					t.Errorf("content = %q, want exactly %q", result.Content, want)
+				}
+				return
+			}
+			if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+				t.Errorf("content = %q, want the escape refusal %q", result.Content, ErrPathEscape.Error())
 			}
 		})
 	}
