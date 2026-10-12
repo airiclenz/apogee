@@ -232,7 +232,10 @@ docs/skill-runs/migrate-knowledge/split_adr.py — --verify; ../capcom/.capcom/k
 - `capcom check && capcom fmt --check`
 **Commit:** `docs(knowledge): summarise decision records 0061 to 0080`
 
-## 9. Record summaries, ADRs 0081–0098
+## 9. Record summaries, ADRs 0081–0098 — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): each summary follows item 5's rule (one paragraph of 4–5 lines wrapped at 100 columns, children named in the ADR file's section order with every id in full) and was applied with `capcom know update --body-replace-old/--body-replace-new` from the throwaway `docs/skill-runs/migrate-knowledge/summaries_0081_0098.py`; the diff removes only the 18 placeholder lines.
+NOTES (2026-10-12): adr-0083 carries 10 children (six standing-denial parts), so its full-id reading list takes most of the five lines and its statement is kept to one sentence; adr-0082 and adr-0086, partly superseded by ADR 0088, say what was superseded and that the rest holds.
 
 **What:** Depends on item 4. Item 5's Goal and Approach, for `adr-0081` … `adr-0098`.
 **Goal:** no `<!-- summary pending -->` line remains anywhere under `.capcom/knowledge/`.
