@@ -13,6 +13,7 @@ package main
 // shows that they do.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,19 @@ func toolsFoldFrame(t *testing.T, config string) (*tuitest.Driver, *e2eSession) 
 	return drv, sess
 }
 
+// awaitConfigCarries blocks until the home's config.yaml holds line — the write-back a fold toggle
+// persists. The toggle writes on the click itself, before the frame that shows the fold, so this
+// is that write's own signal rather than a screen gone quiet; the caller still reads the file for
+// its assertion.
+func awaitConfigCarries(t *testing.T, drv *tuitest.Driver, home, line string) {
+	t.Helper()
+
+	drv.WaitFor(func() bool {
+		cfg, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+		return err == nil && strings.Contains(string(cfg), line)
+	}, tuitest.Awaiting(fmt.Sprintf("%q to reach the home's config.yaml", line)))
+}
+
 // TestE2EToolsUmbrellaFoldsOverThreshold drives the fold from the FILE: with
 // `ui.tools-fold-over: 2` an umbrella of three type rows stands folded to `✦ Tools (3 calls) ▶`
 // with no type row beneath it — the default `ui.tools-open: false` — and a click on that header
@@ -121,7 +135,7 @@ func TestE2EToolsUmbrellaFoldIsRememberedAcrossAResume(t *testing.T) {
 
 	drv.WaitText(toolsFoldHeaderOpen)
 	drv.WaitText(toolsFoldReadRow)
-	drv.WaitQuiet(settled)
+	awaitConfigCarries(t, drv, sess.Home(), "tools-open: true")
 	// The only sentence the toggle can ever say names its key (`tools-open: not saved: …`), and a
 	// landed write says nothing at all.
 	if frame := drv.Frame().String(); strings.Contains(frame, "tools-open") {
@@ -266,7 +280,10 @@ func TestE2EToolsUmbrellaSmallFoldsAlone(t *testing.T) {
 
 	drv.WaitText(toolsFoldHeaderFolded)
 	drv.WaitGone(toolsFoldReadRow)
-	drv.WaitQuiet(settled)
+	// An absence, so it waits on the run rather than on the file: a large umbrella's toggle writes
+	// synchronously on the click (Model.toggleToolsFold), before the frame that shows the fold, so
+	// a small one's that wrote anything would have written it by now.
+	waitIdle(drv)
 	cfg, err := os.ReadFile(filepath.Join(sess.Home(), "config.yaml"))
 	if err != nil {
 		t.Fatalf("read the home's config.yaml: %v", err)

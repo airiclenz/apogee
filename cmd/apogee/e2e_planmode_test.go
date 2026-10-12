@@ -43,7 +43,7 @@ func TestE2EPlanModeAnnouncesWhatItWithholds(t *testing.T) {
 
 	submit(drv, planModePrompt)
 	drv.WaitText("to verify it.")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	req, ok := requestCarrying(stub, planModeBullet)
 	if !ok {

@@ -93,7 +93,7 @@ func TestServerStatsSessionTurnWritesOneLine(t *testing.T) {
 	drv.WaitText(serverStatsReply)
 	drv.WaitFor(func() bool { return len(statsLines(t, sess.Home())) > 0 },
 		tuitest.Awaiting("the Turn's attempt to land in the stats file"))
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	assertOneAttemptLine(t, statsLines(t, sess.Home()), stub)
 }

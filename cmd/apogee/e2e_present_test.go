@@ -61,7 +61,8 @@ func TestE2EPresentOpensOnlyTheAllowedFormats(t *testing.T) {
 	// reply has been dispatched; the opener log is read only after it.
 	submit(drv, "Present the finished deliverables.")
 	drv.WaitText("The deliverables are presented.")
-	drv.WaitQuiet(settled)
+	drv.WaitFor(func() bool { return len(opener.argvs()) >= len(presentInert) },
+		tuitest.Awaiting("one opener launch per inert document"))
 
 	opened := opener.argvs()
 	if len(opened) != len(presentInert) {
@@ -79,7 +80,7 @@ func TestE2EPresentOpensOnlyTheAllowedFormats(t *testing.T) {
 	// in the baseline wording, and none of them starts a program.
 	submit(drv, "Present the office documents.")
 	drv.WaitText("The office documents are presented.")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	if after := opener.argvs(); len(after) != len(presentInert) {
 		t.Errorf("the opener ran %d time(s) in total: %q; want the refused four to have launched nothing",
@@ -88,6 +89,7 @@ func TestE2EPresentOpensOnlyTheAllowedFormats(t *testing.T) {
 
 	// The wording is the model-facing half of the same claim, and it is a refusal reported as an
 	// OUTCOME rather than as a tool error: the checklist fails the item either way round.
+	awaitRecorded(t, drv, sess.Home(), "The office documents are presented.")
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
@@ -122,7 +124,7 @@ func TestE2EPresentServesWithoutLeakingTheToken(t *testing.T) {
 
 	submit(drv, "Present the report for review.")
 	drv.WaitText("The report is presented.")
-	drv.WaitQuiet(settled)
+	awaitRecorded(t, drv, sess.Home(), "The report is presented.")
 
 	// The URL is the transcript's alone — rung 0 prints it raw so the terminal can make it
 	// clickable — and the token is the part of it that is a capability.

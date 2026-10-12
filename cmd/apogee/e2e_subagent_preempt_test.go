@@ -119,7 +119,7 @@ func TestE2EQueuedMessagePreemptsTheScheduledSubAgents(t *testing.T) {
 
 	stub.Release(preemptChildGate)
 	drv.WaitText(preemptWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	// The wire: the parent request that carried the wrap-up's trigger. Its tail is the first
 	// child's result, the skip, then the human's message — the order the design promises.
@@ -173,7 +173,7 @@ func TestE2EQueuedMessageWaitsForTheWholeWave(t *testing.T) {
 
 	stub.Release(preemptChildGate)
 	drv.WaitText(waveWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	parent, ok := preemptParentRequest(stub, waveMessage)
 	if !ok {
@@ -224,7 +224,7 @@ func TestE2EQueuedMessageWaitsForAPooledWaveAndSaysSo(t *testing.T) {
 		_, ok := preemptParentRequest(stub, preemptMessage)
 		return ok
 	}, tuitest.Awaiting("the parent's request carrying the queued message"))
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	asked := false
 	for _, req := range stub.Requests() {
@@ -336,7 +336,7 @@ func TestE2EQueuedMessagePreemptsAPooledSubAgentAndItsRowOpensInPlace(t *testing
 		_, ok := preemptParentRequest(stub, preemptMessage)
 		return ok
 	}, tuitest.Awaiting("the parent's request carrying the queued message"))
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	for _, req := range stub.Requests() {
 		if carriesTask(req, poolSkippedTask) {

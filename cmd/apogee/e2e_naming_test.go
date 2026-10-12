@@ -82,7 +82,7 @@ func TestE2ENamingPaintsAGeneratedName(t *testing.T) {
 	// Seen. Let the child finish, and let the parent wrap up on its result.
 	stub.Release(namingChildGate)
 	drv.WaitText(namingWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	// And the task's first line is GONE from the block, rather than sitting beside the new name: the
 	// head carries one label, and the rename moves it.
@@ -157,7 +157,7 @@ func TestE2ENamingIsSilentWithAutoTitleOff(t *testing.T) {
 	// Waiting for the parent's wrap-up is waiting for the whole delegation to be over: the naming
 	// call would have been made at spawn, so by here a request that was going to arrive has.
 	drv.WaitText(namingWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	if calls := namingRequests(stub); len(calls) != 0 {
 		t.Errorf("auto-title is off and the run still made %d naming requests", len(calls))

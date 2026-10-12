@@ -93,7 +93,7 @@ func TestE2ESeatChoiceSessionAskKeepsTheChildOnTheSessionServer(t *testing.T) {
 	awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)
 	submit(run.drv, seatSessionPrompt)
 	run.drv.WaitText(seatWrapUp)
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 
 	if got := childRequests(run.session, seatNearTask); got != 1 {
 		t.Errorf("the session server answered %d of the child's requests; want the one the call seated there", got)
@@ -117,7 +117,7 @@ func TestE2ESeatChoiceSubAgentsAskRunsTheChildOnTheTarget(t *testing.T) {
 	awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)
 	submit(run.drv, seatSubAgentPrompt)
 	run.drv.WaitText(seatWrapUp)
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 
 	if got := childRequests(run.target, seatFarTask); got != 1 {
 		t.Errorf("the sub-agents server answered %d of the child's requests; want the one the call sent there", got)
@@ -149,7 +149,7 @@ func TestE2ESeatFallbackNoteRidesTheResultWhenTheTargetIsDown(t *testing.T) {
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable")
 	submit(run.drv, seatSubAgentPrompt)
 	run.drv.WaitText(seatWrapUp)
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 
 	if got := childRequests(run.session, seatFarTask); got != 1 {
 		t.Errorf("the session server answered %d of the child's requests; an unusable ask still runs, here", got)
@@ -180,7 +180,7 @@ func TestE2ESeatChoiceFixedStatesNoDelegationsLine(t *testing.T) {
 
 	submit(run.drv, seatPlainPrompt)
 	run.drv.WaitText(seatPlainReply)
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 
 	for _, req := range run.session.Requests() {
 		if line := seatDelegationsLineOf(req); line != "" {
@@ -207,7 +207,7 @@ func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T)
 
 	submit(run.drv, seatPlainPrompt)
 	run.drv.WaitText(seatPlainReply)
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 
 	// Each seat as the line renders it — model, box, words — spelled out here rather than composed
 	// from the production code that paints it: this is what the feature promises the MODEL will read.
@@ -239,7 +239,7 @@ func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)
 	submit(run.drv, seatPlainPrompt)
 	run.drv.WaitText(seatPlainReply)
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 	before := seatLastDelegationsLine(t, run.session)
 
 	// The far box goes away, and the notice waits for TWO consecutive failed beats
@@ -256,7 +256,7 @@ func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	submit(run.drv, seatPlainPrompt)
 	run.drv.WaitFor(func() bool { return len(run.session.Requests()) > sent },
 		tuitest.Awaiting("the request that follows the target-down beat"))
-	run.drv.WaitQuiet(settled)
+	waitIdle(run.drv)
 
 	if after := seatLastDelegationsLine(t, run.session); after != before {
 		t.Errorf("the Delegations line moved when the target went down:\nbefore: %s\nafter:  %s", before, after)

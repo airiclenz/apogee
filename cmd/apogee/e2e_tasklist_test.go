@@ -71,7 +71,7 @@ func TestE2ETaskListReachesTheWireAndSurvivesAResume(t *testing.T) {
 	submit(drv, taskListPrompt)
 	drv.WaitText(taskListCardLabel)
 	drv.WaitText(taskListWrapUp)
-	drv.WaitQuiet(settled)
+	awaitRecorded(t, drv, sess.Home(), taskListWrapUp)
 
 	written := taskListRequestAfterAResult(t, stub.Requests())
 	assertCarriesTheTaskList(t, written, "the request following the task_list result")
@@ -88,7 +88,7 @@ func TestE2ETaskListReachesTheWireAndSurvivesAResume(t *testing.T) {
 	next.WaitText("Send a message")
 	submit(next, taskListResumePrompt)
 	next.WaitText(taskListResumeReply)
-	next.WaitQuiet(settled)
+	waitIdle(next)
 
 	resumed := taskListRequestCarrying(t, stub.Requests()[before:], taskListResumePrompt)
 	assertCarriesTheTaskList(t, resumed, "the resumed session's request")
@@ -222,7 +222,7 @@ func TestE2ETaskListFoldIsRememberedAcrossAResume(t *testing.T) {
 
 	drv.WaitText(taskListCardFolded)
 	drv.WaitGone(taskListDoneRow)
-	drv.WaitQuiet(settled)
+	awaitConfigCarries(t, drv, sess.Home(), "task-list-open: false")
 	// The only sentence the fold can ever say names its key (`task-list-open: not saved: …`), and
 	// a landed write says nothing at all.
 	if frame := drv.Frame().String(); strings.Contains(frame, "task-list-open") {

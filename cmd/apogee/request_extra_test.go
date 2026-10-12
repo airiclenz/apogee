@@ -151,7 +151,7 @@ func TestE2ERequestExtraRidesTheTurnAndARoutedDelegation(t *testing.T) {
 			awaitNotice(t, run.drv, "sub-agents: routing to "+seatTargetServer)
 			submit(run.drv, seatSubAgentPrompt)
 			run.drv.WaitText(seatWrapUp)
-			run.drv.WaitQuiet(settled)
+			waitIdle(run.drv)
 
 			if got := childRequests(run.target, seatFarTask); got != 1 {
 				t.Fatalf("the sub-agents server answered %d of the child's requests; want the one routed there", got)
@@ -187,7 +187,7 @@ func TestE2ERequestExtraFollowsAServerSwitch(t *testing.T) {
 				}
 				return false
 			}, tuitest.Awaiting("the moved session's Turn on the target server"))
-			run.drv.WaitQuiet(settled)
+			waitIdle(run.drv)
 
 			assertEveryWitness(t, run.target, "arrived-at", tc.wantTarget)
 			run.quit(t)
