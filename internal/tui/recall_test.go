@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -83,7 +84,8 @@ func firstRecall(t *testing.T, cmd tea.Cmd) recallLoadedMsg {
 		for _, c := range msg {
 			go func() { out <- c() }()
 		}
-		deadline := time.After(5 * time.Second)
+		budget := testtime.Budget(5 * time.Second)
+		deadline := time.After(budget)
 		for range msg {
 			select {
 			case landed := <-out:
@@ -91,7 +93,7 @@ func firstRecall(t *testing.T, cmd tea.Cmd) recallLoadedMsg {
 					return loaded
 				}
 			case <-deadline:
-				t.Fatal("no recallLoadedMsg five seconds after Init — the load never landed")
+				t.Fatalf("no recallLoadedMsg %v after Init — the load never landed", budget)
 			}
 		}
 		t.Fatal("Init's batch carried no recallLoadedMsg — the load never went out")

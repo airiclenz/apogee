@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // newTestSink builds a bound sink whose coalescing window is short enough that a timer-driven
@@ -44,16 +45,16 @@ func stillBuffering(s *teaSink) bool {
 // way to observe a timer-driven flush without sleeping for the window and hoping.
 func waitForEvents(t *testing.T, prog *stubProgram, n int) []domain.Event {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	expired := testtime.Expiry(testtime.Budget(2 * time.Second))
 	for {
 		got := prog.events()
 		if len(got) >= n {
 			return got
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("timed out waiting for %d events; captured %d: %#v", n, len(got), got)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(testtime.Fixed(time.Millisecond))
 	}
 }
 
@@ -187,7 +188,7 @@ func TestTeaSinkLosesNoTokenText(t *testing.T) {
 		emitted.WriteString(chunk)
 		sink.Emit(domain.TokenEvent{Text: chunk})
 		if i%3 == 2 {
-			time.Sleep(2 * time.Millisecond) // let a window close mid-stream
+			time.Sleep(testtime.Fixed(2 * time.Millisecond)) // let a window close mid-stream
 		}
 	}
 	sink.Emit(domain.MessageEvent{Text: "done"}) // the boundary that flushes whatever is left

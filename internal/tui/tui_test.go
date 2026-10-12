@@ -13,6 +13,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The tests below pin the [Build] seam — the split that lets a Driver (ADR 0031, ADR 0062) enter
@@ -49,21 +51,18 @@ func runUntil(t *testing.T, program *tea.Program, cancel context.CancelFunc, rea
 		defer close(done)
 		_, _ = program.Run()
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for !ready() {
-		if time.Now().After(deadline) {
-			program.Kill()
-			<-done
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Registered before the first wait, so a wait that times out never leaves program.Run running:
+	// the failure ends the test and the cleanup kills the loop and waits it out. Kill is
+	// idempotent, so after a loop that already returned the cleanup costs nothing.
+	t.Cleanup(func() {
+		program.Kill()
+		<-done
+	})
+	testtime.Eventually(t, testtime.Budget(5*time.Second), ready, what)
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
-		program.Kill()
-		<-done
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("the program did not return when its context was cancelled")
 	}
 }

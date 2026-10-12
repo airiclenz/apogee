@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // parkedTestMsg is the envelope a parked call produces in these tests — a stand-in for
@@ -69,7 +71,7 @@ func (s *parkedStub) waitForReplies(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testtime.Budget(2 * time.Second)):
 		t.Fatal("a reply goroutine never finished: the reply channel blocked its sender")
 	}
 }
@@ -128,7 +130,7 @@ func TestParkCallReturnsAbandonedValueOnCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 		cancel()
 	}()
 	got, err := parkCall(ctx, ref, parkedQuestion("proceed?"), "abandoned")

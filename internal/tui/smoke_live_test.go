@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -57,7 +58,7 @@ func TestSmokeLiveProfileSeam(t *testing.T) {
 
 	model := os.Getenv("APOGEE_LIVE_MODEL")
 	if model == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 		defer cancel()
 		info, err := provider.NewClient(endpoint, "", provider.WithAPIKey(liveAPIKey())).Discover(ctx)
 		if err != nil {
@@ -95,7 +96,7 @@ func TestSmokeLiveProfileSeam(t *testing.T) {
 // it where it should. start/end are the profile's configured delimiters (the assertions key off
 // them, so the check is honest whichever markers the model under test actually emits).
 func smokeCheckAThinking(t *testing.T, endpoint, model string, profile domain.ModelProfile, start, end string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(2*time.Minute))
 	defer cancel()
 
 	sink := &smokeSink{}
@@ -155,7 +156,7 @@ func envOr(key, def string) string {
 // survives in the visible text depends on the server's own reasoning-format handling, which is
 // precisely what the smoke test is here to observe, so it is logged, not asserted.
 func smokeCheckANativeControl(t *testing.T, endpoint, model string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(2*time.Minute))
 	defer cancel()
 
 	sink := &smokeSink{}
@@ -189,7 +190,7 @@ func smokeCheckANativeControl(t *testing.T, endpoint, model string) {
 // instructions, so a successful run proves the fenced block parses, dispatches through the
 // approval gate, and the follow-up turn does not derail (the D6 watch).
 func smokeCheckBToolCall(t *testing.T, endpoint, model string, profile domain.ModelProfile) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(2*time.Minute))
 	defer cancel()
 
 	workspace := t.TempDir()

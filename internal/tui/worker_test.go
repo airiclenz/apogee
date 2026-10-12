@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestDriveExchangeRunsToExchangeBoundary proves the worker mirrors the canonical drive
@@ -160,7 +161,7 @@ func TestCancelledStepFlushesCoalescedTokens(t *testing.T) {
 		if _, ok := msg.(cancelledMsg); !ok {
 			t.Fatalf("msg = %T; want cancelledMsg", msg)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testtime.Budget(2 * time.Second)):
 		t.Fatal("worker did not return after cancel (deadlock)")
 	}
 
@@ -233,7 +234,7 @@ func TestStartResumeCancelYieldsCancelledMsg(t *testing.T) {
 		if _, ok := msg.(cancelledMsg); !ok {
 			t.Fatalf("msg = %T; want cancelledMsg", msg)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testtime.Budget(2 * time.Second)):
 		t.Fatal("resume worker did not return after cancel (deadlock)")
 	}
 	if eng.submits() != 0 {
@@ -315,7 +316,7 @@ func TestStartExchangeCancelYieldsCancelledMsg(t *testing.T) {
 		if _, ok := msg.(cancelledMsg); !ok {
 			t.Fatalf("msg = %T; want cancelledMsg", msg)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testtime.Budget(2 * time.Second)):
 		t.Fatal("worker did not return after cancel (deadlock)")
 	}
 	if eng.submits() != 1 {
@@ -348,7 +349,7 @@ func TestStartCompactCancelYieldsCancelledMsg(t *testing.T) {
 		if _, ok := msg.(cancelledMsg); !ok {
 			t.Fatalf("msg = %T; want cancelledMsg (a pre-empted compaction is a cancel)", msg)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testtime.Budget(2 * time.Second)):
 		t.Fatal("compact worker did not return after cancel (deadlock)")
 	}
 	if eng.compactCalls != 1 {

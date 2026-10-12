@@ -62,6 +62,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The child's contract with the parent, all of it: where to write its findings, and which ordering
@@ -93,18 +94,26 @@ const (
 const (
 	conptyCols   = 100
 	conptyRows   = 24
-	conptyFrames = 12                     // one full lap of the snake ring, so every glyph is painted
-	conptyTick   = 30 * time.Millisecond  // faster than the renderer's frame budget, so frames coalesce as they do live
-	conptySettle = 400 * time.Millisecond // let the last frame reach the console before reading it back
+	conptyFrames = 12                    // one full lap of the snake ring, so every glyph is painted
+	conptyTick   = 30 * time.Millisecond // faster than the renderer's frame budget, so frames coalesce as they do live
 	// conptyLFColumn is where the mechanism probe parks the cursor. Any column but 1 will do — 1 is
 	// the answer a translated LF gives, so it must not also be the question.
 	conptyLFColumn = 10
 	// conptyGiveUpTicks bounds the wait for the pseudoconsole's first window size, so a host that
 	// never sends one ends the run with a reason rather than with a process the parent has to kill.
 	conptyGiveUpTicks = 100
-	// conptyChildTimeout bounds one child run, inside its own -test.timeout so the parent reports
-	// the overrun rather than the child's panic.
-	conptyChildTimeout = 45 * time.Second
+)
+
+// The waits around one child run. conptySettle is pacing, not a deadline: the child cannot observe
+// its frame reaching the console, so it gives it this long, at any scale. The two timeouts are
+// budgets and scale with the suite.
+var (
+	conptySettle = testtime.Fixed(400 * time.Millisecond) // let the last frame reach the console before reading it back
+	// conptyChildTimeout bounds one child run, inside its own -test.timeout (conptyChildTestTimeout)
+	// so the parent reports the overrun rather than the child's panic. Both are budgets, so the
+	// order holds at any APOGEE_TEST_TIME_SCALE.
+	conptyChildTimeout     = testtime.Budget(45 * time.Second)
+	conptyChildTestTimeout = testtime.Budget(60 * time.Second)
 )
 
 // conptyResult is what one child run measured. It crosses the process boundary as JSON, so every
@@ -219,7 +228,7 @@ func runConPTYChild(t *testing.T, arm string) conptyResult {
 	pty, err := platform.StartPseudoConsole(platform.PseudoConsoleSpec{
 		Path: exe,
 		CommandLine: windows.ComposeCommandLine([]string{
-			exe, "-test.run=^TestConPTYChildProcess$", "-test.count=1", "-test.timeout=60s",
+			exe, "-test.run=^TestConPTYChildProcess$", "-test.count=1", "-test.timeout=" + conptyChildTestTimeout.String(),
 		}),
 		Env:  append(os.Environ(), conptyResultEnv+"="+resultPath, conptyArmEnv+"="+arm),
 		Cols: conptyCols,

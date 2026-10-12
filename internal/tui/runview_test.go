@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The run view's own suite: what opens one, what leaves one, and what the frame says while one is
@@ -905,7 +906,7 @@ func clearsTheFlash(t *testing.T, cmd tea.Cmd) bool {
 			}
 		}
 		return false
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("the flash-clearing command never produced a message")
 		return false
 	}

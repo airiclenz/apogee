@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // fakeUpdateHost answers the boot update check with a fixed result.
@@ -49,7 +50,8 @@ func firstUpdateCheck(t *testing.T, cmd tea.Cmd) updateCheckedMsg {
 		for _, c := range msg {
 			go func() { out <- c() }()
 		}
-		deadline := time.After(5 * time.Second)
+		budget := testtime.Budget(5 * time.Second)
+		deadline := time.After(budget)
 		for range msg {
 			select {
 			case landed := <-out:
@@ -57,7 +59,7 @@ func firstUpdateCheck(t *testing.T, cmd tea.Cmd) updateCheckedMsg {
 					return checked
 				}
 			case <-deadline:
-				t.Fatal("no updateCheckedMsg five seconds after Init — the check never landed")
+				t.Fatalf("no updateCheckedMsg %v after Init — the check never landed", budget)
 			}
 		}
 		t.Fatal("Init's batch carried no updateCheckedMsg — the check never went out")
