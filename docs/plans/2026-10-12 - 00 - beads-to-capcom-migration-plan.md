@@ -92,7 +92,13 @@ NOTES (2026-10-12): dry run in a `git clone --no-local` scratch of 5f4acaf5: `ca
 - In the scratch clone: `capcom check` exit 0; `capcom fmt --check` exit 0; `capcom list --all --json` has 312 entries, `capcom list --json` 41, `capcom ready --json` 15; `verify.py` exit 0 (aliases 312 1:1, deps 5, related 2, nesting 60, planned 139, open 41, ready 15 — each asserted, non-zero exit on any mismatch).
 **Commit:** `chore(issues): add the beads-to-capcom converter and id table`
 
-## 3. Cut over: .capcom/ in, .beads/ out, in one commit
+## 3. Cut over: .capcom/ in, .beads/ out, in one commit — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): capcom-log merge driver wired with `git config --global merge.capcom-log.name "capcom Log merge"` and `git config --global merge.capcom-log.driver "capcom merge-driver %O %A %B %P %S %X %Y"`; `git config --local --get-regexp '^merge\.'` prints nothing. `beads.role` unset from the local config; `.beads/` and `.beads.gate.lock` removed from disk (archived in item 2).
+NOTES (2026-10-12): `.claude/settings.json` and `.codex/hooks.json` held only bd hook groups, so each was reset to an empty `hooks` object before `capcom init --claude-hooks --codex-hooks` wrote capcom's SessionStart and PreCompact groups; `.codex/config.toml` kept.
+NOTES (2026-10-12): `.gitattributes` gains `.capcom/** text eol=lf` under a short comment, beside the `merge=capcom-log` line `capcom init --merge-driver` appended; the "Git hooks are POSIX sh scripts" comment stays, now covering `.githooks/**` alone. AGENTS.md: one stray blank line left by deleting the bd blocks was collapsed so a single blank precedes the capcom block (`capcom agents --check` still current).
+NOTES (2026-10-12): `.capcom/knowledge/` is empty and so untracked; `capcom check` and `capcom prime` were confirmed to pass with the directory absent, as a fresh clone will have it. Converter run: 312 issues, nested 60, deps 5, related 2; `capcom check`, `capcom fmt`, `capcom fmt --check` (0 files), `capcom reindex`, `verify.py` all checks passed — run before `scripts/beads-to-capcom/` was deleted.
+NOTES (2026-10-12): remaining `.beads/` mentions outside this item's files are owned elsewhere — `.apogee/skills/release-notes-apogee/prompts/commits-scout.md` (item 6), AGENTS.md convention bullets (item 4), Go test strings and closingshape fixtures (plan out of scope).
 
 **What:**
 Recast at the regression check (2026-10-12).

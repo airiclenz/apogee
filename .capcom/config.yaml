@@ -1,0 +1,31 @@
+# capcom configuration. Every key is optional; a missing key takes the value shown here.
+
+# The store format version. capcom refuses a store whose format is newer than it reads.
+format: 2
+
+# Issue statuses in order, each mapped to its category: todo, doing, waiting, done or dropped.
+# capcom's rules read only the category. The first status listed in a category is its default.
+statuses:
+  open: todo
+  active: doing
+  parked: waiting
+  done: done
+  dropped: dropped
+
+# Issue types.
+types: [bug, feature, task, chore, epic, decision]
+
+# Directories, relative to the repository root, that an issue's plan: field is resolved against.
+plans: [docs/plans, docs/plans/archived]
+
+ready:
+  # Issues carrying any of these labels are left out of ready unless asked for.
+  hide: []
+
+lock:
+  # A Tree lock whose heartbeat is older than this is stale.
+  ttl: 2h
+
+elsewhere:
+  # Branches whose tip is older than this many days are not scanned.
+  days: 30

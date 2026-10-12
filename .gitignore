@@ -44,9 +44,5 @@ live-config.yaml
 /go.work
 /go.work.sum
 
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
-.beads/proxieddb/
-.beads.gate.lock
+# A former beads clone's local Dolt state (.beads/, .beads.gate.lock): archive it, then delete it.
+/.beads*
