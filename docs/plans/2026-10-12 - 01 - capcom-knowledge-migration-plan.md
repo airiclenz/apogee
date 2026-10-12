@@ -159,7 +159,9 @@ NOTES (2026-10-12): `.capcom/config.yaml` unchanged — the store was already `f
 - `capcom check && capcom fmt --check`
 **Commit:** `docs(knowledge): link superseded decision records to their successors`
 
-## 5. Record summaries, ADRs 0001–0020
+## 5. Record summaries, ADRs 0001–0020 — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): each summary is one paragraph of 3–5 lines wrapped at 100 columns, applied with `capcom know update --body-replace-old/--body-replace-new`; children are named in the ADR file's section order (context, decision, rejected where present, consequences, then realisations/amendments/notes in file order), every child id written in full; the diff removes only the 20 placeholder lines.
 
 **What:** Depends on item 4.
 **Goal:** in `adr-0001.md` … `adr-0020.md` the `<!-- summary pending -->` line is replaced by a 3–5 line summary that states the decision, names its children in reading order, and — for a superseded record — says what still holds.
