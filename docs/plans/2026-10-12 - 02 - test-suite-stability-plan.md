@@ -548,7 +548,10 @@ NOTES (2026-10-12): left as found, outside the guard's definition: the helpers t
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run '<every test the item changed>' ./cmd/apogee/`; a grep/awk check that no `WaitQuiet` in `cmd/apogee/*_test.go` is directly followed by a backend-state read, as item 25's guard defines one
 **Commit:** `test(e2e): wait on backend state instead of a quiet screen (m–z)`
 
-## 27. Measure what typing prompts costs
+## 27. Measure what typing prompts costs — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): measured 196.3 s of 400.4 s summed per-test elapsed (49%, 94 submit/submitNow calls) over the 20 e2e tests with >=3 static submit/submitNow calls, one -race -json run on the Pi; verdict "paste" (item 28 runs). Instrumentation (atomic accumulator in submit/submitNow, printed by TestMain) reverted; the interval stops before the Enter/ctrl+g press.
+NOTES (2026-10-12): `capcom check` reports AGENTS.md's capcom block out of date — pre-existing, untouched by this item.
 
 **What:** The typed-prompts policy gate (owner call: switch only at ≥10%).
 **Regression guard.** the measured interval (Type → prompt tail visible) is the program's per-key fold cost and an upper bound on what pasting saves; the 10% threshold applies to it, and the issue records that it is an upper bound. The measured tests run under `t.Parallel`, so the accumulator is atomic (a `sync/atomic` Int64 of nanoseconds), and the denominator is the summed per-test elapsed (`go test -json`/`-v`), not the run's wall time.
