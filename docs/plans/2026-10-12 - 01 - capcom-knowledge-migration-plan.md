@@ -301,7 +301,9 @@ internal/tools/path_suggest.go — suggestSiblings; internal/tools/path_suggest_
 - `GOMEMLIMIT=2GiB go test -count=1 ./cmd/release/`
 **Commit:** `refactor: cite decision records as Notes in Go`
 
-## 12. Open issues link to the Notes
+## 12. Open issues link to the Notes — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): all six open issues with hits were parked and every hit was a single-line `[ADR NNNN](docs/adr/NNNN-slug.md)` link (none to `CONTEXT.md`, no anchors, no plain path mentions), so all 16 links were rewritten in place with one regex rather than `capcom update` body flags; `capcom fmt` then formatted 0 files.
 
 **What:** Depends on item 4.
 **Goal:** no open (todo, doing or waiting category) capcom issue names a `docs/adr/` path or links `CONTEXT.md`; closed issues are untouched.

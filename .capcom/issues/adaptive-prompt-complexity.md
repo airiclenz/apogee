@@ -9,7 +9,7 @@ created: 2026-09-03T18:40:21Z
 ---
 
 **Status:** parked 2026-07-22 by decision, not by omission
-([ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)
+([ADR 0021](.capcom/knowledge/decisions/adr-0021.md)
 Q3; `../apogee-sim/mission.md` item 2). Phase 5 ships the **capability tier** as a reported
 `apogee probe model` field and stops there.
 
@@ -22,10 +22,10 @@ project exists for.
 Why it is not built with the probe: this is model-facing behaviour inside the loop, so it is a
 **lab row** on the Mechanism registry — earning its place per model on the non-inferiority gate
 against Bypass, with a Table B bench-validation entry
-([ADR 0009](docs/adr/0009-the-ab-decision-rule.md); the Phase-5 settled design: nothing
+([ADR 0009](.capcom/knowledge/decisions/adr-0009.md); the Phase-5 settled design: nothing
 model-facing ships default-on without bench evidence) — or, if the evidence turns out to hold for
 every model, a **Floor guard**, which takes a verdict of its own under
-[ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md).
+[ADR 0071](.capcom/knowledge/decisions/adr-0071.md).
 Shipping it alongside the probe would mean an unvalidated transform in front of every model
 either way. The tier signal costs nothing and is already there when the evidence is.
 

@@ -9,7 +9,7 @@ created: 2026-09-03T18:40:21Z
 
 **Status:** extracted 2026-07-27 from the closed *system-prompt / template story* entry (its
 Residual 1); originally the prompt-seam plan's D1 *rejected hybrid* (engine-owned won —
-[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)).
+[ADR 0023](.capcom/knowledge/decisions/adr-0023.md)).
 Additive-later, demand-driven.
 
 The idea: a host (embedder) knob to override the engine-rendered instruction block. The

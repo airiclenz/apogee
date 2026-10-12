@@ -9,9 +9,9 @@ created: 2026-09-03T18:41:08Z
 ---
 
 **Status:** deferred 2026-08-27 by
-[ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md) decision 4,
+[ADR 0061](.capcom/knowledge/decisions/adr-0061.md) decision 4,
 and left deferred by
-[ADR 0065](docs/adr/0065-shipped-skills-and-the-load-skill-door.md) §8, which superseded that
+[ADR 0065](.capcom/knowledge/decisions/adr-0065.md) §8, which superseded that
 decision for **B2 alone**. **B1** attaches a matched skill's body to a message carrying no `/id`.
 **Deferred because** it puts catalog-derived prompt text in front of the model that the user did not
 ask for, which changes the model's input on apogee's own initiative — a **Mechanism** in the exact

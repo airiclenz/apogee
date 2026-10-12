@@ -8,7 +8,7 @@ created: 2026-09-03T18:40:52Z
 ---
 
 **Status:** parked 2026-08-04 (assessment at the `/schedule` close-out,
-[ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md)).
+[ADR 0033](.capcom/knowledge/decisions/adr-0033.md)).
 The question: should the model be able to create Schedules itself, via a tool, instead of telling
 the human to run `/schedule`?
 
@@ -24,7 +24,7 @@ firings).
 
 **The shape when built (so it is not re-derived).** Layering is *not* the blocker — the precedent
 is `ask_user`: a driver-supplied delegate seam, nil = tool not registered, and
-[ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)'s open
+[ADR 0002](.capcom/knowledge/decisions/adr-0002.md)'s open
 registry means the driver that owns the scheduler registers the tool without touching the engine.
 Creation routes through the **Approver** as a gated (non-ReadOnly) action, which buys the key
 property for free: a Firing's fail-safe denier refuses it, so self-replication is structurally
@@ -37,7 +37,7 @@ model-creatable schedules at Plan. Sub-agents don't inherit it (ADR 0005).
 setting up its own monitoring has real value, and the companion feature is the cross-session
 approval surface ADR 0033 already named when it rejected Ask-Before schedules. Build the tool once,
 at that layer; the TUI still never has to register it. The daemon's shape has since been settled —
-[ADR 0034](docs/adr/0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md),
+[ADR 0034](.capcom/knowledge/decisions/adr-0034.md),
 an in-repo subcommand over a declarative trigger-action file — and `apogee daemon` itself shipped
 on 2026-08-22, which made this tool possible, not needed. Re-parked 2026-08-22 (owner call): this
 entry stays parked until a real need for a model-facing schedule tool appears.

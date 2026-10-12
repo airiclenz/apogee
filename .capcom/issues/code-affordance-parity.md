@@ -24,15 +24,15 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   2026-07-29 the local-server half, 2026-08-12 the profile half); the request-side remainder
   below was demoted from `[P1]` on 2026-08-14 (owner call).** The shipped bodies have
   left this file for their authoritative records
-  ([ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
+  ([ADR 0028](.capcom/knowledge/decisions/adr-0028.md)
   for `/model` + `/server`,
-  [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
+  [ADR 0029](.capcom/knowledge/decisions/adr-0029.md)
   for the launcher,
-  [ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md) for the profile).
+  [ADR 0044](.capcom/knowledge/decisions/adr-0044.md) for the profile).
   **Remaining:**
   - **Sampling params on the Model profile — deferred, demand-driven (owner call 2026-08-14):
     covered launch-side for launcher-managed servers.** apogee deliberately sends no sampling
-    params ([ADR 0046](docs/adr/0046-the-engine-bounds-every-reply-with-an-output-cap.md)
+    params ([ADR 0046](.capcom/knowledge/decisions/adr-0046.md)
     leaves temperature et al. unset), so the server's own defaults win — and for a
     llama-launcher-managed server those defaults ARE the Launch profile's flags (`--temp`,
     `--top-p`, …), which is the owner's whole workflow. Request-side knobs would matter only for
@@ -42,7 +42,7 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     and launch-side "Launch profile" namespaces from colliding in the UX. Its one prerequisite is
     already discharged: the field-wise `SetSampling` merge landed 2026-08-13, so a profile that
     sets only temperature no longer nils the engine's stamped cap.
-    [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
+    [ADR 0025](.capcom/knowledge/decisions/adr-0025.md) §6 still
     defers the user-after-tool wire risk to this layer by name.
 
 **Related (parked below):** per-tool approval overrides (`toolApprovalOverrides`:
@@ -50,6 +50,6 @@ automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee ha
 disposition table but no user-facing override. See *Configurable tool × mode security matrix*.
 
 **Standing rules the shipped work left behind:** the `model-profiles:` shape table grows one
-entry per *sighting*, never per guess ([ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md)).
+entry per *sighting*, never per guess ([ADR 0044](.capcom/knowledge/decisions/adr-0044.md)).
 What has shipped out of this entry since it was parked is recorded in `CHANGELOG.md` and the
 archived plans and ADRs it names — only the open remainder above lives here.
