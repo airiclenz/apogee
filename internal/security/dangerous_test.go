@@ -664,7 +664,7 @@ func TestShellWriteViewJudgesWhatTheCommandWrites(t *testing.T) {
 	}{
 		// The review's three commands pass through the terminal.
 		{"listing the hooks dir", terminalCall("ls -la .git/hooks"), shellTool, TierNone, ""},
-		{"comparing a hook against its source", terminalCall("cmp .beads/hooks/commit-msg .git/hooks/commit-msg"), shellTool, TierNone, ""},
+		{"comparing a hook against its source", terminalCall("cmp .githooks/commit-msg .git/hooks/commit-msg"), shellTool, TierNone, ""},
 		{"reading the git config", terminalCall("cat .git/config"), shellTool, TierNone, ""},
 		// Writes into the control plane still refuse.
 		{"a redirect into the git config", terminalCall("echo x > .git/config"), shellTool, TierHardRefuse, "write-git-control-plane"},

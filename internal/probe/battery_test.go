@@ -312,7 +312,7 @@ const fencedCall = "```tool\nTOOL_NAME\nprobe_echo\nBEGIN_ARG\ntext\nEND_ARG\nap
 
 // The markdown-fenced trial is asked only when the native probe completed without a call the loop
 // or the salvage guard would run, and the format is suggested only when the trial's reply parsed
-// to the canary tool. Every other case suggests native (bd apogee-probe-suggests-unparseable-format).
+// to the canary tool. Every other case suggests native (issue apogee-probe-suggests-unparseable-format).
 func TestBatteryFencedTrialSuggestsOnlyOnEvidence(t *testing.T) {
 	t.Parallel()
 

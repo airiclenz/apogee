@@ -112,7 +112,7 @@ func assertToolResultAnswered(t *testing.T, requests []stubllm.Request) {
 	t.Fatal("no request carried the read_file result back; the loop never closed")
 }
 
-// TestE2EAnthropicWireCompletesAToolLoop is the bead's acceptance (apogee-6fp): with `wire:
+// TestE2EAnthropicWireCompletesAToolLoop is the issue's acceptance (apogee-6fp): with `wire:
 // anthropic` on the entry, a driven prompt that needs a read completes — the call goes out, the
 // result comes back as a tool_result block, the answer lands in the frame — and every request of
 // the run posted to /v1/messages. The same script is then run headless, because the `usage` line

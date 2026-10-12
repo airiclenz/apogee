@@ -22,7 +22,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// `apogee undo <session-id> [confirm <generation>]` (ADR 0074, bead apogee-kk0.7)
+// `apogee undo <session-id> [confirm <generation>]` (ADR 0074, issue apogee-kk0.7)
 // ---------------------------------------------------------------------------
 
 // undoStore seeds one saved session's snapshot store the way a Firing would have left it: an image

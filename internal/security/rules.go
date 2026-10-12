@@ -174,7 +174,7 @@ func DefaultDangerousRules() []Rule {
 		// WritesOnly: reading `.git/config` (inspecting remotes) is ordinary in-workspace
 		// work — the rule guards the write that plants delayed execution, not the read.
 		// ShellWriteView: the same read through the terminal — `ls -la .git/hooks`,
-		// `cat .git/config`, `cmp .beads/hooks/commit-msg .git/hooks/commit-msg` — is
+		// `cat .git/config`, `cmp .githooks/commit-msg .git/hooks/commit-msg` — is
 		// judged by what the command line writes (writeTargetsOf), so only a redirect into
 		// the control plane or a mutating leader naming it (`echo x > .git/config`,
 		// `rm -rf .git/hooks`, `git config -f .git/config …`) still refuses. This is the ONE

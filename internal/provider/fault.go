@@ -6,7 +6,7 @@ import "net/http"
 // The four renderers — statusError and inBandError on the blocking surface, statusDelta and
 // inBandErrorDelta on the streaming one — used to keep the same three rules by prose, each
 // copy promising to mirror the others; classify owns them once and the renderers only read
-// the verdict. Bead apogee-6fp's second wire added its one classifier arm here, not four:
+// the verdict. Issue apogee-6fp's second wire added its one classifier arm here, not four:
 // the Messages API frames its class as an error-type slug (anthropicOverloaded and the
 // others below) with no numeric code, and classify reads those slugs beside the aggregator's.
 type fault struct {

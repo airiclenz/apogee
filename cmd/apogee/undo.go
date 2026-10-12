@@ -27,7 +27,7 @@ import (
 // until ADR 0074 made the journal outlive its process there was nothing anyone could do about it.
 // This verb is the other end of that persistence — the session's snapshot store is on disk under
 // its own id, so a human who reads the report afterwards can put the exchange back from a fresh
-// process (ADR 0074, bead apogee-kk0.7).
+// process (ADR 0074, issue apogee-kk0.7).
 //
 // It is the SAME two steps and the same listing as `/undo`: a preview that discloses every
 // recorded path with what the revert would do to it, then a `confirm` that executes exactly what

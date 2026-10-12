@@ -4,8 +4,8 @@
 [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (day-one user
 cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off).
 Implementation plans: the three staged plans §9.4 links. · **Companion:**
-[hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Open issue:**
-`apogee-575`.
+[hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Issue:**
+`apogee-575` (done — decided in ADR 0076).
 
 > **How to read this.** The owner asked: *imagine a green field — how would a system be designed
 > that merges today's Hooks, Mechanisms and Floor guards into one thing, that can run external
@@ -289,7 +289,7 @@ pre-collapse survey — see the historical note at the top; most of those files 
 | `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only |
 | `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table — **delivered 2026-09-08 (stage 2)** |
 | `hooks:` list, `mechanisms:` map | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver (amended 2026-09-08: the 7 floor `*bool` keys and the `floorFromOptions` negation seam STAY — ADR 0076 D11; the layers are stage 2b) — **delivered 2026-09-08 (stage 2)** |
-| `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, open issue `apogee-tbs`; no per-entry toggle table until stage 2b) |
+| `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, issue `apogee-tbs`, since done; no per-entry toggle table until stage 2b) |
 
 Stays byte-for-byte: the policy functions in `internal/floor` (`SalvageToolCall`, `ToolLoopBreak`,
 `ToolCallRepair`, `RecoverEmpty`, `EnforceToolUse`, `CacheRead`, `CapToolResults`) and the working

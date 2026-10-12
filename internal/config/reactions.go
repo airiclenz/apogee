@@ -86,7 +86,7 @@ const contextFillNoticeKey = "context-fill-notice"
 // id is checked against the names it may not take, every `on:` entry
 // is read as a Moment, each action key is turned into the handler that runs it — every key takes
 // the same two shapes, an argv list or a webhook mapping, and the class decides what the reply is
-// worth (ADR 0076 D2, bead apogee-1d8) — an absent `timeout:` takes the class default, and
+// worth (ADR 0076 D2, issue apogee-1d8) — an absent `timeout:` takes the class default, and
 // `workspace:` is reduced to the one spelling both sides of the filter are compared as (ADR 0073
 // ratified call C — `~` expanded, absolute, symlinks evaluated). It reports the first thing it
 // cannot map, naming the entry, so a user with several Reactions is told which line to fix.
@@ -230,7 +230,7 @@ func (r reactionConfig) actionKeys() []actionKey {
 // handlerFor turns one action key's value into the handler that runs it: a SEQUENCE of strings is
 // the argv of a command run out of process, and a MAPPING is a webhook POST. The three keys share
 // this one path — a webhook advises or gates exactly as a command does, with the class deciding
-// what its reply is worth (ADR 0076 D2, bead apogee-1d8). Anything else — a bare string, a number —
+// what its reply is worth (ADR 0076 D2, issue apogee-1d8). Anything else — a bare string, a number —
 // is refused with the one sentence that spells both shapes under the key that carried it, since an
 // entry that spelled neither has been written against a schema apogee does not have.
 //

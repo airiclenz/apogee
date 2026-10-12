@@ -63,7 +63,7 @@ jobs:
         # cannot tell a runner that proved row #13's UDP arm from one where landlock, ABI >= 4 or
         # bash went missing. APOGEE_REQUIRE_LANDLOCK_NET=1 turns each of those skips into a
         # failure, and the grep requires the subtest's own PASS line, so an arm that ran nothing
-        # cannot go green (bead apogee-ifrv). The test logs the probed landlock ABI either way.
+        # cannot go green (issue apogee-ifrv). The test logs the probed landlock ABI either way.
         run: |
           set -o pipefail
           go test -count=1 -v -run '^TestLandlockProbeNetwork$' ./internal/platform/ | tee landlock-net.log

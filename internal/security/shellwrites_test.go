@@ -20,7 +20,7 @@ func TestWriteTargetsOf(t *testing.T) {
 		{"an unknown leader fails closed", "frobnicate .git/config", ".git/config"},
 
 		// --- read leaders -----------------------------------------------------------
-		{"cmp reads both sides", "cmp .beads/hooks/commit-msg .git/hooks/commit-msg", ""},
+		{"cmp reads both sides", "cmp .githooks/commit-msg .git/hooks/commit-msg", ""},
 		{"cat reads", "cat .git/config", ""},
 		{"a pipeline of reads", "cat .git/config | grep url | head -1", ""},
 		{"a chain of reads", "ls .git/hooks && stat .git/config; wc -l .git/config", ""},

@@ -197,7 +197,7 @@ func laneIDs(lane []domain.Reaction) string {
 	return strings.Join(ids, " ")
 }
 
-// `advise:` and `gate:` take the same webhook mapping `run:` does (ADR 0076 D2, bead apogee-1d8):
+// `advise:` and `gate:` take the same webhook mapping `run:` does (ADR 0076 D2, issue apogee-1d8):
 // a mapping under either key resolves to a [domain.WebhookHandler] carrying the url and both header
 // mappings, stamped with the key's class and the key's own default timeout when the entry spells
 // none. The two arm on the sync lane exactly as their argv twins do.

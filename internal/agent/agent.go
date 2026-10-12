@@ -1055,7 +1055,7 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 // at the fault (capFold, foldForParent) so the parent can RETAIN the child exactly as it retains a
 // capped one (runSubAgent) and continue the work from the fold rather than re-spawn it from
 // nothing — a delegate that spent an hour of tool rounds before its upstream died is worth that
-// much (bead apogee-60x, ADR 0082). Nothing else changes: res.Faulted stays true, the result the
+// much (issue apogee-60x, ADR 0082). Nothing else changes: res.Faulted stays true, the result the
 // parent reads is still the error result (delegationResult) and the loop's own ErrorEvent is the
 // only one emitted — this spends no wrap-up Turn, because a faulted delegate has no Turn to
 // spend, and emits no marker of its own.
