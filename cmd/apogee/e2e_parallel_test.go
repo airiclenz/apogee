@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -80,8 +81,9 @@ var parallelSize = tuitest.Size{W: 140, H: 30}
 // delegation is not there. It is a window rather than a settle because a live delegation blinks, so
 // the screen never goes quiet while one is running — and it is honest at any length, because the
 // child that is running can never finish: a session capped at one has no way to announce the second
-// delegate for as long as the first is stalled.
-const serialWatch = 500 * time.Millisecond
+// delegate for as long as the first is stalled. A window whose length is the claim, so it is
+// [testtime.Fixed].
+var serialWatch = testtime.Fixed(500 * time.Millisecond)
 
 // TestE2EParallelDelegationsFollowAServerSwitch is the pinned run: the session moves onto an entry
 // that pins two, and the reply that follows puts two delegations on screen at the same time.
@@ -361,12 +363,20 @@ func awaitPane(t *testing.T, drv *tuitest.Driver, what string, want func(tuitest
 func paneNeverShows(t *testing.T, drv *tuitest.Driver, what string, unwanted func(tuitest.Frame) bool) {
 	t.Helper()
 
-	deadline := time.Now().Add(serialWatch)
-	for time.Now().Before(deadline) {
+	// A timer, not testtime.Eventually: the window running out is the pass, not a timeout.
+	window := time.NewTimer(serialWatch)
+	defer window.Stop()
+	look := time.NewTicker(testtime.Fixed(5 * time.Millisecond))
+	defer look.Stop()
+	for {
 		if f := drv.Frame(); unwanted(f) {
 			t.Fatalf("the frame shows %s:\n%s", what, f)
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-window.C:
+			return
+		case <-look.C:
+		}
 	}
 }
 

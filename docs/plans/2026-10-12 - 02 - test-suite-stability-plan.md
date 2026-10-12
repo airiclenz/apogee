@@ -226,7 +226,13 @@ NOTES (2026-10-12): the Acceptance race run was executed as `go test -race -coun
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/tuitest/ ./internal/testtime/`
 **Commit:** `test(tuitest): route every timing through testtime`
 
-## 10. Migrate cmd/apogee, part 1 (e2e core)
+## 10. Migrate cmd/apogee, part 1 (e2e core) — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): stopRunRetryBudget (e2e_smoke) was never a guard finding — it reaches awaitIdlePrompt's parameter — but becomes testtime.Budget(5s) under the rule's "named budget constants get Budget/Fixed initialisers", so the Expiry in awaitIdlePrompt is always passed an already-budgeted value.
+NOTES (2026-10-12): streamReplyWait is `tuitest.DefaultTimeout + testtime.Budget(<runes>*streamRuneAllowance)` — the playback term is wrapped as a whole (streamLines' literal 400 sits inside the streamRunes call the guard judges), and streamRuneAllowance stays an unwrapped const used only inside that Budget, so the sum is scaled exactly once.
+NOTES (2026-10-12): armCeiling (answerAdoptionArmed, 4 s) and allowIfAsked's 2 s window are testtime.Budget: one is a liveness ceiling, the other a wait for a pane whose absence is the answer, where a short window on a slow box would misread a slow pane as none.
+NOTES (2026-10-12): assertJournaledPreImage (e2e_announced) polls with testtime.Eventually on DefaultTimeout; a run that never writes a journal now fails "timed out after … waiting for a journal under <pattern>" instead of "left 0 journal(s)"; the exactly-one check after it is unchanged.
+NOTES (2026-10-12): paneNeverShows looks every testtime.Fixed(5ms) on a ticker and ends on a time.NewTimer(serialWatch) window, per the regression guard's "bounded by a timer on testtime.Fixed".
 
 **What:** Item 9's rule. Includes the derived budgets `settled`, `repaintBudget`, `typingAllowance`, `toolTurnAllowance` and `streamReplyWait`.
 **Regression guard.** Acceptance adds a check that `go test -count=1 -v -run 'TestNoFixedTimingInTests$' ./internal/testtime/` prints no finding naming any of the item's files; every cmd/apogee race run carries `-parallel 1`. A poll whose timeout is an answer, not a failure (awaitRepaint, waitForFrameChange, waitForScroll, stepSettings/awaitIdlePrompt, allowIfAsked, answerAdoptionArmed's window, holdKey's off-goroutine pump) uses testtime.Expiry; a negative window such as paneNeverShows is bounded by a timer on testtime.Fixed; Eventually only where a timeout fails the test on the test goroutine. Wrapping `settled` makes it a var, so `pace`, `promptly` (e2e_approval_test.go) and `repaintBudget` (e2e_support_test.go) become vars: `promptly` a Budget ceiling, `pace` and `repaintBudget` Fixed "no movement" windows.

@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -743,7 +744,8 @@ var _ = func(d *tuitest.Driver) []tea.ProgramOption { return d.ProgramOptions() 
 // full to answer "nothing moved": [scrollTranscript] once per walk, and e2e_hostile_test.go's
 // waitForFrameChange and e2e_stream_test.go's waitForScroll once per call. The seconds that adds to
 // a healthy run are the deliberate price of never reading a half-walked surface as the whole one.
-const repaintBudget = 40 * settled
+// Spent in full it answers "nothing moved", so it is a [testtime.Fixed] window like [settled].
+var repaintBudget = testtime.Fixed(40 * settled)
 
 // expandLastBlock opens the last toggleable block in the transcript — the keyboard route to the
 // click the checklist describes. ⌥↑ enters the block cursor on the LAST stop and ⏎ toggles what it
@@ -853,11 +855,12 @@ func scrollTranscript(drv *tuitest.Driver) string {
 // per walk. A tight budget, on the other hand, ends a walk early on a loaded box — the caller reads
 // the page it already read, calls that the transcript's end, and asserts against half a block.
 func awaitRepaint(drv *tuitest.Driver, painted int64) {
-	deadline := time.Now().Add(repaintBudget)
-	for time.Now().Before(deadline) {
+	// An Expiry, not testtime.Eventually: running out is an answer, never a failure.
+	expired := testtime.Expiry(repaintBudget)
+	for !expired() {
 		if drv.Screen().BytesWritten() > painted {
 			return
 		}
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(testtime.Fixed(2 * time.Millisecond))
 	}
 }

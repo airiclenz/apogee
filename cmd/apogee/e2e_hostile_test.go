@@ -28,6 +28,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -416,15 +417,16 @@ func rowsContain(rows []string, want string) bool {
 // half the rows it meant to read.
 func waitForFrameChange(drv *tuitest.Driver, was string) bool {
 	painted := drv.Screen().BytesWritten()
-	deadline := time.Now().Add(repaintBudget)
-	for time.Now().Before(deadline) {
+	// An Expiry, not testtime.Eventually: running out is the answer "at the top", never a failure.
+	expired := testtime.Expiry(repaintBudget)
+	for !expired() {
 		if now := drv.Screen().BytesWritten(); now > painted {
 			painted = now
 			if drv.Frame().String() != was {
 				return true
 			}
 		}
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(testtime.Fixed(2 * time.Millisecond))
 	}
 	return false
 }

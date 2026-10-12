@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -343,17 +344,19 @@ func TestE2EAdoptionKeysAreArmedAfterPaint(t *testing.T) {
 func answerAdoptionArmed(t *testing.T, drv *tuitest.Driver) {
 	t.Helper()
 
-	const armCeiling = 4 * time.Second
-	deadline := time.Now().Add(armCeiling)
+	// Expiries, not testtime.Eventually: a press the pane has not taken within [settled] is
+	// answered by pressing again, and only the outer ceiling's report fails the test.
+	armCeiling := testtime.Budget(4 * time.Second)
+	pastCeiling := testtime.Expiry(armCeiling)
 	for {
 		drv.Press(tuitest.Enter)
-		for until := time.Now().Add(settled); time.Now().Before(until); {
+		for unanswered := testtime.Expiry(settled); !unanswered(); {
 			if !shows(drv.Frame(), adoptionTitleMarker) {
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(testtime.Fixed(10 * time.Millisecond))
 		}
-		if time.Now().After(deadline) {
+		if pastCeiling() {
 			t.Fatalf("the adoption pane took no ⏎ within %v of rising:\n%s", armCeiling, drv.Frame())
 		}
 	}
@@ -534,8 +537,8 @@ func raisePane(drv driven) {
 func holdKey(drv driven, key, marker string) func() int {
 	// The floor between two presses on a box that keeps up, and how long one press waits to be
 	// taken up on a box that does not.
-	const gap = 5 * time.Millisecond
-	const pace = settled
+	gap := testtime.Fixed(5 * time.Millisecond)
+	pace := settled
 
 	done, stopped := make(chan struct{}), make(chan struct{})
 	sent := 0
@@ -556,7 +559,9 @@ func holdKey(drv driven, key, marker string) func() int {
 			}
 			sent++
 			time.Sleep(gap)
-			for deadline := time.Now().Add(pace); drv.Screen().BytesWritten() == painted && time.Now().Before(deadline); {
+			// An Expiry, not testtime.Eventually: the pump runs off the test goroutine, and a press
+			// the screen has not taken up within pace is answered by the next press.
+			for untaken := testtime.Expiry(pace); drv.Screen().BytesWritten() == painted && !untaken(); {
 				time.Sleep(gap)
 			}
 		}
@@ -605,8 +610,8 @@ func pressAndSettle(t *testing.T, drv driven, key string) {
 	// how fast the pane answers: a round trip that takes a second on a throttled box is a healthy
 	// round trip, and only a pane that is not being answered at all — a latch that re-armed, a key
 	// that reached nothing — takes longer than this. Twenty times [settled], which is still far
-	// below the wait a re-armed latch would cost.
-	const promptly = 20 * settled
+	// below the wait a re-armed latch would cost. A ceiling, so a [testtime.Budget].
+	promptly := testtime.Budget(20 * settled)
 
 	start := time.Now()
 	drv.Type(key)

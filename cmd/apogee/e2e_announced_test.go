@@ -31,6 +31,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 	"github.com/airiclenz/apogee/internal/undo"
 )
@@ -1033,17 +1034,13 @@ func assertJournaledPreImage(t *testing.T, home string) {
 
 	pattern := filepath.Join(home, "snapshots", "*", "journal.json")
 	var matches []string
-	deadline := time.Now().Add(tuitest.DefaultTimeout)
-	for {
+	testtime.Eventually(t, tuitest.DefaultTimeout, func() bool {
 		var err error
 		if matches, err = filepath.Glob(pattern); err != nil {
 			t.Fatalf("glob %s: %v", pattern, err)
 		}
-		if len(matches) > 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return len(matches) > 0
+	}, "a journal under "+pattern)
 	if len(matches) != 1 {
 		t.Fatalf("the run left %d journal(s) under %s; want exactly one: %v",
 			len(matches), pattern, matches)
@@ -1181,8 +1178,8 @@ func readTreeFile(t *testing.T, tree, name string) string {
 // between two looks, not how often a frame is read. An approval pane stands until it is answered,
 // and these fixtures answer none, so any interval short of the suite's own timeout catches one —
 // this is small enough that a test asserting "no pane BEFORE the next request" is asking about
-// the moment it thinks it is.
-const paneWatchInterval = 10 * time.Millisecond
+// the moment it thinks it is. Pacing, so it is [testtime.Fixed].
+var paneWatchInterval = testtime.Fixed(10 * time.Millisecond)
 
 // watchApprovalPanes counts the approval panes a driven run raises, and returns the reader for that
 // count. It is the in-process counterpart of [paneTrace]: the trace file paneTrace reads is written

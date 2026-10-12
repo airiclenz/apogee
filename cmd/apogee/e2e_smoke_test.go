@@ -18,6 +18,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -26,8 +27,9 @@ import (
 // spend — every WaitQuiet pays it in full — so it is set by what a loaded box costs, not by what a
 // quiet one needs. Too short and a repaint that stalls mid-stream on a throttled runner reads as
 // "finished" and pins half a frame; at a quarter second the whole suite pays a handful of seconds
-// for a margin wide enough to survive a scheduling hiccup.
-const settled = 250 * time.Millisecond
+// for a margin wide enough to survive a scheduling hiccup. It is a "nothing moved" window, so it is
+// [testtime.Fixed]: the length is the claim, and scaling it would change what "final" means.
+var settled = testtime.Fixed(250 * time.Millisecond)
 
 // TestE2ESmokeInProcess walks checklist T-25 steps 1–13 through the real composition: the root
 // command, the config resolution, the Agent, the tool layer, the approval gate, the session store
@@ -434,15 +436,16 @@ func stepSettings(drv *tuitest.Driver, key tuitest.Key) bool {
 	before := settingsCursor(drv)
 	painted := drv.Screen().BytesWritten()
 	drv.Press(key)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	// An Expiry, not testtime.Eventually: running out is the answer "the end of the list".
+	expired := testtime.Expiry(testtime.Budget(time.Second))
+	for !expired() {
 		if now := drv.Screen().BytesWritten(); now > painted {
 			painted = now
 			if settingsCursor(drv) != before {
 				return true
 			}
 		}
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(testtime.Fixed(2 * time.Millisecond))
 	}
 	return false
 }
@@ -470,7 +473,7 @@ func closePane(drv *tuitest.Driver, marker string) {
 // [tuitest.DefaultTimeout]. The loaded 4-vCPU CI runner lands a key about every 90 ms, so a flat
 // 5 s budget was exhausted 56 characters into a 79-byte prompt; a budget that grows with the
 // prompt outlasts the typing at any length while a short prompt still fails as fast as before.
-const typingAllowance = 100 * time.Millisecond
+var typingAllowance = testtime.Budget(100 * time.Millisecond)
 
 // submit types a line into the prompt box and sends it. It takes the driver interface rather than
 // one driver, so the same step means the same thing in process and through the pty.
@@ -515,7 +518,7 @@ const stopRunAttempts = 3
 // stopRunRetryBudget is how long a non-final [stopRun] attempt waits for the fold before it presses
 // again. It is short because running it out is not a failure — there is another press to try — and
 // the last attempt is the one that carries the generous backstop.
-const stopRunRetryBudget = 5 * time.Second
+var stopRunRetryBudget = testtime.Budget(5 * time.Second)
 
 // stopRun performs the esc×2 cancel gesture and does not return until the worker has folded.
 //
@@ -557,17 +560,18 @@ func stopRun(t *testing.T, drv driven) {
 // awaitIdlePrompt reports whether the prompt box went back to its idle placeholder inside budget.
 // It polls rather than calling a tuitest wait because a wait that has not landed is not a failure
 // here — [stopRun] has another press to try — and only the last attempt may fail the test. It reads
-// INSIDE the prompt box for [submit]'s reason: the transcript above it can hold anything.
+// INSIDE the prompt box for [submit]'s reason: the transcript above it can hold anything. budget is
+// an already-budgeted value ([stopRunRetryBudget] or [tuitest.DefaultTimeout]), used as passed.
 func awaitIdlePrompt(drv driven, budget time.Duration) bool {
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(budget)
+	for !expired() {
 		if rows, ok := drv.Frame().PromptBox(); ok {
 			box := strings.Join(rows, "\n")
 			if strings.Contains(box, idlePromptHead) && !strings.Contains(box, runningPromptHead) {
 				return true
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 	return false
 }
@@ -578,7 +582,7 @@ func awaitIdlePrompt(drv driven, budget time.Duration) bool {
 // second or more each under the race detector on the loaded 4-vCPU CI runner, where a landlock
 // host also re-execs the race-built test binary to fence a confined command. A flat 5 s budget was
 // exhausted with the fifth tool's receipt already on screen and the wrap-up's request just sent.
-const toolTurnAllowance = 2 * time.Second
+var toolTurnAllowance = testtime.Budget(2 * time.Second)
 
 // awaitReply waits for the model's wrap-up line after a chain of toolTurns sequential tool calls.
 // It is [tuitest.Driver.WaitText] with a budget that grows with the chain — [tuitest.DefaultTimeout]

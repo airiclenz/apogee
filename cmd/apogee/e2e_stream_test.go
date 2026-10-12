@@ -28,6 +28,7 @@ import (
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -76,9 +77,11 @@ const streamRuneAllowance = time.Millisecond
 // arithmetic from a stopwatch on one nine-core box (≈ 5.8 s of playback, with room for the
 // parallel suite on top), and a box with fewer cores than that one spends the whole of it on
 // playback and has nothing left for the paint — which is how a healthy-but-slow run got called a
-// hang. A passing run pays none of it: the wait returns the instant the line paints.
+// hang. A passing run pays none of it: the wait returns the instant the line paints. The playback
+// allowance is a [testtime.Budget] of its own, added to a default that already is one, so the sum
+// is scaled exactly once.
 var streamReplyWait = tuitest.DefaultTimeout +
-	time.Duration(streamRunes(streamLines))*streamRuneAllowance
+	testtime.Budget(time.Duration(streamRunes(streamLines))*streamRuneAllowance)
 
 // streamLine is line n of the fixture's reply.
 func streamLine(n int) string { return fmt.Sprintf("%d. Item %d.", n, n) }
@@ -785,15 +788,16 @@ func windowLow(f tuitest.Frame) int {
 // would not move, and the walk above it stops short of the rows it meant to read.
 func waitForScroll(drv *tuitest.Driver, was int) bool {
 	painted := drv.Screen().BytesWritten()
-	deadline := time.Now().Add(repaintBudget)
-	for time.Now().Before(deadline) {
+	// An Expiry, not testtime.Eventually: running out is the answer "at the top", never a failure.
+	expired := testtime.Expiry(repaintBudget)
+	for !expired() {
 		if now := drv.Screen().BytesWritten(); now > painted {
 			painted = now
 			if windowLow(drv.Frame()) < was {
 				return true
 			}
 		}
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(testtime.Fixed(2 * time.Millisecond))
 	}
 	return false
 }

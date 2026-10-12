@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -183,15 +184,16 @@ func alwaysAllow(drv *tuitest.PTYDriver) {
 // item's claim — so the step that follows a restore asks the question of the screen rather than
 // assuming either answer.
 func allowIfAsked(drv *tuitest.PTYDriver) {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	// An Expiry, not testtime.Eventually: no pane within the window is an answer, not a failure.
+	expired := testtime.Expiry(testtime.Budget(2 * time.Second))
+	for !expired() {
 		if _, _, ok := drv.Frame().Find("Always allow this session"); ok {
 			awaitArmed(drv)
 			drv.WaitQuiet(settled)
 			drv.Type("s")
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 }
 
