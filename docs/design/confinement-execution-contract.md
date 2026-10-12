@@ -1005,8 +1005,16 @@ P3.4 changes `AutoEligible()` from `FSWrite && NetworkEgress` to **`FSWrite` onl
 network is open by default, so network-egress confinement is an *optional tightening*, not an Auto
 gate). Consequence: Linux Auto needs only kernel ≥ 5.13. A 5.13–6.6 kernel reports
 `{FSWrite:true, NetworkEgress:false}` and is **Auto-eligible**; `NetworkEgress` matters only when a user
-opts back into network-deny via `box.NetworkAllow`. The `agent.New` Auto gate (`loop.go`) reads
-`AutoEligible()` unchanged in shape — only the predicate it calls is loosened.
+opts back into network-deny via `box.NetworkAllow`.
+
+Agent construction does not read `AutoEligible()`. `buildAgent` (`internal/agent/construct.go`)
+refuses Auto only for a **nil** Confiner — no facility injected at all — with `ErrAutoUnavailable`;
+any non-nil Confiner admits Auto. Without `FSWrite`, each subprocess call gates through Approval
+instead (`fsConfinementAvailable`, `internal/agent/dispatch.go`; the §4 "subproc, caps insufficient →
+gate" row). `AutoEligible()` is read only by `internal/probe`: the `apogee probe host` verdict, and
+`AutoUnattendedBlocked`, which refuses **unattended** Auto — `apogee headless` and Schedule Firings —
+on a host that cannot fence. *(Corrected 2026-10-12: this paragraph said the `agent.New` Auto gate in
+`loop.go` read `AutoEligible()`.)*
 
 ---
 

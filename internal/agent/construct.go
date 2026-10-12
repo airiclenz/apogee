@@ -49,7 +49,8 @@ func newDelegateAgent(cfg domain.Config, up provider.Responder, d *delegation) (
 
 // buildAgent is the one construction path behind newAgent (d == nil) and newDelegateAgent (d set).
 // Validation order is deliberate: required fields first, then the Auto/Confinement gate
-// (ADR 0012 — FSWrite-only AutoEligible), and finally the armed Reactions, which are validated
+// (ADR 0012 — Auto needs a non-nil Confiner; a Confiner without FSWrite admits Auto and gates each
+// subprocess call through Approval), and finally the armed Reactions, which are validated
 // against the engine's own builtins once those exist (ADR 0076 D1). The two kinds of Agent differ
 // in exactly two places, both marked below: the fields a top-level Agent owns afresh and a delegate
 // takes from d (seedTopLevel / delegation.seed), and the context-file cache, which only a session

@@ -146,7 +146,7 @@ type HostConfinement struct {
 	// the user only through the verdict's wording, never through a rule.
 	Backend string
 	// Caps is the capability matrix that backend reports (domain.ConfinementCaps.AutoEligible is
-	// the filesystem-write bit the Auto gate reads).
+	// the filesystem-write bit the unattended-Auto gate, probe.AutoUnattendedBlocked, reads).
 	Caps domain.ConfinementCaps
 	// Unconfined is `confine-to-workspace: false` — the user's own explicit "I am the sandbox",
 	// which is NOT blocked (ADR 0033 decision 3). It is stored INVERTED, so the zero value is

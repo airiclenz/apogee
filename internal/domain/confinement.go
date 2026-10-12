@@ -137,21 +137,24 @@ const (
 	ResidualUnixEgress = "connect(2) AF_UNIX"
 )
 
-// AutoEligible reports whether these capabilities satisfy the Auto gate. Under ADR 0012
-// the network is open by default, so Auto requires filesystem-write confinement ONLY
+// AutoEligible reports whether these capabilities can fence Auto's subprocess surface. Under
+// ADR 0012 the network is open by default, so that takes filesystem-write confinement ONLY
 // (was FSWrite && NetworkEgress under ADR 0004). NetworkEgress is still reported and
-// matters only when a user opts back into network-deny via box.NetworkAllow. A host
-// without fs-confinement is no longer refused Auto — it gates the subprocess surface
-// instead (confinement-execution-contract §5).
+// matters only when a user opts back into network-deny via box.NetworkAllow. It does not
+// gate interactive Auto: agent construction refuses Auto only for a nil Confiner, and a
+// host without fs-confinement gates each subprocess call through Approval instead. Only
+// unattended Auto (headless runs, Schedule Firings) is refused on false
+// (confinement-execution-contract §5).
 func (c ConfinementCaps) AutoEligible() bool { return c.FSWrite }
 
 // ConfinementBox is the confinement policy for a run. Default = workspace-write-only
-// + network OPEN + per-project allowlist (ADR 0012). NetworkAllow is a TIGHTENING
-// list: empty leaves the network open; non-empty opts the box into network-deny.
+// + network OPEN (ADR 0012). NetworkAllow is an optional TIGHTENING list an embedder sets
+// (Config.ConfineNetworkAllow; no config key spells it): empty leaves the network open;
+// non-empty opts the box into network-deny.
 type ConfinementBox struct {
 	WorkspaceRoot string
 	WritablePaths []string
-	NetworkAllow  []string // per-project tightening; empty = network open (ADR 0012)
+	NetworkAllow  []string // embedder-set tightening; empty = network open (ADR 0012)
 	// ScratchDir is the session scratch dir the box already lists among WritablePaths, named on
 	// its own so a confined spawn can point the toolchain's temp and cache variables (TMPDIR,
 	// GOCACHE, XDG_CACHE_HOME, … — subprocess.ScratchEnv) beneath it. Empty when the session has
@@ -162,7 +165,7 @@ type ConfinementBox struct {
 // ConfinementBox is the full box this Config declares: the workspace root a subprocess is fenced
 // to, the extra writable paths a confined toolchain needs — plus the session's ScratchDir when one
 // is set, which also rides on the box's own ScratchDir field so a confined spawn can seed the
-// toolchain's temp and cache dirs beneath it — and the per-project network tightening list
+// toolchain's temp and cache dirs beneath it — and the embedder-set network tightening list
 // (confinement-execution-contract §7). It is the single place those Confine* fields (and
 // ScratchDir) are folded into a box, so a new call site can no longer open a silent confinement
 // hole by forgetting one of them. The returned slices

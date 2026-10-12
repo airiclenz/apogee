@@ -160,8 +160,8 @@ type Config struct {
 
 	// ConfineWritablePaths and ConfineNetworkAllow extend the confinement box beyond the
 	// workspace root (confinement-execution-contract §7): the toolchain cache/temp dirs a
-	// confined `go build`/`pip` needs to write, and the per-project network tightening
-	// list. The host probes/configures these and folds them into Config; the loop confines
+	// confined `go build`/`pip` needs to write, and the optional network tightening list.
+	// No config key spells either; an embedder sets them on Config. The loop confines
 	// a subprocess to WorkspaceDir ∪ ConfineWritablePaths with ConfineNetworkAllow as the
 	// box's NetworkAllow. Empty NetworkAllow leaves the network open (the ADR 0012 default).
 	ConfineWritablePaths []string

@@ -157,7 +157,7 @@ type Host interface {
 type denyConfiner struct{}
 
 // Capabilities reports a backend that can enforce nothing — both fs-write and
-// network-egress are false, so this backend never satisfies the Auto gate. It offers no
+// network-egress are false, so this backend is never AutoEligible. It offers no
 // Unavailable sentence: there is no facility here to explain itself, and a host reading
 // "no confinement backend on this OS" learns nothing the backend's own name did not already
 // say. The typed CauseBackendAbsent carries that exact fact instead, so a caller branching
@@ -174,8 +174,8 @@ func (denyConfiner) Confine(_ context.Context, _ domain.ConfinementBox, _ *exec.
 	return fmt.Errorf("%w: no confinement backend on this host", domain.ErrConfinementUnavailable)
 }
 
-// NewDenyConfiner returns the no-confinement backend. It enforces nothing and never
-// satisfies the Auto gate. It returns domain.Confiner — the same type the root
+// NewDenyConfiner returns the no-confinement backend. It enforces nothing and is never
+// AutoEligible. It returns domain.Confiner — the same type the root
 // re-exports as apogee.Confiner (ADR 0010), so callers in either package assign it
 // interchangeably.
 func NewDenyConfiner() domain.Confiner { return denyConfiner{} }

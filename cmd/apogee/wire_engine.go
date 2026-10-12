@@ -923,18 +923,20 @@ func (e *lateEngine) SwitchUpstream(spec apogee.UpstreamSpec) error {
 	return agent.SwitchUpstream(spec)
 }
 
-// errAutoUnavailable is the friendly framing of ErrAutoUnavailable: Auto needs
-// filesystem-write confinement, which this host cannot provide (no landlock and no bwrap with
-// user namespaces on Linux, no sandbox-exec on macOS — ADR 0012, ADR 0081). The lower rungs
-// of the ladder still work.
+// errAutoUnavailable is the friendly framing of ErrAutoUnavailable, which construction returns
+// only when no Confiner was injected — the CLI always injects one, so this is a backstop. The
+// string is announced wording and stays: it names the host facts a confinement backend needs
+// (landlock or bwrap with user namespaces on Linux, sandbox-exec on macOS — ADR 0012, ADR 0081).
+// A host whose backend cannot fence still enters Auto and gates each subprocess call through
+// Approval. The lower rungs of the ladder still work.
 var errAutoUnavailable = errors.New(
 	"apogee: auto mode requires filesystem-write confinement, which is unavailable on this host " +
 		"(Linux needs landlock — kernel ≥5.13 — or bwrap with user namespaces; macOS needs sandbox-exec) — " +
 		"use --mode plan, --mode ask-before, or --mode allow-edits")
 
 // friendlyConstructErr maps construction errors to actionable CLI messages. The headline
-// case is Auto mode: New returns ErrAutoUnavailable when Mode==Auto but the host's Confiner
-// cannot enforce filesystem confinement.
+// case is Auto mode: New returns ErrAutoUnavailable when Mode==Auto and no Confiner was
+// injected; a Confiner that cannot enforce filesystem confinement admits Auto and gates instead.
 func friendlyConstructErr(err error) error {
 	if errors.Is(err, apogee.ErrAutoUnavailable) {
 		return errAutoUnavailable

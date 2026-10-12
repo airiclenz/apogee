@@ -112,6 +112,16 @@ project config may only *add* (tighten). Lives in `internal/security` (P3.6).
   unsupervised *and* unbounded" invariant, and the per-tool teeth (MCP gates).
 - **`ConfinementCaps.AutoEligible()` changes** to `FSWrite`-only; the `agent.New` Auto gate and
   `ErrAutoUnavailable` follow. Linux Auto's reach widens from kernel ≥6.7 to ≥5.13.
+
+  > **Note 2026-10-12 (verified against code; plan `2026-10-12 - 00` item 3).** The construction
+  > gate does not read `AutoEligible()`. Agent construction (`buildAgent`,
+  > `internal/agent/construct.go`) refuses Auto only when **no Confiner** is injected at all, with
+  > `ErrAutoUnavailable`; any non-nil Confiner admits Auto. A Confiner without `FSWrite` does not
+  > refuse Auto: each subprocess call gates through Approval instead (`fsConfinementAvailable`,
+  > `internal/agent/dispatch.go` — "confine if you can, gate if you can't"). `AutoEligible()` is read
+  > only by `internal/probe`: the `apogee probe host` verdict, and `AutoUnattendedBlocked`, which
+  > refuses **unattended** Auto — `apogee headless` and Schedule Firings — on a host that cannot fence.
+
 - **`web-fetch` / `http-request` no longer gate in Auto** (url-safety filtered instead); **MCP gating
   is now conditional** on `confine-to-workspace` (gates when `true`, free when `false`).
 - **`confine-to-workspace=false` is a documented footgun.** It is safe *only* via a VM; the

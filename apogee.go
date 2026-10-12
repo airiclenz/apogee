@@ -957,8 +957,9 @@ func NewEventLines(w io.Writer, o EventLinesOptions) *EventLines { return eventj
 // ----------------------------------------------------------------------------
 
 var (
-	// ErrAutoUnavailable is returned by New when Mode==Auto but the Confiner cannot
-	// satisfy the Auto gate (missing or insufficient capabilities).
+	// ErrAutoUnavailable is returned by New when Mode==Auto and no Confiner was injected at
+	// all. A Confiner without filesystem-write confinement does not refuse Auto: each
+	// subprocess call gates through Approval instead (ADR 0012).
 	ErrAutoUnavailable = domain.ErrAutoUnavailable
 
 	// ErrConfinementUnavailable is the runtime safety net a Confiner backend returns

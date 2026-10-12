@@ -147,7 +147,13 @@ docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md — 202
 
 **Commit:** `docs(context): align the Driver, confinement and Moment entries with the code`
 
-## 3. Confinement and MCP design docs agree with the code
+## 3. Confinement and MCP design docs agree with the code — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): consequential edit — internal/domain/errors.go: made necessary by the ratified Auto gate; the `ErrAutoUnavailable` godoc said "the gate is FSWrite-only", which the Auto-gate grep surfaced
+NOTES (2026-10-12): consequential edit — internal/platform/platform.go: made necessary by the ratified Auto gate; `denyConfiner` comments said it "never satisfies the Auto gate", now "is never AutoEligible" (the historical P0.6 "New's Auto gate" sentence stays)
+NOTES (2026-10-12): consequential edit — internal/daemon/file.go: made necessary by the ratified Auto gate; the `Caps` comment now names the unattended-Auto gate (`probe.AutoUnattendedBlocked`) as the reader of `AutoEligible`
+NOTES (2026-10-12): the `errAutoUnavailable` string in cmd/apogee/wire_engine.go is unchanged (announced wording); only its comment and `friendlyConstructErr`'s comment changed
+NOTES (2026-10-12): confinement-execution-contract.md §2.6 and §7's 2026-08-22 amendment still say "per-project `WritablePaths`/`NetworkAllow` from config", though no config key exists (ADR 0012's 2026-10-02 note); left as is, since that phrase is outside this item's grep (allowlist only) and internal/domain scope
 
 **What:** `docs/design/confinement-execution-contract.md` §5 says the `agent.New` Auto gate in
 `loop.go` reads `AutoEligible()`. `docs/design/mcp-client.md`'s "depends only on" list misses two

@@ -235,7 +235,9 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
 
 ## 4. Where it plugs in
 
-- `internal/mcp` depends only on the SDK, `internal/domain`, `internal/security`, and
+- `internal/mcp` depends only on the SDK, `internal/domain`, `internal/security`,
+  `internal/mcpauth` (the token store and refresh handler behind an `auth: oauth` server's bearer),
+  `golang.org/x/net/http/httpguts` (to validate a configured `headers:` or `headers-env:` name) and
   `internal/platform` — the last for a stdio server's process-tree teardown (stopping a server
   kills its whole process tree, not just the first process) and for scoping its `env-allowlist`
   environment. It never imports the root facade (ADR 0010). It exports `Client`, `Connect`,
