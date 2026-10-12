@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestRunKillsAWrappersGrandchildOnTimeout is the process-tree half of the deadline: a wrapper — a
@@ -39,7 +41,7 @@ func TestRunKillsAWrappersGrandchildOnTimeout(t *testing.T) {
 
 	pid := readPIDFile(t, pidFile)
 	defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
-	if !pidGone(pid, 2*time.Second) {
+	if !pidGone(pid, testtime.Budget(2*time.Second)) {
 		t.Errorf("the wrapper's grandchild (pid %d) is still alive after the run timed out; the deadline kills the leader alone", pid)
 	}
 }
@@ -49,29 +51,28 @@ func TestRunKillsAWrappersGrandchildOnTimeout(t *testing.T) {
 func readPIDFile(t *testing.T, path string) int {
 	t.Helper()
 
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
+	pid := 0
+	testtime.Eventually(t, testtime.Budget(20*time.Second), func() bool {
 		if b, err := os.ReadFile(path); err == nil {
-			if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {
-				return pid
+			if got, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && got > 0 {
+				pid = got
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("grandchild PID file %s never appeared", path)
-	return 0
+		return pid > 0
+	}, "grandchild PID file "+path+" to appear")
+	return pid
 }
 
 // pidGone reports whether pid stops existing within the given window, polling so a reap that lands
 // a moment after Run returned does not read as survival. Signal 0 probes existence without
 // delivering anything; ESRCH means the process is gone.
 func pidGone(pid int, within time.Duration) bool {
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(within)
+	for !expired() {
 		if err := syscall.Kill(pid, 0); err != nil {
 			return true
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 	return syscall.Kill(pid, 0) != nil
 }

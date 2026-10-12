@@ -19,6 +19,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // fakeConfiner is a caps-injected Confiner for the core's own tests. It records each Confine
@@ -811,7 +812,7 @@ type zombieWaitTeardown struct {
 
 func (z zombieWaitTeardown) Contain(cmd *exec.Cmd) {
 	stat := filepath.Join("/proc", strconv.Itoa(cmd.Process.Pid), "stat")
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+	for expired := testtime.Expiry(testtime.Budget(10 * time.Second)); !expired(); time.Sleep(testtime.Fixed(5 * time.Millisecond)) {
 		raw, err := os.ReadFile(stat)
 		if err != nil {
 			z.t.Errorf("read %s: %v", stat, err)

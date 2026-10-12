@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -641,7 +642,7 @@ func TestRevertThroughTheRecordedFence(t *testing.T) {
 // arrive. It is generous because it is not a timing measurement: a queued call never arrives
 // at all until the parked step is released, so anything short of the gate's own release is
 // the same answer.
-const lockWaitGrace = 10 * time.Second
+var lockWaitGrace = testtime.Budget(10 * time.Second)
 
 // waitOn fails the test unless c delivers within the grace period, naming what was waited on.
 func waitOn[T any](t *testing.T, c <-chan T, what string) T {

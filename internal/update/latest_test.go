@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // hostPlaceholder in a stand-in Location is replaced by the request's own scheme and host, so a
@@ -100,7 +102,7 @@ func TestLatest_ServerNeverAnswers_ReturnsErrorAtDeadline(t *testing.T) {
 		<-request.Context().Done()
 	}))
 	t.Cleanup(server.Close)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Fixed(50*time.Millisecond))
 	defer cancel()
 
 	tag, err := Latest(ctx, NewClient(server.URL))

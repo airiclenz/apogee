@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // attrRecorder is a platform.ProcessTeardown that snapshots the cmd's SysProcAttr in Contain —
@@ -183,16 +184,16 @@ func TestRunSubprocessTimeoutKillsAConfinedGrandchild(t *testing.T) {
 	}
 
 	// The killed grandchild is reparented and reaped by init (or a subreaper) asynchronously.
-	deadline := time.Now().Add(5 * time.Second)
+	expired := testtime.Expiry(testtime.Budget(5 * time.Second))
 	for {
 		err := syscall.Kill(pid, 0)
 		if errors.Is(err, syscall.ESRCH) {
 			return
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 			t.Fatalf("grandchild %d still exists after the timeout (kill(0) = %v), want it reaped with the group", pid, err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 }

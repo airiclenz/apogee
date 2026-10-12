@@ -13,12 +13,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // safeOpenDeadline is how long a SafeOpen may take before a test calls it wedged. A blocking
 // open of a FIFO with no writer never returns, so the pre-fix failure is this deadline, not an
 // error.
-const safeOpenDeadline = 2 * time.Second
+var safeOpenDeadline = testtime.Budget(2 * time.Second)
 
 // safeOpenOutcome is one SafeOpen call's result, carried out of the goroutine the deadline runs it in.
 type safeOpenOutcome struct {

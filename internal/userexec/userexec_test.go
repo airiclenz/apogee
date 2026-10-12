@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // requireShell skips a test that scripts its command with `sh`. Every assertion in this file is
@@ -113,7 +114,7 @@ func TestRunReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	requireShell(t)
 	t.Parallel()
 
-	const deadline = 200 * time.Millisecond
+	deadline := testtime.Fixed(200 * time.Millisecond)
 	// margin is what a loaded box under -race is allowed on top of the thing being claimed: the
 	// shell's cold start and the kill's delivery in the first case, and the stderr copy's teardown
 	// behind WaitGrace in the second. It is the instrument, never the claim — what each case asserts

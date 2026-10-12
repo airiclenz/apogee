@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -49,7 +50,7 @@ func testRubric() Rubric {
 func testContext(t *testing.T) context.Context {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	t.Cleanup(cancel)
 	return ctx
 }
@@ -394,7 +395,7 @@ func TestJudgeSelfCheck(t *testing.T) {
 		PassWhen: "the text is exactly the word hello",
 		FailsIf:  "the text is any other word",
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(5*time.Minute))
 	defer cancel()
 
 	agrees, err := Ask(ctx, r, Artifact{Name: "the text", Kind: KindStdout, Text: "hello"})

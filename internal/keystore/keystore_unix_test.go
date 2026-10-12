@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // A store tool can be wrapper-shaped — a script that starts the real binary and waits on it — and a
@@ -27,7 +29,7 @@ func TestRunToolKillsAWrappersGrandchildWhenTheStoreNeverAnswers(t *testing.T) {
 
 	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
 	script := fmt.Sprintf("sleep 30 & echo $! > %s; wait", strconv.Quote(pidFile))
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Fixed(200*time.Millisecond))
 	defer cancel()
 
 	_, err := runTool(ctx, []string{"sh", "-c", script}, "")
@@ -37,7 +39,7 @@ func TestRunToolKillsAWrappersGrandchildWhenTheStoreNeverAnswers(t *testing.T) {
 	}
 	pid := readGrandchildPID(t, pidFile)
 	defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
-	if !processGone(pid, 2*time.Second) {
+	if !processGone(pid, testtime.Budget(2*time.Second)) {
 		t.Errorf("the wrapper's grandchild (pid %d) is still alive after the store tool timed out; "+
 			"the deadline killed the leader alone", pid)
 	}
@@ -48,29 +50,28 @@ func TestRunToolKillsAWrappersGrandchildWhenTheStoreNeverAnswers(t *testing.T) {
 func readGrandchildPID(t *testing.T, path string) int {
 	t.Helper()
 
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
+	pid := 0
+	testtime.Eventually(t, testtime.Budget(20*time.Second), func() bool {
 		if data, err := os.ReadFile(path); err == nil {
-			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data))); parseErr == nil && pid > 0 {
-				return pid
+			if got, parseErr := strconv.Atoi(strings.TrimSpace(string(data))); parseErr == nil && got > 0 {
+				pid = got
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("grandchild PID file %s never appeared", path)
-	return 0
+		return pid > 0
+	}, "grandchild PID file "+path+" to appear")
+	return pid
 }
 
 // processGone reports whether pid stops existing within the given window, polling so a reap that
 // lands a moment after runTool returned does not read as survival. Signal 0 probes existence
 // without delivering anything; an error means the process is gone.
 func processGone(pid int, within time.Duration) bool {
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(within)
+	for !expired() {
 		if err := syscall.Kill(pid, 0); err != nil {
 			return true
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 	return syscall.Kill(pid, 0) != nil
 }

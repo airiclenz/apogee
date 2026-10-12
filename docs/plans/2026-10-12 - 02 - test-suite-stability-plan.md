@@ -412,7 +412,15 @@ NOTES (2026-10-12): Acceptance ran one package at a time, raced, all ok (provide
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/reactions/ ./internal/provider/ ./internal/stubllm/ ./cmd/stubllm/ ./internal/schedule/ ./internal/run/ ./cmd/demorig/` (one package at a time if memory is tight)
 **Commit:** `test: route fake-server and harness timing through testtime`
 
-## 20. Migrate the remaining packages and retire the pending set
+## 20. Migrate the remaining packages and retire the pending set — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the twelve pending packages were exactly the plan's list; the guard named no other package, and cmd/release stays untouched per the regression guard.
+NOTES (2026-10-12): judgeFindings and its pending-package Bites subtest go with pendingPackages; the guard now fails on every finding through a small allFindings helper (sorted by directory, source order within).
+NOTES (2026-10-12): named constants become vars — lockWaitGrace (undo), safeOpenDeadline (security), fifoReadDeadline (workflow) = testtime.Budget; parkedWalkQuiet (undo) = testtime.Fixed; userexec's local `const deadline` (a timeout meant to expire) becomes a Fixed local.
+NOTES (2026-10-12): present's fetchEventually, the subprocess grandchild-reap wait and keystore/userexec's processGone/pidGone loop on testtime.Expiry rather than Eventually, so their failure still names the last error (or the caller's own message); subprocess's zombieWaitTeardown.Contain runs inside RunSubprocess and reports with Errorf, so it also takes Expiry. gitexec's ctime rewrite loop, keystore's readGrandchildPID and userexec's readPIDFile now call testtime.Eventually, so their failure text is Eventually's "timed out after … waiting for …".
+NOTES (2026-10-12): beyond the guard's findings, present's fetchEventually http.Client Timeout is wrapped in testtime.Budget (a per-request deadline); userexec's `margin` elapsed bound stays as written, as item 19 left elapsed-time bounds.
+NOTES (2026-10-12): Acceptance ran one package at a time, raced, all ok (config 45s, keystore 18s, the rest under 11s); `GOOS=windows go vet` over the thirteen packages is clean.
+NOTES (2026-10-12): per the verifier's fix, gitexec_test.go's package-wide `const testTimeout = 15 * time.Second` (a per-invocation deadline the guard does not flag as a const) becomes `var testTimeout = testtime.Budget(15 * time.Second)`.
 
 **What:** Item 9's rule for every package still pending: userexec, keystore, subprocess, present, gitexec, workflow, undo, security, mdns, judge, config, update, and any other package the guard names.
 **Regression guard.** `cmd/release`'s `testTagTimeout` and `testPollPause` feed a counting fake sleep (virtual time); as Budget, `APOGEE_TEST_SLOW=1` would turn TestPublishTagStepFailures' pinned "after 30s" into "after 1m0s". They stay untouched: no banned call takes them, so cmd/release never enters pendingPackages and leaves this item's list. The pending-set check is `! grep -q`, since `grep -c` exits 1 on the correct outcome.

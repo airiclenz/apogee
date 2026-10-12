@@ -14,25 +14,6 @@ import (
 	"testing"
 )
 
-// pendingPackages names, by module-relative directory, every package whose tests still carry a
-// fixed timing. The guard skips their findings — it logs them, so `go test -v` lists what a
-// migration has left — and fails on a pending package that has none left, so the set only
-// shrinks. The migration items empty it; a new package never joins it.
-var pendingPackages = map[string]bool{
-	"internal/config":     true,
-	"internal/gitexec":    true,
-	"internal/judge":      true,
-	"internal/keystore":   true,
-	"internal/mdns":       true,
-	"internal/present":    true,
-	"internal/security":   true,
-	"internal/subprocess": true,
-	"internal/undo":       true,
-	"internal/update":     true,
-	"internal/userexec":   true,
-	"internal/workflow":   true,
-}
-
 // timedCalls maps every call the guard watches to the index of its duration argument. The
 // testtime entries are here because Eventually and Expiry never scale: their argument must
 // already be a budgeted value, so a raw literal passed to them is the same fault as a raw sleep.
@@ -73,7 +54,7 @@ const (
 // It parses every _test.go file in the module, plus the non-test files of internal/tuitest, and
 // reports each timed call whose duration is written raw instead of through testtime.Budget or
 // testtime.Fixed, and each hand-rolled wall-clock deadline that should be testtime.Eventually or
-// testtime.Expiry. A package in pendingPackages has its findings logged instead of failed.
+// testtime.Expiry.
 func TestNoFixedTimingInTests(t *testing.T) {
 	t.Parallel()
 
@@ -82,19 +63,13 @@ func TestNoFixedTimingInTests(t *testing.T) {
 		t.Fatal("the walk scanned no package — an empty scan means the module root or the file filter is wrong")
 	}
 
-	failures, logs := judgeFindings(byDir, pendingPackages)
-
-	for _, line := range logs {
-		t.Log(line)
-	}
-	for _, line := range failures {
+	for _, line := range allFindings(byDir) {
 		t.Error(line)
 	}
 }
 
 // TestNoFixedTimingInTestsBites proves the detector on fixtures rather than assuming it: every
-// banned form is reported at its line, every allowed form is not, and a pending package's
-// findings are logged while another package's fail.
+// banned form is reported at its line, and every allowed form is not.
 func TestNoFixedTimingInTestsBites(t *testing.T) {
 	t.Parallel()
 
@@ -235,60 +210,22 @@ func waits() {
 		})
 	}
 
-	t.Run("pending packages log, others fail, a clean pending package fails", func(t *testing.T) {
-		t.Parallel()
-
-		byDir := map[string][]string{
-			"a/pending": {"a/pending/x_test.go:3: finding"},
-			"b/live":    {"b/live/y_test.go:4: finding"},
-			"c/clean":   nil,
-		}
-		pending := map[string]bool{"a/pending": true, "c/clean": true}
-
-		failures, logs := judgeFindings(byDir, pending)
-
-		wantFailures := []string{
-			"b/live/y_test.go:4: finding",
-			`c/clean is in pendingPackages but has no findings — remove it from pendingPackages`,
-		}
-		wantLogs := []string{"a/pending/x_test.go:3: finding"}
-		if strings.Join(failures, "\n") != strings.Join(wantFailures, "\n") {
-			t.Errorf("failures differ\n got:\n  %s\nwant:\n  %s", strings.Join(failures, "\n  "), strings.Join(wantFailures, "\n  "))
-		}
-		if strings.Join(logs, "\n") != strings.Join(wantLogs, "\n") {
-			t.Errorf("logs differ\n got:\n  %s\nwant:\n  %s", strings.Join(logs, "\n  "), strings.Join(wantLogs, "\n  "))
-		}
-	})
 }
 
-// judgeFindings splits the findings into those that fail the guard and those it only logs. A
-// pending package's findings are logged; every other package's fail; a pending package with no
-// findings is a failure of its own, so the set cannot outlive the migration it tracks. Both lists
-// come out sorted by directory, in each directory's source order.
-func judgeFindings(byDir map[string][]string, pending map[string]bool) (failures, logs []string) {
-	dirs := make([]string, 0, len(byDir)+len(pending))
+// allFindings flattens the findings into one list, sorted by directory and kept in each
+// directory's source order, so a failing run reads the same way every time.
+func allFindings(byDir map[string][]string) []string {
+	dirs := make([]string, 0, len(byDir))
 	for dir := range byDir {
 		dirs = append(dirs, dir)
 	}
-	for dir := range pending {
-		if _, scanned := byDir[dir]; !scanned {
-			dirs = append(dirs, dir)
-		}
-	}
 	sort.Strings(dirs)
 
+	var findings []string
 	for _, dir := range dirs {
-		findings := byDir[dir]
-		switch {
-		case pending[dir] && len(findings) == 0:
-			failures = append(failures, dir+" is in pendingPackages but has no findings — remove it from pendingPackages")
-		case pending[dir]:
-			logs = append(logs, findings...)
-		default:
-			failures = append(failures, findings...)
-		}
+		findings = append(findings, byDir[dir]...)
 	}
-	return failures, logs
+	return findings
 }
 
 // moduleRoot walks up from the package directory to the directory holding go.mod.

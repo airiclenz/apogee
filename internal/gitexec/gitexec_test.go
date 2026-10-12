@@ -17,11 +17,12 @@ import (
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // testTimeout bounds every git invocation these tests make; the runner's own ceilings are not
 // what is under test here.
-const testTimeout = 15 * time.Second
+var testTimeout = testtime.Budget(15 * time.Second)
 
 // posixScriptHost skips a test whose fixture is a POSIX shell script. The flags and environment
 // those fixtures pin are platform-independent; only the way the fake git is written is not.

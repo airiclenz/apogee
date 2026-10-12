@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestFileprint_SameLengthRewriteWithRestoredMtimeBreaksThePrint pins that the config probe's
@@ -28,9 +30,7 @@ func TestFileprint_SameLengthRewriteWithRestoredMtimeBreaksThePrint(t *testing.T
 
 	// Rewrite until the ctime tick moves: a coarse filesystem clock can leave a rewrite made
 	// within the same tick with an unchanged ctime, which no fingerprint could see.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		time.Sleep(20 * time.Millisecond)
+	testtime.Eventually(t, testtime.Budget(2*time.Second), func() bool {
 		writeConfigFixture(t, path, "[alias]\n\tst = !false\n")
 		if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
 			t.Fatalf("restore mtime: %v", err)
@@ -39,16 +39,14 @@ func TestFileprint_SameLengthRewriteWithRestoredMtimeBreaksThePrint(t *testing.T
 		if err != nil {
 			t.Fatalf("stat rewrite: %v", err)
 		}
-		if afterCtime, _ := changeTime(after); !afterCtime.Equal(beforeCtime) {
-			if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) || !os.SameFile(before, after) {
-				t.Fatalf("rewrite changed size, mtime or inode; the fixture no longer isolates ctime")
-			}
-			break
+		if afterCtime, _ := changeTime(after); afterCtime.Equal(beforeCtime) {
+			return false
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("ctime never moved across rewrites")
+		if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) || !os.SameFile(before, after) {
+			t.Fatalf("rewrite changed size, mtime or inode; the fixture no longer isolates ctime")
 		}
-	}
+		return true
+	}, "the ctime to move across rewrites")
 
 	if print.holds() {
 		t.Error("holds() = true after a same-size, same-mtime, same-inode rewrite, want false")
@@ -61,7 +59,7 @@ func TestFileprint_UntouchedFileHolds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	writeConfigFixture(t, path, "[core]\n\tbare = false\n")
 	print := takeFileprint(path)
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(testtime.Fixed(20 * time.Millisecond))
 
 	if !print.holds() {
 		t.Error("holds() = false on an untouched file, want true")

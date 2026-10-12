@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // spawnFunc adapts a function to the Spawner interface.
@@ -103,7 +104,7 @@ func TestRunnerWavesNeverExceedWidth(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(testtime.Fixed(5 * time.Millisecond))
 		inFlight.Add(-1)
 		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
 	})

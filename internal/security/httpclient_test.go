@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // guardedClientCredentialedProxy is the shape an operator's HTTP(S)_PROXY value can really
@@ -59,7 +61,7 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 // getThrough sends a GET for target through client, bounded so a broken control cannot hang.
 func getThrough(t *testing.T, client *http.Client, target string) (*http.Response, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(5*time.Second))
 	t.Cleanup(cancel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {

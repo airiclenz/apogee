@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // cacheFlushIN is class IN with the mDNS cache-flush bit set, as real responders send it.
@@ -216,7 +218,7 @@ func TestLookupReturnsPromptlyWhenContextCancelled(t *testing.T) {
 	silent := startResponder(t, func([]byte) ([][]byte, error) { return nil, nil })
 	r := resolver{dest: silent, timeout: time.Minute}
 	ctx, cancel := context.WithCancel(t.Context())
-	time.AfterFunc(50*time.Millisecond, cancel)
+	time.AfterFunc(testtime.Fixed(50*time.Millisecond), cancel)
 	start := time.Now()
 	_, err := r.lookup(ctx, "apollo-ii.local")
 	if !errors.Is(err, context.Canceled) {
@@ -231,7 +233,7 @@ func TestLookupHonoursEarlierContextDeadline(t *testing.T) {
 	t.Parallel()
 	silent := startResponder(t, func([]byte) ([][]byte, error) { return nil, nil })
 	r := resolver{dest: silent, timeout: time.Minute}
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), testtime.Fixed(100*time.Millisecond))
 	defer cancel()
 	_, err := r.lookup(ctx, "apollo-ii.local")
 	if !errors.Is(err, context.DeadlineExceeded) {

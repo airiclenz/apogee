@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The tests run against a REAL listener rather than httptest: the lazy bind, the shared listener
@@ -950,18 +952,18 @@ func keepAliveFetch(t *testing.T, authority, served string) net.Conn {
 func fetchEventually(t *testing.T, target string) int {
 	t.Helper()
 
-	client := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.Now().Add(10 * time.Second)
+	client := &http.Client{Timeout: testtime.Budget(2 * time.Second)}
+	expired := testtime.Expiry(testtime.Budget(10 * time.Second))
 	for {
 		resp, err := client.Get(target)
 		if err == nil {
 			_ = resp.Body.Close()
 			return resp.StatusCode
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("GET %s never succeeded: %v", target, err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 }
 

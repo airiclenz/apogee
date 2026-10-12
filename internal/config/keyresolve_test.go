@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // keyFixtureSentinel is the first argument that turns a run of this test binary into a key-source
@@ -52,12 +53,12 @@ func runKeyFixture(args []string) int {
 	case "blank": // print only whitespace
 		fmt.Print(" \t\n\n")
 	case "hang": // never answer
-		time.Sleep(10 * time.Second)
+		time.Sleep(testtime.Fixed(10 * time.Second))
 	case "flood": // print far more than a key
 		_, _ = os.Stdout.Write(bytes.Repeat([]byte("k"), maxKeyCommandOutput+1024))
 	case "count": // count <tally file> <key> [sleep ms]
 		if delay, err := strconv.Atoi(argAt(args, 3)); err == nil && delay > 0 {
-			time.Sleep(time.Duration(delay) * time.Millisecond)
+			time.Sleep(testtime.Fixed(time.Duration(delay) * time.Millisecond))
 		}
 		if err := tallyRun(argAt(args, 1)); err != nil {
 			fmt.Fprintln(os.Stderr, err)

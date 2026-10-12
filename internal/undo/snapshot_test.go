@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -730,7 +731,7 @@ func TestSnapshotSurface_ConcurrentCaptureRecordAndPreview_IsRaceClean(t *testin
 // parkedWalkQuiet is how long a call queued behind a parked walk is watched for an early
 // return. It bounds a NEGATIVE check, so it only has to be long enough for a call that does
 // not wait to have returned; a call that does wait never returns until the gate releases.
-const parkedWalkQuiet = 200 * time.Millisecond
+var parkedWalkQuiet = testtime.Fixed(200 * time.Millisecond)
 
 // assertStillWaiting fails the test when c delivers before the parked walk is released.
 func assertStillWaiting[T any](t *testing.T, c <-chan T, what string) {

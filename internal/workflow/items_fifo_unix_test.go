@@ -9,12 +9,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // fifoReadDeadline is how long a read of a FIFO source may take before a test calls it wedged. A
 // blocking open of a FIFO with no writer never returns, so the pre-fix failure is this deadline,
 // not an error.
-const fifoReadDeadline = 5 * time.Second
+var fifoReadDeadline = testtime.Budget(5 * time.Second)
 
 // fifoWorkspace is an os.Root-pinned workspace — the FS the Runner reads through — holding a named
 // pipe called "pipe" that no one ever writes to.
