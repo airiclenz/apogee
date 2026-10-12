@@ -3,6 +3,7 @@ title: e2e tests type their prompts key by key where the claim is not about typi
 status: open
 type: task
 priority: 4
+plan: 2026-10-12 - 02 - test-suite-stability-plan
 created: 2026-10-12T12:28:48Z
 ---
 

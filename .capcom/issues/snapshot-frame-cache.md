@@ -3,6 +3,7 @@ title: tuitest Screen.Snapshot rebuilds the full frame and styled render on ever
 status: open
 type: task
 priority: 3
+plan: 2026-10-12 - 02 - test-suite-stability-plan
 created: 2026-10-12T12:28:47Z
 ---
 
