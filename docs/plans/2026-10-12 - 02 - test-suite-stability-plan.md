@@ -139,7 +139,10 @@ NOTES (2026-10-12): the Acceptance grep over `docs .github` cannot return nothin
 **Acceptance:** `make actionlint`; `./scripts/check-pins.sh`; `grep -rn 'LANES=5\|LANES: 5\|five lanes' docs .github` returns nothing
 **Commit:** `ci: default lanes and a race-build cache key for the check job`
 
-## 6. internal/testtime: scaled budgets, fixed durations, Eventually
+## 6. internal/testtime: scaled budgets, fixed durations, Eventually — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): parseScale also rejects "NaN" and "Inf" (both parse as floats; NaN is not above 0 and an infinite scale overflows a Duration), and the parse table carries those two rows beyond the plan's six.
+NOTES (2026-10-12): Scale keeps the parse error from its one sync.Once read and panics on every call, not only the first, so a bad value cannot fall through to a zero scale on a later call.
 
 **What:** Recast at the regression check (2026-10-12). The single home for test timing (review §4, class A).
 **Regression guard.** testtime also exports `Expiry(budget time.Duration) func() bool` — a non-failing deadline that reports true once the budget has elapsed since the call — for polls that cannot fail the test themselves (code off the test goroutine, or kit helpers such as tuitest's WaitFor and checkLeaks that report their own failure); unit-tested beside Eventually. Binding convention — testtime.Eventually and testtime.Expiry never scale; their duration argument is an already-budgeted value (a testtime.Budget/Fixed call or an identifier initialised from one, e.g. tuitest.DefaultTimeout); the package doc states this. Budget delegates to an unexported `scaled(d, s)` helper the tests drive directly, and they assert `Budget(d) == scaled(d, Scale())`, so they hold at any `APOGEE_TEST_TIME_SCALE` (Scale has no setter, and after item 7 a SLOW box runs every `make test` at scale 2).
