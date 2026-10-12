@@ -66,7 +66,13 @@ AGENTS.md — "Git hooks live in" bullet, spoken-id bullet, Dolt-sync bullet; in
 - The item's own commit passes through `.githooks/commit-msg` (no attribution trailer in `git log -1`).
 **Commit:** `chore(hooks): move the commit-msg hook to a tracked .githooks/`
 
-## 2. Archive beads and build the converter with its id table
+## 2. Archive beads and build the converter with its id table — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): `bd sync` not run — per the owner's DECISION the final sync was already done on every machine and only read-only bd commands were allowed; `bd diff main origin/main` printed "No changes between main and origin/main", and `bd memories` reports none stored, so no Knowledge Notes to carry.
+NOTES (2026-10-12): archive written outside the repo at ../apogee-beads-archive/ (issues-final.jsonl, byte-identical to .beads/issues.jsonl; interactions.jsonl; beads-dir/, a `cp -a` of .beads/ that `diff -r` matches).
+NOTES (2026-10-12): idtable.json is hand-chosen, not the trial's mechanical title truncation: 80 spoken ids keep their `apogee-` remainder; 232 others (hash ids, dotted children, and seven spoken ids of five words — e.g. apogee-usage-tap-by-call-id → usage-tap-call-id) get slugs picked from title and description.
+NOTES (2026-10-12): verify.py runs capcom itself (`verify.py <export> <repo-root> [idtable]`) instead of taking four pre-made JSON files as the trial did, and also checks every alias resolves via `capcom show`, titles verbatim, and that each related link is stored on one side only (`capcom show` lists it on both).
+NOTES (2026-10-12): dry run in a `git clone --no-local` scratch of 5f4acaf5: `capcom init --merge-driver` (merge-driver git config lines not run), types epic/decision added to config by hand, convert.py, `capcom check` 0, `capcom fmt`, `capcom fmt --check` 0, `capcom reindex`, list --all 312 / list 41 / ready 15, verify.py exit 0.
 
 **What:**
 **Goal:** `../apogee-beads-archive/` holds `issues-final.jsonl` (a fresh `bd export`, byte-identical to the committed `.beads/issues.jsonl`), `interactions.jsonl` and a full copy of `.beads/`; `scripts/beads-to-capcom/convert.py` and `idtable.json` are committed; `idtable.json` maps every one of the 312 beads ids to a unique capcom slug; a dry run of the converter into a scratch git repo passes `capcom check`, `capcom fmt --check` and `verify.py`.
