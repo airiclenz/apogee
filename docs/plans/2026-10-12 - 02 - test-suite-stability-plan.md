@@ -71,7 +71,7 @@
 - Shrinking any sweep's coverage: the slow tests are split, never cut.
 - The ~90 `WaitQuiet` sites before goldens and whole-frame asserts.
 
-## 1. ConPTY command test drains before it closes
+## 1. ConPTY command test drains before it closes — ✅ DONE (2026-10-12)
 
 **What:** Fixes the 2026-10-12 CI flake `TestStartPseudoConsoleRunsTheCommand`. The test calls `pty.Close()` before its drain finishes, so `CloseOutput` cancels the read in flight and loses conhost's final frame (the path `conpty-final-frame-lost` fixed in production).
 **Goal:** `TestStartPseudoConsoleRunsTheCommand` releases the console, waits for the drain to reach EOF, then calls `CloseOutput`, and asserts the marker. A `t.Cleanup` closes the console on every Fatal path.

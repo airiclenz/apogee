@@ -39,13 +39,19 @@ func TestStartPseudoConsoleRunsTheCommand(t *testing.T) {
 
 	const marker = "apogee-conpty-marker"
 	pty := startTestPseudoConsole(t, "cmd /c echo "+marker)
+	t.Cleanup(func() { _ = pty.Close() })
 	output := drainPseudoConsole(pty)
 
+	// Release before the drain ends and CloseOutput only after it: closing the output first
+	// cancels the read in flight and loses conhost's final frame.
 	code := waitWithin(t, pty)
-	if err := pty.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if err := pty.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
 	}
 	got := output.wait(t)
+	if err := pty.CloseOutput(); err != nil {
+		t.Fatalf("CloseOutput: %v", err)
+	}
 
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
