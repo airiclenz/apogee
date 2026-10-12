@@ -1818,8 +1818,8 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 // and a Model is ~120 KB by value. A t.Run literal that builds and renders one therefore has a
 // frame of a third of a megabyte or more, reserved BEFORE its t.Parallel call parks it. testing
 // parks every parallel subtest until its parent returns, then queues it behind the package's
-// other parallel tests. So the 1,008 cases of TestFrameNeverExceedsTheTerminalHeight held
-// ~0.5 GB of stack for most of the package's run, which every GC cycle scanned, and ~1.5 GB
+// other parallel tests. So the 1,008 cases of runFrameHeightProperty, when one test ran them all,
+// held ~0.5 GB of stack for most of the package's run, which every GC cycle scanned, and ~1.5 GB
 // under -race, whose shadow memory covers stacks too. Here the literal that parks is a few words
 // deep, and body's frame is taken only once the case runs. The three tables below are the
 // package's parallel fan-outs whose cases render a Model; a case of a few KB does not need this.
@@ -1831,15 +1831,15 @@ func runParallelCase(t *testing.T, name string, body func(t *testing.T)) {
 	})
 }
 
-// TestFrameNeverExceedsTheTerminalHeight is the D2 property the audit measured broken: with eight
+// runFrameHeightProperty is the D2 property the audit measured broken: with eight
 // stored sessions the browser composed a 21-row frame on a 20-row terminal, and +5 / +9 rows on 16-
 // and 12-row ones — pushing the input box and the footer clean off the alternate screen, which is
 // plausible in a half-height tmux pane. Every pane's budget now comes from popupBudget, whose
 // floors shrink to nothing rather than promising rows the frame has no space for, so the composed
 // frame fits every window a boxed overlay can be drawn in at all.
 //
-// The property runs over EVERY boxed overlay, not the browser alone: the /model | /server picker
-// shares the browser's slot, and the two prose-bearing panes — the approval and ask prompts — were
+// The property runs over EVERY boxed overlay (frameHeightOverlays), not the browser alone: the
+// /model | /server picker shares the browser's slot, and the two prose-bearing panes — the approval and ask prompts — were
 // the ones still overflowing by exactly one row at smallestOverlayWindow after the row floor
 // dropped, because their body floor had not. The "/" and "@" dropdown is here because it was the
 // LAST pane off the budget and so the last one this property did not cover: it asked for a fixed
@@ -1861,8 +1861,111 @@ func runParallelCase(t *testing.T, name string, body func(t *testing.T)) {
 // rides the title row was composed long and clipped to the pane's width, so the accounting survived
 // the SHORT window only to go silent on a narrow one — and the terminal these panes shrink for is
 // generally both.
-func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
-	t.Parallel()
+//
+// Each overlay is its own top-level test (frameHeightClaim): the shard packer
+// (scripts/test-shards.sh) cannot split a test below the top level, and the one test that ran every
+// overlay set the suite's critical path.
+func runFrameHeightProperty(t *testing.T, overlay frameHeightOverlay) {
+	t.Helper()
+	// Every overlay is opened BESIDE a staged queue as well as alone: none of them is the only thing
+	// in the frame taking rows off the transcript, and a budget that sizes each surface against the
+	// whole viewport is exactly right one surface at a time and wrong the moment two are open. Two
+	// staged rows is a band under its cap and five is one over it (the "… N more queued" marker gets
+	// a row of its own), so both band shapes meet every pane.
+	//
+	// The DRAFT is the fourth dimension, and it was the one still missing (FOLLOW-UP-K): six rows is
+	// a draft the frame cannot pay for under eighteen rows and twelve is one past the box's own taste
+	// cap, where the widget scrolls instead of the box growing. With the box outside the frame's
+	// arithmetic a six-row draft composed a 14-row frame on a 12-row terminal with nothing open at
+	// all — the same overflow the panes were fixed for, arriving through the one surface that was
+	// never in the allocation.
+	for _, staged := range []int{0, 2, 5} {
+		for _, draft := range []int{1, 3, 6, 12} {
+			for _, width := range []int{80, narrowOverlayWindow} {
+				for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
+					runParallelCase(t, fmt.Sprintf("%s+%d staged+%d draft/%d×%d", overlay.name, staged, draft, width, height), func(t *testing.T) {
+						m := withStagedRows(overlay.open(t, width, height, draft), staged)
+
+						content := m.View().Content
+						frame := strings.Split(content, "\n")
+						plainFrame := ansiPattern.ReplaceAllString(content, "")
+
+						if len(frame) > height {
+							t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
+								len(frame), height, len(frame)-height, plainFrame)
+						}
+						// The footer is the last thing View stacks, so its presence is the proof nothing was
+						// pushed past the last row.
+						if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+							t.Errorf("last frame row is blank, want the ▁ bottom-edge hairline:\n%s", plainFrame)
+						}
+						// The accounting properties below are about a pane that IS drawn. With the box at
+						// its one-row floor every pane fits every window it can be drawn in at all, so
+						// giving way there would be a regression, not a give-way; past that floor a draft
+						// really can cost a pane its rows, which is the documented outcome for everything
+						// but the two DECISION panes (TestDecisionSurfaceStaysOnTheFrame owns those).
+						if overlay.block != nil && overlay.block(m.frameOverlays()) == "" {
+							if draft == minInputRows {
+								t.Fatalf("the pane gave way with the box at its one-row floor:\n%s", plainFrame)
+							}
+							return
+						}
+						// …and it did not buy the fit by hiding prose quietly: either the body is on the
+						// screen to its last word, or the pane counts out the lines it is not showing —
+						// in its body block where it has a row for the marker, on its title row where the
+						// window leaves it none, and in whichever wording the width can pay for.
+						if overlay.prose && !strings.Contains(plainFrame, frameHeightProseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
+							t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
+						}
+						// The same holds for the ROWS. A window granted at least one row seats the first
+						// one (popupRowWindow windows around a selection that starts at the top), so the
+						// probe missing means the pane is showing NO choices and NO entries — the case the
+						// scroll cannot answer, and the one the pane has to count out on its title row.
+						if overlay.rowProbe != "" && !strings.Contains(plainFrame, overlay.rowProbe) &&
+							!elisionMarkerPattern.MatchString(plainFrame) {
+							t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
+						}
+						// The band answers to the same allocation and owes the same accounting: whatever
+						// it is holding back rides its own "… N more queued" marker, cap-driven rows and
+						// budget-driven rows alike, in ONE wording.
+						assertBandAccountsForItsQueue(t, m, staged, plainFrame)
+					})
+				}
+			}
+		}
+	}
+}
+
+// frameHeightClaim names the one top-level test that runs an overlay through runFrameHeightProperty.
+type frameHeightClaim int
+
+const (
+	frameHeightSessionBrowser frameHeightClaim = iota
+	frameHeightServerPicker
+	frameHeightApprovalPrompt
+	frameHeightAskPrompt
+	frameHeightAutocompleteDropdown
+	frameHeightNoPane
+	frameHeightClaimKinds
+)
+
+// frameHeightProseTail is the proof a prose-bearing pane's body is on the screen IN FULL: it is the
+// only place it appears, so the frame either holds it or is holding lines back and must say how many.
+const frameHeightProseTail = "END-OF-PROSE"
+
+// frameHeightOverlay is one surface runFrameHeightProperty opens the frame on.
+type frameHeightOverlay struct {
+	claim    frameHeightClaim // the top-level test that runs it
+	name     string
+	prose    bool                       // the pane carries a body, so it owes an accounting of whatever it cannot seat
+	rowProbe string                     // the label of the pane's FIRST row — the one a granted window always seats
+	block    func(frameOverlays) string // this pane's own block, "" when the allocation seated nothing
+	open     func(t *testing.T, width, height, draft int) Model
+}
+
+// frameHeightOverlays is every boxed overlay the frame-height property runs over, plus the staged
+// band on its own.
+func frameHeightOverlays() []frameHeightOverlay {
 	servers := make([]ServerChoice, 0, 12)
 	for i := range 12 {
 		servers = append(servers, ServerChoice{
@@ -1870,32 +1973,23 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			Endpoint: fmt.Sprintf("http://192.168.64.%d:1111", i+1),
 		})
 	}
-	// The tail word is the proof the prose is on the screen IN FULL: it is the only place it
-	// appears, so the frame either holds it or is holding lines back and must say how many.
-	const proseTail = "END-OF-PROSE"
-	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12) + proseTail
+	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12) + frameHeightProseTail
 
-	overlays := []struct {
-		name     string
-		prose    bool                       // the pane carries a body, so it owes an accounting of whatever it cannot seat
-		rowProbe string                     // the label of the pane's FIRST row — the one a granted window always seats
-		block    func(frameOverlays) string // this pane's own block, "" when the allocation seated nothing
-		open     func(t *testing.T, width, height, draft int) Model
-	}{
-		{"session browser", false, "session number 00", func(o frameOverlays) string { return o.block(paneBrowser) },
+	return []frameHeightOverlay{
+		{frameHeightSessionBrowser, "session browser", false, "session number 00", func(o frameOverlays) string { return o.block(paneBrowser) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 				m.sessionBrowser = browserWithSessions(8)
 				return m
 			}},
-		{"server picker", false, "host-00", func(o frameOverlays) string { return o.block(panePicker) },
+		{frameHeightServerPicker, "server picker", false, "host-00", func(o frameOverlays) string { return o.block(panePicker) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height,
 					Options{Workspace: "/ws/a", Server: &fakeServerHost{list: staticServers(servers)}}), draft)
 				m.picker = picker{open: true, kind: pickerServer}
 				return m
 			}},
-		{"approval prompt", true, "", func(o frameOverlays) string { return o.block(panePrompt) },
+		{frameHeightApprovalPrompt, "approval prompt", true, "", func(o frameOverlays) string { return o.block(panePrompt) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 				m.state = stateAwaitingApproval
@@ -1908,7 +2002,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 				m.layout() // the prompt is up: the box gives back the rows the pane needs (draftRowsCeiling)
 				return m
 			}},
-		{"ask prompt", true, "yes, go ahead", func(o frameOverlays) string { return o.block(panePrompt) },
+		{frameHeightAskPrompt, "ask prompt", true, "yes, go ahead", func(o frameOverlays) string { return o.block(panePrompt) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 				m.state = stateAwaitingAsk
@@ -1924,7 +2018,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 		// window is what it has to be spent inside of. The probe is the first row's verb, which a
 		// granted window always seats and no other part of the frame writes. The draft sits ABOVE the
 		// "/" being typed — the menu is a completion of the last line, not of the whole box.
-		{"autocomplete dropdown", false, "/advice", func(o frameOverlays) string { return o.block(paneDropdown) },
+		{frameHeightAutocompleteDropdown, "autocomplete dropdown", false, "/advice", func(o frameOverlays) string { return o.block(paneDropdown) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 				value := "/"
@@ -1939,80 +2033,76 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 		// The band on its own. Six rows at its worst case — the cap, the overflow marker and the two
 		// framing rows — is more than the four a twelve-row terminal has to give, so the strip
 		// overflowed the frame with no pane open at all.
-		{"no pane", false, "", nil, func(t *testing.T, width, height, draft int) Model {
+		{frameHeightNoPane, "no pane", false, "", nil, func(t *testing.T, width, height, draft int) Model {
 			return withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 		}},
 	}
+}
 
-	// Every overlay is opened BESIDE a staged queue as well as alone: none of them is the only thing
-	// in the frame taking rows off the transcript, and a budget that sizes each surface against the
-	// whole viewport is exactly right one surface at a time and wrong the moment two are open. Two
-	// staged rows is a band under its cap and five is one over it (the "… N more queued" marker gets
-	// a row of its own), so both band shapes meet every pane.
-	//
-	// The DRAFT is the fourth dimension, and it was the one still missing (FOLLOW-UP-K): six rows is
-	// a draft the frame cannot pay for under eighteen rows and twelve is one past the box's own taste
-	// cap, where the widget scrolls instead of the box growing. With the box outside the frame's
-	// arithmetic a six-row draft composed a 14-row frame on a 12-row terminal with nothing open at
-	// all — the same overflow the panes were fixed for, arriving through the one surface that was
-	// never in the allocation.
-	for _, ov := range overlays {
-		for _, staged := range []int{0, 2, 5} {
-			for _, draft := range []int{1, 3, 6, 12} {
-				for _, width := range []int{80, narrowOverlayWindow} {
-					for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
-						runParallelCase(t, fmt.Sprintf("%s+%d staged+%d draft/%d×%d", ov.name, staged, draft, width, height), func(t *testing.T) {
-							m := withStagedRows(ov.open(t, width, height, draft), staged)
-
-							content := m.View().Content
-							frame := strings.Split(content, "\n")
-							plainFrame := ansiPattern.ReplaceAllString(content, "")
-
-							if len(frame) > height {
-								t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
-									len(frame), height, len(frame)-height, plainFrame)
-							}
-							// The footer is the last thing View stacks, so its presence is the proof nothing was
-							// pushed past the last row.
-							if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-								t.Errorf("last frame row is blank, want the ▁ bottom-edge hairline:\n%s", plainFrame)
-							}
-							// The accounting properties below are about a pane that IS drawn. With the box at
-							// its one-row floor every pane fits every window it can be drawn in at all, so
-							// giving way there would be a regression, not a give-way; past that floor a draft
-							// really can cost a pane its rows, which is the documented outcome for everything
-							// but the two DECISION panes (TestDecisionSurfaceStaysOnTheFrame owns those).
-							if ov.block != nil && ov.block(m.frameOverlays()) == "" {
-								if draft == minInputRows {
-									t.Fatalf("the pane gave way with the box at its one-row floor:\n%s", plainFrame)
-								}
-								return
-							}
-							// …and it did not buy the fit by hiding prose quietly: either the body is on the
-							// screen to its last word, or the pane counts out the lines it is not showing —
-							// in its body block where it has a row for the marker, on its title row where the
-							// window leaves it none, and in whichever wording the width can pay for.
-							if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
-								t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
-							}
-							// The same holds for the ROWS. A window granted at least one row seats the first
-							// one (popupRowWindow windows around a selection that starts at the top), so the
-							// probe missing means the pane is showing NO choices and NO entries — the case the
-							// scroll cannot answer, and the one the pane has to count out on its title row.
-							if ov.rowProbe != "" && !strings.Contains(plainFrame, ov.rowProbe) &&
-								!elisionMarkerPattern.MatchString(plainFrame) {
-								t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
-							}
-							// The band answers to the same allocation and owes the same accounting: whatever
-							// it is holding back rides its own "… N more queued" marker, cap-driven rows and
-							// budget-driven rows alike, in ONE wording.
-							assertBandAccountsForItsQueue(t, m, staged, plainFrame)
-						})
-					}
-				}
-			}
+// frameHeightOverlayClaimed is the overlay the claim names, failing the test when there is not
+// exactly one.
+func frameHeightOverlayClaimed(t *testing.T, claim frameHeightClaim) frameHeightOverlay {
+	t.Helper()
+	var found []frameHeightOverlay
+	for _, overlay := range frameHeightOverlays() {
+		if overlay.claim == claim {
+			found = append(found, overlay)
 		}
 	}
+	if len(found) != 1 {
+		t.Fatalf("claim %d names %d overlays, want exactly one", claim, len(found))
+	}
+	return found[0]
+}
+
+// TestFrameNeverExceedsTheTerminalHeightClaimsEveryOverlayOnce keeps the split property whole: each
+// overlay is claimed by exactly one of the top-level tests below and each claim names exactly one
+// overlay, so their union is the property over every overlay.
+func TestFrameNeverExceedsTheTerminalHeightClaimsEveryOverlayOnce(t *testing.T) {
+	t.Parallel()
+	claimed := [frameHeightClaimKinds][]string{}
+	for _, overlay := range frameHeightOverlays() {
+		if overlay.claim < 0 || overlay.claim >= frameHeightClaimKinds {
+			t.Errorf("overlay %q carries claim %d, which no test makes", overlay.name, overlay.claim)
+			continue
+		}
+		claimed[overlay.claim] = append(claimed[overlay.claim], overlay.name)
+	}
+	for claim, names := range claimed {
+		if len(names) != 1 {
+			t.Errorf("claim %d names overlays %q, want exactly one", claim, names)
+		}
+	}
+}
+
+func TestFrameNeverExceedsTheTerminalHeightSessionBrowser(t *testing.T) {
+	t.Parallel()
+	runFrameHeightProperty(t, frameHeightOverlayClaimed(t, frameHeightSessionBrowser))
+}
+
+func TestFrameNeverExceedsTheTerminalHeightServerPicker(t *testing.T) {
+	t.Parallel()
+	runFrameHeightProperty(t, frameHeightOverlayClaimed(t, frameHeightServerPicker))
+}
+
+func TestFrameNeverExceedsTheTerminalHeightApprovalPrompt(t *testing.T) {
+	t.Parallel()
+	runFrameHeightProperty(t, frameHeightOverlayClaimed(t, frameHeightApprovalPrompt))
+}
+
+func TestFrameNeverExceedsTheTerminalHeightAskPrompt(t *testing.T) {
+	t.Parallel()
+	runFrameHeightProperty(t, frameHeightOverlayClaimed(t, frameHeightAskPrompt))
+}
+
+func TestFrameNeverExceedsTheTerminalHeightAutocompleteDropdown(t *testing.T) {
+	t.Parallel()
+	runFrameHeightProperty(t, frameHeightOverlayClaimed(t, frameHeightAutocompleteDropdown))
+}
+
+func TestFrameNeverExceedsTheTerminalHeightNoPane(t *testing.T) {
+	t.Parallel()
+	runFrameHeightProperty(t, frameHeightOverlayClaimed(t, frameHeightNoPane))
 }
 
 // TestFrameFitsEveryHeightDownToItsFloor covers the window sizes the property above deliberately

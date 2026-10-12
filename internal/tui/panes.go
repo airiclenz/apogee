@@ -34,7 +34,7 @@ const (
 // frame cannot seat, a width with no room for a box. It is what the frame's transcript clamp measures
 // the panes by ([Model.transcriptRows]), so the repaint tail of an Update ([Model.settle]) renders no
 // pane and View renders each open one once. It must agree with render to the row — the widget's scroll
-// clamp and the click map rest on it — and TestOverlayHeightQueryMatchesItsRender pins that for every row.
+// clamp and the click map rest on it — and sweepOverlayHeightQuery (panes_test.go) pins that for every row.
 //
 // modal says the pane swallows every key it does not act on while it is up — the /sessions browser,
 // the picker and the /settings pane through their modalClaim key, the approval or ask prompt through

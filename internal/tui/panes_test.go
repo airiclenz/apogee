@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -202,43 +203,140 @@ func paneFixtures() []paneFixture {
 	}
 }
 
-// TestOverlayHeightQueryMatchesItsRender pins the pane table's height-equals-render contract
-// (paneSpec.height): for every row, on every window a fixture is swept across — a width with no room
-// for a box, narrow and wide ones, heights from too short to seat any pane up to roomy, the overflow
-// bar on and off — the height query answers exactly the rows the rendered block takes, and 0 where
-// the render is "". The frame's transcript clamp, the viewport widget's scroll clamp and the click
-// map all read the query while View draws the render, so this agreement is what keeps them the same
-// rows.
-func TestOverlayHeightQueryMatchesItsRender(t *testing.T) {
+// overlayHeightQueryGroup is one top-level slice of the height-query sweep. The sweep over every
+// pane fixture ran as ONE top-level test, the longest in the package, and the shard packer
+// (scripts/test-shards.sh) cannot split a test below the top level — so it set the suite's critical
+// path. Each group is its own top-level test now, over the one helper, and
+// TestOverlayHeightQueryGroupsClaimEveryFixtureOnce keeps their union the whole of paneFixtures.
+type overlayHeightQueryGroup int
+
+const (
+	overlayHeightPrompts overlayHeightQueryGroup = iota
+	overlayHeightBrowserAndPicker
+	overlayHeightWorkflows
+	overlayHeightSettings
+	overlayHeightReports
+	overlayHeightDropdown
+	overlayHeightGroupKinds
+)
+
+// overlayHeightQueryGroupPanes is each group's rows of the pane table: a fixture is swept by the
+// group holding its pane.
+var overlayHeightQueryGroupPanes = [overlayHeightGroupKinds][]framePane{
+	overlayHeightPrompts:          {panePrompt},
+	overlayHeightBrowserAndPicker: {paneBrowser, panePicker},
+	overlayHeightWorkflows:        {paneWorkflows},
+	overlayHeightSettings:         {paneSettings},
+	overlayHeightReports:          {paneUsage, paneInspector, paneThinking, paneAdvice},
+	overlayHeightDropdown:         {paneDropdown},
+}
+
+// TestOverlayHeightQueryGroupsClaimEveryFixtureOnce keeps the split sweep whole: every paneFixtures
+// entry lands in exactly one group, so the union of the group tests is the sweep over every fixture,
+// and no group is left sweeping nothing.
+func TestOverlayHeightQueryGroupsClaimEveryFixtureOnce(t *testing.T) {
 	t.Parallel()
+	swept := [overlayHeightGroupKinds]int{}
 	for _, fx := range paneFixtures() {
+		var claims []overlayHeightQueryGroup
+		for g, panes := range overlayHeightQueryGroupPanes {
+			if slices.Contains(panes, fx.pane) {
+				claims = append(claims, overlayHeightQueryGroup(g))
+			}
+		}
+		if len(claims) != 1 {
+			t.Errorf("fixture %q (the %s) lands in %d groups %v, want exactly one",
+				fx.name, paneSpecs[fx.pane].name, len(claims), claims)
+			continue
+		}
+		swept[claims[0]]++
+	}
+	for g, n := range swept {
+		if n == 0 {
+			t.Errorf("group %d sweeps no fixture", g)
+		}
+	}
+}
+
+// The height-query sweep, one top-level test per group of the pane table (see sweepOverlayHeightQuery).
+
+func TestOverlayHeightQueryMatchesItsRenderPrompts(t *testing.T) {
+	t.Parallel()
+	sweepOverlayHeightQueryGroup(t, overlayHeightPrompts)
+}
+
+func TestOverlayHeightQueryMatchesItsRenderBrowserAndPicker(t *testing.T) {
+	t.Parallel()
+	sweepOverlayHeightQueryGroup(t, overlayHeightBrowserAndPicker)
+}
+
+func TestOverlayHeightQueryMatchesItsRenderWorkflows(t *testing.T) {
+	t.Parallel()
+	sweepOverlayHeightQueryGroup(t, overlayHeightWorkflows)
+}
+
+func TestOverlayHeightQueryMatchesItsRenderSettings(t *testing.T) {
+	t.Parallel()
+	sweepOverlayHeightQueryGroup(t, overlayHeightSettings)
+}
+
+func TestOverlayHeightQueryMatchesItsRenderReports(t *testing.T) {
+	t.Parallel()
+	sweepOverlayHeightQueryGroup(t, overlayHeightReports)
+}
+
+func TestOverlayHeightQueryMatchesItsRenderDropdown(t *testing.T) {
+	t.Parallel()
+	sweepOverlayHeightQueryGroup(t, overlayHeightDropdown)
+}
+
+// sweepOverlayHeightQueryGroup sweeps every paneFixtures entry whose pane the group holds, each as a
+// parallel subtest.
+func sweepOverlayHeightQueryGroup(t *testing.T, group overlayHeightQueryGroup) {
+	t.Helper()
+	for _, fx := range paneFixtures() {
+		if !slices.Contains(overlayHeightQueryGroupPanes[group], fx.pane) {
+			continue
+		}
 		t.Run(fx.name, func(t *testing.T) {
 			t.Parallel()
-			base := fx.build(t)
-			if !paneSpecs[fx.pane].open(base) {
-				t.Fatalf("the fixture does not have the %s open", paneSpecs[fx.pane].name)
-			}
-			seen := false
-			for _, bar := range []bool{false, true} {
-				for _, width := range []int{2, 4, 24, 80, 140} {
-					for height := 4; height <= 44; height += 2 {
-						m := base
-						m.opts.UI.ShowScrollbar = bar
-						m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
-						for p := framePane(0); p < paneKinds; p++ {
-							got, want := paneSpecs[p].height(m), blockRows(paneSpecs[p].render(m))
-							if got != want {
-								t.Errorf("bar %v, %dx%d: %s height query = %d, its render takes %d rows",
-									bar, width, height, paneSpecs[p].name, got, want)
-							}
-						}
-						seen = seen || paneSpecs[fx.pane].height(m) > 0
+			sweepOverlayHeightQuery(t, fx)
+		})
+	}
+}
+
+// sweepOverlayHeightQuery pins the pane table's height-equals-render contract (paneSpec.height)
+// with fx's pane up: on every window the sweep crosses — a width with no room for a box, narrow and
+// wide ones, heights from too short to seat any pane up to roomy, the overflow bar on and off — the
+// height query of every row answers exactly the rows the rendered block takes, and 0 where the
+// render is "". The frame's transcript clamp, the viewport widget's scroll clamp and the click map
+// all read the query while View draws the render, so this agreement is what keeps them the same
+// rows.
+func sweepOverlayHeightQuery(t *testing.T, fx paneFixture) {
+	t.Helper()
+	base := fx.build(t)
+	if !paneSpecs[fx.pane].open(base) {
+		t.Fatalf("the fixture does not have the %s open", paneSpecs[fx.pane].name)
+	}
+	seen := false
+	for _, bar := range []bool{false, true} {
+		for _, width := range []int{2, 4, 24, 80, 140} {
+			for height := 4; height <= 44; height += 2 {
+				m := base
+				m.opts.UI.ShowScrollbar = bar
+				m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
+				for p := framePane(0); p < paneKinds; p++ {
+					got, want := paneSpecs[p].height(m), blockRows(paneSpecs[p].render(m))
+					if got != want {
+						t.Errorf("bar %v, %dx%d: %s height query = %d, its render takes %d rows",
+							bar, width, height, paneSpecs[p].name, got, want)
 					}
 				}
+				seen = seen || paneSpecs[fx.pane].height(m) > 0
 			}
-			if !seen {
-				t.Errorf("no window of the sweep drew the %s: the sweep pinned only its zero", paneSpecs[fx.pane].name)
-			}
-		})
+		}
+	}
+	if !seen {
+		t.Errorf("no window of the sweep drew the %s: the sweep pinned only its zero", paneSpecs[fx.pane].name)
 	}
 }

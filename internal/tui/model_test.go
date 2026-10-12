@@ -7440,7 +7440,7 @@ func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 			}
 			// The DRAFT itself is untouched — it is what the human typed, not prose apogee derived.
 			// Which rows of it the box draws is the caret's business
-			// (TestInputBoxWindowFollowsTheCaret); that it still holds all of them is this one's.
+			// (assertInputBoxWindowFollowsTheCaret); that it still holds all of them is this one's.
 			if got := m.input.Value(); got != draftLines(c.draft) {
 				t.Errorf("the draft changed to %q; only the rows it is DRAWN on may give way", got)
 			}
@@ -7448,7 +7448,7 @@ func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 	}
 }
 
-// TestInputBoxWindowFollowsTheCaret is the other half of the box's contract under the frame's cap: a
+// assertInputBoxWindowFollowsTheCaret is the other half of the box's contract under the frame's cap: a
 // capped box is a WINDOW onto the draft, and a window that does not move is a box that hides the
 // line being typed on. The frame's cap can put the box at one row on a short terminal, so the rule
 // has to hold at the tightest bound there is, not just at the ten-row taste cap.
@@ -7456,35 +7456,58 @@ func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 // It types the draft rather than assigning it, which is both how a human makes one and what makes
 // the assertion meaningful: the widget re-clamps its own scroll on each edit, and layout's re-seat
 // (reseatInput, ISSUES #2) re-clamps it whenever the cap changes the box's height under it.
-func TestInputBoxWindowFollowsTheCaret(t *testing.T) {
-	t.Parallel()
-	for _, height := range []int{frameFloorRows, 10, smallestOverlayWindow, 16, 24} {
-		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
-			t.Parallel()
-			m := modelWithOverlayRoomAt(t, 80, height, testOpts)
-			iw := m.inputInnerWidth()
-			m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows: past every cap these windows allow
+//
+// Each height is its own top-level test, so the shard packer (scripts/test-shards.sh), which cannot
+// split a test below the top level, can spread them across processes.
+func assertInputBoxWindowFollowsTheCaret(t *testing.T, height int) {
+	t.Helper()
+	m := modelWithOverlayRoomAt(t, 80, height, testOpts)
+	iw := m.inputInnerWidth()
+	m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows: past every cap these windows allow
 
-			rows := inputContentRows(m.input.Value(), iw)
-			if rows <= m.input.Height() {
-				t.Fatalf("the box drew all %d rows at %d rows of terminal — test premise broken", rows, height)
-			}
-			// The caret is at the end of the value, so the least scroll that keeps it visible puts the
-			// LAST row on the box's bottom line — the widget's own clamp, at whichever height the cap
-			// left the box.
-			if got, want := m.input.ScrollYOffset(), rows-m.input.Height(); got != want {
-				t.Errorf("ScrollYOffset = %d, want %d (%d content rows in a %d-row box)",
-					got, want, rows, m.input.Height())
-			}
-			// …and what scrolled out of sight is exactly what the border row counts.
-			if got, want := m.hiddenDraftRows(), rows-m.input.Height(); got != want {
-				t.Errorf("hiddenDraftRows = %d, want %d", got, want)
-			}
-			if frame := strings.Split(m.View().Content, "\n"); len(frame) > height {
-				t.Errorf("composed frame is %d rows on a %d-row terminal (+%d)", len(frame), height, len(frame)-height)
-			}
-		})
+	rows := inputContentRows(m.input.Value(), iw)
+	if rows <= m.input.Height() {
+		t.Fatalf("the box drew all %d rows at %d rows of terminal — test premise broken", rows, height)
 	}
+	// The caret is at the end of the value, so the least scroll that keeps it visible puts the
+	// LAST row on the box's bottom line — the widget's own clamp, at whichever height the cap
+	// left the box.
+	if got, want := m.input.ScrollYOffset(), rows-m.input.Height(); got != want {
+		t.Errorf("ScrollYOffset = %d, want %d (%d content rows in a %d-row box)",
+			got, want, rows, m.input.Height())
+	}
+	// …and what scrolled out of sight is exactly what the border row counts.
+	if got, want := m.hiddenDraftRows(), rows-m.input.Height(); got != want {
+		t.Errorf("hiddenDraftRows = %d, want %d", got, want)
+	}
+	if frame := strings.Split(m.View().Content, "\n"); len(frame) > height {
+		t.Errorf("composed frame is %d rows on a %d-row terminal (+%d)", len(frame), height, len(frame)-height)
+	}
+}
+
+func TestInputBoxWindowFollowsTheCaretAt8Rows(t *testing.T) {
+	t.Parallel()
+	assertInputBoxWindowFollowsTheCaret(t, frameFloorRows)
+}
+
+func TestInputBoxWindowFollowsTheCaretAt10Rows(t *testing.T) {
+	t.Parallel()
+	assertInputBoxWindowFollowsTheCaret(t, 10)
+}
+
+func TestInputBoxWindowFollowsTheCaretAt12Rows(t *testing.T) {
+	t.Parallel()
+	assertInputBoxWindowFollowsTheCaret(t, smallestOverlayWindow)
+}
+
+func TestInputBoxWindowFollowsTheCaretAt16Rows(t *testing.T) {
+	t.Parallel()
+	assertInputBoxWindowFollowsTheCaret(t, 16)
+}
+
+func TestInputBoxWindowFollowsTheCaretAt24Rows(t *testing.T) {
+	t.Parallel()
+	assertInputBoxWindowFollowsTheCaret(t, 24)
 }
 
 // TestInputBoxTooNarrowForTheCountKeepsAPlainBorder pins the ONE place the box's marker differs

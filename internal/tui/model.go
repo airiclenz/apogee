@@ -3098,7 +3098,7 @@ func blockRows(block string) int {
 // answers from the pane's spec without painting it, and the two strips — a line or two of their
 // own, no pane — through their composed blocks. It equals frameOverlays().height() on every Model
 // value; that is the pane table's height-equals-render contract
-// (TestOverlayHeightQueryMatchesItsRender), and it is what lets [Model.transcriptRows] — asked on
+// (pinned by sweepOverlayHeightQuery), and it is what lets [Model.transcriptRows] — asked on
 // every Update's repaint tail ([Model.settle]) — render no pane, leaving View the one render of
 // each.
 func (m Model) overlayRows() int {
@@ -3337,7 +3337,7 @@ func (m Model) View() tea.View {
 	// Rendered once — the frame's one render of each open pane. The mouse maps a click through
 	// transcriptRows, which measures the panes through their height queries rather than this
 	// composition; that the two land on the same rows is the pane table's height-equals-render
-	// contract (paneSpec.height, pinned by TestOverlayHeightQueryMatchesItsRender).
+	// contract (paneSpec.height, pinned by sweepOverlayHeightQuery).
 	ov := m.frameOverlays()
 
 	rows := make([]string, 0, frameBlocks)

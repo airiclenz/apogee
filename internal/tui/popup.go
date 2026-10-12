@@ -581,7 +581,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 // the paint does. What it still composes is what a count genuinely depends on: the body prose wrapped
 // to the inner width, and a WRAPPING spec's rows wrapped likewise (popupRowBlocks), because only the
 // wrap says how many lines they take. A flat row costs one line at any width, so a non-wrapping
-// spec's rows are never laid out here. TestOverlayHeightQueryMatchesItsRender pins the agreement per pane.
+// spec's rows are never laid out here. sweepOverlayHeightQuery (panes_test.go) pins the agreement per pane.
 func popupHeight(th theme, spec popupSpec, width int) int {
 	if width <= th.popupBorder.GetHorizontalFrameSize() {
 		return 0 // renderPopupPlaced draws no pane here
