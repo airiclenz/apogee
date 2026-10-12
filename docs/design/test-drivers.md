@@ -709,17 +709,23 @@ resize that has to be a signal, the state the terminal is left in on exit, a rea
 anything about the binary's own argv, environment or exit code. Everything else belongs in the
 in-process driver, which is roughly seven times cheaper per step.
 
-**The binary is built once per `go test` run.** `cmd/apogee`'s existing `TestMain` — the one that
-redirects `HOME` to a suite temp dir — also runs `go build -o <suiteTempHome>/apogee .`, without
-`-race`, because what the black-box driver drives is the binary as it ships. The build uses the
-DEVELOPER's `HOME` rather than the suite's throwaway one, or it would miss the module and build
-caches and recompile the world on every run. On failure `e2eBinary` stays empty, `e2eBuildErr` says
-why, and `launchPTY` skips with it: a test that cannot build the binary has not found a bug in it.
-The build is unconditional for an ordinary run of the suite — one cached `go build` is cheaper than
-a second thing to get wrong — with exactly one exception: `keysource_test.go` re-invokes the test
-binary as an `api-key-cmd:` program several times per run, and a child that only prints a key never
-drives the binary. Building there multiplies one build by every re-exec (+10 s on the package,
-measured), so `TestMain` recognises the fixture's marker argument and skips it.
+**The binary is built once per suite run.** `make test` (`scripts/test-shards.sh`) builds
+`./cmd/apogee` once, beside its `go test -c` builds and without `-race`, because what the black-box
+driver drives is the binary as it ships, and names the file to every chunk in
+`APOGEE_TEST_E2E_BINARY`. `cmd/apogee`'s `TestMain` — the one that redirects `HOME` to a suite temp
+dir — takes the binary from that variable when it is set, and exits non-zero before any test runs,
+naming the variable and the path, when the variable names no file: a runner that built nothing is
+not a reason to skip every PTY test green. With the variable unset — a plain `go test` — `TestMain`
+builds the binary itself, `go build -o <suiteTempHome>/apogee .`, as the script does. That build
+uses the DEVELOPER's `HOME` rather than the suite's throwaway one, or it would miss the module and
+build caches and recompile the world on every run. On failure `e2eBinary` stays empty,
+`e2eBuildErr` says why, and `launchPTY` skips with it: a test that cannot build the binary has not
+found a bug in it. The build is unconditional for an ordinary run of the suite — one cached
+`go build` is cheaper than a second thing to get wrong — with two exceptions: a `-test.list` run,
+which runs nothing, and `keysource_test.go`'s re-invocations of the test binary as an
+`api-key-cmd:` program, several per run, where a child that only prints a key never drives the
+binary. Building there multiplies one build by every re-exec (+10 s on the package, measured), so
+`TestMain` recognises the fixture's marker argument and skips it.
 
 **The environment is stated, not inherited.** `launchPTY` gives the child `HOME` (the suite's temp
 one), `PATH`, and nothing else, plus the `TERM`/`COLORTERM` the driver appends. An `APOGEE_*`
@@ -1052,7 +1058,7 @@ whose twenty-five seconds ARE the claim (see below).
 | Set | Runs in a plain `go test` | Ways it does not run |
 | --- | --- | --- |
 | in-process e2e | yes, every platform | — |
-| PTY e2e | yes | Windows; a failed `TestMain` build (both say so in the skip) |
+| PTY e2e | yes | Windows; a failed `TestMain` build of the binary under test (both say so in the skip) |
 | judge | no | always, unless `APOGEE_JUDGE_ENDPOINT` / `APOGEE_LIVE_ENDPOINT` is set — it joins `make live-eval` |
 | newcomer container | no | needs BOTH `docker` on PATH and the judge gate, and Linux (the host can bind on the docker bridge gateway there only, which is where the stub upstream listens); local-only, outside the budget |
 | workflow gates | not a Go test | `scripts/check-pins.sh` and `actionlint` run from `make check` and from the CI check job |
@@ -1065,7 +1071,8 @@ all — it needs no terminal, no model and no network beyond loopback.
 
 The PTY set runs in every plain `go test` too, and has exactly two ways not to run, both of which
 say so: it skips on Windows (the driver is unix-only) and it skips when `TestMain` could not build
-the binary, with the build error in the skip message. It needs no terminal of its own — it makes
+the binary, with the build error in the skip message. A prebuilt binary that is missing is neither:
+it fails the run (see "The binary is built once per suite run"). It needs no terminal of its own — it makes
 one — and no model beyond the same loopback stub.
 
 The e2e tests are **parallel by default** (2026-09-13): `t.Parallel()` is the first statement of

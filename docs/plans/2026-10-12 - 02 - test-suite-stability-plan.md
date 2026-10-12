@@ -475,7 +475,10 @@ NOTES (2026-10-12): wait_test.go was not on the item's Files line; it carries th
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/tuitest/`; `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestE2ESmokeInProcess' ./cmd/apogee/`
 **Commit:** `perf(tuitest): cache the snapshot frame until the screen changes`
 
-## 23. The e2e apogee binary is built once per suite run
+## 23. The e2e apogee binary is built once per suite run — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the selection helper is prebuiltE2EBinary(value) in cmd/apogee/main_test.go: it also refuses a path that is not a regular file (a directory) and returns the path made absolute, so a test that changes directory cannot break a relative one; its test (TestE2EBinaryFromEnvSelectsThePrebuiltBinary) covers unset, set/existing, set/missing and set/directory. The script's binary path takes `go env GOEXE` for the Windows `.exe` suffix.
+NOTES (2026-10-12): test-drivers.md's rewritten paragraph also names the `-test.list` exception to the unconditional build, which the code already had and the doc's "exactly one exception" had missed. Verified by hand: APOGEE_TEST_E2E_BINARY=/nonexistent/apogee makes the package FAIL at startup with the variable and path named; a prebuilt binary drives TestE2EEventLinesSurviveAClosedPipe (PASS, not skipped). golangci-lint on cmd/apogee: 0 issues. The full test-shards run was not exercised here (bash -n only).
 
 **What:** Every cmd/apogee chunk's `TestMain` runs its own `go build` of apogee, 13 links per run.
 **Regression guard.** the cmd/apogee race run carries `-parallel 1`. A set-but-missing `APOGEE_TEST_E2E_BINARY` makes TestMain exit non-zero with a message naming the variable and the path, and never sets `e2eBuildErr` (which would skip every PTY test green). Supersedes `docs/design/test-drivers.md` ("The binary is built once per `go test` run … TestMain … runs go build"): every prose line saying TestMain builds the binary, found by `grep -rn 'TestMain' docs/design/test-drivers.md scripts/test-shards.sh cmd/apogee/main_test.go`, is rewritten.

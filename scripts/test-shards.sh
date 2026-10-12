@@ -72,10 +72,11 @@ cd "$(dirname "$0")/.."
 HEAVY_PKGS=(./cmd/apogee ./internal/tui)
 
 # The chunk size, in the timings' own seconds (the box that measured them). About two minutes:
-# long enough that a process's startup — and cmd/apogee's TestMain, which builds the binary its
-# PTY tests drive — is a small share of it, short enough that the queue's tail is short and no
-# process lives long. CHUNK_MAX_TESTS bounds memory where time does not: internal/tui runs
-# hundreds of fast tests a minute, and every one of them is parked in the process at once.
+# long enough that a process's startup — cmd/apogee's TestMain included, which takes the binary
+# its PTY tests drive prebuilt from this script (see the build below) — is a small share of it,
+# short enough that the queue's tail is short and no process lives long. CHUNK_MAX_TESTS bounds
+# memory where time does not: internal/tui runs hundreds of fast tests a minute, and every one of
+# them is parked in the process at once.
 CHUNK_SECS=120
 CHUNK_MAX_TESTS=400
 # The least a test is assumed to cost, so the many tests the timings record at 0.00 s still
@@ -334,6 +335,12 @@ harvest_timings() { # log [import path]
 # ---------------------------------------------------------------------------------------------
 # Build the heavy packages' test binaries, both at once. The other packages' `go test` runs
 # start from the build cache these fill.
+#
+# Beside them, the apogee binary cmd/apogee's PTY tests drive. Every chunk of that package used
+# to build it in its own TestMain, one link per chunk; built here once and named to every
+# process in APOGEE_TEST_E2E_BINARY, it is one link per run. It is built exactly as TestMain
+# builds it — no -race and none of build_args, since what the black-box driver drives is the
+# binary as it ships — and a TestMain handed a variable that names no file fails the run.
 # ---------------------------------------------------------------------------------------------
 build_pids=()
 for idx in "${!HEAVY_PKGS[@]}"; do
@@ -341,6 +348,9 @@ for idx in "${!HEAVY_PKGS[@]}"; do
 		${build_args[@]+"${build_args[@]}"} "${HEAVY_PKGS[$idx]}" >"$work/build.$idx.log" 2>&1 &
 	build_pids+=($!)
 done
+e2e_binary="$work/bin/apogee$(go env GOEXE)"
+go build -o "$e2e_binary" ./cmd/apogee >"$work/build.e2e.log" 2>&1 &
+e2e_build_pid=$!
 build_failed=0
 for idx in "${!HEAVY_PKGS[@]}"; do
 	if ! wait "${build_pids[$idx]}"; then
@@ -349,7 +359,13 @@ for idx in "${!HEAVY_PKGS[@]}"; do
 		build_failed=1
 	fi
 done
+if ! wait "$e2e_build_pid"; then
+	echo "test-shards: could not build the apogee binary the e2e tests drive (./cmd/apogee):" >&2
+	cat "$work/build.e2e.log" >&2
+	build_failed=1
+fi
 [ "$build_failed" -eq 0 ] || exit 1
+export APOGEE_TEST_E2E_BINARY="$e2e_binary"
 
 # ---------------------------------------------------------------------------------------------
 # Plan. A queue item is a handful of files under $work/q/<n>: kind (chunk|batch), label, cost,

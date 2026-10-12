@@ -48,13 +48,21 @@ var realUserHome string
 var suiteTempHome string
 
 // e2eBinary is the apogee binary the black-box driver runs (internal/tuitest.PTYDriver): the
-// SHIPPED shape of this tree, built once per `go test` invocation by TestMain into the suite's own
-// temp home. Empty when the build failed, in which case e2eBuildErr says why and every PTY test
-// skips with it — a test that cannot build the binary is not a test that found a bug in it.
+// SHIPPED shape of this tree. TestMain takes it prebuilt from APOGEE_TEST_E2E_BINARY when the
+// variable is set (scripts/test-shards.sh builds it once for every chunk of the run), and otherwise
+// builds it once per `go test` invocation into the suite's own temp home. Empty when that build
+// failed, in which case e2eBuildErr says why and every PTY test skips with it — a test that cannot
+// build the binary is not a test that found a bug in it.
 var (
 	e2eBinary   string
 	e2eBuildErr error
 )
+
+// e2eBinaryEnv names a prebuilt binary under test for TestMain to use instead of building its
+// own. It is the test runner's handshake with this package, not apogee configuration: it stays out
+// of ambientApogeeEnv (whose guard asserts each name empty), and no driven launch inherits it,
+// since ptyEnv states the child's environment.
+const e2eBinaryEnv = "APOGEE_TEST_E2E_BINARY"
 
 // TestMain gives the whole suite a throwaway home directory. `t.TempDir` belongs to a running
 // test, so the dir is an `os.MkdirTemp` removed after `m.Run` — and the exit code is taken
@@ -106,8 +114,23 @@ func TestMain(m *testing.M) {
 	// Nor for a run that only LISTS the tests (`go test -list`, which scripts/test-shards.sh plans
 	// its shards with): nothing runs, so nothing needs the binary, and the build was most of that
 	// listing's cost.
+	//
+	// A run whose runner already built the binary names it in APOGEE_TEST_E2E_BINARY, and every
+	// process of that run uses the one file. A variable that names no binary is the runner's bug,
+	// so it fails the run here, loudly, rather than setting e2eBuildErr: that would skip every PTY
+	// test, and a run of skips reads green.
 	if !keyFixtureInvocation() && !listingOnly(os.Args[1:]) {
-		e2eBinary, e2eBuildErr = buildE2EBinary(home)
+		prebuilt, err := prebuiltE2EBinary(os.Getenv(e2eBinaryEnv))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cmd/apogee suite: %v\n", err)
+			_ = os.RemoveAll(home)
+			os.Exit(1)
+		}
+		if prebuilt != "" {
+			e2eBinary = prebuilt
+		} else {
+			e2eBinary, e2eBuildErr = buildE2EBinary(home)
+		}
 	}
 
 	code := m.Run()
@@ -135,6 +158,29 @@ func listingOnly(args []string) bool {
 		}
 	}
 	return false
+}
+
+// prebuiltE2EBinary resolves value, the APOGEE_TEST_E2E_BINARY setting, to the binary it names:
+// "" when the variable is unset or empty (TestMain then builds its own), the path made absolute when
+// it names an existing regular file — absolute because a test may change the working directory
+// under a relative one — and an error naming the variable and the path when it names nothing
+// usable.
+func prebuiltE2EBinary(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	path, err := filepath.Abs(value)
+	if err != nil {
+		return "", fmt.Errorf("%s=%q: resolve the path: %w", e2eBinaryEnv, value, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("%s=%q names no binary: %w", e2eBinaryEnv, value, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s=%q is not a regular file", e2eBinaryEnv, value)
+	}
+	return path, nil
 }
 
 // buildE2EBinary compiles the package under test into dir and returns the binary's path. It is
@@ -198,6 +244,58 @@ func TestListingOnlyReadsTheListFlag(t *testing.T) {
 			t.Errorf("listingOnly(%q) = %v, want %v", tc.args, got, tc.want)
 		}
 	}
+}
+
+// TestE2EBinaryFromEnvSelectsThePrebuiltBinary pins TestMain's choice of the binary under test: an
+// unset APOGEE_TEST_E2E_BINARY builds as before, one naming a file uses that file, and one naming
+// nothing is an error that names the variable and the path — never a silent fall-back to a build,
+// and never a binary path that a launch would then fail to exec.
+func TestE2EBinaryFromEnvSelectsThePrebuiltBinary(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "apogee")
+	if err := os.WriteFile(existing, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write the stand-in binary: %v", err)
+	}
+	missing := filepath.Join(dir, "absent", "apogee")
+
+	t.Run("unset", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := prebuiltE2EBinary("")
+		if err != nil || got != "" {
+			t.Fatalf("prebuiltE2EBinary(\"\") = %q, %v; want \"\", nil (build as before)", got, err)
+		}
+	})
+	t.Run("set to an existing file", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := prebuiltE2EBinary(existing)
+		if err != nil || got != existing {
+			t.Fatalf("prebuiltE2EBinary(%q) = %q, %v; want the file itself", existing, got, err)
+		}
+	})
+	t.Run("set to a missing file", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := prebuiltE2EBinary(missing)
+		if err == nil {
+			t.Fatalf("prebuiltE2EBinary(%q) = %q, nil; want an error", missing, got)
+		}
+		for _, want := range []string{e2eBinaryEnv, missing} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name %q", err, want)
+			}
+		}
+	})
+	t.Run("set to a directory", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := prebuiltE2EBinary(dir); err == nil || !strings.Contains(err.Error(), e2eBinaryEnv) {
+			t.Fatalf("prebuiltE2EBinary(%q) error = %v; want one naming %s", dir, err, e2eBinaryEnv)
+		}
+	})
 }
 
 // TestAmbientApogeeConfigIsClearedForTheSuite asserts the suite starts every test with no
