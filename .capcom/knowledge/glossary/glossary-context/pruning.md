@@ -1,5 +1,5 @@
 ---
-title: Pruning
+title: "Pruning: the structural reducer that stubs stale tool results when history outgrows its share"
 ---
 
 **Pruning**:

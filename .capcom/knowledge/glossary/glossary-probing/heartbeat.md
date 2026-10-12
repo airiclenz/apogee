@@ -1,5 +1,5 @@
 ---
-title: Heartbeat (and its Beat)
+title: "Heartbeat (and its Beat): the continuous monitor of the Upstream"
 ---
 
 **Heartbeat** (and its **Beat**):

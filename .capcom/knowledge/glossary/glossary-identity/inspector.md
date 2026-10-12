@@ -1,5 +1,5 @@
 ---
-title: Inspector
+title: "Inspector: the Driver-side view of what the loop put on the Upstream connection"
 ---
 
 **Inspector**:

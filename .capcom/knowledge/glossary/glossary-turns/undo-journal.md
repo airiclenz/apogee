@@ -1,5 +1,5 @@
 ---
-title: Undo journal
+title: "Undo journal: the per-Exchange record of what writes replaced, which `/undo` restores"
 ---
 
 **Undo journal**:

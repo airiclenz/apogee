@@ -1,5 +1,5 @@
 ---
-title: Background workflow
+title: "Background workflow: a Workflow that runs while the conversation goes on"
 ---
 
 **Background workflow**:

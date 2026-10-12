@@ -1,5 +1,5 @@
 ---
-title: The loop (the agent loop)
+title: "The loop (the agent loop): apogee's core build, call, parse and dispatch control flow"
 ---
 
 **The loop** (the agent loop):

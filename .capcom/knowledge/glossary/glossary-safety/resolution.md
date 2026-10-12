@@ -1,5 +1,5 @@
 ---
-title: Resolution
+title: "Resolution: the single complete verdict for one tool call, computed before it runs"
 ---
 
 **Resolution**:

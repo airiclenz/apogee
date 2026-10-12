@@ -1,5 +1,5 @@
 ---
-title: Thinking pane
+title: "Thinking pane: the Driver-side plain view of the Thinking channel"
 ---
 
 **Thinking pane**:

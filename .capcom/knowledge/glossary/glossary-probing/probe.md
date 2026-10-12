@@ -1,5 +1,5 @@
 ---
-title: Probe (`apogee probe`)
+title: "Probe (`apogee probe`): the diagnosis command for what this machine and model can do"
 ---
 
 **Probe** (`apogee probe`):

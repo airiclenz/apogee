@@ -1,5 +1,5 @@
 ---
-title: Host acknowledgement (`unconfined-hosts:`)
+title: "Host acknowledgement (`unconfined-hosts:`): the user's claim that one named machine is disposable"
 ---
 
 **Host acknowledgement** (`unconfined-hosts:`):

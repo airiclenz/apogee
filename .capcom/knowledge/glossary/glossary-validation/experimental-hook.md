@@ -1,5 +1,6 @@
 ---
-title: Experimental hook
+title: "Experimental hook: retired term for an engine Reaction the bench arms; say bench-armed Reaction"
+retired: true
 ---
 
 **Experimental hook**:

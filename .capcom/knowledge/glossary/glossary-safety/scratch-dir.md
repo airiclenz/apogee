@@ -1,5 +1,5 @@
 ---
-title: Scratch dir
+title: "Scratch dir: the per-session writable directory outside the workspace"
 ---
 
 **Scratch dir**:

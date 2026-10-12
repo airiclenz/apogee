@@ -1,5 +1,5 @@
 ---
-title: Reaction surface
+title: "Reaction surface: the origin-by-class policy matrix every new Reaction is placed in"
 ---
 
 **Reaction surface**:

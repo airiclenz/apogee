@@ -1,5 +1,5 @@
 ---
-title: Delegate report block
+title: "Delegate report block: the standing system content only a delegated agent carries"
 ---
 
 **Delegate report block**:

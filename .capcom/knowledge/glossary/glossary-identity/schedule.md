@@ -1,5 +1,5 @@
 ---
-title: Schedule
+title: "Schedule: a standing prompt, cycle and Agent mode a Driver holds for its lifetime"
 ---
 
 **Schedule**:

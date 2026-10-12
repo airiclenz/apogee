@@ -1,5 +1,5 @@
 ---
-title: Step cap
+title: "Step cap: how many Turns a delegate may take before the engine ends it"
 ---
 
 **Step cap**:

@@ -1,5 +1,5 @@
 ---
-title: Compaction
+title: "Compaction: the default reducer that summarises older Turns through the model"
 ---
 
 **Compaction**:

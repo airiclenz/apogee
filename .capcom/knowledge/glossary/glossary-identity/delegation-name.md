@@ -1,5 +1,5 @@
 ---
-title: Delegation name
+title: "Delegation name: what one Sub-agent run is called wherever it is shown"
 ---
 
 **Delegation name**:

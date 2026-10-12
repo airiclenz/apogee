@@ -1,5 +1,5 @@
 ---
-title: Allow rule
+title: "Allow rule: a remembered, persisted yes that answers an ordinary Approval"
 ---
 
 **Allow rule**:

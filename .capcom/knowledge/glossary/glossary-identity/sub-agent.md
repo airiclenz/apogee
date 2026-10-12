@@ -1,5 +1,5 @@
 ---
-title: Sub-agent
+title: "Sub-agent: a nested agent loop spawned for one delegated sub-task"
 ---
 
 **Sub-agent**:

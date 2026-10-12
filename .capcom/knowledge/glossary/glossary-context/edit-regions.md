@@ -1,5 +1,5 @@
 ---
-title: Edit regions
+title: "Edit regions: the typed summary of changed regions an edit tool records at apply time"
 ---
 
 **Edit regions**:

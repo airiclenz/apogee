@@ -1,5 +1,5 @@
 ---
-title: Embeddable agent (the public API)
+title: "Embeddable agent (the public API): the Go package that runs an apogee agent in-process"
 ---
 
 **Embeddable agent** (the public API):

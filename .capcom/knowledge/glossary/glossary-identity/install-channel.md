@@ -1,5 +1,5 @@
 ---
-title: Install channel
+title: "Install channel: how the running binary was installed, which decides its upgrade command"
 ---
 
 **Install channel**:

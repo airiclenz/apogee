@@ -1,5 +1,5 @@
 ---
-title: Thinking channel (a model's private reasoning)
+title: "Thinking channel (a model's private reasoning): the reasoning stream a model emits apart from its answer"
 ---
 
 **Thinking channel** (a model's private reasoning):

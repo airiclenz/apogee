@@ -1,5 +1,5 @@
 ---
-title: Delegation seat
+title: "Delegation seat: one of the two places a delegation may run"
 ---
 
 **Delegation seat**:

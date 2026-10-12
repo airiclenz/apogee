@@ -1,5 +1,5 @@
 ---
-title: Driver
+title: "Driver: a program that embeds the Embeddable agent and drives the loop"
 ---
 
 **Driver**:

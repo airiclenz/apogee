@@ -1,5 +1,5 @@
 ---
-title: Server stats
+title: "Server stats: the cross-session record of Upstream attempts per server"
 ---
 
 **Server stats**:

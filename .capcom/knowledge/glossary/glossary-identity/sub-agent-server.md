@@ -1,5 +1,5 @@
 ---
-title: Sub-agent server
+title: "Sub-agent server: the `servers:` entry every delegation routes to"
 ---
 
 **Sub-agent server**:

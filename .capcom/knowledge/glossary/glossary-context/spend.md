@@ -1,5 +1,5 @@
 ---
-title: Spend (money)
+title: "Spend (money): the priced amount of a set of provider calls"
 ---
 
 **Spend (money)**:

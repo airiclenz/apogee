@@ -1,5 +1,5 @@
 ---
-title: MCP client (Model Context Protocol)
+title: "MCP client (Model Context Protocol): apogee's client for external MCP servers"
 ---
 
 **MCP client** (Model Context Protocol):

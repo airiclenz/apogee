@@ -1,5 +1,5 @@
 ---
-title: Firing
+title: "Firing: one run of a Schedule's prompt by a fresh agent"
 ---
 
 **Firing**:

@@ -1,5 +1,5 @@
 ---
-title: Price
+title: "Price: the configured per-1M-token rate of one `servers:` entry"
 ---
 
 **Price**:

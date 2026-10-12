@@ -1,5 +1,5 @@
 ---
-title: Fan-out ceiling
+title: "Fan-out ceiling: how many `sub_agent` calls one reply may fan out before the rest are refused"
 ---
 
 **Fan-out ceiling**:

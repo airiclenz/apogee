@@ -1,5 +1,5 @@
 ---
-title: Recipe
+title: "Recipe: a saved Workflow definition written into a Skill's header"
 ---
 
 **Recipe**:

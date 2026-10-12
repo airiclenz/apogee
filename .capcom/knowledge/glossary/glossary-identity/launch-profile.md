@@ -1,5 +1,5 @@
 ---
-title: Launch profile
+title: "Launch profile: llama-launcher's recipe for getting a model running"
 ---
 
 **Launch profile**:

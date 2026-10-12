@@ -1,5 +1,5 @@
 ---
-title: Context files
+title: "Context files: the project's standing text discovered in the workspace root"
 ---
 
 **Context files**:

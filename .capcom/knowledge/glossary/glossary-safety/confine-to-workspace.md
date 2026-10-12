@@ -1,5 +1,5 @@
 ---
-title: "`confine-to-workspace` (the Auto blast-radius flag)"
+title: "`confine-to-workspace` (the Auto blast-radius flag): the global key that tunes Auto's blast radius"
 ---
 
 **`confine-to-workspace`** (the Auto blast-radius flag):

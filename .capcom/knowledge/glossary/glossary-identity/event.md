@@ -1,5 +1,5 @@
 ---
-title: Event
+title: "Event: the sealed sum type the engine emits on its EventSink"
 ---
 
 **Event**:

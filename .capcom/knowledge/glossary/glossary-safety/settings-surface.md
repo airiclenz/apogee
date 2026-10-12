@@ -1,5 +1,5 @@
 ---
-title: Settings surface (`/settings`)
+title: "Settings surface (`/settings`): the full-height pane over the key registry"
 ---
 
 **Settings surface** (`/settings`):

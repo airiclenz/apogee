@@ -1,5 +1,5 @@
 ---
-title: Color scheme
+title: "Color scheme: the palette apogee draws with, as a file of semantic roles"
 ---
 
 **Color scheme**:

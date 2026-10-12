@@ -1,5 +1,5 @@
 ---
-title: Apogee (the coding agent)
+title: "Apogee (the coding agent): the terminal agent that owns the agentic coding loop end to end"
 ---
 
 **Apogee** (the coding agent):

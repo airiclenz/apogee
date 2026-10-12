@@ -1,5 +1,5 @@
 ---
-title: Project config
+title: "Project config: the Project root's own committable `.apogee/` settings"
 ---
 
 **Project config**:

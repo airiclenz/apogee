@@ -1,5 +1,5 @@
 ---
-title: Event lines
+title: "Event lines: the one-JSON-line-per-Event rendering `apogee headless --format json` writes"
 ---
 
 **Event lines**:

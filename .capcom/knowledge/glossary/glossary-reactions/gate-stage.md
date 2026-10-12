@@ -1,5 +1,5 @@
 ---
-title: Gate stage
+title: "Gate stage: the Approver stage where armed gate Reactions decide whether a call may run"
 ---
 
 **Gate stage**:

@@ -1,5 +1,5 @@
 ---
-title: Delegation target
+title: "Delegation target: the latched spec a sub-agent spawn reads to build its own Upstream"
 ---
 
 **Delegation target**:

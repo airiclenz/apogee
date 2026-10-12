@@ -1,5 +1,5 @@
 ---
-title: File reference (`@file`)
+title: "File reference (`@file`): a workspace file the user names with an `@path` token"
 ---
 
 **File reference (`@file`)**:

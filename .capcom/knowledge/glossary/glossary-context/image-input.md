@@ -1,5 +1,5 @@
 ---
-title: Image input (`vision:`)
+title: "Image input (`vision:`): an image a user message carries to the model as an image part"
 ---
 
 **Image input** (`vision:`):

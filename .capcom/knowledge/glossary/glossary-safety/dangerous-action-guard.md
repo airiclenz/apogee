@@ -1,5 +1,5 @@
 ---
-title: Dangerous-action guard
+title: "Dangerous-action guard: the footgun guard refusing a small model's catastrophic mistakes"
 ---
 
 **Dangerous-action guard**:

@@ -1,5 +1,5 @@
 ---
-title: Stop (a delegation)
+title: "Stop (a delegation): the human ending one running Sub-agent while the parent's Turn goes on"
 ---
 
 **Stop (a delegation)**:

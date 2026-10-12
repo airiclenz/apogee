@@ -1,5 +1,5 @@
 ---
-title: Stage view
+title: "Stage view: the Run view level that lists one Workflow stage's items"
 ---
 
 **Stage view**:

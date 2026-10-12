@@ -1,5 +1,5 @@
 ---
-title: Capability tier
+title: "Capability tier: the ordinal summary of what a battery run says the model can be asked to do"
 ---
 
 **Capability tier**:

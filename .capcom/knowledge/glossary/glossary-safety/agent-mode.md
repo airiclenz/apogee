@@ -1,5 +1,5 @@
 ---
-title: Agent mode
+title: "Agent mode: the autonomy level deciding which tool calls need human approval"
 ---
 
 **Agent mode**:

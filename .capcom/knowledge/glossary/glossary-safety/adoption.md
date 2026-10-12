@@ -1,5 +1,5 @@
 ---
-title: Adoption
+title: "Adoption: the user's recorded acceptance of one granting Project config entry"
 ---
 
 **Adoption**:

@@ -1,5 +1,5 @@
 ---
-title: Orientation block
+title: "Orientation block: the standing system content stating the host facts a model needs"
 ---
 
 **Orientation block**:

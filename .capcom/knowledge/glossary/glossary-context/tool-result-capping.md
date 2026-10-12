@@ -1,5 +1,5 @@
 ---
-title: Tool-result capping
+title: "Tool-result capping: the Floor guard truncating any tool result over its share of the Budget"
 ---
 
 **Tool-result capping**:

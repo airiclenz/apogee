@@ -1,5 +1,5 @@
 ---
-title: Task list
+title: "Task list: the model's own checklist, re-rendered into the standing system content"
 ---
 
 **Task list**:

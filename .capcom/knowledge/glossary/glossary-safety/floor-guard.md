@@ -1,5 +1,5 @@
 ---
-title: Floor guard
+title: "Floor guard: engine behaviour that only answers the model's own failure or shapes a request without steering it"
 ---
 
 **Floor guard**:

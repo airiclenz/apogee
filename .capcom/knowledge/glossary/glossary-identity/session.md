@@ -1,5 +1,5 @@
 ---
-title: Session / Session record
+title: "Session / Session record: one conversation the engine holds, and how it is persisted"
 aliases: [session-record]
 ---
 

@@ -1,5 +1,5 @@
 ---
-title: System prompt
+title: "System prompt: the standing instructions sent as the first system message of every request"
 ---
 
 **System prompt**:

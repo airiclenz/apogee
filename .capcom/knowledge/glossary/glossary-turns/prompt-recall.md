@@ -1,5 +1,5 @@
 ---
-title: Prompt recall
+title: "Prompt recall: the per-workspace list of sent inputs the prompt box walks with up and down"
 ---
 
 **Prompt recall**:

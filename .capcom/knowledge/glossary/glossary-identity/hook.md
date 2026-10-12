@@ -1,5 +1,5 @@
 ---
-title: Hook
+title: "Hook: the colloquial alias for a user-origin Reaction"
 ---
 
 **Hook**:

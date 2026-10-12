@@ -1,5 +1,5 @@
 ---
-title: Parallel agents
+title: "Parallel agents: the per-server cap on concurrently running sub-agents"
 ---
 
 **Parallel agents**:

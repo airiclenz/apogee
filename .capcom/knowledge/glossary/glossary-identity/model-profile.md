@@ -1,5 +1,5 @@
 ---
-title: Model profile
+title: "Model profile: how apogee equips and speaks to a given model, on three axes"
 ---
 
 **Model profile**:

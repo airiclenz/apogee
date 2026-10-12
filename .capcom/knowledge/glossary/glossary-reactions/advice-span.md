@@ -1,5 +1,5 @@
 ---
-title: Advice span
+title: "Advice span: one provenance-ledger row recording an advise Reaction's injection"
 ---
 
 **Advice span**:

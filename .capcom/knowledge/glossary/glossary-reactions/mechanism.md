@@ -1,5 +1,6 @@
 ---
-title: Mechanism
+title: "Mechanism: retired term for the gated, self-regulating lab surface; say Reaction"
+retired: true
 ---
 
 **Mechanism**:

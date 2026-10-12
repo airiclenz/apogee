@@ -1,5 +1,5 @@
 ---
-title: Moment
+title: "Moment: a point the loop passes on which a Reaction may fire"
 ---
 
 **Moment**:

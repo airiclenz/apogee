@@ -1,5 +1,5 @@
 ---
-title: Interjection
+title: "Interjection: a message the human sends into a running Exchange"
 ---
 
 **Interjection**:

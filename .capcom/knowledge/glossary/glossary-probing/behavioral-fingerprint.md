@@ -1,5 +1,5 @@
 ---
-title: Behavioral fingerprint
+title: "Behavioral fingerprint: the medium-confidence model identity a completed battery earns"
 ---
 
 **Behavioral fingerprint**:

@@ -1,5 +1,5 @@
 ---
-title: Unpriced
+title: "Unpriced: a provider call with no Price to apply"
 ---
 
 **Unpriced**:

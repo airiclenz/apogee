@@ -1,5 +1,6 @@
 ---
-title: Mechanism descriptor
+title: "Mechanism descriptor: retired term for the per-Mechanism metadata of the deleted catalogue"
+retired: true
 ---
 
 **Mechanism descriptor**:

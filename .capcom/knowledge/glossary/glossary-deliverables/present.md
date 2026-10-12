@@ -1,5 +1,5 @@
 ---
-title: Present / Presentation
+title: "Present / Presentation: surfacing a finished document to the user"
 aliases: [presentation]
 ---
 

@@ -1,5 +1,5 @@
 ---
-title: Project root
+title: "Project root: the folder whose `.apogee/` holds the project's config and skills"
 ---
 
 **Project root**:

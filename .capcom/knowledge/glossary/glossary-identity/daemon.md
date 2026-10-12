@@ -1,5 +1,5 @@
 ---
-title: Daemon
+title: "Daemon: the always-on Driver that holds durable Schedules"
 ---
 
 **Daemon**:

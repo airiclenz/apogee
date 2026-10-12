@@ -1,5 +1,5 @@
 ---
-title: Console
+title: "Console: a persistent interactive program the model drives across Turns"
 ---
 
 **Console**:

@@ -88,8 +88,9 @@ The link regex matches newlines inside link text and normalises whitespace befor
 - `capcom know show confine-to-workspace` and `capcom know show deferred-response-action` resolve
 **Commit:** `docs(knowledge): move the glossary into Knowledge`
 
-## 2. Glossary titles and retired terms
+## 2. Glossary titles and retired terms — ✅ DONE (2026-10-12)
 
+NOTES (2026-10-12): `glossary` and the ten section Notes already carried one-sentence titles from item 1, so `.capcom/knowledge/glossary.md`, the section Notes and AGENTS.md's managed block are unchanged (capcom check confirms the block is current).
 **What:** Depends on item 1.
 **Goal:** every term Note's title reads `<Term>: <gist>` on its own (gist one clause, from the definition's first sentence); every section Note and `glossary` has a one-sentence title; the five retired terms (Mechanism, Hook point, Post-response decision, Mechanism descriptor, Experimental hook) carry `retired: true`.
 **Approach (assumed at the header base):** read each term Note's first paragraph only; write titles with `capcom know update <id> --title …`. Retire with `capcom know update <id> --retire` (this raises the store to format 3). No body changes.

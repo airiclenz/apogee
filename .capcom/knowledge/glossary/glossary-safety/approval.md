@@ -1,5 +1,5 @@
 ---
-title: Approval
+title: "Approval: the human-in-the-loop gate on a single tool call"
 ---
 
 **Approval**:

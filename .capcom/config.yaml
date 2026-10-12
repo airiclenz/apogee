@@ -1,7 +1,7 @@
 # capcom configuration. Every key is optional; a missing key takes the value shown here.
 
 # The store format version. capcom refuses a store whose format is newer than it reads.
-format: 2
+format: 3
 
 # Issue statuses in order, each mapped to its category: todo, doing, waiting, done or dropped.
 # capcom's rules read only the category. The first status listed in a category is its default.

@@ -1,5 +1,5 @@
 ---
-title: Step
+title: "Step: the primitive that advances the loop one Turn to a quiescent boundary"
 ---
 
 **Step**:

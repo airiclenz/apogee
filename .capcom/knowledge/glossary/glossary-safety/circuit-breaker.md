@@ -1,5 +1,5 @@
 ---
-title: Circuit breaker
+title: "Circuit breaker: the backstop refusing an exact tool call after three straight failures"
 ---
 
 **Circuit breaker**:

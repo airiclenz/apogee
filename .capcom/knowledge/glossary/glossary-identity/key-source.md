@@ -1,5 +1,5 @@
 ---
-title: Key source
+title: "Key source: the one place a server entry's API key comes from"
 ---
 
 **Key source**:

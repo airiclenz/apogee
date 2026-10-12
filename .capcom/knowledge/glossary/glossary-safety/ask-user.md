@@ -1,5 +1,5 @@
 ---
-title: Ask-user
+title: "Ask-user: a free-text question the model puts to the human mid-task"
 ---
 
 **Ask-user**:

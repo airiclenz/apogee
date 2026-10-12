@@ -1,5 +1,5 @@
 ---
-title: The bench (apogee-sim)
+title: "The bench (apogee-sim): the external module that validates apogee by importing it as a library"
 ---
 
 **The bench** (apogee-sim):

@@ -1,5 +1,5 @@
 ---
-title: Boot update check
+title: "Boot update check: the TUI's one request per boot for the latest published release"
 ---
 
 **Boot update check**:

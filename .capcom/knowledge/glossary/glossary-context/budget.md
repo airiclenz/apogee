@@ -1,5 +1,5 @@
 ---
-title: Budget
+title: "Budget: the allocation of the context window across a request's parts"
 ---
 
 **Budget**:

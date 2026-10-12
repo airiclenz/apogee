@@ -1,5 +1,5 @@
 ---
-title: Skill
+title: "Skill: a reusable block of instructions the user invokes from a message"
 ---
 
 **Skill**:

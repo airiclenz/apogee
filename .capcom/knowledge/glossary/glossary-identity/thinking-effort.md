@@ -1,5 +1,5 @@
 ---
-title: Thinking effort (how hard a model thinks)
+title: "Thinking effort (how hard a model thinks): the emit-side dial on the Model profile's thinking axis"
 ---
 
 **Thinking effort** (how hard a model thinks):

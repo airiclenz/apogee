@@ -1,5 +1,5 @@
 ---
-title: Doc server
+title: "Doc server: the lazily started HTTP server that serves presented files to a remote user"
 ---
 
 **Doc server**:

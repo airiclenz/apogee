@@ -1,5 +1,5 @@
 ---
-title: Bypass mode
+title: "Bypass mode: the flag that skips every user- and bench-armed advise and shape Reaction"
 ---
 
 **Bypass mode**:

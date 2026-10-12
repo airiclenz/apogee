@@ -1,5 +1,5 @@
 ---
-title: Retained delegation
+title: "Retained delegation: a finished Sub-agent run the parent can continue by its name"
 ---
 
 **Retained delegation**:

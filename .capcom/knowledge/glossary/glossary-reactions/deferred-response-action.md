@@ -1,5 +1,5 @@
 ---
-title: Deferred Response Action vs Request-prep Hint
+title: "Deferred Response Action vs Request-prep Hint: two sources of a pre-request injection, kept distinct"
 ---
 
 **Deferred Response Action vs Request-prep Hint**:

@@ -1,5 +1,5 @@
 ---
-title: Tool summary
+title: "Tool summary: the structured, host-facing half of a tool's outcome"
 ---
 
 **Tool summary**:

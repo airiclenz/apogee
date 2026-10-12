@@ -1,5 +1,6 @@
 ---
-title: Post-response decision
+title: "Post-response decision: retired term for what a seam Reaction returns; say Outcome"
+retired: true
 ---
 
 **Post-response decision**:

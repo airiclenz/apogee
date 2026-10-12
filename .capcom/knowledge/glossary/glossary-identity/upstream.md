@@ -1,5 +1,5 @@
 ---
-title: Upstream
+title: "Upstream: the LLM server that runs the model"
 ---
 
 **Upstream**:

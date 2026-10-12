@@ -1,5 +1,5 @@
 ---
-title: Split diff / Stacked diff
+title: "Split diff / Stacked diff: the two-pane and stacked readings of one diff body"
 aliases: [stacked-diff]
 ---
 

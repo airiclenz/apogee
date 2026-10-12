@@ -1,5 +1,5 @@
 ---
-title: Key class
+title: "Key class: what a Project config may do with one config key"
 ---
 
 **Key class**:

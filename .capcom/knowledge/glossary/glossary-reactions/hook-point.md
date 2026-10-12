@@ -1,5 +1,6 @@
 ---
-title: Hook point
+title: "Hook point: retired term for the five seam Moments; say seam Moment"
+retired: true
 ---
 
 **Hook point**:

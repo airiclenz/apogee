@@ -1,5 +1,5 @@
 ---
-title: Receipt
+title: "Receipt: the short fixed-shape note a Workflow item's child hands back"
 ---
 
 **Receipt**:

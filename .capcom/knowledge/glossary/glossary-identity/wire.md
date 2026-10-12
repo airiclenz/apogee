@@ -1,5 +1,5 @@
 ---
-title: Wire
+title: "Wire: the request/response protocol family a server speaks"
 ---
 
 **Wire**:
