@@ -631,7 +631,7 @@ NOTES (2026-10-12): the "half-second per walk" line was stale since `495e0c96`: 
 **Acceptance:** `grep -rn 'half-second' docs/design/test-drivers.md` is empty; `capcom show esc-disarm-fold-time`; `GOMEMLIMIT=2GiB go test -count=1 -run 'Manual|Readme' ./internal/tools/ ./internal/config/ ./internal/domain/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'DesignDoc' ./internal/stubllm/`
 **Commit:** `docs: state the test timing discipline and file open timing findings`
 
-## 31. Refresh the shard timings seed
+## 31. Refresh the shard timings seed — ✅ DONE (2026-10-13)
 
 **What:** Items 21 and 28 change test names and costs; CI packs by the committed seed.
 **Regression guard.** the seed check greps `OverlayHeightQuery` without the `Test` prefix, so a correct seed passes whatever prefix item 21's split names carry.
