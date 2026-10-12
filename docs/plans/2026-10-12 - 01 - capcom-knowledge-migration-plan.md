@@ -136,8 +136,10 @@ docs/adr/0018-*.md — `##` inside a code fence; ../capcom/docs/skill-runs/migra
 - `capcom know show "ADR 0076"` and `capcom know show adr-0071-decision-1` resolve
 **Commit:** `docs(knowledge): move the decision records into Knowledge`
 
-## 4. Supersession links between decision records
+## 4. Supersession links between decision records — ✅ DONE (2026-10-12)
 
+NOTES (2026-10-12): the Status-line parser behind `split_adr.py --verify-supersession` retires a record whose Status opens "superseded" and, in each `;`-clause that supersedes, retires or moves something, takes the ADRs named after "by"/"and" (so 0063's parenthetical "(ADR 0013 D5)", 0036's "widened by ADR 0078" and 0076's "amended by ADR 0077" name no successor); it reproduces the item's table exactly (asserted), and also checks each `Supersedes:` line (0012, 0071, 0088) against its targets' successors.
+NOTES (2026-10-12): `.capcom/config.yaml` unchanged — the store was already `format: 3` after item 2, so no `capcom know update` raised it.
 **What:** Depends on item 3.
 **Goal:** every record whose frontmatter `Status:` says it is superseded in whole carries `retired: true` and `superseded-by:` naming its successors; every record whose `Status:` names a superseding ADR for part of it carries `superseded-by:` and stays current; records amended only by themselves, by an "amended by" ADR, or by non-ADR events carry neither.
 **Approach (assumed at the header base):** the ADR `Status:` lines are the ground truth; this table, read from them at the base, is the cross-check (a mismatch follows the Status line and leaves a dated NOTES line). Apply with `capcom know update adr-NNNN --add-superseded-by adr-MMMM` (repeat) and `--retire`.
