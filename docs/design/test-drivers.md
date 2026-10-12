@@ -476,17 +476,43 @@ than as a pass).
 ### Waiting
 
 A driver test never sleeps. `WaitFor(t, cond, opts...)` polls at 20 ms against `DefaultTimeout` —
-60 s, generous on purpose, since a wait returns the instant its condition holds and only a failure
-ever spends it — and,
+`testtime.Budget(60 * time.Second)`, generous on purpose, since a wait returns the instant its
+condition holds and only a failure ever spends it — and,
 when it gives up, prints the last frame *plain and styled*, so a colour bug is visible in the
 failure output rather than only in a rerun. `WaitText`, `WaitGone` and `WaitQuiet` are the
 shorthands almost every test uses. Options: `On(screen)` (which screen to print — pass it),
 `Within(d)`, `Awaiting("the approval pane")`. Set `TUITEST_ARTIFACTS=<dir>` and a failure also
 writes `<dir>/<test name>.{txt,ansi}`, for a CI run nobody is watching live.
 
+**Every duration in a test says what it is** (`internal/testtime`, the whole module's tests, not
+only this kit's). A *budget* — a deadline, or a wait that ends on a condition — is written
+`testtime.Budget(d)`, which multiplies it by `APOGEE_TEST_TIME_SCALE` (default 1;
+`APOGEE_TEST_SLOW=1` sets it to 2 unless it is set explicitly), because a loaded or throttled box
+needs more of it and a healthy run spends only what it needs. A *semantic* duration — pacing, a
+"nothing happens within" window, a timeout meant to expire, a fixture's age — is written
+`testtime.Fixed(d)` and never scales, because its length is the claim. A poll outside this kit's
+waits is `testtime.Eventually(t, budget, cond, what)`, or `testtime.Expiry(budget)` where running
+out is an answer rather than a failure; neither scales its argument, so the value passed is
+already a `Budget` or `Fixed` one (`DefaultTimeout`, say) and a budget is scaled exactly once,
+where it is written. `TestNoFixedTimingInTests` (`internal/testtime/guard_test.go`) enforces it:
+it parses every `_test.go` file, and this kit's non-test files, and fails on a timed call
+(`time.Sleep`, `time.After`, `context.WithTimeout`, `Within`, `Eventually`, …) whose duration is a
+raw literal, and on a hand-rolled wall-clock deadline loop. The exception is marked at the call
+site with `Fixed`, never in an allowlist in the guard.
+
+**`WaitQuiet` is for "the frame has settled", before a capture — never for readiness.** A quiet
+screen is not a ready program: a pane whose keys arm paints nothing, a turn's save lands after its
+last frame, and a screen that has not answered a key yet has been quiet since before the key was
+sent. Readiness waits on its own signal: the paint the key caused (`WaitText` on what it was
+supposed to produce, or the byte counter moving), the cursor answers a pane arms on
+(`WaitCursorAnswers(PaneArmAnswers)`), the idle prompt, or the backend state the next assertion
+reads (the session record, a file on disk). `WaitQuiet(settled)` stays only where a golden or a
+whole-frame read is about to pin the picture, and only after a content wait — a screen that has
+not started painting yet is quiet too.
+
 `CheckLeaks(t)` is the other guard: called FIRST in a driver test, it fails the test if a goroutine
 from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch`, `internal/heartbeat` or
-`internal/reactions` is still running when `leakGrace` (the same 60 s as `DefaultTimeout`, and
+`internal/reactions` is still running when `leakGrace` (`DefaultTimeout` itself, scale and all, and
 generous for the same reason) runs out after it ends. Only goroutines the test itself started:
 the call labels the test goroutine with a per-call pprof label (`tuitest.leakcheck`), every
 goroutine started from it — the program's included — inherits the label, and the cleanup reads the
@@ -1004,8 +1030,10 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    gives the run a `t.TempDir()` home and a `t.TempDir()` workspace and passes both as flags; both
    refuse to run with `APOGEE_CONFIG` set. No test may read or write the real `~/.apogee`.
 4. **Wait for the thing, never for a duration.** `WaitText` / `WaitGone` / `WaitFor` are bounded and
-   print the failing frame. A settle (`WaitQuiet`) is for a frame you are about to READ — and only
-   ever after a content wait, because a screen that has not started painting yet is quiet too.
+   print the failing frame; any duration of your own goes through `testtime.Budget` or
+   `testtime.Fixed` ([Waiting](#waiting)). A settle (`WaitQuiet`) is for a frame you are about to
+   capture whole — a golden, a whole-frame read — never a readiness check, and only ever after a
+   content wait, because a screen that has not started painting yet is quiet too.
 5. **Assert on cells.** `Frame.Find`, `Frame.Row`, `Frame.Cell(...).Width`, `Frame.StyleRuns`. A
    `Golden` is for a rendering surface whose whole layout is the claim, and always with
    `sess.Redactions()...` — a golden carrying a temp path or today's date churns on every run. The
@@ -1166,7 +1194,9 @@ The T-03/T-04/T-07 set (`e2e_delegation_test.go`, `e2e_schedule_test.go`) measur
 under `-race` across five launches, and two of its costs are worth naming because every later block
 test inherits them. Reading a line near the END of an expanded block means walking pages, and each
 page costs a settle; and the walk only learns it has reached the bottom by pressing once more and
-finding nothing painted, which is a bounded half-second per walk. A `hang` turn costs nothing — the
+finding nothing painted, which spends `repaintBudget` in full once per walk — forty times `settled`,
+ten seconds, a `testtime.Fixed` window because a tighter one ends a walk early on a loaded box and
+reads half a block as the whole. A `hang` turn costs nothing — the
 stub sleeps until the request's context ends, and killing the program ends it.
 
 The T-06/T-10/T-13 set (`e2e_usage_test.go`, `e2e_approval_test.go`) measures **≈ 9.5 s** under
@@ -1189,9 +1219,9 @@ walks the key list DOWNWARDS (`settingsGoDown`): the rows it wants sit near the 
 verdict a CANCELLED delegation's outcome slot carries is written by the replay that closes it, so the
 claim costs a relaunch and a `/sessions` restore.
 
-Two rules keep it there. Every wait is a bounded `WaitFor` (`DefaultTimeout`, 60 s) on a
-condition, never a sleep; and a settle is `settled` — 250 ms — of no bytes, taken only when a
-frame is about to be READ. The second rule has a corollary worth stating, because it is the quiet
+Two rules keep it there. Every wait is a bounded `WaitFor` (`DefaultTimeout`, 60 s at the default
+`APOGEE_TEST_TIME_SCALE`) on a condition, never a sleep; and a settle is `settled` — a
+`testtime.Fixed` 250 ms — of no bytes, taken only when a frame is about to be captured whole. The second rule has a corollary worth stating, because it is the quiet
 way a driver test lies: **`WaitQuiet` is not a wait for a keypress to land**. The screen has been
 quiet since before the key was sent, so the check passes at once, on a frame the program has not
 answered yet. Wait for the paint the key caused (`awaitRepaint`, or a `WaitText` on what the key

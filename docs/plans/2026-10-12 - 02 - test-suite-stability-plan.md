@@ -606,7 +606,11 @@ NOTES (2026-10-12): live run `scripts/ci-flakes.sh --since 2026-10-10` read 8 fa
 **Acceptance:** `bash -n scripts/ci-flakes.sh`; `scripts/ci-flakes.sh --since 2026-10-10 | grep -c 'TestStartPseudoConsoleRunsTheCommand'` ≥ 1
 **Commit:** `build: add a CI failure tally script`
 
-## 30. Test docs follow the new discipline; file the never-filed findings
+## 30. Test docs follow the new discipline; file the never-filed findings — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the plan's id `default-wire-windows-arm64-flake` is five words and capcom refuses ids over four, so the issue was filed as `default-wire-arm64-flake` (title still names windows/arm64).
+NOTES (2026-10-12): docs/manual/building.md needed no change — item 7 already documents `APOGEE_TEST_SLOW` implying `APOGEE_TEST_TIME_SCALE=2` and the scale knob; no `WaitQuiet`/half-second/`time.Sleep` line there.
+NOTES (2026-10-12): the "half-second per walk" line was stale since `495e0c96`: a transcript walk's end now spends `repaintBudget` (40 × `settled`, 10 s) in full; the doc states that figure.
 
 **What:** The prose and the register catch up with items 6–28. Every doc line that describes a test wait rule, `WaitQuiet` as readiness, `APOGEE_TEST_SLOW` semantics or "a bounded half-second per walk" is updated; find them with `grep -rn 'WaitQuiet\|half-second\|APOGEE_TEST_SLOW\|time.Sleep' docs/design docs/manual AGENTS.md README.md --exclude-dir=archived`.
 **Regression guard.** the sweep covers living docs only — `grep -rn 'WaitQuiet\|half-second\|APOGEE_TEST_SLOW\|time.Sleep' docs/design docs/manual AGENTS.md README.md --exclude-dir=archived` — never docs/plans, docs/reviews or docs/handoffs, which are closed records. The stubllm run is `-run 'DesignDoc'` (TestDesignDocExampleScriptParses parses test-drivers.md's `## stubllm` section; no stubllm test matches Manual|Readme).
