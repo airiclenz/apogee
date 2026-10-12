@@ -3,6 +3,7 @@ title: missing mount root misreported as a workspace-fence refusal
 status: open
 type: bug
 priority: 3
+plan: 2026-10-12 - 00 - regression-and-doc-truth-plan
 aliases: [apogee-missing-mount-misreported]
 created: 2026-10-11T18:16:44Z
 ---
