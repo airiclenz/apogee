@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.25.1] — 2026-10-12
+
 - **Fixed:** `go run ./cmd/release publish` resuming a GitHub release that exists without `SHA256SUMS` (a create that failed mid-upload) now checks every archive already uploaded against the rebuild before uploading anything. Each archive's hash is GitHub's asset digest, or, for an asset without one or a draft release the tags endpoint does not serve, a copy downloaded into the run's build directory and hashed there. A mismatch fails the run naming each stale archive and `gh release delete-asset vX.Y.Z <name>`; a full match uploads only the missing assets, `SHA256SUMS` included.
 
 - **The glossary is also a capcom Note tree.** `CONTEXT.md`'s text now lives verbatim in `.capcom/knowledge/glossary/` as the `glossary` Note, ten section Notes and one Note per term (109), so `capcom know show "Floor guard"` reads a single definition; section headings' anchors (`identity-and-shape`, …) and the paired names (`session-record`, `stacked-diff`, `presentation`) resolve as aliases. `CONTEXT.md` is unchanged for now, and AGENTS.md's capcom block lists the new top-level Note.
