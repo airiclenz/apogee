@@ -83,7 +83,7 @@
 **Acceptance:** `GOOS=windows go vet ./internal/platform/`; `GOOS=windows go test -c -o /dev/null ./internal/platform/`
 **Commit:** `fix(platform): drain the ConPTY command test before closing its output`
 
-## 2. Windows CI runs the ConPTY packages one at a time
+## 2. Windows CI runs the ConPTY packages one at a time — ✅ DONE (2026-10-12)
 
 **What:** The `test-windows` job runs one raw `go test -race` over five trees at once. Its two ConPTY-heavy packages, `internal/platform` and `internal/console`, then share 4 vCPU with each other's 50-run cmd.exe/conhost loops.
 **Regression guard.** today one `go test` over all five trees reports every package even when `internal/platform` fails; split in two, a ConPTY failure would skip the second step and drop the probe/auditsplit/cmd/release results from that run. The second step carries `if: ${{ !cancelled() }}` (or the three light trees run first and the ConPTY step carries it), and the job comment says so.

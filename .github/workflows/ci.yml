@@ -171,7 +171,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: go test (race)
+      - name: go test (race, ConPTY packages)
         # These five trees rather than `./...`: the rest of the suite is Linux-shaped (the
         # landlock battery, the PTY drivers), while the Windows half of the product is the
         # confinement backend — `internal/platform` carries `winlabel`'s walk — whose tests
@@ -196,4 +196,16 @@ jobs:
         # -race needs cgo, which the runner's MinGW gcc satisfies. Should it ever fail to
         # link here, drop -race from this one job and say so in this comment — the C-20
         # race test then rests on its own iteration count alone.
-        run: go test -race -count=1 ./internal/platform/... ./internal/probe/... ./internal/console/... ./internal/auditsplit/... ./cmd/release/...
+        #
+        # The five trees run as two steps. `internal/platform` and `internal/console` are the
+        # ConPTY-heavy packages: each runs 50-iteration cmd.exe/conhost loops, and run side by
+        # side they share the runner's 4 vCPU and starve each other's pseudoconsoles. This
+        # step runs them one at a time (`-p 1`), with `-timeout 30m` for the serial wall time.
+        # The three light trees run in the next step, which carries `if: ${{ !cancelled() }}`
+        # so a ConPTY failure here still reports their results in the same run.
+        run: go test -race -count=1 -p 1 -timeout 30m ./internal/platform/... ./internal/console/...
+      - name: go test (race, remaining trees)
+        # `internal/probe`, `internal/auditsplit` and `cmd/release`: see the step above for why
+        # each is here. `!cancelled()` runs this step even when the ConPTY step failed.
+        if: ${{ !cancelled() }}
+        run: go test -race -count=1 ./internal/probe/... ./internal/auditsplit/... ./cmd/release/...
