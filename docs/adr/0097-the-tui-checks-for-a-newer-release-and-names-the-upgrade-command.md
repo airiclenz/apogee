@@ -16,6 +16,11 @@ Linux. Everyone else unpacks a release archive by hand or builds from source. Th
   feature). Nothing in the binary says when a newer one is out, so users stay on old builds and
   report defects that are already fixed.
 
+> **Amended 2026-10-12.** "Today" in this section is 2026-10-10, the day the owner ratified the
+> shape. Since then the Scoop bucket (`airiclenz/scoop-bucket`) is a live channel, and the winget
+> package's first submission still awaits review in `microsoft/winget-pkgs`, so winget is not yet
+> live (`docs/manual/updating.md`).
+
 Closing the second gap means the binary must ask somewhere. That cuts against two things apogee
 has said about itself. The README promises "no API key, no cloud, works offline". And
 [ADR 0031](0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)
@@ -33,6 +38,13 @@ The owner ratified the shape on 2026-10-10 (plan
    **Driver** checks: `apogee headless`, `apogee daemon`, the bench and `apogee probe` never make
    the request. A run whose output must be reproducible never depends on the network state of the
    day.
+
+   > **Amended 2026-10-12.** Not every boot: only a release build checks. A binary whose base
+   > version is `dev` (built with an empty `VERSION`) or whose full version ends `.dirty` (built
+   > from a modified working tree) gets no update host and never sends the request
+   > (`updateCheckEnabled` in `cmd/apogee/wire_update.go`: `devBaseVersion`,
+   > `dirtyVersionSuffix`). A developer's own build is never told to upgrade to a published
+   > release.
 
 2. **The check is one request to github.com.** It sends `HEAD
    https://github.com/airiclenz/apogee/releases/latest` and reads the latest tag from the redirect's
@@ -76,6 +88,12 @@ The owner ratified the shape on 2026-10-10 (plan
    > every channel, Homebrew tap included. `make release-scoop` and `make release-winget` are
    > retired in its favour. The one-time setup is still manual.
 
+   > **Amended 2026-10-12.** There are six channels, not five. A binary built by `go install …@latest`
+   > is its own channel (`update.GoInstall` in `internal/update/detect.go`), and its upgrade command
+   > is `go install github.com/airiclenz/apogee/cmd/apogee@latest`, not `git pull && make install`.
+   > The source-build row stands for a binary built from a checkout. `docs/manual/updating.md`
+   > carries the six-row table.
+
 7. **The install channel is detected from a build stamp and the executable's location.** `make
    dist` stamps the release binaries it builds. A binary without that stamp is a source build — a
    local `make build`, `make install` or `go install` — and is told `git pull && make install`. A
@@ -84,11 +102,25 @@ The owner ratified the shape on 2026-10-10 (plan
    winget's package directory (user or machine scope) it is winget. A stamped binary anywhere else
    came from a release archive.
 
+   > **Amended 2026-10-12.** The code checks the location first and the stamps second, and reads
+   > two stamps, not one (`update.Detect` in `internal/update/detect.go`). Any binary whose resolved
+   > executable lies under a Homebrew Cellar (`/Cellar/apogee/`), a Scoop `apps/apogee` directory or
+   > winget's package directory belongs to that channel, stamped or not. Only a binary outside
+   > every package-manager tree falls through to the stamps: one whose build info carries no
+   > `vcs.revision` is a `go install` build, one with a revision but without the `make dist` stamp
+   > is a source build, and a stamped release binary is a release archive. An unstamped binary is
+   > therefore not always a source build.
+
 8. **`apogee update` replaces only a release-archive install.**
    - On a Homebrew, Scoop or winget install it refuses: it prints that channel's upgrade command
      and exits non-zero. It never runs a package manager on the user's behalf, because the package
      manager owns that binary and its records.
    - On a source build it refuses the same way and prints `git pull && make install`.
+
+     > **Amended 2026-10-12.** A `go install` build is refused the same way with its own command:
+     > `apogee was installed via go install — run: go install
+     > github.com/airiclenz/apogee/cmd/apogee@latest` (`managedInstallError` in
+     > `cmd/apogee/update.go`).
    - On a release-archive install it asks `[y/N]` before doing anything; `--yes` skips the
      prompt. It downloads the archive for the running platform, verifies it against the release's
      `SHA256SUMS`, and runs the new binary's `--version` before the swap. The old binary is kept
@@ -114,9 +146,22 @@ release page. Invariant 4 is untouched, because nothing model-visible depends on
   silently and nothing waits on it.
 - Every interactive boot makes one HTTPS request to github.com unless disabled. Without a cache
   this is one request per boot, which is cheap and keeps no state on disk.
+
+  > **Amended 2026-10-12.** Only a release build makes it: a `dev` build and a `.dirty` build never
+  > send the request (see the amendment to point 1).
 - Windows users get two package channels, and the release runbook gains two publish steps.
+
+  > **Amended 2026-10-12 ([ADR 0098](0098-the-repo-owns-its-release-pipeline.md)).** The two
+  > publish steps no longer exist as steps of their own: `cmd/release publish` publishes every
+  > channel, the Homebrew tap, the Scoop bucket and winget included, and `make release-scoop` and
+  > `make release-winget` are retired. Of the two Windows channels, only Scoop is live yet; winget
+  > awaits its first acceptance in `microsoft/winget-pkgs`.
 - A `go install` build reads as a source build and is pointed at `git pull && make install`, which
   is the nearest correct advice for a binary that carries no release stamp.
+
+  > **Amended 2026-10-12.** It does not: a `go install` build carries no VCS revision, reads as its
+  > own `GoInstall` channel, and is pointed at `go install
+  > github.com/airiclenz/apogee/cmd/apogee@latest` (see the amendments to points 6 to 8).
 - `apogee update` verifies the download against `SHA256SUMS` from the same release. That catches a
   corrupt or truncated download, not a compromised release: the binaries are still unsigned (bead
   `apogee-3p1`), and code signing stays out of scope here.

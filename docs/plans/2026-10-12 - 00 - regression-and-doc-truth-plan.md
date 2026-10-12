@@ -233,7 +233,9 @@ README.md — Why apogee floor bullet (readmeFloorGuardCount)
 
 **Commit:** `docs: define the bare loop as the Bypass floor`
 
-## 5. ADRs 0089, 0094 and 0097 carry their corrections
+## 5. ADRs 0089, 0094 and 0097 carry their corrections — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the 0089 amendment sits under the D1 2026-10-05 amendment block so one block corrects both; ADR 0097 got eight dated blocks under the rule (Context "today", point 1 dev/.dirty, point 6 six channels, point 7 detection order, point 8 go install refusal, Consequences "every interactive boot" request line (release builds only, per point 1), Consequences publish steps, Consequences go install line) — points 2, 3 and 9 checked against `internal/update/latest.go`, `internal/config` and the importers of `internal/update` and left as they are.
 
 **What:** ADR 0089 D1 (and its 2026-10-05 amendment) gates the background switch on bench approval.
 ADR 0094 D1's body says the same, against its own 2026-10-07 Note. ADR 0097 never records that `dev`

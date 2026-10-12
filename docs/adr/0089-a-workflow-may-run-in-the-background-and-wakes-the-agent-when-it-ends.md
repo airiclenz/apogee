@@ -40,6 +40,18 @@ workflow there blocks.
 > tool policy lifts `workflow`). Headless and daemon runs never show it, and a background `sub_agent`
 > the engine cannot keep runs blocking.
 
+> **Amended 2026-10-12.** The gate in D1 and in the 2026-10-05 amendment above is not a bench
+> approval. It has two halves, and the switch shows only where both hold
+> (`builtinToolsWith` in `internal/tools/registry.go`: `host.OffersBackground &&
+> host.rosterDeltas().lifts(WorkflowToolName)`). The first is the Driver's opt-in,
+> `HostTools.OffersBackground`: the TUI builds its tool set with it on, an embedder sets
+> `domain.Config.OffersBackground`, and headless and daemon runs leave it false. Without it neither
+> `background` switch is published and the `workflow` tool is not offered, whatever the roster
+> says. The second is the roster lifting `workflow`, the default-off tool, through a configuration
+> rung (a profile axis or `EnabledTools`). That rung is the model-class half: a bench verdict for a
+> class reaches the switch only by lifting `workflow` there, and no code reads a bench approval.
+> ADR 0094's 2026-10-07 Note records the same correction for its D1.
+
 **D2 — Capacity.** A background workflow runs at the server's Parallel-agents width minus one, so
 one slot stays free for the conversation. On a width-1 server it has to share that one slot: the
 workflow's children and the conversation's requests take turns. A second background workflow on the

@@ -36,6 +36,15 @@ ADR 0089 D1 shows `fan_out`'s background switch: the model class is bench-approv
 else `sub_agent`'s schema is byte-identical to today's. The bench judges this switch per model class,
 apart from `fan_out` and its own switch.
 
+> **Amended 2026-10-12.** D1's body is wrong on the gate in the way the 2026-10-07 Note at the head
+> of this ADR says: `OffersBackground` is not a bench approval of the model class. The gate is the
+> Driver's opt-in (`HostTools.OffersBackground` — the TUI sets it, an embedder sets
+> `domain.Config.OffersBackground`, headless and daemon runs leave it false) plus the roster lifting
+> `workflow` through a configuration rung (a profile axis or `EnabledTools`). The switch shows only
+> where both hold (`builtinToolsWith` in `internal/tools/registry.go`). The bench's per-class
+> verdict reaches the switch only by lifting `workflow` for that class; no code reads a bench
+> approval. ADR 0089 D1 carries the same amendment.
+
 **D2 — The child runs the blocking `sub_agent` path.** It is a `sub_agent` child, not a workflow
 item child. It writes a prose report and never calls `finish`. It keeps `max_steps` and the step-cap
 clamp, the `read-only` tool roster, `output_path`, and `sub_agent`'s own depth rule
