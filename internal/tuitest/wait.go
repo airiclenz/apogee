@@ -139,7 +139,7 @@ func (w waiter) failure(name string) string {
 			"timed out after %s waiting for %s (no screen was named — pass tuitest.On(screen) to see the frame)",
 			w.timeout, w.what)
 	}
-	frame := w.screen.Snapshot()
+	frame := w.screen.snapshotStyled()
 	plain, styled := frame.String(), frame.Styled()
 	msg := fmt.Sprintf("timed out after %s waiting for %s", w.timeout, w.what)
 	if note := writeArtifacts(name, plain, styled); note != "" {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Style is what a terminal cell looks like, reduced to the four things apogee's own rendering
@@ -102,7 +103,7 @@ type Frame struct {
 	cursorY int
 	width   int
 	height  int
-	styled  string
+	styled  *styledRender
 }
 
 // String is the frame as plain text: every row, trailing spaces trimmed, joined by newlines. It is
@@ -112,7 +113,59 @@ func (f Frame) String() string { return strings.Join(f.rows, "\n") }
 // Styled is the frame with its SGR sequences intact — the same picture String gives, but with the
 // colours still in it. It is for eyes and for judges, never for a golden: escape sequences make a
 // diff unreadable and a renderer is free to re-spell them.
-func (f Frame) Styled() string { return f.styled }
+//
+// It is built on demand, from the emulator, the first time it is asked for, and kept. A frame
+// whose screen has painted since it was taken can no longer be rendered from the emulator — that
+// instant is gone — so it is spelled from the frame's own cells instead: the same picture, with
+// the colours and attributes a [Cell] keeps.
+func (f Frame) Styled() string {
+	if f.styled != nil {
+		if text, ok := f.styled.screen.styledFor(f.styled); ok {
+			return text
+		}
+	}
+	return f.renderCells()
+}
+
+// renderCells spells the frame's cells back out with their SGR sequences, one row per line, each
+// row reset at its end. It carries only what a [Style] keeps, so it is the fallback for a frame
+// the emulator has moved past, never the first answer.
+func (f Frame) renderCells() string {
+	var b strings.Builder
+	for y := range f.cells {
+		if y > 0 {
+			b.WriteByte('\n')
+		}
+		for _, run := range f.StyleRuns(y) {
+			b.WriteString(sgr(run.Style))
+			b.WriteString(run.Text)
+		}
+		b.WriteString(ansi.ResetStyle)
+	}
+	return b.String()
+}
+
+// sgr is the select-graphic-rendition sequence that paints a cell in st, starting from a reset so
+// nothing of the previous run leaks into it.
+func sgr(st Style) string {
+	seq := ansi.Style{}.Reset()
+	if st.FG != nil {
+		seq = seq.ForegroundColor(st.FG)
+	}
+	if st.BG != nil {
+		seq = seq.BackgroundColor(st.BG)
+	}
+	if st.Bold {
+		seq = seq.Bold()
+	}
+	if st.Faint {
+		seq = seq.Faint()
+	}
+	if st.Reverse {
+		seq = seq.Reverse(true)
+	}
+	return seq.String()
+}
 
 // Rows returns the frame's rows as plain text, one entry per terminal row.
 func (f Frame) Rows() []string { return append([]string(nil), f.rows...) }
@@ -228,7 +281,7 @@ func (f Frame) StyleRuns(y int) []Run {
 
 // newFrame reads a snapshot out of an emulator. The caller holds the screen's lock: everything
 // here reads emulator state and the result must be consistent with itself.
-func newFrame(w, h int, cellAt func(x, y int) *uv.Cell, cursorX, cursorY int, styled string) Frame {
+func newFrame(w, h int, cellAt func(x, y int) *uv.Cell, cursorX, cursorY int, styled *styledRender) Frame {
 	f := Frame{
 		cells:   make([][]Cell, h),
 		rows:    make([]string, h),

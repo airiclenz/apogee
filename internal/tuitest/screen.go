@@ -32,6 +32,18 @@ type Screen struct {
 	lastByte time.Time
 	closed   bool
 
+	// gen counts the changes to what the screen shows: every Write and every Resize bumps it. The
+	// frame cache is keyed on it, never on written, because a Resize changes the frame without
+	// painting a byte.
+	gen uint64
+	// cached is the frame built at cached.styled.gen, handed back as is while gen has not moved —
+	// so a WaitFor polling an idle screen every 20 ms rebuilds nothing.
+	cached *Frame
+	// frameBuilds and styledBuilds count the frames and styled renders actually built: a test's
+	// window onto whether an idle poll did any work.
+	frameBuilds  int
+	styledBuilds int
+
 	answers *answerQueue
 	pumped  chan struct{}
 }
@@ -127,6 +139,7 @@ func (s *Screen) Write(p []byte) (int, error) {
 		return 0, errScreenClosed
 	}
 	s.written += int64(len(p))
+	s.gen++
 	s.lastByte = time.Now()
 	for _, mark := range fullRepaintMarks {
 		if bytes.Contains(p, mark) {
@@ -137,22 +150,79 @@ func (s *Screen) Write(p []byte) (int, error) {
 	return s.term.Write(p) //nolint:wrapcheck
 }
 
-// Snapshot freezes what the terminal currently shows into a [Frame].
+// Snapshot freezes what the terminal currently shows into a [Frame]. While nothing has been
+// written and nothing resized since the last one it hands that frame back rather than building it
+// again, and it never builds the styled render: [Frame.Styled] does that, on demand.
 func (s *Screen) Snapshot() Frame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pos := s.term.CursorPosition()
-	return newFrame(s.term.Width(), s.term.Height(), s.term.CellAt, pos.X, pos.Y, s.term.Render())
+	return s.frameLocked()
 }
 
 // holding runs fn over the current frame with the emulator held: no output is parsed, and so no
 // query is answered, until fn returns. A driver writes a key from inside it to place that key in the
-// program's input AHEAD of the answer to anything the program has not yet been seen to paint.
+// program's input AHEAD of the answer to anything the program has not yet been seen to paint. fn
+// must not call [Frame.Styled]: that takes the lock held here.
 func (s *Screen) holding(fn func(Frame)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fn(s.frameLocked())
+}
+
+// snapshotStyled is [Screen.Snapshot] with the frame's styled render built under the same lock,
+// so the two halves of a failure dump are one instant even when the program is still painting.
+func (s *Screen) snapshotStyled() Frame {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.frameLocked()
+	s.styledLocked(f.styled)
+	return f
+}
+
+// frameLocked returns the frame at the current generation, building it only when a Write or a
+// Resize has moved the screen since the cached one. The caller holds s.mu.
+func (s *Screen) frameLocked() Frame {
+	if s.cached != nil && s.cached.styled.gen == s.gen {
+		return *s.cached
+	}
 	pos := s.term.CursorPosition()
-	fn(newFrame(s.term.Width(), s.term.Height(), s.term.CellAt, pos.X, pos.Y, s.term.Render()))
+	f := newFrame(s.term.Width(), s.term.Height(), s.term.CellAt, pos.X, pos.Y,
+		&styledRender{screen: s, gen: s.gen})
+	s.cached = &f
+	s.frameBuilds++
+	return f
+}
+
+// styledRender is the styled half of one cached frame, built the first time something asks for
+// it and memoised from then on. Its fields belong to the screen's lock.
+type styledRender struct {
+	screen *Screen
+	gen    uint64 // the generation the frame was built at
+	built  bool
+	text   string
+}
+
+// styledFor is the styled render for the frame r belongs to, and ok=false when the screen has
+// moved past that frame's generation before anyone asked — the emulator no longer holds that
+// instant, so rendering it now would describe a different picture.
+func (s *Screen) styledFor(r *styledRender) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.styledLocked(r)
+}
+
+// styledLocked is [Screen.styledFor] for a caller already holding s.mu.
+func (s *Screen) styledLocked(r *styledRender) (string, bool) {
+	if r.built {
+		return r.text, true
+	}
+	if r.gen != s.gen {
+		return "", false
+	}
+	r.text = s.term.Render()
+	r.built = true
+	s.styledBuilds++
+	return r.text, true
 }
 
 // Render is the current screen with its SGR sequences intact — what a failing wait prints beneath
@@ -172,6 +242,7 @@ func (s *Screen) Render() string {
 func (s *Screen) Resize(w, h int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.gen++
 	s.term.Resize(w, h)
 }
 

@@ -263,3 +263,124 @@ func TestReplayTraceFatalsOnATrailingPartialLine(t *testing.T) {
 		t.Errorf("the failure message is %q; want it to say %q", msg, "not a quoted trace write")
 	}
 }
+
+// A WaitFor polls its screen every 20 ms, and most of those polls look at a screen nothing has
+// painted into since the last one. These tests pin the cache that makes such a poll free: a frame
+// is rebuilt only when a Write or a Resize has moved the screen, and the styled render is built
+// only when something — a failing wait, in practice — asks for it.
+
+// writeScreen paints text into s, failing the test on a write error.
+func writeScreen(t *testing.T, s *Screen, text string) {
+	t.Helper()
+
+	if _, err := s.Write([]byte(text)); err != nil {
+		t.Fatalf("Write(%q): %v", text, err)
+	}
+}
+
+// builds reads the screen's two build counters under its lock.
+func builds(s *Screen) (frames, styled int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.frameBuilds, s.styledBuilds
+}
+
+// TestSnapshotIsCachedWhileTheScreenIsIdle: repeated snapshots of a screen nothing has written to
+// return the one frame already built, and none of them builds a styled render.
+func TestSnapshotIsCachedWhileTheScreenIsIdle(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	writeScreen(t, s, "idle")
+
+	first := s.Snapshot()
+	for range 5 {
+		if got := s.Snapshot().String(); got != first.String() {
+			t.Fatalf("an idle snapshot = %q, want the cached %q", got, first.String())
+		}
+	}
+	if frames, styled := builds(s); frames != 1 || styled != 0 {
+		t.Errorf("six idle snapshots built %d frames and %d styled renders, want 1 and 0", frames, styled)
+	}
+}
+
+// TestSnapshotFollowsAWrite: a write moves the screen, so the next snapshot is a new frame.
+func TestSnapshotFollowsAWrite(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	writeScreen(t, s, "before")
+	if got := s.Snapshot().Row(0); got != "before" {
+		t.Fatalf("row 0 = %q, want %q", got, "before")
+	}
+	writeScreen(t, s, "\x1b[H\x1b[2Kafter")
+	if got := s.Snapshot().Row(0); got != "after" {
+		t.Errorf("row 0 after a write = %q, want %q", got, "after")
+	}
+	if frames, _ := builds(s); frames != 2 {
+		t.Errorf("two snapshots either side of a write built %d frames, want 2", frames)
+	}
+}
+
+// TestSnapshotFollowsAResize: a resize writes no byte but changes the frame, so it must move the
+// cache on as well — keying the cache on bytes written would hand back the old size.
+func TestSnapshotFollowsAResize(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	writeScreen(t, s, "sized")
+	if f := s.Snapshot(); f.Width() != 12 || f.Height() != 2 {
+		t.Fatalf("snapshot is %dx%d, want 12x2", f.Width(), f.Height())
+	}
+	s.Resize(20, 4)
+	if f := s.Snapshot(); f.Width() != 20 || f.Height() != 4 {
+		t.Errorf("snapshot after Resize(20, 4) is %dx%d, want 20x4", f.Width(), f.Height())
+	}
+}
+
+// TestStyledIsBuiltOnceOnDemand: the styled render is built the first time a frame is asked for
+// it, and kept — a second ask, or a later idle snapshot's ask, builds nothing more.
+func TestStyledIsBuiltOnceOnDemand(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	writeScreen(t, s, "\x1b[31mred\x1b[0m")
+
+	f := s.Snapshot()
+	if !strings.Contains(f.Styled(), "\x1b[31mred") {
+		t.Fatalf("Styled() = %q, want the red run", f.Styled())
+	}
+	_ = s.Snapshot().Styled()
+	if frames, styled := builds(s); frames != 1 || styled != 1 {
+		t.Errorf("one frame asked three times for its styles built %d frames and %d styled renders, want 1 and 1",
+			frames, styled)
+	}
+}
+
+// TestStyledOfAFrameTheScreenHasMovedPast: a frame held across a write keeps its own picture. The
+// emulator no longer holds that instant, so the styled render is spelled from the frame's cells —
+// the old text with its colour, never the new text.
+func TestStyledOfAFrameTheScreenHasMovedPast(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	writeScreen(t, s, "\x1b[31mred\x1b[0m")
+	f := s.Snapshot()
+	writeScreen(t, s, "\x1b[H\x1b[2Kblue")
+
+	styled := f.Styled()
+	if strings.Contains(styled, "blue") || !strings.Contains(styled, "red") {
+		t.Errorf("the held frame's Styled() = %q, want the red frame it was taken from", styled)
+	}
+	if !strings.Contains(styled, "31") {
+		t.Errorf("the held frame's Styled() = %q, want the red foreground kept", styled)
+	}
+	if _, built := builds(s); built != 0 {
+		t.Errorf("a stale frame's styles built %d renders from the emulator, want 0", built)
+	}
+}

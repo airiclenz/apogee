@@ -159,3 +159,27 @@ func TestWaitTextAndWaitGone(t *testing.T) {
 	WaitGone(t, s, "approve?")
 	WaitQuiet(t, s, 50*time.Millisecond)
 }
+
+// TestFailingWaitPrintsTheStyledFrameOfAnIdleScreen: the polls of a wait that times out build the
+// frame once and no styled render; the failure is what builds it, exactly once, and prints it.
+func TestFailingWaitPrintsTheStyledFrameOfAnIdleScreen(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	if _, err := s.Write([]byte("\x1b[31mred\x1b[0m")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	rec := &timeoutRecorder{TB: t}
+	WaitFor(rec, func() bool {
+		_, _, ok := s.Snapshot().Find("never")
+		return ok
+	}, On(s), Within(testtime.Fixed(100*time.Millisecond)), Awaiting("text that never paints"))
+	if len(rec.reports) != 1 || !strings.Contains(rec.reports[0], "\x1b[31mred") {
+		t.Fatalf("the failing wait reported %q, want one report carrying the styled frame", rec.reports)
+	}
+	if frames, styled := builds(s); frames != 1 || styled != 1 {
+		t.Errorf("a failed wait on an idle screen built %d frames and %d styled renders, want 1 and 1",
+			frames, styled)
+	}
+}
