@@ -5,7 +5,7 @@ by a second poll round; relocated 2026-08-19 out of the issue register, where it
 *Tool-surface findings (4-poll round, 2026-08-10)* entry. This document is the authoritative
 record — both poll rounds, the bench arms, the grill topics, the deferred candidates, the
 engine-level notes, the denials and the method lessons. The text below is that entry's body
-unchanged apart from relative ADR links repointed for this directory; the issue register (`bd`,
+unchanged apart from relative ADR links repointed for this directory; the issue register (capcom,
 `apogee-304`) keeps a pointer entry listing the live gates only, with the seven bench arms as
 `apogee-304.1` … `apogee-304.7` in the order (a)…(g).
 

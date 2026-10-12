@@ -4,7 +4,7 @@
 [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (day-one user
 cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off).
 Implementation plans: the three staged plans §9.4 links. · **Companion:**
-[hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Open bead:**
+[hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Open issue:**
 `apogee-575`.
 
 > **How to read this.** The owner asked: *imagine a green field — how would a system be designed
@@ -111,14 +111,14 @@ roll already models exactly this mapping.
 
 > **Amended 2026-09-08 (stage-2 grill; ADR 0076 amendment A1, A2, A7).** `reactions:` is the
 > **user-origin surface only**, and stage 2 ships the **global file only** — the repo layer, the
-> three-layer resolver and the adoption pin below become stage 2b, grilled on bead `apogee-089`.
+> three-layer resolver and the adoption pin below become stage 2b, grilled on issue `apogee-089`.
 > The seven Floor booleans stay canonical and do not migrate (ADR 0076 D11: a Floor guard is by
 > definition one top-level file-only boolean); a builtin id inside `reactions:` is a load-time
 > validation error naming the boolean instead, never a second spelling. Engine origin is code — the
 > bench arms a Go reaction in-process through the facade (ADR 0076 D1), not through this key. The
 > entry schema is `id:` / `on:` / `run:` (polymorphic — a sequence is argv, a mapping is a webhook)
 > / `workspace:` / `timeout:` / `enabled:`; stage 3 shipped `advise:`/`gate:` (argv at first; since
-> 2026-09-19 — bead `apogee-1d8`, ADR 0076 D8's dated amendment — both keys take the same two
+> 2026-09-19 — issue `apogee-1d8`, ADR 0076 D8's dated amendment — both keys take the same two
 > shapes `run:` does, an argv list or a webhook mapping, through one loader path), `advise:` on
 > `post-tool-result` or `file-changed` and `gate:` on `pre-tool-exec`, both resolving beside `run:`
 > into one Reaction per key of one id.
@@ -252,7 +252,7 @@ half the collapse.
    behaviour-identical; a bench identity arm proves it.
 2. **Config** — `reactions:` with the migration table, three layers, adoption pin.
 3. **User cells** — `advise`, `gate`, `shape (view)` for user origin, each behind the grill that
-   bead `apogee-575` asks for. Under this design that grill shrinks to: which cells on day one, one
+   issue `apogee-575` asks for. Under this design that grill shrinks to: which cells on day one, one
    fence, one bench arm.
 
 Rejected alternative: a config-only merge over the three existing runtimes (the position in the
@@ -289,7 +289,7 @@ pre-collapse survey — see the historical note at the top; most of those files 
 | `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only |
 | `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table — **delivered 2026-09-08 (stage 2)** |
 | `hooks:` list, `mechanisms:` map | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver (amended 2026-09-08: the 7 floor `*bool` keys and the `floorFromOptions` negation seam STAY — ADR 0076 D11; the layers are stage 2b) — **delivered 2026-09-08 (stage 2)** |
-| `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, open bead `apogee-tbs`; no per-entry toggle table until stage 2b) |
+| `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, open issue `apogee-tbs`; no per-entry toggle table until stage 2b) |
 
 Stays byte-for-byte: the policy functions in `internal/floor` (`SalvageToolCall`, `ToolLoopBreak`,
 `ToolCallRepair`, `RecoverEmpty`, `EnforceToolUse`, `CacheRead`, `CapToolResults`) and the working
@@ -358,7 +358,7 @@ config loader consults at resolve time, not a runtime check.
 - **Plan B (stage 2, gated on A):** `reactions:` config, three layers, adoption pin, `/settings`
   table, the user cells the grill ratified. Written and executed as
   [`docs/plans/archived/2026-09-08 - 00`](../plans/archived/2026-09-08%20-%2000%20-%20reaction-core-stage-2-plan.md)
-  (global file only; the repo layer and adoption pin are bead `apogee-089`).
+  (global file only; the repo layer and adoption pin are issue `apogee-089`).
 - **Plan C (stage 3, gated on B):** the user `advise` and `gate` cells —
   [`docs/plans/archived/2026-09-09 - 01 - reaction-core-stage-3-plan.md`](../plans/archived/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md):
   the advise slot, its fence, cap, redaction and ledger (§2.5) with the resume strip; the gate stage

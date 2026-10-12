@@ -147,7 +147,9 @@ NOTES (2026-10-12): CONTEXT.md keeps `apogee-fsx` as the plan says; it resolves 
 - `capcom agents --check && capcom check`
 **Commit:** `docs: describe capcom as the issue register`
 
-## 5. Manual and design docs name capcom
+## 5. Manual and design docs name capcom — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): register named as `(capcom, \`apogee-…\`)`, matching item 4's CONTEXT.md wording; "bead"/"Open bead" became "issue"/"Open issue". All eight ids cited (apogee-304, -n6z, -m3p, -575, -089, -1d8, -tbs, -8wy) resolve via `capcom show` as aliases.
 
 **What:**
 **Goal:** `docs/manual/` and the live `docs/design/` docs name capcom wherever they name apogee's register; ids are kept.

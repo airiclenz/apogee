@@ -2679,7 +2679,7 @@ workspace-scoped writes. A low-integrity process cannot write to an unmarked dir
 at all, so a confined `go build`, `pip install` or `npm ci` fails when it reaches its
 cache or `%TEMP%` outside the workspace. The scratch-directory redirect above sets the same
 variables on Windows, but whether the toolchains honour them under the low-integrity token
-is unverified — the Windows caches are a recorded follow-on in the issue register (`bd`,
+is unverified — the Windows caches are a recorded follow-on in the issue register (capcom,
 `apogee-m3p`).
 
 If the machine is disposable and you would rather have Auto unfenced there, `/confine`
