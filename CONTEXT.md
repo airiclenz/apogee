@@ -11,7 +11,12 @@ front of a model may make that model perform worse than the same agent without i
 engine's own advise builtin — the context-fill notice — with them; the seven Floor guards,
 **observe** and **gate** on) —
 **not** a naked model, because Budget, Compaction and Pruning are structural and load-bearing (a
-truly naked model just overflows its context window). The constraint is **proved at bench
+truly naked model just overflows its context window). **The bare loop** — the plain-language name
+`README.md`, `AGENTS.md` and the ADRs give the constraint's baseline — is this Bypass floor
+([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)): the Floor guards and the
+structural reducers are part of it, not held to it, and a Floor guard is admitted to it only if it
+cannot regress it ([ADR 0071](docs/adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md)
+Decision 1, clause (c)). The constraint is **proved at bench
 time** as a ground-truth, distributional non-inferiority gate against Bypass (see
 [ADR 0009](docs/adr/0009-the-ab-decision-rule.md)); in production nothing approximates it any
 more — the self-regulating lab layer that once did (Adaptive Suppression + the Turn Budget)

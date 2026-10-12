@@ -13,6 +13,12 @@ worse than the bare loop ([ADR 0076](0076-one-reaction-core-with-an-origin-by-cl
 The bench measures the *quality* side of that invariant; the *cost* side — how many tokens apogee
 itself spends before the user has said a word — has never been a number anyone could read.
 
+> **Amended 2026-10-12 (plan `2026-10-12 - 00` item 4).** The citation above is wrong: ADR 0076
+> never says "the bare loop". The invariant's baseline is defined by
+> [ADR 0006](0006-bypass-mode-is-the-mechanisms-off-floor.md) — the bare loop is **Bypass mode**,
+> with the Floor guards and the structural reducers on, not a naked model (`CONTEXT.md`, opening
+> paragraph).
+
 What apogee injects at Turn 1 is spread across several producers: the rendered
 [System prompt](../../CONTEXT.md#context-and-history) template, the Orientation block, the delegate
 report block on delegations, the Task list block once the model has written one, the workspace

@@ -72,6 +72,12 @@ This record ratifies the owner's calls of 2026-09-20 (plan `2026-09-20 - 04`).
    `delegate-timeout:`. This default **supersedes** the `[0.18.0]` record: a local server whose
    prefill exceeds ten minutes sets `stream-idle-timeout: 0` or a longer window.
 
+   > **Amended 2026-10-12 (plan `2026-10-12 - 00` item 4).** "The bare loop" is **Bypass mode**
+   > ([ADR 0006](0006-bypass-mode-is-the-mechanisms-off-floor.md)), and the idle cut is structural
+   > configuration that stays on under Bypass, so it is part of that baseline. Read "worse than the
+   > bare loop" here and in the *shorter default* alternative below as "worse than the loop without
+   > the cut": the same admission test ADR 0071 Decision 1, clause (c) puts to a Floor guard.
+
 2. **A Turn re-streams a transient fault up to a per-Turn budget, holding off longer each time.**
    `re-stream-budget:` (a file-only key, an int; `0` = never re-stream), default **3**, replaces the
    one-re-stream latch: a Turn whose request faults transiently — an in-band 429/5xx or

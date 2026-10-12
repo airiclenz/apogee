@@ -80,7 +80,8 @@ func CacheRead(view domain.LoopView, edit *domain.ToolCallEdit) (ok bool) {
 // guard capped to a header: prepareCall caps a local copy of the call, so history still holds the
 // bare arguments, and only an earlier full read can vouch for it. That earliest read being pruned to
 // a stub means the file is no longer in the conversation, and the re-read must go through whole —
-// the guard never leaves the model worse off than the bare loop would.
+// the guard never leaves the model worse off than the loop without it would (ADR 0071 Decision 1,
+// clause (c)).
 func priorSuccessfulReadUnchanged(conv domain.ConversationView, tools []domain.ToolDef, np, currentCallID string) bool {
 	copyCallID := ""
 	for i := 0; i < conv.Len(); i++ {

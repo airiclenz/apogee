@@ -190,7 +190,11 @@ internal/agent/dispatch.go — fsConfinementAvailable; internal/probe/confinemen
 
 **Commit:** `docs(confinement): state the Auto gate the code enforces`
 
-## 4. One wording for the invariant
+## 4. One wording for the invariant — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): README.md left unchanged: it keeps "bare loop" and never says the Floor guards are "held to" the invariant ("the rule behind them" reads as the admission rule), so the approach's "only if" condition did not apply.
+NOTES (2026-10-12): bare-loop hits read and left as they are, because they already match the Bypass definition: ADR 0077:37 (the notice is off under Bypass, so a bench arm beating the bare loop is a test against Bypass), docs/design/workflow-bench-experiment.md:21 (the invariant stated plainly), the plain-English winlabel doc.go and hook-talkback-findings.md, and reaction-core-greenfield.md:235 (tier 6).
+NOTES (2026-10-12): ADR 0082's two hits (lines 69 and 151) are settled by one dated Amended block under the Decision 1 paragraph that covers both, rather than two blocks; the decision text is untouched.
 
 **What:** `AGENTS.md` and `README.md` say "worse than the bare loop", and `AGENTS.md` says the Floor
 guards "are held to it". `CONTEXT.md` and ADR 0006 define the floor as Bypass mode (guards on, not a

@@ -358,7 +358,8 @@ nothing and is reported to you, each time it fails; a `file-changed` entry on a 
 no file neither runs nor reports. Under `bypass:` the
 entry is switched off entirely, like every other Reaction that shapes what the model sees — the
 engine's own [context-fill notice](configuration.md#context-fill-notice) included, even with its
-key on — so a Bypass run reads exactly what the bare loop would. (A sub-agent's step-budget
+key on — so a Bypass run is the bare loop: the Floor guards and the structural reducers, with
+nothing a Reaction shaped. (A sub-agent's step-budget
 notice is not a Reaction but part of its cap, so it stays.)
 
 Write a script that **returns facts, not imperatives**: the files `gofmt` would rewrite, the
