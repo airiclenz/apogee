@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // exampleFixture is the checked-in worked example of the script format. Serving it here pins
@@ -186,16 +187,15 @@ func run(ctx context.Context, out io.Writer, args ...string) <-chan error {
 func waitForAddress(t *testing.T, out *syncBuffer) string {
 	t.Helper()
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	budget := testtime.Budget(5 * time.Second)
+	for expired := testtime.Expiry(budget); !expired(); time.Sleep(testtime.Fixed(10 * time.Millisecond)) {
 		if _, after, found := strings.Cut(out.String(), "listening "); found {
 			if url, _, complete := strings.Cut(after, "\n"); complete {
 				return url
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("no listening line within five seconds; output = %q", out.String())
+	t.Fatalf("no listening line within %v; output = %q", budget, out.String())
 	return ""
 }
 

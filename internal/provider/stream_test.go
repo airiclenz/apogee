@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // sseServer returns a server that writes body verbatim as an event-stream, flushing so a
@@ -1092,6 +1094,7 @@ func TestStream_ThinkingCountsTowardTheCap(t *testing.T) {
 // second deadline, the idle cut itself, is TestStream_IdleTimeoutCutsASilentBody's.
 func TestStream_CtxCancelEndsTheBody(t *testing.T) {
 	t.Parallel()
+	wait := testtime.Budget(2 * time.Second)
 
 	release := make(chan struct{})
 	observed := make(chan struct{})
@@ -1129,13 +1132,13 @@ func TestStream_CtxCancelEndsTheBody(t *testing.T) {
 			t.Fatalf("first delta = %+v, want DeltaContent", delta)
 		}
 		got = append(got, delta)
-	case <-time.After(2 * time.Second):
-		t.Fatal("no content delta within 2s of the handler's flush")
+	case <-time.After(wait):
+		t.Fatalf("no content delta within %v of the handler's flush", wait)
 	}
 
 	cancel()
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(wait)
 	for drained := false; !drained; {
 		select {
 		case delta, open := <-streamed:
@@ -1145,7 +1148,7 @@ func TestStream_CtxCancelEndsTheBody(t *testing.T) {
 			}
 			got = append(got, delta)
 		case <-deadline:
-			t.Fatal("the stream did not end within 2s of the ctx cancel")
+			t.Fatalf("the stream did not end within %v of the ctx cancel", wait)
 		}
 	}
 
@@ -1156,7 +1159,7 @@ func TestStream_CtxCancelEndsTheBody(t *testing.T) {
 
 	select {
 	case <-observed:
-	case <-time.After(2 * time.Second):
+	case <-time.After(wait):
 		t.Fatal("the handler never saw its request context end — the body was not closed")
 	}
 }
@@ -1452,14 +1455,26 @@ func dripServer(line string, interval, span time.Duration) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
-		for end := time.Now().Add(span); time.Now().Before(end); time.Sleep(interval) {
+		window := time.After(testtime.Fixed(span))
+		for spanOpen(window) {
 			_, _ = io.WriteString(w, line)
 			if flusher != nil {
 				flusher.Flush()
 			}
+			time.Sleep(testtime.Fixed(interval))
 		}
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
+}
+
+// spanOpen reports, without blocking, whether a drip's span timer has yet to fire.
+func spanOpen(window <-chan time.Time) bool {
+	select {
+	case <-window:
+		return false
+	default:
+		return true
+	}
 }
 
 // streamAsync drives a Stream on its own goroutine and hands back the channel its deltas arrive
@@ -1690,7 +1705,7 @@ func TestStream_IdleTimeoutOffWaitsForCtx(t *testing.T) {
 
 			streamed := streamAsync(ctx, NewClient(srv.URL, "m", WithStreamIdleTimeout(0)))
 			var got []Delta
-			settle := time.After(200 * time.Millisecond)
+			settle := time.After(testtime.Fixed(200 * time.Millisecond))
 			for waiting := true; waiting; {
 				select {
 				case delta, open := <-streamed:

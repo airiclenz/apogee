@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // replayChat is a chat-completions request carrying one user message.
@@ -221,7 +223,7 @@ func TestReplayerPacesChunksByTheirOffsets(t *testing.T) {
 		url, _ := replayServer(t, &Cassette{Exchanges: []Exchange{
 			textExchange(chatKey("fast"), chunkAt(0, "a"), chunkAt(time.Hour, "b")),
 		}}, 0)
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), testtime.Budget(10*time.Second))
 		defer cancel()
 
 		if _, body := fetch(t, ctx, http.MethodPost, url+chatCompletionsPath, replayChat("fast")); body != "ab" {
@@ -274,7 +276,7 @@ func TestReplayerStreamsDifferentKeysConcurrently(t *testing.T) {
 		t.Fatalf("slow head = %q (%v), want slow-head", head, err)
 	}
 
-	quickCtx, quickCancel := context.WithTimeout(t.Context(), 10*time.Second)
+	quickCtx, quickCancel := context.WithTimeout(t.Context(), testtime.Budget(10*time.Second))
 	defer quickCancel()
 	if status, body := fetch(t, quickCtx, http.MethodPost, url+chatCompletionsPath, replayChat("quick")); status != http.StatusOK || body != "quick" {
 		t.Errorf("quick = %d %q while slow streams, want 200 quick", status, body)

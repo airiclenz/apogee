@@ -393,7 +393,13 @@ NOTES (2026-10-12): Acceptance ran as written (console ok, filewatch ok 6.7s, pl
 **Acceptance:** `GOOS=windows go vet ./internal/console/... ./internal/platform/...`; `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/console/ ./internal/filewatch/`; `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/platform/`
 **Commit:** `test(platform): route console, platform and filewatch timing through testtime`
 
-## 19. Migrate the fake-server and harness packages
+## 19. Migrate the fake-server and harness packages — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): TestEmitRacingReplaceNeverPanics has two goroutines bounded by racingWindow, and a time.After channel delivers to only one of them, so it loops on testtime.Expiry(racingWindow) instead; the single-consumer loops (TestEmitRacingCloseNeverPanics, dripServer over span) take the time.After + non-blocking-select form the regression guard names (helpers windowClosed / spanOpen).
+NOTES (2026-10-12): named constants become vars — awaitDeadline, testWait, termTimeout, engineTestTimeout (moved out of its const block) = testtime.Budget; racingWindow, quietWait, chunkGap = testtime.Fixed; awaitLimit's test override = Fixed(20ms) and server.go is unchanged. attempt_test's local `pause` const becomes a Fixed local.
+NOTES (2026-10-12): schedule's eventually, stubllm's waitUntil and the probe wait, run's awaitFirstRequest and demorig's ready wait now call testtime.Eventually, so their failure text is Eventually's "timed out after … waiting for …"; waitForAddress (cmd/stubllm) and demorig's awaitInputs/awaitStream loop on testtime.Expiry so their failure still reports the output read at that moment.
+NOTES (2026-10-12): beyond the guard's findings, the stubllm hang turns in server_test.go (Hang: time.Minute, Hang: 10ms) are wrapped in testtime.Fixed per the item's "hang → Fixed"; script_test's Hang 250ms is a parse-table value and stays as written, as do the elapsed-time bounds (e.g. server_test's `elapsed > 10*time.Second`).
+NOTES (2026-10-12): Acceptance ran one package at a time, raced, all ok (provider 7.3s, demorig 25.9s); reactions, stubllm and schedule also pass at APOGEE_TEST_TIME_SCALE=2; TestNoFixedTimingInTests passes with the seven packages out of pendingPackages.
 
 **What:** Item 9's rule. The fake-server pacing (`dripServer`, `chunkGap`, `hang`) → `Fixed`.
 **Regression guard.** a time-boxed racing loop (`internal/reactions/runner_test.go` over `racingWindow`, provider's `dripServer` over `span`) becomes `stop := time.After(testtime.Fixed(racingWindow))` (resp. `span`) checked by a non-blocking select in the loop condition. `awaitLimit` is a production var in `internal/stubllm/server.go`, outside the guard's reach: only the test override (server_test.go, 20 ms meant to expire) migrates, to `Fixed`; server.go is left unchanged.

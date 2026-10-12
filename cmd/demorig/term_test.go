@@ -11,11 +11,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // termTimeout bounds every terminal test: a program that hangs on an unanswered query fails here
 // rather than hanging the suite.
-const termTimeout = 5 * time.Second
+var termTimeout = testtime.Budget(5 * time.Second)
 
 // recordShell runs script under sh in a 40×5 terminal and returns the take once the shell exits.
 func recordShell(t *testing.T, script string) *Take {
@@ -129,12 +131,8 @@ func TestTerminal_EventsAndInput(t *testing.T) {
 	}
 	t.Cleanup(func() { term.Close() })
 	// Typed before stty has run, the input would be echoed onto the screen.
-	for deadline := time.Now().Add(termTimeout); rowText(term.Current(), 0) != "ready"; {
-		if time.Now().After(deadline) {
-			t.Fatal("the program never said it was ready")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	testtime.Eventually(t, termTimeout, func() bool { return rowText(term.Current(), 0) == "ready" },
+		"the program to say it was ready")
 	term.Event("type", "ok")
 	if err := term.Send([]byte("ok")); err != nil {
 		t.Fatalf("Send: %v", err)

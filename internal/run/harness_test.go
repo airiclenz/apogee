@@ -19,6 +19,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // finalScript is the simplest Script: one final, no-tool reply, and nothing for a second
@@ -64,7 +65,7 @@ func cancelWhen(t *testing.T, up *stubllm.Server, cancel context.CancelFunc, wan
 			select {
 			case <-done:
 				return
-			case <-time.After(time.Millisecond):
+			case <-time.After(testtime.Fixed(time.Millisecond)):
 			}
 		}
 	}()

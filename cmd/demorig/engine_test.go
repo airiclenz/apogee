@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The fake TUI is this test binary re-executed with fakeTUIEnv naming a directory: it puts its tty
@@ -22,14 +24,17 @@ import (
 // line of the input log — so a test sees exactly the writes the program would have read. When the
 // directory also holds a next-screen file, the first input it reads repaints the screen with it.
 const (
-	fakeTUIEnv        = "DEMORIG_FAKE_TUI"
-	fakeScreenFile    = "screen.txt"
-	fakeNextFile      = "next.txt"
-	fakeInputLogFile  = "input.log"
-	engineTestCols    = 60
-	engineTestRows    = 12
-	engineTestTimeout = 5 * time.Second
+	fakeTUIEnv       = "DEMORIG_FAKE_TUI"
+	fakeScreenFile   = "screen.txt"
+	fakeNextFile     = "next.txt"
+	fakeInputLogFile = "input.log"
+	engineTestCols   = 60
+	engineTestRows   = 12
 )
+
+// engineTestTimeout bounds every wait an engine test makes, its own polls and the WaitActions it
+// scripts alike.
+var engineTestTimeout = testtime.Budget(5 * time.Second)
 
 // TestFakeTUIHelper is the fake TUI's entry point in the re-executed binary; in a normal run it
 // skips.
@@ -127,11 +132,11 @@ func regexpQuote(text string) string {
 // awaitInputs polls the input log until it holds want reads, and returns them unquoted.
 func awaitInputs(t *testing.T, path string, want int) []string {
 	t.Helper()
-	deadline := time.Now().Add(engineTestTimeout)
+	expired := testtime.Expiry(engineTestTimeout)
 	for {
 		raw, _ := os.ReadFile(path)
 		lines := strings.Fields(string(raw))
-		if len(lines) >= want || time.Now().After(deadline) {
+		if len(lines) >= want || expired() {
 			reads := make([]string, 0, len(lines))
 			for _, line := range lines {
 				read, err := strconv.Unquote(line)
@@ -145,7 +150,7 @@ func awaitInputs(t *testing.T, path string, want int) []string {
 			}
 			return reads
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 	}
 }
 
@@ -153,7 +158,7 @@ func awaitInputs(t *testing.T, path string, want int) []string {
 // unless what it read is exactly want.
 func awaitStream(t *testing.T, path, want string) {
 	t.Helper()
-	deadline := time.Now().Add(engineTestTimeout)
+	expired := testtime.Expiry(engineTestTimeout)
 	for {
 		raw, _ := os.ReadFile(path)
 		var stream strings.Builder
@@ -164,13 +169,13 @@ func awaitStream(t *testing.T, path, want string) {
 			}
 			stream.WriteString(read)
 		}
-		if stream.Len() >= len(want) || time.Now().After(deadline) {
+		if stream.Len() >= len(want) || expired() {
 			if stream.String() != want {
 				t.Fatalf("the program read %q, want %q", stream.String(), want)
 			}
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 	}
 }
 

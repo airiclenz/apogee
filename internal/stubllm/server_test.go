@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestServerStreamsTextInConfiguredChunks pins the two halves of the text turn: the exact rune
@@ -247,8 +248,8 @@ func TestServerHangEndsWithTheRequestContext(t *testing.T) {
 	t.Run("cancelled", func(t *testing.T) {
 		t.Parallel()
 
-		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Hang: time.Minute}}})
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Hang: testtime.Fixed(time.Minute)}}})
+		ctx, cancel := context.WithTimeout(context.Background(), testtime.Fixed(50*time.Millisecond))
 		defer cancel()
 
 		started := time.Now()
@@ -264,7 +265,7 @@ func TestServerHangEndsWithTheRequestContext(t *testing.T) {
 	t.Run("elapsed", func(t *testing.T) {
 		t.Parallel()
 
-		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Hang: 10 * time.Millisecond}}})
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Hang: testtime.Fixed(10 * time.Millisecond)}}})
 
 		deltas := streamThroughProvider(t, server, "hi")
 
@@ -595,13 +596,8 @@ func TestServerModelsStatusAndHang(t *testing.T) {
 			_, err := http.DefaultClient.Do(request)
 			done <- err
 		}()
-		deadline := time.Now().Add(5 * time.Second)
-		for len(server.Probes()) == 0 {
-			if time.Now().After(deadline) {
-				t.Fatal("the held probe never reached the log")
-			}
-			time.Sleep(time.Millisecond)
-		}
+		testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool { return len(server.Probes()) > 0 },
+			"the held probe to reach the log")
 		select {
 		case err := <-done:
 			t.Fatalf("the probe returned %v while it should still be held", err)
@@ -1152,18 +1148,11 @@ func TestServeListensAndStopsWithItsContext(t *testing.T) {
 	})
 }
 
-// waitUntil polls done for up to two seconds, failing t when it never becomes true.
+// waitUntil polls done for up to a two-second budget, failing t when it never becomes true.
 func waitUntil(t *testing.T, done func() bool) {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if done() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("condition never held within two seconds")
+	testtime.Eventually(t, testtime.Budget(2*time.Second), done, "the condition to hold")
 }
 
 // TestServerAwaitHoldsTheReplyUntilReleased pins the whole of the `await:` gate: the request is
@@ -1207,7 +1196,7 @@ func TestServerAwaitHoldsTheReplyUntilReleased(t *testing.T) {
 			t.Fatalf("the reply arrived before the gate opened: %s", raw)
 		case err := <-failed:
 			t.Fatalf("post: %v", err)
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(testtime.Fixed(50 * time.Millisecond)):
 		}
 
 		server.Release("go")
@@ -1218,7 +1207,7 @@ func TestServerAwaitHoldsTheReplyUntilReleased(t *testing.T) {
 			}
 		case err := <-failed:
 			t.Fatalf("post: %v", err)
-		case <-time.After(5 * time.Second):
+		case <-time.After(testtime.Budget(5 * time.Second)):
 			t.Fatal("the reply never came after Release")
 		}
 	})
@@ -1235,7 +1224,7 @@ func TestServerAwaitHoldsTheReplyUntilReleased(t *testing.T) {
 
 	t.Run("nothing releases it", func(t *testing.T) {
 		previous := awaitLimit
-		awaitLimit = 20 * time.Millisecond
+		awaitLimit = testtime.Fixed(20 * time.Millisecond)
 		t.Cleanup(func() { awaitLimit = previous })
 
 		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Await: "nobody opens this", Text: "done"}}})

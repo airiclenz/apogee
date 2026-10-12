@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestRunOnceLive drives ONE real Plan-mode Firing end to end against a live
@@ -35,7 +36,7 @@ func TestRunOnceLive(t *testing.T) {
 
 	model := os.Getenv("APOGEE_LIVE_MODEL")
 	if model == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 		defer cancel()
 		info, err := provider.NewClient(endpoint, "", provider.WithAPIKey(apiKey)).Discover(ctx)
 		if err != nil {
@@ -63,7 +64,7 @@ func TestRunOnceLive(t *testing.T) {
 	// The single-slot local server can be slow to first token (ADR 0024's posture: generous
 	// patience, no retries hammering the slot), so the ceiling is wide — it exists to fail
 	// the test rather than hang the package.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(5*time.Minute))
 	defer cancel()
 
 	res, err := Once(ctx, spec)

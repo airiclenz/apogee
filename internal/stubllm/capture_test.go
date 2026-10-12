@@ -10,11 +10,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // chunkGap is how long the streaming upstream waits between its chunks — long enough that each
 // write reaches the proxy as its own read even under -race.
-const chunkGap = 25 * time.Millisecond
+var chunkGap = testtime.Fixed(25 * time.Millisecond)
 
 // keyEnvVar is the environment variable the auth test hands the recorder.
 const keyEnvVar = "STUBLLM_CAPTURE_TEST_KEY"

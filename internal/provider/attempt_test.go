@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // attemptsOf splits a delta sequence into its DeltaAttempt payloads and the kinds of the rest.
@@ -87,7 +89,7 @@ func TestAttemptKeepalivesAdvanceTTFBNotTTFT(t *testing.T) {
 		for range 4 {
 			_, _ = io.WriteString(w, ": keepalive\n\n")
 			flusher.Flush()
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(testtime.Fixed(500 * time.Millisecond))
 		}
 		_, _ = io.WriteString(w, roundTripSSE)
 	}))
@@ -110,7 +112,7 @@ func TestAttemptLastFollowsTTFTAndCarriesUsage(t *testing.T) {
 		flusher, _ := w.(http.Flusher)
 		_, _ = io.WriteString(w, "data: {\"model\":\"served\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n")
 		flusher.Flush()
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(testtime.Fixed(50 * time.Millisecond))
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"b\"},\"finish_reason\":\"stop\"}],"+
 			"\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":7,\"total_tokens\":10}}\n\ndata: [DONE]\n\n")
 	}))
@@ -334,7 +336,7 @@ func deltaKinds(deltas []Delta) []DeltaKind {
 // again before the terminator: TTFT must sit a pause before Last, and Last a pause before the end.
 func TestAttemptToolCallOnlyReplyClockedByFragments(t *testing.T) {
 	t.Parallel()
-	const pause = 200 * time.Millisecond
+	pause := testtime.Fixed(200 * time.Millisecond)
 	cases := []struct {
 		name  string
 		wire  Wire

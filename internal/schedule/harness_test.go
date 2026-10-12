@@ -10,14 +10,16 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // testWait is how long a test waits for an Event that should already be on its way. It is
 // generous because it bounds a scheduling delay under -race, never a policy interval.
-const testWait = 3 * time.Second
+var testWait = testtime.Budget(3 * time.Second)
 
 // quietWait is how long a test watches for an Event that must NOT arrive.
-const quietWait = 200 * time.Millisecond
+var quietWait = testtime.Fixed(200 * time.Millisecond)
 
 // fakeClock is a Clock whose ticks a test delivers by hand and whose Now only moves when the
 // test moves it.
@@ -175,14 +177,7 @@ func signalled(t *testing.T, ch <-chan struct{}, what string) {
 // surface can observe the Event marginally before List agrees.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(testWait)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
+	testtime.Eventually(t, testWait, cond, what)
 }
 
 // kinds reports every Event's kind so far, in arrival order.

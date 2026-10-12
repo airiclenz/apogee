@@ -11,12 +11,13 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions/scope"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // awaitDeadline is how long a test waits for a goroutine it expects to make progress. It is
 // generous on purpose: the assertions are about whether something happens at all, never about
 // how fast, so a loaded CI machine must not be able to fail them.
-const awaitDeadline = 5 * time.Second
+var awaitDeadline = testtime.Budget(5 * time.Second)
 
 // ----------------------------------------------------------------------------
 // Doubles
@@ -545,7 +546,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 // racingWindow is how long the racing tests keep Emit colliding with a reload or a close: long
 // enough that the pre-fix send on a closed queue is provoked within a handful of runs, short
 // enough that `-race -count=20` stays quick.
-const racingWindow = 200 * time.Millisecond
+var racingWindow = testtime.Fixed(200 * time.Millisecond)
 
 // TestEmitRacingReplaceNeverPanics — a reload closes the old generation's queues while the engine
 // is still emitting against that generation: a firing that loaded the old set before the swap
@@ -563,24 +564,26 @@ func TestEmitRacingReplaceNeverPanics(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	deadline := time.Now().Add(racingWindow)
+	// Two goroutines watch the window, so it is an Expiry each can read, not a channel only one
+	// of them would receive from.
+	expired := testtime.Expiry(racingWindow)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for turn := 1; time.Now().Before(deadline); turn++ {
+		for turn := 1; !expired(); turn++ {
 			runner.Emit(turnEvent(turn))
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for generation := 1; time.Now().Before(deadline); generation++ {
+		for generation := 1; !expired(); generation++ {
 			fresh := []domain.Reaction{commandHook("notify", TurnFinished)}
 			if err := runner.Replace(fresh); err != nil {
 				t.Errorf("Replace (generation %d): %v", generation, err)
 				return
 			}
-			time.Sleep(time.Millisecond)
+			time.Sleep(testtime.Fixed(time.Millisecond))
 		}
 	}()
 	wg.Wait()
@@ -594,8 +597,8 @@ func TestEmitRacingReplaceNeverPanics(t *testing.T) {
 func TestEmitRacingCloseNeverPanics(t *testing.T) {
 	t.Parallel()
 
-	deadline := time.Now().Add(racingWindow)
-	for round := 1; time.Now().Before(deadline); round++ {
+	window := time.After(racingWindow)
+	for round := 1; !windowClosed(window); round++ {
 		exec := newFakeExecutor()
 		runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
 			Workspace: t.TempDir(), Exec: exec,
@@ -619,10 +622,20 @@ func TestEmitRacingCloseNeverPanics(t *testing.T) {
 			}
 		}()
 		// Let the emitter reach its stride before the close lands under it.
-		time.Sleep(time.Millisecond)
+		time.Sleep(testtime.Fixed(time.Millisecond))
 		closeRunner(t, runner)
 		close(stop)
 		wg.Wait()
+	}
+}
+
+// windowClosed reports, without blocking, whether the racing window's timer has fired.
+func windowClosed(window <-chan time.Time) bool {
+	select {
+	case <-window:
+		return true
+	default:
+		return false
 	}
 }
 

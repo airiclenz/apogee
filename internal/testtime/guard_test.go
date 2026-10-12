@@ -19,20 +19,13 @@ import (
 // migration has left — and fails on a pending package that has none left, so the set only
 // shrinks. The migration items empty it; a new package never joins it.
 var pendingPackages = map[string]bool{
-	"cmd/demorig":         true,
-	"cmd/stubllm":         true,
 	"internal/config":     true,
 	"internal/gitexec":    true,
 	"internal/judge":      true,
 	"internal/keystore":   true,
 	"internal/mdns":       true,
 	"internal/present":    true,
-	"internal/provider":   true,
-	"internal/reactions":  true,
-	"internal/run":        true,
-	"internal/schedule":   true,
 	"internal/security":   true,
-	"internal/stubllm":    true,
 	"internal/subprocess": true,
 	"internal/undo":       true,
 	"internal/update":     true,

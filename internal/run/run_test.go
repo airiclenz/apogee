@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -389,13 +390,8 @@ func TestOnceTakesNoHoldWithoutAStoreAndARecordID(t *testing.T) {
 func awaitFirstRequest(t *testing.T, up *stubllm.Server) {
 	t.Helper()
 
-	deadline := time.Now().Add(10 * time.Second)
-	for len(up.Requests()) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the Firing never reached the Upstream")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool { return len(up.Requests()) > 0 },
+		"the Firing to reach the Upstream")
 }
 
 // TestOnceDeniesAGatedActionWithoutParking is the fail-safe denier's proof: a gated tool
@@ -424,7 +420,7 @@ func TestOnceDeniesAGatedActionWithoutParking(t *testing.T) {
 
 	// A generous deadline rather than a bare Background: if the denier ever parked, this
 	// test must fail on the assertion below, not hang the package.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancel()
 
 	res, err := Once(ctx, spec)
@@ -472,7 +468,7 @@ func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
 
 	// A generous deadline rather than a bare Background: a gate that never answered would hang
 	// the package rather than failing the assertion below.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancel()
 
 	res, err := Once(ctx, spec)
@@ -511,7 +507,7 @@ func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 	spec := planSpec(up.URL, "note something for me")
 	spec.Config.Tools = registry
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancel()
 
 	res, err := Once(ctx, spec)
@@ -708,7 +704,7 @@ func TestOnceReportsTheLastMessageNotTheFirst(t *testing.T) {
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.Tools = registry
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancel()
 
 	res, err := Once(ctx, spec)
