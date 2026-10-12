@@ -1,11 +1,13 @@
 ---
 title: missing mount root misreported as a workspace-fence refusal
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-10-12 - 00 - regression-and-doc-truth-plan
 aliases: [apogee-missing-mount-misreported]
 created: 2026-10-11T18:16:44Z
+closed: 2026-10-12T13:50:34Z
+reason: "Resolved by plan 2026-10-12 - 00 - regression-and-doc-truth-plan item 1 (archived at 21c302c1): a path under a missing mount root or scratch dir answers each read tool's own not-found message; paths outside every root keep the fence refusal; tests pin both."
 ---
 
 A path under a mounted read root that does not exist yet is refused as "path resolves outside the workspace root" instead of reported as not found.
