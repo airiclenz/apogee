@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/subprocess"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // fakeConfiner is a caps-injected Confiner for the execution-tool tests. It records each
@@ -468,29 +469,33 @@ func waitForPIDFile(t *testing.T, path string) int {
 	t.Helper()
 	// Generous: the Windows tree test starts a PowerShell, whose cold start dwarfs a POSIX
 	// shell's. The wait ends as soon as the file appears, so the ceiling costs nothing.
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if b, err := os.ReadFile(path); err == nil {
-			if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {
-				return pid
-			}
+	var pid int
+	testtime.Eventually(t, testtime.Budget(20*time.Second), func() bool {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("child PID file %s never appeared", path)
-	return 0
+		got, perr := strconv.Atoi(strings.TrimSpace(string(b)))
+		if perr != nil || got <= 0 {
+			return false
+		}
+		pid = got
+		return true
+	}, fmt.Sprintf("child PID file %s to hold a PID", path))
+	return pid
 }
 
 // pidAlive reports whether pid is still alive within the given window, polling so a
-// slightly-late reap does not flake the test.
+// slightly-late reap does not flake the test. within is a budget its callers write unscaled, so it
+// is scaled here, once, by testtime.Budget.
 func pidAlive(pid int, within time.Duration) bool {
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(testtime.Budget(within))
+	for !expired() {
 		// Signal 0 probes existence without delivering a signal; ESRCH ⇒ gone.
 		if err := syscallKill0(pid); err != nil {
 			return false
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 	}
 	return syscallKill0(pid) == nil
 }

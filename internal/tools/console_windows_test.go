@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The apogee-2uh.6 hands-on check, driven on a real Windows host through the registered Console
@@ -155,9 +156,9 @@ func readConsoleUntil(t *testing.T, ctx context.Context, id int, want string) st
 	t.Helper()
 	tool := NewConsoleRead()
 	var read strings.Builder
-	deadline := time.Now().Add(windowsConsoleWait)
+	expired := testtime.Expiry(windowsConsoleWait)
 	for !strings.Contains(read.String(), want) {
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("console_read never returned %q within %v; read %q", want, windowsConsoleWait, read.String())
 		}
 		res, err := tool.Execute(ctx, consoleReadCall("read", id, 500))

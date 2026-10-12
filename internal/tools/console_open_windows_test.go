@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The Windows Console journeys: console_open under a confinement box runs cmd.exe behind a
@@ -23,7 +24,7 @@ import (
 // fakeConfiner: it sets no token, and a Windows confined open without one fails closed.
 
 // windowsConsoleWait bounds how long a test waits for a confined cmd.exe to act.
-const windowsConsoleWait = 15 * time.Second
+var windowsConsoleWait = testtime.Budget(15 * time.Second)
 
 // newWindowsTestConfiner returns the real Windows Confiner, closed when the test ends — it
 // journals its labels under the real apogee home, and a journal left behind is replayed by the
@@ -68,16 +69,10 @@ func openedConsole(t *testing.T, registry *console.Registry) *console.Console {
 // waitForFile polls until path exists, failing the test at windowsConsoleWait.
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(windowsConsoleWait)
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s did not appear within %v", path, windowsConsoleWait)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	testtime.Eventually(t, windowsConsoleWait, func() bool {
+		_, err := os.Stat(path)
+		return err == nil
+	}, path+" to appear")
 }
 
 // TestConsoleOpen_ConfinesThroughTheHandleOnContextOnWindows proves the Confine handoff happens on

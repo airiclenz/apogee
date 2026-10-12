@@ -8,11 +8,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // readFileDeadline is how long a read_file call may take before the test calls it wedged: a
 // blocking open of a FIFO with no writer never returns, which is the failure this file pins.
-const readFileDeadline = 2 * time.Second
+var readFileDeadline = testtime.Budget(2 * time.Second)
 
 // TestReadFile_RefusesAFIFO is the audit's wedge at the tool boundary: a named pipe planted in
 // the workspace no longer blocks read_file — the call returns promptly with the refusal spelled

@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 func consoleReadCall(callID string, id, waitMS int) domain.ToolCall {
@@ -59,14 +60,8 @@ func openUndrainedConsole(t *testing.T, ctx context.Context, command string) (in
 // what a finished program produced is not racing the program's own exit.
 func waitForConsoleExit(t *testing.T, c *console.Console) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !c.Alive() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("console %d was still running after 10s", c.ID)
+	testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool { return !c.Alive() },
+		fmt.Sprintf("console %d to exit", c.ID))
 }
 
 func TestConsoleRead_Markers(t *testing.T) {
@@ -122,7 +117,7 @@ func TestConsoleRead_WaitReturnsAsSoonAsOutputArrives(t *testing.T) {
 		t.Fatalf("console %d is not in the registry that just issued it", id)
 	}
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(testtime.Fixed(100 * time.Millisecond))
 		_, _ = target.Write([]byte("late\n"))
 	}()
 

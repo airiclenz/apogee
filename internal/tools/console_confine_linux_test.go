@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestMain intercepts the __confined-exec sentinel so this test binary can play the in-child half
@@ -96,7 +97,7 @@ func TestConsoleOpen_LiveConfinementDenialStopsTheConsole(t *testing.T) {
 	if !strings.Contains(sent.Content, confinementDenialStopLabel(box)) {
 		t.Errorf("send result = %q, want the kill-on-denial label", sent.Content)
 	}
-	if !waitFor(2*time.Second, func() bool { return !fenced.Alive() }) {
+	if !waitFor(testtime.Budget(2*time.Second), func() bool { return !fenced.Alive() }) {
 		t.Error("the denied console is still alive; the watch did not stop it")
 	}
 	if _, err := os.Stat(escape); !os.IsNotExist(err) {
@@ -105,14 +106,15 @@ func TestConsoleOpen_LiveConfinementDenialStopsTheConsole(t *testing.T) {
 }
 
 // waitFor polls done until it reports true or the budget runs out, so a test can assert on state
-// a background goroutine records (a reaped exit) without sleeping for the worst case.
+// a background goroutine records (a reaped exit) without sleeping for the worst case. budget is an
+// already-budgeted value (a testtime.Budget call), never scaled again here.
 func waitFor(budget time.Duration, done func() bool) bool {
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(budget)
+	for !expired() {
 		if done() {
 			return true
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 	}
 	return done()
 }

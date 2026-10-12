@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // funnelTool is a minimal tool that reaches the network ONLY through the funnel: it embeds
@@ -210,8 +211,8 @@ func TestNetworkFunnel_DoReleasesTheConnectionItOpened(t *testing.T) {
 	// wait for the count rather than sleeping a fixed span. A leaked connection sits in its
 	// pool for IdleConnTimeout, far past this deadline, so the wait costs the green path
 	// milliseconds and never rescues the red one.
-	for deadline := time.Now().Add(5 * time.Second); closed.Load() < opened.Load() && time.Now().Before(deadline); {
-		time.Sleep(5 * time.Millisecond)
+	for expired := testtime.Expiry(testtime.Budget(5 * time.Second)); closed.Load() < opened.Load() && !expired(); {
+		time.Sleep(testtime.Fixed(5 * time.Millisecond))
 	}
 	if got := opened.Load(); got < calls {
 		t.Fatalf("the server saw %d connection(s) for %d calls: the test needs at least one per call to prove anything", got, calls)
@@ -755,7 +756,7 @@ func TestNetworkFunnel_DoCancelledCtxIsGoError(t *testing.T) {
 			// lets it reach the body read, which is the path this subtest exists for. An
 			// early cancel would merely re-cover the in-flight case above — the assertion
 			// holds for both interleavings, so the test cannot flake either way.
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(testtime.Fixed(50 * time.Millisecond))
 			cancel()
 		}()
 
@@ -829,7 +830,7 @@ func TestNetworkFunnel_TimeoutResolution(t *testing.T) {
 	t.Run("the pre-flight resolve runs under the resolved budget", func(t *testing.T) {
 		t.Parallel()
 
-		const budget = 200 * time.Millisecond
+		budget := testtime.Budget(200 * time.Millisecond)
 		guard := security.URLGuard{}.WithResolver(blackHoleResolver(nil))
 
 		// A watchdog rather than a deadline on the caller's own ctx: the caller's ctx must still
@@ -837,7 +838,7 @@ func TestNetworkFunnel_TimeoutResolution(t *testing.T) {
 		// has to fail this case rather than hang it.
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		watchdog := time.AfterFunc(40*budget, cancel)
+		watchdog := time.AfterFunc(testtime.Fixed(40*budget), cancel)
 		defer watchdog.Stop()
 
 		start := time.Now()
@@ -882,12 +883,13 @@ func TestNetworkFunnel_OneBudgetCoversResolveAndRequest(t *testing.T) {
 	// The two outcomes this case separates are a shared budget (~budget) and a per-phase one
 	// (~lookup+budget). They are told apart by a MULTIPLE of the budget, not by a fixed slack:
 	// the ceiling below is 1.5*budget, which sits strictly between the two because lookup is
-	// 0.8*budget. Room for a loaded box therefore comes from scaling both constants up in
-	// absolute terms — a second of headroom at this size — and never from raising the multiple,
-	// which is what the opposing per-phase outcome is pinned by.
-	const (
-		budget = 2 * time.Second
-		lookup = 1600 * time.Millisecond // 0.8*budget, spent before the request starts
+	// 0.8*budget. Room for a loaded box therefore comes from scaling both values up in
+	// absolute terms — a second of headroom at this size, more under APOGEE_TEST_TIME_SCALE —
+	// and never from raising the multiple, which is what the opposing per-phase outcome is
+	// pinned by.
+	var (
+		budget = testtime.Budget(2 * time.Second)
+		lookup = testtime.Budget(1600 * time.Millisecond) // 0.8*budget, spent before the request starts
 	)
 
 	restore := net.DefaultResolver
@@ -913,7 +915,7 @@ func TestNetworkFunnel_OneBudgetCoversResolveAndRequest(t *testing.T) {
 	// than hang it, and its cancellation arrives far above the ceiling asserted below.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	watchdog := time.AfterFunc(20*budget, cancel)
+	watchdog := time.AfterFunc(testtime.Fixed(20*budget), cancel)
 	defer watchdog.Stop()
 
 	start := time.Now()

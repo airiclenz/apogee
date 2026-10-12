@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -82,7 +83,7 @@ func TestQueuedAsker_QueuedQuestionAnswersItsOwnCancellation(t *testing.T) {
 		if got.answer.Text != "" {
 			t.Errorf("a cancelled queued question returned answer %q, want none", got.answer.Text)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("a queued question never answered its own cancellation — the wait is not ctx-aware")
 	}
 	if n := inner.calls.Load(); n != 1 {
@@ -206,7 +207,7 @@ func (f askerFunc) Ask(ctx context.Context, req domain.AskRequest) (domain.AskAn
 // gives the cancelled question to answer — once the queue state is established, so that deadline
 // keeps its full bite however generous this ceiling is: widening the wait for "the question is
 // queued" never widens the window in which the ctx-aware wait must react.
-const queuedAskerCeiling = 10 * time.Second
+var queuedAskerCeiling = testtime.Budget(10 * time.Second)
 
 // waitForQueuedAskers blocks until slot reports want callers inside Acquire, failing the test with
 // what — a phrase naming the thing that never queued — if that has not happened within
@@ -219,15 +220,15 @@ const queuedAskerCeiling = 10 * time.Second
 func waitForQueuedAskers(t *testing.T, slot *domain.PromptSlot, want int, what string) {
 	t.Helper()
 
-	deadline := time.Now().Add(queuedAskerCeiling)
+	expired := testtime.Expiry(queuedAskerCeiling)
 	for {
 		got := slot.Waiting()
 		if got == want {
 			return
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("%s: Waiting() was %d after %s, want %d", what, got, queuedAskerCeiling, want)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(testtime.Fixed(time.Millisecond))
 	}
 }

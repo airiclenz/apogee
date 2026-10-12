@@ -39,7 +39,6 @@ var pendingPackages = map[string]bool{
 	"internal/security":   true,
 	"internal/stubllm":    true,
 	"internal/subprocess": true,
-	"internal/tools":      true,
 	"internal/undo":       true,
 	"internal/update":     true,
 	"internal/userexec":   true,

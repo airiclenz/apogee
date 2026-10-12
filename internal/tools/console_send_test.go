@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 func consoleSendCall(callID string, id int, input string, raw bool, waitMS int) domain.ToolCall {
@@ -537,7 +538,7 @@ func TestConsoleSend_FloodCarriesOneTruncationMarker(t *testing.T) {
 
 // consoleCancelBudget is how soon after its ctx is cancelled a Console call must have returned:
 // the wait windows run to 30 s, and ADR 0088 has a cancel settle promptly, not at the window's end.
-const consoleCancelBudget = time.Second
+var consoleCancelBudget = testtime.Budget(time.Second)
 
 // cancelAfter returns a child of parent that is cancelled once delay has passed.
 func cancelAfter(t *testing.T, parent context.Context, delay time.Duration) context.Context {
