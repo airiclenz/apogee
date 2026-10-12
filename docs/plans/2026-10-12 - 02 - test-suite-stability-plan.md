@@ -179,7 +179,11 @@ NOTES (2026-10-12): the whole-package race run of ./internal/tuitest/ was refuse
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/tuitest/`; `bash -n scripts/test-shards.sh`; `APOGEE_TEST_SLOW=1 APOGEE_TEST_LANES=1 ARGS='-run ^TestNothing$' make test 2>&1 | grep -i scale`
 **Commit:** `test(tuitest): derive the kit's budgets from testtime`
 
-## 8. Guard: no fixed timing in tests
+## 8. Guard: no fixed timing in tests — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): pendingPackages holds 29 directories (322 findings at landing); internal/mcpauth has no findings, so it is not pending — item 15's mcpauth half has nothing for the guard to clear.
+NOTES (2026-10-12): rule (a)'s "numeric literal" is applied as written, so a count multiplying a budgeted value is a finding too (`newcomerBudget = newcomerMaxSteps * (...)`, `Within(2*seatBeat+tuitest.DefaultTimeout)`); a migration writes the multiple inside the wrapper (`testtime.Fixed(2*seatBeat)`) rather than outside it.
+NOTES (2026-10-12): resolution accepts what it cannot reach — another package's selector or a struct field, a parameter or range variable, a multi-value assignment's names — and of a nested call judges only the arguments, never the function it names.
 
 **What:** Recast at the regression check (2026-10-12). The structural ban (class A), modelled on `cmd/apogee/seams_guard_test.go`'s AST walk but repo-wide.
 **Regression guard.** rule (b) names testtime.Eventually and testtime.Expiry as the sanctioned replacements; findings in a pending package never fail but are still printed with t.Logf as `file:line: …`, so a per-file migration goal is checkable with `go test -count=1 -v -run 'TestNoFixedTimingInTests$' ./internal/testtime/ | grep <file>`. Rule (a) resolves a `:=` or local `var` identifier (driver.go's `wait`, pty.go's `remaining`) to its initialiser in the enclosing function, else accepts it; the Bites fixture holds one such local. The guard applies its literal rule (a) to the duration argument of testtime.Eventually and testtime.Expiry as well, so a literal passed to them unwrapped is a finding; the Bites fixture covers it. The walk runs the module-relative directory through `filepath.ToSlash` before the `pendingPackages` lookup and in every reported `file:line`, so the set's forward-slash keys match on Windows too, where `makeWin.bat`'s target_test (`test`/`check`) runs `go test ./...` and `filepath.Rel` yields `internal\tui`.
