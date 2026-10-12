@@ -112,7 +112,9 @@ internal/tools/path_read_test.go — TestReadScopeSkipsUnusableExtraRoot, TestRe
 
 **Commit:** `fix(tools): a missing mount root answers not-found instead of the workspace fence`
 
-## 2. CONTEXT.md agrees with the code
+## 2. CONTEXT.md agrees with the code — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the Driver entry also says an observe webhook is posted by the Driver's Reaction runner, not the engine (verified: `cmd/apogee/wire_boot.go` builds the guarded executor), so "the one Reaction wire the engine opens itself" cannot be misread as covering it
 
 **What:** four drifts in `CONTEXT.md`, plus one stale ADR 0076 sentence.
 

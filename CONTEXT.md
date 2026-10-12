@@ -49,10 +49,17 @@ different thing; do not resurrect the name for the new library), "the SDK".
 
 **Driver**:
 A program that embeds the **Embeddable agent** and drives the loop through its public
-API. Four exist today — the TUI, `apogee daemon`, `apogee headless` and the bench.
+API. Four *product* Drivers ship — the TUI, `apogee daemon`, `apogee headless` and the bench — and
+the in-process and PTY test drivers in `internal/tuitest` are Drivers too
+([ADR 0062](docs/adr/0062-test-drivers-are-drivers.md)).
 The engine must stay sufficient for *any* Driver: nothing model-visible or
-safety-relevant may exist only in one Driver's surface, and a wire surface (HTTP,
-webhooks) is always composed by a Driver — the engine itself is wire-silent. See
+safety-relevant may exist only in one Driver's surface, and every inbound wire surface (HTTP API,
+webhook listener) is composed by a Driver — the engine itself is wire-silent and composes none. The
+engine does dial out: the **Upstream**, the network tools (`http_request`, `web_fetch`,
+`web_search`) and, beside them, one Reaction wire of its own — a sync-lane advise or gate
+**Reaction** spelled as a webhook POSTs its seam document through the url-safety guard
+(`(*Agent).runSyncWebhook`; ADR 0076's 2026-09-19 amendment). An observe webhook is posted by the
+Driver's Reaction runner, not by the engine. See
 [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md).
 _Avoid_: "embedder" (names the linking, not the responsibility of pacing the loop),
 "frontend" / "client" (a Driver owns the loop's pace and state roots, not just a view).
@@ -709,7 +716,7 @@ _Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower t
 The LLM server that runs the model — Ollama, llama.cpp, LM Studio, vLLM, or any endpoint
 speaking one of the two **Wires** (below) apogee has a codec for: the OpenAI chat-completions surface
 (the default) or the Anthropic Messages API. Apogee reaches the Upstream directly through
-its `provider/` package; there is no intervening proxy. An `endpoint` host ending in `.local` that
+its `internal/provider/` package; there is no intervening proxy. An `endpoint` host ending in `.local` that
 the system resolver cannot find is resolved by apogee itself — one in-process IPv4 mDNS query
 (`internal/mdns`), tried only after the system lookup fails — so a release build, which has no cgo
 and so no route to the OS's mDNS responder, still reaches a server named by its mDNS name
@@ -740,7 +747,7 @@ the engine stays wire-silent
 ([ADR 0078](docs/adr/0078-a-servers-wire-is-a-per-entry-codec-inside-the-provider-client.md)).
 _Avoid_: "dialect" for this (the **wire dialect** / `effort-dialect:` is how the thinking-effort
 dial is spelled ON a wire, a narrower thing — ADR 0060); "provider" as the family name (the
-`provider/` package is the client that speaks every wire; `openai` is a wire, not a vendor).
+`internal/provider/` package is the client that speaks every wire; `openai` is a wire, not a vendor).
 
 **Key source**:
 The one place a server entry's API key comes from: a literal `api-key`, a command (`api-key-cmd`)
@@ -1392,9 +1399,11 @@ surface is tuned by the global **`confine-to-workspace`** flag (below). The per-
 **MCP**, which executes in a server Apogee cannot fence, gates through Approval whenever
 `confine-to-workspace` is on; and if fs-confinement is *unavailable* on the host, subprocess tools
 gate too ("confine if you can, gate if you can't") rather than refusing Auto. Apogee never runs a
-tool call both unsupervised *and* unbounded. Lives behind a `platform/` `Confiner` interface
-(seatbelt / landlock / Windows token — AppContainer was **rejected**, ADR 0020); default box =
-workspace-write-only + **network-open** + per-project allowlist. Only `fs-write` is ever claimed
+tool call both unsupervised *and* unbounded. Lives behind the `domain.Confiner` interface, its
+backends in `internal/platform/` (seatbelt on macOS / landlock on Linux, else `bwrap` user + mount
+namespaces / Windows token — AppContainer was **rejected**, ADR 0020); default box =
+workspace-write-only + **network-open**, with an optional network tightening list an embedder sets
+(`Config.ConfineNetworkAllow` — no config key spells it). Only `fs-write` is ever claimed
 on Windows: `network-egress` is not enforceable there, so it is not advertised, and a box that
 asks for it fails closed. See
 [ADR 0012](docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)
@@ -1952,7 +1961,8 @@ of sixteen. A **seam** Moment is in-loop and synchronous, its payload an editabl
 its five are listed in the order a Turn passes them: `pre-request`, `post-response`,
 `pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
 sealed, and there are **eleven** of them. Six report a fact of their own: `exchange-finished`,
-`turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`. Five are the
+`turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`; `file-changed`
+is also one of the two Moments an advise **Reaction** fires at, beside `post-tool-result`. Five are the
 **seam-closing** notices — one per seam, spelled `<seam>-finished`: `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished`,
 `history-rewrite-finished` — each reporting that its seam's cascade ran to its end and the loop
@@ -2043,7 +2053,7 @@ used interchangeably.
 **Budget**:
 The allocation of the model's context window across the parts of a request — system
 prompt, conversation history, file context, and response reserve. The single authority
-on how much room each part gets; other reducers consume it. Lives in `context/`.
+on how much room each part gets; other reducers consume it. Lives in `internal/context/`.
 The split is **measured**, not a set of fixed shares: the **reply reserve** comes off the top
 (20% of the window by default, `response-reserve:`), and out of the **working room** that
 remains each standing part — the system-prompt part (the rendered [System prompt](#context-and-history)

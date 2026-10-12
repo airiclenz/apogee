@@ -162,6 +162,12 @@ notifier beside it.
 > argv handler's alone: a webhook spawns nothing, so it takes no permit and the confinement table
 > does not apply (contract §10.4). No URL guard is added, on parity with the observe webhook.
 >
+> **Amended 2026-10-12 (plan `2026-10-12 - 00` item 2).** "No URL guard is added" is
+> **superseded**: since commit `2d9e79e6` both the sync-lane webhook (`(*Agent).runSyncWebhook`)
+> and the observe webhook post through the url-safety guarded client (`internal/webhook`), which
+> honours the session's URL allow and deny hosts and never follows a redirect. Parity with the
+> observe webhook holds — both are guarded now.
+>
 > *Amendment (2026-09-15, plan `2026-09-15 - 00` item 7):* the contract's §10.3 post-response row is
 > **retired** — `hookExecutionCtx` is deleted and no cascade installs a `SubprocessPermit` at any
 > Moment, in any mode. No shipped Reaction spawns at post-response (the row was a leftover of the
