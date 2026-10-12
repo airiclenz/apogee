@@ -40,7 +40,11 @@
 - 5: guard folded (Tests run `TestDesignDoc` in stubllm, one package per command)
 - 3 (second round): guard folded (kept ignore line widened to `/.beads*` so the repo-root `.beads.gate.lock` stays ignored; the lock is removed and `git status --porcelain` is empty for the release gate)
 
-## 1. commit-msg hook moves to a tracked .githooks/
+## 1. commit-msg hook moves to a tracked .githooks/ — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): `core.hooksPath` is set in this checkout's local git config only (not a tracked change); bd's own hooks (pre-commit, post-merge, pre-push, post-checkout, prepare-commit-msg, post-rewrite) no longer run here, as the plan expects under the freeze.
+NOTES (2026-10-12): the old AGENTS.md bullet called the hook an "attribution stripper"; the hook refuses (exit 1) and strips nothing, so the rewritten bullet says "refuses". The `.git/hooks/commit-msg` dormant-fallback sentence was kept, repointed to `.githooks/commit-msg`.
+NOTES (2026-10-12): the AGENTS.md Dolt-sync bullet still says the git half of the sync "goes live with `bd hooks install`" and names `.beads/hooks/bd-sync-soft`; that bullet is item 4's (and the hooks item 3's), left untouched here.
 
 **What:**
 **Goal:** `.githooks/commit-msg` is tracked, byte-identical to `.beads/hooks/commit-msg` at the header base, LF-pinned in `.gitattributes`; this checkout's `core.hooksPath` is `.githooks`; `SECURITY.md` and the `AGENTS.md` git-hooks bullet describe `.githooks/` as the hook directory and how a clone activates it (`git config core.hooksPath .githooks`), with the trust warning kept.
