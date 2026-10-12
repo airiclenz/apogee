@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-# apogee — an open-source AI coding agent for local LLMs, in your terminal
+# **apogee** - an open-source AI coding agent for local LLMs, in your terminal
 
 <p align="center">
   <a href="https://github.com/airiclenz/apogee/releases/latest"><img src="https://img.shields.io/github/v/release/airiclenz/apogee?label=release" alt="Latest release"></a>
