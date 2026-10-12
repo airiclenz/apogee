@@ -125,7 +125,11 @@ Recast at the regression check (2026-10-12).
 - `test ! -e .beads.gate.lock`; `git status --porcelain` prints nothing after the commit
 **Commit:** `chore(issues): move the issue register from beads to capcom`
 
-## 4. AGENTS.md, README and CONTEXT speak capcom
+## 4. AGENTS.md, README and CONTEXT speak capcom — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): AGENTS.md gains one new bullet beside the register bullet for the merge-driver clone instruction (both `git config --global` lines, with the repo-local refusal named via `internal/gitexec` `CommandConfigRefusal`), rather than folding it into an existing bullet.
+NOTES (2026-10-12): remaining grep hits are migration facts only — AGENTS.md register bullet (`ISSUES.md` → beads 2026-09-03, beads → capcom 2026-10-12), git-hooks bullet (item 1's repoint sentence), spoken-id bullet (migrated beads ids kept as aliases). The old `apogee-net-deny-egress` example was dropped from the alias list: it was never an issue id and does not resolve; the new-slug example is the real `net-deny-egress-gap`.
+NOTES (2026-10-12): CONTEXT.md keeps `apogee-fsx` as the plan says; it resolves as an alias of `adaptive-prompt-complexity`.
 
 **What:**
 **Goal:** no live sentence in `AGENTS.md`, `README.md` or `CONTEXT.md` names `bd`, beads or a "bead" as apogee's register or its workflow; each states the capcom equivalent.

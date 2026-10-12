@@ -355,7 +355,7 @@ prebuilt binaries for all six targets, a Homebrew formula, a Scoop manifest and 
 submission. Functionally the loop is complete: full tool suite, MCP client, parallel
 sub-agents, skills, sessions, schedules, and OS-confined Auto mode on all three platforms.
 What changed lately lives in the [CHANGELOG](CHANGELOG.md); what is next lives in the
-issue register (`bd`).
+issue register (capcom, `.capcom/`).
 
 ## Why Go
 
