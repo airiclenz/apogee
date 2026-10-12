@@ -370,7 +370,9 @@ returned carrying both reasons in `Capabilities().Unavailable`. The order lives 
 constructed lazily because its probe forks `bwrap`.)* *(Amended 2026-07-22, §9: Windows is no longer "elsewhere" — it selects
 the token backend at or above build 17763, and `denyConfiner` only below that floor.)*
 The `ConfinementBox` is built from the injected
-`WorkspaceDir` plus the per-project `WritablePaths`/`NetworkAllow` from config (see §7 — the
+`WorkspaceDir` plus the embedder-set `Config.ConfineWritablePaths`/`Config.ConfineNetworkAllow`
+(no config key fills either — ADR 0012's 2026-10-02 note; today the one `WritablePaths` entry is the
+session scratch dir) (see §7 — the
 toolchain's cache/temp dirs must be writable inside the box or `go test`/`pip` fail under confinement;
 since 2026-09-15 they are redirected into the session scratch dir the box already holds). The `main` entry
 point dispatches the `__confined-exec` sentinel before Cobra (§2.3).
@@ -1229,8 +1231,9 @@ extend it per project. This is a box-*construction* concern, not
 a `Confiner` concern — the `Confine` contract (§2) is unaffected; it confines to whatever box it is
 handed.
 
-> **Amended 2026-08-22 (ADR 0056).** The box's writable set is now **workspace ∪ per-project
-> `WritablePaths` ∪ the session scratch dir** — plus the backend-level `/dev/null` exemption (§2.3),
+> **Amended 2026-08-22 (ADR 0056).** The box's writable set is now **workspace ∪ embedder-set
+> `WritablePaths` ∪ the session scratch dir** *(2026-10-12: `Config.ConfineWritablePaths`, which no
+> config key fills — ADR 0012's 2026-10-02 note)* — plus the backend-level `/dev/null` exemption (§2.3),
 > which stays out of the box by construction. The scratch dir is `~/.apogee/scratch/<session-id>/`
 > (a dotdir sibling of `sessions/`, `library/`, …), created `0700` when the session id is minted and
 > following the **active** session across rotation; `Config.ConfinementBox()` appends it to

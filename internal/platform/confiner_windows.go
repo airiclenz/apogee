@@ -201,9 +201,10 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 // above the floor. NetworkEgress is FALSE always and by construction: ConfinementBox's
 // NetworkAllow is a per-host tightening list, no token or integrity facility can express
 // per-host egress, and the Windows facilities that can (WFP, firewall rules) are
-// machine-scoped and admin-requiring. The backend is Auto-eligible anyway, because
-// AutoEligible() is FSWrite-only (ADR 0012) — the same position a 5.13–6.6 Linux kernel
-// occupies.
+// machine-scoped and admin-requiring. The backend is AutoEligible anyway, because that
+// predicate reads FSWrite alone (ADR 0012) — the same position a 5.13–6.6 Linux kernel
+// occupies. AutoEligible gates only unattended Auto and `apogee probe host`; agent
+// construction admits Auto whenever any Confiner is injected.
 //
 // It reads under the lifecycle lock, so it answers the empty {false, false} once Close has run
 // rather than a torn value — the same honest incapacity a mint failure reports.
