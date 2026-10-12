@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -277,7 +278,7 @@ func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
 		if got != "hello" {
 			t.Fatalf("system clipboard received %q, want the selection %q", got, "hello")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("the copy never reached the system clipboard")
 	}
 }
@@ -307,7 +308,7 @@ func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 
 	select {
 	case <-wrote:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("the copy never reached the system clipboard")
 	}
 	if msg := systemClipboardCmd("", "hello")(); msg != nil {
@@ -341,7 +342,7 @@ func TestTmuxClipboardReceivesTheDragCopy(t *testing.T) {
 		if got != "héllo" {
 			t.Fatalf("tmux received %q, want the selection %q", got, "héllo")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("the copy never reached the tmux seam")
 	}
 }
@@ -370,7 +371,7 @@ func TestTmuxClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 
 	select {
 	case <-wrote:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("the copy never reached the tmux seam")
 	}
 	if msg := tmuxClipboardCmd("", "hello")(); msg != nil {

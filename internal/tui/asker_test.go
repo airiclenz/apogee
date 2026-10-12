@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestAskerReturnsUIAnswer proves the ask-user rendezvous returns whatever the UI typed,
@@ -62,7 +63,7 @@ func TestAskerCancelledCtxReturnsNoLeak(t *testing.T) {
 		if !errors.Is(got.err, context.Canceled) {
 			t.Errorf("err = %v; want context.Canceled", got.err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testtime.Budget(2 * time.Second)):
 		t.Fatal("Ask did not return after ctx cancel (deadlock)")
 	}
 

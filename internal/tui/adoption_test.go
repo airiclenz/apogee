@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -404,8 +405,9 @@ func TestAdoptionStartUpOpenArmsFromInit(t *testing.T) {
 
 // initAsksDrainMarker runs m's Init and reports whether one of the Cmds it batches asks the terminal
 // for a cursor position — the drain marker (approvalDrainMarker). Each Cmd runs on its own goroutine
-// and the search stops at the first marker, so the latch's backstop tick, which sleeps for
-// approvalArmBackstop, is never waited out; half that is how long a marker gets to show up.
+// and the search stops at the first marker, so it never has to wait out the latch's backstop tick,
+// which sleeps for approvalArmBackstop; a test budget of half that is how long a marker gets to show
+// up.
 func initAsksDrainMarker(t *testing.T, m Model) bool {
 	t.Helper()
 	marker := reflect.TypeOf(tea.RequestCursorPosition())
@@ -428,7 +430,7 @@ func initAsksDrainMarker(t *testing.T, m Model) bool {
 	}
 	run(m.Init())
 
-	deadline := time.After(approvalArmBackstop / 2)
+	deadline := time.After(testtime.Budget(approvalArmBackstop / 2))
 	for {
 		select {
 		case msg := <-found:

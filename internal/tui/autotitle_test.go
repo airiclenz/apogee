@@ -13,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/title"
 )
 
@@ -81,7 +82,7 @@ func sendPrompt(t *testing.T, m Model, text string) (Model, tea.Cmd) {
 
 // namingCallDeadline bounds how long a batch is given to yield its naming call. It only has to
 // outlast the recorder seam (which answers instantly) and the spinner's parked tick.
-const namingCallDeadline = 2 * time.Second
+var namingCallDeadline = testtime.Budget(2 * time.Second)
 
 // namingCall runs cmd and every Cmd it batches, each on its own goroutine, and returns the
 // autoTitleMsg one of them produced. Submit's batch carries the worker drive and a parked spinner

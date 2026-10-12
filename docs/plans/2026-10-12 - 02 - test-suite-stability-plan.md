@@ -282,7 +282,11 @@ NOTES (2026-10-12): title_test.go's `wiring.requestTimeout = 30 * time.Milliseco
 **Acceptance:** `go vet ./cmd/apogee/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'TestNoFixedTimingInTests' ./internal/testtime/`; `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run '(Daemon|Undo|ProjectRule|ConfigWatch|MCP|ProbeModel|Headless|Update|TestWatchedProjectConfig|TestE2ESeat)' ./cmd/apogee/`
 **Commit:** `test(apogee): finish routing cmd/apogee timing through testtime`
 
-## 13. Migrate internal/tui, part 1
+## 13. Migrate internal/tui, part 1 — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): pumpTimeout, namingCallDeadline and reseatDeadline move from const to `var … = testtime.Budget(…)` (deadlock/liveness ceilings); every other site in these files is a ceiling on a wait that ends on a condition and is wrapped in testtime.Budget at the call site — only heartbeat_test.go's assertNoBatch 250 ms window is testtime.Fixed.
+NOTES (2026-10-12): initAsksDrainMarker (adoption_test.go) waits testtime.Budget(approvalArmBackstop / 2), wrapping the production constant at the call site (the precedent of items 11 and 12); like allowIfAsked in item 10 its timeout is an answer, so a slow box must not misread a slow marker as none. Its comment now says it never has to wait out the backstop tick rather than that the tick is never waited out, since at a scale of 2 the budget equals the backstop (the tick's approvalArmedMsg is not the marker, so the search is unaffected).
+NOTES (2026-10-12): three failure messages that spelled out their budget in words ("five seconds", "within a second" ×2 in heartbeat_test.go and model_test.go) now print the budgeted value with Fatalf, so they stay true at any APOGEE_TEST_TIME_SCALE.
 
 **What:** Item 9's rule. Includes the named budgets `pumpTimeout`, `reseatDeadline` and `namingCallDeadline`.
 **Regression guard.** Acceptance adds the per-file guard-output check of item 10 for its files; every internal/tui race run carries `-parallel 1`. The `-run` also names the tests that hold or call a migrated site but match no file keyword (the model approval/ask folds, the prompt-scroll reseat, the clipboard and drag-copy tests, the beat tick, startup restore, profile load and the migration tests).

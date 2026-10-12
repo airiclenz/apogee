@@ -24,6 +24,7 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -1761,8 +1762,8 @@ func TestModelApprovalFoldAsksTheTerminalForItsDrainMarker(t *testing.T) {
 			if msg == tea.RequestCursorPosition() {
 				return
 			}
-		case <-time.After(time.Second):
-			t.Fatal("the fold's batch answered nothing within a second; want its drain marker")
+		case <-time.After(testtime.Budget(time.Second)):
+			t.Fatalf("the fold's batch answered nothing within %v; want its drain marker", testtime.Budget(time.Second))
 		}
 	}
 	t.Fatal("the fold's batch carries no drain marker: the pane would arm on its backstop alone")
@@ -3110,7 +3111,7 @@ func TestModelAskFoldAsksTheTerminalForItsDrainMarker(t *testing.T) {
 		go func() { msgs <- cmdMsg(c) }()
 	}
 	launch(cmd)
-	deadline := time.After(time.Second)
+	deadline := time.After(testtime.Budget(time.Second))
 	for pending > 0 {
 		select {
 		case msg := <-msgs:
@@ -3125,7 +3126,7 @@ func TestModelAskFoldAsksTheTerminalForItsDrainMarker(t *testing.T) {
 				return
 			}
 		case <-deadline:
-			t.Fatal("the ask fold's cmds yielded no drain marker within a second")
+			t.Fatalf("the ask fold's cmds yielded no drain marker within %v", testtime.Budget(time.Second))
 		}
 	}
 	t.Fatal("the ask fold's cmds carry no drain marker: the pane would arm on its backstop alone")
@@ -7547,7 +7548,7 @@ func firstInputRow(m Model) string {
 // reseatDeadline bounds the one keystroke TestPromptScrollReseatCannotSpin drives. It is absurdly
 // generous for a walk of three logical lines — the point is only that a walk which cannot advance
 // FAILS the test instead of wedging the whole suite.
-const reseatDeadline = 10 * time.Second
+var reseatDeadline = testtime.Budget(10 * time.Second)
 
 // TestPromptScrollReseatCannotSpin pins termination on the geometry that used to wedge the re-seat.
 // The middle line fills a visual row exactly and ends with a space, so bubbles' wrap gives it a

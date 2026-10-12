@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -157,7 +158,7 @@ func firstBeat(t *testing.T, cmd tea.Cmd) beatMsg {
 		for _, c := range msg {
 			go func() { out <- c() }()
 		}
-		deadline := time.After(5 * time.Second)
+		deadline := time.After(testtime.Budget(5 * time.Second))
 		for range msg {
 			select {
 			case landed := <-out:
@@ -251,8 +252,8 @@ func TestBeatTickRunsOnTheStatedInterval(t *testing.T) {
 		if got, ok := msg.(heartbeatTickMsg); !ok || got.gen != m.hb.gen {
 			t.Errorf("the tick yielded %#v, want the live chain's heartbeatTickMsg (gen %d)", msg, m.hb.gen)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no tick five seconds into a 10ms cadence — the stated BeatInterval was not used")
+	case <-time.After(testtime.Budget(5 * time.Second)):
+		t.Fatalf("no tick %v into a 10ms cadence — the stated BeatInterval was not used", testtime.Budget(5*time.Second))
 	}
 }
 
@@ -300,7 +301,7 @@ func assertNoBatch(t *testing.T, cmd tea.Cmd) {
 		if _, ok := msg.(tea.BatchMsg); ok {
 			t.Error("Init batched a Cmd onto its start-up Cmd; an unwired monitor must start no chain")
 		}
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(testtime.Fixed(250 * time.Millisecond)):
 	}
 }
 

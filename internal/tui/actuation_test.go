@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -238,7 +239,7 @@ func launcherOpts(fake *fakeLauncher) Options {
 
 // pumpTimeout is how long a test waits for one item off an actuation's channel. It is a deadlock
 // guard, not a timing assumption: every fake answers immediately.
-const pumpTimeout = 5 * time.Second
+var pumpTimeout = testtime.Budget(5 * time.Second)
 
 // msgWithin runs cmd on its own goroutine — the listen Cmd BLOCKS on the pump, exactly as it does in
 // the program — and returns the Msg it yielded.
