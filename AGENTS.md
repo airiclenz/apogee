@@ -52,5 +52,7 @@ Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#i
 - `capcom close <id> --reason <text>`: close an issue
 - `capcom know tree`: the outline of the Knowledge tree; `capcom know show <id>` reads a Note
 
-Knowledge tree, top level: no Notes yet.
+Knowledge tree, top level:
+
+- `glossary`: apogee's domain glossary: the terms to use in code, docs and messages, one Note per term
 <!-- END CAPCOM -->

@@ -52,7 +52,13 @@ point every live reference at the Notes; leave pointer stubs where the files wer
 - Synthetic test fixtures naming `docs/adr/…` or `CONTEXT.md` (`internal/tools/*_test.go`, `internal/security/dangerous_payload_test.go`, `internal/workflow/*_test.go`).
 - Tier-6 doc cleanups of the handoff; global skills; AGENTS.md shrink.
 
-## 1. Glossary cut into a Note tree
+## 1. Glossary cut into a Note tree — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): gate passed — capcom 0.3.0; `capcom know update --help` lists `--retire` and `--add-superseded-by`.
+NOTES (2026-10-12): the intro body of `glossary.md` drops CONTEXT.md's `# Apogee` H1 (the Note title replaces it; capcom's own cut did the same); everything else above `## Language` is verbatim after link rewriting.
+NOTES (2026-10-12): a term Note's body is the whole term paragraph, the bold term line included, so the gloss (e.g. `(and its **Beat**)`) survives verbatim; `--verify` compares whole stripped bodies (frontmatter keys tolerated) and also fails on any Note under `glossary/` not cut from CONTEXT.md.
+NOTES (2026-10-12): the two explicit anchors (`floor-guard`, `tool-result-capping`) equal their term ids, so no anchor alias was needed; glossary-context's body is its two-line intro verbatim, Self-regulation's and Retired terms' bodies are their prose verbatim, the other seven sections carry one descriptive line; root and section titles are one sentence (root lower-cases "apogee" per house spelling).
+NOTES (2026-10-12): split_glossary.py exposes `rewrite_links(text, source_path, note_path)`, which resolves targets against the source file's directory, for item 3's split_adr.py to import.
 
 **What:**
 **Goal:** `.capcom/knowledge/glossary.md` exists with ten section children and 109 term grandchildren holding `CONTEXT.md`'s text verbatim (after link rewriting); `docs/skill-runs/migrate-knowledge/split_glossary.py --verify` exits 0; `CONTEXT.md` is byte-identical to the base.
