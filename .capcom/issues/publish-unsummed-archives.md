@@ -3,6 +3,7 @@ title: publish cannot check archives already on a release that has no SHA256SUMS
 status: open
 type: bug
 priority: 3
+plan: 2026-10-12 - 00 - publish-unsummed-archives-plan
 aliases: [apogee-publish-unsummed-archives]
 created: 2026-10-11T11:59:46Z
 ---
