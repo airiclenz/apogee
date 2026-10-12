@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -482,7 +483,7 @@ func TestProjectRuleReachesARunningSubAgent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the exchange: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(testtime.Budget(30 * time.Second)):
 		t.Fatal("the exchange did not finish")
 	}
 
@@ -520,16 +521,14 @@ func runExchange(ctx context.Context, engine *lateEngine, text string) error {
 // is then running, held on its gate.
 func waitForChildRequest(t *testing.T, srv *stubllm.Server) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+	testtime.Eventually(t, testtime.Budget(30*time.Second), func() bool {
 		for _, req := range srv.Requests() {
 			if n := len(req.Messages); n > 0 && req.Messages[n-1].Content == projectRuleChildTask {
-				return
+				return true
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("the child's request never reached the upstream")
+		return false
+	}, "the child's request to reach the upstream")
 }
 
 // childRanTheCommand reports whether a request carries a terminal result holding the command's

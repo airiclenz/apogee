@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/update"
 )
 
@@ -140,7 +141,7 @@ func runUpdateCommand(t *testing.T, deps updateDeps, args ...string) (string, er
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs(args)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancel()
 	err := cmd.ExecuteContext(ctx)
 	return stdout.String(), err

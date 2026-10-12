@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -154,7 +155,7 @@ func (h *daemonHarness) run(t *testing.T) func() error {
 		}
 		select {
 		case <-finished:
-		case <-time.After(10 * time.Second):
+		case <-time.After(testtime.Budget(10 * time.Second)):
 			t.Errorf("the daemon outlived its test; its Scheduler is still reading the seams the harness restores")
 		}
 	})
@@ -162,7 +163,7 @@ func (h *daemonHarness) run(t *testing.T) func() error {
 		select {
 		case err := <-done:
 			return err
-		case <-time.After(10 * time.Second):
+		case <-time.After(testtime.Budget(10 * time.Second)):
 			t.Fatalf("the daemon never returned; log so far:\n%s", h.out.String())
 			return nil
 		}
@@ -175,12 +176,12 @@ func (h *daemonHarness) stop() { h.signals <- syscall.SIGTERM }
 // awaitLog blocks until the daemon's stdout holds want, and fails when it never does.
 func (h *daemonHarness) awaitLog(t *testing.T, want string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(testtime.Budget(10 * time.Second))
+	for !expired() {
 		if strings.Contains(h.out.String(), want) {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(testtime.Fixed(5 * time.Millisecond))
 	}
 	t.Fatalf("the log never held %q; it held:\n%s", want, h.out.String())
 }

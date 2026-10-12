@@ -18,18 +18,21 @@ import (
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/projectroot"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // The cadence this file drives a real watcher at. The production poll is a second, which no test
 // should wait out; internal/config's Watcher exposes Interval and Settle so a Driver-side test can
 // tune them before Start, and configwatch_test.go's own copies of these numbers cover the watcher
-// in isolation.
+// in isolation. The interval and the settle are the watcher's own pacing, so they stay fixed; the
+// deadline is a ceiling on a report arriving, so it scales with the box.
 const (
 	configWatchTestInterval = 10 * time.Millisecond
 	configWatchTestSettle   = 150 * time.Millisecond
-	configWatchTestDeadline = 3 * time.Second
 )
+
+var configWatchTestDeadline = testtime.Budget(3 * time.Second)
 
 // startConfigWatcher starts a watcher over path at the test cadence and stops it with the test.
 func startConfigWatcher(t *testing.T, path string) *filewatch.Watcher {
@@ -332,7 +335,7 @@ func TestWatchedProjectConfigRemovalChangesNothingLive(t *testing.T) {
 	if err := os.Remove(c.projectPath); err != nil {
 		t.Fatalf("remove the Project config: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*configWatchTestSettle)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Fixed(4*configWatchTestSettle))
 	defer cancel()
 	if c.await(ctx) {
 		t.Error("removing the Project config was reported as a change; it applies at the next launch")

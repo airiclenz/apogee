@@ -36,6 +36,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -3576,7 +3577,7 @@ func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(time.Millisecond):
+			case <-time.After(testtime.Fixed(time.Millisecond)):
 			}
 		}
 		cancel()

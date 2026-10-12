@@ -28,6 +28,7 @@ import (
 	"github.com/airiclenz/apogee/internal/judge"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 const (
@@ -42,7 +43,8 @@ const (
 	// the image pull, the container start and the closing report. The previous 15 m could not
 	// fit even its own 20 × 60 s of steps. Generous costs a healthy run nothing (the principle
 	// internal/tuitest's DefaultTimeout states): the exercise ends when the reader finishes or hits
-	// the step ceiling, never on this clock.
+	// the step ceiling, never on this clock. This and the step budget are raw allowances: each call
+	// site scales its own with testtime.Budget, so the sum is scaled once, not once per term.
 	newcomerBudget = newcomerMaxSteps * (newcomerStepBudget + newcomerJudgeAllowance)
 	// One shell command inside the container. It admits the hardware a reader plausibly has
 	// rather than the one this was written on: a step is an `apt-get install`, a release archive
@@ -79,7 +81,7 @@ func TestNewcomerFollowsTheDocs(t *testing.T) {
 		t.Skipf("the newcomer stub binds on the docker bridge gateway, which the host can bind on linux only (this is %s)", runtime.GOOS)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), newcomerBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(newcomerBudget))
 	defer cancel()
 
 	gateway := newcomerBridgeGateway(t, ctx, docker)
@@ -302,7 +304,7 @@ func newcomerExec(ctx context.Context, docker, container, command string) string
 	if strings.TrimSpace(command) == "" {
 		return "(no command)"
 	}
-	stepCtx, cancel := context.WithTimeout(ctx, newcomerStepBudget)
+	stepCtx, cancel := context.WithTimeout(ctx, testtime.Budget(newcomerStepBudget))
 	defer cancel()
 
 	cmd := exec.CommandContext(stepCtx, docker, "exec", "--workdir", "/root", container, "sh", "-lc", command)

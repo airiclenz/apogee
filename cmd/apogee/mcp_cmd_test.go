@@ -26,6 +26,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 const (
@@ -277,7 +278,7 @@ func runMCPCommand(t *testing.T, deps mcpLoginDeps, args ...string) (string, err
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs(args)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancel()
 	err := cmd.ExecuteContext(ctx)
 	return stdout.String(), err

@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // modelUpstream is a fake OpenAI-compatible server that passes the whole capability battery. It
@@ -909,13 +910,14 @@ func TestProbeModelTimeoutFlagBoundsTheBatteryAttempt(t *testing.T) {
 	go func() { errCh <- cmd.ExecuteContext(context.Background()) }()
 
 	// Generous on purpose: it only has to sit far below the 5m default and far above a healthy
-	// run, which cuts the held attempt in 200ms and finishes against the answering upstream.
+	// run, which cuts the held attempt in 200ms and finishes against the answering upstream. It is
+	// a budget, so a slow box's scale stretches it — still under the default at a scale of 2.
 	select {
 	case err := <-errCh:
 		if err != nil {
 			t.Fatalf("probe model: %v\n%s", err, out.String())
 		}
-	case <-time.After(60 * time.Second):
+	case <-time.After(testtime.Budget(60 * time.Second)):
 		t.Fatalf("probe model never returned: --timeout 200ms did not reach the battery client, "+
 			"which is still waiting out the %s default", batteryRequestTimeout)
 	}

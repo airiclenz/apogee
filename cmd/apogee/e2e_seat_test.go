@@ -24,6 +24,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -249,7 +250,7 @@ func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	// multiplied by the interval, so a slower cadence cannot compound into a wait nothing else bounds.
 	run.target.Close()
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable",
-		tuitest.Within(2*seatBeat+tuitest.DefaultTimeout))
+		tuitest.Within(testtime.Fixed(2*seatBeat)+tuitest.DefaultTimeout))
 
 	sent := len(run.session.Requests())
 	submit(run.drv, seatPlainPrompt)

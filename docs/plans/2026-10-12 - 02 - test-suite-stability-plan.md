@@ -263,7 +263,13 @@ NOTES (2026-10-12): TestLiveGenerateTitle's deadline wraps the production titleR
 **Acceptance:** `go vet ./cmd/apogee/`; `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run '(Egress|Delegat|Schedule|Title|Wire|CaptureStderr|FiringHooksRefuses|SessionRaisedFiring|ApplySettingReactions|ReactionsRowReload|HookRunnerReplace)' ./cmd/apogee/`; `GOMEMLIMIT=2GiB go test -count=1 -v -run 'TestNoFixedTimingInTests$' ./internal/testtime/ | grep -E 'cmd/apogee/(e2e_egress|delegation|schedule|title|wire_(boot|firing|live|settings))_test.go'` prints nothing
 **Commit:** `test(apogee): route wiring and delegation timing through testtime`
 
-## 12. Migrate cmd/apogee, part 3, and release the package
+## 12. Migrate cmd/apogee, part 3, and release the package — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): daemonHarness.awaitLog (daemon_test) and the Firing wait in undo_test poll on testtime.Expiry(Budget(10s)), not Eventually: awaitLog's failure dumps the log held at that moment, and the undo wait must Release the held upstream before it fails — Eventually's fixed message and bare Fatalf carry neither. waitFor (mcp_login_fetch) and waitForChildRequest (projectrules) became testtime.Eventually.
+NOTES (2026-10-12): configWatchTestDeadline moves from the const block to `var … = testtime.Budget(3s)`; configWatchTestInterval and configWatchTestSettle stay fixed consts (the watcher's own pacing), and the removal test's 4×settle "no report" window is testtime.Fixed(4*configWatchTestSettle).
+NOTES (2026-10-12): newcomerBudget and newcomerStepBudget stay unwrapped consts (newcomerBudget is a count × the per-step allowances, and wrapping each term and the sum would scale twice); the two context.WithTimeout call sites wrap them in testtime.Budget, the precedent of item 10's streamRuneAllowance and item 11's titleRequestTimeout. Not run here: TestNewcomerFollowsTheDocs is gated on docker and a live endpoint.
+NOTES (2026-10-12): e2e_seat's wait is Within(testtime.Fixed(2*seatBeat)+tuitest.DefaultTimeout) — the beats are the session's own fixed cadence; headless_test's off-goroutine probe tick is Fixed(time.Millisecond); probemodel's 60 s "never returned" ceiling is a Budget, and its comment now says a scale of 2 still sits under the 5 m default it must stay below.
+NOTES (2026-10-12): title_test.go's `wiring.requestTimeout = 30 * time.Millisecond` (item 11's file, a struct-field assignment) is outside the guard's rule set and untouched here.
 
 **What:** Item 9's rule, and cmd/apogee leaves `pendingPackages`.
 **Regression guard.** every cmd/apogee race run carries `-parallel 1`. **Files:** gains e2e_seat_test.go (`tuitest.Within(2*seatBeat+…)`), update_test.go and e2e_newcomer_test.go, which the guard names; daemonfire_test.go has no site. The `-run` also names TestWatchedProjectConfig* and TestE2ESeat*, whose names match no listed keyword.

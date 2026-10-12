@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/muesli/cancelreader"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // pipeInput is a cancellable stand-in for the terminal: lines written to it arrive as typed input,
@@ -149,7 +151,7 @@ func awaitOutcome(t *testing.T, outcome <-chan fetchOutcome) fetchOutcome {
 	select {
 	case result := <-outcome:
 		return result
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("fetch did not return")
 		return fetchOutcome{}
 	}
@@ -348,7 +350,7 @@ func callbackPageWhileFetching(t *testing.T, query url.Values) string {
 	}
 	select {
 	case <-returned:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("fetch did not return after the callback")
 	}
 	return string(page)
@@ -463,7 +465,7 @@ func TestMCPLoginFetch_ContextCancel_ReturnsJoinsInputAndFreesPort(t *testing.T)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("fetch error = %v, want context.Canceled", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("fetch did not return after its context was cancelled")
 	}
 	if input.inFlight.Load() != 0 || !input.isClosed.Load() {
@@ -542,11 +544,5 @@ func TestMCPLoginFetch_EnterWithoutOpener_SaysToCopyTheURL(t *testing.T) {
 // waitFor polls condition until it holds, failing the test after a few seconds.
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatal("condition never held")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	testtime.Eventually(t, testtime.Budget(5*time.Second), condition, "the condition to hold")
 }

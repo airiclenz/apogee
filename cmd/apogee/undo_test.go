@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -461,13 +462,13 @@ func TestUndoVerbRefusesAFiringInFlight(t *testing.T) {
 		_, err := run.Once(context.Background(), spec)
 		fired <- err
 	}()
-	deadline := time.Now().Add(10 * time.Second)
+	expired := testtime.Expiry(testtime.Budget(10 * time.Second))
 	for len(up.Requests()) == 0 {
-		if time.Now().After(deadline) {
+		if expired() {
 			up.Release("answer")
 			t.Fatal("the Firing never reached the Upstream")
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(testtime.Fixed(time.Millisecond))
 	}
 
 	_, err := runUndoCmd(t, home, id)

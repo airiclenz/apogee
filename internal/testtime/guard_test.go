@@ -19,7 +19,6 @@ import (
 // migration has left — and fails on a pending package that has none left, so the set only
 // shrinks. The migration items empty it; a new package never joins it.
 var pendingPackages = map[string]bool{
-	"cmd/apogee":          true,
 	"cmd/demorig":         true,
 	"cmd/stubllm":         true,
 	"internal/agent":      true,
