@@ -1,4 +1,4 @@
-// Package projectroot resolves the Project root (ADR 0096 §1, CONTEXT.md "Project root"): the
+// Package projectroot resolves the Project root (ADR 0096 §1, the glossary's "Project root"): the
 // folder whose `.apogee/` holds the project's Project config and its `.apogee/skills` library.
 //
 // The rule is a filesystem walk and nothing else. From the symlink-resolved workspace upward, the

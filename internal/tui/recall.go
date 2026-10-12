@@ -9,7 +9,7 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The name is deliberate: this is prompt RECALL, not history. The /sessions browser owns the word
-// "history" (CONTEXT.md), and the two are different things — one lists saved conversations, this
+// "history" (the glossary), and the two are different things — one lists saved conversations, this
 // one hands back the exact text the human typed into this workspace's box.
 //
 // The split across the seam is [SessionHost]'s: internal/recall owns the file (one JSONL file per

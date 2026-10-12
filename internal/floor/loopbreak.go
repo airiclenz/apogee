@@ -29,7 +29,7 @@ import (
 //     first member has a result at both positions — the current response has not run yet — so
 //     that is the one compared; a three-tool-Turn Exchange has no -3 and never fires the rule.
 //
-// EXCHANGE-SCOPED, and that is the whole guard's boundary (CONTEXT.md: Exchange). A repeat is only
+// EXCHANGE-SCOPED, and that is the whole guard's boundary (the glossary: Exchange). A repeat is only
 // a loop within the one user request it repeats inside: a human who asks for the same thing again
 // — re-running a build, re-reading a file after editing it elsewhere — opens a NEW Exchange whose
 // first call may legitimately be byte-identical to the last call of the previous one, and answering

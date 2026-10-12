@@ -105,7 +105,7 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // roots is honoured by the next request with no re-wiring.
 //
 // A fact the session does not have is OMITTED rather than rendered empty: no scratch dir until
-// the host has actually created one (CONTEXT.md: "advertised writable only once it actually
+// the host has actually created one (the glossary: "advertised writable only once it actually
 // exists"), no library line without roots (Config.ReadMounts.Roots is nil ⇒ workspace-only, so
 // the func itself is nil-guarded), no workspace line for a Driver that scopes the engine to
 // none, and no context-files line for a session that loaded none. With every bullet omitted the

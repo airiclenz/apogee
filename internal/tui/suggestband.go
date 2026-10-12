@@ -20,7 +20,7 @@ import (
 // against the skill catalog by the ENGINE's matcher (skills.Catalog.Suggest) and the skills that
 // clearly fit, up to three, are named in one row above the input box. Nothing about the catalog
 // reaches the model — a skill is prompt text only when the human invokes it with a "/token"
-// (CONTEXT.md "Skill", ADR 0027) — so the band changes what the SCREEN says and never what is sent.
+// (the glossary's "Skill", ADR 0027) — so the band changes what the SCREEN says and never what is sent.
 // It is the reason the matcher lives in internal/skills rather than here: ranking is engine work,
 // presentation is the Driver's.
 //

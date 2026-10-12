@@ -3,7 +3,7 @@
 // and reports the answer as a Beat.
 //
 // It is deliberately NOT a probe. `apogee probe` (ADR 0021) diagnoses ONCE, on demand, and
-// prints a report a human reads — CONTEXT.md is explicit that it "diagnoses, it does not
+// prints a report a human reads — the glossary is explicit that it "diagnoses, it does not
 // monitor". The heartbeat is the monitoring half nothing owned before: it runs unasked for
 // the life of a session, and its output is consumed (upstream display, offline state, and
 // the rebind that follows an observed model change), never printed as a report. Two nouns,

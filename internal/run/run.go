@@ -670,7 +670,7 @@ func (s Spec) line() string {
 // request (with the human-facing reason the ladder computed) and this deny verdict — so the
 // reason is on the record without this type inventing a channel for it. Refusing rather
 // than blocking is the whole point: a Firing has nobody to ask, so a gate must FAIL, never
-// park (the headless-Asker pattern, CONTEXT.md → Ask).
+// park (the headless-Asker pattern, the glossary → Ask).
 //
 // The mutex is defensive rather than load-bearing: the engine consults the Approver
 // synchronously on the goroutine driving the loop, and count() runs after that goroutine

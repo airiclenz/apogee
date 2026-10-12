@@ -1693,7 +1693,7 @@ type KeyMigrationOffer struct {
 	Entries []string
 }
 
-// LaunchProfileChoice is one Launch profile `/model` offers (CONTEXT.md: a Launch profile
+// LaunchProfileChoice is one Launch profile `/model` offers (the glossary: a Launch profile
 // is the LAUNCH-side description of a model — model file, server, flags — owned by the launcher's
 // config, opposite the request-side Model profile). Name does two jobs with one value, the
 // [ServerChoice] shape: it labels the row, and it is the name [LauncherHost.Load] is called with.

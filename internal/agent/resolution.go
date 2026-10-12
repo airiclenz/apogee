@@ -12,7 +12,7 @@ import (
 
 // ----------------------------------------------------------------------------
 // The per-call Resolution — the one verdict dispatch executes (D1–D6;
-// confinement-execution-contract §4; CONTEXT.md → Resolution)
+// confinement-execution-contract §4; the glossary → Resolution)
 // ----------------------------------------------------------------------------
 //
 // A resolution is the COMPLETE, per-call verdict — every rule that decides a tool call's

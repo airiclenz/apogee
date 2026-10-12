@@ -1366,7 +1366,7 @@ func (s ResolvedSkill) Block(body string) string {
 // Like SkillResolver it is defined here and implemented by internal/skills, so the tool package
 // fulfils the seam without importing the catalog (ADR 0010 — the dependency flows toward domain).
 //
-// [ADR 0065]: docs/adr/0065-shipped-skills-and-the-load-skill-door.md
+// [ADR 0065]: .capcom/knowledge/decisions/adr-0065.md
 type SkillLookup interface {
 	// LookupSkill matches query against the catalog and returns the one answer load_skill sends
 	// back: a body when the match is certain enough to spend the tokens on, candidate ids when it

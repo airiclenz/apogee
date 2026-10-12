@@ -23,7 +23,7 @@ const TextMaxRunes = 200
 const MaxRepeatRounds = 10
 
 // Plan is one Workflow definition, whichever source wrote it: the stages a `fan_out` call asks
-// for or the ones a Recipe declares. It is the in-memory type only — the CONTEXT.md word for the
+// for or the ones a Recipe declares. It is the in-memory type only — the glossary's word for the
 // human-written definition is Recipe, and "plan" otherwise means a docs/plans/ document. Stages
 // run in the order listed; a stage may refer only to stages before it.
 type Plan struct {

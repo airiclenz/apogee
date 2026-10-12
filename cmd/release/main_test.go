@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -98,5 +101,54 @@ func TestBadCommandLineIsAUsageError(t *testing.T) {
 				t.Errorf("runner was called %d times, want none", len(commands.calls))
 			}
 		})
+	}
+}
+
+// recordPathPattern captures the repo-relative path a decisionRecordPointer names in parentheses.
+var recordPathPattern = regexp.MustCompile(`\(([^()]+\.md)\)`)
+
+// TestHelpNamesADecisionRecordThatExists pins the pointer `release --help` closes on: the help
+// prints it, and the Note path it names resolves from the module root — so moving or renaming the
+// record breaks this test rather than leaving the help pointing nowhere.
+func TestHelpNamesADecisionRecordThatExists(t *testing.T) {
+	t.Parallel()
+	commands := &fakeRunner{respond: func(recordedCall) (string, error) {
+		return "", errors.New("the runner must not be reached")
+	}}
+
+	output, err := execute(t, commands, "--help")
+
+	if err != nil {
+		t.Fatalf("release --help: %v", err)
+	}
+	if !strings.Contains(output, decisionRecordPointer) {
+		t.Fatalf("help does not print %q:\n%s", decisionRecordPointer, output)
+	}
+	match := recordPathPattern.FindStringSubmatch(decisionRecordPointer)
+	if match == nil {
+		t.Fatalf("pointer %q names no .md path in parentheses", decisionRecordPointer)
+	}
+	recordPath := filepath.Join(moduleRoot(t), filepath.FromSlash(match[1]))
+	if _, err := os.Stat(recordPath); err != nil {
+		t.Errorf("pointer names %s, which does not resolve: %v", match[1], err)
+	}
+}
+
+// moduleRoot walks up from the test's working directory to the directory holding go.mod.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("working directory: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("no go.mod above the test's working directory")
+		}
+		dir = parent
 	}
 }

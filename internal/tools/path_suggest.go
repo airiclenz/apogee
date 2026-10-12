@@ -18,7 +18,7 @@ const maxPathSuggestions = 5
 
 // suggestSiblings answers the entries of a missing path's PARENT whose names begin with the
 // missing name — the "did you mean" a refusal can offer instead of only saying no. A model
-// that spelled a long filename by its prefix (docs/adr/0025) gets back the name it meant.
+// that spelled a long filename by its prefix (docs/manual/conf) gets back the name it meant.
 //
 // root is the root the path was ACCEPTED under (readScope.resolve already answered that);
 // rel is the missing path relative to that root in NATIVE separator form (workspaceRelative,

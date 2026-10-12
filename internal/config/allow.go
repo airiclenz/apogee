@@ -8,7 +8,7 @@ import (
 	"github.com/airiclenz/apogee/internal/adoption"
 )
 
-// The `allow:` key — Allow rules (ADR 0096 §2, §4; CONTEXT.md "Allow rule", "Adoption")
+// The `allow:` key — Allow rules (ADR 0096 §2, §4; the glossary's "Allow rule", "Adoption")
 //
 // An Allow rule is a persisted yes that answers an ordinary Approval: a word prefix for `terminal`,
 // a whole server for an MCP server. The key is the one granting-class key, and its two layers are

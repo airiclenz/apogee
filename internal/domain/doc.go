@@ -1,4 +1,4 @@
-// Package domain is the ubiquitous language (CONTEXT.md) rendered as Go: every
+// Package domain is the ubiquitous language (the glossary) rendered as Go: every
 // type, interface, enum, sentinel error, and reaction working-value in Apogee's public
 // surface, plus the pure logic intrinsic to those types (Reaction.Validate,
 // ConfinementCaps.AutoEligible, the Session envelope and its versioning).
@@ -11,7 +11,7 @@
 // and the invariant "internal/* never imports root" holds at the bottom of the graph.
 //
 // Naming: "domain", not "core" — the retired "Apogee Core" library term
-// (CONTEXT.md "Retired terms") is unrelated to this internal package.
+// (the glossary's "Retired terms") is unrelated to this internal package.
 //
 // # The files, one line each
 //

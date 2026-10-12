@@ -1,5 +1,5 @@
 // Package adoption records the user's answers to a Project config's granting entries (ADR 0096 §4,
-// CONTEXT.md "Adoption"): which of them are adopted and which rejected, pinned to each entry's exact
+// the glossary's "Adoption"): which of them are adopted and which rejected, pinned to each entry's exact
 // content and to the Project root it sits under.
 //
 // A Project config may be committed, so anything in it can arrive from a teammate, a pull or a

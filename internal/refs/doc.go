@@ -12,7 +12,7 @@
 // The grammar itself is spelled by the doc comments on [FileSpans], [SkillSpans] and [ScanToken],
 // which are its specification: a token starts at a word boundary (which is what keeps an email
 // address out), runs to whitespace in its bare form or between quotes in its quoted one, admits
-// no escape sequences, and never crosses a newline. CONTEXT.md's "File reference (@file)" and
+// no escape sequences, and never crosses a newline. The glossary's "File reference (@file)" and
 // "Skill" entries are the domain-language side of the same rule.
 //
 // The grammar lives below every Driver because more than one reader wants it: the TUI both sends

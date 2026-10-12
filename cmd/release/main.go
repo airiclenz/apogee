@@ -31,6 +31,11 @@ const (
 	exitBadUsage  = 2
 )
 
+// decisionRecordPointer closes the root command's long help: it names the decision record that
+// gives this program its job, by the repo-relative path of that record's Note, so a maintainer
+// reading `release --help` can open it.
+const decisionRecordPointer = "See ADR 0098 (.capcom/knowledge/decisions/adr-0098.md)."
+
 func main() {
 	if err := newRootCommand(execRunner{}).ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, "release:", err)
@@ -48,7 +53,7 @@ func newRootCommand(commands runner) *cobra.Command {
 		Use:   "release",
 		Short: "Build and publish an apogee release",
 		Long: "release does the deterministic work of an apogee release (ADR 0098).\n" +
-			"See docs/adr/0098-the-repo-owns-its-release-pipeline.md.",
+			decisionRecordPointer,
 		SilenceErrors: true,
 	}
 	cmd.AddCommand(newDistCommand(commands))

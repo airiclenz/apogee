@@ -240,7 +240,7 @@ func (p *launcherPath) follow(entry config.ServerEntry) {
 }
 
 // launchProfile is one row of `/model`'s launcher picker as this bridge assembles it — a Launch
-// profile (CONTEXT.md) reduced to the facts the choice is made on. It is the composition root's own type,
+// profile (the glossary) reduced to the facts the choice is made on. It is the composition root's own type,
 // projected onto the renderer's LaunchProfileChoice at the seam, so no launcher type ever reaches
 // internal/tui (the heartbeat.Beat precedent).
 type launchProfile struct {

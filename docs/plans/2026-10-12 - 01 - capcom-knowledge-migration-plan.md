@@ -281,7 +281,10 @@ internal/stubllm/script_test.go — designDocExample; internal/domain/reaction_t
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestManualStatesTheMomentCount' ./internal/domain/`
 **Commit:** `docs: link the decision records and glossary as Notes`
 
-## 11. Go names the Notes, never the old files
+## 11. Go names the Notes, never the old files — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): Go comments naming `CONTEXT.md` now say "the glossary" (or "the glossary's" where the old text was possessive or a quoted entry name); every term name is kept. No `docs/adr/NNNN-slug.md` comment path existed apart from the `[ADR 0065]` doc-link definition, which points at `.capcom/knowledge/decisions/adr-0065.md` as the regression guard requires.
+NOTES (2026-10-12): the new test `TestHelpNamesADecisionRecordThatExists` goes through `release --help` (checks the help prints `decisionRecordPointer`), extracts the parenthesised `.md` path from the constant and stats it under the directory holding `go.mod`, with `filepath.FromSlash` for the Windows CI job.
 
 **What:** Depends on item 4.
 **Goal:** no non-test Go file names a `docs/adr/` path or `CONTEXT.md`; the message `cmd/release` prints names `.capcom/knowledge/decisions/adr-0098.md`, and a test asserts that the path the message names exists relative to the repo root.

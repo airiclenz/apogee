@@ -9,7 +9,7 @@ import (
 // The thinking board — what the /thinking pane reads
 //
 // This file holds the session's thinking: one record per agent per Turn, of the reasoning chunks
-// that agent revealed while that Turn ran (CONTEXT.md, "Thinking channel"). It is the RETENTION
+// that agent revealed while that Turn ran (the glossary, "Thinking channel"). It is the RETENTION
 // half of the /thinking pane — the pane composes and paints rows out of what is kept here, and
 // keeps none of its own — so the rules below are the rules the display lives by.
 //

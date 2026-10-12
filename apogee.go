@@ -523,7 +523,7 @@ type RecipeLaunch = agent.RecipeLaunch
 
 // WorkflowPlan is one Workflow definition (ADR 0087): the stages a `fan_out` call asks for or a
 // Recipe declares, run in the order listed. It is Recipe.Plan's type, so an embedder's own
-// RecipeSource builds one; the CONTEXT.md word for the human-written definition is Recipe.
+// RecipeSource builds one; the glossary's word for the human-written definition is Recipe.
 type WorkflowPlan = workflow.Plan
 
 // WorkflowStage is one stage of a WorkflowPlan; its Kind says which of its fields it reads.

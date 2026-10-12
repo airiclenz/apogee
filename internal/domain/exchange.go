@@ -1,7 +1,7 @@
 package domain
 
 // The Exchange as a derived domain working value (ADR 0017 §1). The current
-// Exchange — one user input through to the final no-tool response (CONTEXT.md)
+// Exchange — one user input through to the final no-tool response (the glossary)
 // — is never cached: its opening is the index of the last RoleUser message that
 // OPENS an Exchange, the Exchange the messages strictly after it. The boundary is
 // stable across request-scoped injections because InjectContext places injections

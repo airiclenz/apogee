@@ -46,7 +46,7 @@ type Item struct {
 type SplitBudget int
 
 // NewSplitBudget derives the split budget from a child's working context ceiling — the Budget's
-// ContextLimit (CONTEXT.md **Budget**, the single authority on context room), never the raw
+// ContextLimit (the glossary's **Budget**, the single authority on context room), never the raw
 // advertised n_ctx. A limit of 0 (unknown) or no larger than the brief reserve yields 0.
 func NewSplitBudget(contextLimit int) SplitBudget {
 	room := contextLimit - splitBriefReserveTokens
