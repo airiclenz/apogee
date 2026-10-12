@@ -201,6 +201,17 @@ sets it in a step of its own, after `make test`:
 print `--- PASS: TestLandlockProbeNetwork/udp_egress_under_network_deny`. Leave it unset on a
 dev box whose kernel lacks landlock ABI 4, where the skip is the honest result.
 
+To tell a flake from a real failure, `scripts/ci-flakes.sh [--since YYYY-MM-DD]
+[--workflow ci.yml] [--limit N]` tallies what failed across CI's failed runs. It needs `gh`,
+authenticated for the repository. It lists the failed runs, fetches each failed job's log
+(cached under `${TMPDIR:-/tmp}/apogee-ci-flakes/`, so a second pass is quick), and prints two
+tables: one row per failed job with its date, commit and failing tests, then one row per
+failure with its package, platform, count and dates. A test that fails on several commits that
+did not touch it is the flake. A data race and a test timeout are tagged `[race]` and
+`[timeout]`. A job that failed outside any test, such as lint, vet or a cross-compile, is named
+by its failing step. A run that was re-run to green no longer counts as failed, so its first
+attempt is not in the tally.
+
 ## Releasing
 
 The release process lives in this repo and needs nothing outside it

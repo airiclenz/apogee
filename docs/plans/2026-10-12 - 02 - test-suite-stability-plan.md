@@ -590,7 +590,11 @@ NOTES (2026-10-12): the pasted-image-path check is not exercised by e2e: no subm
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/tuitest/`; `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestE2E(Smoke|Popup|Copy|Usage|QueuedMessage|ApprovalKeysAreArmed)' ./cmd/apogee/`
 **Commit:** `perf(e2e): paste prompts instead of typing them key by key`
 
-## 29. scripts/ci-flakes.sh tallies CI failures
+## 29. scripts/ci-flakes.sh tallies CI failures — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): added a `--limit N` flag (default 100 failed runs) beyond the Goal's two flags, since `gh run list` caps at 20 by default and an unbounded fetch without `--since` would be open-ended; documented in the script header and building.md.
+NOTES (2026-10-12): platform is read from each job's runner labels (REST `actions/runs/<id>/jobs`), not the job name; test-shards.sh chunk headers (`--- <pkg> chunk i/n ---`) supply the package for chunk failures, which print no `FAIL<TAB>pkg` line. A run re-run to green is no longer a failed run, so its first attempt is not tallied (stated in the header and the manual).
+NOTES (2026-10-12): live run `scripts/ci-flakes.sh --since 2026-10-10` read 8 failed runs (35 s cold, 9 s cached) and counted TestStartPseudoConsoleRunsTheCommand (internal/platform, windows) once; shellcheck is not installed on this box, so only `bash -n` checked syntax; bash 3.2 itself was not available to run.
 
 **What:** Makes "is it a flake?" a lookup instead of a guess (review §8, lever 10).
 **Goal:** `scripts/ci-flakes.sh [--since YYYY-MM-DD] [--workflow ci.yml]` lists failed runs with `gh`, fetches each failed job's log with `gh api repos/{owner}/{repo}/actions/jobs/<id>/logs`, and prints two tables: per run (date, sha, job, failing tests) and aggregated (test, package, platform, count, dates). Non-test job failures are named by the failing step. `docs/manual/building.md` names the script.
