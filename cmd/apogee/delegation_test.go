@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // delegationSpy records what the wiring pushed at the engine, in order. It needs no lock: observe
@@ -812,7 +813,7 @@ func TestDelegationLandLosesToAnEditThatDropsTheServer(t *testing.T) {
 	// when the wait expires, and the assertion is the same for both: what the engine is left holding.
 	select {
 	case <-relisted:
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(testtime.Fixed(50 * time.Millisecond)):
 	}
 	close(gate.release)
 	<-landed
@@ -1169,7 +1170,7 @@ func racedClearAgainstALanding(
 	// holding.
 	select {
 	case <-landed:
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(testtime.Fixed(50 * time.Millisecond)):
 	}
 	close(gate.release)
 	<-cleared

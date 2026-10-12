@@ -31,13 +31,14 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // gateSettleWindow is how long a test waits before concluding that a blocked Gate really is
 // blocked. Nothing under test should ever consume it on the release path — those assertions wait on
 // a channel — so it buys only the negative claim, and buys it cheaply.
-const gateSettleWindow = 50 * time.Millisecond
+var gateSettleWindow = testtime.Fixed(50 * time.Millisecond)
 
 // firingUpstream starts a stubllm upstream that answers every request with one final, no-tool
 // reply. Its request log is what each request carried — the tool menu it offered, which is how the
@@ -52,14 +53,8 @@ func firingUpstream(t *testing.T, reply string) *stubllm.Server {
 // log is polled rather than hooked because the log is the stub's own word that a request landed.
 func awaitRequest(t *testing.T, up *stubllm.Server) {
 	t.Helper()
-	deadline := time.After(10 * time.Second)
-	for len(up.Requests()) == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("the firing never reached the upstream")
-		case <-time.After(time.Millisecond):
-		}
-	}
+	testtime.Eventually(t, testtime.Budget(10*time.Second),
+		func() bool { return len(up.Requests()) > 0 }, "the firing to reach the upstream")
 }
 
 // sessionOnlyTool names anything the interactive session's registry carries that a Firing must not
@@ -921,7 +916,7 @@ func (h *scheduleHarness) fire(t *testing.T) {
 func (h *scheduleHarness) await(t *testing.T, want schedule.EventKind) schedule.Event {
 	t.Helper()
 
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(testtime.Budget(10 * time.Second))
 	for {
 		select {
 		case ev := <-h.events:
@@ -1040,7 +1035,7 @@ func TestIdleGateHoldsAFiringUntilTheSessionIsQuiescent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("wait after the idle report: %v; want a release", err)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(testtime.Budget(time.Second)):
 			t.Fatal("wait did not return after the session reported idle")
 		}
 	})
@@ -1060,7 +1055,7 @@ func TestIdleGateHoldsAFiringUntilTheSessionIsQuiescent(t *testing.T) {
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("wait returned %v; want the context's own error, which is what lets Close join", err)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(testtime.Budget(time.Second)):
 			t.Fatal("wait ignored its cancelled context; Close would hang on this waiter")
 		}
 	})
@@ -1201,7 +1196,7 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 	var got result
 	select {
 	case got = <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("Add never returned from the Update loop: the program is deadlocked, " +
 			"which is what /schedule 10m did to the TUI")
 	}
@@ -1215,7 +1210,7 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 		if msg == nil {
 			t.Fatalf("scheduler notice = %#v, want a message the Update loop can fold", msg)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("no scheduler notice ever reached the program")
 	}
 
@@ -1227,7 +1222,7 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 		if stopErr != nil {
 			t.Fatalf("Stop: %v", stopErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("Stop never returned from the Update loop: the program is deadlocked")
 	}
 	go func() {

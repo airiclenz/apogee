@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The `url-safety:` guard an MCP connect is made under (audit 2026-08-25 F-40).
@@ -105,7 +106,7 @@ func TestASessionRaisedFiringRunsThroughTheBootsRunner(t *testing.T) {
 		if spec.ScheduleName != "Nightly build" {
 			t.Errorf("the injected runner ran Spec.ScheduleName = %q; want the Schedule that fired", spec.ScheduleName)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(testtime.Budget(10 * time.Second)):
 		t.Fatal("the Firing never reached the runner the boot was handed; it ran through the production fallback instead")
 	}
 }

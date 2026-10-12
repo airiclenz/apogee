@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/testtime"
 	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
 	// which shadows the package name inside those functions.
 	apiprovider "github.com/airiclenz/apogee/internal/provider"
@@ -1357,7 +1358,7 @@ func TestFiringHooksRefusesADenyListedWebhookEndpoint(t *testing.T) {
 		t.Fatalf("firingHooks: %v", err)
 	}
 	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
-	closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	closeCtx, cancel := context.WithTimeout(context.Background(), testtime.Budget(10*time.Second))
 	defer cancel()
 	_ = runner.Close(closeCtx)
 

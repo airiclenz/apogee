@@ -26,6 +26,7 @@ import (
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -3758,7 +3759,7 @@ func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 		if name != "reloaded" {
 			t.Errorf("the runner fired %q; want the reaction the reload installed", name)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("no reaction fired after the reload; the runner is still on the boot list")
 	}
 }
@@ -3872,7 +3873,7 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 		if name != "reloaded" {
 			t.Errorf("the runner fired %q; want the reaction the reload installed", name)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("no reaction fired after the reload; the runner is still on the boot list")
 	}
 
@@ -4055,7 +4056,7 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 
 	select {
 	case <-barrier:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("Replace's drain never reported the retired generation's drops; the off-goroutine promise went untested")
 	}
 	if !offCaller.Load() {

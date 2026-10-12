@@ -245,7 +245,12 @@ NOTES (2026-10-12): paneNeverShows looks every testtime.Fixed(5ms) on a ticker a
 **Acceptance:** `go vet ./cmd/apogee/`; `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestE2E(Smoke|Stream|Hostile|Approval|Adoption|Parallel|Console|Announced|LiveState|Width|Outcome|Delegation)' ./cmd/apogee/`; `GOMEMLIMIT=2GiB go test -count=1 -v -run 'TestNoFixedTimingInTests$' ./internal/testtime/ | grep -E 'cmd/apogee/e2e_(support|smoke|stream|hostile|approval|parallel|console|announced)_test.go'` prints nothing
 **Commit:** `test(apogee): route the e2e core's timing through testtime`
 
-## 11. Migrate cmd/apogee, part 2 (wiring and delegation)
+## 11. Migrate cmd/apogee, part 2 (wiring and delegation) — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): awaitRequest (schedule_test.go) is a hand-rolled poll on the test goroutine, so it became testtime.Eventually on Budget(10s) per item 9's rule rather than keeping its 1 ms select tick under Fixed as the assumed approach had it; a timeout now fails "timed out after … waiting for the firing to reach the upstream".
+NOTES (2026-10-12): TestCaptureStderrRestoresOnGoexit's goroutine wait uses testtime.Expiry(Budget(2s)) with a Fixed(10ms) sleep, not Eventually: its failure is a non-fatal t.Errorf that reports the goroutine counts at the moment it gives up, which Eventually's fixed message cannot carry.
+NOTES (2026-10-12): the two delegation_test.go 50 ms "either inside the window or held out of it" waits, gateSettleWindow and title_test.go's 50 ms caller deadline (meant to expire) are testtime.Fixed; every ceiling (egress exit 5 s, the 45 s long-stream Within, schedule's 10 s/1 s/3 s, stalledReplyBackstop, the wire_* 3/5/10 s waits and close context) is testtime.Budget. gateSettleWindow and stalledReplyBackstop move from const to var.
+NOTES (2026-10-12): TestLiveGenerateTitle's deadline wraps the production titleRequestTimeout (title.go, untouched) as testtime.Budget(titleRequestTimeout) at the call site.
 
 **What:** Item 9's rule.
 **Regression guard.** Acceptance adds a check that `go test -count=1 -v -run 'TestNoFixedTimingInTests$' ./internal/testtime/` prints no finding naming any of the item's files; every cmd/apogee race run carries `-parallel 1`. The `-run` also names the six edited tests no keyword matches (TestCaptureStderrRestoresOnGoexit, TestFiringHooksRefusesADenyListedWebhookEndpoint, TestASessionRaisedFiringRunsThroughTheBootsRunner, and three in wire_settings_test.go).

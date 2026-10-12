@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -237,7 +238,7 @@ func TestE2EEgressDeniedMCPEndpointStopsTheLaunch(t *testing.T) {
 			t.Error("apogee exited 0 after refusing a configured MCP endpoint; a set that cannot " +
 				"be connected is a launch that fails, not a session with one tool fewer")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatal("apogee kept running after refusing a configured MCP endpoint")
 	}
 }
@@ -264,7 +265,7 @@ func TestE2EEgressLongStreamIsNotDeadlined(t *testing.T) {
 	// rune lands twenty-five seconds after the first, and a client-level deadline anywhere under
 	// that would end the Turn with an error instead of a sentence.
 	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find("The long answer completes."); return ok },
-		tuitest.Within(45*time.Second), tuitest.Awaiting("the twenty-five-second reply to arrive whole"))
+		tuitest.Within(testtime.Budget(45*time.Second)), tuitest.Awaiting("the twenty-five-second reply to arrive whole"))
 	drv.WaitQuiet(settled)
 
 	frame := drv.Frame()

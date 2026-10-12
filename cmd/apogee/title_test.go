@@ -17,13 +17,14 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/title"
 )
 
 // stalledReplyBackstop bounds the stalled server below. Nothing under test should reach it — every
 // call is abandoned within milliseconds — so it exists purely so a broken deadline leaves a failed
 // assertion rather than a hung suite.
-const stalledReplyBackstop = 5 * time.Second
+var stalledReplyBackstop = testtime.Budget(5 * time.Second)
 
 // noDialect is the dialect closure every case that is NOT about the dialect wires: the zero, which
 // emits the historical chat_template_kwargs shape these tests were all written against.
@@ -257,7 +258,7 @@ func TestTitleGeneratorSurfacesADeadline(t *testing.T) {
 	t.Run("the caller's context", func(t *testing.T) {
 		t.Parallel()
 		wiring := newTitleWiring(binding, noDialect, "/home/dev/apogee")
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), testtime.Fixed(50*time.Millisecond))
 		defer cancel()
 
 		got, err := wiring.generate(ctx, []string{"name this session"})
@@ -634,7 +635,7 @@ func TestLiveGenerateTitle(t *testing.T) {
 	binding := upstreamBinding{Endpoint: endpoint, Model: os.Getenv("APOGEE_LIVE_MODEL")}
 	wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
-	ctx, cancel := context.WithTimeout(context.Background(), titleRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(titleRequestTimeout))
 	defer cancel()
 
 	raw, err := wiring.generate(ctx, []string{

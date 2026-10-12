@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -78,14 +79,14 @@ func TestCaptureStderrRestoresOnGoexit(t *testing.T) {
 	}
 	// The reader ends once the cleanup closes the write end. Poll for `<=`, never `==`: other tests'
 	// background goroutines (httptest idle connections) wind down asynchronously and an equality flakes.
-	deadline := time.Now().Add(2 * time.Second)
+	expired := testtime.Expiry(testtime.Budget(2 * time.Second))
 	for runtime.NumGoroutine() > before {
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Errorf("goroutines = %d after a bailed capture; want <= the %d before it",
 				runtime.NumGoroutine(), before)
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 	}
 }
 
@@ -1035,7 +1036,7 @@ func TestBootConfigWiresTheSyncLanesReporter(t *testing.T) {
 	for i := range got {
 		select {
 		case got[i] = <-sender.msgs:
-		case <-time.After(3 * time.Second):
+		case <-time.After(testtime.Budget(3 * time.Second)):
 			t.Fatalf("message %d never reached the program", i+1)
 		}
 	}
