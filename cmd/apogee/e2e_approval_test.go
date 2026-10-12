@@ -181,7 +181,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// before the pane could have armed, so a pane that is gone afterwards was answered by a
 	// keystroke the human never saw a frame for, which is the whole failure this item exists to
 	// catch.
-	submit(drv, controlPrompt)
+	typeSubmit(drv, controlPrompt)
 	raised := drv.CursorMark()
 	release := holdKey(drv, "a", approvalMarker)
 	drv.WaitText(approvalMarker)
@@ -211,7 +211,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// which is inside the window every decision letter is still dead in. Two presses: stopping a
 	// run is the double-tap gesture everywhere the worker is in flight, the pane included, and
 	// the driver's escapeGap sits well inside escStopWindow.
-	submit(drv, controlPrompt)
+	typeSubmit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
 	stopRun(t, drv)
 	drv.WaitGone(approvalMarker)
@@ -234,7 +234,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// idle wait is half the claim: a pane that appeared would still be waiting to be answered.
 	pressAndSettle(t, drv, "s")
 	waitIdle(drv)
-	submit(drv, controlPrompt)
+	typeSubmit(drv, controlPrompt)
 	waitIdle(drv)
 	if _, _, ok := drv.Frame().Find(approvalMarker); ok {
 		t.Errorf("the call after an always-allow raised a pane anyway:\n%s", drv.Frame())
@@ -524,7 +524,7 @@ func awaitRecorded(t *testing.T, drv driven, home, text string) {
 // caller that typed one before then would have it swallowed. It is also all the readiness a key
 // needs — a quiet screen on top of it would prove nothing more, since arming paints nothing.
 func raisePane(drv driven) {
-	submit(drv, controlPrompt)
+	typeSubmit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
 	awaitArmed(drv)
 }

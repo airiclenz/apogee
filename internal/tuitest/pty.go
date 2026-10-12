@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/termios"
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
@@ -182,6 +183,13 @@ func (d *PTYDriver) TTYState() (echo, canonical bool) {
 func (d *PTYDriver) Type(text string) {
 	d.t.Helper()
 	d.send([]byte(text))
+}
+
+// Paste sends text as one bracketed paste, exactly as [Driver.Paste] does in process: the child
+// reads it as a single paste, not a key press per rune.
+func (d *PTYDriver) Paste(text string) {
+	d.t.Helper()
+	d.send([]byte(ansi.BracketedPasteStart + text + ansi.BracketedPasteEnd))
 }
 
 // TypeUnlessShown types text only if marker is not on the screen, and reports whether it typed. The

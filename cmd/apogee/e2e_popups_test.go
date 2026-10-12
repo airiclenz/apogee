@@ -116,7 +116,7 @@ func TestE2EPopupFramesLists(t *testing.T) {
 	// prompt-only /schedule form, whose first popup asks how often. /model notes that the server
 	// serves no other model, /server that there is no other server, and /effort that the stub
 	// reports no dial.
-	submit(drv, "/schedule tidy the logs")
+	typeSubmit(drv, "/schedule tidy the logs")
 	drv.WaitText(pickerTitle)
 	drv.WaitQuiet(settled)
 	tuitest.Golden(t, "popup-picker", drv.Frame(), goldenRedactions(sess)...)
@@ -125,14 +125,14 @@ func TestE2EPopupFramesLists(t *testing.T) {
 
 	// The `/sessions` browser lists saved records, so one exchange is run and saved first and the
 	// browser is opened on a relaunch over the same home — the way a human reaches it.
-	submit(drv, "Hello there.")
+	typeSubmit(drv, "Hello there.")
 	drv.WaitText("Nothing else to add.")
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the first run returned %v; want a clean quit", err)
 	}
 	next := sess.Relaunch()
 	waitIdle(next)
-	submit(next, "/sessions")
+	typeSubmit(next, "/sessions")
 	next.WaitText(browserHint)
 	next.WaitQuiet(settled)
 	tuitest.Golden(t, "popup-sessions", next.Frame(), popupRedactions(sess)...)
@@ -161,7 +161,7 @@ func TestE2EPopupClickAsk(t *testing.T) {
 	sess := launchTUI(t, drv, stub)
 	waitIdle(drv)
 
-	submit(drv, popupMultiPrompt)
+	typeSubmit(drv, popupMultiPrompt)
 	drv.WaitText(askChoiceHint)
 	awaitArmed(drv)
 	drv.WaitQuiet(settled)
@@ -353,14 +353,14 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	askRedactions := append(goldenRedactions(sess), liveStarRedaction("Ask User"))
 
 	// The approval pane.
-	submit(drv, popupApprovalPrompt)
+	typeSubmit(drv, popupApprovalPrompt)
 	pane := awaitApprovalPane(drv)
 	tuitest.Golden(t, "popup-approval", pane, append(goldenRedactions(sess), liveStarRedaction("Terminal"))...)
 	decide(drv, "a")
 	drv.WaitText("That is what the command had to say.")
 
 	// Single-select, the first choice highlighted.
-	submit(drv, popupSinglePrompt)
+	typeSubmit(drv, popupSinglePrompt)
 	drv.WaitText(askChoiceHint)
 	awaitArmed(drv)
 	drv.WaitQuiet(settled)
@@ -369,7 +369,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.WaitText(askReply)
 
 	// Multi-select, the first box ticked.
-	submit(drv, popupMultiPrompt)
+	typeSubmit(drv, popupMultiPrompt)
 	drv.WaitText(askChoiceHint)
 	awaitArmed(drv)
 	drv.Press(tuitest.Space)
@@ -380,7 +380,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.WaitGone(askChoiceHint)
 
 	// Single-select with a custom answer typed: the highlight drops and the box shows the draft.
-	submit(drv, popupSinglePrompt)
+	typeSubmit(drv, popupSinglePrompt)
 	drv.WaitText(askChoiceHint)
 	awaitArmed(drv)
 	drv.Type("Do the config first")
@@ -391,7 +391,7 @@ func TestE2EPopupFramesPrompts(t *testing.T) {
 	drv.WaitGone(askChoiceHint)
 
 	// Free-text: no choices at all.
-	submit(drv, popupFreePrompt)
+	typeSubmit(drv, popupFreePrompt)
 	drv.WaitText(askFreeHint)
 	drv.WaitQuiet(settled)
 	tuitest.Golden(t, "popup-ask-free", drv.Frame(), askRedactions...)

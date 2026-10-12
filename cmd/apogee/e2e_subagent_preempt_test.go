@@ -29,7 +29,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -267,15 +266,11 @@ func assertWaveTail(t *testing.T, req stubllm.Request) {
 	}
 }
 
-// submitNow is [submit] with the now send: it types a line into the prompt box, waits for it there
+// submitNow is [submit] with the now send: it pastes a line into the prompt box, waits for it there
 // for submit's reason, and presses ctrl+g instead of ⏎.
 func submitNow(drv driven, text string) {
-	drv.Type(text)
-	drv.WaitFor(func() bool {
-		rows, ok := drv.Frame().PromptBox()
-		return ok && strings.Contains(strings.Join(rows, "\n"), promptTail(text))
-	}, tuitest.Within(tuitest.DefaultTimeout+time.Duration(len(text))*typingAllowance),
-		tuitest.Awaiting("the typed prompt to appear in the prompt box"))
+	drv.Paste(text)
+	awaitPrompt(drv, text)
 	drv.Press(tuitest.CtrlG)
 }
 

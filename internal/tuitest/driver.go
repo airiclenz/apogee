@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/testtime"
 )
@@ -182,6 +183,15 @@ func (d *Driver) Done() <-chan error { return d.done }
 func (d *Driver) Type(text string) {
 	d.t.Helper()
 	d.send([]byte(text))
+}
+
+// Paste sends text as one bracketed paste (ansi.BracketedPasteStart … ansi.BracketedPasteEnd), as a
+// terminal does when a human pastes: the program reads it as a single tea.PasteMsg, not a key press
+// per rune, so no key claim — a pane's armed keys, the autocomplete's — ever sees its runes. It is
+// the cheap way to put a line in the prompt box when what is under test is not the typing.
+func (d *Driver) Paste(text string) {
+	d.t.Helper()
+	d.send([]byte(ansi.BracketedPasteStart + text + ansi.BracketedPasteEnd))
 }
 
 // TypeUnlessShown types text only if marker is not on the screen, and reports whether it typed. The

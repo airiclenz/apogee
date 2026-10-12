@@ -266,6 +266,7 @@ func (s *e2eSession) start(drv *tuitest.Driver) {
 // copies of it drifting apart.
 type driven interface {
 	Type(text string)
+	Paste(text string)
 	TypeUnlessShown(text, marker string) bool
 	Press(key tuitest.Key)
 	Frame() tuitest.Frame

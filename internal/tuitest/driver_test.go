@@ -56,6 +56,19 @@ func (l *msgLog) keys() []tea.KeyPressMsg {
 	return out
 }
 
+// pastes returns the content of every bracketed paste recorded so far, in order.
+func (l *msgLog) pastes() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for _, msg := range l.msgs {
+		if p, ok := msg.(tea.PasteMsg); ok {
+			out = append(out, p.Content)
+		}
+	}
+	return out
+}
+
 // mouse returns every mouse message recorded so far, in order — press and release alike, since what
 // a pin has to show is that the two arrive as the two different events they are.
 func (l *msgLog) mouse() []tea.Msg {
@@ -231,6 +244,25 @@ func TestDriverTypeDeliversRunesInOrder(t *testing.T) {
 	}
 	if read.String() != typed {
 		t.Errorf("the model read %q; want the typed %q", read.String(), typed)
+	}
+}
+
+// TestDriverPasteArrivesAsOnePaste: what a driver pastes reaches the model as ONE tea.PasteMsg
+// carrying the text whole — a leading `/` and non-ASCII runes included — and as no key press at
+// all, which is what lets a paste bypass every key claim.
+func TestDriverPasteArrivesAsOnePaste(t *testing.T) {
+	drv, log := driveProbe(t, "paste")
+
+	const pasted = "/usage héllo"
+	drv.Paste(pasted)
+	drv.WaitFor(func() bool { return len(log.pastes()) >= 1 },
+		Awaiting("the paste to reach the model"))
+
+	if got := log.pastes(); len(got) != 1 || got[0] != pasted {
+		t.Errorf("the model read pastes %q; want one paste of %q", got, pasted)
+	}
+	if keys := log.keys(); len(keys) != 0 {
+		t.Errorf("the paste also arrived as %d key presses; want none", len(keys))
 	}
 }
 

@@ -567,7 +567,12 @@ NOTES (2026-10-12): `capcom check` reports AGENTS.md's capcom block out of date 
 **Acceptance:** `capcom show e2e-typed-prompts` shows the measured share and the verdict; `git diff --stat` touches only that issue file
 **Commit:** `docs(issues): record the measured cost of typed e2e prompts`
 
-## 28. Paste prompts in the e2e submit helpers
+## 28. Paste prompts in the e2e submit helpers — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): consequential edit — cmd/apogee/e2e_stream_test.go: made necessary by removing submit's per-byte budget (streamReplyWait's comment named [submit] as sharing its DefaultTimeout-plus-allowance shape; now names [awaitReply] alone).
+NOTES (2026-10-12): typeSubmit callers in e2e_popups_test.go are TestE2EPopupFramesLists (the `/` dropdown), TestE2EPopupClickAsk and TestE2EPopupFramesPrompts (the ask-answer states); TestE2EPopupClickDropdown has no submit call, and TestE2EPopupClickApproval/ClickLists paste. In e2e_approval_test.go, raisePane (used only by TestE2EApprovalKeysAreArmedAfterPaint) types too.
+NOTES (2026-10-12): typingAllowance removed outright, typeSubmit included: tuitest.DefaultTimeout is now testtime.Budget(60s), far above the longest typed prompt (44 bytes at ~90 ms/key on CI).
+NOTES (2026-10-12): the pasted-image-path check is not exercised by e2e: no submit sends a bare image path and the e2e config enables no vision server, so attachPastedImage declines every pasted prompt; its own internal/tui behaviour is unchanged by this item. The pasted `/verb` + Enter claim is pinned by the new TestE2ESmokePastedSlashCommandSends.
 
 **What:** Runs only if item 27's verdict is "paste". When the verdict is "keep typing", this item is marked done-skipped with a NOTES line and the issue stays open.
 **Regression guard.** cmd/apogee race runs carry `-parallel 1`. TestE2EApprovalKeysAreArmedAfterPaint calls `submit` and becomes a `typeSubmit` user, so e2e_approval_test.go joins **Files:**; e2e_copy_test.go leaves it (TestE2ECopyWritesOSC52 types through `drv.Type`, never `submit`, and needs no edit). The `-run` also covers the `submitNow` consumers (TestE2EQueuedMessage*) and the armed-after-paint test. `docs/design/test-drivers.md` names `Paste` (bracketed paste, one PasteMsg, bypasses key claims) beside `Type` in both driver input-surface lists.

@@ -70,8 +70,8 @@ const streamRuneAllowance = time.Millisecond
 // its pty twin and the judge's frames all wait for that line and all wait this long, so the budget
 // has one name and one reason and the twins cannot drift apart.
 //
-// It is [tuitest.DefaultTimeout] plus [streamRuneAllowance] per streamed rune — the shape [submit]
-// and [awaitReply] use, and for the same reason: the default is what a wait on this suite gets for
+// It is [tuitest.DefaultTimeout] plus [streamRuneAllowance] per streamed rune — the shape
+// [awaitReply] uses, and for the same reason: the default is what a wait on this suite gets for
 // the machinery under it, and what THIS wait adds is the time the reply has to be played for
 // before its last line can exist at all. Deriving it that way is the point: the previous 15 s was
 // arithmetic from a stopwatch on one nine-core box (≈ 5.8 s of playback, with room for the

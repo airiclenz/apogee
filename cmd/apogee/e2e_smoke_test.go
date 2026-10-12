@@ -68,7 +68,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	}
 
 	// Step 2 — a prompt, a streamed reply, and the tool block the model's call produced.
-	submit(drv, "What files are in this workspace?")
+	typeSubmit(drv, "What files are in this workspace?")
 	// The block is asserted the way the transcript paints it — a rendered label and an outcome slot
 	// carrying the tool's own data — not the wire's tool name, which the transcript never shows.
 	drv.WaitText("List")
@@ -76,7 +76,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	drv.WaitText("The workspace holds one file")
 
 	// Step 3 — a write asks first. The approval pane offers all four decisions.
-	submit(drv, `Append a line saying "smoke test" to a.txt.`)
+	typeSubmit(drv, `Append a line saying "smoke test" to a.txt.`)
 	drv.WaitText("Always allow this session")
 	// The arm is also proof the pane is painted: its keys arm on the answer to a drain marker asked
 	// only once the answer to the first has shown the pane's own frame written (approval.go).
@@ -98,7 +98,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	// Step 5 — /settings opens, every section is there, and walking past the last row is safe. The
 	// pane is taller than the terminal, so the sections are collected on the way DOWN — which is
 	// also step 5's "walk down past the last row and back up" performed rather than described.
-	submit(drv, "/settings")
+	typeSubmit(drv, "/settings")
 	drv.WaitText("Upstream")
 	seen := walkSettings(t, drv)
 	for _, section := range []string{
@@ -113,7 +113,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 
 	// Step 6 — /usage reports what the run actually spent. The stub's usage numbers are real
 	// numbers, so "non-zero" is a claim with something behind it.
-	submit(drv, "/usage")
+	typeSubmit(drv, "/usage")
 	drv.WaitText(usagePaneMarker)
 	drv.WaitQuiet(settled)
 	usage := drv.Frame()
@@ -126,7 +126,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	// (default true) is apogee's own shipped set rather than an empty library. The crash markers are
 	// spelled as a runtime would spell them: the report now paints skill prose, and a skill whose
 	// job is chasing bugs names "panic" and "error" in its own summary and triggers.
-	submit(drv, "/skills")
+	typeSubmit(drv, "/skills")
 	drv.WaitQuiet(settled)
 	skills := drv.Frame().String()
 	if !strings.Contains(skills, "/debugging") {
@@ -139,7 +139,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	drv.WaitQuiet(settled)
 
 	// Step 8 — /version prints the build version, from the same source --version reads.
-	submit(drv, "/version")
+	typeSubmit(drv, "/version")
 	drv.WaitText(apogee.Version())
 
 	// Step 9 — narrower and wider: everything reflows, and the footer gives way from the LEFT —
@@ -198,7 +198,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	// Step 11 — reopen on the same home: /sessions lists what was just run, with its hint line.
 	next := sess.Relaunch()
 	next.WaitText("Send a message")
-	submit(next, "/sessions")
+	typeSubmit(next, "/sessions")
 	next.WaitText("type to filter · ↑/↓ select · ⏎ resume")
 	next.WaitQuiet(settled)
 	next.Press(tuitest.Enter)
@@ -226,7 +226,7 @@ func TestE2ESmokeInProcess(t *testing.T) {
 
 	// Step 13 — one more prompt in the restored session: it is answered, and the record grows.
 	before := recordSize(t, sess)
-	submit(next, "Is there anything else worth knowing?")
+	typeSubmit(next, "Is there anything else worth knowing?")
 	next.WaitText("Nothing else")
 	next.WaitFor(func() bool { return recordSize(t, sess) > before },
 		tuitest.Awaiting("the session record on disk to grow"))
@@ -269,12 +269,12 @@ func TestE2ESmokePTY(t *testing.T) {
 	}
 
 	// Step 2 — a prompt, the tool call it produces, and the streamed reply after it.
-	submit(drv, "What files are in this workspace?")
+	typeSubmit(drv, "What files are in this workspace?")
 	drv.WaitText("entries")
 	drv.WaitText("The workspace holds one file")
 
 	// Steps 3 and 4 — the write asks first, "a" allows it, and the file on disk carries the line.
-	submit(drv, `Append a line saying "smoke test" to a.txt.`)
+	typeSubmit(drv, `Append a line saying "smoke test" to a.txt.`)
 	drv.WaitText("Always allow this session")
 	// The decision keys are dead until the terminal answers the pane's drain markers (approval.go),
 	// so that a keystroke already in flight cannot answer a question the human has not read yet. A
@@ -290,7 +290,7 @@ func TestE2ESmokePTY(t *testing.T) {
 	// Step 8 — /version, from the binary's own embedded VERSION. The base version rather than the
 	// full one: build provenance depends on how the binary was built, and this one was built by
 	// TestMain rather than by make.
-	submit(drv, "/version")
+	typeSubmit(drv, "/version")
 	drv.WaitText(apogee.BaseVersion())
 
 	// Step 9 — a real resize: TIOCSWINSZ on the pty and the SIGWINCH that comes with it. The frame
@@ -335,6 +335,32 @@ func TestE2ESmokePTY(t *testing.T) {
 	}
 	if got := sess.TraceFullRepaints(); got == 0 {
 		t.Error("the --tui-trace file recorded no full repaint; not even the first frame")
+	}
+}
+
+// TestE2ESmokePastedSlashCommandSends: a `/verb` that arrives as one bracketed paste and is followed
+// by ⏎ runs the command, exactly as the typed one does — the paste re-derives the autocomplete, so
+// ⏎ finds the token already whole and sends it rather than accepting the dropdown's suggestion
+// into the box. It is the claim [submit] rests on now that it pastes: were it false, every pasted
+// slash command in the suite would leave its line in the box and open nothing.
+func TestE2ESmokePastedSlashCommandSends(t *testing.T) {
+	t.Parallel()
+
+	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
+	if err != nil {
+		t.Fatalf("load the smoke script: %v", err)
+	}
+	stub := stubllm.New(t, script)
+	drv := tuitest.NewDriver(t, e2eSize)
+	launchTUI(t, drv, stub)
+	drv.WaitText(promptPlaceholder)
+
+	submit(drv, "/usage")
+	drv.WaitText(usagePaneMarker)
+	closePane(drv, usagePaneMarker)
+	if rows, ok := drv.Frame().PromptBox(); !ok || strings.Contains(strings.Join(rows, "\n"), "/usage") {
+		t.Errorf("the prompt box still holds the pasted command after it ran (box found: %t):\n%s",
+			ok, strings.Join(rows, "\n"))
 	}
 }
 
@@ -469,30 +495,41 @@ func closePane(drv *tuitest.Driver, marker string) {
 	drv.WaitQuiet(settled)
 }
 
-// typingAllowance is the extra wait [submit] grants per typed byte, on top of
-// [tuitest.DefaultTimeout]. The loaded 4-vCPU CI runner lands a key about every 90 ms, so a flat
-// 5 s budget was exhausted 56 characters into a 79-byte prompt; a budget that grows with the
-// prompt outlasts the typing at any length while a short prompt still fails as fast as before.
-var typingAllowance = testtime.Budget(100 * time.Millisecond)
-
-// submit types a line into the prompt box and sends it. It takes the driver interface rather than
+// submit pastes a line into the prompt box and sends it. It takes the driver interface rather than
 // one driver, so the same step means the same thing in process and through the pty.
 //
-// The wait looks INSIDE the prompt box ([tuitest.Frame.PromptBox]), never anywhere on screen: while
-// a slash command is being typed the palette paints `❯ /usage  session token usage — …` above the
-// box, and a whole-frame search would take that row for the typed line before the last key had
-// landed — so Enter accepted the palette's suggestion instead of sending.
+// The line goes in as one bracketed paste ([tuitest.Driver.Paste]) rather than a key per byte:
+// typing it cost about half the e2e suite's summed test time (.capcom/issues/e2e-typed-prompts.md),
+// and a test whose claim is not about keys gains nothing from them. A paste is an edit like a
+// keypress — the autocomplete is re-derived from it — so a pasted `/verb` and ⏎ still send the
+// command. A test whose claim IS about keys types instead, through [typeSubmit].
 //
-// The wait's budget scales with the prompt: [tuitest.DefaultTimeout] plus [typingAllowance] per
-// byte, since every byte is a key the runner has to land before the tail can show.
+// The wait looks INSIDE the prompt box ([tuitest.Frame.PromptBox]), never anywhere on screen: while
+// a slash command is in the box the palette paints `❯ /usage  session token usage — …` above it,
+// and a whole-frame search would take that row for the line before it had landed — so Enter
+// accepted the palette's suggestion instead of sending.
 func submit(drv driven, text string) {
+	drv.Paste(text)
+	awaitPrompt(drv, text)
+	drv.Press(tuitest.Enter)
+}
+
+// typeSubmit is [submit] with the line typed key by key, as a human types it. It is for the tests
+// whose claim is about keys — that a key lands armed or swallowed, that a dropdown or an ask pane
+// reads what was typed, that the smoke run is a human's — where a paste would bypass the very key
+// claims under test.
+func typeSubmit(drv driven, text string) {
 	drv.Type(text)
+	awaitPrompt(drv, text)
+	drv.Press(tuitest.Enter)
+}
+
+// awaitPrompt waits for text's tail to show INSIDE the prompt box, for [submit]'s reason.
+func awaitPrompt(drv driven, text string) {
 	drv.WaitFor(func() bool {
 		rows, ok := drv.Frame().PromptBox()
 		return ok && strings.Contains(strings.Join(rows, "\n"), promptTail(text))
-	}, tuitest.Within(tuitest.DefaultTimeout+time.Duration(len(text))*typingAllowance),
-		tuitest.Awaiting("the typed prompt to appear in the prompt box"))
-	drv.Press(tuitest.Enter)
+	}, tuitest.Awaiting("the prompt to appear in the prompt box"))
 }
 
 // escStopArmedHint is the opening of every wording of the armed-esc hint (internal/tui's

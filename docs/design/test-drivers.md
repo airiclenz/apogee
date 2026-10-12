@@ -583,6 +583,10 @@ go func() { _, err := program.Run(); drv.Finished(err) }()
   OUTPUT is deliberately not among them: it is `tui.Build`'s own `out` argument, `drv.Output()`.
 - `Type(text)`, `Press(key)` — bytes, not `tea.KeyPressMsg` values. The `Key` constants are the
   sequences a real xterm sends, each pinned by `TestKeysDecodeAsIntended` against a live program.
+- `Paste(text)` — the text inside a bracketed paste (`ESC[200~ … ESC[201~`), which the program
+  reads as one `tea.PasteMsg` and no key press, so it bypasses every key claim (pinned by
+  `TestDriverPasteArrivesAsOnePaste`). The e2e `submit`/`submitNow` helpers paste their prompt;
+  `typeSubmit` types it, for the tests whose claim is about keys.
 - `Resize(w, h)` — resizes the emulator, sends the `WindowSizeMsg`, and waits for the repaint.
 - `Frame()`, `Screen()`, `WaitText`, `WaitGone`, `WaitQuiet`, `WaitFor` — the assertion surface.
 - `Quit()` — Ctrl+C twice, then the run's error. `Kill()` — the context, and nothing tidied.
@@ -682,8 +686,8 @@ code := drv.Quit()                  // Ctrl+C twice, then the child's exit statu
 echo, canonical := drv.TTYState()   // the line discipline the shell gets back
 ```
 
-The surface mirrors the in-process driver — `Type`, `Press`, `Resize`, `Frame`, `Screen`, the four
-waits — and adds the four things only a real terminal has:
+The surface mirrors the in-process driver — `Type`, `Paste` (bracketed paste, one `PasteMsg`,
+bypasses key claims), `Press`, `Resize`, `Frame`, `Screen`, the four waits — and adds the four things only a real terminal has:
 
 - `Bytes()` — every byte the child wrote to the terminal, unconsumed. Frames are the picture; this
   is the wire, and the teardown claims are about sequences no frame can show: the alternate-screen
