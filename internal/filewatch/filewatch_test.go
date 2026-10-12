@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The cadence the tests run the watcher at. The Settle window is generously wider than the Interval
@@ -25,11 +27,19 @@ import (
 // report, so that a report merely late on a slow box is not a failure. testQuiet is the window in
 // which a SECOND report must not arrive, which only says anything about the Settle when it is at
 // least as long as one.
+//
+// The Interval and the Settle are the watcher's own configuration and the debounce under test, so
+// they and every sleep cut from them are fixed (testtime.Fixed); only testDeadline, a wait that ends
+// on the report, scales with APOGEE_TEST_TIME_SCALE (testtime.Budget). testQuiet is a window in
+// which nothing may happen, so it is fixed too.
 const (
 	testInterval = 10 * time.Millisecond
 	testSettle   = 500 * time.Millisecond
-	testDeadline = 10 * testSettle
-	testQuiet    = 2 * testSettle
+)
+
+var (
+	testDeadline = testtime.Budget(10 * testSettle)
+	testQuiet    = testtime.Fixed(2 * testSettle)
 )
 
 // startWatcher starts a watcher over path at the test cadence and stops it with the test.
@@ -159,7 +169,7 @@ func TestWatchNeverSettlesOnASampleTakenBeforeAStall(t *testing.T) {
 			stalled <- stallResult{late: late}
 			return
 		}
-		time.Sleep(testSettle + testSettle/2)
+		time.Sleep(testtime.Fixed(testSettle + testSettle/2))
 		stalled <- stallResult{err: os.WriteFile(path, []byte("auto-title: true\n# a second line\n"), 0o600)}
 	}
 	w.Start()
@@ -171,7 +181,7 @@ func TestWatchNeverSettlesOnASampleTakenBeforeAStall(t *testing.T) {
 	// pending. Should it not have yet, the stalled tick observes it instead and the burst
 	// still coalesces, so arming early cannot make a correct watcher fail; arming late is
 	// caught by the hook and skips the test.
-	time.Sleep(testSettle / 5)
+	time.Sleep(testtime.Fixed(testSettle / 5))
 	armed.Store(true)
 	select {
 	case res := <-stalled:
@@ -293,7 +303,7 @@ func TestWatchStopEndsTheWatch(t *testing.T) {
 
 	w.Stop()
 	writeWatchedFile(t, path, "auto-title: false\n# changed again, after Stop\n")
-	time.Sleep(testSettle + 5*testInterval)
+	time.Sleep(testtime.Fixed(testSettle + 5*testInterval))
 
 	select {
 	case _, ok := <-w.Changes():
@@ -320,7 +330,7 @@ func TestWatchStopReturnsWithNobodyDraining(t *testing.T) {
 	w.Start()
 
 	writeWatchedFile(t, path, "auto-title: true\n# never read\n")
-	time.Sleep(testSettle + 5*testInterval)
+	time.Sleep(testtime.Fixed(testSettle + 5*testInterval))
 
 	stopped := make(chan struct{})
 	go func() {

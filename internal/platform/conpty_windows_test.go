@@ -21,15 +21,20 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The pseudoconsole tests' bounds: generous, because a loaded CI host can take seconds to start
 // cmd.exe, and finite, because a pseudoconsole that misbehaves must not hang the suite.
+var (
+	conptyTestTimeout = testtime.Budget(30 * time.Second)
+	conptyTestPoll    = testtime.Fixed(20 * time.Millisecond)
+)
+
+// The size every test pseudoconsole opens at.
 const (
-	conptyTestTimeout = 30 * time.Second
-	conptyTestPoll    = 20 * time.Millisecond
-	conptyTestCols    = 80
-	conptyTestRows    = 25
+	conptyTestCols = 80
+	conptyTestRows = 25
 )
 
 // TestStartPseudoConsoleRunsTheCommand starts a real cmd.exe inside a pseudoconsole and reads back
@@ -408,7 +413,7 @@ func pollJob(t *testing.T, pty *PseudoConsole, ready func(active uint32) bool, w
 	if pty.job.job == windows.InvalidHandle || !pty.job.assigned {
 		t.Fatal("the process never joined a job")
 	}
-	deadline := time.Now().Add(conptyTestTimeout)
+	expired := testtime.Expiry(conptyTestTimeout)
 	for {
 		var info jobAccounting
 		err := windows.QueryInformationJobObject(pty.job.job, windows.JobObjectBasicAccountingInformation,
@@ -419,7 +424,7 @@ func pollJob(t *testing.T, pty *PseudoConsole, ready func(active uint32) bool, w
 		if ready(info.ActiveProcesses) {
 			return
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("timed out waiting for %s (%d processes active)", what, info.ActiveProcesses)
 		}
 		time.Sleep(conptyTestPoll)

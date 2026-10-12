@@ -19,12 +19,13 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // windowsProcessTestTimeout bounds every wait in this file: generous, because a loaded CI host can
 // take seconds to start cmd.exe inside a pseudoconsole, and finite, so a wedged Console fails the
 // test instead of hanging the suite.
-const windowsProcessTestTimeout = 30 * time.Second
+var windowsProcessTestTimeout = testtime.Budget(30 * time.Second)
 
 // TestProcessRunsCommandsTypedIntoTheConsoleOnWindows drives an interactive cmd.exe the way a
 // model does: type a line, read what it printed — with the pseudoconsole's VT painting stripped.
@@ -249,8 +250,8 @@ func startWindowsProcess(t *testing.T, spec Spec) *Process {
 func readWindowsUntil(t *testing.T, process *Process, want string) string {
 	t.Helper()
 	var seen strings.Builder
-	deadline := time.Now().Add(windowsProcessTestTimeout)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(windowsProcessTestTimeout)
+	for !expired() {
 		output, _ := process.Read(200 * time.Millisecond)
 		seen.WriteString(output)
 		if strings.Contains(seen.String(), want) {
@@ -264,19 +265,12 @@ func readWindowsUntil(t *testing.T, process *Process, want string) string {
 // awaitWindows polls condition until it holds, failing the test with what it was waiting for.
 func awaitWindows(t *testing.T, condition func() bool, what string) {
 	t.Helper()
-	deadline := time.Now().Add(windowsProcessTestTimeout)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("waited %v for %s", windowsProcessTestTimeout, what)
+	testtime.Eventually(t, windowsProcessTestTimeout, condition, what)
 }
 
 // finalFrameFlushDelay is how long the seam test holds conhost's final flush back after the
 // release: far longer than a reaper that closes the output with the release takes to do it.
-const finalFrameFlushDelay = 100 * time.Millisecond
+var finalFrameFlushDelay = testtime.Fixed(100 * time.Millisecond)
 
 // finalFrameConsole stands in for a pseudoconsole whose command has exited but whose last frame is
 // still being flushed: Read hands the frame over only once the test lets the flush through, and a

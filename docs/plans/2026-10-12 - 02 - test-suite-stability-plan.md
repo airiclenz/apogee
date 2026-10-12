@@ -374,7 +374,13 @@ NOTES (2026-10-12): Acceptance ran as `GOMEMLIMIT=2GiB go test -race -count=1 -p
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/agent/ ./internal/domain/`
 **Commit:** `test(agent): route timing through testtime`
 
-## 18. Migrate internal/console, internal/platform and internal/filewatch
+## 18. Migrate internal/console, internal/platform and internal/filewatch — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the read loops (readUntil, readRegistryUntil, readWindowsUntil, conpty pollJob) loop on testtime.Expiry, not Eventually, so their failure still reports what was read (or the active-process count) at that moment; waitFor, awaitRegistry, awaitWindows and teardown's waitForPIDFile become testtime.Eventually, so their failure text is now Eventually's "timed out after … waiting for …".
+NOTES (2026-10-12): testTimeout, registryTestTimeout (now 30s), windowsProcessTestTimeout, escapeeRunTimeout and conptyTestTimeout move from const to `var … = testtime.Budget(…)`; finalFrameFlushDelay and conptyTestPoll become `var … = testtime.Fixed(…)` (conptyTestCols/Rows stay in their own const block, with a one-line comment).
+NOTES (2026-10-12): filewatch keeps testInterval and testSettle as consts (the watcher's own configuration and the debounce under test); testDeadline becomes testtime.Budget(10*testSettle), testQuiet testtime.Fixed(2*testSettle), and every Settle-derived sleep is wrapped in testtime.Fixed at the call site (the multiple inside the wrapper); the comment block above them gains a paragraph saying so.
+NOTES (2026-10-12): beyond the guard's findings, lock_test's AcquireLockWait 10s wait is testtime.Budget and its 50ms release delay Fixed; ring_test's elapsed bounds (2s, 1s) and the Read/ReadContext windows passed to the code under test are not guard findings and stay as written; pidAlive's caller keeps its 500ms window, which pidAlive wraps in testtime.Fixed.
+NOTES (2026-10-12): Acceptance ran as written (console ok, filewatch ok 6.7s, platform ok 5.7s, raced) plus all three packages at APOGEE_TEST_TIME_SCALE=2; `GOOS=windows go vet ./internal/console/... ./internal/platform/...` is clean; TestNoFixedTimingInTests passes with the three packages out of pendingPackages.
 
 **What:** Item 9's rule. `registryTestTimeout` rises to `Budget(30*time.Second)` to match its siblings; `finalFrameFlushDelay` and the filewatch debounce sleeps → `Fixed`.
 **Regression guard.** `pidAlive(pid, within)` (teardown_unix_test.go) asserts the escapee stays alive throughout a window — a negative window; it keeps its bool signature and bounds its loop by `time.NewTimer(testtime.Fixed(within))` in a select. The same timer form covers the readUntil/waitFor loops only where Eventually does not fit.

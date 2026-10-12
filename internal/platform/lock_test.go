@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The lock tests run entirely in this process, on both supported platforms, because the
@@ -180,11 +182,11 @@ func TestAcquireLockWaitTakesTheLockOnceTheHolderReleases(t *testing.T) {
 	path := lockPath(t)
 	release := acquire(t, path)
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(testtime.Fixed(50 * time.Millisecond))
 		release()
 	}()
 
-	second, err := AcquireLockWait(path, 10*time.Second)
+	second, err := AcquireLockWait(path, testtime.Budget(10*time.Second))
 
 	if err != nil {
 		t.Fatalf("AcquireLockWait while the holder releases = %v, want the lock", err)

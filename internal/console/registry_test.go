@@ -12,11 +12,12 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // registryTestTimeout bounds every wait in this file: long enough that a loaded CI host does not
 // flake, short enough that a genuinely wedged Console fails the test instead of the suite.
-const registryTestTimeout = 10 * time.Second
+var registryTestTimeout = testtime.Budget(30 * time.Second)
 
 // TestRegistryAssignsMonotonicIDsNeverReusingAClosedOne pins the id contract the model depends on:
 // a stale id in its context can never come back pointing at somebody else's process.
@@ -347,8 +348,8 @@ func openTestShell(t *testing.T, registry *Registry, owner string) *Console {
 func readRegistryUntil(t *testing.T, console *Console, want string) string {
 	t.Helper()
 	var seen strings.Builder
-	deadline := time.Now().Add(registryTestTimeout)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(registryTestTimeout)
+	for !expired() {
 		output, dropped := console.Read(200 * time.Millisecond)
 		if dropped != 0 {
 			t.Fatalf("the ring dropped %d bytes of a short test's output", dropped)
@@ -365,12 +366,5 @@ func readRegistryUntil(t *testing.T, console *Console, want string) string {
 // awaitRegistry polls condition until it holds, failing the test with what it was waiting for.
 func awaitRegistry(t *testing.T, condition func() bool, what string) {
 	t.Helper()
-	deadline := time.Now().Add(registryTestTimeout)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("waited %v for %s", registryTestTimeout, what)
+	testtime.Eventually(t, registryTestTimeout, condition, what)
 }

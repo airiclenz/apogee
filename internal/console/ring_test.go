@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestRingReadDrainsWhatWasWrittenSinceTheLastRead pins the drain-on-read contract: a Read hands
@@ -108,7 +110,7 @@ func TestRingReadReturnsAsSoonAsNewBytesArrive(t *testing.T) {
 
 	r := newRing(64)
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 		_, _ = r.Write([]byte("late"))
 	}()
 
@@ -131,7 +133,7 @@ func TestRingReadReturnsWhenTheRingCloses(t *testing.T) {
 
 	r := newRing(64)
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
 		r.close()
 	}()
 
@@ -183,7 +185,7 @@ func TestRingWriteNeverBlocksAWriterNobodyReads(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(testtime.Budget(10 * time.Second)):
 		t.Fatal("writes blocked with nobody reading")
 	}
 
@@ -218,7 +220,7 @@ func TestRingReadContextCancelEndsTheWaitWithoutDraining(t *testing.T) {
 	t.Parallel()
 	r := newRing(64)
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(50*time.Millisecond, cancel)
+	time.AfterFunc(testtime.Fixed(50*time.Millisecond), cancel)
 
 	started := time.Now()
 	unread, dropped := r.ReadContext(ctx, 30*time.Second)

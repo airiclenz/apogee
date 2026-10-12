@@ -13,11 +13,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // escapeeRunTimeout bounds the runs below so a host on which the rendezvous never completes fails
 // the test in seconds instead of hanging until the suite's own deadline.
-const escapeeRunTimeout = 30 * time.Second
+var escapeeRunTimeout = testtime.Budget(30 * time.Second)
 
 // runUnderTeardown runs argv through the §2.4 seam exactly as a spawner does — the per-OS
 // constructor before Start, RunWithTeardown around Wait — so the two teardown paths this file
@@ -61,31 +63,41 @@ func setsidEscapeScript(t *testing.T, tail string) (script, pidFile string) {
 func waitForPIDFile(t *testing.T, path string) int {
 	t.Helper()
 
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if b, err := os.ReadFile(path); err == nil {
-			if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {
-				return pid
-			}
+	var pid int
+	testtime.Eventually(t, testtime.Budget(20*time.Second), func() bool {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("escapee PID file %s never appeared", path)
-	return 0
+		parsed, perr := strconv.Atoi(strings.TrimSpace(string(b)))
+		if perr != nil || parsed <= 0 {
+			return false
+		}
+		pid = parsed
+		return true
+	}, "escapee PID file "+path+" to appear")
+	return pid
 }
 
 // pidAlive reports whether pid is still alive throughout the given window, polling so a
 // slightly-late reap does not read as survival. Signal 0 probes existence without delivering
-// anything; ESRCH means the process is gone.
+// anything; ESRCH means the process is gone. The window is a negative one — nothing may happen
+// within it — so it is never scaled.
 func pidAlive(pid int, within time.Duration) bool {
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
+	window := time.NewTimer(testtime.Fixed(within))
+	defer window.Stop()
+	probe := time.NewTicker(testtime.Fixed(20 * time.Millisecond))
+	defer probe.Stop()
+	for {
 		if err := syscall.Kill(pid, 0); err != nil {
 			return false
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-window.C:
+			return syscall.Kill(pid, 0) == nil
+		case <-probe.C:
+		}
 	}
-	return syscall.Kill(pid, 0) == nil
 }
 
 // killPID terminates pid, best-effort. It exists so a test that leaves a backgrounded process

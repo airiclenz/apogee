@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The Settle is measured on the clock at the moment a change is observed, not on the tick's
@@ -52,7 +54,7 @@ func TestWatchSettlesOnTheClockNotTheTick(t *testing.T) {
 
 	// Continued. The poll's first tick is now older than the Settle and the child's write is what it
 	// observes; this second write lands well inside the Settle measured from that observation.
-	time.Sleep(testSettle / 3)
+	time.Sleep(testtime.Fixed(testSettle / 3))
 	writeWatchedFile(t, path, "auto-title: true\n# a second line\n")
 
 	awaitChange(t, w, "a write observed on a stale tick")

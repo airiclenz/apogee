@@ -11,11 +11,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // testTimeout bounds every wait in this file: long enough that a loaded CI host does not flake,
 // short enough that a genuinely wedged Console fails the test instead of the suite.
-const testTimeout = 10 * time.Second
+var testTimeout = testtime.Budget(10 * time.Second)
 
 // TestProcessRunsCommandsTypedIntoTheTerminal is the round trip the whole package exists for:
 // input written to the terminal reaches the shell, and what it prints comes back out of Read.
@@ -218,8 +220,8 @@ func writeInput(t *testing.T, process *Process, input string) {
 func readUntil(t *testing.T, process *Process, want string) string {
 	t.Helper()
 	var seen strings.Builder
-	deadline := time.Now().Add(testTimeout)
-	for time.Now().Before(deadline) {
+	expired := testtime.Expiry(testTimeout)
+	for !expired() {
 		output, dropped := process.Read(200 * time.Millisecond)
 		if dropped != 0 {
 			t.Fatalf("the ring dropped %d bytes of a short test's output", dropped)
@@ -236,14 +238,7 @@ func readUntil(t *testing.T, process *Process, want string) string {
 // waitFor polls condition until it holds, failing the test with what it was waiting for.
 func waitFor(t *testing.T, condition func() bool, what string) {
 	t.Helper()
-	deadline := time.Now().Add(testTimeout)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("waited %v for %s", testTimeout, what)
+	testtime.Eventually(t, testTimeout, condition, what)
 }
 
 // processExists reports whether pid is still a live process. Signal 0 performs the permission and
