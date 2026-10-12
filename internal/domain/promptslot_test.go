@@ -9,6 +9,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // TestPromptSlot_AdmitsOneAtATime pins the whole point of the type: a second caller waits until the
@@ -26,7 +28,7 @@ func TestPromptSlot_AdmitsOneAtATime(t *testing.T) {
 	select {
 	case err := <-admitted:
 		t.Fatalf("a second caller was admitted (err %v) while the first held the slot", err)
-	case <-time.After(20 * time.Millisecond):
+	case <-time.After(testtime.Fixed(20 * time.Millisecond)):
 	}
 
 	slot.Release()
@@ -35,7 +37,7 @@ func TestPromptSlot_AdmitsOneAtATime(t *testing.T) {
 		if err != nil {
 			t.Errorf("the waiting caller returned %v, want admission once the slot was free", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("the waiting caller was never admitted after Release")
 	}
 	slot.Release()
@@ -64,7 +66,7 @@ func TestPromptSlot_QueuedCallerAnswersItsOwnCancellation(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("a cancelled queued caller returned %v, want context.Canceled", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("a queued caller never answered its own cancellation — the wait is not ctx-aware")
 	}
 }
@@ -118,23 +120,23 @@ func TestPromptSlot_WaitingDropsWhenAQueuedCallerIsCancelled(t *testing.T) {
 // promptSlotWaiterCeiling bounds a poll for the waiter count. It is deliberately generous: the poll
 // returns the instant the count matches, so the headroom costs a healthy run nothing and is only
 // ever spent on a box loaded enough to leave a goroutine unscheduled for seconds.
-const promptSlotWaiterCeiling = 10 * time.Second
+var promptSlotWaiterCeiling = testtime.Budget(10 * time.Second)
 
 // waitForPromptSlotWaiters blocks until slot reports exactly want callers inside Acquire, failing
 // the test if that has not happened within promptSlotWaiterCeiling.
 func waitForPromptSlotWaiters(t *testing.T, slot *PromptSlot, want int) {
 	t.Helper()
 
-	deadline := time.Now().Add(promptSlotWaiterCeiling)
+	expired := testtime.Expiry(promptSlotWaiterCeiling)
 	for {
 		got := slot.Waiting()
 		if got == want {
 			return
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("Waiting() was %d after %s, want %d", got, promptSlotWaiterCeiling, want)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(testtime.Fixed(time.Millisecond))
 	}
 }
 

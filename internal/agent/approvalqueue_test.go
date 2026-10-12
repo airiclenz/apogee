@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -38,7 +39,7 @@ func (q *queueProbeApprover) Approve(_ context.Context, req domain.ApprovalReque
 		q.overlaps.Add(1)
 	}
 	q.seen = append(q.seen, req)
-	time.Sleep(q.hold)
+	time.Sleep(testtime.Fixed(q.hold))
 	q.inFlight.Add(-1)
 
 	if q.allow(req) {
@@ -77,7 +78,7 @@ func childToolResults(events []domain.Event) map[string][]domain.ToolResult {
 // each verdict reaching the child that asked for it.
 func TestFanOut_ConcurrentChildApprovalsQueueAndNameTheirChild(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	approver := &queueProbeApprover{
 		// Long enough that an unserialized second child would still be inside when the first is:
 		// the two are released from the probe at the same instant and reach the gate microseconds
@@ -235,7 +236,7 @@ func TestQueuedApprover_QueuedRequestAnswersItsOwnCancellation(t *testing.T) {
 		if got.decision != domain.ApprovalDeny {
 			t.Errorf("a cancelled queued request returned %q, want the safe verdict %q", got.decision, domain.ApprovalDeny)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtime.Budget(3 * time.Second)):
 		t.Fatal("a queued request never answered its own cancellation — the wait is not ctx-aware")
 	}
 	if n := inner.calls.Load(); n != 1 {

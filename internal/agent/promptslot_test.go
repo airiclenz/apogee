@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -84,7 +85,7 @@ func TestPromptSlot_CancelledTurnReleasesEitherKindOfWaiter(t *testing.T) {
 			if !errors.Is(err, context.Canceled) {
 				t.Errorf("the queued question returned %v, want context.Canceled — the loop rolls the Turn back on it", err)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(testtime.Budget(3 * time.Second)):
 			t.Fatal("a question queued behind an approval never answered its own cancellation")
 		}
 		if n := asker.calls.Load(); n != 0 {
@@ -132,7 +133,7 @@ func TestPromptSlot_CancelledTurnReleasesEitherKindOfWaiter(t *testing.T) {
 			if a.decision != domain.ApprovalDeny {
 				t.Errorf("the queued approval returned %q, want the safe verdict %q", a.decision, domain.ApprovalDeny)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(testtime.Budget(3 * time.Second)):
 			t.Fatal("an approval queued behind a question never answered its own cancellation")
 		}
 		if n := approver.calls.Load(); n != 0 {
@@ -207,7 +208,7 @@ func TestStep_DesignatesOnePromptSlotForTheWholeTree(t *testing.T) {
 // the 3 * time.Second the test then gives the cancelled caller to answer — once the queue state is
 // established, so that deadline keeps its full bite however generous this ceiling is: widening the
 // wait for "the caller is queued" never widens the window in which the ctx-aware wait must react.
-const queuedCallerCeiling = 10 * time.Second
+var queuedCallerCeiling = testtime.Budget(10 * time.Second)
 
 // waitForQueuedCallers blocks until slot reports want callers inside Acquire, failing the test with
 // what — a phrase naming the thing that never queued — if that has not happened within
@@ -220,15 +221,15 @@ const queuedCallerCeiling = 10 * time.Second
 func waitForQueuedCallers(t *testing.T, slot *domain.PromptSlot, want int, what string) {
 	t.Helper()
 
-	deadline := time.Now().Add(queuedCallerCeiling)
+	expired := testtime.Expiry(queuedCallerCeiling)
 	for {
 		got := slot.Waiting()
 		if got == want {
 			return
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("%s: Waiting() was %d after %s, want %d", what, got, queuedCallerCeiling, want)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(testtime.Fixed(time.Millisecond))
 	}
 }

@@ -356,7 +356,12 @@ NOTES (2026-10-12): Acceptance ran as `go test -race -count=1 -p 1 -parallel 1 .
 **Acceptance:** `GOOS=windows go vet ./internal/tools/`; `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/tools/`
 **Commit:** `test(tools): route timing through testtime`
 
-## 17. Migrate internal/agent and internal/domain
+## 17. Migrate internal/agent and internal/domain — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): holdBeta (fanout_test.go) loops on `testtime.Expiry(testtime.Budget(5 * time.Second))`, not the regression guard's literal `testtime.Expiry(5*time.Second)`: item 9's rule forbids a raw literal passed to Expiry and the guard flags it; the fall-through to cancel() is unchanged.
+NOTES (2026-10-12): waitForQueuedCallers (agent) and waitForPromptSlotWaiters (domain) loop on testtime.Expiry, not Eventually, so their failure still reports the Waiting() count at that moment; queuedCallerCeiling and promptSlotWaiterCeiling move from const to `var … = testtime.Budget(10 * time.Second)`. background_test.go's approval-queue poll becomes testtime.Eventually (its failure text is now Eventually's "timed out after … waiting for an approval to reach the manager's queue").
+NOTES (2026-10-12): beyond the guard's findings, the named files' non-finding timings follow item 9's rule: the two probe hold sleeps are `time.Sleep(testtime.Fixed(<x>.hold))`; concurrencyProbe's 3s gate waits and delegationphase/fanout waitFor's 3s are Budget; the 150ms/300ms probe waits (serial and shared-slot rows, meant to expire) are Fixed; turn_test.go's `past` fixture age is Fixed. Domain config values in subagent/setreactions (caps, StreamIdleTimeout, Timeout fields, the elapsed > 10s bound) are not test timing calls and stay as written.
+NOTES (2026-10-12): Acceptance ran as `GOMEMLIMIT=2GiB go test -race -count=1 -p 1 -parallel 1 ./internal/agent/ ./internal/domain/` per this box's rules (agent ok 79.3s, domain ok); both packages also pass at APOGEE_TEST_TIME_SCALE=2.
 
 **What:** Item 9's rule. The slow fake collaborators' `hold` sleeps → `Fixed`; the queue ceilings → `Budget`.
 **Regression guard.** `holdBeta` (fanout_test.go) runs as gatedTaskResponder's gate on the agent's goroutine and tolerates expiry; its loop is bounded by `testtime.Expiry(5*time.Second)` or a `time.NewTimer(testtime.Budget(5*time.Second))` select, keeping the fall-through to `cancel()`, never Eventually (t.Fatalf off the test goroutine).

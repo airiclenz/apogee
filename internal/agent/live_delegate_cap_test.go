@@ -13,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -207,7 +208,7 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 	}
 	apiKey := os.Getenv("APOGEE_API_KEY")
 
-	discoverCtx, cancelDiscover := context.WithTimeout(context.Background(), 30*time.Second)
+	discoverCtx, cancelDiscover := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
 	defer cancelDiscover()
 	info, err := provider.NewClient(endpoint, os.Getenv("APOGEE_LIVE_MODEL"),
 		provider.WithAPIKey(apiKey)).Discover(discoverCtx)
@@ -284,7 +285,7 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 
 	// Wide enough that a slow single-slot server is not what fails the test, and short enough to
 	// land inside `go test`'s own default 10-minute ceiling with a diagnosis rather than a panic.
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(8*time.Minute))
 	defer cancel()
 
 	result, outcome := parent.runSubAgent(ctx, domain.ToolCall{

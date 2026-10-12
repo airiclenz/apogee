@@ -15,6 +15,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -88,7 +89,7 @@ func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
 	t.Helper()
 	select {
 	case <-ch:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatalf("timed out waiting for %s", what)
 	}
 }
@@ -137,7 +138,7 @@ func TestBackground_RunsAtTheServerWidthMinusOne(t *testing.T) {
 			t.Parallel()
 			cfg := recipeConfig(t, newLockedSink(), sweepRecipe("sweep", tc.items...))
 			cfg.ParallelAgents = tc.cap
-			probe := newConcurrencyProbe(len(tc.items), 300*time.Millisecond)
+			probe := newConcurrencyProbe(len(tc.items), testtime.Fixed(300*time.Millisecond))
 			up := &workflowResponder{}
 			for _, item := range tc.items {
 				up.route("sweep "+item, probe.enter, finishScript("f-"+item, item+" is fine"))
@@ -705,14 +706,12 @@ func TestBackground_AnApprovalWaitsInTheManagersQueue(t *testing.T) {
 	id := launchBackground(t, a, "pair")
 
 	var prompt *backgroundPrompt
-	for deadline := time.Now().Add(5 * time.Second); prompt == nil; time.Sleep(5 * time.Millisecond) {
+	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
 		if waiting := a.background.waiting(); len(waiting) > 0 {
 			prompt = waiting[0]
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("no approval reached the manager's queue")
-		}
-	}
+		return prompt != nil
+	}, "an approval to reach the manager's queue")
 	if prompt.workflow != id || prompt.approval == nil || prompt.approval.Tool != "write_thing" {
 		t.Fatalf("queued prompt = %+v, want write_thing's approval for %s", prompt, id)
 	}
@@ -1067,7 +1066,7 @@ func returnsWithin(t *testing.T, what string, call func() error) {
 		if err != nil {
 			t.Fatalf("%s: %v", what, err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 		t.Fatalf("%s did not return while a stopped workflow's event sink was blocked", what)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -172,7 +173,7 @@ func TestApprovalSeam_TwinCoalescesWhileItWaits(t *testing.T) {
 			if a.decision != domain.ApprovalAllowForSession {
 				t.Errorf("%s returned %q, want %q", got.name, a.decision, domain.ApprovalAllowForSession)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(testtime.Budget(3 * time.Second)):
 			t.Fatalf("%s never returned", got.name)
 		}
 	}

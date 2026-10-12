@@ -14,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -192,7 +193,7 @@ func fanOutAgent(t *testing.T, sink domain.EventSink, parallelAgents int, up pro
 // order — because the pool only widens the run, never the commit.
 func TestFanOut_ChildrenOverlapAndCommitInCallOrder(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	// The second child answers first if it can: the gate releases both at the same instant, so
 	// completion order is genuinely unconstrained and only the commit phase fixes the history.
 	up := newRoutedResponder().
@@ -233,7 +234,7 @@ func TestFanOut_ChildrenOverlapAndCommitInCallOrder(t *testing.T) {
 // loop exactly where it was, running the delegations one after another.
 func TestFanOut_CapOneKeepsTheGroupSerial(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 150*time.Millisecond)
+	probe := newConcurrencyProbe(2, testtime.Fixed(150*time.Millisecond))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
 		route("task one", probe.enter, contentScript("child one done")).
@@ -375,7 +376,7 @@ func TestFanOut_AnnouncesNoGroupForALoneDelegationOrLeaves(t *testing.T) {
 // cap it inherited says 4. The depth bound is raised to 2 so the grandchildren can exist at all.
 func TestFanOut_DepthOneStaysSerial(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 150*time.Millisecond)
+	probe := newConcurrencyProbe(2, testtime.Fixed(150*time.Millisecond))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "the middle task"})).
 		route("the middle task", nil, fanOutScript([2]string{"g1", "leaf one"}, [2]string{"g2", "leaf two"})).
@@ -399,7 +400,7 @@ func TestFanOut_DepthOneStaysSerial(t *testing.T) {
 // tool result and nothing else — no sibling is cancelled, and the parent Exchange completes.
 func TestFanOut_SiblingSurvivesAFailedChild(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "doomed task"}, [2]string{"c2", "healthy task"})).
 		route("doomed task", probe.enter, []provider.Delta{{Kind: provider.DeltaError, Err: "upstream exploded"}}).
@@ -440,7 +441,7 @@ func TestFanOut_CancelKeepsFinishedSiblingsAndStopsRunningOnes(t *testing.T) {
 	// The second child is still in flight when the first has reported; only then does the human
 	// press Esc, and its stream surfaces the cancellation the way the real provider does.
 	interrupted := func(c context.Context) {
-		waitFor(c, sink.done, 3*time.Second)
+		waitFor(c, sink.done, testtime.Budget(3*time.Second))
 		cancel()
 		<-c.Done()
 	}
@@ -494,7 +495,7 @@ func TestFanOut_ASlotDequeuedAfterTheCancelIsNeverStarted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	cancelling := func(c context.Context) {
 		probe.enter(c)
 		cancel()
@@ -590,13 +591,13 @@ func TestFanOut_CancelKeepsASiblingRetainedBeforeIt(t *testing.T) {
 	var alphaRetained atomic.Bool
 	// Beta holds its first request until Alpha is retained, then the human presses Esc.
 	holdBeta := func(c context.Context) {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
+		expired := testtime.Expiry(testtime.Budget(5 * time.Second))
+		for !expired() {
 			if _, ok := a.retained.lookup("Alpha"); ok {
 				alphaRetained.Store(true)
 				break
 			}
-			time.Sleep(time.Millisecond)
+			time.Sleep(testtime.Fixed(time.Millisecond))
 		}
 		cancel()
 		<-c.Done()
@@ -639,7 +640,7 @@ func TestFanOut_CancelKeepsASiblingRetainedBeforeIt(t *testing.T) {
 // is its serial-path mirror.
 func TestFanOut_ChildPanicRecoversWithoutKillingTheSibling(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "exploding task"}, [2]string{"c2", "calm task"})).
 		route("exploding task", func(c context.Context) { probe.enter(c); panic("child boom") }, nil).
@@ -693,7 +694,7 @@ func (s *linearSink) Emit(e domain.Event) {
 // braided sibling streams.
 func TestFanOut_SinkReceivesALinearStampedStream(t *testing.T) {
 	sink := &linearSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
 		route("task one", probe.enter, contentScript("child one done")).
@@ -1107,7 +1108,7 @@ func threeWayFanOutParentSeamed(
 // children at once, because the slots being spent are its own (ADR 0045 §5).
 func TestFanOut_RoutedWidthComesFromTheTargetCap(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(3, 3*time.Second)
+	probe := newConcurrencyProbe(3, testtime.Budget(3*time.Second))
 
 	a := threeWayFanOutParent(t, sink, 1 /* the session server is serial */, nil)
 	routeToGrunt(a, gruntResponder{gate: probe.enter, reply: "grunt child done"}, 3)
@@ -1145,7 +1146,7 @@ func TestFanOut_RoutedWidthComesFromTheTargetCap(t *testing.T) {
 // servers: where each child lands is a race, that all three ran AT ONCE is not.
 func TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(3, 3*time.Second)
+	probe := newConcurrencyProbe(3, testtime.Budget(3*time.Second))
 
 	var parent atomic.Pointer[Agent]
 	var once sync.Once
@@ -1313,7 +1314,7 @@ func TestFanOut_PendingInterjectionSkipsTheQueuedChildren(t *testing.T) {
 func TestFanOut_PendingInterjectionNeverTouchesARunningChild(t *testing.T) {
 	sink := &recordingSink{}
 	var pending atomic.Bool
-	probe := newConcurrencyProbe(3, 3*time.Second)
+	probe := newConcurrencyProbe(3, testtime.Budget(3*time.Second))
 	// enter rendezvouses all three children, so by the time any of them flips the seam all three
 	// slots have been dequeued and checked.
 	gate := func(ctx context.Context) {

@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -5442,7 +5443,7 @@ func TestDelegationLedgerRecordsEveryOutcomeInSpawnOrder(t *testing.T) {
 	// Alpha's gate: its reply streams only once ANOTHER sibling's row is already in the ledger, so
 	// the first-spawned delegation is certainly not the first recorded.
 	holdAlpha := func(ctx context.Context) {
-		deadline := time.After(5 * time.Second)
+		deadline := time.After(testtime.Budget(5 * time.Second))
 		for len(a.delegations.rows()) == 0 {
 			select {
 			case <-ctx.Done():
@@ -5450,7 +5451,7 @@ func TestDelegationLedgerRecordsEveryOutcomeInSpawnOrder(t *testing.T) {
 			case <-deadline:
 				return
 			default:
-				time.Sleep(time.Millisecond)
+				time.Sleep(testtime.Fixed(time.Millisecond))
 			}
 		}
 	}

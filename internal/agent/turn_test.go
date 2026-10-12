@@ -6,6 +6,7 @@ import (
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // The exit table (item 2) is unit-testable in isolation: end() drives a turnLifecycle over a
@@ -15,7 +16,7 @@ import (
 // deleted helpers did — behavior is locked to today's.
 
 func TestTurnEnd_Table(t *testing.T) {
-	past := time.Now().Add(-time.Millisecond) // guarantees Elapsed > 0
+	past := time.Now().Add(-testtime.Fixed(time.Millisecond)) // guarantees Elapsed > 0
 
 	t.Run("endTurnDone advances, leaves the Exchange open and the queue untouched", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
@@ -315,7 +316,7 @@ func (o *countingObserver) exchangeAborted() { o.aborted++ }
 // Exchange open for the re-attempt, so it must never read as a close, and a close is not a
 // rollback. An abort is a close too, but a settle that keeps its finished Turns is not an abort.
 func TestTurnLifecycleNotifiesItsObserver(t *testing.T) {
-	past := time.Now().Add(-time.Millisecond)
+	past := time.Now().Add(-testtime.Fixed(time.Millisecond))
 
 	t.Run("closeExchange tells the observer once and nothing else", func(t *testing.T) {
 		conv := domain.NewConversation(nil)

@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -45,7 +46,7 @@ func (a *askProbeAsker) Ask(_ context.Context, req domain.AskRequest) (domain.As
 		a.overlaps.Add(1)
 	}
 	a.seen = append(a.seen, req)
-	time.Sleep(a.hold)
+	time.Sleep(testtime.Fixed(a.hold))
 	a.inFlight.Add(-1)
 
 	return domain.AskAnswer{Text: a.answer(req)}, nil

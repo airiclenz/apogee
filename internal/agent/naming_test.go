@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -64,7 +65,7 @@ func (s *lockedSink) namings() []domain.SubAgentNamedEvent {
 func (s *lockedSink) awaitRename() {
 	select {
 	case <-s.renamed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtime.Budget(5 * time.Second)):
 	}
 }
 

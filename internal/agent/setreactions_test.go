@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // syncGen is the Generation a Driver hands over when the user's `reactions:` file resolves to
@@ -465,7 +466,7 @@ func TestSetReactionsSwapsTheObserveRunnerOntoTheNewLane(t *testing.T) {
 
 	mustSetReactions(t, a, swapped)
 	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(5*time.Second))
 	defer cancel()
 	if err := runner.Close(ctx); err != nil {
 		t.Fatalf("runner.Close: %v", err)

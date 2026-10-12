@@ -21,10 +21,8 @@ import (
 var pendingPackages = map[string]bool{
 	"cmd/demorig":         true,
 	"cmd/stubllm":         true,
-	"internal/agent":      true,
 	"internal/config":     true,
 	"internal/console":    true,
-	"internal/domain":     true,
 	"internal/filewatch":  true,
 	"internal/gitexec":    true,
 	"internal/judge":      true,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -110,13 +111,13 @@ func waitFor(ctx context.Context, ch <-chan struct{}, wait time.Duration) {
 // though the tripwire forces the second child to complete before the first.
 func TestDelegationPhases_BracketEveryChildInAFanOut(t *testing.T) {
 	sink := newPhaseTripwireSink("c2")
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript(
 			[2]string{"c1", "task one"}, [2]string{"c2", "task two"}, [2]string{"c3", "task three"})).
 		route("task one", func(ctx context.Context) {
 			probe.enter(ctx)
-			waitFor(ctx, sink.done, 3*time.Second)
+			waitFor(ctx, sink.done, testtime.Budget(3*time.Second))
 		}, contentScript("child one done")).
 		route("task two", probe.enter, contentScript("child two done")).
 		route("task three", nil, contentScript("child three done")).
@@ -268,7 +269,7 @@ func TestDelegationPhases_SerialDelegationEmitsThePair(t *testing.T) {
 // happens rather than after the sibling finally joins.
 func TestDelegationPhases_FailedChildFinishesWithItsErrorResult(t *testing.T) {
 	sink := &recordingSink{}
-	probe := newConcurrencyProbe(2, 3*time.Second)
+	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
 	up := newRoutedResponder().
 		route("delegate two things", nil, fanOutScript([2]string{"c1", "doomed task"}, [2]string{"c2", "healthy task"})).
 		route("doomed task", probe.enter, []provider.Delta{{Kind: provider.DeltaError, Err: "upstream exploded"}}).
