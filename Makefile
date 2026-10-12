@@ -295,8 +295,10 @@ check:
 	@echo "==> gofmt (must be empty)"
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "needs gofmt:"; echo "$$out"; exit 1; fi
 # Plain `go vet ./...` has no step of its own: golangci-lint's standard set runs govet.
-	@echo "==> go vet (windows build tag: the Windows-tagged tests must still compile)"
-	@GOOS=windows go vet ./internal/platform/... ./internal/probe/... ./internal/console/... ./internal/auditsplit/... ./cmd/release/...
+# The Windows vet covers the whole module, not only the trees CI's test-windows job runs: any
+# package's Windows build must still compile, and its Windows-tagged files must vet clean.
+	@echo "==> go vet (windows build tag: the whole module's Windows build must still compile)"
+	@GOOS=windows go vet ./...
 	@echo "==> golangci-lint"
 	@$(MAKE) --no-print-directory lint
 	@echo "==> go build ./..."

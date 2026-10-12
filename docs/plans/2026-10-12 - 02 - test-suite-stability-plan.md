@@ -96,7 +96,7 @@
 **Acceptance:** `make actionlint`; `./scripts/check-pins.sh`
 **Commit:** `ci: run the ConPTY packages one at a time in the windows job`
 
-## 3. make check vets the whole module for Windows
+## 3. make check vets the whole module for Windows — ✅ DONE (2026-10-12)
 
 **What:** `make check` cross-vets only the five Windows trees.
 **Regression guard.** `docs/manual/building.md` describes the Windows vet in two places — the `make check` table row and the "Windows-tagged tests run on a `windows-latest` job" paragraph ("vets the five trees that job tests …"); both are rewritten, and the five-tree list then lives only in ci.yml's test-windows step.
