@@ -108,7 +108,9 @@
 **Acceptance:** `GOOS=windows GOMEMLIMIT=2GiB go vet ./...` exits 0; `grep -n 'GOOS=windows go vet ./\.\.\.' Makefile`; `grep -n 'auditsplit/\.\.\.' docs/manual/building.md` returns nothing
 **Commit:** `build: vet the whole module for Windows in make check`
 
-## 4. Line endings pinned repo-wide
+## 4. Line endings pinned repo-wide — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): renormalize verified in a throwaway detached worktree at HEAD carrying the new .gitattributes (the main tree holds a wave sibling's uncommitted edits, which `git add --renormalize .` would stage): it staged only .gitattributes; check-attr, the i/crlf count (0) and the makeWin.bat CRLF checkout (`\r \n`) all matched Acceptance there.
 
 **What:** `.gitattributes` pins LF one path at a time, and every new byte-compared path has broken Windows CI once before it got its pin.
 **Regression guard.** `git add --renormalize .` stages nothing, `makeWin.bat` included: its index copy stays LF (`eol=crlf` converts on checkout only), so it has no diff to commit and leaves **Files:**; its CRLF checkout is checked with `rm makeWin.bat && git checkout makeWin.bat && od -c makeWin.bat | head -1`. `binary` does not clear `eol`, so the expected `check-attr` lines are spelled out in Acceptance (probed with git 2.47).

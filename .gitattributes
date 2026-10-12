@@ -1,59 +1,22 @@
-# Block art embedded via go:embed and its markdown source must stay LF byte-for-byte on
-# every platform — a CRLF checkout would bake \r into the binary and break TUI rendering.
-internal/tui/logo.txt text eol=lf
-graphics/apogee-logo.md text eol=lf
+# Every text file is LF in the index and in every checkout, on every platform. Goldens, testdata,
+# go:embed'd files, scripts, hooks and the capcom register are all read byte-for-byte, and a
+# core.autocrlf=true checkout (Windows CI) would otherwise put a carriage return on each line —
+# a golden then diffs while printing identically, and //go:embed bakes the \r into the binary.
+# One default covers every path, so a new byte-compared path needs no pin of its own.
+* text=auto eol=lf
 
-# Every golden and testdata file is compared byte-for-byte by tuitest.compareGolden /
-# GoldenText, so it must be LF on every platform — a core.autocrlf=true checkout (Windows CI)
-# would otherwise turn a byte-identical frame into a diff that looks identical.
-*.golden text eol=lf
-**/testdata/** text eol=lf
+# Windows batch files are run by cmd.exe, which wants CRLF: the index copy stays LF and the
+# conversion happens on checkout only.
+*.bat text eol=crlf
 
-# ...except binary fixtures, which the line above would otherwise mark as text: a CRLF byte pair
-# inside a PDF or an image would be rewritten to LF on `git add` and corrupt the fixture.
-**/testdata/**/*.pdf binary
-**/testdata/**/*.png binary
-**/testdata/**/*.gif binary
-**/testdata/**/*.jpg binary
+# Binary fixtures and assets are never converted: a CRLF byte pair inside a PDF, an image or a
+# font would be rewritten on `git add` and corrupt the file.
+*.png binary
+*.gif binary
+*.jpg binary
+*.pdf binary
+*.ttf binary
+*.ico binary
 
-# The go:embed'd defaults must stay LF for the same reason the block art above does: //go:embed
-# bakes the bytes into the binary verbatim, so a core.autocrlf=true checkout ships a daemon unit,
-# a plist and a starter config whose every line ends in a carriage return, and which `apogee
-# daemon install` then writes out that way. It also fails the generation tests, which compare a
-# rendering against an LF .golden and so report a diff that prints identically. VERSION is
-# embedded too — strings.TrimSpace in version.go already saves the version NUMBER, but it is
-# pinned here so no embedded file is left relying on its reader to trim.
-cmd/apogee/defaults/** text eol=lf
-internal/config/defaults/** text eol=lf
-VERSION text eol=lf
-
-# The shipped skills are go:embed'd too, for the same reason: //go:embed bakes the bytes into the
-# binary verbatim, so a core.autocrlf=true checkout would ship every SKILL.md and stage prompt with
-# a carriage return on each line, and the `/audit` split would hand its parts to the model that way.
-internal/skills/shipped/** text eol=lf
-
-# The release program's package-channel templates are go:embed'd as well: a core.autocrlf=true
-# checkout (windows-latest) would bake a carriage return into every line, so the formula
-# byte-equality test against testdata/apogee-0.24.11.rb goes red on Windows CI and a Windows-host
-# publish pushes a CRLF formula and manifest to the tap and the bucket.
-cmd/release/templates/** text eol=lf
-
-# Git hooks are POSIX sh scripts run by Git Bash on Windows: a core.autocrlf=true checkout
-# would end every line in a carriage return and break them, so they stay LF everywhere.
-.githooks/** text eol=lf
-
-# The scripts run under bash, Git Bash included: a core.autocrlf=true checkout would end every
-# line in a carriage return and break them, so they stay LF everywhere.
-scripts/*.sh text eol=lf
-
-# The repo's committed skills are read by an agent host byte-for-byte on every platform: a
-# core.autocrlf=true checkout would hand every SKILL.md and stage prompt over with a carriage
-# return on each line, so a Windows host would read different bytes than a POSIX one.
-.apogee/skills/** text eol=lf
-
-# The capcom issue register is markdown that capcom parses and rewrites byte-for-byte on every
-# platform: a core.autocrlf=true checkout would put a carriage return on every line, so capcom fmt
-# and the capcom-log merge driver would see different bytes on a Windows host. Issue files merge
-# through the capcom-log driver, defined in each operator's global git config.
-.capcom/** text eol=lf
+# Issue files merge through the capcom-log driver, defined in each operator's global git config.
 .capcom/issues/**/*.md merge=capcom-log
