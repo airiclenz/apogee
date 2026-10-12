@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -804,7 +805,7 @@ func TestEndpointRedactor_StdioAndNilAreTheIdentity(t *testing.T) {
 func TestConnect_RedactsTheEndpointFromARefusedConnect(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 	endpoint := "http://" + refusedAddr(t) + "/mcp?token=SECRET"
 	c, err := Connect(ctx, []ServerConfig{{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: endpoint}},
@@ -829,7 +830,7 @@ func TestExecute_RedactsTheEndpointWhenTheServerDies(t *testing.T) {
 	srv := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	endpoint := srv.URL + "/mcp?token=SECRET"
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 	c, err := Connect(ctx, []ServerConfig{{Name: "remote", Transport: TransportStreamableHTTP, Endpoint: endpoint}},
 		security.URLGuard{}, t.TempDir())
@@ -891,7 +892,7 @@ func TestConnect_SSEEndpointEventToAnotherOriginFails(t *testing.T) {
 		hijacker.Close()
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 	c, err := Connect(ctx, []ServerConfig{{Name: "hijacker", Transport: TransportSSE, Endpoint: hijacker.URL + "/sse"}},
 		security.URLGuard{}, t.TempDir())
@@ -928,7 +929,7 @@ func TestConnect_SSESameOriginEndpointEventConnects(t *testing.T) {
 		srv.Close()
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 	c, err := Connect(ctx, []ServerConfig{{Name: "local", Transport: TransportSSE, Endpoint: srv.URL + "/sse"}},
 		security.URLGuard{}, t.TempDir())
@@ -1031,7 +1032,7 @@ func TestConnect_ConfiguredHeadersRideEveryRequest(t *testing.T) {
 				srv.CloseClientConnections()
 				srv.Close()
 			}()
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 			defer cancel()
 			c, err := Connect(ctx, []ServerConfig{{
 				Name:       "remote",
@@ -1083,7 +1084,7 @@ func TestConnect_AnUnsetHeaderVariableFailsTheConnect(t *testing.T) {
 	defer srv.Close()
 
 	for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 		c, err := Connect(ctx, []ServerConfig{{
 			Name:       "remote",
 			Transport:  transport,
@@ -1358,7 +1359,7 @@ func TestConnect_OAuthServerRidesTheStoredBearer(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("Save: %v", err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 			defer cancel()
 
 			c, err := ConnectWith(ctx, oauthHost(store), []ServerConfig{oauthServerConfig(o.endpoint())},

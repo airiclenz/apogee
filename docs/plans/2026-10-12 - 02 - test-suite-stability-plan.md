@@ -317,7 +317,13 @@ NOTES (2026-10-12): parkedcall's 10 ms pre-cancel sleep and sink's 2 ms mid-stre
 **Acceptance:** `go vet ./internal/tui/`; `GOOS=windows go vet ./internal/tui/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'TestNoFixedTimingInTests' ./internal/testtime/`; `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run '(Parked|Recall|RunView|Sink|UpdateCheck|Worker|ParkCall|Build|CancelledStep|StartResume|StartExchange|StartCompact)' ./internal/tui/`
 **Commit:** `test(tui): finish routing internal/tui timing through testtime`
 
-## 15. Migrate internal/mcp and internal/mcpauth
+## 15. Migrate internal/mcp and internal/mcpauth — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): internal/mcpauth needed no edit — it had no guard findings and was never in pendingPackages (item 8's note); handler_test.go is untouched.
+NOTES (2026-10-12): gatedServerWait moves from const to `var … = testtime.Budget(10s)`; runGatedFixtureServer (re-exec'd subprocess, no testing.TB) loops on testtime.Expiry(gatedServerWait) with a Fixed(10ms) stat poll and keeps os.Exit(2). assertNoGoroutineIn loops on Expiry, not Eventually, because its failure prints the stacks of that moment; its caller passes testtime.Budget(2s). The descendant-reap poll is testtime.Eventually(Budget(2s)), so its failure text is now Eventually's "timed out after … waiting for the descendant (pid N) to die after Close (…)".
+NOTES (2026-10-12): mcpCallTimeout's test override is testtime.Fixed(100ms) (a timeout meant to expire, and the result text asserts "100ms"); the elapsed bound `20 * mcpCallTimeout` becomes testtime.Budget(20 * mcpCallTimeout) (item 9's precedent for elapsed bounds); the 50 ms AfterFunc cancel is Fixed pacing; the wedged fixture's Sleep(time.Minute) is Fixed; every context.WithTimeout(20s) ceiling is Budget.
+NOTES (2026-10-12): the wedged-drain bound becomes testtime.Fixed(2*host.TerminateDuration+host.WaitDelay) + testtime.Budget(2*time.Second) — the ladder's own waits stay fixed, only the slack scales (the multiple sits inside the wrapper, per item 8's note).
+NOTES (2026-10-12): Acceptance ran as `go test -race -count=1 -parallel 1 -p 1 ./internal/mcp/ ./internal/mcpauth/` per this box's rules; internal/mcp also passed at APOGEE_TEST_TIME_SCALE=2.
 
 **What:** Item 9's rule. Includes `gatedServerWait` and `mcpCallTimeout`; the wedged-server `Sleep(time.Minute)` → `Fixed`.
 **Regression guard.** `runGatedFixtureServer` (mcp_test.go) polls `time.Now().After(deadline)` inside the re-exec'd fixture subprocess, which has no `testing.TB`; its loop is bounded by `testtime.Expiry(gatedServerWait)` (item 9's rule) or a `time.NewTimer(testtime.Budget(gatedServerWait))` select beside the 10 ms stat poll, keeping `os.Exit(2)` on expiry, never Eventually.

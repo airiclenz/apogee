@@ -12,6 +12,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -291,7 +292,7 @@ func stallingTool(t *testing.T) domain.Tool {
 // Turn survives (ADR 0007). Not parallel: it shrinks the package-level mcpCallTimeout.
 func TestExecute_CallTimeoutIsErrorResult(t *testing.T) {
 	saved := mcpCallTimeout
-	mcpCallTimeout = 100 * time.Millisecond
+	mcpCallTimeout = testtime.Fixed(100 * time.Millisecond)
 	t.Cleanup(func() { mcpCallTimeout = saved })
 	tool := stallingTool(t)
 
@@ -308,7 +309,7 @@ func TestExecute_CallTimeoutIsErrorResult(t *testing.T) {
 	if !strings.Contains(res.Content, "timed out after 100ms") {
 		t.Errorf("timeout result text = %q; want it to name the deadline", res.Content)
 	}
-	if bound := 20 * mcpCallTimeout; elapsed > bound {
+	if bound := testtime.Budget(20 * mcpCallTimeout); elapsed > bound {
 		t.Errorf("Execute took %v; want it back within %v of a %v deadline", elapsed, bound, mcpCallTimeout)
 	}
 }
@@ -322,7 +323,7 @@ func TestExecute_CancelMidCallIsGoError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	timer := time.AfterFunc(50*time.Millisecond, cancel)
+	timer := time.AfterFunc(testtime.Fixed(50*time.Millisecond), cancel)
 	defer timer.Stop()
 
 	_, err := tool.Execute(ctx, domain.ToolCall{ID: "c", Tool: "many__stall"})

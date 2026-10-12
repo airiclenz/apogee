@@ -23,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ----------------------------------------------------------------------------
@@ -168,29 +169,30 @@ func runWedgedFixtureServer() {
 	// the runtime's deadlock detector would kill a parked process outright, which is the very
 	// wedge this fixture exists to hold.
 	for {
-		time.Sleep(time.Minute)
+		time.Sleep(testtime.Fixed(time.Minute))
 	}
 }
 
 // gatedServerWait bounds how long the gated fixture waits for its gate before giving up; it is
 // well inside the tests' connect timeout, so a gate that never opens surfaces as a failed
 // handshake rather than a hung test.
-const gatedServerWait = 10 * time.Second
+var gatedServerWait = testtime.Budget(10 * time.Second)
 
 // runGatedFixtureServer holds the fixture server back until the gate file exists — it reads
 // nothing and writes nothing before then, so no handshake can complete while the gate is shut.
 // With mute set it exits the moment the gate opens instead of serving, which fails the handshake
 // the client already started. A gate that never opens ends the process unserved.
 func runGatedFixtureServer(gate string, mute bool) {
-	deadline := time.Now().Add(gatedServerWait)
+	// Expiry, not Eventually: this runs in the re-exec'd fixture process, which has no test to fail.
+	expired := testtime.Expiry(gatedServerWait)
 	for {
 		if _, err := os.Stat(gate); err == nil {
 			break
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			os.Exit(2)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 	}
 	if mute {
 		os.Exit(3)
@@ -227,7 +229,7 @@ func wedgedStdioServerConfig(t *testing.T) ServerConfig {
 // closes it. It fails the test on a connect error (the fixture must always be reachable).
 func connectFixture(t *testing.T) *Client {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	t.Cleanup(cancel)
 
 	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
@@ -401,7 +403,7 @@ func TestConnect_RefusesAStdioServerInsideTheWorkspace(t *testing.T) {
 	cfg := stdioServerConfig(t)
 	cfg.Command = copyExecutable(t, cfg.Command, filepath.Join(workspace, "planted-mcp-server"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 
 	c, err := Connect(ctx, []ServerConfig{cfg}, security.URLGuard{}, workspace)
@@ -429,7 +431,7 @@ func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX process groups; the Windows Job Object half of the same seam is verified on the owner's box")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 
 	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
@@ -456,13 +458,8 @@ func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for pidAlive(pid) {
-		if time.Now().After(deadline) {
-			t.Fatalf("the descendant (pid %d) outlived Close; want the server's process group reaped", pid)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	testtime.Eventually(t, testtime.Budget(2*time.Second), func() bool { return !pidAlive(pid) },
+		fmt.Sprintf("the descendant (pid %d) to die after Close (the server's process group reaped)", pid))
 }
 
 // TestClose_BoundsTheDrainOfAWedgedStdioServer proves the drain bound the teardown seam advertises
@@ -480,7 +477,7 @@ func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
 	// sibling's own cmd.Wait would read as this server's. Both bounds ride on the Host.
 	host := Host{TerminateDuration: 100 * time.Millisecond, WaitDelay: 200 * time.Millisecond}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 
 	c, err := ConnectWith(ctx, host, []ServerConfig{wedgedStdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
@@ -494,7 +491,7 @@ func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
 	// Everything the wedge can legitimately cost: the ladder's two waits (stdin close, then
 	// SIGTERM) before the SIGKILL, then the cancelled context's own bounded drain — plus slack for
 	// a loaded machine. Anything past that is the unbounded wait this wiring removes.
-	bound := 2*host.TerminateDuration + host.WaitDelay + 2*time.Second
+	bound := testtime.Fixed(2*host.TerminateDuration+host.WaitDelay) + testtime.Budget(2*time.Second)
 	closed := make(chan error, 1)
 	go func() { closed <- c.Close() }()
 	select {
@@ -504,7 +501,7 @@ func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
 	case <-time.After(bound):
 		t.Fatalf("Close did not return within %v; the wedged server's drain is unbounded", bound)
 	}
-	assertNoGoroutineIn(t, "os/exec.(*Cmd).Wait", 2*time.Second)
+	assertNoGoroutineIn(t, "os/exec.(*Cmd).Wait", testtime.Budget(2*time.Second))
 }
 
 // TestBuildStdioTransport_CancelArmsTheCmdsTeardown pins the other half of the same wiring, the
@@ -538,7 +535,7 @@ func TestBuildStdioTransport_CancelArmsTheCmdsTeardown(t *testing.T) {
 	go func() { waited <- cmd.Wait() }()
 	cancel()
 
-	bound := platform.ProcessWaitDelay + 2*time.Second
+	bound := platform.ProcessWaitDelay + testtime.Budget(2*time.Second)
 	select {
 	case <-waited:
 	case <-time.After(bound):
@@ -626,7 +623,7 @@ func gatedStdioServerConfig(t *testing.T, gate string, mute bool) ServerConfig {
 func TestConnect_StdioContainPrecedesTheHandshake(t *testing.T) {
 	gate := filepath.Join(t.TempDir(), "gate")
 	host, built := recordStdioTeardowns(gate)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 
 	c, err := ConnectWith(ctx, host, []ServerConfig{gatedStdioServerConfig(t, gate, false)}, security.URLGuard{}, t.TempDir())
@@ -656,7 +653,7 @@ func TestConnect_StdioContainPrecedesTheHandshake(t *testing.T) {
 func TestConnect_FailedStdioHandshakeReapsAContainedTree(t *testing.T) {
 	gate := filepath.Join(t.TempDir(), "gate")
 	host, built := recordStdioTeardowns(gate)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 
 	c, err := ConnectWith(ctx, host, []ServerConfig{gatedStdioServerConfig(t, gate, true)}, security.URLGuard{}, t.TempDir())
@@ -806,7 +803,7 @@ func TestConnect_StdioServerLaunchesUnderAnEmptyEnvAllowlist(t *testing.T) {
 	cfg := stdioServerConfig(t)
 	cfg.EnvAllowlist = &[]string{}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	t.Cleanup(cancel)
 	c, err := Connect(ctx, []ServerConfig{cfg}, security.URLGuard{}, t.TempDir())
 	if err != nil {
@@ -822,17 +819,19 @@ func TestConnect_StdioServerLaunchesUnderAnEmptyEnvAllowlist(t *testing.T) {
 // long as the shutdown ladder runs, so the claim is about what SURVIVES Close, not about one instant.
 func assertNoGoroutineIn(t *testing.T, frame string, within time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(within)
+	// Expiry, not Eventually: the failure prints the stacks of that moment, which Eventually's
+	// fixed message cannot carry.
+	expired := testtime.Expiry(within)
 	for {
 		buf := make([]byte, 1<<20)
 		stacks := string(buf[:runtime.Stack(buf, true)])
 		if !strings.Contains(stacks, frame) {
 			return
 		}
-		if time.Now().After(deadline) {
+		if expired() {
 			t.Fatalf("a goroutine was still parked in %s %v after Close:\n%s", frame, within, stacks)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtime.Fixed(10 * time.Millisecond))
 	}
 }
 
@@ -990,7 +989,7 @@ func TestBuildTransport_UnknownAndMissing(t *testing.T) {
 // error is surfaced — no half-wired MCP set, no orphan. (The first server is the live stdio
 // fixture; the second is a stdio server whose command does not exist.)
 func TestConnect_RollsBackOnLaterFailure(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
 	defer cancel()
 
 	configs := []ServerConfig{

@@ -29,7 +29,6 @@ var pendingPackages = map[string]bool{
 	"internal/gitexec":    true,
 	"internal/judge":      true,
 	"internal/keystore":   true,
-	"internal/mcp":        true,
 	"internal/mdns":       true,
 	"internal/platform":   true,
 	"internal/present":    true,
