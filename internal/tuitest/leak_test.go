@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // parkedForTest blocks in a frame this package owns, which is exactly what a leaked driver
@@ -19,7 +21,7 @@ func parkedForTest(started chan<- struct{}, stop <-chan struct{}) {
 // selfTestGrace is the grace this package's own tests give a check whose leak is deliberate. The
 // goroutines it parks never stop until the test says so, so no grace would save them, and the
 // production [leakGrace] would only make the report a minute late.
-const selfTestGrace = 200 * time.Millisecond
+var selfTestGrace = testtime.Fixed(200 * time.Millisecond)
 
 // recordingTB stands in for the *testing.T of a test that leaks, so a test can call [CheckLeaks],
 // run the cleanup itself and read back what it reported instead of failing on it. testing.TB cannot

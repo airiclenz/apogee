@@ -11,6 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // Size is a terminal's dimensions in cells.
@@ -461,8 +463,9 @@ func (in *driverInput) touched() bool {
 // scheduled to notice it, so on a loaded box the gap the program actually observes is shorter than
 // the gap the driver slept, and a 20 ms margin is one scheduling hiccup away from merging two
 // keystrokes. The suite presses Esc a couple of dozen times, so the extra costs it a second or two
-// in total — the only fixed sleep in the kit, and the cheapest place to be generous.
-const escapeGap = 200 * time.Millisecond
+// in total — the only fixed sleep in the kit, and the cheapest place to be generous. It is
+// [testtime.Fixed], not a budget: the gap is the terminal's rule, and a slow box does not change it.
+var escapeGap = testtime.Fixed(200 * time.Millisecond)
 
 // send writes into the program's input under the same lock the answer pump holds, so a terminal
 // answer can never be spliced into the middle of a keystroke's byte sequence.

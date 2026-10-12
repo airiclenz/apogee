@@ -43,7 +43,6 @@ var pendingPackages = map[string]bool{
 	"internal/subprocess": true,
 	"internal/tools":      true,
 	"internal/tui":        true,
-	"internal/tuitest":    true,
 	"internal/undo":       true,
 	"internal/update":     true,
 	"internal/userexec":   true,

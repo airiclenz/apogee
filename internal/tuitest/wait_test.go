@@ -1,6 +1,7 @@
 package tuitest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,10 +33,10 @@ func TestKitBudgetsAreScaledBudgets(t *testing.T) {
 func TestWaitForReturnsAsSoonAsTheConditionHolds(t *testing.T) {
 	t.Parallel()
 
-	landed := time.Now().Add(60 * time.Millisecond)
 	start := time.Now()
-	WaitFor(t, func() bool { return time.Now().After(landed) }, Within(3*time.Second), Awaiting("the landing"))
-	if elapsed := time.Since(start); elapsed > time.Second {
+	landed := testtime.Expiry(testtime.Fixed(60 * time.Millisecond))
+	WaitFor(t, landed, Within(testtime.Budget(3*time.Second)), Awaiting("the landing"))
+	if elapsed := time.Since(start); elapsed > testtime.Budget(time.Second) {
 		t.Errorf("WaitFor took %s for a condition that held after 60ms", elapsed)
 	}
 }
@@ -70,7 +71,47 @@ func TestWaitFailureWithoutAScreenSaysSo(t *testing.T) {
 	}
 }
 
-// TestWaitArtifactsAreWrittenWhenTheDirIsSet: TUITEST_ARTIFACTS is the CI half — the frame lands
+// timeoutRecorder stands in for the *testing.T of a wait that times out, so a test can read back what
+// [WaitFor] reported instead of failing on it. The real T is embedded — testing.TB has an unexported
+// method — and only Fatalf is taken over; it records and returns, so the caller sees every report.
+type timeoutRecorder struct {
+	testing.TB
+	reports []string
+}
+
+func (r *timeoutRecorder) Fatalf(format string, args ...any) {
+	r.reports = append(r.reports, fmt.Sprintf(format, args...))
+}
+
+// TestWaitForTimeoutReportsThroughTheWaitersFailure: a wait that runs out on a screen fails the test
+// once, with the waiter's own failure — the frame plain and styled — not a bare timeout.
+func TestWaitForTimeoutReportsThroughTheWaitersFailure(t *testing.T) {
+	t.Parallel()
+
+	s := NewScreen(12, 2)
+	t.Cleanup(s.Close)
+	if _, err := s.Write([]byte("\x1b[31mred\x1b[0m ok")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	timeout := testtime.Fixed(100 * time.Millisecond)
+	rec := &timeoutRecorder{TB: t}
+	WaitFor(rec, func() bool { return false }, On(s), Within(timeout), Awaiting("the approval pane"))
+
+	if len(rec.reports) != 1 {
+		t.Fatalf("WaitFor reported %d failures, want 1: %q", len(rec.reports), rec.reports)
+	}
+	want := waiter{screen: s, timeout: timeout, what: "the approval pane"}.failure(t.Name())
+	if rec.reports[0] != want {
+		t.Errorf("the timeout report is not the waiter's failure:\ngot:\n%s\nwant:\n%s", rec.reports[0], want)
+	}
+	for _, part := range []string{"timed out after 100ms", "red ok", "\x1b[31mred"} {
+		if !strings.Contains(rec.reports[0], part) {
+			t.Errorf("the timeout report does not carry %q:\n%s", part, rec.reports[0])
+		}
+	}
+}
+
+// TestWaitArtifactsAreWrittenWhenTheDirIsSet:TUITEST_ARTIFACTS is the CI half — the frame lands
 // beside the run as two files, plain and styled, named for the test.
 func TestWaitArtifactsAreWrittenWhenTheDirIsSet(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "artifacts")
@@ -109,9 +150,9 @@ func TestWaitTextAndWaitGone(t *testing.T) {
 	s := NewScreen(20, 2)
 	t.Cleanup(s.Close)
 	go func() {
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(testtime.Fixed(40 * time.Millisecond))
 		_, _ = s.Write([]byte("approve?"))
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(testtime.Fixed(40 * time.Millisecond))
 		_, _ = s.Write([]byte("\x1b[2J\x1b[Hdone"))
 	}()
 	WaitText(t, s, "approve?")

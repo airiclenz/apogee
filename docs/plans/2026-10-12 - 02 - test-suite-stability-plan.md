@@ -200,7 +200,14 @@ A `pendingPackages` set names, by module-relative directory, every package that 
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 -run 'TestNoFixedTimingInTests' ./internal/testtime/`
 **Commit:** `test(testtime): guard tests against fixed sleeps and deadlines`
 
-## 9. Migrate internal/tuitest
+## 9. Migrate internal/tuitest — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): pty.go needed no edit — its finding resolved through escapeGap (driver.go), which is now `var escapeGap = testtime.Fixed(200 * time.Millisecond)`; pty_test.go carried no findings and is untouched.
+NOTES (2026-10-12): leak_test.go (not in Files) — selfTestGrace becomes `var selfTestGrace = testtime.Fixed(200 * time.Millisecond)` under the rule's "named budget constants get Budget/Fixed initialisers" (a grace meant to expire); it was never a guard finding.
+NOTES (2026-10-12): screen_test.go's resize-shrink wait uses testtime.Expiry(testtime.Budget(5s)), not Eventually: the painter must be stopped before the test fails, and the runtime.Gosched spin keeps the wait as tight as the window under test.
+NOTES (2026-10-12): wait_test.go's early-return bound (`elapsed > time.Second`) became testtime.Budget(time.Second) alongside Within(testtime.Budget(3s)), so the bound scales with the wait it measures; the landing condition is now testtime.Expiry(testtime.Fixed(60ms)).
+NOTES (2026-10-12): the new test's TB fake is named timeoutRecorder because screen_test.go already declares a fatalRecorder (nil TB, Goexit on Fatalf) that cannot serve WaitFor, which calls t.Name().
+NOTES (2026-10-12): the Acceptance race run was executed as `go test -race -count=1 -p 1 -parallel 1 ./internal/tuitest/ ./internal/testtime/` per this box's rules.
 
 **What:** Recast at the regression check (2026-10-12). The first package off the pending list. Every migration item (9–20) applies the same rule:
 - A deadline or a wait that ends on a condition → `testtime.Budget`.

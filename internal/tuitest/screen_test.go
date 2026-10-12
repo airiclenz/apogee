@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // A resize is the one moment a driver hands the emulator a size the RENDERER has not seen yet.
@@ -96,9 +98,11 @@ func TestScreenResizeHeightShrinkWhileOutputStreams(t *testing.T) {
 		// Wait for at least one frame laid out for the tall terminal to land on the short one.
 		// That is the window the panic lived in, and without the wait the two resizes can bracket
 		// it entirely — the test would then pass against the unfixed code.
-		deadline := time.Now().Add(5 * time.Second)
+		// An Expiry rather than testtime.Eventually: the painter has to be stopped before the test
+		// fails, and the spin on runtime.Gosched keeps the wait as tight as the window it targets.
+		expired := testtime.Expiry(testtime.Budget(5 * time.Second))
 		for s.BytesWritten() < painted+int64(len(frame)) {
-			if time.Now().After(deadline) {
+			if expired() {
 				close(done)
 				painting.Wait()
 				t.Fatal("the painting goroutine stopped writing")

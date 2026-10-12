@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // A driver test starts a real program, a real worker, a real file watch and a real heartbeat. The
@@ -113,7 +115,9 @@ func checkLeaks(t testing.TB, grace time.Duration) {
 		// The cleanup runs on the test's own goroutine, which wears the id like everything it
 		// started; without this it would count itself.
 		pprof.SetGoroutineLabels(context.Background())
-		deadline := time.Now().Add(grace)
+		// An Expiry, not testtime.Eventually: the report is the check's own — Errorf with the
+		// stacks still running — and the cleanup must not stop the test with a bare timeout.
+		expired := testtime.Expiry(grace)
 		for {
 			profile, err := goroutineProfile()
 			if err != nil {
@@ -124,12 +128,12 @@ func checkLeaks(t testing.TB, grace time.Duration) {
 			if len(left) == 0 {
 				return
 			}
-			if !time.Now().Before(deadline) {
+			if expired() {
 				t.Errorf("%d goroutine(s) outlived the test by %s:\n\n%s",
 					goroutinesIn(left), grace, stacksOf(left))
 				return
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(testtime.Fixed(50 * time.Millisecond))
 		}
 	})
 }

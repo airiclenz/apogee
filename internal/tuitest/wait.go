@@ -74,15 +74,17 @@ func WaitFor(t testing.TB, cond func() bool, opts ...Option) {
 	for _, opt := range opts {
 		opt(&w)
 	}
-	deadline := time.Now().Add(w.timeout)
+	// The deadline is an Expiry rather than testtime.Eventually because the failure is this
+	// kit's own: Eventually would report a bare timeout, and the frame would be lost.
+	expired := testtime.Expiry(w.timeout)
 	for {
 		if cond() {
 			return
 		}
-		if !time.Now().Before(deadline) {
+		if expired() {
 			break
 		}
-		time.Sleep(pollInterval)
+		time.Sleep(testtime.Fixed(pollInterval))
 	}
 	if cond() { // one last look, so a condition that landed during the final sleep still counts
 		return
