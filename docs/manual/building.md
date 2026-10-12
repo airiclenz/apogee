@@ -166,8 +166,9 @@ The knobs:
 | --- | --- |
 | `APOGEE_TEST_LANES=n` | How many test processes run at once. Default: the process budget above. |
 | `APOGEE_TEST_SHARDS=n` | The older knob, from when each heavy package ran as n long-lived shards. It is now read as `APOGEE_TEST_LANES` = n per heavy package + 1, the process count those shards came to. `APOGEE_TEST_LANES` wins. |
-| `APOGEE_TEST_SLOW=1` | The slow-box plan: three lanes (an explicit lane count still wins), every process `-parallel 1`. |
+| `APOGEE_TEST_SLOW=1` | The slow-box plan: three lanes (an explicit lane count still wins), every process `-parallel 1`. It scales the test budgets as well as the concurrency: unless `APOGEE_TEST_TIME_SCALE` is set, it sets it to 2. |
 | `APOGEE_TEST_RACE=0` | Drops the race detector (see below). |
+| `APOGEE_TEST_TIME_SCALE=x` | Multiplies every test budget — each deadline or wait that ends on a condition — by x, a number above 0 (default 1). Durations whose length is what a test claims are never scaled. The `==>` summary line names any scale other than 1. |
 
 `go test -race -count=1 ./...` remains the equivalent single-process run (every test, nothing
 skipped), but it is not the supported shape. It hands every package the box at once, which is
@@ -179,7 +180,9 @@ cost.
 
 `APOGEE_TEST_SLOW=1` makes the same script runnable on a box the default plan overloads, such as
 a Raspberry Pi 4 or 5. It is explicit rather than sized off the core count, because a Pi and
-CI's 4 vCPU runner report the same `nproc` and differ 3–5× per core. `APOGEE_TEST_RACE=0` drops
+CI's 4 vCPU runner report the same `nproc` and differ 3–5× per core. Slow mode doubles the test
+budgets too (`APOGEE_TEST_TIME_SCALE=2`, unless you set a scale yourself), because a slow box's
+waits run long as well as its processes. `APOGEE_TEST_RACE=0` drops
 the race detector. The stock Raspberry Pi OS arm64 kernels give 39-bit (Pi 4) or 47-bit (Pi 5)
 virtual addresses, and TSan requires 48 (`FATAL: Found 39 - Supported 48`), so no `-race` binary
 runs on either. An unraced run announces itself on stderr and in its `==>` summary line, and it

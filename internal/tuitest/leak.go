@@ -55,8 +55,9 @@ var leakMarkers = []string{
 // by nature — a program returns before its renderer's last write lands — so the check polls rather
 // than snapping once, and the grace is generous for the same reason [DefaultTimeout] is: the poll
 // returns the moment the last labelled goroutine goes, so a clean teardown never spends it, while
-// a tight one reports a loaded box's slow teardown as a leak it is not.
-const leakGrace = DefaultTimeout
+// a tight one reports a loaded box's slow teardown as a leak it is not. It is [DefaultTimeout]
+// itself, so it carries that budget's scale and is not scaled a second time.
+var leakGrace = DefaultTimeout
 
 // checkerFrame is this package's own inspection frame. The goroutine reading the profile is in it,
 // which of course names internal/tuitest; the cleanup clears its own labels before it reads, so

@@ -6,7 +6,26 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
+
+// TestKitBudgetsAreScaledBudgets: the kit's deadlines are budgets, so they follow
+// APOGEE_TEST_TIME_SCALE like every other one, and the leak grace is the wait deadline itself
+// rather than a second, separately scaled copy.
+func TestKitBudgetsAreScaledBudgets(t *testing.T) {
+	t.Parallel()
+
+	if want := testtime.Budget(60 * time.Second); DefaultTimeout != want {
+		t.Errorf("DefaultTimeout = %s, want testtime.Budget(60s) = %s", DefaultTimeout, want)
+	}
+	if want := testtime.Budget(5 * time.Second); teardownTimeout != want {
+		t.Errorf("teardownTimeout = %s, want testtime.Budget(5s) = %s", teardownTimeout, want)
+	}
+	if leakGrace != DefaultTimeout {
+		t.Errorf("leakGrace = %s, want DefaultTimeout = %s", leakGrace, DefaultTimeout)
+	}
+}
 
 // TestWaitForReturnsAsSoonAsTheConditionHolds: the wait is what keeps the e2e budget; it must not
 // cost its whole deadline for a condition that lands early.

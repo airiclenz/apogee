@@ -51,7 +51,10 @@
 #   APOGEE_TEST_SHARDS=n   the older knob, read as APOGEE_TEST_LANES = n per heavy package + 1
 #                          (the process count the per-package shards it used to set came to)
 #   APOGEE_TEST_RACE=0     drop -race (announced on stderr and in the ==> line); any other value keeps it
-#   APOGEE_TEST_SLOW=1     slow box: 3 lanes (an explicit lane count still wins), every process -parallel 1
+#   APOGEE_TEST_SLOW=1     slow box: 3 lanes (an explicit lane count still wins), every process -parallel 1,
+#                          and APOGEE_TEST_TIME_SCALE=2 unless the caller set a scale
+#   APOGEE_TEST_TIME_SCALE=x  scales every test budget by x (internal/testtime; default 1); a scale
+#                          other than 1 is named in the ==> line
 #
 # The extra flags reach every process. A batch's `go test` takes them as given. A chunk's binary
 # takes the test flags among them in their binary spelling (`-timeout=1h` becomes
@@ -184,7 +187,9 @@ done
 # because core count cannot tell the boxes apart: a Raspberry Pi and CI's 4-vCPU runner both
 # report 4 cores and differ 3–5x per core, and CI keeps the plan above. Slow mode is three lanes,
 # every process -parallel 1: three tests on the box at once, a core left for the builds and the
-# processes' startup, and three race-enabled processes' memory rather than four.
+# processes' startup, and three race-enabled processes' memory rather than four. A slow box also
+# needs longer waits, so slow mode doubles every test budget (APOGEE_TEST_TIME_SCALE=2, read by
+# internal/testtime) unless the caller already chose a scale.
 # ---------------------------------------------------------------------------------------------
 ncpu=$( (command -v nproc >/dev/null 2>&1 && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 budget=$((ncpu - 1))
@@ -206,10 +211,14 @@ fi
 case "$lanes" in '' | *[!0-9]*) lanes=1 ;; esac
 [ "$lanes" -ge 1 ] || lanes=1
 
+if is_slow_box && [ -z "${APOGEE_TEST_TIME_SCALE:-}" ]; then
+	export APOGEE_TEST_TIME_SCALE=2
+fi
+
 if is_slow_box; then
 	parallel=1
 	batch_parallel=1
-	echo "test-shards: slow box (APOGEE_TEST_SLOW=1): $lanes lanes, every process -parallel 1" >&2
+	echo "test-shards: slow box (APOGEE_TEST_SLOW=1): $lanes lanes, every process -parallel 1, budgets scaled x$APOGEE_TEST_TIME_SCALE" >&2
 else
 	parallel=$((budget / lanes))
 	[ "$parallel" -ge 1 ] || parallel=1
@@ -469,10 +478,15 @@ done | sort -t$'\t' -k1,1rn | cut -f2 >"$work/order"
 # Run. Each lane walks the queue in order and claims an item by creating its claim directory —
 # `mkdir` is atomic, so exactly one lane gets each item — then runs it and moves on.
 # ---------------------------------------------------------------------------------------------
+# A scale other than 1 (numerically: "1.0" is 1) is named, so a run's budgets are on its record.
+scale_note=
+if awk -v s="${APOGEE_TEST_TIME_SCALE:-1}" 'BEGIN { exit (s + 0 == 1) }'; then
+	scale_note=", budgets scaled x${APOGEE_TEST_TIME_SCALE}"
+fi
 if [ "${APOGEE_TEST_RACE:-}" = 0 ]; then
-	echo "==> go test (unraced): $nitems processes over $lanes lanes"
+	echo "==> go test (unraced): $nitems processes over $lanes lanes$scale_note"
 else
-	echo "==> go test -race: $nitems processes over $lanes lanes"
+	echo "==> go test -race: $nitems processes over $lanes lanes$scale_note"
 fi
 echo "    heavy-package chunks of ~${CHUNK_SECS}s and at most $CHUNK_MAX_TESTS tests, the other $nrest packages in batches; each runs $parallel test(s) at a time, a batch $batch_parallel"
 

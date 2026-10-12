@@ -160,7 +160,11 @@ It has unit tests, and it imports nothing from the module.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/testtime/`; `go vet ./internal/testtime/`; `! go list -f '{{join .Imports "\n"}}' ./internal/testtime/ | grep -q 'airiclenz/apogee'` (the package imports nothing from the module)
 **Commit:** `feat(testtime): add the shared test timing package`
 
-## 7. tuitest budgets and the shard script honour the scale
+## 7. tuitest budgets and the shard script honour the scale — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): consequential edit — Makefile: made necessary by the slow-box plan now doubling budgets and the new APOGEE_TEST_TIME_SCALE knob (the `test` target's comment lists the knobs and what slow mode does)
+NOTES (2026-10-12): the Tests line names DefaultTimeout only; TestKitBudgetsAreScaledBudgets (wait_test.go) also pins teardownTimeout = Budget(5s) and leakGrace = DefaultTimeout (scaled once, not twice)
+NOTES (2026-10-12): the whole-package race run of ./internal/tuitest/ was refused by the harness's permission classifier; only the new test was run (raced, at scale 1 and at scale 2) — the verifier should run the package-level Acceptance command
 
 **What:** Wires the knob through.
 **Goal:**
