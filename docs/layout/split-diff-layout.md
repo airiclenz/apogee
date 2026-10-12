@@ -1,11 +1,11 @@
 # Split diff layout
 
 This file is the canonical diff-body layout spec (grill session 2026-08-19),
-ratified by [ADR 0052](../adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md).
+ratified by [ADR 0052](../../.capcom/knowledge/decisions/adr-0052.md).
 It replaces `siff-layout.md`, an earlier sketch that was never committed. `tool-layout.md` keeps the block
 grammar — headers, slots, fold states — and its per-tool table's diff rows point
 here for what the expanded body paints. Terms (Split diff, Stacked diff, Edit
-regions) are `CONTEXT.md`'s.
+regions) are the glossary's (`capcom know show glossary`).
 
 Scope: the expanded body of the six diff-bodied blocks — `write_file`,
 `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`,

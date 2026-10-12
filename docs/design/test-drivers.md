@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-27 · **Status:** ✅ **Current** — the kit is built (its plan was archived as completed)
 and this document is kept in step with it as the kit grows · **Owner ADR:**
-[ADR 0062](../adr/0062-test-drivers-are-drivers.md) ("test drivers are Drivers") ·
+[ADR 0062](../../.capcom/knowledge/decisions/adr-0062.md) ("test drivers are Drivers") ·
 **Realised by:** `docs/plans/archived/2026-08-27 - 02 - test-drivers-kit-plan.md`
 
 > **How to read this file.** It is the practical counterpart to ADR 0062: the ADR says *why* the

@@ -67,7 +67,7 @@ boundary. A future `git_push` blocks `--force` and protected-branch pushes the w
 blocks amend-on-published; no dangerous-action guard rule is added ahead of the tool, and the
 candidate itself stays unreplicated.
 *(Per-profile tool rosters: GRILLED 2026-08-23 →
-[ADR 0057](../adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md);
+[ADR 0057](../../.capcom/knowledge/decisions/adr-0057.md);
 implementation plan `docs/plans/archived/2026-08-23 - 00 - per-profile-tool-rosters-plan.md`.)*
 
 **Deferred candidates:** env-var parameters on `terminal`/`python_exec` (stable across both Qwen
@@ -89,12 +89,12 @@ behind `tools.disabled` — and are pruned on bench evidence like every other ad
 
 **Denied, with reasons** (do not re-file as gaps):
 
-- `database_query` — [ADR 0031](../adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md):
+- `database_query` — [ADR 0031](../../.capcom/knowledge/decisions/adr-0031.md):
   no first-party connectors, that is MCP's job.
 - standalone `apply_patch` — it already exists inside `edit_existing_file`; models missing it is a
   *discovery* problem, tracked as the explicit-patch-param idea in (f) above.
 - concurrent `terminal` — parallelism lands at the sub-agent layer
-  ([ADR 0039](../adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
+  ([ADR 0039](../../.capcom/knowledge/decisions/adr-0039.md)).
 - `inspect_environment` — `terminal` covers it.
 
 **Method lessons** (they generalise past this round):
@@ -106,7 +106,7 @@ behind `tools.disabled` — and are pruned on bench evidence like every other ad
 
 **Second round (2026-08-16, 3 polls — deepseek-v4-flash, Qwen3.8-27B, Qwen3.6-35B-A3B).** Larger
 models than the first round. Owner framing, ratified this day, and applied to the identity
-statements in `README.md`/`AGENTS.md`/`CONTEXT.md`: **apogee is built for smaller local models —
+statements in `README.md`/`AGENTS.md`/the glossary (`capcom know show glossary`): **apogee is built for smaller local models —
 while working even better with bigger ones.** The ~4B–35B range is dropped from identity docs
 (kept in ADRs and past rationales as historical context, and in the bench arms above as a concrete
 measurement class); the hard-learned lesson it encoded stays: usefully agentic behaviour starts
@@ -126,10 +126,10 @@ model a tool-list slot.
 - **Persistent terminal / PTY session** (Qwen3.8's single top pick) — attach to a running dev
   server, drive REPLs/interactive programs via a start/send/poll session pair. NOT covered by the
   first round's `concurrent terminal` denial (that was parallelism,
-  [ADR 0039](../adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md));
+  [ADR 0039](../../.capcom/knowledge/decisions/adr-0039.md));
   this is interactivity, with heavy confinement and lifecycle implications. **GRILLED
   2026-08-25 → the Console family,
-  [ADR 0059](../adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md)**
+  [ADR 0059](../../.capcom/knowledge/decisions/adr-0059.md)**
   (`console_open/send/read/close`, live host state, split along the classification line,
   default-off/profile-enabled). **SHIPPED 2026-08-25** — `console_open`, `console_send`,
   `console_read` and `console_close` live in `internal/tools/console_*.go` over `internal/console`.
@@ -144,6 +144,6 @@ model a tool-list slot.
   guided decomposition and is tuning; a plain tool the model owns prescribes nothing, fires on no
   Turn the model did not open itself, and holds only the sentences the model wrote about its own
   work. Shipped as `task_list` — engine-held, whole-list replace, re-rendered as a standing block —
-  [ADR 0072](../adr/0072-the-task-list-is-model-owned-session-state.md). The record above stands as
+  [ADR 0072](../../.capcom/knowledge/decisions/adr-0072.md). The record above stands as
   written; this is the distinction that overturned it.
 - Method lesson 1 re-confirmed: same roster, one model removes two tools, another removes none.

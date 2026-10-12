@@ -85,6 +85,6 @@ Please do not open a public issue for a vulnerability. Use GitHub's private repo
 (`apogee --version`), the platform, the autonomy mode, and a reproduction. You will get an
 acknowledgement, a fix on `main` and a release; credit in the changelog if you want it.
 
-The security-relevant design decisions are recorded under [`docs/adr/`](docs/adr/), and the
+The security-relevant design decisions are recorded as [decision records](.capcom/knowledge/decisions.md), and the
 confinement contract in
 [`docs/design/confinement-execution-contract.md`](docs/design/confinement-execution-contract.md).

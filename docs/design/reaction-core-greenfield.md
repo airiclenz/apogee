@@ -1,7 +1,7 @@
 # Reaction core — a greenfield design for one hook/mechanism/floor-guard surface
 
 **Date:** 2026-09-07 · **Status:** ✅ **Decided** — grilled the same day; §3 and §8 resolved in
-[ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (day-one user
+[ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md) (day-one user
 cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off).
 Implementation plans: the three staged plans §9.4 links. · **Companion:**
 [hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Issue:**
@@ -153,7 +153,8 @@ advise class survivable, and it answers the costs the findings document lists as
 
 ## 3. The policy matrix
 
-The `Reaction surface` entry in `CONTEXT.md` (four exclusive rungs) becomes an executable matrix.
+The glossary's `Reaction surface` entry (`capcom know show reaction-surface`; four exclusive rungs)
+becomes an executable matrix.
 Exclusivity survives as "one reaction, one cell".
 
 | origin ↓ / class → | observe | advise | gate | shape (view) | shape (work) |
@@ -210,7 +211,7 @@ off). The bench's control arm and the shipped default remain the same agent.
 
 - **Doctrine.** One ADR would replace ADR 0071 D4/D6 (catalogue and lab layer) and ADR 0073
   D2/D4/D5/D7 (observe-only, no pre-event, global-only, never-wait) together, and the
-  `Reaction surface` entry in `CONTEXT.md` is rewritten as the matrix. ADR 0031 invariant 4 is
+  `Reaction surface` entry in the glossary (`capcom know show reaction-surface`) is rewritten as the matrix. ADR 0031 invariant 4 is
   *satisfied by construction* rather than superseded: every handler registers on one core, so any
   reaction is bench-drivable in-process and the ledger attributes its effect. Content quality carries
   the standing obligation ADR 0064 §6 already places on the system prompt.

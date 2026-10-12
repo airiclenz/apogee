@@ -204,7 +204,7 @@ answer and no prose among them. stderr keeps every notice, warning and summary i
 `text`, with one exception: the prune notice and the live narration go quiet, because the `prune`,
 `tool_call`, `tool_result` and `sub_agent_phase` lines on stdout already carry the same facts. The
 contract is
-[ADR 0075](../adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
+[ADR 0075](../../.capcom/knowledge/decisions/adr-0075.md).
 
 ```json
 {"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T14:12:33.884201Z","session":"20260907-141233-7f2a","turn":0,"depth":0,"call_id":null,"run_id":null,"data":{"call":{"id":"call_1","tool":"read_file","arguments":{"path":"a.txt"}},"resolved_path":"","spawn_run_id":""}}
@@ -281,7 +281,7 @@ named by the seam's closing notice — `pre-request-finished`, `post-response-fi
 reactions that acted there under `data.fired`. They are off by default for two reasons. Volume:
 the request and response seams close once per streamed Turn and the two tool seams once per tool
 call, at every depth, so a run that used tools has more seam lines than tool lines. And the
-default stream is what [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+default stream is what [ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md)
 A5 promised: the seam closures are sink-only there, so a consumer that never asked sees exactly
 the stream it saw before the kind existed. `--seams` reaches only the Event lines; given without
 `--format json` it is a usage error — `apogee headless: --seams needs --format json`, exit `2`,

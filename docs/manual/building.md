@@ -199,7 +199,7 @@ dev box whose kernel lacks landlock ABI 4, where the skip is the honest result.
 ## Releasing
 
 The release process lives in this repo and needs nothing outside it
-([ADR 0098](../adr/0098-the-repo-owns-its-release-pipeline.md)): a clone, the Go toolchain,
+([ADR 0098](../../.capcom/knowledge/decisions/adr-0098.md)): a clone, the Go toolchain,
 `git`, `gh` logged in with push access to this repository, the Homebrew tap and the Scoop
 bucket, and — for winget — `komac`. It runs the same from Linux, macOS or Windows. The work
 is split in two. A Go maintainer program, `cmd/release` (run as `go run ./cmd/release <verb>`,
@@ -353,8 +353,8 @@ rather than a separate artifact. `make dist` needs nothing beyond the Go toolcha
 library, so it runs the same on Linux, macOS and Windows.
 
 **Reading the code?** [`AGENTS.md`](../../AGENTS.md) is the single map: it says where each
-kind of knowledge lives — `CONTEXT.md` for the domain language, `docs/adr/` for the
-settled decisions, `docs/design/` for the contracts, `layout.md` for the TUI spec — and
+kind of knowledge lives — the glossary (`capcom know show glossary`) for the domain language, the decision records
+(`capcom know show decisions`) for the settled decisions, `docs/design/` for the contracts, `layout.md` for the TUI spec — and
 states the conventions you cannot derive from the source. Per-package `doc.go` files
 carry the file-by-file tours from there.
 

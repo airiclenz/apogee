@@ -106,7 +106,7 @@ floor is what Bypass is measured *against*, not something Bypass takes away. All
 screen](commands.md#the-settings-screen--settings), as Session rows: an edit applies to the session
 you are in. Only an explicit `<key>: false` takes one away, and the Go API's `apogee.FloorConfig`
 spells them as `Disable…` fields, so an embedder handing `New` a bare `Config` gets the whole floor.
-[ADR 0071](../adr/0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) records
+[ADR 0071](../../.capcom/knowledge/decisions/adr-0071.md) records
 why they are behaviour rather than catalogued rows.
 
 A guard's work stays out of the transcript — with one exception. When `tool-call-salvage` runs a
@@ -126,7 +126,7 @@ or an A-B-A-B alternation with a directive and can be turned off, where the brea
 call that keeps *failing*.
 
 What runs *above* the floor is the **Reaction** core
-([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)) — the
+([ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md)) — the
 [`reactions:`](#reactions--reactions) list, and one built-in reaction of the engine's own, the
 [context-fill notice](#context-fill-notice) below. The lab catalogue an earlier build let you switch
 rows of is gone; a file that still carries its key is rewritten for you at start-up rather than
@@ -159,7 +159,7 @@ It is **not a Floor guard**, and that is why it ships **off**. A Floor guard cha
 sees after its own mistake, or shapes the request without steering it; this notice exists to steer,
 and apogee's hard rule is that nothing which steers a model ships on until a bench run shows the
 model does better with it than without
-([ADR 0077](../adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md)). So the
+([ADR 0077](../../.capcom/knowledge/decisions/adr-0077.md)). So the
 key is the one top-level boolean beside the seven Floor keys that an untouched config leaves off,
 and — unlike the Floor — `--bypass` turns it off together with every other advise reaction. It is
 file-only (no flag, no environment variable) but live: the `/settings` row switches it for the
@@ -429,7 +429,7 @@ write at all, not merely which directory a session opens in.
 `APOGEE_BYPASS` earns a paragraph of its own, because of what it is for. It runs the whole session
 with **advise and shape Reactions of user or bench origin off** — exactly what can move the floor —
 while the Floor guards and the structural reducers stay on
-([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)). **observe** and
+([ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md)). **observe** and
 **gate** Reactions keep running too, because they change nothing the floor measures: a run under
 Bypass still fires your observe Reactions and still asks before it acts. On a stock install that
 changes nothing you can see, since nothing of user or bench origin is armed — the switch is the
@@ -439,12 +439,12 @@ Turn-1 request itself is identical with and without Bypass on a stock install, a
 request twice, as configured and under Bypass, and prints what the armed Reactions added
 ([`apogee probe`](probe.md)).
 Bypass is the honest "model-shaping Reactions off" floor an armed Reaction is measured against on the
-bench ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code
+bench ([ADR 0006](../../.capcom/knowledge/decisions/adr-0006.md)), and it is the very code
 path you can run yourself. What it never touches is the agent's structure and its floor — context
 compaction, the Budget, all seven Floor guards, the rest of the
 loop — so the floor is a working agent rather than a naked model. The same switch is
 the `bypass` row in `/settings`, and it is live: flip it mid-session and the next Reaction to fire
-already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the full definition.
+already sees it. [**Bypass mode**](../../.capcom/knowledge/glossary.md) in the glossary (`capcom know show glossary`) is the full definition.
 
 ## update-check
 
@@ -463,7 +463,7 @@ offline, a timeout, an unexpected answer — means simply no notice. Only a clea
 a `dev` build, or one whose version ends `.dirty` (built from a modified tree), never checks.
 Headless runs, the daemon, the bench, `apogee probe` and `apogee undo` never check, and the check
 never downloads or replaces anything
-([ADR 0097](../adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md)).
+([ADR 0097](../../.capcom/knowledge/decisions/adr-0097.md)).
 
 `update-check: false` turns it off, and so does `APOGEE_NO_UPDATE_CHECK` set to any non-empty value
 (see [Environment overrides](#environment-overrides)); there is no flag. The key is read once, at
@@ -512,7 +512,7 @@ A configured MCP endpoint is the first of two deliberate exemptions. An `mcp-ser
 one you wrote in your own config, so the floor — which exists to stop a *model* pivoting to internal
 addresses — is not applied to it, and the connection is pinned to that endpoint's own resolved
 addresses instead ([ADR
-0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)). Your
+0012](../../.capcom/knowledge/decisions/adr-0012.md)). Your
 two host lists still apply: a denied endpoint is refused at startup with the same url-safety
 message, and any *other* private address that connection is later pointed at stays refused.
 
@@ -745,7 +745,7 @@ attempt or one another program sends to the listener, is turned away and the log
 `~/.apogee/mcp-auth/<name>.json` (the directory `0700`, the file `0600`, rewritten atomically),
 holding the access and refresh tokens, their expiry, the authorization server and the client
 registration — everything a refresh needs. It is the one credential apogee writes to disk itself
-([ADR 0095](../adr/0095-mcp-oauth-tokens-are-persisted-by-apogee.md)): an API key or a header token
+([ADR 0095](../../.capcom/knowledge/decisions/adr-0095.md)): an API key or a header token
 is something you already keep somewhere, and apogee only reads it from where you point, but an
 OAuth token is minted by the login and has nowhere else to live. The server's `name` is the file's
 name, so it must be a safe file stem — letters, digits, `.`, `_` and `-`, starting with a letter or
@@ -872,7 +872,7 @@ Know what that turns on. A skill is prompt text somebody else wrote: it appears 
 and invoking it prepends the author's instructions to the message you send. Cloning a repository
 therefore means accepting that its skills are on your menu, one keystroke from your next message
 — read them the way you read its build scripts. Two things bound the trust. Your own library wins
-every id collision ([ADR 0032](../adr/0032-the-user-skill-library-outranks-the-workspace.md)), so
+every id collision ([ADR 0032](../../.capcom/knowledge/decisions/adr-0032.md)), so
 a repository can contribute a **new** skill id but can never quietly replace one you invoke by
 muscle memory; the copy it displaced is recorded rather than dropped, and
 [`/skills`](commands.md) names both the live one and the shadowed one. And the skill folders the
@@ -929,7 +929,7 @@ They are the **weakest** claim on a skill id in the system — below your global
 project's folders, below everything on disk. A skill of the same id anywhere else wins, and the
 shipped copy is recorded as shadowed rather than dropped, so writing your own `debugging` replaces
 apogee's without your having to switch anything off. That is the same collision rule
-[ADR 0032](../adr/0032-the-user-skill-library-outranks-the-workspace.md) states for the folders,
+[ADR 0032](../../.capcom/knowledge/decisions/adr-0032.md) states for the folders,
 with the shipped source added at the bottom. `/skills export <id>` is the shortcut for exactly
 that: it writes apogee's copy into `~/.apogee/skills/<id>/` for you to edit — see
 [the commands page](commands.md#in-chat-commands-skills-and-file-references).
@@ -960,7 +960,7 @@ What the matcher reads is each skill's **id, display name, summary and `triggers
 body. That is what keeps ranking a large library cheap, and it is also the whole of what suggestion
 touches: the catalog stays on this side of the wire, and a skill reaches the model only when you
 invoke it with `/id`
-([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
+([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
 Nine more keys live under `ui:`. Seven of them change how the screen looks rather than what it
 says; the other two, `ui.inspector` and `ui.stall-after`, come further down.
@@ -1460,7 +1460,7 @@ of the three wires, and also tell apogee the dial exists, so the picker and the 
 come back on a server it could not read. `off` forces the opposite: never send an effort
 at all, the escape hatch for a server that errors on the kwarg. Anything else is a startup
 error naming the entry and the key. See
-[ADR 0060](../adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md).
+[ADR 0060](../../.capcom/knowledge/decisions/adr-0060.md).
 
 A model that thinks for a long time can also go silent. `ui.stall-after` — a duration
 written the way Go spells one (`90s`, `2m`), default `120s`, `0` turns it off — sets how
@@ -1722,7 +1722,7 @@ reporting a bare lookup error:
 
 The cure is the one it names: put the server's IP address in `endpoint`, or give the
 name an `/etc/hosts` line. See
-[ADR 0091](../adr/0091-endpoint-local-names-resolve-over-mdns-in-process.md).
+[ADR 0091](../../.capcom/knowledge/decisions/adr-0091.md).
 
 **A `model:` is used as written.** When an entry names a model, that id is the
 model apogee asks for, whether or not the server's `/v1/models` lists it. A listed
@@ -1739,7 +1739,7 @@ A model you named is never swapped for another the server happens to list — a
 wrong id fails loud on the next request instead of quietly running someone else's
 model. Only an entry with **no** `model:` binds whatever the server lists first,
 and follows it when that changes. See
-[ADR 0085](../adr/0085-apogee-measures-upstreams-and-passes-routing-through.md),
+[ADR 0085](../../.capcom/knowledge/decisions/adr-0085.md),
 which amends ADR 0024 on this point.
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
@@ -1888,7 +1888,7 @@ unless any server is already running under that launcher, which apogee joins
 rather than replaces. Only an explicit pick or a committed load records: a model
 change the heartbeat merely observed, and the `--model` / `APOGEE_MODEL`
 overrides, never write anything. See
-[ADR 0048](../adr/0048-apogee-remembers-the-model-choice-per-server.md).
+[ADR 0048](../../.capcom/knowledge/decisions/adr-0048.md).
 
 **The first run asks.** With `server:` unset, apogee starts with **no server
 bound** — no engine constructed, nothing pointed anywhere — opens the `/server`
@@ -2163,7 +2163,7 @@ apogee runs that batch at the smaller of the two `parallel-agents` caps, so
 neither box is oversubscribed. A reply whose delegations all land on one seat
 runs at that seat's own cap, exactly as above.
 
-See [ADR 0069](../adr/0069-the-top-level-model-picks-the-delegation-seat.md).
+See [ADR 0069](../../.capcom/knowledge/decisions/adr-0069.md).
 
 ## The upstream API key
 
@@ -2342,7 +2342,7 @@ or LM Studio, activating a profile on a server that is already up), while starti
 managed `llama-server` or signalling one to stop reports a clean unsupported error. And a
 launcher on **another machine** is a different thing — reach that one as an
 `mcp-servers:` entry pointing at the launcher's MCP adapter; the two compose. See
-[the launcher design record](../adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
+[the launcher design record](../../.capcom/knowledge/decisions/adr-0029.md).
 
 ## The system prompt
 
@@ -2396,7 +2396,7 @@ relative path resolves against your apogee home rather than the workspace. Unlik
 that resolves the prompt, so a missing one is a startup error naming the index and the
 path. Layers are templates in the same closed placeholder language as the prompt itself
 (below). See
-[the layering record](../adr/0067-system-prompt-layers-are-an-explicit-additive-channel.md).
+[the layering record](../../.capcom/knowledge/decisions/adr-0067.md).
 
 An existing `~/.apogee/config.yaml` that carries a `system-prompt-text:` of its own
 keeps it: that is rung 2, and it wins, so nothing changes under a setup you already
@@ -2767,7 +2767,7 @@ and JWTs, and the staged names for key and env files (`*.pem`, `*.key`, `*.p12`,
 `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `.env`, `.env.*` — the `.env.example`/`sample`/`template`
 templates and any `.pub` public key excepted); a hit forces the look in every mode, the
 `Fix:` row names the file and what was found, and approving is the only way through — there
-is no allow-list ([ADR 0080](../adr/0080-git-commit-forces-a-look-at-staged-secret-material.md)).
+is no allow-list ([ADR 0080](../../.capcom/knowledge/decisions/adr-0080.md)).
 A scan that *cannot finish* forces the same look: if git stops answering within the check's own
 budget, or fails part-way through a repository it had already resolved, the `Fix:` row says the
 staged content is unchecked instead of naming a finding — a check that did not run never passes

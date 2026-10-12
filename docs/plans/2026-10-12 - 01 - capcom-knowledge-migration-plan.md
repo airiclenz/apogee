@@ -250,7 +250,11 @@ NOTES (2026-10-12): adr-0083 carries 10 children (six standing-denial parts), so
 - `capcom check && capcom fmt --check`
 **Commit:** `docs(knowledge): summarise decision records 0081 to 0098`
 
-## 10. Live docs link to the Notes
+## 10. Live docs link to the Notes — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): prose naming one glossary term in `CONTEXT.md` (Resolution, Color scheme, Interjection, Reaction surface, Context cost) names that term's Note (`capcom know show <term-id>`) instead of the generic "the glossary (`capcom know show glossary`)"; bare `CONTEXT.md` links still go to `.capcom/knowledge/glossary.md` as the Approach says.
+NOTES (2026-10-12): the illustrative path chosen for the commands.md:438 sample is `docs/manual/conf` → `docs/manual/configuration.md`; item 11's path_suggest.go:21 comment should use `docs/manual/conf`.
+NOTES (2026-10-12): `relink.py` and `check_links.py` written to `docs/skill-runs/migrate-knowledge/` (gitignored); `check_links.py` found no pre-existing dangling link in the touched trees outside `docs/adr/`/`CONTEXT.md`.
 
 **What:** Depends on items 2 and 4.
 **Goal:** no live doc links into `docs/adr/` or `CONTEXT.md`: the shared reference grep below prints nothing, and `check_links.py` finds every relative link in the touched files resolving.

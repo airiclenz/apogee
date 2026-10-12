@@ -1,8 +1,8 @@
 # Apogee — MCP Client Shape (the P3.15 design note)
 
 **Date:** 2026-06-24 · **Status:** ✅ **Accepted** (the P3.15 design deliverable) · **Owner ADRs:**
-[ADR 0008](../adr/0008-stateless-tools-and-non-forkable-external-effects.md) /
-[ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md) ·
+[ADR 0008](../../.capcom/knowledge/decisions/adr-0008.md) /
+[ADR 0012](../../.capcom/knowledge/decisions/adr-0012.md) ·
 **Realised by:** P3.15 (`internal/mcp`, the `cmd/apogee` composition wiring).
 
 > **Why a design note, not ADR 0014.** Phase-3 plan §3 D3 left the form a P3.15 judgement: "the
@@ -44,7 +44,7 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   are not followed. The endpoint itself is **exempt from the floor** — it is config-file-only and
   never model-supplied, so a localhost / LAN server is a supported configuration rather than a fatal
   startup error, while a rebind or a redirect to a *different* private address stays refused
-  ([ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md),
+  ([ADR 0012](../../.capcom/knowledge/decisions/adr-0012.md),
   Amendment 2026-07-26). Above the dial pin, **every request is pinned to the endpoint's origin**
   (2026-09-29): `security.OriginPinTransport`, the guarded client's outermost RoundTripper, forwards only a
   request whose scheme + host + port (host in `security.NormalizeURL`'s form, default ports
@@ -146,7 +146,7 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   (an auth token above all) only ever reaches the configured origin — an SSE `endpoint` event
   naming another origin is refused before a header could leave.
 - **An `auth: oauth` server's bearer rides the origin pin; its authorization server runs under the
-  floor** (2026-10-08, [ADR 0095](../adr/0095-mcp-oauth-tokens-are-persisted-by-apogee.md)).
+  floor** (2026-10-08, [ADR 0095](../../.capcom/knowledge/decisions/adr-0095.md)).
   `ServerConfig.Auth` (`auth: oauth`), `ClientID` and `ClientSecretEnv` (`client-id:`, the NAME of
   the variable holding a preregistered client's secret) are a streamable-http server's OAuth
   opt-in, and `ServerConfig.ValidateAuth` is their one rule, refused at load and again in

@@ -435,7 +435,7 @@ spelled onto the parent the call named, so one can be handed straight back as th
 its refusal quotes the path it examined:
 
 ```
-file not found: docs/adr/0025 — did you mean: docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md
+file not found: docs/manual/conf — did you mean: docs/manual/configuration.md
 ```
 
 A refusal from the workspace fence — a path outside the roots apogee may read — never gains that
@@ -498,7 +498,7 @@ and it goes again the moment the draft no longer does.
 The band is apogee talking to **you**, never to the model. The ranking runs here, over the catalog
 apogee already loaded; no part of your library travels with a request, and a skill becomes prompt
 text only when you put its `/id` in a message, exactly as before
-([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)). A message
+([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)). A message
 sent with the row on screen is sent unchanged — the band never takes `⏎`.
 
 **`⇥` picks one.** With the row showing and no `/` or `@` menu open, Tab opens the menu you already

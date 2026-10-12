@@ -165,8 +165,8 @@ resolved
 ```
 
 `apogee probe context` is the fifth subject, free like the host report by default: it answers
-"what does apogee itself put in front of the model at Turn 1?" — the **Context cost** of
-`CONTEXT.md`, [ADR 0079](../adr/0079-context-cost-is-a-first-class-engine-report.md). It
+"what does apogee itself put in front of the model at Turn 1?" — the **Context cost**
+(`capcom know show context-cost`, [ADR 0079](../../.capcom/knowledge/decisions/adr-0079.md)). It
 composes the configuration a session on this host would start with, under the mode the session
 would start in (`--mode` picks another — the mode matters, since Plan filters the tool menu and
 adds a bullet to the orientation), constructs an idle agent from it and reads what that agent
@@ -190,7 +190,7 @@ Context cost — what apogee puts in front of the model at Turn 1 (mode ask-befo
 ```
 
 `--live` is the paid side of the same report, and like `probe model` it is an explicit act
-([ADR 0021](../adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)): it sends **one** fixed one-word request
+([ADR 0021](../../.capcom/knowledge/decisions/adr-0021.md)): it sends **one** fixed one-word request
 (`Reply with the single word OK.`, the reply capped at 8 tokens) to the configured endpoint and
 adds a `measured` column — the server's own `prompt_tokens` for that Turn 1, with the share it
 answered from its prefix cache in brackets when it reported one — while the estimate rows are

@@ -1,8 +1,8 @@
 # Apogee — Confinement Execution Contract (the P3.1 implementation contract)
 
 **Date:** 2026-06-24 · **Status:** ✅ **Accepted** (the P3.1 design deliverable) · **Owner ADR:**
-[ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)
-(supersedes [ADR 0004](../adr/0004-auto-mode-requires-os-level-confinement.md)) ·
+[ADR 0012](../../.capcom/knowledge/decisions/adr-0012.md)
+(supersedes [ADR 0004](../../.capcom/knowledge/decisions/adr-0004.md)) ·
 **Realised by:** P3.2 (Linux landlock), P3.3 (macOS seatbelt), P3.4 (mode ladder + dispatch wiring),
 P3.7 (write-tool family), P3.8 (execution tools); the Windows token backend (§9, 2026-07-22) and the
 Linux namespace backend (§2.3/§5/§6.3, 2026-09-17, ADR 0081) amended it. **No production code lands in P3.1** — this document
@@ -206,7 +206,7 @@ decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and record
 > with statelessness (ADR 0008).
 
 **Linux (namespace, 2026-09-17, `//go:build linux`;
-[ADR 0081](../adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md)).** The second Linux
+[ADR 0081](../../.capcom/knowledge/decisions/adr-0081.md)).** The second Linux
 backend, selected when landlock cannot fence on this kernel (§2.6). It is an **argv rewrite** of the
 seatbelt shape, not a re-exec of the Apogee binary: the launcher is bubblewrap (`bwrap`), taken once at
 construction as an optional external enhancement (ADR 0042 §4 — Linux's bounded exception, macOS's
@@ -523,7 +523,7 @@ one level down (D2), for free, with no threading.
 > (`internal/agent/resolution.go`) *before* anything executes. Dispatch is a thin executor that
 > gathers facts, calls `resolve()` once, and carries out the verdict; it holds no ladder,
 > guard-tier, or demote decision of its own. "Disposition" is **retired from code** (it named only
-> the ladder stage). See CONTEXT.md → **Resolution** and the 2026-07-02 clarification in ADR 0013.
+> the ladder stage). See the glossary → **Resolution** (`capcom know show resolution`) and the 2026-07-02 clarification in ADR 0013.
 > The section number is kept because code comments cite "§4".
 
 > **Amended 2026-07-25 (url-safety choke point; ADR 0012 amendment 2026-07-25).** The **net** class
@@ -864,7 +864,7 @@ error names the Console and the reopen fix in their place (the `Remedy` paragrap
 it without re-deciding.
 
 > **The approved escape executes (landed 2026-08-14 —
-> [ADR 0049](../adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)).**
+> [ADR 0049](../../.capcom/knowledge/decisions/adr-0049.md)).**
 > The "WS-write, target out of workspace → gate" row is whole in both halves. **Classification**:
 > dispatch resolves the target with `resolveTargetUnbounded`
 > (`internal/tools/workspace_scoped.go:178`), so an out-of-workspace write **reaches the Gate** and
@@ -933,7 +933,7 @@ never optimistic:
   ABI 3): the fence is real but a confined command can still *empty* an existing file outside the
   box, and a kernel ≥ 6.2 closes it. A kernel without landlock says why in `Unavailable`
   (`landlock unavailable (landlock_create_ruleset: <errno>)`).
-  *(Amended 2026-09-17, [ADR 0081](../adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md).)*
+  *(Amended 2026-09-17, [ADR 0081](../../.capcom/knowledge/decisions/adr-0081.md).)*
   Landlock is the **first rung**; when it cannot fence writes the selector (§2.6) constructs the
   **namespace backend**, whose probe takes `bwrap` from the fixed system directories (§2; never
   `PATH`, amended 2026-10-02) and then **launches it once for real**
@@ -1278,7 +1278,7 @@ the write family + the §4 out-of-workspace realisation), P3.8 (§2.4 teardown, 
 
 ## 9. Windows — the token backend (amendment, 2026-07-22)
 
-**Owner ADR:** [ADR 0020](../adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md).
+**Owner ADR:** [ADR 0020](../../.capcom/knowledge/decisions/adr-0020.md).
 This section is the Windows half of §2.3's backend obligations, §5's capability table and §6's probe
 harness. It is an **amendment**, not a renegotiation: §2.2's prepare-in-place shape, §4's Resolution
 and §5's `FSWrite`-only `AutoEligible()` are unchanged. ADR 0020 carries the reasoning and the

@@ -30,7 +30,8 @@ Conventional commits, `type(scope): subject` — types `feat`, `fix`, `docs`,
 Ticket ids are capcom issue ids: a slug like `adoption-pane-unarmed`, or an
 older `apogee-<slug>` or hash form like `apogee-qi3` that survives as an alias.
 The register lives in `.capcom/issues/`. No AI attribution trailers. Plans live in
-`docs/plans/`, ADRs in `docs/adr/`.
+`docs/plans/`, decision records in `.capcom/knowledge/decisions/`, the glossary in
+`.capcom/knowledge/glossary/`.
 
 ## User surfaces — where a change becomes visible
 
@@ -41,7 +42,7 @@ The register lives in `.capcom/issues/`. No AI attribution trailers. Plans live 
 | Config keys & defaults | `internal/config/defaults/config.yaml`, `internal/config/registry.go`, `internal/config/options.go`, `internal/config/reactions.go` |
 | Model tools | `internal/tools/registry.go` (`KnownToolNames`, `DefaultToolsWithHost`) |
 | Public Go API | the module root `apogee.go`, `version.go`; `internal/domain/events.go`, `reaction.go` |
-| Docs & manual | `README.md`, `docs/manual/`, `CONTEXT.md`, `layout.md`, `SECURITY.md` |
+| Docs & manual | `README.md`, `docs/manual/`, `.capcom/knowledge/glossary/`, `layout.md`, `SECURITY.md` |
 | Install & packaging | `Makefile`, `.github/workflows/`, `cmd/release/templates/`, `cmd/apogee/defaults/`, `docs/manual/updating.md` |
 | Emitted strings | `internal/tui/` (status, help, notices), `internal/notice/`, `cmd/apogee/` user messages, `internal/config/defaults/prompt.txt`, `internal/floor/prompts/`, `internal/skills/shipped/` |
 

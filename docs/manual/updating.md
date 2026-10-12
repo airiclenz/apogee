@@ -10,7 +10,7 @@ v0.24.11 → v0.25.0 · brew upgrade apogee
 ```
 
 Running that command is always up to you
-([ADR 0097](../adr/0097-the-tui-checks-for-a-newer-release-and-names-the-upgrade-command.md)).
+([ADR 0097](../../.capcom/knowledge/decisions/adr-0097.md)).
 Only a clean release build asks — a `dev` build or one whose version ends `.dirty` never does —
 and headless runs, the daemon, the bench, `apogee probe` and `apogee undo` never check.
 

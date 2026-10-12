@@ -87,7 +87,7 @@ as one, and which of the two a terminal paints in is a capability it either anno
 (mode 2027, "Unicode core") or never mentions. Apogee measures in whichever one its own painter
 is using — the TUI's single **width authority**, which starts at wcwidth and follows the painter
 to the grapheme measure the moment the terminal says so
-([ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md),
+([ADR 0030](.capcom/knowledge/decisions/adr-0030.md),
 `internal/tui/width.go`). So every rule below that says *width*, *column*, *wraps at* or *is
 padded to* is stated in cells the terminal really shows — never in cells a library computed off
 to one side.
@@ -104,8 +104,8 @@ the glyph the pointer is on.
 **Every colour in this document is a role, and the hex beside it is one scheme's answer.** Colours
 come from the active **colour scheme**: one YAML file of 29 semantic roles, selected by
 `ui.color-scheme`, shipped as `dark` and `light` and overridable per user from
-`~/.apogee/schemes/` ([ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md),
-`CONTEXT.md` §Color scheme). Every hex quoted below is the built-in **`dark`** scheme's value — what
+`~/.apogee/schemes/` ([ADR 0040](.capcom/knowledge/decisions/adr-0040.md),
+the glossary's **Color scheme**, `capcom know show color-scheme`). Every hex quoted below is the built-in **`dark`** scheme's value — what
 apogee paints until someone picks another — and is named with the role key that carries it, so a
 scheme swap moves all of them at once, live, with the screen repainted from scratch.
 
@@ -1444,7 +1444,7 @@ top-level slot — the whole-Turn cancel settling — outranks every one of them
 reads `Message <name>…  ⏎ send · ↑ recall · esc back`, and `⏎` sends that message to that child
 rather than to the conversation below: it queues into the child's own mailbox and lands at its next
 between-Steps boundary as an ordinary interjection, with the child's tools, mode and confinement
-exactly the ones it was spawned with (`CONTEXT.md`, "Interjection"; ADR 0063). The parse is the top
+exactly the ones it was spawned with (the glossary's **Interjection**, `capcom know show interjection`; ADR 0063). The parse is the top
 level's, so `@file` references and skill `/tokens` ride along as they do anywhere else, while a
 `/command` is a word for apogee whatever the box is addressing and never reaches the child. A view
 of a run that is **over, or not yet started**, is read-only and says so in the same place —

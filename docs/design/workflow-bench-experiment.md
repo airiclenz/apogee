@@ -1,11 +1,11 @@
 # The workflow bench experiment
 
 **Date:** 2026-09-28 · **Status:** 📐 **Designed, not run** — the runs live in `apogee-sim` ·
-**Owner ADRs:** [ADR 0087](../adr/0087-the-engine-runs-workflows-the-model-or-a-recipe-asks-for.md)
+**Owner ADRs:** [ADR 0087](../../.capcom/knowledge/decisions/adr-0087.md)
 D8 (`fan_out` ships off; the flagship experiment) /
-[ADR 0089](../adr/0089-a-workflow-may-run-in-the-background-and-wakes-the-agent-when-it-ends.md)
+[ADR 0089](../../.capcom/knowledge/decisions/adr-0089.md)
 D1 (the background switch and `workflow` are shown only to model classes the bench has approved) /
-[ADR 0009](../adr/0009-the-ab-decision-rule.md) (the decision rule) ·
+[ADR 0009](../../.capcom/knowledge/decisions/adr-0009.md) (the decision rule) ·
 **Realised by:** `docs/plans/archived/2026-09-27 - 00 - engine-run-workflows-plan.md` (the design; the
 engine and facade it measures)
 

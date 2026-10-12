@@ -18,5 +18,5 @@ install it, what it can do. These pages are the full detail:
 | [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation, and the release runbook |
 
 Working on the codebase itself? [`AGENTS.md`](../../AGENTS.md) is the map of
-where knowledge lives; `CONTEXT.md` defines the domain language; `docs/adr/`
-holds the settled decisions.
+where knowledge lives; the glossary (`capcom know show glossary`) defines the domain language; the decision
+records (`capcom know show decisions`) hold the settled decisions.

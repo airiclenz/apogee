@@ -27,7 +27,7 @@ scheme role, which the sketches below leave uncoloured.
 **Since 2026-08-30 the delegation has no expanded shape at all**: expanding a
 sub-agent opens its **run view**, a surface of its own that takes the whole
 transcript slot, and the collapsed row is the only shape a run wears in the
-conversation ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md),
+conversation ([ADR 0063](../../.capcom/knowledge/decisions/adr-0063.md),
 `layout.md`, "Run view"). The `┊` rule below is stated as it was written — the
 closer drawn only where another grouped sub-agent follows an expanded one, and
 emitted by the seam that joins two blocks rather than by the group painter — and
@@ -135,7 +135,7 @@ closer is drawn today.
   bodies. This holds for the delegation row too, and the **run view** is no
   exception to it: a framed sub-agent has one state, collapsed, and opening it
   opens a different *surface* rather than a third fold stage of the row
-  ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md)).
+  ([ADR 0063](../../.capcom/knowledge/decisions/adr-0063.md)).
   `task_list` is the first of two blocks whose collapsed state is its
   **header alone**: it folds to `✦ Task List (done/total)` — no task row
   beneath, no `+N more lines`, because the header's own count already says

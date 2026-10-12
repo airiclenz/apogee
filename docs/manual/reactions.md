@@ -12,7 +12,7 @@ nothing and reports nothing.
 A `run:` entry is told what **already happened**. It cannot delay a turn, answer an approval, or
 change anything about the run it is watching, and nothing it prints, returns or answers reaches
 the model, the conversation or the saved session — its failure is yours to see and nobody else's.
-It is a [Reaction](../../CONTEXT.md) of **user** origin and **observe** class: it watches. The
+It is a [Reaction](../../.capcom/knowledge/glossary.md) of **user** origin and **observe** class: it watches. The
 other two keys are the same origin at the two classes the loop **waits** on. An `advise:` entry
 (class **advise**) runs after a tool call finished, and what it prints — or, as a webhook, answers —
 is appended to that call's result inside a fence apogee writes, so the model reads it as advice from you and not as the
@@ -25,7 +25,7 @@ result the way an `advise:` entry does; yours fires on your own machine, as your
 configuration rather than a model action. Of the five in-loop seams, a `gate:` entry reacts at
 `pre-tool-exec` and an `advise:` entry at `post-tool-result` (or its `file-changed` narrowing);
 the other three take no user entry. Every notice below reports a thing that is over.
-([ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) is the
+([ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md) is the
 decision — the origin and class vocabulary, and which cells a user entry may take; ADR 0073,
 which it supersedes in part, is the reasoning behind the `run:` posture.)
 

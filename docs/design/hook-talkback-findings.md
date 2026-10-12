@@ -1,17 +1,17 @@
 # Hook talk-back findings — can a user-configured reaction speak to the model?
 
-> **Overtaken by [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+> **Overtaken by [ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md)
 > (2026-09-07).** This is a research record, kept for its reasoning. The question it poses was decided
 > in ADR 0076 the same day, and the Reaction core that ADR specifies has since shipped and replaced
 > the Hook and Mechanism surfaces this document describes. Where this record and ADR 0076 disagree,
 > the ADR is right. Its "next step is a grill" closing line is history: that grill happened.
 
 **Provenance:** recorded 2026-09-07 at the owner's request to *research* one question, raised after
-the Hooks feature shipped: should apogee's observe-only [Hook](../../CONTEXT.md) and its
-[Mechanism](../../CONTEXT.md) lab surface become one user-facing surface offering three modes —
+the Hooks feature shipped: should apogee's observe-only [Hook](../../.capcom/knowledge/glossary.md) and its
+[Mechanism](../../.capcom/knowledge/glossary.md) lab surface become one user-facing surface offering three modes —
 (1) event → external action, (2) event → external action → response to the model, (3) both. Three
 parallel readers produced it: a rival survey, a seam analysis of this repo, and a doctrine check
-against the settled ADRs. **Status: research only — decided since.** The question was grilled the same day and settled in [ADR 0076](../adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (user advise + gate admitted as cells of one Reaction core; invariant 4 satisfied by construction; the fixed-text machinery arm named). No decision is taken *here*, nothing is
+against the settled ADRs. **Status: research only — decided since.** The question was grilled the same day and settled in [ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md) (user advise + gate admitted as cells of one Reaction core; invariant 4 satisfied by construction; the fixed-text machinery arm named). No decision is taken *here*, nothing is
 designed, and no ADR is superseded. The next step, if the owner wants one, is a grill.
 
 **The one-line answer:** the proposal is smaller and more orthodox than it first appears — it is a
@@ -117,7 +117,7 @@ models:
   prompts*. Partially mitigated — `internal/hooks` is already facade-exported, so the *library* is
   bench-drivable. Unmitigated in substance: **a per-user script's output is not a behaviour anyone
   can bench.**
-- **The Reaction surface exclusivity rule** (`CONTEXT.md`), which defines rung 4 as "it changes
+- **The Reaction surface exclusivity rule** (the glossary, `capcom know show reaction-surface`), which defines rung 4 as "it changes
   nothing the model sees" and names the lint case as the worked rejection. Moving this is a
   domain-language change before it is a feature.
 - **ADR 0073 decision 7, "The engine never waits on a Hook"**, plus decision 2's `Emit` returning
