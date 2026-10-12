@@ -138,7 +138,11 @@ func TestE2ECopyWritesOSC52(t *testing.T) {
 	// A transcript row restored by --continue copies the rendered text under the drag.
 	drv.Press(tuitest.Enter)
 	drv.WaitText(copyReply)
-	drv.WaitQuiet(settled)
+	// The relaunch below restores from the session record, and a painted reply is no proof that
+	// record has been written — the idle save is a Cmd queued behind the reply's last frame.
+	drv.WaitFor(func() bool {
+		return len(sess.sessionRecords()) > 0 && strings.Contains(sessionRecordText(t, sess.Home()), copyReply)
+	}, tuitest.Awaiting("the reply to reach the session record"))
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}

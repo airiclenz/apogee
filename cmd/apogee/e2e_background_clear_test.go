@@ -52,7 +52,7 @@ func TestE2EBackgroundClearDoesNotHang(t *testing.T) {
 	drv.WaitText(idlePromptHead)
 
 	stub.Release(bgBoundaryGate)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
@@ -97,7 +97,7 @@ func TestE2EBackgroundSessionSwitchDoesNotHang(t *testing.T) {
 	drv.WaitText(bgBoundaryHelloReply)
 
 	stub.Release(bgBoundaryGate)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}

@@ -395,7 +395,8 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			t.Errorf("the continued run's view does not carry its completed report:\n%s", flat)
 		}
 		drv.Press(tuitest.Esc)
-		drv.WaitQuiet(settled)
+		drv.WaitGone("← main ›") // the run view's crumb goes with the view
+		waitIdle(drv)
 
 		if err := sess.Quit(); err != nil {
 			t.Fatalf("the run returned %v; want a clean quit", err)

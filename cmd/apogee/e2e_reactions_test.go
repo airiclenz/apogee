@@ -584,7 +584,6 @@ func TestE2EReactionsApprovalDecidedCarriesTheVerdict(t *testing.T) {
 	submit(drv, `Append a line saying "smoke test" to a.txt.`)
 	drv.WaitText("Always allow this session")
 	awaitArmed(drv)
-	drv.WaitQuiet(settled)
 	drv.Type("a")
 	drv.WaitText(smokeWriteReply)
 
@@ -713,7 +712,7 @@ func TestE2EReactionsReloadSwapsTheArmedList(t *testing.T) {
 	drv.WaitText("Nothing else")
 	drv.WaitFor(func() bool { return len(readHookPayloads(t, sink)) == 2 },
 		tuitest.Awaiting("the second generation's entry to fire"))
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
@@ -867,7 +866,7 @@ func TestE2EGateAsksInTheTUI(t *testing.T) {
 	drv.WaitQuiet(settled)
 	drv.Type("a")
 	drv.WaitText(gateAnswer)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
@@ -914,7 +913,7 @@ func TestE2EGateFailureIsReportedInTheTUI(t *testing.T) {
 	drv.WaitQuiet(settled)
 	drv.Type("a")
 	drv.WaitText(gateAnswer)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)

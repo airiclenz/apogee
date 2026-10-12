@@ -287,7 +287,7 @@ func TestDocsEnvTraceFlagsWriteFilesAndStayOutOfHelp(t *testing.T) {
 
 	submit(drv, "Say hello.")
 	drv.WaitText("Ready.")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	if code := sess.drv.Quit(); code != 0 {
 		t.Fatalf("the run exited %d; want a clean quit", code)
@@ -367,7 +367,10 @@ func TestDocsEnvRootsMoveTheHomeAndTheFence(t *testing.T) {
 
 	submit(drv, "Read the file just outside the workspace.")
 	drv.WaitText("outside the workspace, so the read was refused")
-	drv.WaitQuiet(settled)
+	// The claim below reads the session record, and a painted reply is no proof it has been written
+	// — the idle save is a Cmd queued behind the reply's last frame.
+	drv.WaitFor(func() bool { return len(sess.sessionRecords()) > 0 },
+		tuitest.Awaiting("the session record to reach the store"))
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)

@@ -98,7 +98,7 @@ func TestE2EToolsUmbrellaFoldsOverThreshold(t *testing.T) {
 
 	drv.WaitText(toolsFoldHeaderOpen)
 	drv.WaitText(toolsFoldReadRow)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
@@ -231,7 +231,7 @@ func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 	// The denial is the Turn's last result, and the wrap-up answers it.
 	decide(drv, "d")
 	drv.WaitText(toolsFoldWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}

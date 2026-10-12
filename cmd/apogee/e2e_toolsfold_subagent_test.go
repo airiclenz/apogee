@@ -150,7 +150,7 @@ func TestE2EToolsUmbrellaFoldsInsideARunViewWhileTheTurnRuns(t *testing.T) {
 	drv.Press(tuitest.Esc)
 	drv.WaitGone(toolsFoldRunViewCrumb)
 	drv.WaitText(toolsFoldDelegateWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}

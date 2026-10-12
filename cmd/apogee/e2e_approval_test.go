@@ -506,14 +506,14 @@ const promptPlaceholder = "Send a message…"
 // passing, that no pane is standing — a pane that appeared would still be waiting to be answered.
 func waitIdle(drv driven) { drv.WaitText(promptPlaceholder) }
 
-// raisePane sends the conversation's one prompt and waits for its approval pane to arm and settle.
-// The arm is not tidiness: the decision keys come alive one latch after the pane opens
-// ([awaitArmed]), so a caller that typed one before then would have it swallowed.
+// raisePane sends the conversation's one prompt and waits for its approval pane to arm. The arm is
+// not tidiness: the decision keys come alive one latch after the pane opens ([awaitArmed]), so a
+// caller that typed one before then would have it swallowed. It is also all the readiness a key
+// needs — a quiet screen on top of it would prove nothing more, since arming paints nothing.
 func raisePane(drv driven) {
 	submit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
 	awaitArmed(drv)
-	drv.WaitQuiet(settled)
 }
 
 // holdKey writes key into the terminal until marker is on screen, and the returned function stops

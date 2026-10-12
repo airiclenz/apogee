@@ -312,7 +312,6 @@ func allowAndAwait(drv *tuitest.PTYDriver, done string) {
 
 	if _, _, ok := drv.Frame().Find(approvalRow); ok {
 		awaitArmed(drv)
-		drv.WaitQuiet(settled)
 		drv.Type("s")
 	}
 	drv.WaitText(done)

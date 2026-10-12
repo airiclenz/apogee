@@ -60,7 +60,12 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	drv := sess.drv
 	submit(drv, "Say hello.")
 	drv.WaitText("Hello from the console run.")
-	drv.WaitQuiet(settled)
+	// The record is the precondition, and a painted reply is no proof it has been written — the
+	// idle save is a Cmd queued behind the reply's last frame.
+	drv.WaitFor(func() bool {
+		return len(sessionRecordsIn(t, sess.Home())) > 0 &&
+			strings.Contains(sessionRecordText(t, sess.Home()), "Hello from the console run.")
+	}, tuitest.Awaiting("the first run's reply to reach the session record"))
 	if code := drv.Quit(); code != 0 {
 		t.Fatalf("the first run exited %d; want a clean quit", code)
 	}
@@ -161,7 +166,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	// there is no process to ask about.
 	pid := drv.Pid()
 	stopRun(t, drv) // the hanging Turn goes first, so the quit is a quit and not a cancel-then-quit
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	drv.Quit()
 	awaitGone(t, drv, pid, parentSleep, "every Console to be reaped when apogee quits")
 }
@@ -175,7 +180,6 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 func alwaysAllow(drv *tuitest.PTYDriver) {
 	drv.WaitText("Always allow this session")
 	awaitArmed(drv)
-	drv.WaitQuiet(settled)
 	drv.Type("s")
 }
 
@@ -189,7 +193,6 @@ func allowIfAsked(drv *tuitest.PTYDriver) {
 	for !expired() {
 		if _, _, ok := drv.Frame().Find("Always allow this session"); ok {
 			awaitArmed(drv)
-			drv.WaitQuiet(settled)
 			drv.Type("s")
 			return
 		}
