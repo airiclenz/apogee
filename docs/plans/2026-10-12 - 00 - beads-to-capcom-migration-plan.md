@@ -166,7 +166,9 @@ docs/design/reaction-core-greenfield.md — header "Open bead", stage-2b amendme
 - the Tests command passes
 **Commit:** `docs: name capcom as the issue register in the manual and design docs`
 
-## 6. release-notes-apogee prompts read capcom ids
+## 6. release-notes-apogee prompts read capcom ids — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the slug example is the live issue `adoption-pane-unarmed` (in `_apogee.md` and `trace-check.md`); trace-check's leak grep is unchanged — a bare capcom slug has no fixed shape a regex can catch, so the prose tells the checker to read for one instead.
 
 **What:**
 **Goal:** the `release-notes-apogee` skill classifies capcom commits and ids: ticket ids are capcom slugs or old beads ids (aliases); `chore(issues)` and the historical `chore(beads)` are both no-op commit types; scouts skip `.capcom/` (and historical `.beads/`).

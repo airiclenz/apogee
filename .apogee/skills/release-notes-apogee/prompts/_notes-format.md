@@ -61,7 +61,7 @@ apogee and has never read its source.
 ## What never appears in these notes
 
 - **No row ids** (`R-01`, `CL-07`, `S-12`, …), **no commit hashes**, no branch
-  names, **no PR, issue or bead ids**.
+  names, **no PR or issue ids**.
 - **No file paths**, unless the path *is* the feature (a config file the user
   edits, an install location, a folder apogee tells them about).
 - **No internal identifiers** — function, package, type and schema names, or

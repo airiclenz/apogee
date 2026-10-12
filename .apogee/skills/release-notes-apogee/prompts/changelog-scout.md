@@ -29,7 +29,7 @@ One entry per authored `- **Bold lead.**` bullet, in the authors' order,
 and its follow-up fix); split one naming two independent things. Use
 `_inventory-format.md`'s shape. `Commits:`, `Files:`, `Tests touched:`,
 `Evidence:` and `Verdict:` stay `—` — an invented attribution would survive
-the merge looking like evidence. `Refs:` carries only the bead ids, ADRs and
+the merge looking like evidence. `Refs:` carries only the issue ids, ADRs and
 plan items the bullet itself names.
 
 **Quote verbatim.** Under each entry, reproduce its bullet(s) as a markdown

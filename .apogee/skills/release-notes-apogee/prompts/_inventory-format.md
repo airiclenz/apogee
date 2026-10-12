@@ -24,7 +24,7 @@ the "touched without behaviour change" list.
   to check, never a restatement of the title.
 - **Commits:** the commits that deliver it, or `uncommitted`.
 - **Files:** the behaviour-defining files, ≤ 8. **Tests touched:** or `none`.
-- **Refs:** plan file and item, ADR or bead id named in commit messages or
+- **Refs:** plan file and item, ADR or issue id named in commit messages or
   changelog text, or `none` — recorded, never opened.
 - **Evidence** (evidence phases only): `<file> — <before> → <after>`.
 - **Verdict** (evidence phases only): `found | changed | absent`.

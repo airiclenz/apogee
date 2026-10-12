@@ -8,7 +8,7 @@ committed in. Read `_shared.md`, then `_apogee.md`. Read-only.
 claims must not reach you — two independent readings whose disagreement the
 merge can see beat one that agreed with itself. Never open it or read its
 diff: end every `git show` / `git diff` path list with
-`':(exclude)CHANGELOG.md'`. Plan, ADR and bead ids a subject names go on
+`':(exclude)CHANGELOG.md'`. Plan, ADR and issue ids a subject names go on
 `Refs:`, never opened.
 
 **Inputs:** `BASELINE` (`baseline.range`, `baseline.commits`) · `APOGEE`
@@ -22,8 +22,8 @@ diff: end every `git show` / `git diff` path list with
 3. Read the diffs that decide what a change *does*: `git show <sha> -- <paths>`
    for each group's behaviour-defining files (commands, config and tool
    registries, public API, emitted strings) and `git diff HEAD -- <paths>`
-   for uncommitted work. Skip `go.sum`, generated code, `.beads/`,
-   `docs/skill-runs/` and images.
+   for uncommitted work. Skip `go.sum`, generated code, `.capcom/`, the
+   historical `.beads/`, `docs/skill-runs/` and images.
    Note the `_test.go` files that moved with each group.
 
 **Bookkeeping.** A commit of a type `_apogee.md` lists as shipping nothing

@@ -18,8 +18,9 @@ row belongs in the no-bullet table; a `REWRITE` row must also point at
 
 **The leak grep — last, on `notes.md` only.** Leaks are gaps, quoted with
 their line: run ids (`R-`, `CL-`, `C-`, `S-` + digits), commit hashes, `#<n>`
-issue numbers, bead ids (`apogee-qi3`, `apogee-<slug>`), and talk of how the
-notes were made. Judge each hit — a version, a deliberate `apogee-…` name or
+issue numbers, issue ids (`apogee-qi3`, `apogee-<slug>`, or a capcom slug like
+`adoption-pane-unarmed`, which the grep cannot see — read for it), and talk of
+how the notes were made. Judge each hit — a version, a deliberate `apogee-…` name or
 "run apogee" is no leak.
 
 ```bash

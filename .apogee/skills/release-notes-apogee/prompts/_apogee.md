@@ -26,8 +26,10 @@ number; that is the dispatch's `VERSION:` key, `unreleased` when absent.
 Conventional commits, `type(scope): subject` — types `feat`, `fix`, `docs`,
 `build`, `refactor`, `test`, `chore`. Bookkeeping that ships nothing:
 `chore(version)`, `chore(release)`, `chore(issues)`, `chore(plans)`,
-`chore(beads)`, `docs(plans)`. Ticket ids are beads ids, `apogee-<slug>` or a
-hash form like `apogee-qi3`. No AI attribution trailers. Plans live in
+`docs(plans)`, and the historical `chore(beads)` from before the capcom move.
+Ticket ids are capcom issue ids: a slug like `adoption-pane-unarmed`, or an
+older `apogee-<slug>` or hash form like `apogee-qi3` that survives as an alias.
+The register lives in `.capcom/issues/`. No AI attribution trailers. Plans live in
 `docs/plans/`, ADRs in `docs/adr/`.
 
 ## User surfaces — where a change becomes visible

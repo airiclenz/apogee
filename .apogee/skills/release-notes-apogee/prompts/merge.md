@@ -16,7 +16,7 @@ input id lands exactly once** — in one row's `Sources:` or under
 `## Not a release row` with its reason.
 
 **Matching**, strongest first: shared files or commits · the same flag, key,
-command, setting or message seen from two sides · the same bead, ADR or plan
+command, setting or message seen from two sides · the same issue, ADR or plan
 item on `Refs:`. Title similarity never suffices; name a judgement call in
 `Notes:`. One verifiable thing is one row — split, fold. Number `R-01`, …
 breaking and user-visible first, internal last; never renumber.
