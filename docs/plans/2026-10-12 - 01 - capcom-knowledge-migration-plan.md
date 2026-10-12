@@ -318,7 +318,11 @@ NOTES (2026-10-12): all six open issues with hits were parked and every hit was 
 - `capcom check && capcom fmt --check`
 **Commit:** `docs(issues): cite decision records as Notes in open issues`
 
-## 13. Pointer stubs and AGENTS.md
+## 13. Pointer stubs and AGENTS.md — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): `capcom agents` made no change — the managed block already listed the `decisions` and `glossary` Notes (no "no Notes yet" line left), and `capcom agents --check` reports it current.
+NOTES (2026-10-12): AGENTS.md's "What capcom owns" clause now names capcom as the home of the glossary and decision records and drops the "docs/adr/ keeps settled decisions" entry from its house-documents list, since that document is no longer a house file outside capcom.
+NOTES (2026-10-12): the header's "Old files" ratified call already says a new docs/adr/README.md stub is created (guard (c)); no plan edit was needed. docs/design/archived/technical-design.md's `../adr/` links now dangle, as the plan's Out of scope allows for docs/design/archived/.
 
 **What:** Depends on items 10, 11 and 12.
 **Goal:** `CONTEXT.md` and `docs/adr/README.md` are pointer stubs of at most 10 lines and `docs/adr/` holds nothing else; AGENTS.md sends readers to the `glossary` and `decisions` Notes; the managed block lists both; the shared reference grep without its `CONTEXT.md`, `docs/adr` and `AGENTS.md` exclusions prints only stub lines.
