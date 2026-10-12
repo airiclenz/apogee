@@ -28,7 +28,9 @@
 **Regression check (2026-10-12, 921c0235):**
 - 1: guard folded (writer decision) — a draft release's 404 from the tags endpoint, or an archive absent from its assets, takes the `gh release download` fallback; hash with `fileSHA256`.
 
-## 1. publish checks uploaded archives against the rebuild when the release has no SHA256SUMS
+## 1. publish checks uploaded archives against the rebuild when the release has no SHA256SUMS — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): retry fix — downloadAssetSHA256 creates its download directory with the package's directoryMode, and the test fake's downloadArchive writes with documentMode, in place of bare 0o755 / 0o644 literals.
 
 **What:** Fixes the gap deferred from the release-pipeline plan's item 6: `convergeRelease` uploads its own `SHA256SUMS` beside archives it never compared.
 **Goal:** a `publish` run that finds the release existing without `SHA256SUMS` compares each already-uploaded archive's SHA-256 (GitHub digest, else a downloaded copy hashed locally) with the rebuilt `SHA256SUMS` line for it; any mismatch fails the run before any `gh release upload`, naming each mismatched archive and `gh release delete-asset vX.Y.Z <name>`; a full match uploads only the missing assets, `SHA256SUMS` included.

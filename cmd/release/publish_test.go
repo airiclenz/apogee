@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,6 +58,13 @@ type publishFake struct {
 	tagCommit string
 	// publishedSums is the release's SHA256SUMS, as `gh release download` prints it.
 	publishedSums string
+	// releaseByTag is what `gh api repos/airiclenz/apogee/releases/tags/<tag>` prints, "" for the
+	// 404 the endpoint answers for a draft release.
+	releaseByTag string
+	// archiveDir holds the archives `gh release download --pattern <name> --dir` fetches, except
+	// that each archive in staleDownloads is fetched as bytes no rebuild writes.
+	archiveDir     string
+	staleDownloads []string
 	// channels is the tap, the bucket and the komac and gh installs the channel steps meet.
 	channels fakeChannels
 
@@ -129,11 +137,31 @@ func (f *publishFake) respond(call recordedCall) (string, error) {
 		return "", os.WriteFile(output, []byte(stubBinary(call.env)), 0o755)
 	case command == "gh release download "+publishVersion+" --pattern SHA256SUMS --output -":
 		return f.publishedSums, nil
+	case command == "gh api repos/"+apogeeRepo+"/releases/tags/"+publishVersion:
+		if f.releaseByTag == "" {
+			return "", errors.New(command + ": " + ghNotFound)
+		}
+		return f.releaseByTag, nil
+	case call.name == "gh" && len(args) == 7 && args[0] == "release" && args[1] == "download" &&
+		args[2] == publishVersion && args[3] == "--pattern" && args[5] == "--dir":
+		return "", f.downloadArchive(args[4], args[6])
 	}
 	if output, isAnswered, err := f.respondChannel(call); isAnswered {
 		return output, err
 	}
 	return f.repo.respond(call)
+}
+
+// downloadArchive writes the release's archive name into dir, as `gh release download` would.
+func (f *publishFake) downloadArchive(name, dir string) error {
+	content := []byte("an archive no rebuild of " + publishVersion + " writes")
+	if !slices.Contains(f.staleDownloads, name) {
+		var err error
+		if content, err = os.ReadFile(filepath.Join(f.archiveDir, name)); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(filepath.Join(dir, name), content, documentMode)
 }
 
 // hasRemoteTag reports whether origin holds the tag: from the start when the remote says so,
@@ -183,12 +211,48 @@ func writeReleaseTree(dir string) error {
 // across runs over the same tree, so a release published from an earlier run carries exactly it.
 func rebuiltSums(t *testing.T) string {
 	t.Helper()
+	return readTestFile(t, filepath.Join(rebuiltAssets(t), checksumsFile))
+}
+
+// rebuiltAssets builds publishVersion's assets and returns the directory holding them: the
+// archives a release published from an earlier run carries, byte for byte.
+func rebuiltAssets(t *testing.T) string {
+	t.Helper()
 	sourceDir := t.TempDir()
 	if err := writeReleaseTree(sourceDir); err != nil {
 		t.Fatal(err)
 	}
-	outDir := runTestDist(t, fakeToolchain(testBuildCount), sourceDir)
-	return readTestFile(t, filepath.Join(outDir, checksumsFile))
+	return runTestDist(t, fakeToolchain(testBuildCount), sourceDir)
+}
+
+// releaseByTagJSON is `gh api repos/airiclenz/apogee/releases/tags/<tag>` output for a release
+// carrying names, each with the digest digests maps it to; a name digests lacks is printed with
+// the null digest of an asset GitHub has not hashed. The real output's other fields are left out,
+// as publish reads none of them.
+func releaseByTagJSON(digests map[string]string, names ...string) string {
+	assets := make([]string, 0, len(names))
+	for _, name := range names {
+		digest := "null"
+		if hash, isFound := digests[name]; isFound {
+			digest = fmt.Sprintf("%q", hash)
+		}
+		assets = append(assets, fmt.Sprintf(`{"name":%q,"digest":%s}`, name, digest))
+	}
+	return `{"tag_name":"` + publishVersion + `","assets":[` + strings.Join(assets, ",") + `]}` + "\n"
+}
+
+// sumsDigests maps every archive sums lists to its GitHub digest, `sha256:<hex>`.
+func sumsDigests(t *testing.T, sums string) map[string]string {
+	t.Helper()
+	digests := map[string]string{}
+	for _, name := range releaseAssetsV02411[:6] {
+		hash, err := checksumFor(sums, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digests[name] = sha256DigestPrefix + hash
+	}
+	return digests
 }
 
 // publishRunResult is what one publish run did: the error main would turn into an exit code,
@@ -570,15 +634,17 @@ func TestPublishTagStepFailures(t *testing.T) {
 }
 
 // TestPublishPartialReleaseUploadsOnlyTheMissingAssets pins the resume of a half-uploaded
-// release: the rebuilt sums are checked against its SHA256SUMS when it has one, and only the
-// assets it lacks are uploaded — never a create, never an asset it already carries.
+// release: the rebuilt sums are checked against its SHA256SUMS when it has one, and its uploaded
+// archives' digests when it has none, and only the assets it lacks are uploaded — never a create,
+// never an asset it already carries.
 func TestPublishPartialReleaseUploadsOnlyTheMissingAssets(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]struct {
-		uploaded     []string
-		wantUploads  []string
-		wantDownload bool
+		uploaded       []string
+		wantUploads    []string
+		wantDownload   bool
+		wantDigestRead bool
 	}{
 		"two archives missing": {
 			uploaded:     slices.Delete(slices.Clone(releaseAssetsV02411), 4, 6),
@@ -586,8 +652,9 @@ func TestPublishPartialReleaseUploadsOnlyTheMissingAssets(t *testing.T) {
 			wantDownload: true,
 		},
 		"SHA256SUMS missing": {
-			uploaded:    releaseAssetsV02411[:6],
-			wantUploads: []string{checksumsFile},
+			uploaded:       releaseAssetsV02411[:6],
+			wantUploads:    []string{checksumsFile},
+			wantDigestRead: true,
 		},
 	}
 	for name, tc := range cases {
@@ -597,6 +664,7 @@ func TestPublishPartialReleaseUploadsOnlyTheMissingAssets(t *testing.T) {
 			fake.repo.remote.tagObject = "tag"
 			fake.repo.remote.release = releaseJSON("uploaded", tc.uploaded...)
 			fake.publishedSums = rebuiltSums(t)
+			fake.releaseByTag = releaseByTagJSON(sumsDigests(t, fake.publishedSums), tc.uploaded...)
 
 			result := runTestPublish(t, fake, false)
 
@@ -629,6 +697,138 @@ func TestPublishPartialReleaseUploadsOnlyTheMissingAssets(t *testing.T) {
 			isDownloaded := lineIndex(commandLines(result.commands), "gh release download") >= 0
 			if isDownloaded != tc.wantDownload {
 				t.Errorf("downloaded SHA256SUMS = %t, want %t", isDownloaded, tc.wantDownload)
+			}
+			isDigestRead := lineIndex(commandLines(result.commands), releaseByTagCommand) >= 0
+			if isDigestRead != tc.wantDigestRead {
+				t.Errorf("read the asset digests = %t, want %t", isDigestRead, tc.wantDigestRead)
+			}
+		})
+	}
+}
+
+// releaseByTagCommand is the command publish reads the release's asset digests with.
+const releaseByTagCommand = "gh api repos/" + apogeeRepo + "/releases/tags/" + publishVersion
+
+// TestPublishHashesUploadedArchivesWithoutADigest pins the fallback of the check on a release
+// without SHA256SUMS: an archive GitHub serves no digest for — its digest null, the archive
+// missing from the tags endpoint's assets, or the whole release a draft the endpoint answers 404
+// for — is downloaded into the build directory, never the checkout, hashed there, in the order
+// the release lists its assets, and on a match only SHA256SUMS is uploaded.
+func TestPublishHashesUploadedArchivesWithoutADigest(t *testing.T) {
+	t.Parallel()
+
+	uploaded := releaseAssetsV02411[:6]
+	cases := map[string]struct {
+		// releaseByTag builds the tags endpoint's answer from the archives' digests.
+		releaseByTag  func(digests map[string]string) string
+		wantDownloads []string
+	}{
+		"a null digest and an unlisted archive": {
+			releaseByTag: func(digests map[string]string) string {
+				delete(digests, "apogee_0.24.11_linux_amd64.tar.gz")
+				return releaseByTagJSON(digests, slices.Delete(slices.Clone(uploaded), 1, 2)...)
+			},
+			wantDownloads: []string{"apogee_0.24.11_linux_amd64.tar.gz", "apogee_0.24.11_darwin_arm64.tar.gz"},
+		},
+		"a draft release": {
+			releaseByTag:  func(map[string]string) string { return "" },
+			wantDownloads: slices.DeleteFunc(releaseAssetNames(mustVersion(t, publishVersion)), func(name string) bool { return name == checksumsFile }),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fake := newPublishFake()
+			fake.repo.remote.tagObject = "tag"
+			fake.repo.remote.release = releaseJSON("uploaded", uploaded...)
+			fake.archiveDir = rebuiltAssets(t)
+			sums := readTestFile(t, filepath.Join(fake.archiveDir, checksumsFile))
+			fake.releaseByTag = tc.releaseByTag(sumsDigests(t, sums))
+
+			result := runTestPublish(t, fake, false)
+
+			if result.err != nil {
+				t.Fatalf("publish failed: %v\n%s", result.err, result.output)
+			}
+			var downloads []string
+			for _, call := range result.commands.recorded("gh") {
+				if len(call.args) < 2 || call.args[1] != "download" {
+					continue
+				}
+				name := call.args[4]
+				downloads = append(downloads, name)
+				downloadDir := call.args[len(call.args)-1]
+				wantArgs := []string{"release", "download", publishVersion, "--pattern", name, "--dir", downloadDir}
+				if !slices.Equal(call.args, wantArgs) {
+					t.Errorf("gh release download args = %q, want %q", call.args, wantArgs)
+				}
+				if filepath.Base(downloadDir) != publishedAssetsDir ||
+					!strings.HasPrefix(filepath.Base(filepath.Dir(downloadDir)), "apogee-publish-") {
+					t.Errorf("downloaded %s to %s, want the build directory's %s subdirectory", name, downloadDir, publishedAssetsDir)
+				}
+				if strings.HasPrefix(downloadDir, call.dir) {
+					t.Errorf("downloaded %s to %s, inside the checkout %s", name, downloadDir, call.dir)
+				}
+			}
+			if !slices.Equal(downloads, tc.wantDownloads) {
+				t.Errorf("downloaded %q, want %q", downloads, tc.wantDownloads)
+			}
+			uploads := slices.DeleteFunc(result.commands.recorded("gh"), func(call recordedCall) bool {
+				return len(call.args) < 2 || call.args[1] != "upload"
+			})
+			if len(uploads) != 1 || len(uploads[0].args) != 5 || filepath.Base(uploads[0].args[4]) != checksumsFile {
+				t.Errorf("uploads = %v, want one upload of %s alone", uploads, checksumsFile)
+			}
+		})
+	}
+}
+
+// TestPublishRefusesUploadedArchivesThatDoNotMatchTheRebuild pins the check on a release without
+// SHA256SUMS: an uploaded archive whose digest, or downloaded copy, hashes to anything but the
+// rebuilt sum stops the run before any upload, and the failure names the archive and the way out
+// — and no SHA256SUMS to delete, as the release has none.
+func TestPublishRefusesUploadedArchivesThatDoNotMatchTheRebuild(t *testing.T) {
+	t.Parallel()
+
+	stale := "apogee_0.24.11_linux_amd64.tar.gz"
+	uploaded := releaseAssetsV02411[:6]
+	cases := map[string]struct {
+		change func(fake *publishFake, digests map[string]string)
+	}{
+		"a digest differs": {
+			change: func(fake *publishFake, digests map[string]string) {
+				digests[stale] = sha256DigestPrefix + strings.Repeat("0", 64)
+				fake.releaseByTag = releaseByTagJSON(digests, uploaded...)
+			},
+		},
+		"a downloaded archive differs": {
+			change: func(fake *publishFake, _ map[string]string) { fake.staleDownloads = []string{stale} },
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fake := newPublishFake()
+			fake.repo.remote.tagObject = "tag"
+			fake.repo.remote.release = releaseJSON("uploaded", uploaded...)
+			fake.archiveDir = rebuiltAssets(t)
+			tc.change(fake, sumsDigests(t, readTestFile(t, filepath.Join(fake.archiveDir, checksumsFile))))
+
+			result := runTestPublish(t, fake, false)
+
+			if result.err == nil {
+				t.Fatalf("publish succeeded over a mismatched archive:\n%s", result.output)
+			}
+			for _, want := range []string{stale + " ", "gh release delete-asset v0.24.11 <name>` (" + stale + ")"} {
+				if !strings.Contains(result.err.Error(), want) {
+					t.Errorf("publish error = %v, want it to name %q", result.err, want)
+				}
+			}
+			if strings.Contains(result.err.Error(), checksumsFile) {
+				t.Errorf("publish error = %v, want it not to name %s, which the release lacks", result.err, checksumsFile)
+			}
+			if index := lineIndex(commandLines(result.commands), "gh release upload"); index >= 0 {
+				t.Errorf("uploaded assets over a mismatched archive")
 			}
 		})
 	}
