@@ -196,7 +196,10 @@ NOTES (2026-10-12): adr-0022 and adr-0023 carry 8 and 7 extra children, so their
 - `capcom check && capcom fmt --check`
 **Commit:** `docs(knowledge): summarise decision records 0021 to 0040`
 
-## 7. Record summaries, ADRs 0041–0060
+## 7. Record summaries, ADRs 0041–0060 — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): each summary follows item 5's rule (one paragraph of 4–5 lines wrapped at 100 columns, children named in the ADR file's section order with every id in full) and was applied with `capcom know update --body-replace-old/--body-replace-new` from the throwaway `docs/skill-runs/migrate-knowledge/summaries_0041_0060.py`; the diff removes only the 20 placeholder lines.
+NOTES (2026-10-12): adr-0043 carries 10 children, so its full-id reading list takes most of the five lines and its decision statement is kept to two short sentences.
 
 **What:** Depends on item 4. Item 5's Goal and Approach, for `adr-0041` … `adr-0060`.
 **Goal:** no `<!-- summary pending -->` line remains in `adr-0041.md` … `adr-0060.md`; each holds a summary per item 5's rule.
