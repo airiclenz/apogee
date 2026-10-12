@@ -173,8 +173,9 @@ The knobs:
 skipped), but it is not the supported shape. It hands every package the box at once, which is
 the load the lanes exist to avoid. When bisecting or debugging, name the package and the test
 (`go test -race -count=1 -run TestX ./cmd/apogee/`) rather than the whole tree. CI runs
-`make test` under `APOGEE_TEST_LANES=5`: a hosted runner is a 4 vCPU box, and each
-race-enabled process carries its own memory cost.
+`make test` with no lane knob set, so the lanes come from `nproc` as on every other box: a hosted
+runner is a 4 vCPU box, which gives three lanes, each a race-enabled process with its own memory
+cost.
 
 `APOGEE_TEST_SLOW=1` makes the same script runnable on a box the default plan overloads, such as
 a Raspberry Pi 4 or 5. It is explicit rather than sized off the core count, because a Pi and

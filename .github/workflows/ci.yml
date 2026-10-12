@@ -28,6 +28,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # A cache key of this job's own. The lint, vulncheck and cross jobs hash go.sum alone,
+          # so with that default all four share one key and whichever finishes first saves it:
+          # this job's race build objects were rarely the ones kept. Hashing go.mod as well gives
+          # the key a value only this job produces. Never add scripts/test-shards.sh here:
+          # setup-go has no restore-keys, so every edit to that script would cost a cold race build.
+          cache-dependency-path: |
+            go.sum
+            go.mod
       - name: action pins (scripts/check-pins.sh)
         run: ./scripts/check-pins.sh
       - name: actionlint
@@ -52,12 +60,10 @@ jobs:
         # `make test` is scripts/test-shards.sh: the race-enabled suite run as a queue of
         # short-lived test processes over a fixed number of lanes, the same command `make check`
         # runs locally, so the suite has one definition (as with `make actionlint` above). The
-        # lane count is normally sized off nproc; a ubuntu-latest runner is 4 vCPU / 16 GB, and
-        # every lane runs a race-enabled test binary with its own memory cost, so five lanes is
-        # the process count the old two-shards-per-heavy-package cap came to.
+        # lane count is sized off nproc here as on every other box: a ubuntu-latest runner is
+        # 4 vCPU / 16 GB, so the default budget of nproc - 1 runs three race-enabled lanes and
+        # leaves a core for the builds.
         run: make test
-        env:
-          APOGEE_TEST_LANES: 5
       - name: landlock UDP arm runs (row #13)
         # `make test` above counts a skipped TestLandlockProbeNetwork as a pass, so on its own it
         # cannot tell a runner that proved row #13's UDP arm from one where landlock, ABI >= 4 or

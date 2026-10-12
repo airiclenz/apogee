@@ -123,7 +123,9 @@ NOTES (2026-10-12): renormalize verified in a throwaway detached worktree at HEA
 **Acceptance:** `git check-attr text eol -- internal/probe/testdata/x.golden makeWin.bat graphics/demo.gif` prints `x.golden: eol: lf`, `makeWin.bat: text: set` and `makeWin.bat: eol: crlf`, and `graphics/demo.gif: text: unset`; `git ls-files --eol | grep -c 'i/crlf'` is 0; `rm makeWin.bat && git checkout makeWin.bat && od -c makeWin.bat | head -1` shows `\r \n`
 **Commit:** `build: pin LF line endings repo-wide`
 
-## 5. CI check job: default lanes and its own race cache
+## 5. CI check job: default lanes and its own race cache — ✅ DONE (2026-10-12)
+
+NOTES (2026-10-12): the Acceptance grep over `docs .github` cannot return nothing literally: `docs/plans/` (this plan) and `docs/reviews/2026-10-12 - test-suite-stability-speed-memory.md` quote the old value as history; ran it excluding those two directories, and it returns nothing.
 
 **What:** The check job forces `APOGEE_TEST_LANES: 5` on 4 vCPU. It also shares one setup-go cache key with the lint, vulncheck and cross jobs, so its race build objects are rarely the ones saved.
 **Regression guard.** with the env gone, `docs/manual/building.md` ("CI runs `make test` under `APOGEE_TEST_LANES=5`: a hosted runner is a 4 vCPU box…") and the step comment justifying "five lanes" are false; both are rewritten (the default on 4 vCPU is 3 lanes: `scripts/test-shards.sh` budget = nproc − 1). The cache key hashes `go.sum` + `go.mod`, never `scripts/test-shards.sh`: setup-go has no restore-keys, so every edit to that script (item 7 edits it) would run a cold race build.
