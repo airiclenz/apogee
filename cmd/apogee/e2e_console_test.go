@@ -81,7 +81,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	submit(drv, "Open a console running "+parentSleep+".")
 	alwaysAllow(drv)
 	drv.WaitText("The console is open.")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	// Step 3 — one real process, and it is a descendant of the apogee the driver spawned.
 	if pids := descendants(t, drv.Pid(), parentSleep); len(pids) != 1 {
@@ -98,7 +98,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	// part of driving the step rather than a claim being made.
 	alwaysAllow(drv)
 	drv.WaitText("The delegation is done.")
-	drv.WaitQuiet(settled)
+	awaitRecorded(t, drv, sess.Home(), "The delegation is done.")
 
 	record := sessionRecordText(t, sess.Home())
 	if !strings.Contains(record, "no console 1 (open consoles: 2)") {
@@ -122,7 +122,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	// is nothing at all, and the refusal lists no Consoles because there are none.
 	submit(drv, "Read console 1.")
 	drv.WaitText("That console is not open here.")
-	drv.WaitQuiet(settled)
+	awaitRecorded(t, drv, sess.Home(), "That console is not open here.")
 	if after := sessionRecordText(t, sess.Home()); !strings.Contains(after, "no console 1 (open consoles: none)") {
 		t.Error("the restored conversation's console_read was not refused with " +
 			"`no console 1 (open consoles: none)`; a restore inherits no Console ids")
@@ -139,7 +139,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	submit(drv, "Open a console running "+parentSleep+".")
 	allowIfAsked(drv)
 	drv.WaitText("The console is open.")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if pids := descendants(t, drv.Pid(), parentSleep); len(pids) != 1 {
 		t.Fatalf("%q runs as %v after the second open; want exactly one", parentSleep, pids)
 	}

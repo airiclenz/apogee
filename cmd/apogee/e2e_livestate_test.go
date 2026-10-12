@@ -292,7 +292,7 @@ func TestE2ELiveStateLauncherMoveKeepsTheSessionWorking(t *testing.T) {
 	// The session ends up bound to the profile's server, and the request log is what says so: the
 	// next prompt is answered by the SECOND stub and the first is never asked again.
 	drv.WaitGone("loading beta")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	before := len(first.Requests())
 	submit(drv, "Hello from the new server.")
 	drv.WaitFor(func() bool { return len(second.Requests()) > 0 },

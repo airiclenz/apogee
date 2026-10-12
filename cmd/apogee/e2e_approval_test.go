@@ -14,6 +14,7 @@ package main
 // The judgment half that is left is one rubric, at the bottom of this file.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -505,6 +506,18 @@ const promptPlaceholder = "Send a message…"
 // would be satisfied by the exchange before it and race the one under test. It also asserts, in
 // passing, that no pane is standing — a pane that appeared would still be waiting to be answered.
 func waitIdle(drv driven) { drv.WaitText(promptPlaceholder) }
+
+// awaitRecorded blocks until the session store under home carries text. A painted reply is no
+// proof the record holds it, and neither is the idle prompt: the idle save is a Cmd queued behind
+// the turn's last frame (saveAtIdle in internal/tui/model.go). So a read of the record, or of
+// anything the turn did before its reply, waits here on the turn's own last words reaching it —
+// which also proves every tool result before them is there.
+func awaitRecorded(t *testing.T, drv driven, home, text string) {
+	t.Helper()
+	drv.WaitFor(func() bool {
+		return len(sessionRecordsIn(t, home)) > 0 && strings.Contains(sessionRecordText(t, home), text)
+	}, tuitest.Awaiting(fmt.Sprintf("%q to reach the session record", text)))
+}
 
 // raisePane sends the conversation's one prompt and waits for its approval pane to arm. The arm is
 // not tidiness: the decision keys come alive one latch after the pane opens ([awaitArmed]), so a

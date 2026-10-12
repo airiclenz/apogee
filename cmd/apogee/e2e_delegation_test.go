@@ -238,7 +238,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		// script would have run.
 		submit(drv, capPrompt)
 		drv.WaitText("The delegate handed back what it had.")
-		drv.WaitQuiet(settled)
+		waitIdle(drv)
 
 		// The child asked exactly four times: the three working Turns the cap allows, plus the one
 		// closing Turn the engine spends asking it to sum up. Its requests are the ones carrying
@@ -261,7 +261,9 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		if last := lastChildRequest(stub, childTask); len(last.Tools) != 1 || last.Tools[0] != "write_file" {
 			t.Errorf("the wrap-up offered %v; want exactly write_file", last.Tools)
 		}
-		// And it never reached the turn where it would have spoken its own answer.
+		// And it never reached the turn where it would have spoken its own answer. The frame reads from
+		// here to the golden below want the screen settled, not just the turn folded.
+		drv.WaitQuiet(settled)
 		if strings.Contains(drv.Frame().String(), childFinalWords) {
 			t.Errorf("the child ran past its cap and answered:\n%s", drv.Frame())
 		}
@@ -319,7 +321,8 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		// Back out of the view first: inside one the prompt box addresses the child on screen
 		// (ADR 0063), so the next prompt is one for the CONVERSATION and has to be typed there.
 		drv.Press(tuitest.Esc)
-		drv.WaitQuiet(settled)
+		drv.WaitGone("← main ›") // the run view's crumb goes with the view
+		waitIdle(drv)
 
 		// Step 9's edge — a call may lower the bound and never raise it: max_steps: 50 still stops
 		// at three, and the marker still names three.
@@ -328,7 +331,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		drv.WaitFor(func() bool {
 			return childRequests(stub, childTask) >= before+4
 		}, tuitest.Awaiting("the second delegation's three child turns and its wrap-up"))
-		drv.WaitQuiet(settled)
+		waitIdle(drv)
 		if got := childRequests(stub, childTask); got != before+4 {
 			t.Errorf("the second delegation made %d child requests; max_steps: 50 must not raise a "+
 				"cap of 3, which allows 3 plus one wrap-up", got-before)
@@ -350,7 +353,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 
 		submit(drv, continuePrompt)
 		drv.WaitText("The delegate handed back what it had.")
-		drv.WaitQuiet(settled)
+		waitIdle(drv)
 
 		// The capped result the parent read carries the handle as its last body line — the line
 		// the fixture's continue turn is keyed on, so reaching the parent's wrap-up at all proves it
@@ -377,6 +380,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 
 		// The conversation: a second run row, wearing the inherited name rather than the continue
 		// call's task, and finished — not stopped short.
+		drv.WaitQuiet(settled)
 		collapsed := drv.Frame()
 		if got := rowsContaining(collapsed, "survey to continue ✓"); got != 2 {
 			t.Fatalf("the conversation carries %d run rows named survey, want the capped run's and the continued run's:\n%s", got, collapsed)
@@ -416,7 +420,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 
 		submit(drv, outputCapPrompt)
 		drv.WaitText("The delegate handed back what it had.")
-		drv.WaitQuiet(settled)
+		waitIdle(drv)
 
 		if got := childRequests(stub, childTask); got != 4 {
 			t.Errorf("the child made %d requests; a cap of 3 turns allows 3 plus one wrap-up", got)
@@ -451,7 +455,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 
 		submit(drv, capPrompt)
 		drv.WaitText("The delegate handed back what it had.")
-		drv.WaitQuiet(settled)
+		waitIdle(drv)
 
 		if got := childRequests(stub, childTask); got != 4 {
 			t.Errorf("the child made %d requests; unbounded, its script runs four turns", got)
@@ -568,7 +572,7 @@ func TestE2EDelegationChildCarriesTheReportBlock(t *testing.T) {
 	// never delegated at all.
 	submit(drv, reportPrompt)
 	drv.WaitText(reportWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	// Every request the run made, split by whose conversation it belongs to. The child's carry the
 	// block exactly once — a second copy would mean it is being composed per Turn instead of
@@ -631,7 +635,7 @@ func TestE2EDelegateReadOnlyRosterReachesTheChild(t *testing.T) {
 
 	submit(drv, rosterPrompt)
 	drv.WaitText(rosterWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	// Every request the child made carried the menu; the working Turns all offered one, and none
 	// of them offered anything Plan mode could not run on every target.

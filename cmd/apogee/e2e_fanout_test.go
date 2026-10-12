@@ -70,7 +70,7 @@ func TestE2EFanOutTrailerStatesTheWidth(t *testing.T) {
 	// result, so the request carrying the three results has been made by the time it shows.
 	submit(drv, fanOutWidthPrompt)
 	drv.WaitText(fanOutWidthWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	before, after := fanOutParentRequests(t, stub, fanOutWidthPrompt)
 
@@ -114,7 +114,7 @@ func TestE2EFanOutCeilingRefusesTheOverflow(t *testing.T) {
 
 	submit(drv, fanOutCeilingPrompt)
 	drv.WaitText(fanOutCeilingWrapUp)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	_, after := fanOutParentRequests(t, stub, fanOutCeilingPrompt)
 

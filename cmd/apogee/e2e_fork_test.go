@@ -68,10 +68,12 @@ func TestE2EForkKeepsThePrefixAndSurvivesAResume(t *testing.T) {
 	} {
 		submit(drv, step.prompt)
 		drv.WaitText(step.reply)
-		drv.WaitQuiet(settled)
+		waitIdle(drv)
 	}
-	drv.WaitFor(func() bool { return len(sess.sessionRecords()) == 1 },
-		tuitest.Awaiting("the parent's idle save to reach the session store"))
+	// One record, and the LAST Exchange in it: a count alone is met by the first Exchange's save.
+	drv.WaitFor(func() bool {
+		return len(sess.sessionRecords()) == 1 && strings.Contains(sessionRecordText(t, sess.Home()), forkReply3)
+	}, tuitest.Awaiting("the parent's idle save, all three Exchanges in it, to reach the session store"))
 	store := session.NewStore(filepath.Join(sess.Home(), "sessions"))
 	parentBefore := onlyRecord(t, store)
 
@@ -128,7 +130,7 @@ func TestE2EForkKeepsThePrefixAndSurvivesAResume(t *testing.T) {
 
 	submit(next, forkChildPrompt)
 	next.WaitText(forkChildReply)
-	next.WaitQuiet(settled)
+	waitIdle(next)
 
 	req := taskListRequestCarrying(t, stub.Requests()[before:], forkChildPrompt)
 	assertHistoryEndsAtTheKeptExchange(t, req)

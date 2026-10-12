@@ -101,7 +101,7 @@ func TestE2EEgress(t *testing.T) {
 	// Step 2 — a fetch of a public page. The body is what proves the proxy FORWARDED rather than
 	// merely accepted: the page is only reachable through the route table.
 	submit(drv, "Fetch the release notes.")
-	allowAndAwait(drv, "The notes are fetched.")
+	allowAndAwait(t, sess, "The notes are fetched.")
 
 	if got := proxy.Saw(pageHost); got != 1 {
 		t.Errorf("the proxy saw %d request(s) for %s; want exactly 1 (log: %v)", got, pageHost, proxy.Log())
@@ -118,7 +118,7 @@ func TestE2EEgress(t *testing.T) {
 	// is not "the proxy said no": NOTHING was dialled, and the proxy's log is where that is read.
 	before := len(proxy.Log())
 	submit(drv, "Fetch the discard port.")
-	allowAndAwait(drv, "The discard port was refused.")
+	allowAndAwait(t, sess, "The discard port was refused.")
 
 	if got := proxy.Saw("127.0.0.1"); got != 0 {
 		t.Errorf("%d loopback request(s) went through the proxy; a floor-refused URL must leave "+
@@ -136,7 +136,7 @@ func TestE2EEgress(t *testing.T) {
 	// Step 4 — the MCP server's own tool. Its name carries the entry's alias, which is how a call
 	// that reached the configured server is told from one that reached anything else.
 	submit(drv, "Echo through the docs server.")
-	allowAndAwait(drv, "The docs server answered.")
+	allowAndAwait(t, sess, "The docs server answered.")
 	if record := sessionRecordText(t, sess.Home()); !strings.Contains(record, "echo: ping") {
 		t.Error("docs__echo did not answer; a configured MCP endpoint reached through the proxy " +
 			"must surface its tools like any other")
@@ -151,7 +151,7 @@ func TestE2EEgress(t *testing.T) {
 
 	proxied := len(proxy.Log())
 	submit(drv, "Fetch the release notes once more.")
-	allowAndAwait(drv, "The page host is refused now.")
+	allowAndAwait(t, sess, "The page host is refused now.")
 	if got := len(proxy.Log()); got != proxied {
 		t.Errorf("the proxy log grew from %d to %d entries over a denied fetch: %v", proxied, got, proxy.Log())
 	}
@@ -197,7 +197,7 @@ func TestE2EEgress(t *testing.T) {
 	// proxy, so a follow would show up twice, and neither showing is what settles it.
 	submit(drv, "Ask the upstream that moved.")
 	drv.WaitText("upstream HTTP 308")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 	if got := proxy.Saw(redirectHost); got != 0 {
 		t.Errorf("%d request(s) for the redirect target went through the proxy: %v", got, proxy.Log())
 	}
@@ -277,7 +277,9 @@ func TestE2EEgressLongStreamIsNotDeadlined(t *testing.T) {
 }
 
 // allowAndAwait drives one tool call to its reply: it answers the approval pane if one comes up and
-// then waits for done.
+// then waits for done — on screen, and then in the session record, which every caller reads next
+// (the proxy log and the page server's hits are settled by then too: the call that moved them came
+// back before the reply did).
 //
 // Asking the SCREEN whether a pane is there — rather than assuming one either way — is what the
 // network tools' own allowance grain requires. "Always allow this session" for a network tool is
@@ -298,7 +300,9 @@ func awaitRefusedCalls(t *testing.T, drv *tuitest.PTYDriver, sess *ptySession, w
 	}, tuitest.Awaiting(fmt.Sprintf("%d call(s) on the dropped server to be refused as unknown", want)))
 }
 
-func allowAndAwait(drv *tuitest.PTYDriver, done string) {
+func allowAndAwait(t *testing.T, sess *ptySession, done string) {
+	t.Helper()
+	drv := sess.drv
 	const approvalRow = "Always allow this session"
 
 	drv.WaitFor(func() bool {
@@ -315,7 +319,7 @@ func allowAndAwait(drv *tuitest.PTYDriver, done string) {
 		drv.Type("s")
 	}
 	drv.WaitText(done)
-	drv.WaitQuiet(settled)
+	awaitRecorded(t, drv, sess.Home(), done)
 }
 
 // renameHomeConfig rewrites one occurrence in a home's config.yaml, for the edits a test makes to a
