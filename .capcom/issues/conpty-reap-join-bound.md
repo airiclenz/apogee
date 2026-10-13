@@ -1,10 +1,12 @@
 ---
 title: Windows reap joins the ConPTY reader for only 5 s before CloseOutput
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-12T21:51:20Z
+closed: 2026-10-13T09:16:00Z
+reason: "Resolved by plan '2026-10-13 - 00 - open-bugs-sweep-plan' item 6 (archived at 77f00a79): Windows reap joins the ConPTY reader to EOF (conhost's flush signal), bounded only by finalFrameJoinTimeout (60 s) for a wedged conhost. Residue: the Windows-only guard tests run only on Windows CI, not verified on this host."
 ---
 
 Production `reap` (`internal/console/process_windows.go`) uses the safe teardown order — Release, join the reader, then CloseOutput — but joins the reader only until `closeJoinTimeout` (5 s, `internal/console/process_shared.go`) passes before calling `CloseOutput` anyway. conhost flushes a short command's final frame as the pseudoconsole closes; under heavy load that flush can arrive after the 5 s, and `CloseOutput` then cancels the read carrying it (`CancelIoEx`) — the same final-frame loss the ConPTY test fix (plan item 1) closed on the test side.

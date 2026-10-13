@@ -1,10 +1,12 @@
 ---
 title: Two e2e tests read the session record after a quiet screen with no wait on it
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-13T04:54:08Z
+closed: 2026-10-13T09:16:00Z
+reason: "Resolved by plan '2026-10-13 - 00 - open-bugs-sweep-plan' item 3 (archived at 77f00a79): the umbrella-fold resume test waits idle and on the recorded wrap-up before Quit, and the fork test waits for both session records before parentAndChild."
 ---
 
 Two backend-state reads still follow a quiet screen with no wait on the session record. They are the class `waitquiet-readiness-proxy` covers, but the 6-line window that items 24 to 26 of the test-suite-stability plan swept did not reach them:

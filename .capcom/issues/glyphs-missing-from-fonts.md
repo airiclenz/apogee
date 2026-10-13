@@ -1,11 +1,13 @@
 ---
 title: TUI glyphs missing from common monospace fonts drift rows on DOM-rendered terminals
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 aliases: [apogee-glyphs-missing-from-fonts]
 created: 2026-10-10T08:30:46Z
+closed: 2026-10-13T09:16:01Z
+reason: "Resolved by plan '2026-10-13 - 00 - open-bugs-sweep-plan' item 11 (archived at 77f00a79): opt-in ui.glyphs: safe swaps the theme glyphs, spinner, ⟳ ⑂ ✗ literals and live ask pane marker for font-safe values; default unicode unchanged. Residues under safe: the ▼ open-fold glyph, the stacked-diff ⋯ region rule and the [✔] task-list/recorded-exchange markers stay fixed constants."
 ---
 
 The TUI draws glyphs that the common Windows monospace fonts lack. In a terminal that renders text as flowing DOM text instead of on a strict cell grid, the fallback glyph (Segoe UI Symbol, proportional) is wider than a cell and every later cell on the row shifts right. Long runs of the tool-row leader push the outcome slot ("pending", "running", "exit 0") past the right edge.
