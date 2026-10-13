@@ -1191,6 +1191,18 @@
 // header's size. A zero theme (a Model{} literal in a test) holds a nil pointer and must reach no
 // style.
 //
+// Invariant — the Model stays inside a 32 KiB by-value budget. Every byte the Model holds by value
+// is copied on every Update, and past the compiler's 128 KiB stack-variable ceiling every inlined
+// value-receiver call heap-allocates the whole copy; the budget keeps it well clear of both
+// (TestModelFitsTheStack). Two rules keep it inside: exactly one textarea is held by value — the
+// chat input's, on the embedded [promptEditor] — and no lipgloss.Style is held by value outside the
+// two widgets that carry their own (the transcript's viewport and that one textarea's Styles);
+// TestModelHoldsOneTextareaAndNoStyleByValue walks the Model's by-value type graph for both. A new
+// style belongs in [themeStyles]. A new text field — a filter, a rename row, an editable value — is a
+// [copyOnWriteField], never a [lineEditor] by value: the holder keeps the field's whole textarea
+// behind one pointer and replaces it on every write ([copyOnWriteField.edit]), so each Model copy
+// still has a field of its own, which is what a value field would have given it.
+//
 // Invariant — an arm mutates; Update's tail lays out and repaints. An Update arm writes the
 // transcript, opens or closes a pane, writes the input box, and returns: it never calls
 // [Model.layout] or [Model.refreshViewport] to make the frame agree with what it changed. That is

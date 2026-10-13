@@ -14,7 +14,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -6269,55 +6272,110 @@ func TestModelNoBuilderByValue(t *testing.T) {
 	builderType := reflect.TypeOf(strings.Builder{})
 	seen := map[reflect.Type]bool{}
 
-	var walk func(typ reflect.Type, path string)
-	walk = func(typ reflect.Type, path string) {
+	walkByValue(reflect.TypeOf(Model{}), "Model", func(typ reflect.Type, path string) bool {
 		if seen[typ] {
-			return
+			return false
 		}
 		seen[typ] = true
 
 		if typ == builderType {
 			t.Errorf("strings.Builder held by value at %s — the Model is copied on every "+
 				"Update and a value Builder panics copyCheck; hold it by pointer or use a string", path)
-			return
+			return false
 		}
-		switch typ.Kind() {
-		case reflect.Struct:
-			for i := 0; i < typ.NumField(); i++ {
-				f := typ.Field(i)
-				walk(f.Type, path+"."+f.Name)
-			}
-		case reflect.Array:
-			walk(typ.Elem(), path+"[]")
-		}
-		// Pointer/Slice/Map/Chan/Interface/Func are reference headers: copying the Model
-		// copies the reference, not the pointee, so a Builder behind one is never copied.
-	}
-
-	walk(reflect.TypeOf(Model{}), "Model")
+		return true
+	})
 }
 
-// modelStackCeiling is the Go compiler's ceiling on a stack-allocated variable
-// (cmd/compile's ir.MaxStackVarSize, 128 KiB). A Model larger than this is moved to the heap
-// wherever the compiler materialises a copy of it as a local — every inlined value-receiver
-// call is one — so the copy Bubble Tea makes by design becomes an allocation of the whole
-// Model, hundreds of times a frame.
-const modelStackCeiling = 128 << 10
+// walkByValue visits every type value-reachable from typ — typ itself, then, wherever visit
+// answers true, the fields of a struct and each element of an array, recursively. path names each
+// visit's place from the root ("Model.viewport.KeyMap", "Model.cells[2]"), so a type held at two
+// places, or in an array of two, is visited once per place. Pointer, slice, map, chan, interface and
+// func types are visited but never entered: they are reference headers, so copying the Model copies
+// the reference, not the pointee, and nothing behind one is part of the copy.
+func walkByValue(typ reflect.Type, path string, visit func(typ reflect.Type, path string) bool) {
+	if !visit(typ, path) {
+		return
+	}
+	switch typ.Kind() {
+	case reflect.Struct:
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			walkByValue(f.Type, path+"."+f.Name, visit)
+		}
+	case reflect.Array:
+		for i := 0; i < typ.Len(); i++ {
+			walkByValue(typ.Elem(), fmt.Sprintf("%s[%d]", path, i), visit)
+		}
+	}
+}
 
-// TestModelFitsTheStack pins the Model under [modelStackCeiling]. Crossing it is silent — no
+// modelSizeBudget is what the Model may hold by value: 32 KiB. The hard line beneath it is the Go
+// compiler's ceiling on a stack-allocated variable (cmd/compile's ir.MaxStackVarSize, 128 KiB) — a
+// Model larger than that is moved to the heap wherever the compiler materialises a copy of it as a
+// local, every inlined value-receiver call being one, so the copy Bubble Tea makes by design becomes
+// an allocation of the whole Model, hundreds of times a frame. Under the ceiling the cost is still
+// the copy itself, every byte of it on every Update (ADR 0011): the budget sits well below the
+// ceiling, over the ~22 KB the Model holds once its theme styles and its overlay text fields are
+// behind pointers, so a large field put back by value fails here long before it reaches the heap.
+const modelSizeBudget = 32 << 10
+
+// TestModelFitsTheStack pins the Model under [modelSizeBudget]. Crossing it is silent — no
 // test of behaviour notices — and slow: when the approval pane's rule field put a 13 KB
-// lineEditor on the Model by value (134,632 bytes against 120,840 before), every keypress in
-// /settings cost four times what it had under -race, and the driven settings walks in
-// cmd/apogee timed out on the loaded CI runner. A large field the Model needs only some of the
-// time belongs behind a pointer it replaces rather than writes through (projectRuleEdit), which
-// keeps the copy semantics ADR 0011 relies on.
+// lineEditor on the Model by value (134,632 bytes against 120,840 before), the Model crossed the
+// compiler's stack ceiling, every keypress in /settings cost four times what it had under -race,
+// and the driven settings walks in cmd/apogee timed out on the loaded CI runner. A large field the
+// Model needs only some of the time belongs behind a pointer it replaces rather than writes through
+// ([copyOnWriteField] for a text field; the theme's shared [themeStyles] for styles), which keeps
+// the copy semantics ADR 0011 relies on.
 func TestModelFitsTheStack(t *testing.T) {
 	t.Parallel()
 
-	if size := reflect.TypeOf(Model{}).Size(); size >= modelStackCeiling {
-		t.Errorf("Model is %d bytes, at or over the %d-byte stack ceiling: every inlined value-receiver "+
-			"call now heap-allocates a copy of it — move a large, sometimes-used field behind a pointer",
-			size, modelStackCeiling)
+	if size := unsafe.Sizeof(Model{}); size > modelSizeBudget {
+		t.Errorf("Model is %d bytes by value, over the %d-byte budget: every Update copies all of it — "+
+			"move a large, sometimes-used field behind a pointer (a text field behind copyOnWriteField)",
+			size, modelSizeBudget)
+	}
+}
+
+// TestModelHoldsOneTextareaAndNoStyleByValue pins what the size budget is made of: exactly one
+// textarea.Model — the chat input's, which the embedded promptEditor holds by value — and no
+// lipgloss.Style outside the two widgets that carry their own (viewport.Model, and that one
+// textarea's Styles). A textarea is some 13 KB and a Style some hundreds of bytes, so either one
+// added to the Model by value spends the budget [TestModelFitsTheStack] guards a few fields at a
+// time, long before that test fails: a second text field belongs behind a [copyOnWriteField], and a
+// style in the theme's shared [themeStyles]. The walk is [walkByValue] without
+// TestModelNoBuilderByValue's per-type de-duplication — a by-value type graph is acyclic — so a
+// textarea is counted at every path that holds one.
+func TestModelHoldsOneTextareaAndNoStyleByValue(t *testing.T) {
+	t.Parallel()
+	textareaType := reflect.TypeOf(textarea.Model{})
+	viewportType := reflect.TypeOf(viewport.Model{})
+	styleType := reflect.TypeOf(lipgloss.Style{})
+	var textareas []string
+
+	walkByValue(reflect.TypeOf(Model{}), "Model", func(typ reflect.Type, path string) bool {
+		switch typ {
+		case textareaType:
+			textareas = append(textareas, path)
+			return false
+		case viewportType:
+			return false
+		case styleType:
+			t.Errorf("lipgloss.Style held by value at %s — the Model is copied on every Update; "+
+				"a style lives in the theme's shared themeStyles", path)
+			return false
+		}
+		return true
+	})
+
+	switch {
+	case len(textareas) == 0:
+		t.Errorf("no textarea.Model is value-reachable from the Model: the walk no longer reaches the " +
+			"chat input's, so this guard has stopped guarding — find where the prompt editor went")
+	case len(textareas) > 1:
+		t.Errorf("%d textarea.Models held by value, at %s — only the chat input's may be; hold every "+
+			"other text field behind a copyOnWriteField", len(textareas), strings.Join(textareas, ", "))
 	}
 }
 

@@ -575,8 +575,9 @@ func (e lineEditor) clone() lineEditor {
 // copyOnWriteField holds a [lineEditor] by POINTER and replaces it rather than writing through it.
 //
 // The pointer is the size: a lineEditor is a whole textarea, some 13 KB by value, and every field
-// the Model holds by value is copied on every Update (ADR 0011) and counts toward the compiler's
-// 128 KiB stack-variable ceiling the Model must stay under (TestModelFitsTheStack). The replace is
+// the Model holds by value is copied on every Update (ADR 0011) and counts toward the 32 KiB by-value
+// budget the Model must stay under (TestModelFitsTheStack), which allows the chat input's textarea
+// and no other (TestModelHoldsOneTextareaAndNoStyleByValue). The replace is
 // the semantics: a value field gives each Model copy a field of its own, and so does this — [edit]
 // builds a deep copy ([lineEditor.clone]), applies the change to the copy and points THIS holder at
 // it, so a Model copy taken before the keystroke still holds the field exactly as it stood.

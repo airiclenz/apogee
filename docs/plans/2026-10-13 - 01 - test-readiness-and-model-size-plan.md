@@ -249,7 +249,12 @@ internal/tui/sessions_test.go — renamedField; internal/tui/autotitle_test.go �
 - the new tests and the existing rename/name tests, by name, single-package `-run`
 **Commit:** `perf(tui): hold rename and name buffers behind a copy-on-write field`
 
-## 11. The Model's size is pinned
+## 11. The Model's size is pinned — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the 32 KiB budget is a new `modelSizeBudget` constant that replaces `modelStackCeiling` rather than lowering it under the old name: that name and its comment state the compiler's 128 KiB ceiling, which the budget's own comment now cites as the hard line beneath it.
+NOTES (2026-10-13): the walker is factored out of `TestModelNoBuilderByValue` as `walkByValue(typ, path, visit)` and shared by both guards; the builder guard keeps its `seen` de-dupe inside its visit, while the new walk has none. Arrays are now walked once per element (`Model.x[0]`, `Model.x[1]`), so a `[2]textarea.Model` counts as two; checked by temporarily adding `[2]textarea.Model` and a `lipgloss.Style` to `Model` (both guards fired, `Model` 49,200 bytes against the budget), then reverted.
+NOTES (2026-10-13): the new walk also fails when it reaches NO `textarea.Model`, so the guard cannot go silently vacuous if the prompt editor moves behind a pointer.
+NOTES (2026-10-13): consequential edit — internal/tui/lineeditor.go: made necessary by the 32 KiB budget (the `copyOnWriteField` comment said the Model must stay under the compiler's 128 KiB ceiling).
 
 Depends on items 7, 9 and 10.
 
