@@ -1,0 +1,6 @@
+# actionlint's built-in list of GitHub-hosted runner labels predates the ubuntu-26.04 image (public
+# preview since 2026-09; actionlint v1.7.12 does not know it), so it is declared here or every job
+# on it fails `make actionlint`. Drop the entry once the pinned actionlint lists the label itself.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
