@@ -2888,7 +2888,13 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 // the one projection both startup and every live re-read make, so the refusal is one sentence in
 // both places — and a bad value edited into the file under a running session REFUSES on the
 // re-read, through the loader's error, where it once resolved to the key's default in silence.
+//
+// The `ui:` block is seeded with the defaults its own type declares (domain.DefaultUIPrefs) before
+// the rows land, so a field of the block no row owns yet — the glyph set, until its `ui.glyphs`
+// key joins the schema — resolves to its declared default rather than to its zero value; every
+// field a row owns is then written over by that row, so the seed changes nothing else.
 func applyFile(o *Options, fc fileConfig) error {
+	o.UI = domain.DefaultUIPrefs()
 	for _, k := range KeyRegistry {
 		if err := k.fromFile(o, fc); err != nil {
 			return err

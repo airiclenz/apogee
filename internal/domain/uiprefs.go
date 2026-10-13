@@ -9,7 +9,8 @@ import (
 
 // UIPrefs is the `ui:` block as ONE value: what a Driver is configured to draw — the status-line
 // spinner and its colour loop, the scroll bar, the palette, the quiet threshold, the Inspector's
-// wire capture, the skill-suggestion band, and the two fold states the transcript writes back.
+// wire capture, the skill-suggestion band, the two fold states the transcript writes back, and the
+// glyph set the screen's symbols are drawn from.
 // It is one struct because the keys describe one subsystem and travel together, from the on-disk
 // block through resolution (internal/config) to the wire (tui.Options) to the live apply — and it
 // lives here, beside the vocabularies its fields are spelled in, so every layer that carries the
@@ -83,6 +84,49 @@ type UIPrefs struct {
 	// so none is ever large and every one folds on its own session-only flag alone. Negative is
 	// meaningless and Validate refuses it.
 	ToolsFoldOver int
+	// Glyphs names the set the screen's symbols are drawn from: [GlyphsUnicode], the look apogee
+	// has always had, or [GlyphsSafe], which swaps every symbol a terminal font may lack for one
+	// it carries. Default unicode, and `""` reads as unicode too — [ParseSpinnerStyle]'s posture,
+	// so a block assembled field by field with Glyphs left zero (a one-key validation) still
+	// validates. Any other name is refused by [UIPrefs.Validate] naming the key.
+	Glyphs GlyphSet
+}
+
+// GlyphSet names the set of symbols the screen is drawn with. The vocabulary is declared once,
+// here, so the config layer validates a `ui.glyphs:` value against the same names the renderer
+// picks its symbols by.
+type GlyphSet string
+
+const (
+	// GlyphsUnicode is the full set: the symbols apogee has always drawn.
+	GlyphsUnicode GlyphSet = "unicode"
+	// GlyphsSafe is the font-safe set, for a terminal font that lacks some of the unicode set.
+	GlyphsSafe GlyphSet = "safe"
+)
+
+// DefaultGlyphSet is what an unset value resolves to: the look apogee has always had.
+const DefaultGlyphSet = GlyphsUnicode
+
+// glyphSetNames is the vocabulary [ParseGlyphSet] accepts, in the order its error lists them.
+var glyphSetNames = []GlyphSet{GlyphsUnicode, GlyphsSafe}
+
+// ParseGlyphSet maps a value onto a glyph set. "" ⇒ the default; an unknown value is an error
+// naming the sets this build knows. The caller names the key it read the value from, as for
+// [ParseSpinnerStyle].
+func ParseGlyphSet(s string) (GlyphSet, error) {
+	if s == "" {
+		return DefaultGlyphSet, nil
+	}
+	for _, set := range glyphSetNames {
+		if GlyphSet(s) == set {
+			return set, nil
+		}
+	}
+	names := make([]string, 0, len(glyphSetNames))
+	for _, set := range glyphSetNames {
+		names = append(names, string(set))
+	}
+	return "", fmt.Errorf("unknown glyph set %q (known sets: %s)", s, strings.Join(names, ", "))
 }
 
 // DefaultColorSchemeName is the built-in scheme every fallback lands on: the palette apogee has
@@ -131,9 +175,9 @@ func UIKeys() []string {
 
 // DefaultUIPrefs is the `ui:` block with nothing configured: the default spinner style with the
 // colour loop on, the scroll bar shown, the default colour scheme, the shipped quiet threshold,
-// the Inspector disarmed, the skill-suggestion band on, the task-list cards open, and the Tools
-// umbrella folding past five type rows with large umbrellas starting folded. Every `""` handed to
-// [UIPrefs.Set] lands the field this value carries for that key.
+// the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
+// umbrella folding past five type rows with large umbrellas starting folded, and the unicode glyph
+// set. Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
 		Spinner:          DefaultSpinnerStyle,
@@ -144,6 +188,7 @@ func DefaultUIPrefs() UIPrefs {
 		SkillSuggestions: true,
 		TaskListOpen:     true,
 		ToolsFoldOver:    DefaultToolsFoldOver,
+		Glyphs:           DefaultGlyphSet,
 	}
 }
 
@@ -189,17 +234,20 @@ func ParseToolsFoldOver(text string) (int, error) {
 }
 
 // Validate rejects a block naming a spinner style this build has no animation for, a StallAfter
-// below zero, or a ToolsFoldOver below zero — the same three refusals the parsers make, so a
-// block assembled field by field is judged as one read through [UIPrefs.Set] would be. Catching
-// them here makes a typo a startup error that names the key; left to the renderer they would
-// silently resolve to some other style and to the shipped threshold, and the user would be left
-// wondering why their setting did nothing.
+// below zero, a ToolsFoldOver below zero, or a glyph set this build does not know — the same four
+// refusals the parsers make, so a block assembled field by field is judged as one read through
+// [UIPrefs.Set] would be. Catching them here makes a typo a startup error that names the key; left
+// to the renderer they would silently resolve to some other style, the shipped threshold or the
+// unicode glyphs, and the user would be left wondering why their setting did nothing.
 func (u UIPrefs) Validate() error {
 	if _, err := ParseSpinnerStyle(string(u.Spinner)); err != nil {
 		return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
 	}
 	if err := validStallAfter(u.StallAfter); err != nil {
 		return err
+	}
+	if _, err := ParseGlyphSet(string(u.Glyphs)); err != nil {
+		return fmt.Errorf("apogee: invalid ui.glyphs: %w", err)
 	}
 	return validToolsFoldOver(u.ToolsFoldOver)
 }

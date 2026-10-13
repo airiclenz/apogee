@@ -27,11 +27,11 @@ func countptr(n int) *WholeCount { w := WholeCount(n); return &w }
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
 // guard waiting 120 seconds of engine silence out, the skill-suggestion band painting, the task-list cards open, and a Tools umbrella
-// folding past five type rows with large umbrellas starting folded. It is spelled out rather than taken from
+// folding past five type rows with large umbrellas starting folded, all drawn in the unicode glyph set. It is spelled out rather than taken from
 // domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
-	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
+	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode}
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
 // ladder is pinned off whatever host the tests happen to run on.
@@ -287,7 +287,7 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) {
 				o.UI = domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
-					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
+					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode}
 			},
 		},
 		{
@@ -5363,7 +5363,7 @@ func TestApplyConfigUI(t *testing.T) {
 	}
 
 	want := domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
-		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
+		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
 	}
@@ -5634,19 +5634,19 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
@@ -5654,13 +5654,13 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			// The band's key, the one whose default is TRUE: an explicit false takes the band away and
@@ -5668,7 +5668,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only skill-suggestions: false → the band goes and the look is untouched",
 			yaml: "ui:\n  skill-suggestions: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			// The task-list fold key, the other default-TRUE bool: an explicit false starts the cards
@@ -5676,7 +5676,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only task-list-open: false → the cards start folded and nothing else moves",
 			yaml: "ui:\n  task-list-open: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 		{
 			// And the newest key is independent in both directions: turning the stall guard off says
@@ -5684,7 +5684,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only stall-after: 0 → the look is untouched and only the guard goes",
 			yaml: "ui:\n  stall-after: 0\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
+				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode},
 		},
 	}
 	for _, tt := range tests {

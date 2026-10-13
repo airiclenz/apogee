@@ -219,7 +219,7 @@ func TestParseStallAfterAndToolsFoldOverDefaults(t *testing.T) {
 }
 
 // TestUIPrefsValidateSpeaksTheParsersSentences: a block assembled field by field is refused as a
-// value read through Set would be — the same three sentences.
+// value read through Set would be — the same four sentences.
 func TestUIPrefsValidateSpeaksTheParsersSentences(t *testing.T) {
 	t.Parallel()
 
@@ -234,10 +234,48 @@ func TestUIPrefsValidateSpeaksTheParsersSentences(t *testing.T) {
 		{"an unknown spinner", UIPrefs{Spinner: "twirl"}, `apogee: invalid ui.spinner: unknown spinner style "twirl"`},
 		{"a negative wait", UIPrefs{StallAfter: -5 * time.Second}, `apogee: invalid ui.stall-after -5s: want 0 or more`},
 		{"a negative count", UIPrefs{ToolsFoldOver: -1}, `apogee: invalid ui.tools-fold-over -1: want 0 or more`},
+		{"an unknown glyph set", UIPrefs{Glyphs: "ascii"}, `apogee: invalid ui.glyphs: unknown glyph set "ascii" (known sets: unicode, safe)`},
 	} {
 		err := tt.u.Validate()
 		if err == nil || !strings.HasPrefix(err.Error(), tt.want) {
 			t.Errorf("%s: Validate() = %v; want it to start with %q", tt.name, err, tt.want)
+		}
+	}
+}
+
+// TestUIPrefsGlyphsDefaultsToUnicodeAndKnowsTwoSets: the block's glyph set is unicode by default,
+// `""` reads as unicode (a block validated one key at a time leaves Glyphs zero), safe is the other
+// set, and any other name is refused naming the key.
+func TestUIPrefsGlyphsDefaultsToUnicodeAndKnowsTwoSets(t *testing.T) {
+	t.Parallel()
+
+	if got := DefaultUIPrefs().Glyphs; got != GlyphsUnicode {
+		t.Errorf("DefaultUIPrefs().Glyphs = %q; want %q", got, GlyphsUnicode)
+	}
+	for _, tt := range []struct {
+		text string
+		want GlyphSet
+	}{
+		{"", GlyphsUnicode},
+		{"unicode", GlyphsUnicode},
+		{"safe", GlyphsSafe},
+	} {
+		got, err := ParseGlyphSet(tt.text)
+		if err != nil || got != tt.want {
+			t.Errorf("ParseGlyphSet(%q) = %q, %v; want %q", tt.text, got, err, tt.want)
+		}
+		u := DefaultUIPrefs()
+		u.Glyphs = GlyphSet(tt.text)
+		if err := u.Validate(); err != nil {
+			t.Errorf("Validate() with Glyphs %q = %v; want accepted", tt.text, err)
+		}
+	}
+	for _, bad := range []string{"ascii", "Safe", "UNICODE", " safe"} {
+		u := DefaultUIPrefs()
+		u.Glyphs = GlyphSet(bad)
+		err := u.Validate()
+		if err == nil || !strings.HasPrefix(err.Error(), "apogee: invalid ui.glyphs: ") {
+			t.Errorf("Validate() with Glyphs %q = %v; want refused naming ui.glyphs", bad, err)
 		}
 	}
 }
