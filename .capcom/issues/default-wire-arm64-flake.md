@@ -1,9 +1,11 @@
 ---
 title: TestE2EDefaultWireStaysChatCompletions fails about 1 in 3 on windows/arm64
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-10-12T21:51:20Z
+closed: 2026-10-13T17:36:02Z
+reason: "Confirmed fixed on the owner's windows/arm64 box: 10 consecutive green runs (go test -count=10 -failfast -run '^TestE2EDefaultWireStaysChatCompletions$' ./cmd/apogee/, 2026-10-13). Fix: 1afb2250, the Windows sharing-violation retry on the session record rename (open-bugs-sweep plan item 4)."
 ---
 
 `TestE2EDefaultWireStaysChatCompletions` (`cmd/apogee/e2e_wire_anthropic_test.go`) fails about 1 in 3 runs on the owner's windows/arm64 box. It drives the loop through `driveWireLoop` with no wire named and asserts every request reached `/v1/chat/completions` and none `/v1/messages`. No CI runner is windows/arm64, so the failure has never been captured in a log the census could read, and its cause — load, timing, or a real defect on that platform — is unknown.
