@@ -136,7 +136,7 @@ Test-only. In `driveWireLoop` (`cmd/apogee/e2e_wire_anthropic_test.go`) add a `t
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/stubllm/`
 **Commit:** `test(e2e): dump requests, frame and store when a wire loop fails`
 
-## 6. Windows reap drains the ConPTY to EOF
+## 6. Windows reap drains the ConPTY to EOF — ✅ DONE (2026-10-13)
 
 **What:**
 **Goal:** after the console process exits, `reap` on Windows joins the output reader until EOF (conhost closing its write end, the documented signal that the final frame is flushed), bounded only by a separate long safety constant for a wedged conhost; the explicit `Close` path keeps its short bound.

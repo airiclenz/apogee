@@ -152,9 +152,10 @@ func (p *Process) Close() error {
 // command left running in its job, and — because a pseudoconsole's output does not end when its
 // process does — it is what lets the reader drain the final frame and close the ring, so a read
 // waiting on an exited Console returns instead of sitting out its window. The output pipe is
-// closed only once the reader has reached the end of output (or closeJoinTimeout has passed):
-// conhost flushes a short command's last frame as the pseudoconsole closes, and closing the pipe
-// at once would cancel the read carrying it. Neither error is lost: both steps are idempotent and
+// closed only once the reader has reached the end of output (or finalFrameJoinTimeout has passed,
+// for a wedged conhost): conhost flushes a short command's last frame as the pseudoconsole closes,
+// the pipe's EOF is the signal that flush is done, and closing the pipe before it would cancel the
+// read carrying it. Neither error is lost: both steps are idempotent and
 // hand the same error to Close.
 func (p *Process) reap() {
 	defer close(p.reaped)
@@ -163,6 +164,6 @@ func (p *Process) reap() {
 	code, _ := p.console.Wait()
 	p.recordExit(code)
 	_ = p.console.Release()
-	joinBefore(p.readerDone, time.Now().Add(closeJoinTimeout))
+	joinBefore(p.readerDone, time.Now().Add(finalFrameJoinTimeout))
 	_ = p.console.CloseOutput()
 }
