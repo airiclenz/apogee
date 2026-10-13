@@ -63,12 +63,16 @@ rules without a restart.
 Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
 for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Sixteen
-keys are the exception to "applied now", because they are read only while a session is being wired:
+`/settings` keys are the exception to "applied now", because they are read only while a session is being wired:
 `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five delegation bounds
 (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
 `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the three workflow keys
 (`workflow-continuations`, `workflow-retries`, `workflow-wake`), `sessions.max-age` and
-`sessions.max-count` take the save and honour it at the next start, as their `/settings` rows say. An
+`sessions.max-count` take the save and honour it at the next start, as their `/settings` rows say.
+A few other settings, or parts of them, reach only the next session too, each said where it is
+described: `update-check:`, `dangerous-rules:` (the guard is built when a session starts), the
+environment scrub of a `headers-env:` or `client-secret-env:` variable, and the `url-safety:` lists a
+running session's webhook Reactions hold. An
 edit reaches the runs this session raises, too: a `/schedule` firing composes itself from the
 settings the session is running at the moment it fires, so a tool you disabled or a host you denied
 is disabled and denied for it as well. A file that does not parse changes nothing — the session

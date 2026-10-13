@@ -46,7 +46,7 @@ closer is drawn today.
 - expanded tools should be printed with a brighter gray than collapsed
   (scheme roles `muted` / `muted-bright`)
 - Sub-agent calls group with **each other** (`✦ Sub-Agent (N)`, one row per
-  agent: name left, stat right; expanding a member opens its span) but never
+  agent: name left, stat right; opening a member opens its run view) but never
   join a super-group — a sub-agent block or group breaks the run.
 - Skill fetches group with **each other** the same way (`✦ Skill (N)`, one row
   per fetch: the loaded skill left, the outcome slot blank; expanding a member

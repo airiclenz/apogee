@@ -17,6 +17,10 @@ shipped the uncontested improvements and the promoted new tools (`find_files`, `
 switch; everything the round raised that did **not** ship is recorded here, so a deferral or a
 denial never becomes a silent drop. **None of it is a live gap.**
 
+**Terminology (2026-10-13).** This record predates the Reaction core. *Mechanism* is the term ADR
+0076 retired with the lab layer (D1, D12): read each use below as an engine-origin Reaction above
+the Floor guards — the advise and shape classes Bypass switches off — not as live machinery.
+
 **Bench experiments required before any tool removal.** Models are unreliable narrators about their
 own tooling: the E4B poll preferred patch-only editing — the format small models are measurably
 worst at — and a repeat Qwen poll returned a substantially different list, so only REPLICATED
@@ -76,7 +80,7 @@ rename/replace operations (×2 — Qwen 2026-08-10 sessions; Qwen3.8-27B 2026-08
 bounded `replace_all` with a replacement cap and shown context); `workspace_summary`.
 
 **Engine-level notes (not tools):** context-window introspection for the model (Mechanism
-territory); streaming/progress for long-running tools; structured JSON tool outputs.
+territory — *since shipped as the Context-fill notice, an engine advise Reaction, ADR 0077*); streaming/progress for long-running tools; structured JSON tool outputs.
 
 **`grep` arguments added 2026-09-15 (session-mining round, plan `2026-09-14 - 02` item 14):**
 `exclude` (file- or directory-name globs skipped for that call alone), `paths` (several paths

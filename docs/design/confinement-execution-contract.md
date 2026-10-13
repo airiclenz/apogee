@@ -565,7 +565,8 @@ one level down (D2), for free, with no threading.
 > recursion point stays (it is `Delegate`d before the ladder, never a leaf). `ReadOnly()` keeps its
 > remaining jobs: it is the terminal-floor input to `classifyTool` *(since 2026-09-15
 > `tools.Classify`)* and what self-regulation's
-> read/write tally reads. Menu-only change; no ladder cell moves, and no verdict changes.
+> read/write tally reads *(2026-10-13: self-regulation left the core with ADR 0076 D1; the
+> terminal-floor input is the job that remains)*. Menu-only change; no ladder cell moves, and no verdict changes.
 > **Note 2026-09-14 (the second loosen, ADR 0012 amendment of that date):** the menu now keys on
 > `planOffers` — `planAdmits` plus Apogee's own **WS-write** carriers whenever a session scratch
 > dir is set — and the Plan ladder row runs a WS-write whose resolved target is inside that dir
@@ -580,7 +581,8 @@ one level down (D2), for free, with no threading.
 > bytes. Every site that resolves a program now refuses an `argv[0]` landing inside the workspace
 > root or any `box.WritablePaths` entry, before anything starts
 > (`security.RefuseExecFromWritablePath`, wrapped package-locally in `internal/tools`,
-> `internal/mechanisms` and `internal/present`). It is a **tool-side fence, not a ladder cell**: no
+> `internal/mechanisms` and `internal/present` — *the wrappers are gone, see the 2026-08-30
+> amendment below; `internal/mechanisms` itself was deleted by ADR 0076 D1*). It is a **tool-side fence, not a ladder cell**: no
 > cell moves and no verdict changes, it applies on the `Run` path exactly as on `Confine` (an
 > unconfined site passes a nil box, leaving the workspace root as the whole fence), and it reaches
 > the one exec that never gets a Resolution at all — rung 1's OS opener, which `present_document`
@@ -1389,8 +1391,9 @@ at all — learns whether it may spawn a subprocess, and inside which box.
 ### 10.1 Why a hook needs its own seam
 
 §4 decides one **tool call**: dispatch gathers the facts, `resolve()` returns a verdict, and the
-executor carries it out — Approval, Confine, audit trip and all. A Mechanism firing at a hook point
-is on none of that path. It runs inside the Turn, between the loop's own steps, with no call to
+executor carries it out — Approval, Confine, audit trip and all. A reaction firing at a seam (a
+Mechanism at a hook point, when this was written — ADR 0076 retired both terms) is on none of that
+path. It runs inside the Turn, between the loop's own steps, with no call to
 resolve, no Approver to consult (the Approver is consulted after the stream closes, per call, and a
 post-response hook has no way to open a gate of its own) and no verdict to execute. So a hook that
 shells out is, by construction, outside every guard §4 provides.
@@ -1405,8 +1408,10 @@ func WithSubprocessPermit(ctx context.Context, p SubprocessPermit) context.Conte
 func SubprocessPermitFromContext(ctx context.Context) (SubprocessPermit, bool)
 ```
 
-Both live in `internal/domain/confinement.go`, beside the `Confinement` helpers, so a Mechanism
-(`internal/mechanisms`) reads them without importing the root facade (ADR 0010). A **second permit**
+Both live in `internal/domain/confinement.go`, beside the `Confinement` helpers, so a reader outside
+the agent reads them without importing the root facade (ADR 0010) — today the hook door in
+`internal/tools` (`exec_common.go`); the `internal/mechanisms` reader it was written for was deleted
+with the lab layer (ADR 0076 D1). A **second permit**
 now rides the same idiom in the same file — `WriteEscapePermit{Real string}` (ADR 0049, §4), which
 carries the one approved out-of-workspace write target into the shared write funnel; same
 zero-value-safe shape, different question (*may this hook spawn?* against *may this write land
@@ -1530,10 +1535,10 @@ All three of the tool side's execution contracts hold for a hook's child:
   operator-configured `api-key-env` names (ADR 0047) reach a hook the way they reach a tool, along
   their own route: `Config.SecretEnvVars` → `HostTools.SecretEnvVars` → the door's `secretEnv`
   argument. Until v0.20.0 a Mechanism-spawned hook took a parallel route through
-  `mechanisms.Deps.SecretEnvVars`, filled by the engine's `deriveDeps`; the catalogue is empty since
-  ADR 0071 and `Deps` carries no fields, so a future lab Mechanism that spawns a subprocess re-adds
-  it. A hook's child therefore drops exactly the variables `terminal`,
-  `python_exec` and `run_tests` drop; a Mechanism that names none leaves the fixed half alone.
+  `mechanisms.Deps.SecretEnvVars`, filled by the engine's `deriveDeps`; ADR 0076 D1 deleted the lab
+  layer — `Deps`, the catalogue and `deriveDeps` with it — so the door's `secretEnv` argument is the
+  only route. A hook's child therefore drops exactly the variables `terminal`,
+  `python_exec` and `run_tests` drop; a caller that names none leaves the fixed half alone.
 
 ## 11. Per-call context carriers (amendment, 2026-09-24)
 

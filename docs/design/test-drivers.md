@@ -1023,7 +1023,7 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    a real process, or the tty state on the way out.
 2. **Script stubllm; never write a handler.** The fixture goes in `cmd/apogee/testdata/stubllm/`.
    Match on `when:` rather than on order wherever the conversation has a shape — apogee makes calls
-   of its own (the session title, whatever a Mechanism needs), and an ordered script silently hands
+   of its own (the session title, a compaction summary), and an ordered script silently hands
    one of them the turn meant for the user's prompt. End the fixture with one `repeat: true` turn
    for those, and let `AssertConsumed` prove the scripted turns fired.
 3. **Own the home and the workspace.** `launchTUI` — and `launchPTY` for the black-box driver —

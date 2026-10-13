@@ -1,7 +1,8 @@
 # Building from source
 
 Not the only way in any more — [Install](../../README.md#install) has Homebrew, Scoop, winget
-and prebuilt archives — but it stays the shortest path to the tip of `main`.
+(not live yet: its first submission still awaits review in `microsoft/winget-pkgs`) and prebuilt
+archives — but it stays the shortest path to the tip of `main`.
 
 **Prerequisites:** Go 1.26.9 or later (the toolchain version pinned in `go.mod`).
 
@@ -315,8 +316,9 @@ warns — untracked files flip that flag.
 **One-time setup for the Windows channels.** `publish`'s scoop and winget steps publish into
 repositories that have to exist first, and the first winget submission is a different
 command from every later one. Until each is done, `status` reports that channel
-`setup-pending` and `publish` skips it. Done once, by the owner, before the first release
-that ships on Scoop and winget:
+`setup-pending` and `publish` skips it. Done once, by the owner. Scoop's half is done and the bucket
+is live; winget's first submission (step 4) still awaits
+review in `microsoft/winget-pkgs`, so the winget step stays `setup-pending` until it merges:
 
 1. **Create the Scoop bucket.** A public GitHub repository `airiclenz/scoop-bucket`; the
    scoop step writes `bucket/apogee.json` into it, creating the directory on its first run.
@@ -373,7 +375,7 @@ kind of knowledge lives — the glossary (`capcom know show glossary`) for the d
 states the conventions you cannot derive from the source. Per-package `doc.go` files
 carry the file-by-file tours from there.
 
-> **Note (as of 2026-10-02):** launch the TUI with a bare `apogee` — it starts on a `servers:` entry of
+> **Note:** launch the TUI with a bare `apogee` — it starts on a `servers:` entry of
 > `~/.apogee/config.yaml` (an entry with `wire: anthropic` speaks the Anthropic Messages API) —
 > or point one session straight at an OpenAI-compatible server with
 > `apogee --endpoint <openai-compatible-url> --model <name>`. All four autonomy modes, the

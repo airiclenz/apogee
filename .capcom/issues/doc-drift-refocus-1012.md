@@ -1,9 +1,11 @@
 ---
 title: Doc drift from the 2026-10-12 refocus (tier 6), unverified against code
-status: open
+status: done
 type: task
 priority: 4
 created: 2026-10-13T18:25:09Z
+closed: 2026-10-13T19:39:34Z
+reason: "Every item verified against code: all were doc defects except the Floor-guard count (correct, now test-pinned in the manual pages by TestManualStatesTheFloorGuardCount); no code defects. IDEAS.md is gitignored, fixed locally."
 ---
 
 Doc-to-doc drift found by the 2026-10-12 `/refocus` run (tier 6 of the local handoff `2026-10-12 - 01 - refocus-findings-and-capcom-knowledge-migration`), outside the files the capcom Knowledge migration cut into Notes. **None of it was checked against the code**: verify each item first — a mismatch can be a code bug, not a doc bug. Line numbers are as of 2026-10-12 and may have moved.

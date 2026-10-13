@@ -474,6 +474,44 @@ func TestReadmeStatesTheFloorGuardCount(t *testing.T) {
 	}
 }
 
+// manualFloorGuardCount matches a manual page's spelled count of the Floor guards wherever it sits —
+// "the seven Floor guards", "one of the seven Floor-guard keys", "the seven top-level Floor-guard
+// keys". A word before "Floor guard" that spells no number ("the Floor guards") is not a count.
+var manualFloorGuardCount = regexp.MustCompile(`(?i)\b(\w+)\s+(?:top-level\s+)?floor[- ]guard`)
+
+// The manual pages count the Floor guards in prose as the README does, several times each, and
+// every count must be the one floorGuardKeys holds. A page that stops counting fails rather than
+// passing silently, so a page dropped from the list is a decision, not an accident.
+func TestManualStatesTheFloorGuardCount(t *testing.T) {
+	t.Parallel()
+
+	pages := []string{
+		"../../docs/manual/configuration.md",
+		"../../docs/manual/daemon.md",
+		"../../docs/manual/reactions.md",
+	}
+	for _, page := range pages {
+		doc, err := os.ReadFile(page)
+		if err != nil {
+			t.Fatalf("reading %s: %v", page, err)
+		}
+		counted := 0
+		for _, match := range manualFloorGuardCount.FindAllSubmatch(doc, -1) {
+			stated := slices.Index(spelledCounts, strings.ToLower(string(match[1])))
+			if stated < 0 {
+				continue
+			}
+			counted++
+			if got := len(floorGuardKeys); stated != got {
+				t.Errorf("%s states %q; floorGuardKeys names %d", page, match[0], got)
+			}
+		}
+		if counted == 0 {
+			t.Errorf("%s no longer counts the Floor guards as %q", page, manualFloorGuardCount)
+		}
+	}
+}
+
 // The names a root keeps the `terminal` tool away from: every variable a webhook header is read
 // from, each once, in a stable order — the values come off a map, so an unsorted answer would
 // reorder between runs and make every caller's own output unstable.

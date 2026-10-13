@@ -69,7 +69,8 @@ Reaction { id, origin, class, on: [moments], handler }
 - `origin` — `engine` (a builtin, or a Go reaction the bench registers in-process) | `user`
   (configured).
 - `class` — what the reaction may do; see the matrix in §3.
-- `handler` — Go func | argv | webhook | `mcp:` server/tool.
+- `handler` — Go func | argv | webhook | `mcp:` server/tool. *(Decided: `mcp:` is **reserved** —
+  ADR 0076 D3; the shipped handlers are Go func, argv and webhook.)*
 
 ### 2.3 Two lanes, one dispatcher
 
@@ -138,6 +139,17 @@ specific to apogee: the repo config path is on the tool deny list for writes, an
 holds even if that deny is switched off — because `write_file` can otherwise author a reaction that
 runs on the next reload, bypassing the workspace exec fence in one hop.
 
+> **Superseded in part (2026-10-10; ADR 0096, ADR 0076's amendment of that date).** Stage 2b shipped
+> as ADR 0096, and the table and paragraph above are not what it built. The repo layer is the
+> **Project config**, `<Project root>/.apogee/config.yaml`; every key carries one of four classes —
+> granting (adoption-gated), tighten-only, project parameter, global-only — and the default is
+> global-only. The one granting key is the Allow rules: **Adoption** is per entry, pinned outside
+> the repo and given through the adoption pane, `/settings` or `apogee project adopt` — there is no
+> `apogee reactions adopt`. Reactions (`run:` / `advise:` / `gate:`) and MCP servers in the Project
+> config are **not admitted** (a follow-up); the per-entry `workspace:` filter stays the per-project
+> Reaction story. There is no path deny list either: file tools meet a Tier-1 refusal on the
+> Project config, and the Adoption pin is the guarantee.
+
 ### 2.5 Provenance ledger
 
 Every span a reaction injects records `{reaction, origin, moment, turn}`. This is what makes the
@@ -160,7 +172,7 @@ Exclusivity survives as "one reaction, one cell".
 | origin ↓ / class → | observe | advise | gate | shape (view) | shape (work) |
 |---|---|---|---|---|---|
 | engine (builtin or bench-armed) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| user | ✓ | ✓ | ✓ | ✓ | ✗ |
+| user | ✓ | ✓ | ✓ | ✓ (reserved — ADR 0076 D3) | ✗ |
 
 - **observe** — no return. Today's Hook.
 - **advise** — returns text that becomes model-visible context, fenced, capped, fail-open (no advice
@@ -178,6 +190,10 @@ Exclusivity survives as "one reaction, one cell".
 
 `--bypass` under this design = builtins only (every user reaction and every bench-armed reaction
 off). The bench's control arm and the shipped default remain the same agent.
+
+> **Superseded (ADR 0076 D9).** Bypass switches off by **class**, not by origin: every `advise` and
+> `shape` reaction of user or bench-armed origin goes quiet, together with the engine's one advise
+> builtin (the Context-fill notice); `observe`, `gate` and the seven Floor guards stay on.
 
 ## 4. What it buys
 
@@ -264,7 +280,8 @@ handoff). Cheaper now, but it adds a fourth idiom on top of three and keeps ever
 1. Day-one user cells: `observe` + `advise`, or all four?
 2. The stable injection slot: one block before the newest user/tool message, or a dedicated message?
 3. Deadline defaults per class (`advise` and `gate` block the loop).
-4. Whether `mcp:` handlers need their own approval posture or inherit the MCP tool's.
+4. Whether `mcp:` handlers need their own approval posture or inherit the MCP tool's. *(Resolved:
+   `mcp:` is reserved until a case arrives — ADR 0076 D3.)*
 5. Migration UX for the seven floor booleans and the `hooks:` list — silent, or a one-time notice.
 
 ## 9. Seed material for the plan
@@ -287,7 +304,7 @@ pre-collapse survey — see the historical note at the top; most of those files 
 | `hooks.Runner` (queue, matcher, executors) | `internal/hooks/runner.go`, `match.go`, `command.go`, `webhook.go` | the async lane, unchanged in substance — **delivered 2026-09-08 (stage 2)** |
 | `SetBypass`/`bypassMu`, `SetFloor`/`floorMu` | `agent.go`, `floorguards.go` | one generation swap of the reaction set — **delivered 2026-09-08 (stage 2)**; `Runner.Replace` (`runner.go`) is kept as the observe lane's swap primitive, called only by `SetReactions` |
 | `mechanisms.Deps`, `register`, `catalogue`, `SwapCatalogue`, `Build`, `Descriptors` | `internal/mechanisms/catalogue.go` | deleted |
-| `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only |
+| `selfreg.go` (strikes, Turn Budget), `skipUnderBypass` | `internal/agent/selfreg.go`, `hookrun.go` | deleted from the core; `--bypass` = builtins only (superseded: advise + shape off by class — ADR 0076 D9) |
 | `retired.go` roll with `Successor` | `internal/mechanisms/retired.go` | the config migration table — **delivered 2026-09-08 (stage 2)** |
 | `hooks:` list, `mechanisms:` map | `internal/config/hooks.go`, `config.go`, `configwrite_mechanism.go`, `cmd/apogee/wire_settings.go` | one `reactions:` list, one resolver (amended 2026-09-08: the 7 floor `*bool` keys and the `floorFromOptions` negation seam STAY — ADR 0076 D11; the layers are stage 2b) — **delivered 2026-09-08 (stage 2)** |
 | `/settings` rows: hooks (read-only), mechanisms (read-only) | `internal/config/registry.go` | one read-only structured `reactions` row (amended 2026-09-08: the 7 floor rows stay as they are — ADR 0076 D11, issue `apogee-tbs`, since done; no per-entry toggle table until stage 2b) |

@@ -2,8 +2,8 @@
 #
 # Thin convenience wrapper over the Go toolchain. The source of truth for the
 # build is `go build`; these targets just give the common invocations one-word
-# names and bundle the Phase-2 acceptance gate (docs/plans/archived/phase-2-detail-plan.md §7)
-# into a single `make check`.
+# names and bundle the pre-commit gate into a single `make check` (it began as the Phase-2
+# acceptance gate, docs/plans/archived/phase-2-detail-plan.md §7, and has grown since).
 
 BINARY  := apogee
 PKG     := ./cmd/apogee
@@ -19,7 +19,7 @@ MODULE  := github.com/airiclenz/apogee
 BUILD_COUNT := $(shell git rev-list --count HEAD 2>/dev/null)
 GO_LDFLAGS  := $(if $(BUILD_COUNT),-X $(MODULE).buildCount=$(BUILD_COUNT))
 
-# The 6 release targets the Phase-2 cross-build invariant must stay green on.
+# The 6 release targets the cross-build invariant must stay green on.
 CROSS_TARGETS := \
 	linux/amd64   linux/arm64 \
 	darwin/amd64  darwin/arm64 \
@@ -287,7 +287,7 @@ cross:
 dist:
 	go run ./cmd/release dist
 
-## check: the Phase-2 acceptance gate (fmt-check, lint, build, vulncheck, race tests, ADR-0010, cross, --help)
+## check: the pre-commit gate (gofmt, Windows vet, lint, build, vulncheck, race tests, action pins, actionlint, ADR-0010, cross, --help)
 .PHONY: check
 check:
 # The gate is raced by definition: an unraced pass (APOGEE_TEST_RACE=0, a slow-box convenience
@@ -318,7 +318,7 @@ check:
 	@$(MAKE) --no-print-directory cross
 	@echo "==> apogee --help (exit 0)"
 	@go run $(PKG) --help >/dev/null
-	@echo "all Phase-2 gates passed"
+	@echo "all make check gates passed"
 
 ## clean: remove the built binary
 .PHONY: clean
