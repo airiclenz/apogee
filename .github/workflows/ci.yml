@@ -8,6 +8,40 @@ name: CI
 on:
   push:
     branches: [main]
+    # A push that touches only issues, plans, reviews and other prose the build never reads
+    # skips the run. `paths` rather than `paths-ignore`, because only `paths` takes `!`
+    # negations: everything is in by default, each `!` line drops a tree no test, embed or
+    # Makefile target reads, and a later positive line takes one file back. The filter reads
+    # the whole push, so a push mixing prose and code still runs. Docs a test does read stay
+    # in: README.md and VERSION, docs/manual/** and docs/design/test-drivers.md (drift tests),
+    # .apogee/** (TestRepoReleaseSkillsLoad), graphics/demo/** (cmd/demorig's tests). A new
+    # test that reads a file dropped here must take it back below, or a push touching only
+    # that file goes untested. pull_request stays unfiltered: the PRs this repo gets are
+    # dependabot's, which always touch code.
+    paths:
+      - '**'
+      - '!.capcom/**'
+      # cmd/release's TestHelpNamesADecisionRecordThatExists stats this record.
+      - '.capcom/knowledge/decisions/adr-0098.md'
+      - '!docs/plans/**'
+      - '!docs/handoffs/**'
+      - '!docs/reviews/**'
+      - '!docs/layout/**'
+      - '!docs/adr/**'
+      - '!docs/design/archived/**'
+      - '!.claude/**'
+      - '!.codex/**'
+      - '!.vscode/**'
+      - '!CHANGELOG.md'
+      - '!AGENTS.md'
+      - '!CLAUDE.md'
+      - '!CONTEXT.md'
+      - '!SECURITY.md'
+      - '!LICENSE'
+      - '!layout.md'
+      - '!graphics/*.svg'
+      - '!graphics/demo.gif'
+      - '!graphics/demo/README.md'
   pull_request:
     branches: [main]
 
