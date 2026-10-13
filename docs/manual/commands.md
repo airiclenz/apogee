@@ -607,10 +607,12 @@ Both verbs **run at idle** — typed while the model works, they queue and run o
 
 `/settings` opens a **full-height pane** over your whole configuration: one row per setting,
 in registry order — roughly the order the starter `config.yaml` documents them — and grouped under section headings,
-each row showing the value **this run resolved** for it and where that value came from —
+each row showing the value **this run resolved** for it and where that value comes from —
 `(default)`, `(global)` for `~/.apogee/config.yaml`, `(project)` for the project's
 `.apogee/config.yaml`, or `(env)` / `(flag)` for an override — so a key that reads one way in the
-file and another on screen explains itself. Saving a key a project may set — the context files, the
+file and another on screen explains itself. The mark follows the files: a save or reset from the
+pane, or a save to either file that apogee reloads, moves it at once, while an `(env)` or `(flag)`
+override keeps its mark for the whole run. Saving a key a project may set — the context files, the
 project-skills switch, `tools.disabled`, `url-safety.deny-hosts` — asks **Save to: global / this
 project** (`←/→` choose, `⏎` save, `esc` back), opening on the file that supplies the key now; every
 other key is written to the global file as before. The row then shows what the two files resolve

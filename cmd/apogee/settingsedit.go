@@ -318,6 +318,17 @@ func (e *externalEdit) retake() (fileProjection, bool) {
 	return projected, true
 }
 
+// layers is which keys each config file states, as the baseline last read them: the global file's
+// and the Project config's. It is what the `/settings` rows take their source marks and their
+// editability from (settingsHost.Rows), so a mark follows every save this pane makes and every
+// re-read the watcher applies, rather than the files as they stood at launch. Both maps belong to a
+// projection that is replaced whole and never written into, so they are handed back as they are.
+func (e *externalEdit) layers() (global, project map[string]bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.baseline.opts.GlobalKeys, e.baseline.opts.ProjectKeys
+}
+
 // settingChanged reports whether the key at registry index i came back holding something else.
 //
 // A key whose row shows its whole value is answered by the row — its displayed value, and the prose

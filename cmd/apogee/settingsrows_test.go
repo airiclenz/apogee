@@ -943,3 +943,129 @@ func TestSettingsRowsOfferTheProjectTargetByClass(t *testing.T) {
 		t.Error("a session with no Project config to write offered the project target")
 	}
 }
+
+// settingsMarkOf is the source mark h's rows give path right now.
+func settingsMarkOf(t *testing.T, h settingsHost, path string) tui.SettingSource {
+	t.Helper()
+	return rowsByPath(t, h.Rows())[path].Source
+}
+
+// The source mark follows the files: a global-only key saved from its default row reads `(global)`
+// at once, and the reset that takes its line out reads `(default)` again — not the boot resolution's
+// answer for the rest of the session.
+func TestSettingsHostRowsMarkFollowsAGlobalSaveAndReset(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "")
+	if got := settingsMarkOf(t, h, "bypass"); got != tui.SettingFromDefault {
+		t.Fatalf("bypass mark at launch = %q, want %q", got, tui.SettingFromDefault)
+	}
+
+	if err := h.Write("bypass", "true"); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := settingsMarkOf(t, h, "bypass"); got != tui.SettingFromGlobal {
+		t.Errorf("bypass mark after the save = %q, want %q — the global file now states it", got, tui.SettingFromGlobal)
+	}
+
+	if err := h.Reset("bypass"); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if got := settingsMarkOf(t, h, "bypass"); got != tui.SettingFromDefault {
+		t.Errorf("bypass mark after the reset = %q, want %q — the line is gone", got, tui.SettingFromDefault)
+	}
+}
+
+// A save somebody else makes to the file reaches the mark through the watcher's re-read: the key the
+// save added reads `(global)` once the re-read has run.
+func TestSettingsHostRowsMarkFollowsAnExternalSave(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "")
+	writeSettingsFixture(t, h.configPath, "auto-title: false\n"+startupServerYAMLFor("http://127.0.0.1:1"))
+
+	if _, err := h.edits.changed(); err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+
+	if got := settingsMarkOf(t, h, "auto-title"); got != tui.SettingFromGlobal {
+		t.Errorf("auto-title mark after the external save = %q, want %q", got, tui.SettingFromGlobal)
+	}
+}
+
+// Editability follows the files the same way: a tighten-only list the project gains entries for in
+// a targeted save turns read-only and points at the editor, the row the launch would have built.
+func TestSettingsHostRowsEditabilityFollowsAProjectSave(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "tools:\n  disabled: [terminal]\n", "")
+	if !rowsByPath(t, h.Rows())["tools.disabled"].Editable {
+		t.Fatal("tools.disabled is read-only at launch; the project adds nothing to it yet")
+	}
+
+	if _, err := h.SaveTo(tui.SettingTargetProject, "tools.disabled", "[web_fetch]"); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+
+	got := rowsByPath(t, h.Rows())["tools.disabled"]
+	if got.Editable || got.EditPointer != pointerExternalEdit || got.Source != tui.SettingFromProject {
+		t.Errorf("tools.disabled after the project save = {editable %v pointer %q source %q}; want "+
+			"read-only, pointing at the editor, marked project", got.Editable, got.EditPointer, got.Source)
+	}
+}
+
+// An environment override from boot still ranks first: a save to the file beneath it leaves the row
+// marked with the variable that will win again at the next start.
+func TestSettingsHostRowsKeepABootOverrideMarkAfterASave(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "")
+	h.opts.Overrides = map[string]config.Source{"bypass": config.SourceEnv}
+
+	if err := h.Write("bypass", "true"); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got := rowsByPath(t, h.Rows())["bypass"]
+	if got.Source != tui.SettingFromEnv || got.SourceName != config.EnvBypass {
+		t.Errorf("bypass after the save = {source %q name %q}, want {%q %q}", got.Source, got.SourceName,
+			tui.SettingFromEnv, config.EnvBypass)
+	}
+}
+
+// A host composed with no external-edit baseline — the settingsHost literals other tests build —
+// marks its rows off the boot resolution's own file layers.
+func TestSettingsHostRowsWithNoBaselineMarkFromTheBootLayers(t *testing.T) {
+	t.Parallel()
+	opts := fabricatedSettings()
+	opts.Overrides = nil
+	opts.GlobalKeys = map[string]bool{"bypass": true}
+	opts.ProjectKeys = map[string]bool{"use-project-skills": true}
+
+	byPath := rowsByPath(t, settingsHost{opts: opts}.Rows())
+
+	if got := byPath["bypass"].Source; got != tui.SettingFromGlobal {
+		t.Errorf("bypass mark = %q, want %q", got, tui.SettingFromGlobal)
+	}
+	if got := byPath["use-project-skills"].Source; got != tui.SettingFromProject {
+		t.Errorf("use-project-skills mark = %q, want %q", got, tui.SettingFromProject)
+	}
+	if got := byPath["auto-title"].Source; got != tui.SettingFromDefault {
+		t.Errorf("auto-title mark = %q, want %q", got, tui.SettingFromDefault)
+	}
+}
+
+// `server:` is a key the re-read never reports, so its value stays the boot one — and so does its
+// mark: a file that drops the line leaves the row marked as it launched, agreeing with its value.
+func TestSettingsHostRowsKeepTheServerMarkAfterAReload(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "")
+	if got := settingsMarkOf(t, h, settingKeyServer); got != tui.SettingFromGlobal {
+		t.Fatalf("server mark at launch = %q, want %q", got, tui.SettingFromGlobal)
+	}
+	writeSettingsFixture(t, h.configPath, "servers:\n  - name: "+testServerName+"\n    endpoint: http://127.0.0.1:1\n")
+
+	if _, err := h.edits.changed(); err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+
+	if got := settingsMarkOf(t, h, settingKeyServer); got != tui.SettingFromGlobal {
+		t.Errorf("server mark after the reload = %q, want the boot %q", got, tui.SettingFromGlobal)
+	}
+}

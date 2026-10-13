@@ -387,14 +387,17 @@ var (
 )
 
 // settingsHost is this binary's [tui.SettingsHost]: the four acts of the `/settings` pane, which
-// are four faces of one config file — the rows it shows off the resolution THIS run made, the write
-// and the reset that splice that file, and the live apply of the key just persisted (ADR 0035, ADR
-// 0037). It holds what those acts need rather than four closures over the wiring, so the family
-// crosses to the renderer as one value and is faked in a test as one seam.
+// are four faces of one config file — the rows it shows off the resolution THIS run made, marked
+// with the layers the files hold now, the write and the reset that splice that file, and the live
+// apply of the key just persisted (ADR 0035, ADR 0037). It holds what those acts need rather than
+// four closures over the wiring, so the family crosses to the renderer as one value and is faked in
+// a test as one seam.
 type settingsHost struct {
-	// opts is the resolved snapshot the rows are projected from, so the pane reports the resolution
-	// THIS run made: a key persisted mid-session is applied by apply below and shown from the pane's
-	// own journal, marked ` *` (ADR 0037 decision 8).
+	// opts is the resolved snapshot the rows' VALUES are projected from, so the pane reports the
+	// resolution THIS run made: a key persisted mid-session is applied by apply below and shown from
+	// the pane's own journal, marked ` *` (ADR 0037 decision 8). Its env and flag Overrides rank
+	// first in every row's source mark; which FILE supplies a key is read from edits instead
+	// (layeredOpts), so a mark follows the files on disk.
 	opts config.Options
 	// live is the running session's answer for the two keys the resolution above cannot answer: the
 	// autonomy mode and Auto's blast radius move during a session without the file hearing about it,
@@ -409,7 +412,9 @@ type settingsHost struct {
 	// the project target, and SaveTo refuses one.
 	projectRoot   string
 	workspacesDir string
-	// edits is the external-edit baseline every landed write re-takes (ADR 0041 decision 8).
+	// edits is the external-edit baseline every landed write re-takes (ADR 0041 decision 8), and the
+	// reading of the files the rows' source marks and editability come from (layeredOpts). nil marks
+	// the rows off opts alone.
 	edits *externalEdit
 	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the root composes
 	// it out of the members this Driver holds, which is not a shape this seam could have as a method.
@@ -432,8 +437,9 @@ type settingsHost struct {
 }
 
 // Rows is every key the registry describes, with the value this run resolved and the source mark
-// that says which layer supplied it (settingsrows.go), and — for the two keys the
-// engine rather than the file holds — the value the session is RUNNING (overlayLiveSettings). The
+// that says which layer supplies it now (settingsrows.go): a boot override first, then the files as
+// the last save or re-read left them (layeredOpts). For the two keys the engine rather than the file
+// holds, the value is the one the session is RUNNING (overlayLiveSettings). The
 // one text row's prose is seeded with apogee's embedded default prompt where that default is what
 // the session resolves (seedPromptEditor), so the editor ⏎ opens starts from the prompt in force
 // rather than blank.
@@ -445,7 +451,7 @@ type settingsHost struct {
 // After the registry's rows come the *Allow rules* section's, one per rule the session holds now
 // (allowRuleRows) — appended, so the registry's own order and sections stand as they are.
 func (h settingsHost) Rows() []tui.SettingRow {
-	rows := overlayLiveSettings(settingsRows(h.opts), h.live)
+	rows := overlayLiveSettings(settingsRows(h.layeredOpts()), h.live)
 	if h.projectRoot == "" {
 		rows = withoutProjectTarget(rows)
 	}
@@ -456,6 +462,44 @@ func (h settingsHost) Rows() []tui.SettingRow {
 		return rows
 	}
 	return append(rows, allowRuleRows(h.allowRules())...)
+}
+
+// layeredOpts is the boot resolution with its two file layers — which keys the global file and the
+// Project config state — replaced by the files as the external-edit baseline last read them, so every
+// row's source mark and editability follow a `/settings` save or reset (Write, Reset, SaveTo, ResetIn
+// all re-take the baseline) and a re-read the watcher applied (externalEdit.changed). The values and
+// the env and flag Overrides stay the boot resolution's: an override still ranks first in the mark,
+// and a value this session moved is shown from the pane's own journal.
+//
+// The two keys a re-read never reports, `server:` and `sub-agents-server:` (externalEdit.changed),
+// keep their boot entries: their value is the boot one until a picker moves it, and a mark read off
+// the file beside it would disagree with the value it marks. A host with no baseline marks its rows
+// off the boot resolution alone.
+func (h settingsHost) layeredOpts() config.Options {
+	if h.edits == nil {
+		return h.opts
+	}
+	opts := h.opts
+	global, project := h.edits.layers()
+	opts.GlobalKeys = withBootPickerKeys(global, h.opts.GlobalKeys)
+	opts.ProjectKeys = withBootPickerKeys(project, h.opts.ProjectKeys)
+	return opts
+}
+
+// withBootPickerKeys is a copy of current with the `server:` and `sub-agents-server:` entries taken
+// from boot instead — a copy, because current is the baseline's own map and boot the session's.
+func withBootPickerKeys(current, boot map[string]bool) map[string]bool {
+	keys := make(map[string]bool, len(current)+2)
+	for path, set := range current {
+		keys[path] = set
+	}
+	for _, path := range []string{settingKeyServer, settingKeySubAgentsServer} {
+		delete(keys, path)
+		if boot[path] {
+			keys[path] = true
+		}
+	}
+	return keys
 }
 
 // Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry
@@ -561,9 +605,9 @@ func (h settingsHost) inProject(write func() error) error {
 }
 
 // notHeldByProject refuses a global save of a tighten-only list the Project config now adds entries
-// to — the row the boot resolution would have made read-only (carriesProjectEntries), reached here
-// because a project save earlier in this session gave the list its project entries. Its value is the
-// union of both files, so saving it to the global file would copy the project's entries there.
+// to — a row the files make read-only (carriesProjectEntries), reached here when the project file
+// gained those entries after the row was painted. Its value is the union of both files, so saving it
+// to the global file would copy the project's entries there.
 func (h settingsHost) notHeldByProject(key string) error {
 	k, ok := config.LookupKey(key)
 	if !ok || k.Class != config.ClassTightenOnly || h.edits == nil {

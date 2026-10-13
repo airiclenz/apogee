@@ -189,16 +189,22 @@ type settingsPendingSave struct {
 // journal keeps one entry per key ([Model.recordSettingEdit]), so the LAST source is what the row
 // says about the key.
 //
+// reread marks an edit a re-read of the files applied — either trigger of applyReloaded, the watcher
+// or the editor's return trip — whose value is therefore the LAYERED one the next start resolves,
+// never a value written beneath a file that outranks it (settingsOutranksNote).
+//
 // target and source are a targeted save's (a [SettingRow.ProjectCapable] key, [SettingsHost.SaveTo]):
-// the file the human chose, and the file that supplies the key once the save landed — which is what
-// the row's source mark reports from then on (ADR 0037 decision 8: the boot resolution plus the
-// journal). Both are empty for every other edit, whose row keeps the source it was resolved with.
+// the file the human chose, and the file that supplies the key once the save landed. The row's own
+// [SettingRow.Source] agrees from the next paint, because the provider marks every row off the files
+// as they stand now; source is the journal's copy of the same answer. Both are empty for every other
+// edit.
 type settingEdit struct {
 	path    string
 	value   string
 	note    string
 	reset   bool
 	watched bool
+	reread  bool
 	target  SettingTarget
 	source  SettingSource
 }
@@ -379,7 +385,8 @@ const noSettingsNote = "settings are unavailable — no configuration is wired"
 const noSettingsRow = "no configuration to show"
 
 // settingsSourceMarker is the "(default)" | "(global)" | "(project)" | "(env)" | "(flag)" cell that
-// says which source supplied a row's value THIS run ([SettingRow.Source]). It is a cell of its own
+// says which source supplies a row's value ([SettingRow.Source]): a boot override, else the config
+// file that states the key as it stands now, after every save and reload. It is a cell of its own
 // rather than a suffix on the value, the currentRowCell posture: the popup module styles rows whole
 // and aligns them by column, so every row's mark lands in one column — and that column collapses
 // away only on rows whose provider reported no source at all.
@@ -404,18 +411,19 @@ func settingsOverride(source SettingSource) bool {
 //   - a save to the GLOBAL file under a value the Project config sets changes nothing in force: the
 //     pane applied the layered value, which is still the project's (settingsSaveToTarget), so the
 //     note says where the save went and what kept it from mattering;
-//   - an untargeted edit — a re-read the watcher applied — of a row the Project config supplies is
-//     outranked at the next start like an override's.
+//   - an untargeted in-pane write — which lands in the global file — of a row the Project config
+//     supplies is outranked at the next start like an override's.
 //
-// A save to the file that now supplies the key, and every edit of a default or global row, says
-// nothing: the next start reads exactly what was written.
+// A save to the file that now supplies the key, every edit of a default or global row, and every
+// re-read of the files says nothing: the next start reads exactly what was written, and a re-read
+// applied the layered value the next start resolves, whichever file the row's mark now names.
 func settingsOutranksNote(row SettingRow, edit settingEdit) string {
 	switch {
 	case settingsOverride(row.Source):
 		return settingsSourceLabel(row) + " outranks at next launch"
 	case edit.target == SettingTargetGlobal && edit.source == SettingFromProject:
 		return settingsProjectOutranksNote
-	case edit.target == "" && row.Source == SettingFromProject:
+	case edit.target == "" && !edit.reread && row.Source == SettingFromProject:
 		return settingsSourceLabel(row) + " outranks at next launch"
 	}
 	return ""
@@ -425,8 +433,9 @@ func settingsOutranksNote(row SettingRow, edit settingEdit) string {
 const settingsProjectOutranksNote = "saved to global; the project config outranks it"
 
 // settingsSourceOf is the source mark a row paints: the source a targeted save left supplying the key
-// (settingEdit.source) once one has landed, else the source the run resolved it from. An override
-// keeps its mark whatever was saved, because it outranks both files.
+// (settingEdit.source) once one has landed, else the row's own — the provider's, read off the files
+// as they stand now. The two agree once the provider has re-read; the journal's copy answers the same
+// keypress. An override keeps its mark whatever was saved, because it outranks both files.
 func (m *Model) settingsSourceOf(row SettingRow) SettingSource {
 	if settingsOverride(row.Source) {
 		return row.Source

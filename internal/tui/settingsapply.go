@@ -177,8 +177,8 @@ func (m Model) settingsAskTarget(row SettingRow, pending settingsPendingSave) Mo
 }
 
 // settingsDefaultTarget is the file the save-target question opens on: this project when the
-// Project config supplies the key now — as the run resolved it, or as a save this session made left
-// it (settingsSourceOf) — and the global file otherwise.
+// Project config supplies the key now — as the files stand at the last save or reload the provider
+// read, or as a save this session made left it (settingsSourceOf) — and the global file otherwise.
 func (m Model) settingsDefaultTarget(row SettingRow) SettingTarget {
 	if m.settingsSourceOf(row) == SettingFromProject {
 		return SettingTargetProject

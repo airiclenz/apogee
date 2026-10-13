@@ -172,7 +172,12 @@ Advances `demorig-eperm-root-cause`; does not close it. A failure of the no-attr
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'EPERM|Probe' ./cmd/demorig/`
 **Commit:** `chore(demorig): probe which launch step refuses when a take start hits EPERM`
 
-## 8. /settings source mark follows saves and reloads
+## 8. /settings source mark follows saves and reloads — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): narrowed settingsOutranksNote's untargeted-project case with a new `settingEdit.reread` flag set by applyReloaded (both triggers: watcher and editor return trip), rather than on `watched` alone, since the editor return trip also applies the layered value; new test TestSettingsPaneProjectRowReReadSaysNothingOutranksIt covers both triggers; the existing project-row outranks test is unchanged apart from its comment.
+NOTES (2026-10-13): consequential edit — internal/tui/settingswatcher.go: made necessary by the new `settingEdit.reread` flag (applyReloaded sets it).
+NOTES (2026-10-13): consequential edit — internal/tui/settingsapply.go: made necessary by the mark following disk (settingsDefaultTarget's comment said "as the run resolved it").
+NOTES (2026-10-13): the confinement pair (`confine-to-workspace`, `unconfined-hosts`), which externalEdit.changed also never reports, now marks off the files like every other key; the plan named only the two server keys for the boot-entry carve-out, and `confine-to-workspace`'s value is overlaid from the engine anyway.
 
 **What:**
 **Goal:** after any `/settings` save or reset (global or targeted) and after an external config-file change is reloaded, each row's source mark and editability reflect the layered files on disk; env and flag overrides from boot still rank first.

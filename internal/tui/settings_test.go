@@ -2083,9 +2083,10 @@ func TestSettingsPaneOverriddenRowSaysTheOverrideOutranksItAtTheNextStart(t *tes
 	}
 }
 
-// A row the Project config supplies is outranked at the next start just as an override is: the pane
-// writes the global file, and the project's value sits above it (ADR 0096). The note names the
-// project config, since a project row carries no source name of its own.
+// A row the Project config supplies is outranked at the next start just as an override is when the
+// pane writes it untargeted: that write lands in the global file, and the project's value sits above
+// it (ADR 0096). The note names the project config, since a project row carries no source name of its
+// own.
 func TestSettingsPaneProjectRowSaysTheProjectConfigOutranksItAtTheNextStart(t *testing.T) {
 	t.Parallel()
 	rows := []SettingRow{{
@@ -2103,6 +2104,32 @@ func TestSettingsPaneProjectRowSaysTheProjectConfigOutranksItAtTheNextStart(t *t
 	}
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, "(project)") || !strings.Contains(pane, want) {
 		t.Errorf("the pane does not carry both the project marker and the note:\n%s", pane)
+	}
+}
+
+// A re-read of the files that lands on a project row says nothing about being outranked: the
+// provider marks the row off the files as they stand now, so `(project)` there means the project
+// file itself supplied the value the re-read applied — the layered value the next start resolves.
+// Both triggers of the re-read are held to it, the watcher and the editor's return trip.
+func TestSettingsPaneProjectRowReReadSaysNothingOutranksIt(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{{
+		Path: "retries", Section: "Session", Kind: SettingBool, Value: settingFalse, Default: settingFalse,
+		Source: SettingFromProject, Editable: true, Desc: "Retries.",
+	}}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: "retries", Value: settingTrue}}}
+
+	watched := configWatchModel(t, rows, &settingsWriteLog{}, edit)
+	watched = step(t, watched, configChangedMsg{alive: true})
+	returned, _ := configWatchModel(t, rows, &settingsWriteLog{}, edit).applyReloaded(rows, edit.applied, false)
+
+	for name, m := range map[string]Model{"watcher": watched, "editor return": returned} {
+		if _, ok := m.settingEditOf("retries"); !ok {
+			t.Fatalf("%s: the re-read journaled nothing for retries", name)
+		}
+		if got := m.settingsNote(rows[0]); got != "" {
+			t.Errorf("%s: note = %q, want none — the re-read applied the project's own value", name, got)
+		}
 	}
 }
 

@@ -2,6 +2,8 @@ package main
 
 // The wire side of the /settings surface: it projects the declarative key registry (internal/config/registry.go)
 // plus the values THIS run resolved (options) onto the renderer's plain-data rows (tui.SettingRow).
+// The host hands it options whose file layers are the files as they stand now
+// (settingsHost.layeredOpts), so a row's source mark and editability follow every save and reload.
 //
 // It sits here, in the composition root, for the reason every other display seam does: the schema,
 // the precedence that decided which source won, the config file's own spelling of a value and the
@@ -275,8 +277,9 @@ func settingKind(kind config.Kind) tui.SettingKind {
 	}
 }
 
-// settingSource reports the source marker for a row: which source supplied this key's value this
-// run (config.Options.SourceOf) and, for an override, what that source is CALLED, so the pane's note
+// settingSource reports the source marker for a row: which source supplies this key's value in opts
+// (config.Options.SourceOf) — a boot override, else the file layer opts carries — and, for an
+// override, what that source is CALLED, so the pane's note
 // can name it ("APOGEE_MODE", "--mode") instead of saying "something". An environment override on
 // a row that names no variable is APOGEE_NO_UPDATE_CHECK's, the one override config applies by hand
 // rather than through the row (ADR 0043's exception, ADR 0097): it forces `update-check` off.

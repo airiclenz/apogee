@@ -77,9 +77,12 @@ one every other boxed pane spends on itself, which is why the pane asks for none
 blank above the key legend is its counterpart below. Both are bought out of the row window rather
 than out of the pane's height, so a short terminal gives them up and keeps the keys. Rows are four
 cells — key, value, a source mark, and the note or pointer. The mark names where the row's value
-came from: `(default)`, `(global)` for the global config file, `(project)` for the Project config
+comes from: `(default)`, `(global)` for the global config file, `(project)` for the Project config
 layered over it, `(env)` or `(flag)` for an override — so every row carries one, and the column
-collapses away only on rows a provider reported without a source. The note column collapses away on
+collapses away only on rows a provider reported without a source. An override is the one fixed at
+launch; which file supplies a key is read off the files as they stand now, so the mark — and whether
+the row can be written here — follows every save and reset this pane makes and every outside save
+the config watcher reloads. The note column collapses away on
 a configuration with nothing read-only and nothing edited yet. A commit on a key a project may set
 (a project-param or tighten-only key, ADR 0096 §6) asks which file it lands in before anything is
 written — the legend becomes `Save to: [global] / this project · ←/→ choose · ⏎ save · esc back`
@@ -105,10 +108,11 @@ session with no rules shows no such section.
 ### An edited row
 
 ```
-│ ❯ context-files.enable  false *      (default)  · applies at next clear                      │
+│ ❯ context-files.enable  false *      (global)   · applies at next clear                      │
 ```
 
-The ` *` says *this session changed this key here* and is cleared only by a relaunch. The note beside
+The ` *` says *this session changed this key here* and is cleared only by a relaunch; the mark beside
+it already names the file the save landed in. The note beside
 it is the one deferral wording the surface has: `context-files:` is part of the prefix every request
 is cached against, so it lands at the next `/clear`. Every other key is already in force by the time
 the row repaints. Where an environment variable or a flag outranks the file the note reads
