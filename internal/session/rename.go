@@ -10,11 +10,6 @@ import "time"
 // handle closes. The loop lives here, untagged, so its tests run on every platform.
 
 const (
-	// renameRetryBudget bounds how long a retryable rename failure is retried before the error
-	// surfaces — the same bound Go's own cmd/go/internal/robustio gives a Windows rename, long
-	// enough for a reader to finish one record read, short enough that a handle never released
-	// (an antivirus scan gone wrong) still fails the save rather than wedging it.
-	renameRetryBudget = 2 * time.Second
 	// renameFirstBackoff is the pause after the first retryable failure; each later pause
 	// doubles it, up to renameMaxBackoff.
 	renameFirstBackoff = time.Millisecond

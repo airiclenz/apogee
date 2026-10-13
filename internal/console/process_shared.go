@@ -25,16 +25,6 @@ const (
 // cannot make closing a Console hang.
 const closeJoinTimeout = 5 * time.Second
 
-// finalFrameJoinTimeout bounds how long the Windows reaper waits, after the process has exited and
-// the pseudoconsole is released, for the reader to reach the end of output before it closes the
-// output pipe. The reader's EOF — conhost closing its end of the pipe — is the documented signal
-// that every client is gone and the final frame is flushed, so the reaper waits for that and not
-// for a clock: under load conhost's last flush can arrive well after closeJoinTimeout. The bound
-// exists only so a wedged conhost cannot pin the reaper forever. Nothing waits on the reaper
-// synchronously — Close joins it under its own closeJoinTimeout deadline — so the long bound
-// costs a caller nothing.
-const finalFrameJoinTimeout = 60 * time.Second
-
 // Spec describes one console process to start. It is deliberately free of ids, owners and tool
 // vocabulary: this package's process files are about a process behind a terminal, and the
 // registry above them owns everything else.

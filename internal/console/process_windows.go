@@ -146,6 +146,16 @@ func (p *Process) Close() error {
 	return errors.Join(err, p.console.CloseOutput())
 }
 
+// finalFrameJoinTimeout bounds how long the Windows reaper waits, after the process has exited and
+// the pseudoconsole is released, for the reader to reach the end of output before it closes the
+// output pipe. The reader's EOF — conhost closing its end of the pipe — is the documented signal
+// that every client is gone and the final frame is flushed, so the reaper waits for that and not
+// for a clock: under load conhost's last flush can arrive well after closeJoinTimeout. The bound
+// exists only so a wedged conhost cannot pin the reaper forever. Nothing waits on the reaper
+// synchronously — Close joins it under its own closeJoinTimeout deadline — so the long bound
+// costs a caller nothing.
+const finalFrameJoinTimeout = 60 * time.Second
+
 // reap waits for the process, records how it ended, and then releases the pseudoconsole.
 //
 // The release is the Windows form of the §2.4 teardown-on-every-exit: it terminates whatever the

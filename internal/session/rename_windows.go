@@ -5,9 +5,16 @@ package session
 import (
 	"errors"
 	"os"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
+
+// renameRetryBudget bounds how long a retryable rename failure is retried before the error
+// surfaces — the same bound Go's own cmd/go/internal/robustio gives a Windows rename, long enough
+// for a reader to finish one record read, short enough that a handle never released (an antivirus
+// scan gone wrong) still fails the save rather than wedging it.
+const renameRetryBudget = 2 * time.Second
 
 // renameRecord moves from over to, retrying through renameRetryBudget while a reader holds the
 // destination open without FILE_SHARE_DELETE (rename.go).
