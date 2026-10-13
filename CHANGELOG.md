@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.25.2] — 2026-10-13
+
 - **A second `esc` or `⌃c` typed in time always acts.** The double-press stop and quit gestures measured their one-second window when the second press was handled, so a busy apogee that got to it late re-armed the gesture instead of cancelling the run or quitting. The window now closes only when the gesture's own disarm timer is handled, which always comes after a press typed before it fired (ADR 0099).
 
 - **Tests:** the last e2e tests that took a quiet screen as proof of readiness now wait on the thing they need — the umbrella-fold resume test on the session record holding the wrap-up, the fork test on the store holding both records, the reaction-gate and hook tests on the approval pane arming — and the background-boundary confirm, which is never latched, is answered as soon as its title paints.
