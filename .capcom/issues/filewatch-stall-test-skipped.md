@@ -1,10 +1,12 @@
 ---
 title: filewatch stall and burst tests skip under load instead of being fixed
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-10-13 - 01 - test-readiness-and-model-size-plan
 created: 2026-10-12T21:51:20Z
+closed: 2026-10-13T15:53:56Z
+reason: "Resolved by plan '2026-10-13 - 01 - test-readiness-and-model-size-plan' items 5-6 (archived at 3ce94203): the stall test arms on a still tick via the widened sampled hook and burst writes step-lock with the watcher's samples; no t.Skip remains"
 ---
 
 The last fix to the filewatch stall flake (`7929556d`, "skip the stall test when it arms past the Settle") made `TestWatchNeverSettlesOnASampleTakenBeforeAStall` (`internal/filewatch/filewatch_test.go`) skip when its pre-arm sleep (`testSettle/5`) overruns the whole Settle on a loaded runner, rather than making the test independent of how late it arms. `TestWatchCoalescesABurstIntoOneReport` skips the same way when its burst takes too close to the Settle. On exactly the boxes where the stall matters — loaded ones — the claim goes unobserved, and a skip reads as green.

@@ -1,10 +1,12 @@
 ---
 title: e2e picker keys and resumed openLastRun typed after a quiet screen
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-10-13 - 01 - test-readiness-and-model-size-plan
 created: 2026-10-13T08:58:27Z
+closed: 2026-10-13T15:53:56Z
+reason: "Resolved by plan '2026-10-13 - 01 - test-readiness-and-model-size-plan' items 1-2 (archived at 3ce94203): /fork and /sessions picker keys gate on the painted title/hint and moved cursor; openLastRun waits on waitIdle and the run view's crumb"
 ---
 
 Three e2e waits still take a quiet screen as proof of readiness before typing a key, left outside the scope of plan '2026-10-13 - 00 - open-bugs-sweep-plan' item 3 (which converted the sites it named):
