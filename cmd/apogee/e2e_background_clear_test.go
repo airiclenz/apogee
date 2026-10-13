@@ -123,9 +123,11 @@ func startHeldScout(drv *tuitest.Driver) {
 }
 
 // stopAtTheConfirm waits for the boundary's stop-or-keep confirm and answers `y`, letting the
-// boundary stop the running workflow.
+// boundary stop the running workflow. The painted title is all the readiness the key needs: the
+// boundary confirm is not a latched pane (internal/tui's confirmBoundary leaves the picker
+// unlatched, so picker.isArmed holds from the first frame), and a `y` read after its title is
+// answered by it — a quiet screen on top would prove nothing more.
 func stopAtTheConfirm(drv *tuitest.Driver) {
 	drv.WaitText(bgBoundaryConfirm)
-	drv.WaitQuiet(settled)
 	drv.Type("y")
 }

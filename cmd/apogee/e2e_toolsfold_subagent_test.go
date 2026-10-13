@@ -42,8 +42,10 @@ const (
 )
 
 // toolsFoldDelegatedRun drives the finished shape to its wrap-up under `ui.tools-fold-over: 2` —
-// the delegation sent, the child's three reads landed and reported, the parent's wrap-up painted,
-// the screen quiet — and returns the session so the caller can go on with it.
+// the delegation sent, the child's three reads landed and reported, the parent's wrap-up painted —
+// and returns the session so the caller can go on with it. It waits on nothing past the painted
+// wrap-up: a quiet screen proves neither the idle prompt nor the saved record, so each caller waits
+// on the one it goes on to need.
 func toolsFoldDelegatedRun(t *testing.T) (*tuitest.Driver, *e2eSession) {
 	t.Helper()
 
@@ -53,7 +55,6 @@ func toolsFoldDelegatedRun(t *testing.T) (*tuitest.Driver, *e2eSession) {
 
 	submit(drv, toolsFoldDelegatePrompt)
 	drv.WaitText(toolsFoldDelegateWrapUp)
-	drv.WaitQuiet(settled)
 	return drv, sess
 }
 
@@ -84,6 +85,7 @@ func TestE2EToolsUmbrellaFoldsInsideARunView(t *testing.T) {
 
 	drv, sess := toolsFoldDelegatedRun(t)
 
+	waitIdle(drv)
 	openLastRun(drv)
 	drv.WaitText(toolsFoldRunViewCrumb)
 	drv.WaitQuiet(settled)
@@ -164,7 +166,11 @@ func TestE2EToolsUmbrellaFoldsInsideARunViewWhileTheTurnRuns(t *testing.T) {
 func TestE2EToolsUmbrellaFoldInARunViewSurvivesAResume(t *testing.T) {
 	t.Parallel()
 
-	_, sess := toolsFoldDelegatedRun(t)
+	drv, sess := toolsFoldDelegatedRun(t)
+	// The resume rebuilds the run from the record, so the quit waits on the record holding the
+	// wrap-up — the idle save is queued behind the turn's last frame ([awaitRecorded]).
+	waitIdle(drv)
+	awaitRecorded(t, drv, sess.Home(), toolsFoldDelegateWrapUp)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the first run returned %v; want a clean quit", err)
 	}

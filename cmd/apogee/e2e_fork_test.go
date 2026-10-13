@@ -104,7 +104,10 @@ func TestE2EForkKeepsThePrefixAndSurvivesAResume(t *testing.T) {
 	}
 
 	// The records: the parent's, unchanged but for the stamp its idle save re-applied, and the child
-	// beside it pointing back at it.
+	// beside it pointing back at it. The painted note is no proof the child's record is on disk, so
+	// the read waits on the store holding both.
+	drv.WaitFor(func() bool { return len(sess.sessionRecords()) == 2 },
+		tuitest.Awaiting("the child's record to reach the session store beside the parent's"))
 	parentAfter, child := parentAndChild(t, store, parentBefore.Meta.ID)
 	assertSameRecordButUpdatedAt(t, parentBefore, parentAfter)
 	if child.Meta.ParentID != parentBefore.Meta.ID {

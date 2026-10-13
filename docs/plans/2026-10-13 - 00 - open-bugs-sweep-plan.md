@@ -80,7 +80,9 @@ Test-only follow-up to item 1. `stopRun` (`cmd/apogee/e2e_smoke_test.go`) presse
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run '^(TestE2EApprovalForcedLookSurvivesAutoMode|TestE2EApprovalKeysAreArmedAfterPaint|TestE2EConsolesDieWithTheirOwner|TestE2EOutcomeCancelledDelegationCarriesTheFailureTone|TestE2EHostileWrapsUnderItsOwnIndent|TestE2EStreamCancelKeepsWhatArrived|TestE2EStreamRepaintCeiling|TestJudgeHostileRowsReadAsOneRow)$' ./cmd/apogee/`
 **Commit:** `test(e2e): stopRun stops a run with one double esc`
 
-## 3. Remaining WaitQuiet readiness proxies in the e2e tests
+## 3. Remaining WaitQuiet readiness proxies in the e2e tests — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): left as found, outside the item's named sites: the `next.WaitQuiet(settled)` before `openLastRun(next)` in TestE2EToolsUmbrellaFoldInARunViewSurvivesAResume's resumed half, and the WaitQuiet before the /fork picker's Down and the /sessions picker's Down in the fork and background-switch tests — keys typed after a quiet screen on pickers the item did not name.
 
 **What:**
 Closes the rest of `waitquiet-readiness-proxy` and all of `e2e-unwaited-record-reads`. Use the helpers items 24–26 of the archived plan introduced (`awaitArmed`, `waitIdle`, `awaitRecorded` in `cmd/apogee/e2e_approval_test.go`); no new helper is needed.

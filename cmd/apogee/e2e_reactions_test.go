@@ -187,7 +187,7 @@ func TestE2EHooksFireFromTheTUI(t *testing.T) {
 
 	// The approval is answered, the write lands, and the command Reaction receives the two events the
 	// journey produced.
-	drv.WaitQuiet(settled)
+	awaitArmed(drv)
 	drv.Type("a")
 	drv.WaitText(smokeWriteReply)
 
@@ -863,7 +863,7 @@ func TestE2EGateAsksInTheTUI(t *testing.T) {
 
 	// Answered, so the session ends the way every other driven case does rather than being quit
 	// out from under a pending question.
-	drv.WaitQuiet(settled)
+	awaitArmed(drv)
 	drv.Type("a")
 	drv.WaitText(gateAnswer)
 	waitIdle(drv)
@@ -910,7 +910,7 @@ func TestE2EGateFailureIsReportedInTheTUI(t *testing.T) {
 
 	// Answered, so the session ends the way every other driven case does rather than being quit
 	// out from under a pending question.
-	drv.WaitQuiet(settled)
+	awaitArmed(drv)
 	drv.Type("a")
 	drv.WaitText(gateAnswer)
 	waitIdle(drv)
