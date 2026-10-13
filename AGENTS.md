@@ -47,10 +47,19 @@ markdown files under `.capcom/`, versioned with the code; track work there and n
 Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#install.
 
 - `capcom ready`: the issues ready to work on, most urgent first
-- `capcom show <id>`: one issue in full
-- `capcom create --id <slug> --title <title>`: file a new issue
-- `capcom close <id> --reason <text>`: close an issue
+- `capcom show <id>`: one issue in full, with what blocks it
+- `capcom create --id <slug> --title <title> [--dep <id>]`: file a new issue
+- `capcom dep add <id> <dep-id>`: make an issue wait for another; `capcom dep list <id>` shows both sides
+- `capcom close <id> --reason <text>`: close an issue; it names the issues this made ready
+- `capcom list --tree --depth 2`: the outline of the issues
 - `capcom know tree`: the outline of the Knowledge tree; `capcom know show <id>` reads a Note
+
+An issue's body says what is wrong or wanted, why, and how to tell it is done (`## Acceptance`),
+readable on its own; a plan says how and in what order.
+
+Where things are: an issue is `.capcom/issues/<id>.md`, and its children sit in the directory
+`.capcom/issues/<id>/` beside it; Notes follow the same shape under `.capcom/knowledge/`.
+Prefer capcom commands; after a hand edit run `capcom check`.
 
 Knowledge tree, top level:
 
