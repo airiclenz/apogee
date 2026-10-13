@@ -50,7 +50,7 @@ func TestE2EFiringMarksAnAbandonedFinalTurn(t *testing.T) {
 	// has been enriched: everything below is about the enriched block.
 	drv.WaitText("Schedule")
 	drv.WaitText(scheduleNoAnswer)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	expandLastBlock(drv)
 

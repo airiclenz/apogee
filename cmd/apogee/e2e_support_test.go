@@ -780,14 +780,27 @@ func expandLastBlock(drv *tuitest.Driver) {
 // a view esc is the way back OUT of it, so the tidy-up that leaves the block cursor would close the
 // very thing the test just opened. It costs nothing either — opening the view drops the block cursor
 // itself, so the repaint-anchoring that made expandLastBlock's esc necessary is already gone.
+//
+// It waits on two real signals and on no quiet screen. The byte mark the ⌥↑ is checked against is
+// taken only once the run is back at the idle prompt ([waitIdle]): a mark taken while the turn's
+// last frames, or a resume's start-up paint, were still landing would be passed by that paint, and
+// the ⏎ would go to a screen with no cursor on it. And it returns on the run view's own breadcrumb,
+// the band naming the way back, which is on the screen exactly when the view is open — a settle
+// would also end on a press that never landed. A caller that reads a frame next settles it first.
 func openLastRun(drv *tuitest.Driver) {
+	waitIdle(drv)
 	painted := drv.Screen().BytesWritten()
 	drv.Press(tuitest.AltUp)
 	drv.WaitFor(func() bool { return drv.Screen().BytesWritten() > painted },
 		tuitest.Awaiting("the block cursor to highlight a block"))
 	drv.Press(tuitest.Enter)
-	drv.WaitQuiet(settled)
+	drv.WaitText(runViewCrumbHead)
 }
+
+// runViewCrumbHead is the opening of every run view's breadcrumb (`← main › <name>`, crumbText in
+// internal/tui/subagentblock.go): the text [openLastRun] knows the view is open by, whichever run
+// it opened.
+const runViewCrumbHead = "← main ›"
 
 // rowContaining is the frame's first row holding want, failing the test with the whole frame when
 // no row does. It is how a claim about ONE line — a stats line, a footer — is made against a frame

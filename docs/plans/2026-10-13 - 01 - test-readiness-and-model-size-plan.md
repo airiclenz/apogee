@@ -65,7 +65,10 @@ internal/tui/popup.go — popupRowLinesAt (selected row = glyphs.user+" ")
 - `grep -n -A1 -E 'WaitText\(("⏎ resume"|forkPickerTitle|"type to filter · ↑/↓ select · ⏎ resume")\)' cmd/apogee/*_test.go | grep -c WaitQuiet` prints 0
 **Commit:** `test(e2e): advance pickers on the moved cursor, not a quiet screen`
 
-## 2. openLastRun and resumed transcripts wait on a real signal
+## 2. openLastRun and resumed transcripts wait on a real signal — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): `waitIdle` is called inside `openLastRun` itself, as its first line, rather than by each caller — so every caller (seven call sites) gets the mark-after-idle guarantee; at the sites the plan named for a caller-side `waitIdle` before `openLastRun` (TestE2EToolsUmbrellaFoldInARunViewSurvivesAResume's resumed half, TestJudgeDelegationStepCap, TestE2EOutcomeSlotsCarryTheToolsVerdict) the `WaitQuiet` is simply removed, with no duplicate `waitIdle` added.
+NOTES (2026-10-13): the crumb string is a new const `runViewCrumbHead = "← main ›"` in e2e_support_test.go (the prefix of crumbText's `← main › <name>`); the two delegation callers that go straight into `scrollTranscript` (which reads its first page immediately) also gained a `WaitQuiet(settled)` before it, as frame reads.
 
 Depends on item 1.
 

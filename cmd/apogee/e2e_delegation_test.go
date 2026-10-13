@@ -292,6 +292,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		tuitest.Golden(t, "t04-step-cap-block", collapsed, goldenRedactions(sess)...)
 
 		openLastRun(drv)
+		drv.WaitQuiet(settled)
 
 		// Step 6 — the run view opens on the child's own conversation: the task it was handed, and
 		// the work it got through before the cap stopped it.
@@ -393,6 +394,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		}
 
 		openLastRun(drv)
+		drv.WaitQuiet(settled)
 		flat := flatten(scrollTranscript(drv))
 		if !strings.Contains(flat, flatten(childContinuedWords)) {
 			t.Errorf("the continued run's view does not carry its completed report:\n%s", flat)
@@ -460,6 +462,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			t.Errorf("the child made %d requests; unbounded, its script runs four turns", got)
 		}
 		openLastRun(drv)
+		drv.WaitQuiet(settled)
 		flat := flatten(scrollTranscript(drv))
 		if !strings.Contains(flat, flatten(childFinalWords)) {
 			t.Errorf("the uncapped child never got to answer:\n%s", flat)
@@ -498,8 +501,8 @@ func TestJudgeDelegationStepCap(t *testing.T) {
 
 	submit(drv, capPrompt)
 	drv.WaitText("The delegate handed back what it had.")
-	drv.WaitQuiet(settled)
 	openLastRun(drv)
+	drv.WaitQuiet(settled)
 
 	tones := schemeTones()
 	judge.Require(t, t.Context(), judge.Rubric{

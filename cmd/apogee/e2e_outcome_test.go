@@ -91,6 +91,7 @@ func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 	// being refused by its own server, so the run has an answer behind it and the prompt stands at
 	// the top of its view, above that answer (the second half of the checklist's step 5).
 	openLastRun(drv)
+	drv.WaitQuiet(settled)
 	if opened := drv.Frame(); !strings.Contains(flatten(opened.String()), doomedTask) {
 		t.Errorf("the delegation's run view does not show the prompt it carried:\n%s", opened)
 	}
@@ -224,7 +225,8 @@ func seedLinesFile(t *testing.T, ws string) {
 }
 
 // approveEdit sends one edit prompt and allows the write it raises, returning once the model has
-// spoken again — which is what says the result reached the transcript and the block is settled.
+// spoken again and the run is back at the idle prompt ([waitIdle]) — which is what says the result
+// reached the transcript and the turn is over, so the next keystroke lands on a finished block.
 func approveEdit(t *testing.T, drv *tuitest.Driver, prompt string) {
 	t.Helper()
 
@@ -232,7 +234,7 @@ func approveEdit(t *testing.T, drv *tuitest.Driver, prompt string) {
 	awaitApprovalPane(drv)
 	decide(drv, "a")
 	drv.WaitText("The edit is in.")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 }
 
 // assertErrorTone fails unless the row carrying marker holds a cell painted in the colour scheme's

@@ -178,7 +178,6 @@ func TestE2EToolsUmbrellaFoldInARunViewSurvivesAResume(t *testing.T) {
 	next := sess.RelaunchWith("--continue")
 	next.WaitText("Send a message")
 	next.WaitText(toolsFoldDelegateWrapUp)
-	next.WaitQuiet(settled)
 	openLastRun(next)
 	next.WaitText(toolsFoldRunViewCrumb)
 	next.WaitQuiet(settled)
