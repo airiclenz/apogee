@@ -660,6 +660,42 @@ func TestServerLogsDiscoveryRequests(t *testing.T) {
 	}
 }
 
+// TestServerLogsStrayRequests pins that a request no route answers lands in the stray log with
+// its method and path, is still answered the way the mux always answered it, and reaches neither
+// the completion log nor Unmatched — the gate a test's "nothing unexpected was asked" rests on.
+func TestServerLogsStrayRequests(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{{Text: "ok"}}})
+
+	post(t, server, `{"model":"stub-model","messages":[{"role":"user","content":"hi"}]}`)
+	if status, _ := fetch(t, t.Context(), http.MethodPost, server.URL+"/v1/completions", "{}"); status != http.StatusNotFound {
+		t.Errorf("POST /v1/completions = %d, want the 404 an unknown path always got", status)
+	}
+	if status, _ := fetch(t, t.Context(), http.MethodGet, server.URL+"/v1/chat/completions", ""); status != http.StatusMethodNotAllowed {
+		t.Errorf("GET /v1/chat/completions = %d, want the 405 a wrong method always got", status)
+	}
+
+	strays := server.Strays()
+	if len(strays) != 2 ||
+		strays[0].Method != http.MethodPost || strays[0].Path != "/v1/completions" ||
+		strays[1].Method != http.MethodGet || strays[1].Path != "/v1/chat/completions" {
+		t.Fatalf("strays = %+v, want the unknown path then the wrong method", strays)
+	}
+	if strays[0].At.IsZero() || strays[1].At.Before(strays[0].At) {
+		t.Errorf("stray times = %s, %s, want stamped in arrival order", strays[0].At, strays[1].At)
+	}
+	if requests := server.Requests(); len(requests) != 1 || requests[0].N != 1 {
+		t.Errorf("requests = %+v, want the one completion, numbered 1 — a stray is not a request", requests)
+	}
+	if unmatched := server.Unmatched(); len(unmatched) != 0 {
+		t.Errorf("unmatched = %+v, want none — a stray is not a request no Turn answered", unmatched)
+	}
+	if probes := server.Probes(); len(probes) != 0 {
+		t.Errorf("probes = %+v, want none — a stray is not a discovery probe", probes)
+	}
+}
+
 // getJSON GETs one of server's routes with the given headers and returns the body with its
 // trailing newline trimmed, so a test can compare the literal JSON the client will decode.
 func getJSON(t *testing.T, server *Server, path string, header http.Header) string {

@@ -47,7 +47,8 @@
 //     list shape, and the reduction of a Messages request to the same neutral log entry the
 //     chat route records.
 //   - log.go — the request log every served request lands in, the probe log the discovery
-//     GETs land in, and the assertions over them.
+//     GETs land in, the stray log a request no route answers lands in, and the assertions over
+//     them.
 //   - record.go — the recording proxy that turns a real server's traffic — its discovery
 //     answers included — into a Script.
 //   - cassette.go — the Cassette a live capture is stored as: raw reply chunks with their

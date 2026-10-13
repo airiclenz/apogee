@@ -104,6 +104,21 @@ type Probe struct {
 	At time.Time
 }
 
+// Stray is one request no route of the stub answers — an unknown path, or a known path under the
+// wrong method — as the test sees it afterwards. Strays are logged apart from completions and
+// probes so [Server.Requests], the request numbering and [Server.Unmatched] stay about what the
+// agent asked the model, while a test whose run went quiet can still see that apogee dialed
+// somewhere the stub does not serve. The stub still answers a stray the way the mux always has: a
+// 404, or a 405 for a wrong method.
+type Stray struct {
+	// Method is the request's HTTP method.
+	Method string
+	// Path is the path the request named.
+	Path string
+	// At is when the request arrived.
+	At time.Time
+}
+
 // Requests returns a copy of the request log, oldest first. It is empty when the Server was
 // built with WithRequestLog(false).
 func (s *Server) Requests() []Request {
@@ -124,6 +139,17 @@ func (s *Server) Probes() []Probe {
 
 	out := make([]Probe, len(s.probes))
 	copy(out, s.probes)
+	return out
+}
+
+// Strays returns a copy of the stray log, oldest first: every request no route answered. It is
+// empty when the Server was built with WithRequestLog(false).
+func (s *Server) Strays() []Stray {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]Stray, len(s.strays))
+	copy(out, s.strays)
 	return out
 }
 

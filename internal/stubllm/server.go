@@ -89,6 +89,7 @@ type Server struct {
 	matcher  *matcher
 	requests []Request
 	probes   []Probe
+	strays   []Stray
 	// gates holds one channel per `await:` label, closed by [Server.Release]. Labels are
 	// created on first use from either side, so a Release that runs before the request it
 	// frees — the ordinary case, since the test is watching apogee and not the wire — opens a
@@ -250,16 +251,30 @@ func (s *Server) gate(label string) chan struct{} {
 // fixture is written once whichever wire the test drives. The probes answer from the Script's
 // [Discovery] block: GET /v1/models in the list shape of the wire that asked, GET /props with
 // the scripted launch facts or a 404 when none are scripted — what a real server that is not
-// llama.cpp does for the path the client probes and tolerates. Everything else 404s. [New] and
-// [Serve] put it behind a listener; [InProcess] hands it out bare, for a test that reaches it
-// through [Server.Transport] or mounts it under a mux of its own.
+// llama.cpp does for the path the client probes and tolerates. Everything else 404s — or 405s, on
+// a known path under the wrong method — and lands in the stray log. [New] and [Serve] put it
+// behind a listener; [InProcess] hands it out bare, for a test that reaches it through
+// [Server.Transport] or mounts it under a mux of its own.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+modelsPath, s.handleModels)
 	mux.HandleFunc("GET "+propsPath, s.handleProps)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
 	mux.HandleFunc("POST /v1/messages", s.handleMessages)
-	return s.authorized(mux)
+	return s.authorized(s.strayLogged(mux))
+}
+
+// strayLogged logs a request no route of mux answers, then lets mux answer it as it always has — a
+// 404 for an unknown path, a 405 for a known path under the wrong method — so a run that dialed
+// somewhere the stub does not serve shows it in [Server.Strays] rather than only as a status the
+// client may have swallowed.
+func (s *Server) strayLogged(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pattern := mux.Handler(r); pattern == "" {
+			s.stray(r)
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // authorized enforces WithAPIKey when one is set, in either header spelling.
@@ -323,6 +338,16 @@ func (s *Server) probe(r *http.Request) {
 
 	if s.set.requestLog {
 		s.probes = append(s.probes, Probe{Path: r.URL.Path, Header: r.Header.Clone(), At: time.Now()})
+	}
+}
+
+// stray logs a request no route answers, unless the log is off.
+func (s *Server) stray(r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.set.requestLog {
+		s.strays = append(s.strays, Stray{Method: r.Method, Path: r.URL.Path, At: time.Now()})
 	}
 }
 

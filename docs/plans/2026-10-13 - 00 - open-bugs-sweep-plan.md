@@ -117,7 +117,12 @@ Likely cause of `default-wire-arm64-flake`: the test's `savedTranscript` poll op
 - Windows CI (not runnable on this host): `go test -count=1 -run 'Rename|AtomicWrite' ./internal/session/`
 **Commit:** `fix(session): retry the record rename through a Windows sharing violation`
 
-## 5. Default-wire e2e failures explain themselves
+## 5. Default-wire e2e failures explain themselves — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the dump reads the frame BEFORE `sess.stop()` (a stopped run has left the alternate screen, so a post-stop frame is blank) and the output and store directory after it; the item text listed `drv.Frame()` beside the post-stop reads.
+NOTES (2026-10-13): strays are detected by wrapping the mux and asking `mux.Handler(r)` for an empty pattern, so both unknown paths (404) and known paths under a wrong method (405) are logged and still answered exactly as before; the unit test pins both. No new stubllm file — the accessor sits beside `Probes()` in log.go and doc.go's log.go line names the stray log.
+NOTES (2026-10-13): consequential edit — internal/stubllm/doc.go: made necessary by the stray log added to log.go (the file map's log.go line lists its logs).
+NOTES (2026-10-13): verified by a throwaway forced failure (reverted) that the dump prints requests, probes, the live frame and the session store's .json/.lock names; `default-wire-arm64-flake` is advanced, not closed.
 
 **What:**
 Test-only. In `driveWireLoop` (`cmd/apogee/e2e_wire_anthropic_test.go`) add a `t.Cleanup` that, when `t.Failed()`, logs: every `stub.Requests()` entry (N, wire, turn index, unmatched, time, last message), `stub.Probes()` and `stub.Unmatched()`, `drv.Frame()`, `sess.Output()`, the file names in the session store directory, and `runtime.GOOS/GOARCH` with `testtime.Scale()`. If `internal/stubllm`'s mux drops requests to unknown paths silently, record them so `Unmatched()` (or a new accessor) reports them. Advances `default-wire-arm64-flake`; does not close it.

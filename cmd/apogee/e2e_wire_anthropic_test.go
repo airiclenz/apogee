@@ -8,12 +8,17 @@ package main
 // headless `usage` line, and about nothing the wires already share.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -54,6 +59,9 @@ func driveWireLoop(t *testing.T, wire string) *stubllm.Server {
 	stub := stubllm.New(t, loadScript(t, "wire-anthropic"))
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIOn(t, drv, stub, wireHome(t, stub, wire), "")
+	// Registered after the launch so it runs before the session's own cleanup (LIFO): the stub
+	// and the driver are still live when a failed run is dumped.
+	t.Cleanup(func() { dumpWireLoopOnFailure(t, stub, drv, sess) })
 
 	submit(drv, wireLoopPrompt)
 	drv.WaitText(wireLoopAnswer)
@@ -64,6 +72,63 @@ func driveWireLoop(t *testing.T, wire string) *stubllm.Server {
 	}
 	stub.AssertConsumed(t)
 	return stub
+}
+
+// dumpWireLoopOnFailure logs everything a failed wire loop leaves behind, so a failure seen only on
+// a host nobody can reproduce on (default-wire-arm64-flake) explains itself from its own log: what
+// the stub was asked and on which wire, what it answered, what it was asked that no route serves,
+// the frame the run ended on, what the command tree printed, what the session store holds, and the
+// host and time scale the budgets ran under. A passing run logs nothing.
+func dumpWireLoopOnFailure(t *testing.T, stub *stubllm.Server, drv *tuitest.Driver, sess *e2eSession) {
+	t.Helper()
+
+	if !t.Failed() {
+		return
+	}
+	// The frame is read while the run may still be up — a stopped run has left the alternate
+	// screen — and the output only after it stops, since the app writes it until then; stop is a
+	// no-op for a run already quit.
+	frame := strings.TrimRight(drv.Frame().String(), "\n")
+	sess.stop()
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "wire loop failed on %s/%s, test time scale %g\n", runtime.GOOS, runtime.GOARCH, testtime.Scale())
+	b.WriteString("requests:\n")
+	for _, r := range stub.Requests() {
+		fmt.Fprintf(&b, "  #%d wire=%s turn=%d unmatched=%t at=%s last=%q\n",
+			r.N, r.Wire, r.TurnIndex, r.Unmatched, r.At.Format(time.RFC3339Nano), lastMessageText(r))
+	}
+	b.WriteString("probes:\n")
+	for _, p := range stub.Probes() {
+		fmt.Fprintf(&b, "  %s at=%s\n", p.Path, p.At.Format(time.RFC3339Nano))
+	}
+	b.WriteString("unmatched:\n")
+	for _, r := range stub.Unmatched() {
+		fmt.Fprintf(&b, "  %s\n", r)
+	}
+	b.WriteString("strays:\n")
+	for _, s := range stub.Strays() {
+		fmt.Fprintf(&b, "  %s %s at=%s\n", s.Method, s.Path, s.At.Format(time.RFC3339Nano))
+	}
+	fmt.Fprintf(&b, "frame:\n%s\n", frame)
+	fmt.Fprintf(&b, "output:\n%s\n", sess.Output())
+	b.WriteString("session store:\n")
+	entries, err := os.ReadDir(filepath.Join(sess.Home(), "sessions"))
+	if err != nil {
+		fmt.Fprintf(&b, "  unreadable: %v\n", err)
+	}
+	for _, entry := range entries {
+		fmt.Fprintf(&b, "  %s\n", entry.Name())
+	}
+	t.Log(b.String())
+}
+
+// lastMessageText is the text of a request's last message, or "" when it carried none.
+func lastMessageText(r stubllm.Request) string {
+	if len(r.Messages) == 0 {
+		return ""
+	}
+	return r.Messages[len(r.Messages)-1].Content
 }
 
 // assertRequestsOnWire fails unless every request the stub logged arrived on wire — the loop's
