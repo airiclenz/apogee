@@ -84,9 +84,7 @@ func TestE2EBackgroundSessionSwitchDoesNotHang(t *testing.T) {
 	// row below the top one is the greeting session.
 	submit(drv, "/sessions")
 	drv.WaitText("⏎ resume")
-	drv.WaitQuiet(settled)
-	drv.Press(tuitest.Down)
-	drv.WaitQuiet(settled)
+	pickerDown(drv)
 	drv.Press(tuitest.Enter)
 	stopAtTheConfirm(drv)
 

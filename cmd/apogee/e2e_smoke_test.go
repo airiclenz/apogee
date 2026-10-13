@@ -200,7 +200,6 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	next.WaitText("Send a message")
 	typeSubmit(next, "/sessions")
 	next.WaitText("type to filter · ↑/↓ select · ⏎ resume")
-	next.WaitQuiet(settled)
 	next.Press(tuitest.Enter)
 
 	// Step 12 — the restored transcript is the one that was saved: both prompts, both replies, and

@@ -208,9 +208,7 @@ func restoreOtherSession(t *testing.T, drv *tuitest.PTYDriver) {
 
 	submit(drv, "/sessions")
 	drv.WaitText("⏎ resume")
-	drv.WaitQuiet(settled)
-	drv.Press(tuitest.Down)
-	drv.WaitQuiet(settled)
+	pickerDown(drv)
 	drv.Press(tuitest.Enter)
 	drv.WaitText("resumed:")
 	drv.WaitQuiet(settled)

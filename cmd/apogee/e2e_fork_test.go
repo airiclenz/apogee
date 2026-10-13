@@ -81,9 +81,9 @@ func TestE2EForkKeepsThePrefixAndSurvivesAResume(t *testing.T) {
 	// first row, so one step down is the second point — the one whose cut drops the last prompt.
 	submit(drv, "/fork")
 	drv.WaitText(forkPickerTitle)
-	drv.WaitQuiet(settled)
 	drv.Press(tuitest.Down)
-	drv.WaitQuiet(settled)
+	drv.WaitFor(func() bool { return strings.Contains(paneCursor(drv), forkPrompt2) },
+		tuitest.Awaiting("the fork picker to highlight the second prompt"))
 	drv.Press(tuitest.Enter)
 
 	// The switch: the note names the parent, and the dropped Exchange is gone from the scrollback

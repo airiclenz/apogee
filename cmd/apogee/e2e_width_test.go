@@ -316,20 +316,6 @@ func setColourScheme(t *testing.T, drv *tuitest.Driver, name string) {
 	closePane(drv, settingsHint)
 }
 
-// paneCursor is the row a short popup list highlights, found from the BOTTOM of the frame up.
-// [settingsCursor] scans from the top, which is right for the full-height key list — nothing else is
-// on the screen then — and wrong for a value sub-list, where the transcript above it is visible and a
-// prompt row starts with the very same ❯.
-func paneCursor(drv *tuitest.Driver) string {
-	rows := drv.Frame().Rows()
-	for y := len(rows) - 1; y >= 0; y-- {
-		if i := strings.Index(rows[y], "❯ "); i >= 0 {
-			return strings.TrimSpace(strings.Trim(rows[y][i:], "│┃ "))
-		}
-	}
-	return ""
-}
-
 // settingKeyColorScheme is the registry path of the row the switch is made from — spelled here for
 // the reason cmd/apogee spells the other two it has to recognise (settingsrows.go): a row that has to
 // be found at all is found by its path.

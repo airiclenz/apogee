@@ -154,7 +154,6 @@ func TestE2EPresentServesWithoutLeakingTheToken(t *testing.T) {
 	next.WaitText("Send a message")
 	submit(next, "/sessions")
 	next.WaitText("⏎ resume")
-	next.WaitQuiet(settled)
 	next.Press(tuitest.Enter)
 	next.WaitText("notes.pdf")
 	next.WaitQuiet(settled)

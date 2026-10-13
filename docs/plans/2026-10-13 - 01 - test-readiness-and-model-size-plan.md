@@ -43,7 +43,11 @@
 - 3: recast (split: post-launch/applied-note sites, depends on nothing; Goal covers test bodies, seat/request-extra launch helpers out of scope; awk acceptance)
 - 4: recast (split from 3: Esc/resume sites, depends on items 1 and 2; the /skills Esc waits on waitIdle alone)
 
-## 1. Pickers advance on a moved cursor, not a quiet screen
+## 1. Pickers advance on a moved cursor, not a quiet screen — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the moved-cursor check compares the highlight's frame row as well as its text (new `paneCursorRow`, which `paneCursor` now wraps): in `TestE2EBackgroundSessionSwitchDoesNotHang` both saved sessions paint the identical row text ("A session over a background scout · just now · 1 msg"), so a text-only comparison against the pre-`Down` value never resolves.
+NOTES (2026-10-13): the `/fork` site waits for `paneCursor` to contain `forkPrompt2` (the target row) rather than for a generic change; the `/sessions` sites use the shared `pickerDown(driven)` helper.
+NOTES (2026-10-13): post-resume `WaitQuiet`s after `⏎` (e.g. `restoreOtherSession`'s after "resumed:", `restoreNewestSession`'s after the resumed note) were left untouched — the plan's items 3-4 own the submit-after-resume gates.
 
 **What:**
 **Goal:** in `cmd/apogee`'s e2e tests, every `/fork` and `/sessions` picker key follows the picker's painted title/hint, and every `Enter` after a `Down` follows a frame whose selected row (the `❯ ` cursor row) is the target row; no `WaitQuiet` is the only gate before a picker key.

@@ -804,6 +804,45 @@ func rowContaining(t *testing.T, f tuitest.Frame, want string) string {
 	return ""
 }
 
+// paneCursor is the row a short popup list highlights, found from the BOTTOM of the frame up.
+// [settingsCursor] scans from the top, which is right for the full-height key list — nothing else is
+// on the screen then — and wrong for a value sub-list, where the transcript above it is visible and a
+// prompt row starts with the very same ❯. It takes [driven] so the PTY driver's picker walks read it too.
+func paneCursor(drv driven) string {
+	_, text := paneCursorRow(drv)
+	return text
+}
+
+// paneCursorRow is [paneCursor] with the frame row it sits on, -1 when nothing is highlighted. The
+// row is what tells two highlights apart when the rows they sit on read the same — two saved
+// sessions under one title, both saved just now.
+func paneCursorRow(drv driven) (int, string) {
+	rows := drv.Frame().Rows()
+	for y := len(rows) - 1; y >= 0; y-- {
+		if i := strings.Index(rows[y], "❯ "); i >= 0 {
+			return y, strings.TrimSpace(strings.Trim(rows[y][i:], "│┃ "))
+		}
+	}
+	return -1, ""
+}
+
+// pickerDown steps a popup list's highlight one row down and returns once the frame shows the
+// highlight on a different row than before — the frame a following ⏎ is typed against. A quiet
+// screen is no such signal: it was already quiet before the press, so a quiet check says nothing
+// about whether the step has been painted. The pre-press row is read only once one is painted, so
+// a frame still arriving cannot pass for the step, and the highlight is told apart by the row it
+// sits on as well as by its text, since two rows can read the same.
+func pickerDown(drv driven) {
+	drv.WaitFor(func() bool { y, _ := paneCursorRow(drv); return y >= 0 },
+		tuitest.Awaiting("the pane to paint its highlighted row"))
+	beforeY, beforeText := paneCursorRow(drv)
+	drv.Press(tuitest.Down)
+	drv.WaitFor(func() bool {
+		y, text := paneCursorRow(drv)
+		return y >= 0 && (y != beforeY || text != beforeText)
+	}, tuitest.Awaiting(fmt.Sprintf("the highlight to move off row %d (%q)", beforeY, beforeText)))
+}
+
 // flatten collapses every run of whitespace in text to one space. A frame is wrapped to its width,
 // so a SENTENCE the renderer had to break over two rows is only assertable this way; a claim about
 // a single row uses rowContaining instead.
