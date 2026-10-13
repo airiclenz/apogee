@@ -127,7 +127,11 @@ cmd/apogee/e2e_outcome_test.go — TestE2EOutcomeSlotsCarryTheToolsVerdict; cmd/
 - `awk 'FNR==1{n=0} /^[[:space:]]*($|\/\/)/{next} /^func /{n=0} {if(n>0){if($0~/Frame\(|Golden\(/)n=0; else if($0~/(submit|typeSubmit)\(|\.Type\(/){print FILENAME":"FNR;n=0} else n--} if($0~/WaitQuiet\(settled\)/)n=2}' cmd/apogee/*_test.go` prints nothing
 **Commit:** `test(e2e): submit after a closed view or a resume on the idle prompt`
 
-## 5. The stall test arms on a still tick inside the Settle
+## 5. The stall test arms on a still tick inside the Settle — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the still branch now reads the hook's own `pending` (`if reportAt.IsZero() || pending`) instead of repeating `before.Before(reportAt)`, so the bite is the one-word swap of `pending` for `after.Before(reportAt)` there; bite run red ("a change was reported when the burst had already been reported once"), reverted.
+NOTES (2026-10-13): Acceptance `! grep -n 't.Skip\|testSettle / 5' internal/filewatch/filewatch_test.go` still matches line 75 — `writeBurst`'s Skipf, the burst test's skip that item 6 owns (not yet done); the stall test itself has no skip and no pre-arm sleep. The grep goes clean once item 6 lands.
+NOTES (2026-10-13): spoiled-attempt retry exercised with a temporary hook that held the poll past the Settle on the pending tick: 2 forced spoils then passed, 3 forced spoils Fataled ("all 3 attempts settled the first write…"); each attempt's first write has a fresh length so it is a change on the size witness alone. No CHANGELOG entry: test-only change; item 6 carries `filewatch-stall-test-skipped`'s Closes.
 
 **What:**
 **Goal:** `TestWatchNeverSettlesOnASampleTakenBeforeAStall` contains no `t.Skip` and no pre-arm sleep; it arms on the first poll tick that sees no change while a Settle is pending, and still fails against a watcher that judges the Settle on the post-sample clock.

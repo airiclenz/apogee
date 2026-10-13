@@ -90,9 +90,12 @@ type Watcher struct {
 	stopOnce sync.Once
 
 	// sampled, when set, runs on the poll goroutine between each tick's stat and its second clock
-	// read — the one place a stall lets the file move under a sample already taken. It is nil in
+	// read — the one place a stall lets the file move under a sample already taken. It is told what
+	// the tick has already decided as of its stat: changed, that the sample differs from the last
+	// one, and pending, that a Settle is running and not yet due. A test stages its stall on the
+	// tick that matters by those two, rather than by guessing at the poll's timing. It is nil in
 	// production and set only by this package's tests, before Start, to stage that stall for real.
-	sampled func()
+	sampled func(changed, pending bool)
 }
 
 // New builds a watcher over path at the production cadence. It touches nothing, and
@@ -171,16 +174,18 @@ func (w *Watcher) poll(last fileState) {
 			if !ok {
 				continue
 			}
+			changed := !current.equal(last)
+			pending := !reportAt.IsZero() && before.Before(reportAt)
 			if w.sampled != nil {
-				w.sampled()
+				w.sampled(changed, pending)
 			}
 			after := time.Now()
-			if !current.equal(last) {
+			if changed {
 				last = current
 				reportAt = after.Add(w.Settle)
 				continue
 			}
-			if reportAt.IsZero() || before.Before(reportAt) {
+			if reportAt.IsZero() || pending {
 				continue
 			}
 			reportAt = time.Time{}

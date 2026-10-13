@@ -8,6 +8,7 @@ package filewatch
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -133,18 +134,35 @@ func TestWatchCoalescesABurstIntoOneReport(t *testing.T) {
 	expectNoChange(t, w, testQuiet, "the burst had already been reported once")
 }
 
-// stallResult is what the staged stall reports back: how late it armed when that was too late to
-// stage anything, or the outcome of the write it made inside the stall.
+// stallAttempts bounds how many first writes the stall test spends looking for a still tick inside
+// the Settle. An attempt is spoiled only when the box holds the poll past the whole Settle, so the
+// first write rightly settles alone; three in a row is a box too loaded to stage the stall at all.
+const stallAttempts = 3
+
+// stallResult is what one attempt at the staged stall reports back from the poll goroutine: that it
+// was spoiled — the first still tick after the first write already found the Settle due — or the
+// outcome of the write it made inside the stall.
 type stallResult struct {
-	late time.Duration
-	err  error
+	spoiled bool
+	err     error
 }
+
+// The states the stall hook moves through on one attempt: idle between attempts, watching for the
+// attempt's first write to be observed, then waiting for the first still tick after it.
+const (
+	stallIdle int32 = iota
+	stallWatching
+	stallObserved
+)
 
 // A still sample is quiet only as of the stat that took it. A poll goroutine held off the CPU between
 // the stat and its clock read wakes past reportAt, and reporting then would announce a sample the
 // rest of the burst has since overtaken — the next tick sees that write and reports the save a second
 // time. The stall is staged on the poll goroutine itself, after the stat and before the clock read,
-// and the burst's second write lands inside it.
+// on the first tick that sees the first write hold still while its Settle is pending, and the burst's
+// second write lands inside it. Should the poll be held past the whole Settle before that tick comes,
+// the first write settles alone and is reported; the attempt is spoiled, its report drained, and a
+// fresh first write starts the next one.
 func TestWatchNeverSettlesOnASampleTakenBeforeAStall(t *testing.T) {
 	t.Parallel()
 
@@ -154,45 +172,48 @@ func TestWatchNeverSettlesOnASampleTakenBeforeAStall(t *testing.T) {
 	w := New(path)
 	w.Interval = testInterval
 	w.Settle = testSettle
-	var armed atomic.Bool
-	var wroteFirst time.Time
-	stalled := make(chan stallResult, 1)
-	w.sampled = func() {
-		if !armed.CompareAndSwap(true, false) {
-			return
+	var state atomic.Int32
+	outcomes := make(chan stallResult, stallAttempts)
+	w.sampled = func(changed, pending bool) {
+		switch {
+		case changed:
+			state.CompareAndSwap(stallWatching, stallObserved)
+		case pending:
+			if !state.CompareAndSwap(stallObserved, stallIdle) {
+				return
+			}
+			time.Sleep(testtime.Fixed(testSettle + testSettle/2))
+			outcomes <- stallResult{err: os.WriteFile(path, []byte("auto-title: true\n# a second line\n"), 0o600)}
+		default:
+			if state.CompareAndSwap(stallObserved, stallIdle) {
+				outcomes <- stallResult{spoiled: true}
+			}
 		}
-		// The stalled tick's stat came after its first clock read and before this one, and any
-		// pending reportAt is at least a Settle past wroteFirst. Inside that Settle the tick is
-		// therefore still pending by construction; past it, the first write has rightly settled
-		// and been reported, and the write below is a second change, not the rest of a burst.
-		if late := time.Since(wroteFirst); late >= testSettle {
-			stalled <- stallResult{late: late}
-			return
-		}
-		time.Sleep(testtime.Fixed(testSettle + testSettle/2))
-		stalled <- stallResult{err: os.WriteFile(path, []byte("auto-title: true\n# a second line\n"), 0o600)}
 	}
 	w.Start()
 	t.Cleanup(w.Stop)
 
-	wroteFirst = time.Now()
-	writeWatchedFile(t, path, "auto-title: true\n")
-	// Let the poll observe the first write, so the stalled tick is a still one with a Settle
-	// pending. Should it not have yet, the stalled tick observes it instead and the burst
-	// still coalesces, so arming early cannot make a correct watcher fail; arming late is
-	// caught by the hook and skips the test.
-	time.Sleep(testtime.Fixed(testSettle / 5))
-	armed.Store(true)
-	select {
-	case res := <-stalled:
-		if res.late > 0 {
-			t.Skipf("the stall armed %v after the first write, past the %v Settle it had to land inside", res.late, testSettle)
+	for attempt := 1; ; attempt++ {
+		state.Store(stallWatching)
+		// Each attempt's first write is a length no earlier one had, so it is a change on the size
+		// witness alone whatever the filesystem's timestamp granularity.
+		writeWatchedFile(t, path, "auto-title: true\n"+strings.Repeat("#", attempt)+"\n")
+		var res stallResult
+		select {
+		case res = <-outcomes:
+		case <-time.After(testDeadline):
+			t.Fatal("the poll never took a still sample after the first write")
 		}
 		if res.err != nil {
 			t.Fatalf("write inside the stall: %v", res.err)
 		}
-	case <-time.After(testDeadline):
-		t.Fatal("the poll never reached the staged stall")
+		if !res.spoiled {
+			break
+		}
+		awaitChange(t, w, "a first write that settled before the stall could be staged")
+		if attempt == stallAttempts {
+			t.Fatalf("all %d attempts settled the first write before a still tick inside its %v Settle", stallAttempts, testSettle)
+		}
 	}
 
 	awaitChange(t, w, "a burst whose second write landed inside a stall")
