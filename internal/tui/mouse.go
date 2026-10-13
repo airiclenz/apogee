@@ -1304,7 +1304,10 @@ func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		}
 		m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
 		if off, on := pre.settingsFieldCaretAt(paint, msg.X, msg.Y); on {
-			m.settings.editor.caretToRune(off)
+			m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
+				e.caretToRune(off)
+				return nil
+			})
 			m.settings.sel.seat(off, cell{})
 		}
 		return m, nil, true
@@ -1344,7 +1347,10 @@ func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
 	if !on {
 		return m, true // off the field, but still the pane's drag: the span keeps what it had
 	}
-	m.settings.editor.caretToRune(off)
+	m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
+		e.caretToRune(off)
+		return nil
+	})
 	m.settings.sel.extend(off, cell{})
 	return m, true
 }
@@ -1368,11 +1374,18 @@ func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
 		// The multi-line field scrolls by its CARET, because that is what its window follows
 		// (renderSettingsText points selected at the caret's line): one prompt line per notch, the same
 		// step ↑/↓ take in it, and the widget's own clamp at the two ends the wheel must not roll past.
+		step := 0
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			m.settings.editor.stepLine(-1)
+			step = -1
 		case tea.MouseWheelDown:
-			m.settings.editor.stepLine(1)
+			step = 1
+		}
+		if step != 0 {
+			m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
+				e.stepLine(step)
+				return nil
+			})
 		}
 		return m, true
 	}

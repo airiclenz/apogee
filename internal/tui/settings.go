@@ -119,11 +119,12 @@ const (
 // verdict each key earns are the package's one answer to those questions (listsurface.go, ADR 0053),
 // and what stays here is what only this pane knows — which row a ⏎ opens, and what backspace arms.
 //
-// The editor is a [lineEditor] held BY VALUE, as the Model holds the prompt's own (ADR 0011): the
-// widget is copy-safe and carries no self-referential no-copy type, which is what lets the pane stay
-// a plain value on a Model that is copied every Update. Its zero value is an inert widget — a
-// textarea nothing has focused, which answers "" and takes no keys — so a closed pane is still
-// exactly the zero value, and no state outside settingsValueBuffer can type into anything.
+// The editor is a [lineEditor] behind a [copyOnWriteField]: the pane is a plain value on a Model that
+// is copied every Update (ADR 0011), and a whole textarea held by value would be copied with it, so
+// the pane holds a pointer and every write replaces the field rather than writing through it — a
+// Model copy taken before a keystroke keeps the field it was taken with, as a value field would. Its
+// zero value is the empty, unbuilt field, which answers "" and takes no keys, so a closed pane is still
+// exactly the zero value, and no state outside the two typed states can type into anything.
 //
 // sel is a drag-selection inside that field, and it is the pane's own rather than the Model's
 // ([Model.sel]): the prompt box is still drawn under this pane, so a span stored in the prompt's slot
@@ -146,7 +147,7 @@ type settingsPane struct {
 	// filtering surface would have brought a whole text widget with it (ADR 0053 decision 9). The
 	// pane's one field ([lineEditor]) stays the one it already had.
 	sub     listCursor
-	editor  lineEditor
+	editor  copyOnWriteField
 	sel     fieldSel
 	failure settingFailure
 	answer  settingAnswer
@@ -648,7 +649,10 @@ func (m Model) settingsDeleteSelection(step settingsStep, sel fieldSel, msg tea.
 	}
 	switch msg.String() {
 	case "backspace", "delete":
-		m.settings.editor.deleteSelection(sel)
+		m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
+			e.deleteSelection(sel)
+			return nil
+		})
 		return m, true
 	}
 	return m, false
@@ -700,7 +704,7 @@ func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 // rule for the edits that arrive as keystrokes, and the same one here.
 func (m Model) settingsFieldMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 	m.settings.sel = fieldSel{}
-	return m, m.settings.editor.editMsg(msg), true
+	return m, m.settings.editor.edit(func(e *lineEditor) tea.Cmd { return e.editMsg(msg) }), true
 }
 
 // settingsAbandonStep drops a second step whose row went away and swallows the keypress that found
@@ -710,7 +714,7 @@ func (m Model) settingsFieldMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 // rest, which under the sub-list and the armed reset it already is — every exit from a field clears
 // it — so one verb serves all four.
 func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
-	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, listCursor{}, lineEditor{}
+	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, listCursor{}, copyOnWriteField{}
 	m.settings.pending = settingsPendingSave{}
 	return m, nil
 }
@@ -767,11 +771,13 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	case SettingString, SettingInt:
 		m.settings.kind = settingsValueBuffer
-		m.settings.editor = newSettingsEditor(m.opts.CursorShape, m.th.surface, m.settingsBufferSeed(row))
+		field := newSettingsEditor(m.opts.CursorShape, m.th.surface, m.settingsBufferSeed(row))
+		m.settings.editor = newCopyOnWriteField(field)
 		return m, nil
 	case SettingText:
 		m.settings.kind = settingsTextEditor
-		m.settings.editor = newSettingsTextEditor(m.opts.CursorShape, m.th.surface, m.settingsTextValue(row))
+		field := newSettingsTextEditor(m.opts.CursorShape, m.th.surface, m.settingsTextValue(row))
+		m.settings.editor = newCopyOnWriteField(field)
 		return m, nil
 	case SettingStructured:
 		return m, nil // never Editable; the registry terminates descent here
@@ -924,7 +930,7 @@ func (m Model) settingsEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// An abandoned edit takes its refusal with it: the ✗ on this row is the reason THIS edit was
 		// not accepted, and leaving it up after the human walked away from the edit would report a
 		// failure against a row nobody is editing any more.
-		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+		m.settings.kind, m.settings.editor = settingsKeyList, copyOnWriteField{}
 		m.settings.failure = settingFailure{}
 		return m, nil
 	}
@@ -952,13 +958,13 @@ func (m Model) settingsEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // deliberate way to take a value away is the reset backspace arms.
 func (m Model) settingsCommitEdit(row SettingRow, value string, blank bool) (tea.Model, tea.Cmd) {
 	if blank {
-		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+		m.settings.kind, m.settings.editor = settingsKeyList, copyOnWriteField{}
 		return m, nil
 	}
 	next, cmd, landed := m.settingsPersist(row, value)
 	m = next
 	if landed {
-		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+		m.settings.kind, m.settings.editor = settingsKeyList, copyOnWriteField{}
 	}
 	return m, cmd
 }

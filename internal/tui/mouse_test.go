@@ -3563,7 +3563,10 @@ func TestSettingsFieldShadesTheCellsAClickSeats(t *testing.T) {
 					if side.caretLo {
 						anchor, head = tx.hi, tx.lo
 					}
-					m.settings.editor.caretToRune(head)
+					m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
+						e.caretToRune(head)
+						return nil
+					})
 					m.settings.sel = fieldSel{active: true, anchorOff: anchor, headOff: head}
 					selected := string([]rune(tx.value)[tx.lo:tx.hi])
 					x, y := frameCell(t, m, selected)

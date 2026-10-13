@@ -31,10 +31,12 @@ import (
 // it is written once here so the prompt and the settings value row cannot drift apart on where the
 // caret goes.
 //
-// It is held BY VALUE by both its callers, as the Model has always held the prompt's (ADR 0011,
-// doc.go): the widget carries no self-referential no-copy type, and what it holds by pointer (its
-// viewport, its wrap cache) is shared across the Model's copies deliberately, which is the posture
-// the chat box has run in since it was built.
+// The prompt holds it BY VALUE, as the Model has always held it (ADR 0011, doc.go): the widget
+// carries no self-referential no-copy type, and what it holds by pointer (its viewport, its wrap
+// cache) is shared across the Model's copies deliberately, which is the posture the chat box has run
+// in since it was built. The overlay fields — the list filters, the /settings field — hold it behind
+// a [copyOnWriteField] instead, which keeps a whole textarea out of every Model copy and gives each
+// copy a field of its own by replacing the field on every write.
 //
 // It knows nothing about what is being edited: what a value may hold, what commits it and what
 // abandons it all belong to the caller. That is the whole boundary — this type turns keystrokes into
@@ -105,7 +107,7 @@ func newPopupField(shape tea.CursorShape, surface color.Color, glyph, seed strin
 }
 
 // isBuilt reports whether this is a real field rather than the inert zero value a whole-struct reset
-// leaves behind (`m.picker = picker{}`, `m.settings.editor = lineEditor{}`). It is the focus flag
+// leaves behind (`m.picker = picker{}`, a field reset to `lineEditor{}`). It is the focus flag
 // because focus is what construction grants and nothing in this package ever takes away: a zero
 // textarea answers "" and drops every key it is handed (its Update returns on !focus), so a surface
 // that builds its field lazily asks this before handing over a keystroke (typeIntoOverlayFilter).
@@ -539,6 +541,16 @@ func (e *lineEditor) reseatInput() {
 	e.seatCaret(e.input.Line(), e.input.Column())
 }
 
+// movesCaretOnly reports whether a keypress is one of the widget's VERTICAL caret moves — a line or
+// a page up or down — which read the text and write none of it. These are what a field that walks
+// lines answers with the caret's remembered goal column, and a single-line field has them switched
+// off ([lineEditor.singleLine]), so it reports none. The widget's key map is the authority, so a
+// rebinding there is followed here.
+func (e lineEditor) movesCaretOnly(msg tea.KeyPressMsg) bool {
+	km := e.input.KeyMap
+	return key.Matches(msg, km.LineNext, km.LinePrevious, km.PageUp, km.PageDown)
+}
+
 // clone is a copy of the field that shares no TEXT with it: the same value, the caret at the same
 // logical (row, column), and a value grid of its own. A plain `next := e` is not one — the widget
 // keeps its text as a grid of rune slices, and an insertion or a deletion in the middle of a line
@@ -573,7 +585,8 @@ func (e lineEditor) clone() lineEditor {
 // builds its field lazily still asks [copyOnWriteField.isBuilt] before the first keystroke.
 //
 // Everything outside this type reads the field through the accessors below and writes it through
-// edit; nothing reaches the held editor directly, which is what keeps every write a replace.
+// edit, or editKey for a keypress; nothing reaches the held editor directly, which is what keeps every
+// write a replace.
 type copyOnWriteField struct {
 	editor *lineEditor
 }
@@ -607,6 +620,33 @@ func (f copyOnWriteField) textWithCaret() string {
 	return f.editor.textWithCaret()
 }
 
+// caretRune is where the caret stands as a rune offset into the value ([lineEditor.caretRune]); 0
+// for the zero holder, whose value is empty.
+func (f copyOnWriteField) caretRune() int {
+	if f.editor == nil {
+		return 0
+	}
+	return f.editor.caretRune()
+}
+
+// caretLine is the logical line the caret stands on ([lineEditor.caretLine]); 0 for the zero holder,
+// whose value is one empty line.
+func (f copyOnWriteField) caretLine() int {
+	if f.editor == nil {
+		return 0
+	}
+	return f.editor.caretLine()
+}
+
+// caretGlyph is where textWithCaret drew the caret glyph ([lineEditor.caretGlyph]); the zero holder
+// draws none, so it shifts nothing.
+func (f copyOnWriteField) caretGlyph() glyphShift {
+	if f.editor == nil {
+		return glyphShift{}
+	}
+	return f.editor.caretGlyph()
+}
+
 // edit applies one change to the field copy-on-write: change runs against a deep copy of the held
 // field, and this holder is pointed at that copy, so the field a previous Model copy points at is
 // never written. On the zero holder the change meets a zero lineEditor, which drops every key, as a
@@ -617,6 +657,23 @@ func (f *copyOnWriteField) edit(change func(*lineEditor) tea.Cmd) tea.Cmd {
 		next = f.editor.clone()
 	}
 	cmd := change(&next)
+	f.editor = &next
+	return cmd
+}
+
+// editKey hands one keypress to the field copy-on-write ([lineEditor.editKey]). It is [edit] for
+// every key but one class: the widget's vertical caret moves (lineEditor.movesCaretOnly), which write
+// no text and are the only keys whose effect rests on what [lineEditor.clone] cannot carry over — the
+// column the caret remembers across a run of ↑/↓, so a walk through a short line lands back on the
+// column it left. Those run against a shallow copy instead: it shares the snapshot's text grid, which
+// a caret move only reads, and keeps the remembered column, so a multi-line field walks exactly as a
+// value field did while an earlier Model copy still keeps its own caret.
+func (f *copyOnWriteField) editKey(msg tea.KeyPressMsg) tea.Cmd {
+	if f.editor == nil || !f.editor.movesCaretOnly(msg) {
+		return f.edit(func(e *lineEditor) tea.Cmd { return e.editKey(msg) })
+	}
+	next := *f.editor
+	cmd := next.editKey(msg)
 	f.editor = &next
 	return cmd
 }

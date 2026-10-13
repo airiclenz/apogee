@@ -3181,6 +3181,85 @@ func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
 	}
 }
 
+// The field is held behind a copy-on-write pointer (copyOnWriteField), so a Model copy taken after
+// the first keystroke — once the two copies point at one field — must keep that field while the other
+// copy is edited, as a value field did. Each edit lands in the MIDDLE of a line, where an insertion
+// writes through the backing array of the line it splits: a copy that shared its text with the
+// snapshot would rewrite the snapshot's text as well as its caret. The text field's mouse paths ride
+// along — a wheel notch seats the caret too, so the snapshot's caret line must not move with it.
+func TestSettingsEditorCopyKeepsItsOwnField(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		row   SettingRow
+		first rune
+		want  string // the edited copy's value after ←, 'x'
+	}{
+		{"value buffer", settingsStringRow(), '1', "http://box:1111x1"},
+		{"multi-line field", settingsTextRow(), '!', "You are apogee.\nWork step by step.x!"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := settingsEditModel(t, []SettingRow{c.row}, &settingsWriteLog{})
+			m = pressSettings(t, step(t, m, keyEnter()), keyRune(c.first))
+			snapshot := m
+			wantValue, wantCaret := snapshot.settings.editor.value(), snapshot.settings.editor.caretRune()
+
+			edited := pressSettings(t, m, keyLeft(), keyRune('x'))
+
+			if got := edited.settings.editor.value(); got != c.want {
+				t.Errorf("edited copy = %q, want %q: the keys landed somewhere else", got, c.want)
+			}
+			if got := snapshot.settings.editor.value(); got != wantValue {
+				t.Errorf("snapshot = %q, want %q: an edit on the other copy wrote through to it", got, wantValue)
+			}
+			if got := snapshot.settings.editor.caretRune(); got != wantCaret {
+				t.Errorf("snapshot caret = %d, want %d: the other copy's caret move reached it", got, wantCaret)
+			}
+		})
+	}
+
+	t.Run("multi-line field under the wheel", func(t *testing.T) {
+		t.Parallel()
+		m := settingsTextEditModel(t, "one\ntwo\nthree")
+		paneTop, _, ok := m.settingsPaneRect()
+		if !ok {
+			t.Fatal("the pane is not on the frame")
+		}
+		snapshot := m
+
+		scrolled := step(t, m, tea.MouseWheelMsg{X: 10, Y: paneTop + 1, Button: tea.MouseWheelUp})
+
+		if got := scrolled.settings.editor.caretLine(); got != 1 {
+			t.Fatalf("scrolled copy's caret is on line %d, want 1", got)
+		}
+		if got := snapshot.settings.editor.caretLine(); got != 2 {
+			t.Errorf("snapshot's caret is on line %d, want 2: the notch on the other copy moved it", got)
+		}
+	})
+}
+
+// A walk through a SHORT line comes back out on the column it went in at: ↑ from the end of a long
+// line lands on a two-rune line's end, and the next ↑ lands on the long line above at the column the
+// walk started from, not at the short line's. That remembered column is the widget's own, and a
+// field rebuilt on every keystroke would drop it, so the copy-on-write field must carry it across a
+// run of vertical moves (copyOnWriteField.editKey).
+func TestSettingsPaneTextEditorKeepsItsColumnThroughAShortLine(t *testing.T) {
+	t.Parallel()
+	m := settingsTextEditModel(t, "Work step by step.\nab\nWork step by step.")
+	snapshot := m
+
+	m = pressSettings(t, m, keyUp(), keyUp())
+
+	if got, want := m.settings.editor.caretRune(), len("Work step by step."); got != want {
+		t.Errorf("caret = %d, want %d — the first line's end, the column the walk started from", got, want)
+	}
+	if got, want := snapshot.settings.editor.caretRune(), len("Work step by step.\nab\nWork step by step."); got != want {
+		t.Errorf("snapshot caret = %d, want %d: the walk on the other copy moved it", got, want)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Pasting into a settings field (spec requirement 7 — a field the human can paste into)
 // ----------------------------------------------------------------------------

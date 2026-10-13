@@ -207,7 +207,11 @@ internal/tui/schedule.go — `m.picker.filter = lineEditor{}` reset; internal/tu
 - the new copy-independence tests and the existing filter/`projectRuleEdit` tests, by name, single-package `-run`
 **Commit:** `perf(tui): hold list filters behind a copy-on-write editor`
 
-## 9. The settings editor behind the copy-on-write field
+## 9. The settings editor behind the copy-on-write field — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): added `copyOnWriteField.editKey` and `lineEditor.movesCaretOnly` (lineeditor.go), which the plan does not name: `edit`'s deep clone (`lineEditor.clone` → `seatCaret`) drops the textarea's remembered goal column, so routing the multi-line field's ↑/↓ through `edit` would have made a walk through a short line land on that short line's column — a change to "settings edit behaves as before". Vertical moves (LineNext/LinePrevious/PageUp/PageDown, off in a single-line field) now run on a shallow copy, which only reads the shared grid; every other key still goes through `edit`. Added the nil-safe read accessors `caretRune`, `caretLine` and `caretGlyph` that the settings renderers, mouse.go and the existing tests read.
+NOTES (2026-10-13): consequential edit — internal/tui/lineeditor.go: the lineEditor type comment ("held BY VALUE by both its callers") and the isBuilt comment's `m.settings.editor = lineEditor{}` example were made false by the conversion; both rewritten.
+NOTES (2026-10-13): the settingsWheel switch now picks a step and calls `edit` once rather than writing in each case; the existing tests in settings_test.go, mouse_test.go (Settings*) and lineeditor_test.go, plus the 9 tests in other files that drive the pane, pass by name (`-parallel 4`).
 
 Depends on item 8.
 

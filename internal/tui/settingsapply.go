@@ -244,7 +244,7 @@ func (m Model) settingsSaveToTarget(row SettingRow) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m.settingsFailed(row, err.Error())
 	}
-	m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+	m.settings.kind, m.settings.editor = settingsKeyList, copyOnWriteField{}
 	m, cmd := m.settingsApplied(row, settingEdit{
 		path:   row.Path,
 		value:  outcome.Value,
