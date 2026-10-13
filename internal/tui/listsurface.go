@@ -121,15 +121,16 @@ type listSurface struct {
 	// filter is what the human has typed into the open overlay: the case-insensitive substring every
 	// row must carry to survive (filterPopupRows). It is a [lineEditor] — the package's one text FIELD
 	// (lineeditor.go), so "what does backspace do here" is answered where every other field answers it
-	// — held BY VALUE as the Model holds the prompt's own (ADR 0011): the widget carries no
-	// self-referential no-copy type, so the value-copied Model stays copyable.
+	// — held behind a [copyOnWriteField]: a pointer, so the two filtering panes do not each carry a
+	// whole textarea in the value-copied Model, and replaced on every keystroke rather than written
+	// through, so a Model copy keeps the filter it was taken with (ADR 0011).
 	//
-	// Its ZERO value is the inert widget a whole-struct reset leaves behind — a textarea nothing has
-	// focused, which answers "" and drops every key — so the zeroing every close and accept already
-	// does still clears the filter, and no path can carry a stale one into the next open. The real
-	// field is built on the first key that reaches it (typeIntoOverlayFilter) rather than at each of
-	// the sites that open an overlay.
-	filter lineEditor
+	// Its ZERO value is the empty, unbuilt field a whole-struct reset leaves behind — it answers ""
+	// and drops every key — so the zeroing every close and accept already does still clears the
+	// filter, and no path can carry a stale one into the next open. The real field is built on the
+	// first key that reaches it (typeIntoOverlayFilter) rather than at each of the sites that open an
+	// overlay.
+	filter copyOnWriteField
 }
 
 // view is the rows this surface SHOWS out of the ones it is given: the offering pruned by the filter,
@@ -322,12 +323,12 @@ func (m Model) listKey(
 // caret the shared filter line has always drawn.
 func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows []popupRow) tea.Cmd {
 	if !l.filter.isBuilt() {
-		l.filter = newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, "")
+		l.filter = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, ""))
 	}
 	// The Cmd is handed back rather than dropped, as the /settings buffer hands its own back
 	// (settingsBufferKey): a single-line field asks for none today, and swallowing one silently is how
 	// that stops being true unnoticed.
-	cmd := l.filter.editKey(msg)
+	cmd := l.filter.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) })
 	l.clampSelection(len(l.view(rows).rows))
 	return cmd
 }
@@ -419,7 +420,7 @@ const pickerFilterCursor = "▌"
 // spelling it themselves would be two places for the label, the cursor and the stripping to drift
 // apart. The cursor arrives INSIDE the text, where the field draws it ([lineEditor.textWithCaret]),
 // so the strip covers it too — harmlessly, since a block glyph is no control character.
-func overlayFilterLine(filter lineEditor) string {
+func overlayFilterLine(filter copyOnWriteField) string {
 	if filter.value() == "" {
 		return ""
 	}
@@ -584,13 +585,13 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 //
 // An empty filter leaves the body block exactly as the pane left it — nothing at all, for both panes
 // that filter — so a list nobody has typed into is the list it was before a filter existed.
-func (m Model) renderFilterListPlaced(filter lineEditor, c listContent) (string, popupPlacement, bool) {
+func (m Model) renderFilterListPlaced(filter copyOnWriteField, c listContent) (string, popupPlacement, bool) {
 	return m.renderListPlaced(filteredListContent(filter, c))
 }
 
 // filteredListContent is c with the filter line folded in as its body — the one statement of that fold,
 // read by the paint above and by the height query the frame's clamp asks ([Model.transcriptRows]).
-func filteredListContent(filter lineEditor, c listContent) listContent {
+func filteredListContent(filter copyOnWriteField, c listContent) listContent {
 	if line := overlayFilterLine(filter); line != "" {
 		c.body, c.bodyLead, c.bodyPad = line, pickerFilterLead, true
 	}

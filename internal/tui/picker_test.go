@@ -1854,10 +1854,10 @@ func TestPickerFilterMatchesTheJoinedRowCells(t *testing.T) {
 
 // typedFilter is an overlay filter holding text, built exactly as the first keystroke into an open
 // overlay builds it (typeIntoOverlayFilter). It exists for the tests that SEED a filter rather than
-// type one: the filter is a [lineEditor], and a field is a widget rather than a string, so a test
-// that is not about the typing still has to hand the pane a real one.
-func typedFilter(m Model, text string) lineEditor {
-	return newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, text)
+// type one: the filter is a [lineEditor] behind a [copyOnWriteField], and a field is a widget rather
+// than a string, so a test that is not about the typing still has to hand the pane a real one.
+func typedFilter(m Model, text string) copyOnWriteField {
+	return newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, text))
 }
 
 // pickerKindCase is one open picker of one kind, the filter that narrows it to a single row, and the

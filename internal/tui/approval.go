@@ -912,15 +912,14 @@ const (
 // field with it, so no rule typed for one call is ever saved for the next. The field is open exactly
 // while there is one ([projectRuleEdit.open]): the zero value a reset leaves is the closed sub-step.
 //
-// The field is held by POINTER, and replaced rather than written through ([projectRuleEdit.edit]).
-// The pointer is what keeps the Model under the compiler's 128 KiB stack-variable ceiling: a
-// lineEditor is a whole textarea, some 13 KB by value, and the Model past that ceiling is moved to
-// the heap at every inlined value-receiver call — hundreds of sites, each a fresh allocation of the
-// whole Model on every frame (TestModelFitsTheStack). The replace is what keeps the ADR 0011 copy
-// semantics a value field would have had: an edit builds a new field and points this copy at it, so
-// a Model copy taken before the keystroke still holds the field as it stood.
+// The field is a [copyOnWriteField]: held by pointer, which keeps a whole textarea's worth of bytes
+// out of the value-copied Model (TestModelFitsTheStack), and replaced rather than written through.
+// An edit applies the keystroke to a deep copy of the field — a value grid of its own
+// ([lineEditor.clone]) — and points this sub-step at it, so a Model copy taken before the keystroke
+// still holds the field as it stood, which is the ADR 0011 copy semantics a value field would have
+// had.
 type projectRuleEdit struct {
-	field *lineEditor
+	field copyOnWriteField
 	// note is the refusal the last save met — an empty field, or the host's error — painted as the
 	// pane's hint until the next edit. "" when nothing was refused.
 	note string
@@ -988,17 +987,7 @@ func (m Model) editingProjectRule() bool {
 // open reports whether the sub-step holds a live field: one was opened, and it is a real field
 // rather than an inert zero value (lineEditor.isBuilt).
 func (r projectRuleEdit) open() bool {
-	return r.field != nil && r.field.isBuilt()
-}
-
-// edit applies one change to the field copy-on-write: the change lands on a copy, and this
-// sub-step is pointed at it, so the field a previous Model copy points at is never written
-// (projectRuleEdit). The caller has checked the field is open.
-func (r *projectRuleEdit) edit(change func(*lineEditor) tea.Cmd) tea.Cmd {
-	next := *r.field
-	cmd := change(&next)
-	r.field = &next
-	return cmd
+	return r.field.isBuilt()
 }
 
 // openProjectRule takes the project row: a `terminal` rule opens the field seeded with the
@@ -1013,7 +1002,7 @@ func (m Model) openProjectRule() (tea.Model, tea.Cmd) {
 		return m.saveProjectRule(offer.kind, offer.text)
 	}
 	field := newPopupField(m.opts.CursorShape, m.th.surface, settingsCaret, offer.text)
-	m.ruleEdit = projectRuleEdit{field: &field}
+	m.ruleEdit = projectRuleEdit{field: newCopyOnWriteField(field)}
 	return m, nil
 }
 
@@ -1035,7 +1024,7 @@ func (m Model) projectRuleKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return next.(Model), cmd, true
 	}
 	m.ruleEdit.note = "" // an edit answers the refusal it was painted for
-	return m, m.ruleEdit.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) }), true
+	return m, m.ruleEdit.field.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) }), true
 }
 
 // saveProjectRule saves the rules text holds into the Project config through the host
@@ -1081,5 +1070,5 @@ func (m Model) projectRuleMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	m.ruleEdit.note = ""
-	return m, m.ruleEdit.edit(func(f *lineEditor) tea.Cmd { return f.editMsg(msg) }), true
+	return m, m.ruleEdit.field.edit(func(f *lineEditor) tea.Cmd { return f.editMsg(msg) }), true
 }

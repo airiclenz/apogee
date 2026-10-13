@@ -538,3 +538,85 @@ func (e *lineEditor) deleteSelection(sel fieldSel) {
 func (e *lineEditor) reseatInput() {
 	e.seatCaret(e.input.Line(), e.input.Column())
 }
+
+// clone is a copy of the field that shares no TEXT with it: the same value, the caret at the same
+// logical (row, column), and a value grid of its own. A plain `next := e` is not one — the widget
+// keeps its text as a grid of rune slices, and an insertion or a deletion in the middle of a line
+// writes through the backing array the two copies would share, so typing into one would rewrite
+// the other. seatCaret is the rebuild: it sets the value afresh (SetValue allocates a new grid) and
+// seats the caret back where it stood, re-clamping the scroll onto it.
+//
+// What the field holds by pointer — its viewport, its wrap memo — stays shared, which is the
+// posture [lineEditor] has always run in. The rebuild does reset one thing: the caret's remembered
+// goal column for vertical moves, which the widget offers no setter for and a single-line field
+// never reads. An unbuilt field has no grid to share and no viewport to seat, so it is handed back
+// as it is.
+func (e lineEditor) clone() lineEditor {
+	if !e.isBuilt() {
+		return e
+	}
+	e.seatCaret(e.input.Line(), e.input.Column())
+	return e
+}
+
+// copyOnWriteField holds a [lineEditor] by POINTER and replaces it rather than writing through it.
+//
+// The pointer is the size: a lineEditor is a whole textarea, some 13 KB by value, and every field
+// the Model holds by value is copied on every Update (ADR 0011) and counts toward the compiler's
+// 128 KiB stack-variable ceiling the Model must stay under (TestModelFitsTheStack). The replace is
+// the semantics: a value field gives each Model copy a field of its own, and so does this — [edit]
+// builds a deep copy ([lineEditor.clone]), applies the change to the copy and points THIS holder at
+// it, so a Model copy taken before the keystroke still holds the field exactly as it stood.
+//
+// Its zero value is the empty, unbuilt field a whole-struct reset leaves behind (`m.picker =
+// picker{}`): it answers "" and reports itself unbuilt, as a zero lineEditor does, so a surface that
+// builds its field lazily still asks [copyOnWriteField.isBuilt] before the first keystroke.
+//
+// Everything outside this type reads the field through the accessors below and writes it through
+// edit; nothing reaches the held editor directly, which is what keeps every write a replace.
+type copyOnWriteField struct {
+	editor *lineEditor
+}
+
+// newCopyOnWriteField holds a freshly built field. The editor is taken by value, so the caller's own
+// copy is never the one held.
+func newCopyOnWriteField(e lineEditor) copyOnWriteField {
+	return copyOnWriteField{editor: &e}
+}
+
+// isBuilt reports whether the holder carries a real field ([lineEditor.isBuilt]); the zero holder
+// does not.
+func (f copyOnWriteField) isBuilt() bool {
+	return f.editor != nil && f.editor.isBuilt()
+}
+
+// value is what the field holds ([lineEditor.value]); "" for the zero holder.
+func (f copyOnWriteField) value() string {
+	if f.editor == nil {
+		return ""
+	}
+	return f.editor.value()
+}
+
+// textWithCaret is the value with the field's caret glyph drawn in ([lineEditor.textWithCaret]); ""
+// for the zero holder, which has neither text nor glyph.
+func (f copyOnWriteField) textWithCaret() string {
+	if f.editor == nil {
+		return ""
+	}
+	return f.editor.textWithCaret()
+}
+
+// edit applies one change to the field copy-on-write: change runs against a deep copy of the held
+// field, and this holder is pointed at that copy, so the field a previous Model copy points at is
+// never written. On the zero holder the change meets a zero lineEditor, which drops every key, as a
+// zero value field would.
+func (f *copyOnWriteField) edit(change func(*lineEditor) tea.Cmd) tea.Cmd {
+	var next lineEditor
+	if f.editor != nil {
+		next = f.editor.clone()
+	}
+	cmd := change(&next)
+	f.editor = &next
+	return cmd
+}

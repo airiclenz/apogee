@@ -202,6 +202,92 @@ func TestZeroFieldIsInertAndSaysSo(t *testing.T) {
 	}
 }
 
+// The copy-on-write field (copyOnWriteField). A Model copy must keep the field it was taken with
+// however the other copy is typed into, as a value field would; the holder is a pointer, so that
+// is true only if every write lands on a field of its own. The edit here is in the MIDDLE of the
+// value on purpose: an insertion there writes through the backing array of the line it splits, so a
+// copy that shared its text grid with the snapshot — a shallow `next := *p` — would rewrite the
+// snapshot's text too, where an append at the end would not show it.
+func TestCopyOnWriteFieldEditLeavesAnEarlierCopyAlone(t *testing.T) {
+	t.Parallel()
+
+	field := newCopyOnWriteField(testPopupField(pickerFilterCursor, ""))
+	for _, r := range "ab" {
+		field.edit(func(e *lineEditor) tea.Cmd { return e.editKey(keyRune(r)) })
+	}
+	snapshot := field
+
+	field.edit(func(e *lineEditor) tea.Cmd { return e.editKey(tea.KeyPressMsg{Code: tea.KeyLeft}) })
+	field.edit(func(e *lineEditor) tea.Cmd { return e.editKey(keyRune('x')) })
+
+	if got := field.value(); got != "axb" {
+		t.Errorf("edited copy = %q, want %q: the keys landed somewhere else", got, "axb")
+	}
+	if got := snapshot.value(); got != "ab" {
+		t.Errorf("snapshot = %q, want %q: an edit on the other copy wrote through to it", got, "ab")
+	}
+	if got, want := snapshot.textWithCaret(), "ab"+pickerFilterCursor; got != want {
+		t.Errorf("snapshot caret = %q, want %q: the other copy's caret move reached it", got, want)
+	}
+}
+
+// The zero holder is the empty, unbuilt field a whole-struct reset leaves behind, exactly as a zero
+// lineEditor is (TestZeroFieldIsInertAndSaysSo): it reads empty, reports itself unbuilt, and an edit
+// that reaches it anyway drops the key as the zero widget does rather than panicking on the nil
+// field.
+func TestZeroCopyOnWriteFieldIsInertAndSaysSo(t *testing.T) {
+	t.Parallel()
+
+	var zero copyOnWriteField
+	if zero.isBuilt() {
+		t.Error("the zero holder reports itself built; a whole-struct reset would leave a live field")
+	}
+	if got := zero.value() + zero.textWithCaret(); got != "" {
+		t.Errorf("zero holder reads %q, want nothing", got)
+	}
+	zero.edit(func(e *lineEditor) tea.Cmd { return e.editKey(keyRune('a')) })
+	if zero.isBuilt() || zero.value() != "" {
+		t.Errorf("after a key: built = %v, value = %q, want the zero field to drop it", zero.isBuilt(), zero.value())
+	}
+}
+
+// The same promise through the two panes that filter: a Model snapshot taken AFTER the first
+// keystroke — once the filter is built and the two copies point at one field — keeps its filter
+// while the other copy types a second key.
+func TestPickerFilterCopyKeepsItsOwnText(t *testing.T) {
+	t.Parallel()
+	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+	m = typeFilter(t, m, "t")
+	snapshot := m
+
+	typed := typeFilter(t, m, "h")
+
+	if got := typed.picker.filter.value(); got != "th" {
+		t.Errorf("typed copy's filter = %q, want %q", got, "th")
+	}
+	if got := snapshot.picker.filter.value(); got != "t" {
+		t.Errorf("snapshot's filter = %q, want %q: typing on the other copy reached it", got, "t")
+	}
+}
+
+func TestSessionBrowserFilterCopyKeepsItsOwnText(t *testing.T) {
+	t.Parallel()
+	m, _ := filterableBrowser(t)
+	m = step(t, m, keyRune('d'))
+	snapshot := m
+
+	typed := step(t, m, keyRune('r'))
+
+	if got := typed.sessionBrowser.filter.value(); got != "dr" {
+		t.Errorf("typed copy's filter = %q, want %q", got, "dr")
+	}
+	if got := snapshot.sessionBrowser.filter.value(); got != "d" {
+		t.Errorf("snapshot's filter = %q, want %q: typing on the other copy reached it", got, "d")
+	}
+}
+
 // testPopupField builds a popup-painted field the way the three overlays do, off the default scheme
 // and cursor shape — the fields are painted as plain text, so neither reaches what these tests read.
 func testPopupField(glyph, seed string) lineEditor {

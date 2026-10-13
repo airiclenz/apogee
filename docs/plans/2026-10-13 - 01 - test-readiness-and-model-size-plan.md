@@ -189,7 +189,10 @@ internal/tui/doc.go — "[theme] holds the palette, glyphs, and styles" paragrap
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run '^(TestModelFitsTheStack|TestWidthAuthoritySurvivesAValueCopy|TestModelNoBuilderByValue)$' ./internal/tui/` plus the new tests and the `colorscheme_test.go` tests, by name
 **Commit:** `perf(tui): share the theme's styles behind an immutable pointer`
 
-## 8. A copy-on-write line-editor field for the list filters
+## 8. A copy-on-write line-editor field for the list filters — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the type is named `copyOnWriteField` (field `editor`, constructor `newCopyOnWriteField`, read accessors `isBuilt`/`value`/`textWithCaret`, writer `edit`); `projectRuleEdit.edit` is gone and its two callers call `m.ruleEdit.field.edit`; the deep clone is `lineEditor.clone`, which rebuilds the grid through `seatCaret` and so resets the widget's vertical goal column — harmless for single-line fields, worth knowing for item 9's multi-line system-prompt editor.
+NOTES (2026-10-13): picker.go, sessions.go and panes.go needed no edit — they only pass the filter to `renderFilterListPlaced`/`filteredListContent`, whose parameter type changed in listsurface.go; doc.go's invariant section (which item 7 extended for the theme) carries no copy-on-write-field paragraph yet.
 
 **What:**
 **Goal:** one unexported copy-on-write field type in `internal/tui/lineeditor.go` holds a `*lineEditor` whose zero value is an empty, unbuilt editor; every write builds a fresh copy and swaps the pointer, never writing through a shared one; `listSurface.filter` and `projectRuleEdit.field` use it; a snapshot `a := m` is unchanged after typing into the filter on `b`.

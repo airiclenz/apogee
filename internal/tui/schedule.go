@@ -208,7 +208,7 @@ func (m Model) acceptScheduleStop(offered int) (tea.Model, tea.Cmd) {
 // close and accept zeroes the whole struct, which is what clears the filter there), so it is also
 // the one place a new field of the overlay's state can be forgotten.
 func (m Model) acceptCycle(cycle time.Duration) (tea.Model, tea.Cmd) {
-	m.picker.kind, m.picker.selected, m.picker.filter = pickerScheduleMode, 0, lineEditor{}
+	m.picker.kind, m.picker.selected, m.picker.filter = pickerScheduleMode, 0, copyOnWriteField{}
 	m.picker.draft.cycle = cycle
 	return m, nil
 }
