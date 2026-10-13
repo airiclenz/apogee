@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,15 +17,17 @@ import (
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
-// The cadence the tests run the watcher at. The Settle window is generously wider than the Interval
-// so that a burst of writes coalesces even on a loaded machine under -race, and the deadline is wide
-// enough that a missed report is a failure of the watcher rather than of the box it runs on.
+// The cadence the tests run the watcher at. A test that writes more than once does not race the poll
+// for its writes to coalesce: it step-locks them with the watcher's samples (sampleGate, or the stall
+// tests' own hooks), so the Settle is not a window a later write has to land inside, and the deadline
+// is wide enough that a missed report is a failure of the watcher rather than of the box it runs on.
 //
 // The three windows are margins sized for a loaded box, and the last two derive from the Settle so
-// the relation each one asserts survives any future widening. testSettle is the window a FRACTION of
-// which still has to be measurable: filewatch_unix_test.go sleeps testSettle/3 to land a second
-// write inside a real SIGSTOP-stalled Settle, and at 150ms that fraction was a 50ms sleep a
-// descheduled goroutine could overrun. testDeadline is the whole window awaitChange gives one
+// the relation each one asserts survives any future widening. testSettle is the stall the poll must
+// NOT suffer between two ticks for the stall tests to stage their case: a box that holds the poll
+// goroutine off the CPU for a whole Settle settles the first write alone, rightly, and spoils that
+// attempt — the tests retry it a bounded number of times — so the Settle is wide enough that a
+// -race run on a loaded box rarely spoils one. testDeadline is the whole window awaitChange gives one
 // report, so that a report merely late on a slow box is not a failure. testQuiet is the window in
 // which a SECOND report must not arrive, which only says anything about the Settle when it is at
 // least as long as one.
@@ -46,12 +49,96 @@ var (
 // startWatcher starts a watcher over path at the test cadence and stops it with the test.
 func startWatcher(t *testing.T, path string) *Watcher {
 	t.Helper()
+	return startSampledWatcher(t, path, nil)
+}
+
+// startSampledWatcher starts a watcher over path at the test cadence with sampled as its hook, and
+// stops it with the test. The hook is installed before Start, so the poll goroutine never reads it
+// while the test is still writing it.
+func startSampledWatcher(t *testing.T, path string, sampled func(changed, pending bool)) *Watcher {
+	t.Helper()
 	w := New(path)
 	w.Interval = testInterval
 	w.Settle = testSettle
+	w.sampled = sampled
 	w.Start()
 	t.Cleanup(w.Stop)
 	return w
+}
+
+// startGatedWatcher starts a watcher whose samples a sampleGate step-locks with the test's writes.
+// The gate's Cleanup is registered after Start's, so it runs first: the gate is open, and any poll it
+// still holds is free, before Stop waits for the poll goroutine to return.
+func startGatedWatcher(t *testing.T, path string) (*Watcher, *sampleGate) {
+	t.Helper()
+	gate := &sampleGate{
+		held:    make(chan struct{}),
+		release: make(chan struct{}),
+		opened:  make(chan struct{}),
+	}
+	gate.armed.Store(true)
+	w := startSampledWatcher(t, path, gate.sample)
+	t.Cleanup(gate.open)
+	return w, gate
+}
+
+// sampleGate step-locks a test's writes with a watcher's samples. As the watcher's sampled hook it
+// holds the poll goroutine on each tick that observes a change, until the test has made its next
+// write and lets it go — so the next tick already looks at that write, and no still tick can fall
+// between two writes of a burst however long the box keeps either side off the CPU.
+type sampleGate struct {
+	// armed is whether a changed tick is held at all. writeBurst clears it before its final write so
+	// that write's own changed tick passes straight through to the Settle it starts.
+	armed atomic.Bool
+	// held carries the poll's word that it is holding on a changed tick; release lets it go.
+	held    chan struct{}
+	release chan struct{}
+	// opened is closed when the gate opens for good, freeing a poll held on either channel.
+	opened   chan struct{}
+	openOnce sync.Once
+}
+
+// sample is the watcher's sampled hook. It runs on the poll goroutine.
+func (g *sampleGate) sample(changed, _ bool) {
+	if !changed || !g.armed.Load() {
+		return
+	}
+	select {
+	case g.held <- struct{}{}:
+	case <-g.opened:
+		return
+	}
+	select {
+	case <-g.release:
+	case <-g.opened:
+	}
+}
+
+// awaitHold waits until the poll is held on a tick that observed a change.
+func (g *sampleGate) awaitHold(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.held:
+	case <-time.After(testDeadline):
+		t.Fatal("the poll never observed the burst's previous write")
+	}
+}
+
+// let lets go of the poll awaitHold saw held.
+func (g *sampleGate) let(t *testing.T) {
+	t.Helper()
+	select {
+	case g.release <- struct{}{}:
+	case <-time.After(testDeadline):
+		t.Fatal("the held poll never took its release")
+	}
+}
+
+// open disarms the gate and frees any poll it holds, for good: the test's Cleanup, so that a test
+// failing mid-burst still lets Stop return.
+func (g *sampleGate) open() {
+	g.armed.Store(false)
+	g.openOnce.Do(func() { close(g.opened) })
 }
 
 // writeWatchedFile writes content to path, failing the test if it cannot.
@@ -62,17 +149,25 @@ func writeWatchedFile(t *testing.T, path, content string) {
 	}
 }
 
-// writeBurst writes each content to path in turn, the way an editor's save lands, and skips the test
-// when the burst took long enough that the box, not the watcher, decides whether it coalesces: a
-// burst spread over a whole Settle is two changes, and two reports are then the right answer.
-func writeBurst(t *testing.T, path string, contents ...string) {
+// writeBurst writes each content to path in turn, the way an editor's save lands, step-locked with the
+// watcher through its gate: each write after the first lands while the poll is held on the tick that
+// observed the one before it, so every tick between two writes sees a change and the burst is one
+// change however loaded the box. The gate is disarmed before the final write and only then is the
+// previous hold let go, so the final write's own changed tick passes through and its Settle runs out.
+func writeBurst(t *testing.T, gate *sampleGate, path string, contents ...string) {
 	t.Helper()
-	start := time.Now()
-	for _, content := range contents {
+	last := len(contents) - 1
+	for i, content := range contents {
+		if i > 0 {
+			gate.awaitHold(t)
+		}
+		if i == last {
+			gate.armed.Store(false)
+		}
 		writeWatchedFile(t, path, content)
-	}
-	if took := time.Since(start); took >= testSettle/2 {
-		t.Skipf("the burst took %v, too close to the %v Settle to be one change", took, testSettle)
+		if i > 0 {
+			gate.let(t)
+		}
 	}
 }
 
@@ -127,8 +222,8 @@ func TestWatchCoalescesABurstIntoOneReport(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := startWatcher(t, path)
-	writeBurst(t, path, "", "auto-title: tr", "auto-title: true\n")
+	w, gate := startGatedWatcher(t, path)
+	writeBurst(t, gate, path, "", "auto-title: tr", "auto-title: true\n")
 
 	awaitChange(t, w, "a burst of three writes")
 	expectNoChange(t, w, testQuiet, "the burst had already been reported once")
@@ -383,11 +478,10 @@ func TestTwoWatchersReportOnlyTheirOwnFile(t *testing.T) {
 	writeWatchedFile(t, schedulesPath, "schedules: []\n")
 
 	configWatch := startWatcher(t, configPath)
-	schedulesWatch := startWatcher(t, schedulesPath)
+	schedulesWatch, schedulesGate := startGatedWatcher(t, schedulesPath)
 
 	// A burst on the second file: one report there, and nothing at all on the first.
-	writeWatchedFile(t, schedulesPath, "schedules:\n")
-	writeWatchedFile(t, schedulesPath, "schedules:\n  - name: nightly\n")
+	writeBurst(t, schedulesGate, schedulesPath, "schedules:\n", "schedules:\n  - name: nightly\n")
 	awaitChange(t, schedulesWatch, "a burst of writes to the second file")
 	expectNoChange(t, schedulesWatch, testQuiet, "the burst had already been reported once")
 	expectNoChange(t, configWatch, testQuiet, "nothing had touched the first file")

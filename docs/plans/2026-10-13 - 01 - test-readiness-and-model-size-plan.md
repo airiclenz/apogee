@@ -148,7 +148,11 @@ internal/testtime/guard_test.go — TestNoFixedTimingInTests
 - bite: judge on `after` at `poll`'s still branch, keep `pending` on `before` — the stall test goes red; revert
 **Commit:** `test(filewatch): arm the stall on a still tick inside the Settle, never skip`
 
-## 6. Burst writes step-lock with the watcher's samples
+## 6. Burst writes step-lock with the watcher's samples — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the gate is a `sampleGate` (held/release/opened channels + armed flag) installed before Start through a new `startSampledWatcher` (startWatcher now delegates to it) and `startGatedWatcher`, whose `gate.open` Cleanup is registered after Start's `w.Stop` so LIFO frees a held poll first; every gate wait is bounded by `time.After(testDeadline)`. `writeBurst` disarms the gate before its final write (so before letting the previous hold go) and now takes the gate; TwoWatchers' two schedules writes go through it.
+NOTES (2026-10-13): beyond the plan's guard, the unix SIGSTOP test also gets item 5's bounded spoiled-attempt retry (`stallAttempts`, a fresh-length child write each attempt): an attempt is spoiled only when the first still tick is `!pending` AND at least a Settle passed since the observation (measured on the poll goroutine), so a stale-tick watcher (gap ~one tick) still blocks, takes the second write and reports twice. The SIGSTOP/child staging moved into a helper `stopWhileAChildWrites`; the child now writes via `printf %b` so the content is parameterised.
+NOTES (2026-10-13): CHANGELOG.md pin kept, not reversed: the still-tick gate preserves "a second write inside the Settle still coalesces". Bites run red and reverted: `reportAt = tick.Add(w.Settle)` in poll → unix test red ("a change was reported when the burst had already been reported once", 3/3); a `w.report()` on every observed change → Coalesces and TwoWatchers red. Retry path exercised with a temporarily forced spoil: 2 forced → pass, 3 forced → Fatal "all 3 attempts held the poll…". The const-block rationale rewritten (the testSettle/3 sleep is gone). No CHANGELOG entry: test-only change.
 
 Depends on item 5.
 
