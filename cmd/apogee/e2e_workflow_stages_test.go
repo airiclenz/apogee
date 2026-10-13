@@ -84,7 +84,6 @@ func TestE2EWorkflowStages(t *testing.T) {
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIIn(t, drv, stub, stagesWorkspace(t), "")
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	submit(drv, stagesLaunch)
 	drv.WaitText(stagesAnswer)

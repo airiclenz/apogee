@@ -102,7 +102,6 @@ func TestE2EPopupFramesLists(t *testing.T) {
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUI(t, drv, stub)
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	// The `/` dropdown.
 	drv.Type("/")

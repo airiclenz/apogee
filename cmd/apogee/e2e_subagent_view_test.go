@@ -101,7 +101,6 @@ func TestE2ESubAgentView(t *testing.T) {
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIOn(t, drv, stub, runViewHome(t, stub), "")
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	submit(drv, runViewPrompt)
 
@@ -221,14 +220,12 @@ func TestE2ESubAgentView(t *testing.T) {
 }
 
 // openWorkingRun opens the last delegation in the transcript as its run view while that delegation
-// is still WORKING — [openLastRun]'s keystrokes, ⌥↑ then ⏎, waiting on the view's own header
-// instead of on a settled screen.
+// is still WORKING — ⌥↑ then ⏎, waiting on the view's own header instead of on a settled screen.
 //
-// The difference is the whole reason it exists. openLastRun ends on a quiet screen, which is the
-// right wait for a run that is over and the one wait a run that is not can never satisfy: a working
-// session animates its status line every frame, so a settle over one only ever ends in the wait's
-// timeout. The header is the more direct question anyway — the view is open when the breadcrumb
-// naming the way back is on the screen.
+// A working run is never at the idle prompt and never goes quiet: the session animates its status
+// line every frame, so a settle over one only ever ends in the wait's timeout. So the byte mark the
+// ⌥↑ is checked against is taken as the call begins, and the wait that ends it is the breadcrumb
+// naming the way back, which is on the screen exactly when the view is open.
 func openWorkingRun(drv *tuitest.Driver) {
 	painted := drv.Screen().BytesWritten()
 	drv.Press(tuitest.AltUp)

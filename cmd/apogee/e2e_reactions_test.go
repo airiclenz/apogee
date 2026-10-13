@@ -706,7 +706,7 @@ func TestE2EReactionsReloadSwapsTheArmedList(t *testing.T) {
 
 	rewriteHomeHooks(t, sess.Home(), sinkEntry(after))
 	drv.WaitText(appliedNote)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	submit(drv, "Is there anything else worth knowing?")
 	drv.WaitText("Nothing else")

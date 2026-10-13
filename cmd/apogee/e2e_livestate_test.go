@@ -268,7 +268,6 @@ func TestE2ELiveStateLauncherMoveKeepsTheSessionWorking(t *testing.T) {
 	drv := tuitest.NewDriver(t, liveStateSize)
 	sess := launchTUIOn(t, drv, first, launcherHome(t, first), "")
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	// Step 11 — the picker is the launcher's own list: the profile on the session's own server, and
 	// the one that serves somewhere else, which is the one that moves anything.

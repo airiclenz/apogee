@@ -91,7 +91,7 @@ cmd/apogee/e2e_schedule_test.go — TestE2EFiringMarksAnAbandonedFinalTurn
 **Closes:** e2e-waitquiet-picker-keys
 **Commit:** `test(e2e): open a run only after the idle prompt and the cursor's own paint`
 
-## 3. Submits after a note wait on readiness, not quiet
+## 3. Submits after a note wait on readiness, not quiet — ✅ DONE (2026-10-13)
 
 **What:** Recast at the regression check (2026-10-13).
 **Goal:** no `submit`/`Type` in a test body of this item's files has a `WaitQuiet` as its only gate; where `waitIdle` already precedes the first submit, the redundant `WaitQuiet` is gone.

@@ -64,7 +64,6 @@ func TestE2EFanOutTrailerStatesTheWidth(t *testing.T) {
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIOn(t, drv, stub, fanOutWidthHome(t, stub), "")
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	// The wrap-up on screen is a fan-out that came back: its turn is keyed on the sub_agent tool
 	// result, so the request carrying the three results has been made by the time it shows.
@@ -110,7 +109,6 @@ func TestE2EFanOutCeilingRefusesTheOverflow(t *testing.T) {
 	drv := tuitest.NewDriver(t, e2eSize)
 	sess := launchTUIOn(t, drv, stub, fanOutCeilingHome(t, stub), "")
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	submit(drv, fanOutCeilingPrompt)
 	drv.WaitText(fanOutCeilingWrapUp)

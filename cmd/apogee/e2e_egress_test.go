@@ -147,7 +147,7 @@ func TestE2EEgress(t *testing.T) {
 	// re-reads, the key applies, and the session says which keys moved.
 	appendHomeConfig(t, sess.Home(), "url-safety:\n  deny-hosts: ["+pageHost+", "+mcpHost+"]\n")
 	drv.WaitText("applied: url-safety.deny-hosts")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	proxied := len(proxy.Log())
 	submit(drv, "Fetch the release notes once more.")
@@ -183,7 +183,7 @@ func TestE2EEgress(t *testing.T) {
 	// and TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails (the old sessions stand).
 	renameHomeConfig(t, sess.Home(), "name: docs", "name: manuals")
 	drv.WaitText("applied: mcp-servers")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	submit(drv, "Echo through the docs server once more.")
 	awaitRefusedCalls(t, drv, sess, 2)
