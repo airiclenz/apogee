@@ -84,6 +84,12 @@ const (
 // defaultGlyphs; nothing else about the set is decided per scheme. Every field is a plain string,
 // so the theme stays copy-safe (ADR 0011).
 //
+// Two sets exist, picked by `ui.glyphs` (domain.GlyphSet, glyphsFor): defaultGlyphs and safeGlyphs,
+// the font-safe spelling for a terminal whose font lacks some of the default shapes. newModel and
+// the live apply (settingsApplyLocal) seat the configured set over newTheme's default, and a
+// scheme switch carries it across its rebuild (applyColorScheme). Each safe glyph measures as many
+// cells as its default counterpart, so switching sets moves no column.
+//
 // What stays OUT of the set is as deliberate as what is in it: the tree branches, rails, table
 // rules and half blocks are fixed constants above, a glyph composed into another constant
 // (memberGutter, subAgentOpenMarker, tableDivider) stays with that constant, and the task-list and
@@ -118,9 +124,14 @@ type glyphSet struct {
 
 	failure    string // leads a /settings row's refusal note (settingsNote), one cell like the "·" every other note leads with (settingsNoteMarkerCells)
 	askChecked string // a ticked option of the LIVE multi-select ask pane (askChoiceRows), the same width as askUncheckedMarker so ticking a row moves nothing
+
+	// asciiSpinner turns the status-line spinner into safeSpinnerFrames under EVERY style
+	// (spinnerAnim.view): the braille block the styles draw is the shape a thin font lacks first.
+	asciiSpinner bool
 }
 
-// defaultGlyphs is the set every theme carries today: the shapes the layout specs draw.
+// defaultGlyphs is the `ui.glyphs: unicode` set every theme starts with: the shapes the layout
+// specs draw.
 var defaultGlyphs = glyphSet{
 	assistant:      "✦",
 	leaderDot:      "⋯", // U+22EF MIDLINE HORIZONTAL ELLIPSIS
@@ -138,6 +149,39 @@ var defaultGlyphs = glyphSet{
 	forkTag:        "⑂",
 	failure:        "✗",
 	askChecked:     askCheckedMarker,
+}
+
+// safeGlyphs is the font-safe set `ui.glyphs: safe` selects: a shape nearly every terminal font
+// carries in place of each default one, at the same cell width (TestSafeGlyphsMeasureAsTheDefaults).
+// The task-list and recorded-exchange checkboxes are not in any set (glyphSet), so they keep [✔].
+var safeGlyphs = glyphSet{
+	assistant:      "♦",
+	leaderDot:      "·", // U+00B7 MIDDLE DOT
+	user:           "›",
+	done:           "√",
+	skill:          "♦",
+	presented:      "≡",
+	interject:      "»",
+	collapsed:      "►", // U+25BA BLACK RIGHT-POINTING POINTER
+	modePlan:       "□",
+	modeAskBefore:  "○",
+	modeAllowEdits: "√",
+	modeAuto:       "►►",
+	scheduleTag:    "@",
+	forkTag:        "+",
+	failure:        "x",
+	askChecked:     "[x]",
+	asciiSpinner:   true,
+}
+
+// glyphsFor is the set a `ui.glyphs` value draws with: safeGlyphs for safe, defaultGlyphs for
+// unicode and for "" (an Options block assembled without the key reads as the default, as
+// domain.ParseGlyphSet reads it).
+func glyphsFor(set domain.GlyphSet) glyphSet {
+	if set == domain.GlyphsSafe {
+		return safeGlyphs
+	}
+	return defaultGlyphs
 }
 
 // bodyIndent is the column every transcript block's body text starts in, as a blank prefix: a
@@ -175,7 +219,8 @@ type theme struct {
 	measure widthAuthority
 
 	// glyphs is the drawn marker glyphs this theme paints with (glyphSet). newTheme seats
-	// defaultGlyphs.
+	// defaultGlyphs; newModel and the `ui.glyphs` apply seat the configured set over it (glyphsFor),
+	// and applyColorScheme carries it across a rebuild, as it does measure and padPrompts.
 	glyphs glyphSet
 
 	userBlock lipgloss.Style // white on dark-gray, full-width block (the last user prompt)

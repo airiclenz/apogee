@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -240,5 +241,155 @@ func TestNewModelNotesTheColorSchemeWarnings(t *testing.T) {
 	clean := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
 	if hasEntry(clean, entryNote, warning) {
 		t.Error("a run with no warnings still noted one")
+	}
+}
+
+// TestSafeGlyphsMeasureAsTheDefaults: every glyph of the font-safe set measures as many cells as
+// the default glyph it stands in for, so `ui.glyphs: safe` moves no column anywhere — `►►` is two
+// like `⏵⏵`, the live ask pane's `[x]` three like `[✔]`. The sweep reads the struct, so a glyph
+// added to the set is measured without this test naming it.
+func TestSafeGlyphsMeasureAsTheDefaults(t *testing.T) {
+	t.Parallel()
+
+	measure := newTheme(scheme.Default()).measure
+	def, safe := reflect.ValueOf(defaultGlyphs), reflect.ValueOf(safeGlyphs)
+	for i := range def.NumField() {
+		if def.Field(i).Kind() != reflect.String {
+			continue
+		}
+		name := def.Type().Field(i).Name
+		d, s := def.Field(i).String(), safe.Field(i).String()
+		if s == "" {
+			t.Errorf("safeGlyphs.%s is empty; every default glyph needs a safe counterpart", name)
+			continue
+		}
+		if dw, sw := measure.Width(d), measure.Width(s); dw != sw {
+			t.Errorf("safeGlyphs.%s = %q measures %d cells; its default %q measures %d", name, s, sw, d, dw)
+		}
+	}
+}
+
+// TestGlyphsForPicksTheConfiguredSet: `safe` selects the font-safe set, and `unicode` and the zero
+// value both select the default — the look apogee has always had.
+func TestGlyphsForPicksTheConfiguredSet(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		set  domain.GlyphSet
+		want glyphSet
+	}{
+		{domain.GlyphsSafe, safeGlyphs},
+		{domain.GlyphsUnicode, defaultGlyphs},
+		{"", defaultGlyphs},
+	} {
+		if got := glyphsFor(tc.set); got != tc.want {
+			t.Errorf("glyphsFor(%q) = %+v; want %+v", tc.set, got, tc.want)
+		}
+	}
+	m := newModel(context.Background(), &fakeEngine{}, Options{UI: domain.UIPrefs{Glyphs: domain.GlyphsSafe}}, nil)
+	if m.th.glyphs != safeGlyphs {
+		t.Errorf("newModel under ui.glyphs: safe seated %+v; want the safe set", m.th.glyphs)
+	}
+}
+
+// TestSafeGlyphsInTheModeMarkerAndTheAskPane: under `safe` the footer's rungs and the live ask
+// pane's ticked row draw their safe shapes; the unticked row is the same `[ ]` in both sets.
+func TestSafeGlyphsInTheModeMarkerAndTheAskPane(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	th.glyphs = safeGlyphs
+	for mode, want := range map[domain.Mode]string{
+		domain.ModePlan:       "□ plan",
+		domain.ModeAskBefore:  "○ ask before",
+		domain.ModeAllowEdits: "√ allow edits",
+		domain.ModeAuto:       "►► auto",
+	} {
+		if got := modeMarker(th, mode); got != want {
+			t.Errorf("modeMarker(safe, %s) = %q; want %q", mode, got, want)
+		}
+	}
+	rows := askChoiceRows(th, []string{"red", "blue"}, true, []bool{true, false})
+	if got := rows[0][0]; got != "[x]" {
+		t.Errorf("a ticked row under safe leads with %q; want [x], never %s", got, askCheckedMarker)
+	}
+	if got := rows[1][0]; got != askUncheckedMarker {
+		t.Errorf("an unticked row under safe leads with %q; want %q", got, askUncheckedMarker)
+	}
+}
+
+// glyphFrameModel is a sized model under the glyph set and mode given, its transcript carrying a
+// prompt, a read with a dotted leader, a commit whose hidden output folds behind the collapsed
+// indicator, and an answer.
+func glyphFrameModel(t *testing.T, set domain.GlyphSet, mode domain.Mode) Model {
+	t.Helper()
+	opts := testOpts
+	opts.Mode = mode
+	opts.UI.Glyphs = set
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m.transcript.addUser("read main.go", nil)
+	m.transcript.apply(domain.TokenEvent{Text: "Let me read it."})
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+		Content: "[File: main.go, 1 lines total, showing lines 1-1]\npackage main",
+		Summary: domain.ReadSpan{Start: 1, End: 1, Total: 1}}})
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c2", Tool: "git_commit", Arguments: []byte(`{"message":"a commit"}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "1\n2\n3"}})
+	m.transcript.apply(domain.MessageEvent{EventBase: domain.EventBase{Turn: 1}, Text: "It is a Go file."})
+	m.settle()
+	return m
+}
+
+// TestSafeGlyphFrameDrawsNoUnicodeMarks: a whole running frame under `ui.glyphs: safe` — the
+// transcript, the spinner, the status line and the footer — draws none of the default marks and no
+// braille cell, and carries the safe leader and rung in their place.
+func TestSafeGlyphFrameDrawsNoUnicodeMarks(t *testing.T) {
+	t.Parallel()
+
+	m := glyphFrameModel(t, domain.GlyphsSafe, domain.ModeAllowEdits)
+	m.worker.start(func(error) {}, nil)
+	m.state = stateRunning
+	m.settle()
+	frame := plain(m.View())
+
+	for _, mark := range []string{"⋯", "✦", "❯", "⧖", "▤", "✓", "▶", "⊞", "◐", "⏵", "⟳", "⑂", "✗"} {
+		if strings.Contains(frame, mark) {
+			t.Errorf("the safe frame draws %q:\n%s", mark, frame)
+		}
+	}
+	for _, r := range frame {
+		if r >= 0x2800 && r <= 0x28FF {
+			t.Errorf("the safe frame draws the braille cell %q:\n%s", r, frame)
+			break
+		}
+	}
+	for _, want := range []string{"·", "►", "♦ Tools", "› read main.go", "√ allow edits"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("the safe frame carries no %q:\n%s", want, frame)
+		}
+	}
+	if strings.Contains(frame, "✔ allow edits") {
+		t.Errorf("the safe footer still reads ✔ allow edits:\n%s", frame)
+	}
+}
+
+// TestUnicodeGlyphFrameIsTheDefaultLook: `ui.glyphs: unicode` is the look apogee has always drawn —
+// byte for byte the frame of a model whose Options never named the key.
+func TestUnicodeGlyphFrameIsTheDefaultLook(t *testing.T) {
+	t.Parallel()
+
+	unicode := glyphFrameModel(t, domain.GlyphsUnicode, domain.ModeAllowEdits).View()
+	unset := glyphFrameModel(t, "", domain.ModeAllowEdits).View()
+	if unicode.Content != unset.Content {
+		t.Errorf("the unicode frame differs from the default one:\n--- unicode ---\n%s\n--- default ---\n%s",
+			unicode.Content, unset.Content)
+	}
+	frame := plain(unicode)
+	for _, want := range []string{"⋯", "✦ Tools", "▶", "❯ read main.go", "✔ allow edits"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("the unicode frame carries no %q:\n%s", want, frame)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +111,10 @@ const DefaultGlyphSet = GlyphsUnicode
 // glyphSetNames is the vocabulary [ParseGlyphSet] accepts, in the order its error lists them.
 var glyphSetNames = []GlyphSet{GlyphsUnicode, GlyphsSafe}
 
+// GlyphSetNames returns the glyph sets this build knows, in the order [ParseGlyphSet]'s error lists
+// them. It hands back a fresh slice on every call, as [SpinnerStyleNames] does.
+func GlyphSetNames() []GlyphSet { return slices.Clone(glyphSetNames) }
+
 // ParseGlyphSet maps a value onto a glyph set. "" ⇒ the default; an unknown value is an error
 // naming the sets this build knows. The caller names the key it read the value from, as for
 // [ParseSpinnerStyle].
@@ -148,6 +153,7 @@ const DefaultToolsFoldOver = 5
 const (
 	UIKeySpinner          = "ui.spinner"
 	UIKeySpinnerColor     = "ui.spinner-color"
+	UIKeyGlyphs           = "ui.glyphs"
 	UIKeyShowScrollbar    = "ui.show-scrollbar"
 	UIKeyColorScheme      = "ui.color-scheme"
 	UIKeyStallAfter       = "ui.stall-after"
@@ -161,8 +167,9 @@ const (
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
 // caller sweeping the block reads it in the order the user edits it.
 var uiKeys = []string{
-	UIKeySpinner, UIKeySpinnerColor, UIKeyShowScrollbar, UIKeyColorScheme, UIKeyStallAfter,
-	UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen, UIKeyToolsFoldOver,
+	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
+	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
+	UIKeyToolsFoldOver,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -255,7 +262,7 @@ func (u UIPrefs) Validate() error {
 // Set lands one key's value, spelled as the config file spells it, onto the block: the text is
 // trimmed, `""` lands that key's default (what a fresh start resolves from a file that does not
 // carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
-// bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
+// glyph set through [ParseGlyphSet], the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
 // is refused.
@@ -285,6 +292,12 @@ func (u *UIPrefs) land(key, value string) error {
 		u.Spinner = style
 	case UIKeySpinnerColor:
 		return landBool(&u.SpinnerColor, key, value, defaults.SpinnerColor)
+	case UIKeyGlyphs:
+		set, err := ParseGlyphSet(value)
+		if err != nil {
+			return fmt.Errorf("apogee: invalid ui.glyphs: %w", err)
+		}
+		u.Glyphs = set
 	case UIKeyShowScrollbar:
 		return landBool(&u.ShowScrollbar, key, value, defaults.ShowScrollbar)
 	case UIKeyColorScheme:

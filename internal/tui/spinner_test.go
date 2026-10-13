@@ -93,6 +93,33 @@ func TestSpinnerFrameWidth(t *testing.T) {
 			}
 		})
 	}
+
+	// Under `ui.glyphs: safe` every style draws the turning line instead, one column on every frame
+	// and never a braille cell — the block a thin terminal font lacks first.
+	safe := newTheme(scheme.Default())
+	safe.glyphs = safeGlyphs
+	for style := range spinnerSpecs {
+		t.Run(string(style)+"/safe", func(t *testing.T) {
+			t.Parallel()
+
+			var s spinnerAnim
+			for frame := 0; frame < sweep; frame++ {
+				s.frame = frame
+				glyph := s.drawn(safe, style)
+				if got := ansi.StringWidth(glyph); got != 1 {
+					t.Errorf("safe frame %d of %s (%q) is %d columns wide, want 1", frame, style, glyph, got)
+				}
+				for _, r := range glyph {
+					if r >= brailleBase && r <= brailleBase+0xFF {
+						t.Errorf("safe frame %d of %s draws the braille cell %q", frame, style, glyph)
+					}
+				}
+				if want := safeSpinnerFrames[frame%len(safeSpinnerFrames)]; glyph != want {
+					t.Errorf("safe frame %d of %s = %q, want %q", frame, style, glyph, want)
+				}
+			}
+		})
+	}
 }
 
 // TestSpinnerStyleFallsBackToClassic proves the renderer never shows a blank column: a style with

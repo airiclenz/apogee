@@ -452,6 +452,15 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
+	case domain.UIKeyGlyphs:
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+		// Every memoised block paint holds the outgoing set's marks and its key does not name the
+		// set (paintcache.go), so the cache is cleared as a scheme switch clears it; the set is in the
+		// frame key, so the repaint tail lays the transcript out again in the new marks.
+		m.th.glyphs = glyphsFor(m.opts.UI.Glyphs)
+		m.transcript.paints.clear()
 	case domain.UIKeySkillSuggestions:
 		// Nothing is laid out again and nothing is recomputed here: the band is derived from the
 		// draft where the frame is built, so the very next render already answers the new value —
@@ -557,10 +566,11 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	// (width.go): a scheme switch must not un-learn what the terminal already told the program.
 	// The prompt padding is the same kind of fact: the terminal's colour-profile answer decided it
 	// (Update's tea.ColorProfileMsg case), and a new palette does not give a colourless terminal
-	// colour to paint the half rows in.
-	measure, padPrompts := m.th.measure, m.th.padPrompts
+	// colour to paint the half rows in. The glyph set is the human's `ui.glyphs` rather than the
+	// palette's, so a new scheme keeps whichever set the screen is drawn in.
+	measure, padPrompts, glyphs := m.th.measure, m.th.padPrompts, m.th.glyphs
 	m.th = newTheme(s)
-	m.th.measure, m.th.padPrompts = measure, padPrompts
+	m.th.measure, m.th.padPrompts, m.th.glyphs = measure, padPrompts, glyphs
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
 	m.opts.ColorScheme, m.opts.UI.ColorScheme = s, name

@@ -241,7 +241,16 @@ internal/tui/toolleader.go — leaderRow (appends glyphDone then CutSuffix's it:
 - `grep -nE '^\s*(const\s+)?(glyph(Assistant|LeaderDot|User|Done|Skill|Presented|Interject|Collapsed|Mode[A-Za-z]+)|scheduleTagGlyph|forkTagGlyph)\s+=' internal/tui/*.go` prints nothing (14 hits at base)
 **Commit:** `refactor(tui): carry the drawn glyphs on the theme`
 
-## 11. Font-safe glyph set
+## 11. Font-safe glyph set — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the `ui.glyphs` row, its template line, its `uiConfig` field and its `uiKeys` slot sit after `ui.spinner-color` rather than directly after `ui.spinner`, so the spinner/spinner-color pair the template prose describes together stays adjacent. They are still after `ui.spinner` in section "Interface".
+NOTES (2026-10-13): the safe spinner is chosen off the theme's set. `glyphSet` gains an `asciiSpinner bool` (true only in `safeGlyphs`), and `spinnerAnim.drawn(th, style)` returns `safeSpinnerFrames` (`| / - \`) for every style. `glyphSet` stays comparable, so the whole set joins `frameKey` as `glyphs glyphSet`. `newTheme(s)` keeps its signature. `newModel` seats `glyphsFor(opts.UI.Glyphs)`, and `""` reads as unicode.
+NOTES (2026-10-13): the `applyFile` seed (`o.UI = domain.DefaultUIPrefs()`) and its comment from item 9 are dropped, because the new `ui.glyphs` row now writes the field's default for a file without the key. internal/config stays green without the seed.
+NOTES (2026-10-13): added `domain.GlyphSetNames()` in uiprefs.go so the new `ui.glyphs` subtest of TestRegistryEnumValuesMatchParseSites can check both directions, mirroring `SpinnerStyleNames`. The config_test.go resolved-`UIPrefs` literals were already carried by item 9. Only `everyKeyFileConfig` gains `Glyphs: "safe"`, which TestRegistrySetIsTheInverseOfRead requires.
+NOTES (2026-10-13): consequential edit: internal/tui/tui.go. Made necessary by `Options.UI.Glyphs` becoming a field the renderer reads; the Options.UI comment lists every field the renderer reads, and now names Glyphs.
+NOTES (2026-10-13): the starter template's `ui:` prose gains a `glyphs` paragraph next to the new line, saying what `safe` swaps and when to use it.
+NOTES (2026-10-13): residues under `safe`, both outside the Goal's list and named in docs/manual/configuration.md. (1) The open-fold `▼` (glyphExpanded) is still a constant (item 10), so a safe frame still draws it. (2) The stacked-diff region rule `⋯⋯⋯⋯⋯⋯⋯⋯` (stackedRegionRuleGlyph, item 10) is built into saved Details, so it stays. The frame tests use no stacked diff. The close reason should name these with the `[✔]` task-list and recorded-exchange markers.
+NOTES (2026-10-13): mutation check: removing the `ui.glyphs` arm's `m.transcript.paints.clear()` turns TestGlyphsApplyRepaintsThePaintedBlocks red. The cache clear is load-bearing, not redundant with the frameKey join.
 
 **What:**
 Recast at the regression check (2026-10-13).

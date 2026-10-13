@@ -179,13 +179,14 @@ type paintKey struct {
 	// which re-wraps everything, and the key would otherwise serve paints wrapped by the other
 	// method.
 	//
-	// The COLOURS move too, and are deliberately not named here. A colour-scheme switch rebuilds
-	// every style at once (ADR 0040), which is the "theme changes" case this comment used to say did
-	// not exist — and the alternative it named is the one taken: the switch CLEARS the cache outright
-	// (settingsApplyLocal's applyColorScheme) rather than growing this key into a full theme
-	// identity. That keeps a steady-state repaint comparing four scalars and a string, and it is
-	// sound for the same reason transcript.reset's clear is: after it, nothing memoised in the
-	// previous palette remains to be found.
+	// The COLOURS move too, and so do the GLYPHS, and neither is named here. A colour-scheme switch
+	// rebuilds every style at once (ADR 0040) and a `ui.glyphs` switch swaps every drawn mark
+	// (theme.glyphs) — the "theme changes" cases this comment used to say did not exist — and the
+	// alternative it named is the one taken for both: the switch CLEARS the cache outright
+	// (settingsApplyLocal — applyColorScheme, and the ui.glyphs arm) rather than growing this key
+	// into a full theme identity. That keeps a steady-state repaint comparing four scalars and a
+	// string, and it is sound for the same reason transcript.reset's clear is: after it, nothing
+	// memoised in the previous palette or the previous marks remains to be found.
 	measure widthAuthority
 	// padPrompts is the other part of [theme] this key names, for the same reason: the terminal's
 	// colour-profile answer switches it mid-session (model.go, tea.ColorProfileMsg), and a prompt
@@ -416,11 +417,13 @@ type frameKey struct {
 	// generation is the transcript's write counter ([transcript.generation]): the entries, the live
 	// buffer, the root and the fold seed, folded into one integer by the writers themselves.
 	generation uint64
-	// scheme, measure and padPrompts are the theme's identity: the palette is rebuilt whole on a
-	// scheme switch (applyColorScheme), the measure moves on the terminal's mode-2027 answer
-	// (foldModeReport) and the prompt padding on its colour-profile answer (Update's
-	// tea.ColorProfileMsg case), and nothing else about a theme changes mid-session.
+	// scheme, glyphs, measure and padPrompts are the theme's identity: the palette is rebuilt whole
+	// on a scheme switch (applyColorScheme), the drawn marks swap on a `ui.glyphs` switch
+	// (settingsApplyLocal), the measure moves on the terminal's mode-2027 answer (foldModeReport)
+	// and the prompt padding on its colour-profile answer (Update's tea.ColorProfileMsg case). Those
+	// four are everything about a theme that changes mid-session.
 	scheme     string
+	glyphs     glyphSet
 	measure    widthAuthority
 	padPrompts bool
 	// width and showScrollbar are the column budget: the window's columns less the gutter the bar
@@ -442,6 +445,7 @@ func (m Model) frameKey() frameKey {
 	return frameKey{
 		generation:    m.transcript.generation,
 		scheme:        m.opts.UI.ColorScheme,
+		glyphs:        m.th.glyphs,
 		measure:       m.th.measure,
 		padPrompts:    m.th.padPrompts,
 		width:         m.width,

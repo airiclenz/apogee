@@ -140,6 +140,21 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		}
 	})
 
+	t.Run("ui.glyphs", func(t *testing.T) {
+		t.Parallel()
+		values := enumValues(t, "ui.glyphs")
+		for _, v := range values {
+			if _, err := domain.ParseGlyphSet(v); err != nil {
+				t.Errorf("registry offers glyph set %q but domain.ParseGlyphSet rejects it: %v", v, err)
+			}
+		}
+		for _, set := range domain.GlyphSetNames() {
+			if !slices.Contains(values, string(set)) {
+				t.Errorf("domain knows glyph set %q but the registry does not offer it", set)
+			}
+		}
+	})
+
 	t.Run("workflow-wake", func(t *testing.T) {
 		t.Parallel()
 		// Parsed in THIS package, sub-agents-choice's reason below; the row is file-only, so
@@ -980,7 +995,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"response-reserve":  "ResponseReserve",
 		"present.auto-open": "Present", "present.command": "Present", "present.port": "Present",
 		"present.host": "Present", "present.command-on-model-documents": "Present",
-		"ui.spinner": "UI", "ui.spinner-color": "UI", "ui.show-scrollbar": "UI",
+		"ui.spinner": "UI", "ui.spinner-color": "UI", "ui.glyphs": "UI", "ui.show-scrollbar": "UI",
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
 		"ui.tools-open": "UI", "ui.tools-fold-over": "UI",
@@ -1059,7 +1074,7 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 	var resolved Options
 	mustApplyFile(t, &resolved, fileConfig{})
 	documented := map[string]string{
-		"ui.spinner": "classic", "ui.spinner-color": "false", "ui.show-scrollbar": "false",
+		"ui.spinner": "classic", "ui.spinner-color": "false", "ui.glyphs": "safe", "ui.show-scrollbar": "false",
 		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
 		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
 		"ui.tools-fold-over": "12",

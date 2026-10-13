@@ -36,6 +36,12 @@ var uiKeyCases = map[string]uiKeyCase{
 		want:  false,
 		bad:   map[string]string{"maybe": `apogee: invalid ui.spinner-color "maybe": want true or false`},
 	},
+	UIKeyGlyphs: {
+		value: "safe",
+		read:  func(u UIPrefs) any { return u.Glyphs },
+		want:  GlyphsSafe,
+		bad:   map[string]string{"ascii": `apogee: invalid ui.glyphs: unknown glyph set "ascii"`},
+	},
 	UIKeyShowScrollbar: {
 		value: "false",
 		read:  func(u UIPrefs) any { return u.ShowScrollbar },
@@ -93,14 +99,15 @@ var uiKeyCases = map[string]uiKeyCase{
 }
 
 // TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase pins the sweep the other tests run on: the
-// ten keys in the order the starter template presents them, each with a case above, and a slice
+// eleven keys in the order the starter template presents them, each with a case above, and a slice
 // a caller cannot reorder under this package.
 func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	t.Parallel()
 
 	want := []string{
-		"ui.spinner", "ui.spinner-color", "ui.show-scrollbar", "ui.color-scheme", "ui.stall-after",
-		"ui.inspector", "ui.skill-suggestions", "ui.task-list-open", "ui.tools-open", "ui.tools-fold-over",
+		"ui.spinner", "ui.spinner-color", "ui.glyphs", "ui.show-scrollbar", "ui.color-scheme",
+		"ui.stall-after", "ui.inspector", "ui.skill-suggestions", "ui.task-list-open", "ui.tools-open",
+		"ui.tools-fold-over",
 	}
 	if got := UIKeys(); !slices.Equal(got, want) {
 		t.Errorf("UIKeys() = %v; want the template order %v", got, want)

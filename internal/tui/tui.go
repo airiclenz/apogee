@@ -1231,7 +1231,9 @@ type Options struct {
 	//
 	// Which fields the renderer reads, and where: Spinner and SpinnerColor select the animation, read
 	// at every paint and tick rather than copied onto it (spinnerAnim.spec — the zero style resolves
-	// to classic, the animation with no registry entry); ShowScrollbar reserves the bar's gutter column or gives it to the body
+	// to classic, the animation with no registry entry); Glyphs picks the marks the theme draws
+	// (glyphsFor, seated on theme.glyphs by newModel — the zero value is the unicode set) and is in
+	// the frame key through it (paintcache.go); ShowScrollbar reserves the bar's gutter column or gives it to the body
 	// (layout) and is in the frame key for it (paintcache.go); ColorScheme is the NAME the palette
 	// below was loaded under, so a report can say which scheme is in force; StallAfter is the quiet
 	// threshold the status line reports past (0 ⇒ off); Inspector WORDS /inspect's empty pane — the

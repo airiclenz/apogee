@@ -806,6 +806,9 @@ func (d pendingDecision) questionOpen() bool {
 // is focused for is the real terminal cursor in Options.CursorShape (newPromptEditor).
 func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.Msg)) Model {
 	th := newTheme(opts.colorScheme())
+	// The glyph set is the human's `ui.glyphs`, not the scheme's: newTheme seats the default and the
+	// configured set is laid over it here, the posture measure and padPrompts take (theme.go).
+	th.glyphs = glyphsFor(opts.UI.Glyphs)
 
 	vp := viewport.New()
 	// The transcript viewport does NOT wrap: its rows are 1:1 with the stored lines. The painter

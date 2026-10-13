@@ -321,6 +321,22 @@ func (s spinnerAnim) interval(style SpinnerStyle) time.Duration { return s.spec(
 // glyph is this frame's braille cell(s) under style, pure in [spinnerAnim.frame].
 func (s spinnerAnim) glyph(style SpinnerStyle) string { return s.spec(style).glyph(s.frame) }
 
+// safeSpinnerFrames are the font-safe spinner's four frames — a line turning a quarter at a time,
+// one ASCII cell each — drawn under EVERY style while the theme's glyph set asks for them
+// (glyphSet.asciiSpinner, `ui.glyphs: safe`): the braille block every style draws is the shape a
+// thin terminal font lacks first. The style still paces them, each frame held for its interval.
+var safeSpinnerFrames = []string{"|", "/", "-", `\`}
+
+// drawn is this frame's glyph as th draws it: the style's own frame, or the safe set's turning line.
+// frame is never negative (arm zeroes it and a tick only increments it), so the modulo needs no
+// guard.
+func (s spinnerAnim) drawn(th theme, style SpinnerStyle) string {
+	if th.glyphs.asciiSpinner {
+		return safeSpinnerFrames[s.frame%len(safeSpinnerFrames)]
+	}
+	return s.glyph(style)
+}
+
 // starBlinkHalfPeriod is how long the transcript's LIVE STAR holds one phase: ✦ for half a second,
 // then a bare cell for half a second (layout.md, "The live star"). It is a wall-clock duration
 // rather than a frame count so the blink reads the same under every spinner style — the frame count
@@ -355,19 +371,19 @@ func (s spinnerAnim) framesPerColorLoop(style SpinnerStyle) int {
 	return int(spinnerColorPeriod / s.interval(style))
 }
 
-// view paints this frame's glyph under style for the status line — coloured by the loop when
-// color is set, on the bare field when not — on the theme's spinner field — the status
-// bar's black background. This is the single place the glyph animation and the colour loop compose:
-// the two are orthogonal settings, so no style carries a colour of its own and nothing here
-// branches on the style to decide one. Uncoloured, the field adds no foreground at all and the
+// view paints this frame's glyph under style, in th's glyph set ([spinnerAnim.drawn]), for the
+// status line — coloured by the loop when color is set, on the bare field when not — on the
+// theme's spinner field — the status bar's black background. This is the single place the glyph
+// animation and the colour loop compose: the two are orthogonal settings, so no style carries a
+// colour of its own and nothing here branches on the style to decide one. Uncoloured, the field adds no foreground at all and the
 // glyph keeps the terminal's own text colour — byte for byte what the pre-plan spinner rendered
 // (TestSpinnerClassicUncolouredIsUnchanged), which is why this branch paints on spinnerBase rather
 // than through the status bar's faint grey.
 func (s spinnerAnim) view(th theme, style SpinnerStyle, color bool) string {
 	if !color {
-		return th.spinnerBase.Render(s.glyph(style))
+		return th.spinnerBase.Render(s.drawn(th, style))
 	}
-	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop(style))).Render(s.glyph(style))
+	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop(style))).Render(s.drawn(th, style))
 }
 
 // arm opens a fresh tick chain on generation gen: back at frame 0, with the first tick scheduled.

@@ -277,6 +277,7 @@ type Key struct {
 var (
 	modeValues        = []string{string(domain.ModePlan), string(domain.ModeAskBefore), string(domain.ModeAllowEdits), string(domain.ModeAuto)}
 	spinnerValues     = []string{"snake", "glitter", "classic"}
+	glyphsValues      = []string{string(domain.GlyphsUnicode), string(domain.GlyphsSafe)}
 	cursorShapeValues = []string{"block", "underline", "bar"}
 	// The one vocabulary internal/domain does not own: who picks a delegation's seat is a fact about
 	// the CONFIG rather than about the agent loop, so the two words live here (options.go) and this
@@ -981,6 +982,17 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *bool { return u.SpinnerColor }),
 	},
 	{
+		Path: "ui.glyphs", Kind: KindEnum, Default: string(domain.DefaultGlyphSet), EnumValues: glyphsValues,
+		Editable: true,
+		Validate: validateGlyphSetName,
+		Desc:     "The symbols the screen is drawn with; safe swaps the ones a terminal font may lack.",
+		// Copied across as the file names it, ui.spinner's posture: UIPrefs.Validate judges the name
+		// at ResolveOptions, so an unknown one reaches startup as an error.
+		field: uiField(domain.UIKeyGlyphs, named[domain.GlyphSet], spelled[domain.GlyphSet],
+			func(u *domain.UIPrefs) *domain.GlyphSet { return &u.Glyphs },
+			func(u *uiConfig) *domain.GlyphSet { return nonEmptyName[domain.GlyphSet](u.Glyphs) }),
+	},
+	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
@@ -1527,6 +1539,12 @@ func validatePresentPort(value string) error {
 // names the key the value was read from.
 func validateSpinnerName(value string) error {
 	return domain.UIPrefs{Spinner: domain.SpinnerStyle(value)}.Validate()
+}
+
+// validateGlyphSetName refuses a glyph set this build does not draw, through the startup check
+// itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
+func validateGlyphSetName(value string) error {
+	return domain.UIPrefs{Glyphs: domain.GlyphSet(value)}.Validate()
 }
 
 // validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the

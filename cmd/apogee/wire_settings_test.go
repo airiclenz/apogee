@@ -959,6 +959,7 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.show-scrollbar",
 	"ui.spinner",
 	"ui.spinner-color",
+	"ui.glyphs",
 	"ui.stall-after",
 	"ui.color-scheme",
 	"ui.skill-suggestions",

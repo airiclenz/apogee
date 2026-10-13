@@ -701,7 +701,7 @@ func everyKeyFileConfig() fileConfig {
 		SystemPromptLayers: []systemPromptLayerConfig{{Text: "prefer tables"}},
 		ContextFiles:       &contextFilesConfig{Enable: boolptr(false), Names: []string{"CLAUDE.md"}},
 		CursorShape:        "bar",
-		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
+		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), Glyphs: "safe", ShowScrollbar: boolptr(false),
 			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true),
 			SkillSuggestions: boolptr(false), TaskListOpen: boolptr(false), ToolsOpen: boolptr(true),
 			ToolsFoldOver: countptr(8)},

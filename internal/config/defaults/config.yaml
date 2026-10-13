@@ -1046,6 +1046,13 @@ update-check: true
 # gradient steps visibly, and on a 16-colour one it collapses to a couple of tones — that is what
 # `spinner-color: false` is for.
 #
+# `glyphs` picks the symbols the screen is drawn with. `unicode` — the default — is the look
+# described everywhere else in this file. `safe` is for a terminal whose font lacks some of those
+# symbols (VS Code's terminal with GPU acceleration off is one): it swaps the transcript and footer
+# marks for ones nearly every font carries (`♦` for `✦`, `›` for `❯`, `·` for the `⋯` leader, `►`
+# for `▶`, `√` for `✓`) and turns every spinner style into a one-column `| / - \` turn. The
+# task-list cards keep their `[✔]` either way. Switch live from /settings.
+#
 # `show-scrollbar` decides whether a scroll bar is painted down the right-hand edge of the
 # transcript AND of every popup pane — `/settings` and its sub-lists, `/usage`, the `/sessions`
 # browser, the `/model` and `/server` pickers, the `/` dropdown, the approval and ask prompts. The
@@ -1119,6 +1126,7 @@ update-check: true
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
+  glyphs: unicode        # unicode | safe — safe swaps the symbols a terminal font may lack
   show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
   stall-after: 120s      # engine silence before "· quiet" qualifies the status line; 0 = off

@@ -90,6 +90,7 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 	values := map[string]struct{ accepted, refused string }{
 		domain.UIKeySpinner:          {string(domain.SpinnerGlitter), "nope"},
 		domain.UIKeySpinnerColor:     {settingTrue, "maybe"},
+		domain.UIKeyGlyphs:           {string(domain.GlyphsSafe), "ascii"},
 		domain.UIKeyShowScrollbar:    {settingFalse, "maybe"},
 		domain.UIKeyColorScheme:      {"light", "light"},
 		domain.UIKeyStallAfter:       {"2m", "soonish"},
@@ -153,5 +154,69 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 
 	if _, _, _, handled, _ := (model(t, true)).settingsApplyLocal(domain.UIKeyInspector, settingTrue); handled {
 		t.Error("settingsApplyLocal handled ui.inspector; the key is the seam's, not the renderer's")
+	}
+}
+
+// TestGlyphsApplyRepaintsThePaintedBlocks: a `ui.glyphs` edit applied live swaps the theme's set and
+// the blocks already on screen repaint in it — the memoised paints of the outgoing marks are
+// dropped (paintcache.go) and the set is in the frame key, so a transcript painted with `▶` and the
+// `⋯` leader comes back with `►` and `·`, and back again.
+func TestGlyphsApplyRepaintsThePaintedBlocks(t *testing.T) {
+	t.Parallel()
+
+	m := glyphFrameModel(t, domain.GlyphsUnicode, domain.ModeAskBefore)
+	if frame := plain(m.View()); !strings.Contains(frame, "⋯") || !strings.Contains(frame, "▶") {
+		t.Fatalf("the unicode fixture paints no ⋯ leader or ▶ indicator to repaint:\n%s", frame)
+	}
+
+	for _, tc := range []struct {
+		value      string
+		want       glyphSet
+		gone, seen []string
+	}{
+		{string(domain.GlyphsSafe), safeGlyphs, []string{"⋯", "▶", "✦"}, []string{"··", "►", "♦ Tools"}},
+		{string(domain.GlyphsUnicode), defaultGlyphs, []string{"··", "►", "♦"}, []string{"⋯", "▶", "✦ Tools"}},
+	} {
+		applied, _, _, handled, err := m.settingsApplyLocal(domain.UIKeyGlyphs, tc.value)
+		if err != nil || !handled {
+			t.Fatalf("settingsApplyLocal(ui.glyphs, %q) = handled %v, err %v", tc.value, handled, err)
+		}
+		if applied.th.glyphs != tc.want {
+			t.Errorf("ui.glyphs=%s seated %+v; want %+v", tc.value, applied.th.glyphs, tc.want)
+		}
+		applied.settle()
+		frame := plain(applied.View())
+		for _, mark := range tc.gone {
+			if strings.Contains(frame, mark) {
+				t.Errorf("after ui.glyphs=%s the frame still draws %q — a stale paint:\n%s", tc.value, mark, frame)
+			}
+		}
+		for _, mark := range tc.seen {
+			if !strings.Contains(frame, mark) {
+				t.Errorf("after ui.glyphs=%s the frame carries no %q:\n%s", tc.value, mark, frame)
+			}
+		}
+		m = applied
+	}
+}
+
+// TestColorSchemeSwitchKeepsTheGlyphSet: a scheme switch rebuilds the theme (applyColorScheme), and
+// the glyph set is the human's `ui.glyphs`, not the palette's — so `safe` survives the rebuild.
+func TestColorSchemeSwitchKeepsTheGlyphSet(t *testing.T) {
+	t.Parallel()
+
+	opts := testOpts
+	opts.UI.Glyphs = domain.GlyphsSafe
+	opts.Schemes = fakeSchemeHost{resolve: func(string) (scheme.Scheme, []string) { return stubScheme("#123456"), nil }}
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	if m.th.glyphs != safeGlyphs {
+		t.Fatalf("the fixture is not drawn in the safe set: %+v", m.th.glyphs)
+	}
+	applied, _, _, handled, err := m.settingsApplyLocal(domain.UIKeyColorScheme, "light")
+	if err != nil || !handled {
+		t.Fatalf("settingsApplyLocal(ui.color-scheme, light) = handled %v, err %v", handled, err)
+	}
+	if applied.th.glyphs != safeGlyphs {
+		t.Errorf("a scheme switch under ui.glyphs: safe left the theme drawing %+v; want the safe set", applied.th.glyphs)
 	}
 }

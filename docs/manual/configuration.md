@@ -962,7 +962,7 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Nine more keys live under `ui:`. Seven of them change how the screen looks rather than what it
+Ten more keys live under `ui:`. Eight of them change how the screen looks rather than what it
 says; the other two, `ui.inspector` and `ui.stall-after`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
@@ -970,6 +970,22 @@ fallback, because a misspelt spinner is a typo you want told about, not silently
 `ui.spinner-color` is a separate bool, on by default, that runs a slow colour loop over whichever
 glyph the spinner draws; it is deliberately independent of `ui.spinner`, so all six combinations are
 yours to pick.
+
+`ui.glyphs` picks the symbols the screen is drawn with: `unicode` — the default, the look the rest
+of this manual describes — or `safe`, for a terminal whose font lacks some of those symbols and
+draws boxes or blanks in their place (VS Code's integrated terminal with GPU acceleration turned
+off is a common case). `safe` swaps every mark apogee draws for one nearly every font carries, each
+the same width as the one it replaces, so nothing on screen moves: `♦` for the `✦` star, `›` for
+the `❯` prompt, a `·` leader for `⋯`, `►` for the `▶` fold indicator, `√` for `✓`, `»` for the `⧖`
+interjection, `≡` for the `▤` presented document, `@` and `+` for the `⟳` and `⑂` `/sessions`
+tags, `x` for `✗`, the footer's rungs as `□ plan`, `○ ask before`, `√ allow edits` and `►► auto`,
+`[x]` for a ticked option in an open `ask_user` pane, and the status-line spinner — every style —
+as a one-column `| / - \` turn instead of braille. Three things keep their shape: the key hints
+(`⇥ ⇧ ⌃ ⌥ ⌫ ⏎ ␣`); the `[✔]` of the task-list cards and of a recorded `ask_user` exchange, which
+the model reads back and the session record keeps; and the `⋯⋯⋯⋯⋯⋯⋯⋯` rule between the regions of
+an edit's stacked diff, which is drawn into the edit's saved result. A value other than those two is a startup
+error. The switch is live: commit the row in `/settings` and the whole transcript repaints in the
+other set.
 
 `ui.show-scrollbar` — on by default — paints the scroll bar on the transcript and on any popup that
 overflows, and reserves the column it hangs in; off, that column goes back to the text. The flip is
@@ -1011,6 +1027,7 @@ resolve — it warns and falls back to the default palette rather than refusing 
 ui:
   spinner: glitter
   spinner-color: false
+  glyphs: safe
   show-scrollbar: false
   color-scheme: light
 ```

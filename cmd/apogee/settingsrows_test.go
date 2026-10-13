@@ -78,7 +78,7 @@ func fabricatedSettings() config.Options {
 		WorkingWindow:         16384,
 		ResponseReserve:       0.35,
 		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
-		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
+		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, Glyphs: domain.GlyphsSafe, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3},
 		Bypass: true,
@@ -461,6 +461,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"present.host":                       "",
 		"ui.spinner":                         "glitter",
 		"ui.spinner-color":                   "true",
+		"ui.glyphs":                          "safe", // the font-safe set in the fixture, against its unicode default
 		"ui.show-scrollbar":                  "false",
 		"ui.color-scheme":                    "dark",
 		"ui.stall-after":                     "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back

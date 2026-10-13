@@ -115,6 +115,10 @@ field everything below is drawn on, and no glyph, marker, width or row budget is
 are load-bearing rather than decorative and every shipped scheme is tested for them: `skill` and
 `file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones.
 
+**The glyphs this document draws are the default set.** `ui.glyphs: safe` swaps them, cell for cell
+at the same width, for shapes nearly every terminal font carries (`♦` for `✦`, `›` for `❯`, a `·`
+leader for `⋯`, an ASCII spinner) — the full list is in `docs/manual/configuration.md` (`ui.glyphs`).
+
 ---
 
 ## What "height" means: one row budget, and the transcript pays it
