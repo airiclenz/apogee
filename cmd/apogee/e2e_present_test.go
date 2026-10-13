@@ -17,6 +17,8 @@ package main
 // opener is resolved.
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -294,9 +296,15 @@ func servedToken(t *testing.T, url string) string {
 	return ""
 }
 
-// sessionRecordText is everything this home's session store holds, concatenated: the tool results
-// the model was given, the transcript entries, and whatever else was persisted. A claim that some
-// text is NOT in the record is only as good as the amount of record it read, so it reads all of it.
+// sessionRecordText is every record this home's session store holds, concatenated: the tool
+// results the model was given, the transcript entries, and whatever else was persisted. A claim
+// that some text is NOT in the record is only as good as the amount of record it read, so it reads
+// every record.
+//
+// A record is a *.json file, the set the store's own List reads. A save writes a
+// .apogee-session-*.tmp beside it and renames that into place, so a caller polling this while the
+// app saves can list a temp file that is gone by the time it is opened — the temp file is skipped,
+// and a record that vanishes between the listing and the read is no longer in the store to read.
 func sessionRecordText(t *testing.T, home string) string {
 	t.Helper()
 
@@ -307,10 +315,13 @@ func sessionRecordText(t *testing.T, home string) string {
 	}
 	var b strings.Builder
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			t.Fatalf("read the session record %s: %v", entry.Name(), err)
 		}
