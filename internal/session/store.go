@@ -294,7 +294,7 @@ func newID(now time.Time, rand io.Reader) string {
 }
 
 // Save writes rec to <dir>/<rec.Meta.ID>.json atomically (temp file in the same dir +
-// os.Rename), creating the directory if needed and stamping RecordVersion. The same ID
+// renameRecord, rename.go), creating the directory if needed and stamping RecordVersion. The same ID
 // overwrites its own file (update-in-place). Save never mints ids or edits Meta beyond the
 // version stamp — cadence and metadata policy live with the caller. An id that is not a safe
 // filename component is refused with ErrInvalidID: the write must stay inside s.dir even when
@@ -730,7 +730,9 @@ func legacyTime(path string) time.Time {
 
 // atomicWrite writes data to a temp file in path's directory and renames it into place, so
 // a reader never observes a partially-written record and a crash leaves no truncated file.
-// The temp file is removed on any failure and never survives a successful rename.
+// The temp file is removed on any failure and never survives a successful rename. The rename
+// goes through renameRecord, which on Windows waits out a reader holding the record open
+// (rename.go) instead of failing the save on it.
 func atomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".apogee-session-*.tmp")
@@ -752,7 +754,7 @@ func atomicWrite(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("apogee: close temp session file %q: %w", tmpName, err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := renameRecord(tmpName, path); err != nil {
 		return fmt.Errorf("apogee: rename session file into %q: %w", path, err)
 	}
 	return nil

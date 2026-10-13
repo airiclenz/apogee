@@ -100,7 +100,7 @@ Closes the rest of `waitquiet-readiness-proxy` and all of `e2e-unwaited-record-r
 **Closes:** waitquiet-readiness-proxy; e2e-unwaited-record-reads
 **Commit:** `test(e2e): wait on the record, the idle prompt or the armed pane, not a quiet screen`
 
-## 4. Session record rename survives a Windows sharing violation
+## 4. Session record rename survives a Windows sharing violation — ✅ DONE (2026-10-13)
 
 **What:**
 **Goal:** a session save on Windows whose rename over the record fails with a sharing violation or access-denied (a reader holding the record open without FILE_SHARE_DELETE) is retried with short backoff for a bounded total time before the error surfaces; other errors and other platforms surface at once.
