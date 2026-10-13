@@ -532,11 +532,6 @@ func awaitPrompt(drv driven, text string) {
 	}, tuitest.Awaiting("the prompt to appear in the prompt box"))
 }
 
-// escStopArmedHint is the opening of every wording of the armed-esc hint (internal/tui's
-// escStopHintPlain and the fan-out forms that add what a stop would discard), so waiting for it
-// recognises an armed gesture whatever room the status line had to say it in.
-const escStopArmedHint = "press esc again to cancel"
-
 // idlePromptHead opens the prompt box's placeholder while nothing is in flight, and
 // runningPromptHead the one it wears while a worker does (internal/tui's idlePlaceholder and
 // runningPlaceholder). Only the HEAD of each is named: the box truncates its legend to the room it
@@ -547,58 +542,29 @@ const (
 	runningPromptHead = "queue a message"
 )
 
-// stopRunAttempts bounds how many times [stopRun] re-presses before it calls the run stuck. Three
-// presses is a retry rather than a loop: by the second attempt the screen has already shown the
-// hint once, so a run still going after that is a defect and not a slow box.
-const stopRunAttempts = 3
-
-// stopRunRetryBudget is how long a non-final [stopRun] attempt waits for the fold before it presses
-// again. It is short because running it out is not a failure — there is another press to try — and
-// the last attempt is the one that carries the generous backstop.
-var stopRunRetryBudget = testtime.Budget(5 * time.Second)
-
 // stopRun performs the esc×2 cancel gesture and does not return until the worker has folded.
 //
-// The gesture is a pair, and internal/tui measures the pair's window (escStopWindow, one second)
-// when each press is FOLDED, not when it is sent: two presses the kit puts 70 ms apart on the wire
-// (tuitest's escapeGap) can be folded a second or more apart whenever the fold queue is backed up
-// — mid-reply, with the rest of the parallel suite on the same cores — and the second press then
-// RE-ARMS the gesture instead of confirming it. The run carries on, and the test waits for an idle
-// screen that is never coming: that is how TestE2EStreamCancelKeepsWhatArrived timed out against
-// the 400-line fixture with line 342 of 400 painted and the prompt box still reading "esc×2 cancel".
-//
-// So the step does what the human it stands for does: press, WATCH FOR THE HINT the arming puts on
-// the status line, press again — and if the run is still going, press again. Waiting on the hint is
-// what makes the second press open its window from a fold that has already happened; the retry is
-// what carries the step over the fold latency that is left.
+// The gesture is a pair: the first press arms it and schedules internal/tui's reset tick
+// (escStopWindow, one second, from that press's fold), and a second press folded before the tick
+// stops the run, however long the fold queue held it (ADR 0099). The kit puts the two presses
+// tuitest's escapeGap (200 ms) apart on the wire, so the second is queued long before the tick can
+// fire and always folds ahead of it — one gesture is enough, as it is for the human it stands for.
+// A run still in flight after it is a defect, and the test fails with the frame that shows it.
 func stopRun(t *testing.T, drv driven) {
 	t.Helper()
-	for attempt := 1; attempt <= stopRunAttempts; attempt++ {
-		drv.Press(tuitest.Esc)
-		drv.WaitText(escStopArmedHint)
-		drv.Press(tuitest.Esc)
-		// Only the LAST attempt gets the full backstop. A press that re-armed instead of
-		// confirming is the case the retry exists for, and sitting out a generous deadline
-		// before trying again would spend a minute on the very path the retry is meant to be
-		// quick about; the retry itself is cheap, so the earlier attempts wait a short while
-		// and press on.
-		budget := stopRunRetryBudget
-		if attempt == stopRunAttempts {
-			budget = tuitest.DefaultTimeout
-		}
-		if awaitIdlePrompt(drv, budget) {
-			return
-		}
+	drv.Press(tuitest.Esc)
+	drv.Press(tuitest.Esc)
+	if !awaitIdlePrompt(drv, tuitest.DefaultTimeout) {
+		t.Fatalf("the run was still in flight after the esc×2 cancel gesture; the last frame is:\n%s",
+			drv.Frame())
 	}
-	t.Fatalf("the run was still in flight after %d esc×2 cancel gestures; the last frame is:\n%s",
-		stopRunAttempts, drv.Frame())
 }
 
 // awaitIdlePrompt reports whether the prompt box went back to its idle placeholder inside budget.
-// It polls rather than calling a tuitest wait because a wait that has not landed is not a failure
-// here — [stopRun] has another press to try — and only the last attempt may fail the test. It reads
-// INSIDE the prompt box for [submit]'s reason: the transcript above it can hold anything. budget is
-// an already-budgeted value ([stopRunRetryBudget] or [tuitest.DefaultTimeout]), used as passed.
+// It polls rather than calling a tuitest wait so [stopRun] can fail with its own account of the
+// gesture and the frame it left. It reads INSIDE the prompt box for [submit]'s reason: the
+// transcript above it can hold anything. budget is an already-budgeted value
+// ([tuitest.DefaultTimeout]), used as passed.
 func awaitIdlePrompt(drv driven, budget time.Duration) bool {
 	expired := testtime.Expiry(budget)
 	for !expired() {

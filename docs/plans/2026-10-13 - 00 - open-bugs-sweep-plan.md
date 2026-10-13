@@ -64,7 +64,10 @@ Fixes `esc-disarm-fold-time`: the window was measured at fold time, so a loaded 
 **Closes:** esc-disarm-fold-time
 **Commit:** `fix(tui): double-press esc and ctrl+c disarm only on their reset tick`
 
-## 2. stopRun presses esc×2 once
+## 2. stopRun presses esc×2 once — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): stopRun no longer waits for the armed hint between its two presses (the plan's "presses esc, esc, then waits for the idle prompt once"): the driver's escapeGap queues the second press long before the first fold's one-second reset tick can fire, so it always folds ahead of it; escStopArmedHint, whose only reader was that wait, is removed with it.
+NOTES (2026-10-13): awaitIdlePrompt is kept (stopRun Fatalfs with the frame when awaitIdlePrompt(drv, tuitest.DefaultTimeout) is false); its doc comment is rewritten to drop [stopRunRetryBudget] and "another press to try". TestJudgeHostileRowsReadAsOneRow skips without its live-judge endpoint, so wrappedPaneFrame's stopRun path ran only under the other seven.
 
 **What:**
 Test-only follow-up to item 1. `stopRun` (`cmd/apogee/e2e_smoke_test.go`) presses esc, esc, then waits for the idle prompt once; drop `stopRunAttempts` and `stopRunRetryBudget` and the retry loop. Fix the stale "70 ms" in its doc comment (the driver's `escapeGap` in `internal/tuitest/driver.go` is the authority). Depends on item 1.
