@@ -1,10 +1,12 @@
 ---
 title: e2e tests type their prompts key by key where the claim is not about typing
-status: open
+status: done
 type: task
 priority: 4
 plan: 2026-10-12 - 02 - test-suite-stability-plan
 created: 2026-10-12T12:28:48Z
+closed: 2026-10-13T05:10:15Z
+reason: Resolved by plan '2026-10-12 - 02 - test-suite-stability-plan' (item 27-28), archived at c6b5e859.
 ---
 
 Driven e2e tests enter their prompts one key at a time even when the test's claim has nothing to do with typing, which costs wall time in `make test`.

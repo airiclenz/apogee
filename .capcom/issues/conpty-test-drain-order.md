@@ -1,10 +1,12 @@
 ---
 title: TestStartPseudoConsoleRunsTheCommand closes the ConPTY before draining it
-status: open
+status: done
 type: bug
 priority: 1
 plan: 2026-10-12 - 02 - test-suite-stability-plan
 created: 2026-10-12T18:11:06Z
+closed: 2026-10-13T05:10:14Z
+reason: Resolved by plan '2026-10-12 - 02 - test-suite-stability-plan' (item 1), archived at c6b5e859.
 ---
 
 The test calls pty.Close() before its drain reaches EOF; CloseOutput cancels the in-flight read and loses conhost's final frame. Failed CI on 7f22d7df (2026-10-12). Review §3.
