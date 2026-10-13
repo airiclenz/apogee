@@ -1,9 +1,11 @@
 ---
 title: Move CI's Linux jobs from ubuntu-24.04 to ubuntu-26.04
-status: open
+status: done
 type: task
 priority: 4
 created: 2026-10-13T18:14:13Z
+closed: 2026-10-13T20:18:09Z
+reason: "CI run #632 (38460498658) green on ubuntu-26.04 (image 20260927.149.1, kernel 7.0, landlock ABI 8), both landlock steps passed; lanes sized off nproc as before."
 ---
 
 CI's Linux jobs (`.github/workflows/ci.yml`, `.github/workflows/tag-on-version-bump.yml`) are pinned to `ubuntu-24.04` so GitHub's move of `ubuntu-latest` to Ubuntu 26.04 (by 2026-10-19) cannot change the runner under a push that changed nothing else. The pin is a holding position, not a destination: 24.04 images will eventually be retired, and the `check` job's landlock steps (`TestLandlockProbeNetwork` with `APOGEE_REQUIRE_LANDLOCK_NET=1`, the T-11 `probe` truncate-residual check) depend on the runner's kernel and landlock ABI, so the move should be proved by a run of its own.
