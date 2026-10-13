@@ -571,7 +571,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 	if count > 0 {
 		label := th.toolLabel.Render(groupLabelOf(members)) + " " +
 			th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, count))
-		out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetNone)
+		out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), targetNone)
 	}
 	room := toolRowCells(th, width)
 	for _, m := range members {
@@ -779,10 +779,10 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 			return lines, hides
 		}
 		row := leaderRow(th, tv, marker, room, expanded, noRemainder)
-		return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
+		return []string{indicatorRow(th, row, width, th.glyphs.collapsed)}, true
 	}
 	row := leaderRow(th, tv, marker, room, false, noRemainder)
-	return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
+	return []string{indicatorRow(th, row, width, th.glyphs.collapsed)}, true
 }
 
 // collapsedSubAgentView is the whole of what a framed delegation shows of itself, wherever it is

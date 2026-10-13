@@ -683,7 +683,7 @@ func TestAttachedImagesRideTheSubmitAndClearTheLine(t *testing.T) {
 			}
 			wantRow := "attached: shot.png (2.0 KiB)"
 			if text == "" {
-				wantRow = glyphUser + " " + wantRow
+				wantRow = defaultGlyphs.user + " " + wantRow
 			}
 			if view := plain(m.View()); !strings.Contains(view, wantRow) || !strings.Contains(view, text) {
 				t.Errorf("view after the send lacks the sent block's %q row beside %q:\n%s", wantRow, text, view)

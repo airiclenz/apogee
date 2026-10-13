@@ -3790,7 +3790,7 @@ func (m Model) footerContent(w int) string {
 	markerStyle := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode))
 	mode := markerStyle.Render(layout.mode)
 	if word := confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()); word == unconfinedWord {
-		mode = markerStyle.Render(modeMarker(m.opts.Mode)) +
+		mode = markerStyle.Render(modeMarker(m.th, m.opts.Mode)) +
 			m.th.footerText.Foreground(m.th.errorFg).Render(" · "+word)
 	}
 	mode += m.th.footerText.Render(bodyIndent)
@@ -3829,7 +3829,7 @@ func (m Model) footerLeft(info, offline string) string {
 func (m Model) footerRow(w int) footerLayout {
 	in := m.footerLeftText()
 	in.mode = footerModeText(
-		modeMarker(m.opts.Mode),
+		modeMarker(m.th, m.opts.Mode),
 		confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()),
 	)
 	in.width, in.margin, in.measure = w, m.th.measure.Width(bodyIndent), m.th.measure
@@ -3860,9 +3860,10 @@ func (m Model) footerRow(w int) footerLayout {
 func (m Model) footerLeftText() footerInput {
 	in := footerInput{
 		host:    stripEscapes(hostDisplay(m.opts)),
-		model:   footerRun(m.upstreamSegments()...),
+		model:   footerRun(m.th.glyphs, m.upstreamSegments()...),
 		workdir: m.workdir,
 		spend:   spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency()),
+		glyphs:  m.th.glyphs,
 	}
 	override, profile := m.eng.ThinkingEffort()
 	support := m.effortSupport()
@@ -4018,16 +4019,16 @@ func modeLabel(m domain.Mode) string {
 // It is display-only and deliberately separate from modeLabel: the label is also read aloud in
 // sentences (the confinement overlay's "the current mode is ask before"), where a glyph would be
 // noise. Only the footer's marker leads with the symbol.
-func modeSymbol(m domain.Mode) string {
+func modeSymbol(th theme, m domain.Mode) string {
 	switch m {
 	case domain.ModePlan:
-		return glyphModePlan
+		return th.glyphs.modePlan
 	case domain.ModeAskBefore:
-		return glyphModeAskBefore
+		return th.glyphs.modeAskBefore
 	case domain.ModeAllowEdits:
-		return glyphModeAllowEdits
+		return th.glyphs.modeAllowEdits
 	case domain.ModeAuto:
-		return glyphModeAuto
+		return th.glyphs.modeAuto
 	default:
 		return ""
 	}
@@ -4038,8 +4039,8 @@ func modeSymbol(m domain.Mode) string {
 // halves are rendered under a SINGLE style: the glyph carries the mode's colour because it is
 // part of the same styled run as the word, not because it was coloured to match (footerContent).
 // A mode with no symbol (off the ladder) renders its label alone, with no leading space.
-func modeMarker(m domain.Mode) string {
-	if sym := modeSymbol(m); sym != "" {
+func modeMarker(th theme, m domain.Mode) string {
+	if sym := modeSymbol(th, m); sym != "" {
 		return sym + " " + modeLabel(m)
 	}
 	return modeLabel(m)

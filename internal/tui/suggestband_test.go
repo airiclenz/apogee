@@ -286,7 +286,7 @@ func TestSkillHintRowIsPaintedLikeTheBand(t *testing.T) {
 			t.Errorf("the hint row is more than one line:\n%q", ansi.Strip(row))
 		}
 		if width == 80 {
-			want := "  " + glyphSkill + " skills: /security-audit · /code-audit · /handoff   tab to pick"
+			want := "  " + defaultGlyphs.skill + " skills: /security-audit · /code-audit · /handoff   tab to pick"
 			if got := strings.TrimRight(ansi.Strip(row), " "); got != want {
 				t.Errorf("hint row = %q, want %q", got, want)
 			}

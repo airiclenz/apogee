@@ -39,7 +39,7 @@ func readCall(tr *transcript, id, path string, from, to, depth int) {
 
 // groupMemberLine composes a collapsed member row the way the painter lays it out: the row's own
 // text, then the ▶ flush against the block's right edge.
-func groupMemberLine(text string) string { return leaderEdgeRow(text, glyphCollapsed) }
+func groupMemberLine(text string) string { return leaderEdgeRow(text, defaultGlyphs.collapsed) }
 
 // leaderEdgeRow is that arithmetic for the indicator a LEADER row carries (leaderRow, render.go) —
 // the ▶ of a collapsed one, the ▼ an open one wears on its first row. The field between the outcome

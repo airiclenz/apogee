@@ -799,7 +799,7 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 func assertTaskListPaint(t *testing.T, tr *transcript) {
 	t.Helper()
 	collapsed := renderPlain(tr, 80)
-	if want := "✦ Task List (1/3) " + glyphCollapsed; collapsed != want {
+	if want := "✦ Task List (1/3) " + defaultGlyphs.collapsed; collapsed != want {
 		t.Errorf("task_list paints collapsed:\n%s\nwant its counted header alone:\n%s", collapsed, want)
 	}
 	if !tr.toggleExpanded(0) {

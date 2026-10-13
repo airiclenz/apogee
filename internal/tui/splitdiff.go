@@ -220,7 +220,7 @@ func splitCodeCells(width, gutter int) int {
 func (r splitRow) paint(th theme, gutter, code int) []string {
 	pane := gutter + splitMarkerCells + code
 	if r.rule {
-		return []string{th.toolDetail.Render(strings.Repeat(glyphLeaderDot, pane*2+splitDividerCells))}
+		return []string{th.toolDetail.Render(strings.Repeat(th.glyphs.leaderDot, pane*2+splitDividerCells))}
 	}
 	left := r.left.paint(th, gutter, code)
 	right := r.right.paint(th, gutter, code)

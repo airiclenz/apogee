@@ -234,6 +234,13 @@ const askQuestionFloor = 3
 // that lands as a blank or a double-width tofu there; ✔ (U+2714) is a one-cell text-presentation
 // glyph that stays one cell in every width table. They are the same width as each other, so
 // ticking a row repaints three cells and moves nothing.
+//
+// They are the RECORDED shapes: the task-list row markers (taskListDoneMarker) and the transcript's
+// record of an asked question (askExchangeLines) are spelled from them, because both are
+// model-facing or persisted and must not follow the display. The LIVE pane draws its ticked row
+// from the theme's glyph set instead (glyphSet.askChecked, askChoiceRows), which the default set
+// spells as askCheckedMarker — so the live pane and the record agree under it, and only the live
+// pane moves when a theme carries another set.
 const (
 	askCheckedMarker   = "[✔]"
 	askUncheckedMarker = "[ ]"
@@ -250,7 +257,7 @@ const (
 // and sized to the offering for a multi-select one (the askReqMsg fold), and a row it does not reach
 // is drawn unticked — the rendering states what the state says, and never panics over what it does
 // not.
-func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
+func askChoiceRows(th theme, labels []string, multi bool, checked []bool) []popupRow {
 	if !multi {
 		return singleCellRows(labels)
 	}
@@ -258,7 +265,7 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 	for i, label := range labels {
 		marker := askUncheckedMarker
 		if i < len(checked) && checked[i] {
-			marker = askCheckedMarker
+			marker = th.glyphs.askChecked
 		}
 		rows[i] = popupRow{marker, label}
 	}
@@ -396,7 +403,7 @@ func (m Model) askPromptSpec(req domain.AskRequest) (popupSpec, bool) {
 	// rather than a branch of its own restating the count, which is how booking and painting stay in
 	// step: a pane that over-books spends a line of the question on a blank it never draws, and one
 	// that under-books draws a blank out of the body's lines.
-	rows := askChoiceRows(stripEscapesAll(req.Choices), req.MultiSelect, m.askChecked)
+	rows := askChoiceRows(m.th, stripEscapesAll(req.Choices), req.MultiSelect, m.askChecked)
 	heights := popupWrappedRowHeights(m.th, rows, m.width)
 	askPad := popupRowPadLines(len(rows) > 0, askRowStyle.padBelow)
 	wanted := popupRowBlockLines(heights, askRowStyle.gapLines(), askPad)

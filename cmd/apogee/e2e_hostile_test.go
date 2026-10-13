@@ -666,7 +666,7 @@ func footerRowIndex(f tuitest.Frame) int {
 }
 
 // glyphFooterSeparator is the ✦ the footer sets its segments apart with (internal/tui/theme.go's
-// glyphAssistant, which the status line reuses).
+// default glyphSet.assistant, which the status line reuses).
 const glyphFooterSeparator = "✦"
 
 // assertSkillSectionRows counts the rows one /skills section AUTHORED, and compares them with the

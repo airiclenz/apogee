@@ -301,7 +301,7 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 				t.Fatalf("the collapsed block paints %d rows, want its header and one branch:\n%s",
 					len(lines), strings.Join(lines, "\n"))
 			}
-			if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, glyphCollapsed)) {
+			if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, defaultGlyphs.collapsed)) {
 				t.Errorf("collapsed branch = %q; want its slot to end in the count %q", lines[1], tc.wantCount)
 			}
 		})
@@ -382,7 +382,7 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 				if lines := rows(); len(lines) != 2 {
 					t.Errorf("%s paint stands %d rows, want its header and one branch:\n%s",
 						when, len(lines), strings.Join(lines, "\n"))
-				} else if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, glyphCollapsed)) {
+				} else if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, defaultGlyphs.collapsed)) {
 					t.Errorf("%s branch = %q; want its slot to end in the count %q", when, lines[1], tc.wantCount)
 				}
 			}
@@ -621,9 +621,9 @@ func TestCollapsedBlockStandsAtMostTwoRows(t *testing.T) {
 	if want := "✦ Terminal"; lines[0] != want {
 		t.Errorf("header = %q, want %q — the indicator rides the branch row now", lines[0], want)
 	}
-	if !strings.HasSuffix(lines[1], glyphCollapsed) || !strings.Contains(lines[1], clipTail) {
+	if !strings.HasSuffix(lines[1], defaultGlyphs.collapsed) || !strings.Contains(lines[1], clipTail) {
 		t.Errorf("branch row = %q, want the target cut short with %q and the row wearing %q",
-			lines[1], clipTail, glyphCollapsed)
+			lines[1], clipTail, defaultGlyphs.collapsed)
 	}
 	if want := "+3 more lines"; !strings.Contains(lines[1], want) {
 		t.Errorf("branch row = %q, want its slot to count the hidden body with %q", lines[1], want)
@@ -659,7 +659,7 @@ func TestClippedTargetAloneIsNoToggleTarget(t *testing.T) {
 			len(collapsed), collapsed[len(collapsed)-1], strings.Join(collapsed, "\n"))
 	}
 	for i, ln := range collapsed {
-		if strings.HasSuffix(ln, glyphCollapsed) || strings.HasSuffix(ln, glyphExpanded) {
+		if strings.HasSuffix(ln, defaultGlyphs.collapsed) || strings.HasSuffix(ln, glyphExpanded) {
 			t.Errorf("row %d = %q wears an indicator; a cut target reveals nothing", i, ln)
 		}
 	}

@@ -1440,7 +1440,7 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 	if !onRow {
 		return m, nil, true // the pane's chrome: claimed, with no row to take
 	}
-	rows, _ := m.sessionBrowser.unfilteredRows(m.opts.Workspace, time.Now())
+	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
 	count := len(m.sessionBrowser.view(rows).rows)
 	if count == 0 {
 		return m, nil, true // the empty-workspace note is prose, not a choice: no row to name

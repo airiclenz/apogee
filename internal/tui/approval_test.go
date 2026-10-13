@@ -382,7 +382,7 @@ func TestModelApprovalForcedPaneKeepsADecisionRowAtTheFloor(t *testing.T) {
 			if !strings.Contains(rows[0], "Approve terminal?") {
 				t.Errorf("top border does not carry the tool name the decision turns on:\n%s", flat)
 			}
-			if !strings.Contains(flat, glyphUser+" Allow") {
+			if !strings.Contains(flat, defaultGlyphs.user+" Allow") {
 				t.Errorf("no decision row is painted — the pane cannot be answered from the screen:\n%s", flat)
 			}
 			if got := strings.Contains(flat, forcedApprovalDisclosure); got != tc.disclosed {

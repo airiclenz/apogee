@@ -1942,7 +1942,7 @@ func TestSettingsTaskListOpenAppliesToEveryCard(t *testing.T) {
 		t.Errorf("value cell = %q, want %q", got, want)
 	}
 	closed := step(t, m, keyEsc())
-	if got, want := taskListHeaders(closed), []string{"✦ Task List (1/3) " + glyphCollapsed, "✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+	if got, want := taskListHeaders(closed), []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed, "✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 		t.Errorf("the next frame paints headers %q, want both folded %q", got, want)
 	}
 

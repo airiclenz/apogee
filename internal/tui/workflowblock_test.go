@@ -276,10 +276,10 @@ func stageRowIn(painted, name string) string {
 
 // stageSlot is a painted stage row's outcome slot and whether the row wears ▶ and ✓.
 func stageSlot(row string) (slot string, opens, done bool) {
-	opens = strings.Contains(row, glyphCollapsed)
-	done = strings.Contains(row, " "+glyphDone+" ")
-	rest := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(row), glyphCollapsed))
-	_, slot, _ = strings.Cut(rest, glyphLeaderDot+" ")
+	opens = strings.Contains(row, defaultGlyphs.collapsed)
+	done = strings.Contains(row, " "+defaultGlyphs.done+" ")
+	rest := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(row), defaultGlyphs.collapsed))
+	_, slot, _ = strings.Cut(rest, defaultGlyphs.leaderDot+" ")
 	return slot, opens, done
 }
 
@@ -1280,9 +1280,9 @@ func assertItemRowsOnly(t *testing.T, painted string, labels ...string) {
 	lines := strings.Split(painted, "\n")
 	for _, label := range labels {
 		if !slices.ContainsFunc(lines, func(ln string) bool {
-			return strings.Contains(ln, " "+label+" ") && strings.Contains(ln, glyphCollapsed)
+			return strings.Contains(ln, " "+label+" ") && strings.Contains(ln, defaultGlyphs.collapsed)
 		}) {
-			t.Errorf("item %q paints no row wearing %s:\n%s", label, glyphCollapsed, painted)
+			t.Errorf("item %q paints no row wearing %s:\n%s", label, defaultGlyphs.collapsed, painted)
 		}
 	}
 }
@@ -1302,8 +1302,8 @@ func assertStageRowsOnly(t *testing.T, painted string, stages ...string) {
 		}
 	}
 	for _, stage := range stages {
-		if row := stageRowIn(painted, stage); !strings.Contains(row, glyphCollapsed) {
-			t.Errorf("stage %q paints no row wearing %s:\n%s", stage, glyphCollapsed, painted)
+		if row := stageRowIn(painted, stage); !strings.Contains(row, defaultGlyphs.collapsed) {
+			t.Errorf("stage %q paints no row wearing %s:\n%s", stage, defaultGlyphs.collapsed, painted)
 		}
 	}
 }
@@ -1423,7 +1423,7 @@ func TestARetriedItemKeepsOneRow(t *testing.T) {
 			e.done, e.tool.stat.spell(), e.tool.Summary.Text)
 	}
 	painted := plainRender(tr)
-	if n := strings.Count(painted, glyphCollapsed); n != 1 {
+	if n := strings.Count(painted, defaultGlyphs.collapsed); n != 1 {
 		t.Errorf("the retried item paints %d rows, want one:\n%s", n, painted)
 	}
 	if m = enterOnLastBlock(t, m); m.viewedRun().id != "run.2" {
@@ -1494,7 +1494,7 @@ func TestSubAgentBesideAFanOutKeepsItsOwnHead(t *testing.T) {
 // workflowPaint is the plain transcript from the workflow block's header on — what the block paints,
 // without the start-up box a fresh Model opens with.
 func workflowPaint(m Model) string {
-	_, block, _ := strings.Cut(plainTranscript(m), glyphAssistant+" "+workflowTitle)
+	_, block, _ := strings.Cut(plainTranscript(m), defaultGlyphs.assistant+" "+workflowTitle)
 	return block
 }
 
@@ -1663,8 +1663,8 @@ func TestWorkflowStarBlinksWhileRunning(t *testing.T) {
 	if got := workflowHeaderCell(t, v, true); got != " " {
 		t.Errorf("running block at the blinked-out phase leads with %q, want a bare cell", got)
 	}
-	if got := workflowHeaderCell(t, v, false); got != glyphAssistant {
-		t.Errorf("running block at the settled phase leads with %q, want %q", got, glyphAssistant)
+	if got := workflowHeaderCell(t, v, false); got != defaultGlyphs.assistant {
+		t.Errorf("running block at the settled phase leads with %q, want %q", got, defaultGlyphs.assistant)
 	}
 }
 
@@ -1683,8 +1683,8 @@ func TestWorkflowStarSteadyOnceEnded(t *testing.T) {
 	}
 	for name, v := range cases {
 		for _, blink := range []bool{false, true} {
-			if got := workflowHeaderCell(t, v, blink); got != glyphAssistant {
-				t.Errorf("%s block at blink=%v leads with %q, want a steady %q", name, blink, got, glyphAssistant)
+			if got := workflowHeaderCell(t, v, blink); got != defaultGlyphs.assistant {
+				t.Errorf("%s block at blink=%v leads with %q, want a steady %q", name, blink, got, defaultGlyphs.assistant)
 			}
 		}
 	}
@@ -1699,8 +1699,8 @@ func TestWorkflowStarBlinksWhileWaitingOnAsk(t *testing.T) {
 	if got := workflowHeaderCell(t, v, true); got != " " {
 		t.Errorf("waiting block at the blinked-out phase leads with %q, want a bare cell", got)
 	}
-	if got := workflowHeaderCell(t, v, false); got != glyphAssistant {
-		t.Errorf("waiting block at the settled phase leads with %q, want %q", got, glyphAssistant)
+	if got := workflowHeaderCell(t, v, false); got != defaultGlyphs.assistant {
+		t.Errorf("waiting block at the settled phase leads with %q, want %q", got, defaultGlyphs.assistant)
 	}
 }
 

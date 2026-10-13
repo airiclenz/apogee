@@ -81,7 +81,7 @@ func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
 	t.Parallel()
 
 	m := footerFactsModel(t)
-	marker := footerModeText(modeMarker(domain.ModeAuto), confinedWord)
+	marker := footerModeText(modeMarker(newTheme(scheme.Default()), domain.ModeAuto), confinedWord)
 
 	for _, tc := range []struct {
 		width int
@@ -103,8 +103,8 @@ func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
 			if left != tc.want {
 				t.Errorf("footer's left run = %q, want %q", left, tc.want)
 			}
-			if strings.HasPrefix(left, glyphAssistant) || strings.HasSuffix(left, glyphAssistant) {
-				t.Errorf("footer's left run = %q, want no dangling %q", left, glyphAssistant)
+			if strings.HasPrefix(left, defaultGlyphs.assistant) || strings.HasSuffix(left, defaultGlyphs.assistant) {
+				t.Errorf("footer's left run = %q, want no dangling %q", left, defaultGlyphs.assistant)
 			}
 		})
 	}
@@ -115,7 +115,7 @@ func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
 func footerLeftRun(t *testing.T, m Model, w int) string {
 	t.Helper()
 
-	marker := footerModeText(modeMarker(domain.ModeAuto), confinedWord)
+	marker := footerModeText(modeMarker(newTheme(scheme.Default()), domain.ModeAuto), confinedWord)
 	flat := ansiPattern.ReplaceAllString(m.footerContent(w), "")
 	if !strings.HasSuffix(flat, marker+bodyIndent) {
 		t.Fatalf("footer = %q, want it to end %q", flat, marker+bodyIndent)
@@ -235,7 +235,7 @@ func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 			footer := m.footerContent(80)
 			want := tc.symbol + " " + tc.label
 
-			if got := modeMarker(tc.mode); got != want {
+			if got := modeMarker(newTheme(scheme.Default()), tc.mode); got != want {
 				t.Errorf("modeMarker(%q) = %q, want %q", tc.mode, got, want)
 			}
 			// The marker still ends the line bodyIndent short of the edge — the symbol joined the
@@ -257,10 +257,10 @@ func TestModeMarkerFallsBackToTheWordAlone(t *testing.T) {
 	t.Parallel()
 
 	off := domain.Mode("hands-off")
-	if got := modeSymbol(off); got != "" {
+	if got := modeSymbol(newTheme(scheme.Default()), off); got != "" {
 		t.Errorf("modeSymbol(%q) = %q, want no glyph for an off-ladder mode", off, got)
 	}
-	if got, want := modeMarker(off), string(off); got != want {
+	if got, want := modeMarker(newTheme(scheme.Default()), off), string(off); got != want {
 		t.Errorf("modeMarker(%q) = %q, want %q", off, got, want)
 	}
 }

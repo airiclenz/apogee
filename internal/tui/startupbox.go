@@ -34,7 +34,7 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 	// own.
 	v.Path, v.Location = expandTabs(v.Path), expandTabs(v.Location)
 
-	marker := glyphPresented + " "
+	marker := th.glyphs.presented + " "
 
 	var out []string
 	if v.Title != "" {

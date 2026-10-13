@@ -206,7 +206,7 @@
 // reads, and the ids ride out as [domain.UserInput.SkillIDs] on a submitted message and on a staged
 // interjection alike. Like @file, *resolution* (turning an ID into the prepended skill body) stays
 // in the agent loop, through Config.Skills. The merged "/" menu offers the catalog beside the
-// commands (marked with glyphSkill, and accepting one writes its token), with commands SHADOWING a
+// commands (marked with the theme's skill glyph, and accepting one writes its token), with commands SHADOWING a
 // skill of the same id — the collision is settled menu-side, so the parse layer never has to know
 // skills exist. A shadowed skill stays invocable by typing its "/id" token anywhere but at the head
 // of the line, which is the only position the whole-input command rule claims.

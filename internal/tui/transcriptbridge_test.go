@@ -593,8 +593,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 		want := strings.Join([]string{
 			"✦ Tools (2 calls) " + glyphExpanded,
 			leaderEdgeRow("  ┕ Ask User (2) ⋯ 2 errors", glyphExpanded),
-			"  │ ┝ Ship it? ⋯ " + errWord + " " + glyphCollapsed,
-			"  │ ┕ Tag it? ⋯ " + errWord + " " + glyphCollapsed,
+			"  │ ┝ Ship it? ⋯ " + errWord + " " + defaultGlyphs.collapsed,
+			"  │ ┕ Tag it? ⋯ " + errWord + " " + defaultGlyphs.collapsed,
 		}, "\n")
 		if out := renderPlain(replayed, 80); out != want {
 			t.Errorf("replayed failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
@@ -2274,7 +2274,7 @@ func TestTranscriptCodecReplaysANoReportDelegationWithoutACheck(t *testing.T) {
 			if !strings.Contains(painted, slot) {
 				t.Errorf("no replayed row reads %q:\n%s", slot, painted)
 			}
-			if strings.Contains(painted, glyphDone) {
+			if strings.Contains(painted, defaultGlyphs.done) {
 				t.Errorf("the replayed run wears the done ✓:\n%s", painted)
 			}
 			if live := renderPlain(tr, width); live != painted {

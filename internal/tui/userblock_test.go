@@ -30,7 +30,7 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: pm.method}
 
-			paint := renderUserBlock(th, glyphUser+" ", paintInput{text: text, entryState: entryState{expanded: true}}, width)
+			paint := renderUserBlock(th, defaultGlyphs.user+" ", paintInput{text: text, entryState: entryState{expanded: true}}, width)
 			if len(paint.lines) == 0 {
 				t.Fatalf("the user block rendered nothing at all")
 			}
@@ -303,7 +303,7 @@ func TestPromptWithSkillsPaintsNoChipRow(t *testing.T) {
 	}
 	splitMarker(t, rows[4], promptSeeLess, width)
 	for i, row := range rows {
-		if strings.Contains(row, glyphSkill) {
+		if strings.Contains(row, defaultGlyphs.skill) {
 			t.Errorf("row %d still badges the skill: %q", i, row)
 		}
 	}
@@ -376,7 +376,7 @@ func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
 	if got := accentRuns(rows[1], accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review"}) {
 		t.Errorf("the accent covers %q; want the token alone", got)
 	}
-	if got := strip(rows[1]); !strings.HasPrefix(got, glyphUser+" "+text) {
+	if got := strip(rows[1]); !strings.HasPrefix(got, defaultGlyphs.user+" "+text) {
 		t.Errorf("the block's own text changed under the accent: %q", got)
 	}
 }
@@ -507,7 +507,7 @@ func TestUserBlockPaintsHalfRowPadding(t *testing.T) {
 	th := newTheme(scheme.Default())
 	in := paintInput{text: "alpha\nbravo"}
 
-	rows := renderUserBlock(th, glyphUser+" ", in, width).lines
+	rows := renderUserBlock(th, defaultGlyphs.user+" ", in, width).lines
 	if len(rows) != 4 {
 		t.Fatalf("the block painted %d rows; want its two body rows between two half rows:\n%s",
 			len(rows), strip(strings.Join(rows, "\n")))
@@ -532,7 +532,7 @@ func TestUserBlockPaintsHalfRowPadding(t *testing.T) {
 
 	unpadded := th
 	unpadded.padPrompts = false
-	body := renderUserBlock(unpadded, glyphUser+" ", in, width).lines
+	body := renderUserBlock(unpadded, defaultGlyphs.user+" ", in, width).lines
 	if !reflect.DeepEqual(rows[1:len(rows)-1], body) {
 		t.Errorf("the padding changed the body rows:\n--- got ---\n%s\n--- want ---\n%s",
 			strip(strings.Join(rows[1:len(rows)-1], "\n")), strip(strings.Join(body, "\n")))
@@ -559,7 +559,7 @@ func TestUserBlockPaddingCarriesTheBlockMark(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			marks := renderUserBlock(th, glyphUser+" ", paintInput{text: tc.text}, 40).targets
+			marks := renderUserBlock(th, defaultGlyphs.user+" ", paintInput{text: tc.text}, 40).targets
 
 			for i, mark := range marks {
 				if mark.kind != tc.want {

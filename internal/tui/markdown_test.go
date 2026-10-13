@@ -432,14 +432,14 @@ func TestWithMarker(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	got := withMarker(th, glyphAssistant+" ", []string{"first", "second"})
-	if got[0] != glyphAssistant+" first" {
+	got := withMarker(th, defaultGlyphs.assistant+" ", []string{"first", "second"})
+	if got[0] != defaultGlyphs.assistant+" first" {
 		t.Errorf("line 0 = %q; want the marker prepended", got[0])
 	}
 	if got[1] != "  second" {
 		t.Errorf("line 1 = %q; want a two-column hanging indent", got[1])
 	}
-	if one := withMarker(th, glyphAssistant+" ", nil); len(one) != 1 || one[0] != glyphAssistant+" " {
+	if one := withMarker(th, defaultGlyphs.assistant+" ", nil); len(one) != 1 || one[0] != defaultGlyphs.assistant+" " {
 		t.Errorf("empty body = %#v; want a single marker-only line", one)
 	}
 }

@@ -380,10 +380,10 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 			// header of the targetless shape, which paints no such row (renderToolBlock).
 			worn := false
 			for _, ln := range lines {
-				worn = worn || strings.HasSuffix(ln, glyphCollapsed)
+				worn = worn || strings.HasSuffix(ln, defaultGlyphs.collapsed)
 			}
 			if !worn {
-				t.Errorf("collapsed block wears no %q:\n%s", glyphCollapsed, strings.Join(lines, "\n"))
+				t.Errorf("collapsed block wears no %q:\n%s", defaultGlyphs.collapsed, strings.Join(lines, "\n"))
 			}
 		})
 	}

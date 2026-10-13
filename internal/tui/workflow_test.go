@@ -704,7 +704,7 @@ func TestBackgroundSubAgent_CallPaintsAsABackgroundWorkflowCall(t *testing.T) {
 		}
 	}
 	painted := plainRender(tr)
-	if !strings.Contains(painted, "scout "+glyphLeaderDot+" "+bgSubAgentStarted) {
+	if !strings.Contains(painted, "scout "+defaultGlyphs.leaderDot+" "+bgSubAgentStarted) {
 		t.Errorf("no row reads the delegation's name over its immediate answer:\n%s", painted)
 	}
 	for _, refused := range []string{"done", "Sub-Agent (2)"} {

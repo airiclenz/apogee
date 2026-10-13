@@ -98,9 +98,9 @@ func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 	if !row.skill {
 		t.Error("the skill row is not marked as a skill; accept would treat it as a command")
 	}
-	if len(row.cells) == 0 || !strings.Contains(row.cells[0], glyphSkill) || !strings.Contains(row.cells[0], "/clean-code") {
+	if len(row.cells) == 0 || !strings.Contains(row.cells[0], defaultGlyphs.skill) || !strings.Contains(row.cells[0], "/clean-code") {
 		t.Errorf("skill row cells = %q, want the %q marker and the /id token it writes in the first column",
-			row.cells, glyphSkill)
+			row.cells, defaultGlyphs.skill)
 	}
 }
 
@@ -448,7 +448,7 @@ func TestSentUserBlockAccentsTheSkillToken(t *testing.T) {
 	if !strings.Contains(got, "/clean-code fix the parser") {
 		t.Errorf("the sent message missing from the transcript:\n%s", got)
 	}
-	if strings.Contains(got, glyphSkill+" Clean Code") {
+	if strings.Contains(got, defaultGlyphs.skill+" Clean Code") {
 		t.Errorf("the sent block still badges the skill on a chip row:\n%s", got)
 	}
 	if !strings.Contains(m.View().Content, m.th.skillAccent.Render("/clean-code")) {
@@ -542,7 +542,7 @@ func TestDeliveredInterjectionAccentsTheSkillToken(t *testing.T) {
 	if want := (skillSpan{start: 0, end: len("/review")}); !reflect.DeepEqual(last.skillSpans, []skillSpan{want}) {
 		t.Errorf("delivered block spans = %v, want %v — the invocation must be located in the text", last.skillSpans, want)
 	}
-	if got := plain(m.View()); strings.Contains(got, glyphSkill+" Review") {
+	if got := plain(m.View()); strings.Contains(got, defaultGlyphs.skill+" Review") {
 		t.Errorf("the delivered remark still badges the skill on a chip row:\n%s", got)
 	}
 	if !strings.Contains(m.View().Content, m.th.skillAccent.Render("/review")) {

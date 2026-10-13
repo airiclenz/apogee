@@ -58,14 +58,14 @@ func (s blockState) branchMarkerIn(n, total int) string {
 // An overridden glyph answers before the live/blink conjunction is even asked, which is what makes a
 // borrowed block's header STATIC by construction rather than by its caller remembering to leave two
 // fields false.
-func (s blockState) star() string {
+func (s blockState) star(th theme) string {
 	if s.glyph != "" {
 		return s.glyph
 	}
 	if s.live && s.blink {
 		return " "
 	}
-	return glyphAssistant
+	return th.glyphs.assistant
 }
 
 // stateIndicator is the glyph a TOGGLEABLE block wears — at its leader row's right edge, past the
@@ -75,11 +75,11 @@ func (s blockState) star() string {
 // whether a block
 // wears one at all is the toggle-target rule's, asked once in renderToolBlock — so the two questions
 // stay one condition and one glyph apart.
-func stateIndicator(expanded bool) string {
+func stateIndicator(th theme, expanded bool) string {
 	if expanded {
 		return glyphExpanded
 	}
-	return glyphCollapsed
+	return th.glyphs.collapsed
 }
 
 // anyOpenCall reports whether any of these entries is a tool call still waiting for its result —

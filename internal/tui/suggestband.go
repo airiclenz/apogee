@@ -291,7 +291,7 @@ func (m Model) renderSkillHints() string {
 // the field, and this is the one place the id becomes screen (doc.go's seam invariant).
 func (m Model) skillHintRow() string {
 	var b strings.Builder
-	b.WriteString(m.th.queuedText.Render(bodyIndent + glyphSkill + " " + skillHintLead))
+	b.WriteString(m.th.queuedText.Render(bodyIndent + m.th.glyphs.skill + " " + skillHintLead))
 	for i, h := range m.skillHints {
 		if i > 0 {
 			b.WriteString(m.th.queuedText.Render(skillHintSeparator))

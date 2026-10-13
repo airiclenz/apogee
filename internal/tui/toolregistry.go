@@ -1375,8 +1375,8 @@ func taggedDiffCounts(content string) (added, removed int) {
 
 // taskListCount words task_list's header count as the tasks done over the tasks listed — "1/3" —
 // read off the rows of the list the tool echoed back. The list is the model's OWN text, so this
-// reads only the two markers internal/tasklist puts at the head of a row — the checkbox glyphs the
-// question pane already draws (askCheckedMarker) — and never a row's words, which means a task
+// reads only the two markers internal/tasklist puts at the head of a row — the recorded checkbox
+// shapes (askCheckedMarker/askUncheckedMarker) — and never a row's words, which means a task
 // whose text happens to open with a bracket cannot be miscounted as a row of its own.
 //
 // It takes the body's LINES rather than the result because both producers have to reach it and
@@ -1425,9 +1425,10 @@ func taskListDetail(content string) toolOutcome {
 }
 
 // taskListOpenMarker and taskListDoneMarker are the row prefixes internal/tasklist renders a task
-// list with — the ask pane's own checkbox glyphs plus the single space that separates a marker from
-// its text. They are spelled from those constants rather than repeated as literals so the two
-// checkbox shapes the program shows a human and a model cannot drift apart.
+// list with — the recorded checkbox shapes (askCheckedMarker/askUncheckedMarker) plus the single
+// space that separates a marker from its text. They are model-facing parse keys, so they stay
+// constants equal to tasklist's markers and never follow the theme's display glyph set (the live
+// ask pane's ticked row does: glyphSet.askChecked).
 const (
 	taskListOpenMarker = askUncheckedMarker + " "
 	taskListDoneMarker = askCheckedMarker + " "
@@ -1852,10 +1853,12 @@ func loadedSkillName(content string) string {
 // quietly failing to match. Equality is the whole test: the answer contract is the label verbatim,
 // one per line (domain.AskAnswer), and anything looser would tick a box the human did not.
 //
-// The markers are the popup's own pinned ASCII pair rather than a second spelling of them
-// (askCheckedMarker/askUncheckedMarker, docs/layout/user-questions-layout.md), and they are drawn
-// for a single-select question exactly as for a multi-select one: this is a record of what was
-// asked and answered, not a menu anyone can still act on.
+// The markers are the recorded checkbox constants (askCheckedMarker/askUncheckedMarker,
+// docs/layout/user-questions-layout.md), never the theme's display set: these lines are baked into
+// the block's persisted Details, so what a record shows cannot follow the set a later session
+// paints the live pane with (glyphSet.askChecked). They are drawn for a single-select question
+// exactly as for a multi-select one: this is a record of what was asked and answered, not a menu
+// anyone can still act on.
 func askExchangeLines(args map[string]any, content string) []detailLine {
 	choices := offeredChoices(args)
 	answers := answerLines(content)

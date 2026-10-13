@@ -468,7 +468,7 @@ func TestBlockCursorHighlightsPaddedPromptRow(t *testing.T) {
 	if row < 0 {
 		t.Fatal("the cursor's line is not on screen")
 	}
-	if got := strings.Split(plain(m.View()), "\n")[row]; !strings.Contains(got, glyphUser+" alpha") {
+	if got := strings.Split(plain(m.View()), "\n")[row]; !strings.Contains(got, defaultGlyphs.user+" alpha") {
 		t.Errorf("the highlighted row reads %q; want the prompt's ❯ row", got)
 	}
 }

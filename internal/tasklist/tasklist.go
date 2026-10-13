@@ -33,8 +33,9 @@ const Fence = "Task list — "
 // only place a model reliably re-reads it after compaction.
 const HeaderFormat = Fence + "yours to maintain; call task_list with the COMPLETE list to update it (%d open, %d done):"
 
-// doneMarker and openMarker are the row prefixes. They are the checkbox glyphs the
-// user-question pane already draws (internal/tui's askCheckedMarker), so a model and a
+// doneMarker and openMarker are the row prefixes. They are the recorded checkbox shapes
+// internal/tui spells its task-list markers from (askCheckedMarker/askUncheckedMarker — the
+// shapes the user-question pane draws under its default glyph set), so a model and a
 // human meet the same two shapes throughout the program, and they are the same width as
 // each other, so the texts line up without padding.
 const (

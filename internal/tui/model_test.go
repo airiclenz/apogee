@@ -1915,7 +1915,7 @@ func TestModelApprovalPromptPopupChrome(t *testing.T) {
 	// hand — so every one of them starts at the same display offset whatever its label measures.
 	col, seen := -1, 0
 	for _, row := range rows {
-		if !strings.Contains(row, glyphUser+" ") && !strings.Contains(row, glyphMenuUnselected+" ") {
+		if !strings.Contains(row, defaultGlyphs.user+" ") && !strings.Contains(row, glyphMenuUnselected+" ") {
 			continue // not a menu row
 		}
 		i := strings.Index(row, "[")
@@ -3613,7 +3613,7 @@ func askAnswerLines(rows []string) int {
 	seated := 0
 	for _, row := range rows {
 		text := strings.TrimSpace(strings.Trim(row, "│"))
-		if strings.HasPrefix(text, glyphUser+" ") || strings.HasPrefix(text, glyphMenuUnselected+" ") {
+		if strings.HasPrefix(text, defaultGlyphs.user+" ") || strings.HasPrefix(text, glyphMenuUnselected+" ") {
 			seated++
 		}
 	}
@@ -4030,7 +4030,7 @@ func askChoiceLines(rows []string) []string {
 	var out []string
 	for _, row := range rows {
 		content := popupContent(row)
-		if strings.HasPrefix(content, glyphUser) || strings.HasPrefix(content, glyphMenuUnselected) {
+		if strings.HasPrefix(content, defaultGlyphs.user) || strings.HasPrefix(content, glyphMenuUnselected) {
 			out = append(out, content)
 		}
 	}
@@ -4051,7 +4051,7 @@ func TestModelAskMultiSelectRendersACheckboxColumn(t *testing.T) {
 
 	choices := askChoiceLines(rows)
 	want := []string{
-		glyphUser + " " + askUncheckedMarker + "  alpha",
+		defaultGlyphs.user + " " + askUncheckedMarker + "  alpha",
 		glyphMenuUnselected + " " + askUncheckedMarker + "  beta",
 		glyphMenuUnselected + " " + askUncheckedMarker + "  gamma",
 	}
@@ -4118,7 +4118,7 @@ func TestModelAskMultiSelectKeepsTheMenuStyling(t *testing.T) {
 	for _, line := range popupLines(pane) {
 		content := popupContent(line)
 		switch {
-		case strings.HasPrefix(content, glyphUser):
+		case strings.HasPrefix(content, defaultGlyphs.user):
 			if sgr := styleSGR(m.th.popupAccent); !strings.Contains(line, sgr) {
 				t.Errorf("the pointed-at option carries no accent SGR %q: %q", sgr, content)
 			}
@@ -4209,7 +4209,7 @@ func TestModelAskMultiSelectHintNamesTheToggle(t *testing.T) {
 func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
 	t.Parallel()
 	labels := []string{"alpha", "beta", "gamma"}
-	if got, want := askChoiceRows(labels, false, []bool{true, true, true}), singleCellRows(labels); !reflect.DeepEqual(got, want) {
+	if got, want := askChoiceRows(newTheme(scheme.Default()), labels, false, []bool{true, true, true}), singleCellRows(labels); !reflect.DeepEqual(got, want) {
 		t.Errorf("single-select rows = %v, want the plain one-cell labels %v", got, want)
 	}
 
@@ -4221,7 +4221,7 @@ func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
 	for i, line := range askChoiceLines(rows) {
 		want := glyphMenuUnselected + " " + labels[i]
 		if i == 0 {
-			want = glyphUser + " " + labels[i]
+			want = defaultGlyphs.user + " " + labels[i]
 		}
 		if line != want {
 			t.Errorf("option line %d = %q, want %q:\n%s", i, line, want, got)
@@ -7797,7 +7797,7 @@ func TestFooterMarkerCarriesNoConfinementWordBelowAuto(t *testing.T) {
 			t.Parallel()
 			m := newTestModelEng(t, &fakeEngine{confine: true}, confineOpts(capableHost, mode))
 			flat := ansiPattern.ReplaceAllString(m.footerContent(120), "")
-			if want := modeMarker(mode) + bodyIndent; !strings.HasSuffix(flat, want) {
+			if want := modeMarker(newTheme(scheme.Default()), mode) + bodyIndent; !strings.HasSuffix(flat, want) {
 				t.Errorf("footer = %q, want it to end %q with no confinement word", flat, want)
 			}
 		})
@@ -7860,7 +7860,7 @@ func TestFooterOfflineKeepsItsErrorToneAtEveryWidth(t *testing.T) {
 
 	for _, w := range []int{120, 40} {
 		footer := m.footerContent(w)
-		if run := m.th.footerText.Foreground(m.th.errorFg).Render(" " + glyphAssistant + " " + offlineLabel); !strings.Contains(footer, run) {
+		if run := m.th.footerText.Foreground(m.th.errorFg).Render(" " + defaultGlyphs.assistant + " " + offlineLabel); !strings.Contains(footer, run) {
 			t.Errorf("footer at width %d does not carry %q as its own error-toned run: %q",
 				w, offlineLabel, footer)
 		}
@@ -8261,9 +8261,9 @@ func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
 		mode domain.Mode
 		want string
 	}{
-		{"ask before", &fakeEngine{}, domain.ModeAskBefore, modeMarker(domain.ModeAskBefore)},
-		{"auto confined", &fakeEngine{confine: true}, domain.ModeAuto, modeMarker(domain.ModeAuto) + " · " + confinedWord},
-		{"auto unconfined", &fakeEngine{confine: false}, domain.ModeAuto, modeMarker(domain.ModeAuto) + " · " + unconfinedWord},
+		{"ask before", &fakeEngine{}, domain.ModeAskBefore, modeMarker(newTheme(scheme.Default()), domain.ModeAskBefore)},
+		{"auto confined", &fakeEngine{confine: true}, domain.ModeAuto, modeMarker(newTheme(scheme.Default()), domain.ModeAuto) + " · " + confinedWord},
+		{"auto unconfined", &fakeEngine{confine: false}, domain.ModeAuto, modeMarker(newTheme(scheme.Default()), domain.ModeAuto) + " · " + unconfinedWord},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

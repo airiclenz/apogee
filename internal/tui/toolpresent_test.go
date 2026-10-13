@@ -1858,7 +1858,7 @@ func TestViewDiffRecoversItsRegions(t *testing.T) {
 			}
 			rule := false
 			for _, d := range tv.Details.all() {
-				rule = rule || strings.Contains(d.Text, glyphLeaderDot)
+				rule = rule || strings.Contains(d.Text, defaultGlyphs.leaderDot)
 			}
 			if rule != tc.wantRule {
 				t.Errorf("elision rule painted = %v, want %v — a rule claims lines the regions left uncovered", rule, tc.wantRule)
@@ -3406,7 +3406,7 @@ func TestGitDiffRangeSeparatesTheHunksOfOneFile(t *testing.T) {
 		{Gutter: " 1 ", Text: "  head"},
 		{Kind: detailDiffRemoved, Gutter: " 2 ", Text: "- old"},
 		{Kind: detailDiffAdded, Gutter: " 2 ", Text: "+ new"},
-		{Text: strings.Repeat(glyphLeaderDot, stackedRegionRuleCells)},
+		{Text: strings.Repeat(stackedRegionRuleGlyph, stackedRegionRuleCells)},
 		{Gutter: "40 ", Text: "  far"},
 		{Kind: detailDiffRemoved, Gutter: "41 ", Text: "- there"},
 		{Kind: detailDiffAdded, Gutter: "41 ", Text: "+ here"},

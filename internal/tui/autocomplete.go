@@ -459,8 +459,8 @@ func commandSuggestions(partial string, busy, effortSupported bool) []acItem {
 
 // slashSuggestions builds the merged "/" menu: the commands whose name partial prefixes, labelled
 // with their summaries (commandSuggestions), and the catalog skills partial matches, each marked
-// with glyphSkill — the transcript's own skill glyph — and shown as the "/id" token accepting it
-// writes. One namespace, two kinds of row.
+// with the theme's skill glyph (glyphSet.skill) — the transcript's own — and shown as the "/id"
+// token accepting it writes. One namespace, two kinds of row.
 //
 // The rows are ordered by MATCH QUALITY rather than by which half produced them: a stable sort on
 // the rank both halves already carry (slashMatchRank) puts an exact match first, then the prefix
@@ -563,6 +563,7 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 			continue
 		}
 		items = append(items, skillRow(
+			m.th,
 			sk,
 			// The better of the two names the filter above accepted the skill on: matching an id
 			// by prefix is worth as much as matching a display name by one, and a skill must not
@@ -608,11 +609,11 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 // partial in the "/" menu (slashMatchRank), the matcher's own placement in the suggestion menu — and
 // source is which dir the skill was loaded from. Both are the CALLER's: they are properties of the
 // pair (menu, skill) rather than of the skill, which is why neither is derived in here.
-func skillRow(sk skills.Skill, rank int, source string) acItem {
+func skillRow(th theme, sk skills.Skill, rank int, source string) acItem {
 	return acItem{
 		value: sk.ID,
 		cells: popupRow{
-			glyphSkill + " " + skillTokenLabel(sk.ID, source),
+			th.glyphs.skill + " " + skillTokenLabel(sk.ID, source),
 			skillMenuCell(popupRow{
 				flattenField(stripEscapes(sk.DisplayName)),
 				flattenField(stripEscapes(sk.Summary)),
@@ -803,7 +804,7 @@ func (m *Model) openSuggestMenu() {
 		}
 		// The matcher answered strongest first, so a row's PLACE in that answer is its rank here: the
 		// same lowest-is-best scale the "/" menu sorts on, carrying the one ordering this menu has.
-		items = append(items, skillRow(sk, len(items), skillSource(sk.Dir, m.opts.skillRoots())))
+		items = append(items, skillRow(m.th, sk, len(items), skillSource(sk.Dir, m.opts.skillRoots())))
 	}
 	if len(items) == 0 {
 		return

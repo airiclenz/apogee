@@ -46,12 +46,12 @@ func renderPlain(tr *transcript, width int) string {
 
 // leaderRun matches a painted leader — two or more of its dots — so collapsing it cannot touch a
 // lone ⋯ a tool's own output happens to contain.
-var leaderRun = regexp.MustCompile(glyphLeaderDot + "{2,}")
+var leaderRun = regexp.MustCompile(defaultGlyphs.leaderDot + "{2,}")
 
 // collapseLeader reduces every dotted leader on a line to one dot. It is renderPlain's, and the
 // paint-level tests deliberately do not use it: what they measure is the very geometry this drops.
 func collapseLeader(line string) string {
-	return leaderRun.ReplaceAllString(line, glyphLeaderDot)
+	return leaderRun.ReplaceAllString(line, defaultGlyphs.leaderDot)
 }
 
 func plainRender(tr *transcript) string { return renderPlain(tr, 80) }
@@ -1984,7 +1984,7 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 	// about whether the head can be opened at all.
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		leaderEdgeRow("  ┕ survey the tests ⋯", glyphCollapsed),
+		leaderEdgeRow("  ┕ survey the tests ⋯", defaultGlyphs.collapsed),
 	}, "\n")
 	got := renderPlain(tr, 80)
 	if got != want {
@@ -3637,7 +3637,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		// on its delegate's first committed entry (subAgentScheduled).
 		want := strings.Join([]string{
 			"✦ Sub-Agent",
-			leaderEdgeRow("  ┕ survey the tests ⋯ 0 tool calls", glyphCollapsed),
+			leaderEdgeRow("  ┕ survey the tests ⋯ 0 tool calls", defaultGlyphs.collapsed),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("collapsed run leaked the message addressed to it:\n--- got ---\n%s\n--- want ---\n%s", got, want)

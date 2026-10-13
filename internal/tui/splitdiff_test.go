@@ -65,7 +65,7 @@ func TestSplitDiffRowsPaintsTheLayoutSketch(t *testing.T) {
 		` 90 -     return errNarrow                       │  90 +     return fmt.Errorf("width %d under %d",`,
 		"                                                 │       w, minWidth)                              ",
 		" 91     }                                        │  91     }                                       ",
-		strings.Repeat(glyphLeaderDot, 99),
+		strings.Repeat(defaultGlyphs.leaderDot, 99),
 		"204     return nil                               │ 205     return nil                              ",
 		"205 - }                                          │ 206 +   }                                       ",
 		"                                                 │ 207 +                                           ",
@@ -222,7 +222,7 @@ func TestSplitDiffRowsRuleOnlyWhereRegionsDoNotMeet(t *testing.T) {
 		{BeforeStart: 15, AfterStart: 15, Leading: []string{"f", "g"}, Removed: []string{"h"}, Inserted: []string{"H"}},
 	}
 	for i, row := range splitPlain(splitDiffRows(th, meeting, 100)) {
-		if strings.Contains(row, glyphLeaderDot) {
+		if strings.Contains(row, defaultGlyphs.leaderDot) {
 			t.Errorf("row %d draws a rule between regions that meet: %q", i, row)
 		}
 	}
@@ -232,7 +232,7 @@ func TestSplitDiffRowsRuleOnlyWhereRegionsDoNotMeet(t *testing.T) {
 	rows := splitPlain(splitDiffRows(th, parted, 100))
 	// Five rows for the first region — one context, the removed and inserted pair on one row, three
 	// trailing — so the rule stands on the sixth, between the regions rather than inside either.
-	if len(rows) < 6 || !strings.Contains(rows[5], glyphLeaderDot) {
+	if len(rows) < 6 || !strings.Contains(rows[5], defaultGlyphs.leaderDot) {
 		t.Fatalf("rows =\n%s\nwant the rule between two regions that do not meet", strings.Join(rows, "\n"))
 	}
 	if got, want := th.measure.Width(rows[5]), splitPaneCells(100)*2+splitDividerCells; got != want {

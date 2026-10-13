@@ -1629,7 +1629,7 @@ func settingsTextSummary(text string) string {
 // a row says about a secret it persisted and does not hold (settingsEditedValue).
 func (m *Model) settingsNote(row SettingRow) string {
 	if m.settings.failure.path == row.Path && m.settings.failure.msg != "" {
-		return "✗ " + m.settings.failure.msg
+		return m.th.glyphs.failure + " " + m.settings.failure.msg
 	}
 	if m.settings.answer.path == row.Path && m.settings.answer.msg != "" {
 		return "· " + m.settings.answer.msg

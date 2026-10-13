@@ -216,7 +216,14 @@ Part of `glyphs-missing-from-fonts`.
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/domain/`
 **Commit:** `feat(config): ui.glyphs selects the unicode or font-safe glyph set`
 
-## 10. Theme glyphs move onto the theme
+## 10. Theme glyphs move onto the theme — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): re-derived from "m.th already reaches every free renderer" — skillRow, blockState.star, stateIndicator, footerRun/footerInput, modeSymbol/modeMarker/modeRows, sessionRowCells/unfilteredRows/filteredView/sessionRows and askChoiceRows had no theme in reach; each now takes th theme (footerInput carries a glyphs field set in footerLeftText, beside its measure).
+NOTES (2026-10-13): diffbody.go stackedRows keeps a constant (new stackedRegionRuleGlyph = "⋯") instead of reading glyphSet.leaderDot: the stacked-diff region rule is built at enrich time into toolOutcome.Details, which a session record persists — the same reason the plan keeps askExchangeLines on askCheckedMarker. Item 11's safe set therefore leaves that recorded rule as ⋯ (the paint-time split-diff rule does follow the set).
+NOTES (2026-10-13): glyphExpanded stays a constant (not in the Goal's list); only the collapsed ▶ moved onto the set.
+NOTES (2026-10-13): consequential edit — internal/tui/popup.go, internal/tui/toolleader.go, internal/tui/doc.go, internal/tui/autocomplete.go: comments naming the removed glyphUser/glyphLeaderDot/glyphSkill constants made stale by moving them onto glyphSet
+NOTES (2026-10-13): consequential edit — cmd/apogee/e2e_support_test.go, cmd/apogee/e2e_hostile_test.go: comments naming internal/tui's glyphAssistant made stale by moving it onto glyphSet
+NOTES (2026-10-13): consequential edit — internal/tui/footerfit_test.go: footerFitCase sets glyphs: defaultGlyphs, made necessary by footerInput carrying the glyph set
 
 **What:**
 Recast at the regression check (2026-10-13).

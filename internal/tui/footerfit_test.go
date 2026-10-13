@@ -39,6 +39,7 @@ func footerFitCase() footerInput {
 		mode:    footerTestMode,
 		margin:  measure.Width(bodyIndent),
 		measure: measure,
+		glyphs:  defaultGlyphs,
 	}
 }
 
@@ -285,7 +286,7 @@ func TestFooterFitLeavesNoDanglingSeparator(t *testing.T) {
 
 		row := got.info + got.offline
 		if strings.HasPrefix(row, " ") || strings.HasSuffix(row, " ") ||
-			strings.HasPrefix(row, glyphAssistant) || strings.HasSuffix(row, glyphAssistant) {
+			strings.HasPrefix(row, defaultGlyphs.assistant) || strings.HasSuffix(row, defaultGlyphs.assistant) {
 			t.Errorf("footerFit(width %d) left run = %q, want no dangling separator", w, row)
 		}
 	}

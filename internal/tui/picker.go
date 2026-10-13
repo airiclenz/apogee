@@ -316,7 +316,7 @@ func init() {
 		pickerMode: {
 			title:  fixedTitle(modePickerTitle),
 			hint:   pickerChooseHint,
-			rows:   func(Model) []popupRow { return modeRows() },
+			rows:   func(m Model) []popupRow { return modeRows(m.th) },
 			accept: Model.acceptMode,
 		},
 		pickerFork: {
@@ -1462,11 +1462,11 @@ const modePickerTitle = "autonomy mode — how much apogee does without asking"
 // word, so the pane and the chrome underneath it can never name a mode two different ways) and
 // says what the rung permits. Two cells, so the sentences start at one column under the shortest
 // and the longest marker alike.
-func modeRows() []popupRow {
+func modeRows(th theme) []popupRow {
 	ladder := domain.ModeLadder()
 	rows := make([]popupRow, 0, len(ladder))
 	for _, mode := range ladder {
-		rows = append(rows, popupRow{modeMarker(mode), "— " + modeGloss(mode)})
+		rows = append(rows, popupRow{modeMarker(th, mode), "— " + modeGloss(mode)})
 	}
 	return rows
 }

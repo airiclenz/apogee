@@ -30,30 +30,23 @@ import (
 // scheme (the user block's background and the chrome's borders) still share one tone — `chrome` —
 // matching the layout sketch (layout.md).
 
-// The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
-// tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯, and a
-// menu-style popup row that is NOT the selected one leads with ·, the ❯'s quiet counterpart. A
-// sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level), opened by the
+// The fixed marker glyphs — the ones the theme's glyph set does not carry (glyphSet holds the
+// assistant ✦, the user ❯ and the other drawn marks). Tool detail hangs off a tree branch (┝ for
+// an interior line, ┕ for the last), and a menu-style popup row that is NOT the selected one leads
+// with ·, the user glyph's quiet counterpart. A sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level), opened by the
 // delegation's own ┌─┶ header row and parted from the next row of its group by a lone ┊
 // (docs/layout/tool-layout.md, "Grouped Sub-agents") — that frame is the whole of what announces a
 // descent, at every depth and on the live path as well as the committed one.
 const (
-	glyphAssistant      = "✦" // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star)
 	glyphBranch         = "┝"
 	glyphBranchLast     = "┕"
-	glyphLeaderDot      = "⋯" // U+22EF MIDLINE HORIZONTAL ELLIPSIS — one cell of the dotted leader a tool row runs from its target to its outcome slot (toolleader.go, leaderRowIn), painted in the `tool-leader` role. Deliberately one glyph per cell, so the run's length IS its cell count
-	glyphUser           = "❯"
-	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
+	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): the user glyph's counterpart (glyphSet.user), deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail        = "│"
 	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label gold (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
 	glyphRailCorner     = "┌" // U+250C LIGHT DOWN AND RIGHT — the corner a delegation's header row opened its frame with, at the very left of the row, before ADR 0063 left a run the collapsed row and its view (subAgentOpenMarker, docs/layout/tool-layout.md "Grouped Sub-agents"). It is the one cell of that marker painted in the rail's gold, because it IS the rail's top end (design call 2 of docs/plans/archived/"2026-08-11 - 01")
 	glyphRailTee        = "┶" // U+2536 LIGHT UP AND HORIZONTAL AND HEAVY LEFT — where the frame's arm meets the delegation's own branch on that header row. It stands in the row's detail tone with the ─ beside it, not in the rail's gold: it is this row's branch marker, the ┝/┕ of a member that happens to be open (design call 2)
 	glyphRailClose      = "┊" // U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL — the lone line closing a group member's span where the next row of its group follows it (no DELEGATION opens a span in place since ADR 0063; a grouped skill fetch expands INLINE and does), in the rail's gold (railJoin; a group's last member and a lone run show none). Its dashes are the point: the frame stops rather than continuing, which is what a solid │ under the last row of a span would say
-	glyphDone           = "✓" // U+2713 CHECK MARK — a FINISHED delegation's mark, after its name on the row and before the leaders, in the scheme's `success` green (theme.successMark, design call 6). A failed run wears no glyph at all: its red outcome slot is the whole of the failure marking (summaryStyle)
 	glyphBullet         = "•" // a markdown bullet-list item (- / * / +)
-	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
-	glyphPresented      = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
-	glyphInterject      = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
 	glyphPadAbove       = "▄" // U+2584 LOWER HALF BLOCK — one cell of the half row opening a sent prompt block (renderUserBlock): its lower half in the block's own gray, so the field reads half a row taller above its first line
 	glyphPadBelow       = "▀" // U+2580 UPPER HALF BLOCK — one cell of the half row closing a sent prompt block, glyphPadAbove's mirror under its last line
 	glyphTableRule      = "─" // one cell of a markdown table's horizontal rule — under the header row and between adjacent body rows alike (mdtable.go)
@@ -67,12 +60,11 @@ const (
 // there at all, that the block is a click target (layout.md, "Collapsed and expanded blocks"). A
 // block with nothing to reveal wears neither. The shape is the ▶/▼ pair of the owner's sketch
 // (docs/layout/tool-layout.md), full-size rather than the small ▸/▾ these used to be: the indicator
-// is the transcript's one affordance and it reads at a glance. glyphModeAuto's doubled "⏵⏵" is a
-// different element in a different place and the two are deliberately not shared.
-const (
-	glyphCollapsed = "▶" // U+25B6 BLACK RIGHT-POINTING TRIANGLE — this block is collapsed: a click opens it
-	glyphExpanded  = "▼" // U+25BC BLACK DOWN-POINTING TRIANGLE — this block is expanded: a click closes it
-)
+// is the transcript's one affordance and it reads at a glance. The collapsed ▶ rides the theme's
+// glyph set (glyphSet.collapsed); the expanded ▼ is fixed here. The auto mode's doubled "⏵⏵"
+// (glyphSet.modeAuto) is a different element in a different place and the two are deliberately
+// not shared.
+const glyphExpanded = "▼" // U+25BC BLACK DOWN-POINTING TRIANGLE — this block is expanded: a click closes it
 
 // The transcript scroll bar's two glyphs (renderScrollbar). They are one axis drawn in two
 // weights — the thumb is the heavy stroke, the track the light one — so the bar reads as a single
@@ -86,17 +78,67 @@ const (
 	glyphScrollTrack = "│" // U+2502 LIGHT VERTICAL — the groove behind it
 )
 
-// The autonomy-mode glyphs, one per rung of the ladder (modeSymbol). They lead the footer's mode
-// marker in the mode's OWN colour — the glyph and the word are one styled run, not a coloured
-// badge beside a label — so the rung reads at a glance from the shape before the word is read.
-// Each is one terminal cell wide except ⏵⏵, which is deliberately two: auto is the one rung that
-// acts without asking, and the doubled chevron is what "running ahead" looks like.
-const (
-	glyphModePlan       = "⊞"  // plan — an outline, nothing filled in yet
-	glyphModeAskBefore  = "◐"  // ask before — the barred circle of a held action
-	glyphModeAllowEdits = "✔"  // allow edits — edits pass
-	glyphModeAuto       = "⏵⏵" // auto — fast-forward, no gate
-)
+// glyphSet is the drawn marker glyphs a theme carries (theme.glyphs): the marks whose shape a
+// terminal font may not hold, read by every renderer off the theme it was handed rather than off a
+// package constant, so one place decides which spelling the frame paints. newTheme seats
+// defaultGlyphs; nothing else about the set is decided per scheme. Every field is a plain string,
+// so the theme stays copy-safe (ADR 0011).
+//
+// What stays OUT of the set is as deliberate as what is in it: the tree branches, rails, table
+// rules and half blocks are fixed constants above, a glyph composed into another constant
+// (memberGutter, subAgentOpenMarker, tableDivider) stays with that constant, and the task-list and
+// recorded-exchange checkboxes (askCheckedMarker/askUncheckedMarker) are model-facing and persisted,
+// so they never follow the display set.
+type glyphSet struct {
+	assistant string // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star); also the footer's segment separator
+	leaderDot string // one cell of the dotted leader a tool row runs from its target to its outcome slot (toolleader.go, leaderRowIn), painted in the `tool-leader` role. Deliberately one glyph per cell, so the run's length IS its cell count
+	user      string // leads the user prompt, and the selected row of a menu-style popup
+	done      string // a FINISHED delegation's mark, after its name on the row and before the leaders, in the scheme's `success` green (theme.successMark, design call 6). A failed run wears no glyph at all: its red outcome slot is the whole of the failure marking (summaryStyle)
+	skill     string // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
+	presented string // leads a presented document — deliberately NOT the assistant star: a deliverable is not a tool call
+	interject string // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
+	collapsed string // the state indicator of a COLLAPSED block: a click opens it (stateIndicator; glyphExpanded is its fixed twin)
+
+	// The autonomy-mode glyphs, one per rung of the ladder (modeSymbol). They lead the footer's mode
+	// marker in the mode's OWN colour — the glyph and the word are one styled run, not a coloured
+	// badge beside a label — so the rung reads at a glance from the shape before the word is read.
+	// Each is one terminal cell wide except auto's, which is deliberately two: auto is the one rung
+	// that acts without asking, and the doubled chevron is what "running ahead" looks like.
+	modePlan       string // plan — an outline, nothing filled in yet
+	modeAskBefore  string // ask before — the barred circle of a held action
+	modeAllowEdits string // allow edits — edits pass
+	modeAuto       string // auto — fast-forward, no gate
+
+	// The /sessions row tags (sessionRowCells). Each is one terminal cell wide in EITHER width
+	// method — it carries no variation selector, so the two measures agree about it (ADR 0030) —
+	// which is what keeps a tagged row costing the title column exactly what it looks like it
+	// costs, whatever measure the painter is on.
+	scheduleTag string // leads the tag of a record that is one Firing of a Schedule (ADR 0033): a circling arrow, for the standing instruction that will run again
+	forkTag     string // leads the tag of a record cut from another by /fork (Meta.ParentID set): a branching line, for the history the two records share up to the point they part
+
+	failure    string // leads a /settings row's refusal note (settingsNote), one cell like the "·" every other note leads with (settingsNoteMarkerCells)
+	askChecked string // a ticked option of the LIVE multi-select ask pane (askChoiceRows), the same width as askUncheckedMarker so ticking a row moves nothing
+}
+
+// defaultGlyphs is the set every theme carries today: the shapes the layout specs draw.
+var defaultGlyphs = glyphSet{
+	assistant:      "✦",
+	leaderDot:      "⋯", // U+22EF MIDLINE HORIZONTAL ELLIPSIS
+	user:           "❯",
+	done:           "✓", // U+2713 CHECK MARK
+	skill:          "✦",
+	presented:      "▤",
+	interject:      "⧖",
+	collapsed:      "▶", // U+25B6 BLACK RIGHT-POINTING TRIANGLE
+	modePlan:       "⊞",
+	modeAskBefore:  "◐",
+	modeAllowEdits: "✔",
+	modeAuto:       "⏵⏵",
+	scheduleTag:    "⟳",
+	forkTag:        "⑂",
+	failure:        "✗",
+	askChecked:     askCheckedMarker,
+}
 
 // bodyIndent is the column every transcript block's body text starts in, as a blank prefix: a
 // marker ("✦ " / "❯ " — the glyph plus its trailing space) is exactly this wide, and a wrapped
@@ -131,6 +173,10 @@ type theme struct {
 	// the layout code reaches its measure exactly where it reaches its styles — and because a
 	// widthAuthority is a plain value, the theme stays as copy-safe as it was (ADR 0011).
 	measure widthAuthority
+
+	// glyphs is the drawn marker glyphs this theme paints with (glyphSet). newTheme seats
+	// defaultGlyphs.
+	glyphs glyphSet
 
 	userBlock lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
 	promptPad lipgloss.Style // the ▄/▀ half rows padding a sent prompt block (renderUserBlock): the block's `chrome` gray as the glyph's FOREGROUND on no background, so half of each cell is the block's field and the other half the terminal's own
@@ -335,6 +381,7 @@ func newTheme(s scheme.Scheme) theme {
 		// it was, so it reads the measure off the outgoing theme and re-arms it on this one.
 		// Any future live rebuild owes the same carry-over.
 		measure:    newWidthAuthority(),
+		glyphs:     defaultGlyphs,
 		userBlock:  lipgloss.NewStyle().Foreground(userText).Background(chrome),
 		promptPad:  lipgloss.NewStyle().Foreground(chrome),
 		padPrompts: true,

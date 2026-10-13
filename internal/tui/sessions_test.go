@@ -1022,19 +1022,19 @@ func TestSessionRowCells(t *testing.T) {
 
 	// Same-workspace row in the current view: three cells, each separator leading its own cell.
 	want := popupRow{"a task", "· 5m ago", "· 3 msgs"}
-	if got := sessionRowCells(meta, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), meta, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("current-view cells = %v, want %v", got, want)
 	}
 	// Foreign row in the all view: the workspace base qualifies the TITLE, inside the title cell, so
 	// the time and count columns stay where every other row put them.
 	want = popupRow{"a task · proj", "· 5m ago", "· 3 msgs"}
-	if got := sessionRowCells(meta, "", "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), meta, "", "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("foreign all-view cells = %v, want the workspace base inside the title cell (%v)", got, want)
 	}
 	// A legacy record with no workspace reads a friendly base rather than filepath.Base's ".".
 	legacy := session.Meta{Title: "old", UpdatedAt: now.Add(-time.Hour), UserMsgs: 1}
 	want = popupRow{"old · unknown workspace", "· 1h ago", "· 1 msg"}
-	if got := sessionRowCells(legacy, "", "/home/me/proj", true, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), legacy, "", "/home/me/proj", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("legacy all-view cells = %v, want %v", got, want)
 	}
 }
@@ -1053,20 +1053,20 @@ func TestSessionRowCellsSpendIsTheSessionTotal(t *testing.T) {
 	}
 
 	want := popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(1_000_000)}
-	if got := sessionRowCells(meta, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), meta, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells = %v, want the session total in a cell of its own (%v)", got, want)
 	}
 
 	main := meta
 	main.DelegateUsage = session.Usage{}
 	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(64000)}
-	if got := sessionRowCells(main, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), main, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells with no delegate spend = %v, want the main agent's own total (%v)", got, want)
 	}
 
 	silent := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a"}
 	want = popupRow{"a task", "· 5m ago", "· 3 msgs"}
-	if got := sessionRowCells(silent, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), silent, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells for a record that reported nothing = %v, want no spend cell (%v)", got, want)
 	}
 }
@@ -1085,21 +1085,21 @@ func TestSessionRowCellsSpendCarriesTheStoredCost(t *testing.T) {
 	priced.DelegateUsage = session.Usage{Calls: 2, TotalTokens: 36000, CostMicros: 20_000, PricedCalls: 2}
 	priced.Currency = "EUR"
 	want := popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(100_000) + " · 0.42 EUR"}
-	if got := sessionRowCells(priced, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), priced, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("priced cells = %v, want the session's amount under its stored label (%v)", got, want)
 	}
 
 	partial := priced
 	partial.DelegateUsage = session.Usage{Calls: 2, TotalTokens: 36000, UnpricedCalls: 2}
 	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(100_000) + " · ≥ 0.40 EUR"}
-	if got := sessionRowCells(partial, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), partial, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("partly priced cells = %v, want the amount marked as a floor (%v)", got, want)
 	}
 
 	old := base
 	old.Usage = session.Usage{Calls: 4, TotalTokens: 64000}
 	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(64000)}
-	if got := sessionRowCells(old, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), old, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells for a record with no priced call = %v, want tokens only (%v)", got, want)
 	}
 }
@@ -1123,19 +1123,19 @@ func TestSessionRowCellsScheduleTag(t *testing.T) {
 	}
 
 	want := popupRow{"nightly sweep — 03:00 · ⟳ nightly sweep", "· 5m ago", "· 1 msg"}
-	if got := sessionRowCells(firing, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), firing, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("firing cells = %v, want the schedule tag in the title cell (%v)", got, want)
 	}
 	// The foreign-workspace view states both qualifiers, in the order the title is read for: which
 	// workspace, then which standing instruction.
 	want = popupRow{"nightly sweep — 03:00 · proj · ⟳ nightly sweep", "· 5m ago", "· 1 msg"}
-	if got := sessionRowCells(firing, "", "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), firing, "", "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("foreign firing cells = %v, want %v", got, want)
 	}
 	// A plain record has no identity to state, so it states none — no tag, no empty tier.
 	plain := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 1, Workspace: "/home/me/proj"}
 	want = popupRow{"a task", "· 5m ago", "· 1 msg"}
-	if got := sessionRowCells(plain, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(newTheme(scheme.Default()), plain, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("plain cells = %v, want the row unchanged by schedules (%v)", got, want)
 	}
 }
@@ -1159,7 +1159,7 @@ func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
 		}},
 	}
 
-	rows := sessionRows(b, "/ws/a", now)
+	rows := sessionRows(newTheme(scheme.Default()), b, "/ws/a", now)
 	want := []popupRow{{"a firing · ⟳ reset  me", "· 5m ago", "· 1 msg"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %v, want the escape gone whole from the tag (%v)", rows, want)
@@ -1194,7 +1194,7 @@ func TestSessionRowsTagForkedSessions(t *testing.T) {
 		},
 	}
 
-	rows := sessionRows(b, "/ws/a", now)
+	rows := sessionRows(newTheme(scheme.Default()), b, "/ws/a", now)
 	want := []popupRow{
 		{"fix the parser · ⑂ fix the parser", "· 1m ago", "· 2 msgs"},
 		{"orphaned fork · ⑂ gone-9", "· 2m ago", "· 1 msg"},
@@ -1220,7 +1220,7 @@ func TestSessionRowsTagForkedSessions(t *testing.T) {
 	}
 	// The all-workspaces view states the foreign base before the parent, as it does before a
 	// schedule: which workspace, then whose history.
-	if got := sessionRowCells(b.metas[2], b.parentTitle(b.metas[2]), "/ws/b", true, now); got[0] != "over there · a · ⑂ elsewhere" {
+	if got := sessionRowCells(newTheme(scheme.Default()), b.metas[2], b.parentTitle(b.metas[2]), "/ws/b", true, now); got[0] != "over there · a · ⑂ elsewhere" {
 		t.Errorf("foreign fork title = %q, want the base before the parent tag", got[0])
 	}
 }
@@ -1291,7 +1291,7 @@ func TestSessionRowCellsStripEscapes(t *testing.T) {
 		},
 	}
 
-	rows := sessionRows(b, "/ws/a", now)
+	rows := sessionRows(newTheme(scheme.Default()), b, "/ws/a", now)
 	want := []popupRow{{"reset  me · other", "· 5m ago", "· 3 msgs"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %v, want the escape gone whole from the title cell (%v)", rows, want)
@@ -1319,7 +1319,7 @@ func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
 	if got, want := m.sessionBrowser.renameBuf.value(), "reset  me"; got != want {
 		t.Errorf("rename buffer = %q, want the seed escape-stripped (%q)", got, want)
 	}
-	for i, ln := range layoutPopupRows(m.th, sessionRows(m.sessionBrowser, m.opts.Workspace, time.Now())) {
+	for i, ln := range layoutPopupRows(m.th, sessionRows(m.th, m.sessionBrowser, m.opts.Workspace, time.Now())) {
 		if strings.ContainsRune(ln, 0x1b) {
 			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
 		}
@@ -1340,7 +1340,7 @@ func TestSessionRowsAlignTheColumns(t *testing.T) {
 		},
 	}
 
-	lines := layoutPopupRows(newTheme(scheme.Default()), sessionRows(b, "/ws/a", now))
+	lines := layoutPopupRows(newTheme(scheme.Default()), sessionRows(newTheme(scheme.Default()), b, "/ws/a", now))
 	if len(lines) != 2 {
 		t.Fatalf("rows = %v, want one per visible session", lines)
 	}
@@ -1369,9 +1369,9 @@ func TestSessionRowsConfirmIsItsOwnCell(t *testing.T) {
 		metas: []session.Meta{{Title: "doomed", UpdatedAt: now, UserMsgs: 1, Workspace: "/ws/a"}},
 	}
 
-	unarmed := sessionRows(b, "/ws/a", now)
+	unarmed := sessionRows(newTheme(scheme.Default()), b, "/ws/a", now)
 	b.confirming = true
-	armed := sessionRows(b, "/ws/a", now)
+	armed := sessionRows(newTheme(scheme.Default()), b, "/ws/a", now)
 
 	if len(armed) != 1 || len(armed[0]) != 4 || armed[0][3] != deleteConfirmCell {
 		t.Fatalf("armed row = %v, want the confirm as a fourth cell", armed)
@@ -1400,7 +1400,7 @@ func TestSessionRowsRenameIsOneCell(t *testing.T) {
 		metas:     []session.Meta{{Title: "old title", UpdatedAt: now, UserMsgs: 1, Workspace: "/ws/a"}},
 	}
 
-	rows := sessionRows(b, "/ws/a", now)
+	rows := sessionRows(newTheme(scheme.Default()), b, "/ws/a", now)
 	want := popupRow{"rename: new title▏"}
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0], want) {
 		t.Errorf("renaming row = %v, want %v", rows, want)
@@ -1706,7 +1706,7 @@ func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
 	if !strings.Contains(lines[0], "saved sessions") {
 		t.Errorf("title line = %q, want the pane still naming itself", lines[0])
 	}
-	if strings.Contains(m.renderSessionBrowser(), glyphUser) {
+	if strings.Contains(m.renderSessionBrowser(), defaultGlyphs.user) {
 		t.Error("a pane with no rows drew a selection marker; there is nothing to highlight")
 	}
 }

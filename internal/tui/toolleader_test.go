@@ -148,7 +148,7 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 			}
 			// Dropped means DROPPED: the leader opens straight after the marker, so not one cell of
 			// the target — nor a lone clip tail standing in for it — is left on the row.
-			if got := strings.HasPrefix(plain, marker+glyphLeaderDot); got != tc.wantDropped {
+			if got := strings.HasPrefix(plain, marker+defaultGlyphs.leaderDot); got != tc.wantDropped {
 				t.Errorf("row = %q opens with its leader = %v, want the target dropped = %v",
 					plain, got, tc.wantDropped)
 			}
@@ -156,7 +156,7 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 				t.Errorf("row = %q carries a clip tail = %v, want %v", plain, got, tc.wantClip)
 			}
 
-			dots := strings.Count(plain, glyphLeaderDot)
+			dots := strings.Count(plain, defaultGlyphs.leaderDot)
 			if dots < leaderMinDots {
 				t.Errorf("row = %q carries %d leader dots, below the floor of %d", plain, dots, leaderMinDots)
 			}
@@ -165,14 +165,14 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 			}
 			// The dots wear the `tool-leader` role of their own, so a scheme can damp them without
 			// moving the target's tone with them.
-			if leader := th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots)); !strings.Contains(row, leader) {
+			if leader := th.toolLeader.Render(strings.Repeat(defaultGlyphs.leaderDot, dots)); !strings.Contains(row, leader) {
 				t.Errorf("the leader is not painted in the tool-leader role: %q", row)
 			}
 			// Design call 11 both ways: red when the wording says the call failed, and the row's own
 			// tone when it does not. The slot is read off the row STRUCTURALLY — everything past the
 			// last dot and its gap — so the assertion holds for the case whose outcome was itself
 			// cut and whose final text no fixture spells out.
-			slot := strings.TrimPrefix(plain[strings.LastIndex(plain, glyphLeaderDot)+len(glyphLeaderDot):], " ")
+			slot := strings.TrimPrefix(plain[strings.LastIndex(plain, defaultGlyphs.leaderDot)+len(defaultGlyphs.leaderDot):], " ")
 			if got := strings.Contains(row, th.errorText.Render(slot)); got != tc.wantFailed {
 				t.Errorf("outcome %q painted in the failure tone = %v, want %v", slot, got, tc.wantFailed)
 			}
@@ -230,7 +230,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 	// targetCells is what the painted row left the target: everything before the leader, less the
 	// marker leading it and the gap the dots stand clear of.
 	targetCells := func(plain string) int {
-		head := plain[:strings.Index(plain, glyphLeaderDot)]
+		head := plain[:strings.Index(plain, defaultGlyphs.leaderDot)]
 		return th.measure.Width(strings.TrimRight(head, " ")) - th.measure.Width(branchMarker(true))
 	}
 

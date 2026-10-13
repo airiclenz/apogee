@@ -7,7 +7,7 @@ import (
 )
 
 // The room the dotted leader flexes in (docs/layout/tool-layout.md, "Width and overflow"). The dot
-// the run is built from is glyphLeaderDot, which lives with the other glyphs in theme.go.
+// the run is built from is the theme's leaderDot, which rides its glyph set (glyphSet, theme.go).
 //
 // leaderGap is the blank held on each side of the run that carries the eye from a row's target to
 // the outcome slot at its right edge, so the dots never touch the text they run between.
@@ -133,10 +133,10 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, re
 		// which is why the painter re-splits rather than the caller pre-styling: leaderRowIn hands
 		// back the SURVIVING text, and on a row too narrow to seat the mark the split simply does
 		// not match and the name paints in one tone, whole (toolView.finished).
-		left += " " + glyphDone
+		left += " " + th.glyphs.done
 		paint = func(s string) string {
-			if name, ok := strings.CutSuffix(s, " "+glyphDone); ok {
-				return tone.Render(name) + " " + th.successMark.Render(glyphDone)
+			if name, ok := strings.CutSuffix(s, " "+th.glyphs.done); ok {
+				return tone.Render(name) + " " + th.successMark.Render(th.glyphs.done)
 			}
 			return tone.Render(s)
 		}
@@ -194,7 +194,7 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 	}
 	dots := max(leaderMinDots, avail-leadCells-tail)
 	row := paintRowMarker(th, marker, expanded) + lead +
-		th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots))
+		th.toolLeader.Render(strings.Repeat(th.glyphs.leaderDot, dots))
 	if slot != "" {
 		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, summary, expanded).Render(slot)
 	}
@@ -430,5 +430,5 @@ const (
 // must not change width when a member opens (▶ → ▼, item 5) — a member whose text re-wrapped on
 // being expanded would move under the very click that expanded it.
 func groupIndicatorCells(th theme) int {
-	return groupIndicatorGap + max(th.measure.Width(glyphCollapsed), th.measure.Width(glyphExpanded))
+	return groupIndicatorGap + max(th.measure.Width(th.glyphs.collapsed), th.measure.Width(glyphExpanded))
 }

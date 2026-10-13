@@ -711,6 +711,12 @@ const (
 // second row in a narrow one, which is a rule that reads as two.
 const stackedRegionRuleCells = 8
 
+// stackedRegionRuleGlyph is one cell of that rule — the leader's own `⋯` shape, spelled here as a
+// constant rather than read off the theme's glyph set (glyphSet.leaderDot), because the stacked rows
+// are built into a block's Details at enrich time, which a session record persists: what was
+// recorded must not follow the display set a later session paints with.
+const stackedRegionRuleGlyph = "⋯"
+
 // stackedDiffLines renders recorded Edit regions as the STACKED reading of a diff body: per region
 // its leading context, its removed lines behind `-` at their before-file numbers, its inserted
 // lines behind `+` at their after-file numbers, then its trailing context — the layout
@@ -790,7 +796,7 @@ func stackedRows(regions []domain.EditRegion) []stackedRow {
 	rows := make([]stackedRow, 0, len(regions)*4)
 	for i, region := range regions {
 		if i > 0 && !regionsMeet(regions[i-1], region) {
-			rows = append(rows, stackedRow{text: strings.Repeat(glyphLeaderDot, stackedRegionRuleCells)})
+			rows = append(rows, stackedRow{text: strings.Repeat(stackedRegionRuleGlyph, stackedRegionRuleCells)})
 		}
 		before, after := region.BeforeStart, region.AfterStart
 		for _, text := range region.Leading {

@@ -840,11 +840,11 @@ func TestSubAgentDoneMarkPaintedInTheSuccessRole(t *testing.T) {
 
 	row := leaderRow(th, toolView{Target: "survey", finished: true}, branchMarker(true), 60, false, noRemainder)
 
-	styled := th.successMark.Render(glyphDone)
-	if styled == glyphDone {
+	styled := th.successMark.Render(defaultGlyphs.done)
+	if styled == defaultGlyphs.done {
 		t.Fatal("the successMark role renders no escape sequence; the ✓ would be unstyled")
 	}
-	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().Success)).Render(glyphDone); styled != want {
+	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().Success)).Render(defaultGlyphs.done); styled != want {
 		t.Errorf("✓ style = %q; want the scheme's `success` green %q", styled, want)
 	}
 	if !strings.Contains(row, styled) {
@@ -854,7 +854,7 @@ func TestSubAgentDoneMarkPaintedInTheSuccessRole(t *testing.T) {
 		t.Errorf("row text = %q; want it to open %q (the mark follows the name, ahead of the leaders)", got, want)
 	}
 	plain := leaderRow(th, toolView{Target: "survey"}, branchMarker(true), 60, false, noRemainder)
-	if strings.Contains(ansi.Strip(plain), glyphDone) {
+	if strings.Contains(ansi.Strip(plain), defaultGlyphs.done) {
 		t.Errorf("an unfinished delegation's row carries a ✓: %q", ansi.Strip(plain))
 	}
 }

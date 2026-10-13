@@ -29,7 +29,7 @@ import (
 //   - The pane is filled solid black: the border style paints its border and padding cells black,
 //     and every content line is padded out to the full inner width on the same black field, so no
 //     interior cell (including the gap after a short row) is left on the terminal background.
-//   - The module owns the marker (glyphUser + a space on the selected row, two spaces
+//   - The module owns the marker (the theme's user glyph, glyphSet.user, + a space on the selected row, two spaces
 //     otherwise — or glyphMenuUnselected in menu style, popupSpec.menuRows), the selected-row
 //     highlight (th.userBlock's full bar, or the menu's accent run instead), the per-row treatment
 //     a caller asks for by KIND (popupSpec.rowKinds: a section header's white label, an edited
@@ -213,7 +213,7 @@ const (
 // ask for it are the panes whose rows are the answers to that body.
 //
 // menuRows paints the row list as a MENU rather than as a list with a cursor in it: the selected row
-// is glyphUser plus its label lit in the accent (th.popupAccent), every other row is
+// is the user glyph (glyphSet.user) plus its label lit in the accent (th.popupAccent), every other row is
 // glyphMenuUnselected plus its label faint, and NO row carries th.userBlock's full-width highlight
 // bar (docs/layout/user-questions-layout.md). The difference is what the row list is FOR. A picker
 // offers a long scrolled list of things to look through, and the bar is the position marker that
@@ -470,7 +470,7 @@ const popupBoxBorderRow = 1
 // (lipgloss v2 folds the border and padding into width, so every returned line is exactly width
 // cells). The inner content budget follows the border style — like renderStartupBox — rather
 // than a hard-coded frame, and every content line (title, rows, hint) is truncated to it so none
-// can wrap the box. The selected row within the scrolled window carries the glyphUser marker and
+// can wrap the box. The selected row within the scrolled window carries the user-glyph marker and
 // the full-bar highlight; the others render faint.
 func renderPopup(th theme, spec popupSpec, width int) string {
 	view, _ := renderPopupPlaced(th, spec, width)
@@ -856,7 +856,7 @@ type popupRowBlock struct {
 }
 
 // popupRowLines composes the spec's rows into the styled, black-filled content lines the pane
-// paints — the selected row within the scroll window carrying the glyphUser marker and the
+// paints — the selected row within the scroll window carrying the user-glyph marker and the
 // full-bar highlight, the others faint — and reports how many rows it is NOT showing. In MENU style
 // (popupSpec.menuRows) the marker and the styling change and nothing else does: the unselected rows
 // lead with glyphMenuUnselected instead of two blank cells, the selected row is lit in the accent
@@ -1050,7 +1050,7 @@ func popupRowLinesAt(th theme, spec popupSpec, blocks [][]string, inner int, bla
 		marker := "  "
 		switch {
 		case selected:
-			marker = glyphUser + " "
+			marker = th.glyphs.user + " "
 		case spec.menuRows:
 			// The dot is a marker like the chevron, in the same two cells: the labels of a menu line
 			// up in one column whichever row is selected, so moving the selection moves the light and
@@ -1135,7 +1135,7 @@ func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string
 	}
 }
 
-// popupRowIndent is the width of the marker column every row leads with — glyphUser,
+// popupRowIndent is the width of the marker column every row leads with — the user glyph,
 // glyphMenuUnselected or two blank cells, one cell plus the space after it either way — and so also
 // the HANGING INDENT a wrapped row's continuation lines carry (popupSpec.wrapRows). It is what a
 // wrapped row is wrapped TO: the text budget is the pane's inner width less this, on the first line

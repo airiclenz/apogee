@@ -528,7 +528,7 @@ func renderWorkflowBlock(th theme, view workflowView, text string, width int, st
 // (workflowView.stageBody) hung beneath them in the detail tone.
 func renderWorkflowStages(th theme, v workflowView, width int, state blockState) blockPaint {
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolLabel, state.star()+" ", v.header(), width), targetNone)
+	out.add(hangingWrap(th, th.toolLabel, state.star(th)+" ", v.header(), width), targetNone)
 	room := toolRowCells(th, width)
 	for i := range v.stages {
 		out.addStage(i, []string{v.stageRow(th, i, width, room)})
@@ -559,7 +559,7 @@ func (v workflowView) stageRow(th theme, i, width, room int) string {
 	case (stage.state == stagePending || stage.state == stageSkipped) && !waiting:
 		return th.toolLeader.Render(ansi.Strip(row))
 	case stage.entered:
-		return indicatorRow(th, row, width, glyphCollapsed)
+		return indicatorRow(th, row, width, th.glyphs.collapsed)
 	}
 	return row
 }
@@ -635,7 +635,7 @@ func (v workflowView) stageBody() []string {
 // what lets a block replayed from an older record — which kept no view — paint as its record did.
 func renderWorkflowText(th theme, text string, width int, state blockState) []string {
 	header, body, _ := strings.Cut(text, "\n")
-	lines := hangingWrap(th, th.toolLabel, state.star()+" ", header, width)
+	lines := hangingWrap(th, th.toolLabel, state.star(th)+" ", header, width)
 	if body == "" {
 		return lines
 	}

@@ -890,7 +890,7 @@ func (m Model) renderPendingInterjections() string {
 	}
 	bodies := m.stagedRowBodies()
 	for _, body := range bodies[len(bodies)-band.shown:] {
-		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+body))
+		rows = append(rows, m.queuedRow(bodyIndent+m.th.glyphs.interject+" "+body))
 	}
 	// The closing framing row, unless the skill-suggestion row has been granted it: the two
 	// surfaces share ONE block above the box, so the group closes on the hint instead and

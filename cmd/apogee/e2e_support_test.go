@@ -568,7 +568,7 @@ func TestFrameRedactionsSurviveAVersionWidthChange(t *testing.T) {
 	}
 }
 
-// liveStarGlyph is the assistant and tool-header star (internal/tui's glyphAssistant). A tool
+// liveStarGlyph is the assistant and tool-header star (internal/tui's default glyph set, glyphSet.assistant). A tool
 // block still holding an open call blinks it: half a second showing, half a second a bare cell that
 // holds its column (layout.md, "The live star").
 const liveStarGlyph = "✦"

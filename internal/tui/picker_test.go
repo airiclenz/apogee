@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -2009,7 +2010,7 @@ func pickerKindCases() []pickerKindCase {
 		{
 			name:   "autonomy rungs",
 			filter: "allow",
-			want:   modeMarker(domain.ModeAllowEdits),
+			want:   modeMarker(newTheme(scheme.Default()), domain.ModeAllowEdits),
 			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
 				t.Helper()
 				m, eng := openModePicker(t, domain.ModePlan)
@@ -2480,7 +2481,7 @@ func TestPickerZeroMatchesPaintsTheFilterOverNoRows(t *testing.T) {
 			t.Errorf("a row survived a filter matching nothing: %q", ln)
 		}
 	}
-	if strings.Contains(m.renderPicker(), glyphUser) {
+	if strings.Contains(m.renderPicker(), defaultGlyphs.user) {
 		t.Error("a pane with no rows drew a selection marker; there is nothing to highlight")
 	}
 }
@@ -3249,8 +3250,8 @@ func TestPickerModeOffersTheLadderInOrder(t *testing.T) {
 		got = append(got, row[0])
 	}
 	want := []string{
-		modeMarker(domain.ModePlan), modeMarker(domain.ModeAskBefore),
-		modeMarker(domain.ModeAllowEdits), modeMarker(domain.ModeAuto),
+		modeMarker(m.th, domain.ModePlan), modeMarker(m.th, domain.ModeAskBefore),
+		modeMarker(m.th, domain.ModeAllowEdits), modeMarker(m.th, domain.ModeAuto),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want the four rungs in ladder order %v", got, want)

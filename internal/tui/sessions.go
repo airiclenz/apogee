@@ -81,20 +81,6 @@ const sessionRenameCaret = "▏"
 // while nothing is armed.
 const deleteConfirmCell = "delete? y/n"
 
-// scheduleTagGlyph leads the tag a row carries when its record is one Firing of a Schedule
-// (ADR 0033): a circling arrow, for the standing instruction that will run again. It is one
-// terminal cell wide in EITHER width method — it carries no variation selector, so the two
-// measures agree about it (ADR 0030) — which is what keeps a labelled row costing the title
-// column exactly what it looks like it costs, whatever measure the painter is on.
-const scheduleTagGlyph = "⟳"
-
-// forkTagGlyph leads the tag a row carries when its record was cut from another by /fork
-// (Meta.ParentID set): a branching line, for the history the two records share up to the point
-// they part. Like scheduleTagGlyph it is one terminal cell wide in either width method and
-// carries no variation selector (ADR 0030), so a tagged title costs the column exactly what it
-// looks like it costs.
-const forkTagGlyph = "⑂"
-
 // interruptedNote is the transcript note appended when a resumed session was interrupted
 // mid-task (the engine reports InExchange after the restore). It tells the human how to pick the
 // work back up — /continue re-Steps the open Exchange (driveResume); a fresh message settles it
@@ -223,8 +209,8 @@ type browserView struct {
 // It is derived per frame and per keypress rather than captured at open, the picker's own posture:
 // the store can be re-listed under the open pane (a delete, a rename) and the relative times in the
 // cells move on their own.
-func (b sessionBrowser) filteredView(workspace string, now time.Time) browserView {
-	rows, visible := b.unfilteredRows(workspace, now)
+func (b sessionBrowser) filteredView(th theme, workspace string, now time.Time) browserView {
+	rows, visible := b.unfilteredRows(th, workspace, now)
 	pruned := b.view(rows)
 	view := browserView{rows: pruned.rows, metas: make([]session.Meta, 0, len(pruned.offering))}
 	for _, i := range pruned.offering {
@@ -243,11 +229,11 @@ func (b sessionBrowser) filteredView(workspace string, now time.Time) browserVie
 // off ONE walk of the store: filteredView needs the metas to map a surviving row back to its record,
 // and asking `visible` for them a second time re-allocated and re-copied the whole store on every
 // frame. A caller that only paints or clamps rows discards the second half.
-func (b sessionBrowser) unfilteredRows(workspace string, now time.Time) ([]popupRow, []session.Meta) {
+func (b sessionBrowser) unfilteredRows(th theme, workspace string, now time.Time) ([]popupRow, []session.Meta) {
 	visible := b.visible(workspace)
 	rows := make([]popupRow, 0, len(visible))
 	for _, meta := range visible {
-		rows = append(rows, sessionRowCells(meta, b.parentTitle(meta), workspace, b.allWorkspaces, now))
+		rows = append(rows, sessionRowCells(th, meta, b.parentTitle(meta), workspace, b.allWorkspaces, now))
 	}
 	return rows, visible
 }
@@ -291,7 +277,7 @@ func (b sessionBrowser) record(workspace string, rows []popupRow) (session.Meta,
 // sessionBrowserView is that view as of now — the one read every key route and the painter share, so
 // a verb and the pane can never disagree about which record the highlight names.
 func (m Model) sessionBrowserView() browserView {
-	return m.sessionBrowser.filteredView(m.opts.Workspace, time.Now())
+	return m.sessionBrowser.filteredView(m.th, m.opts.Workspace, time.Now())
 }
 
 // sessionBrowserKey routes a keypress while the overlay is open (idle only). A live rename edit or
@@ -318,7 +304,7 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.confirming {
 		return m.sessionConfirmKey(msg)
 	}
-	rows, _ := m.sessionBrowser.unfilteredRows(m.opts.Workspace, time.Now())
+	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
 	verdict, cmd := m.listKey(&m.sessionBrowser.listSurface, msg, rows, listWrapsAround)
 	switch verdict {
 	case listCloses:
@@ -785,7 +771,7 @@ func (m Model) browserListContent() (listContent, bool) {
 		// back (the picker's zero-match pane). Prose is not a choice, so the highlight stays off it.
 		c.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
 	} else {
-		c.rows = sessionRows(b, m.opts.Workspace, time.Now())
+		c.rows = sessionRows(m.th, b, m.opts.Workspace, time.Now())
 		c.selected = b.highlight(len(c.rows))
 	}
 	return c, true
@@ -801,8 +787,8 @@ func (m Model) browserListContent() (listContent, bool) {
 // The decoration is applied AFTER the filter and so takes no part in it: "delete? y/n" is the pane
 // answering a keypress rather than a fact about the session, and a row must not survive a filter on
 // the strength of being armed.
-func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
-	view := b.filteredView(workspace, now)
+func sessionRows(th theme, b sessionBrowser, workspace string, now time.Time) []popupRow {
+	view := b.filteredView(th, workspace, now)
 	rows := make([]popupRow, 0, len(view.rows))
 	for i, row := range view.rows {
 		switch {
@@ -851,20 +837,20 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 // transcript on the way back in, never its Meta), so a title carrying "\x1bc" would otherwise reach the pane as a live RIS
 // terminal reset — the popup module strips nothing and truncates ANSI-preservingly — and would also
 // lie to the column math, since an ESC byte occupies no display cell but does occupy the string.
-func sessionRowCells(meta session.Meta, parentTitle string, currentWorkspace string, all bool, now time.Time) popupRow {
+func sessionRowCells(th theme, meta session.Meta, parentTitle string, currentWorkspace string, all bool, now time.Time) popupRow {
 	title := stripEscapes(meta.Title)
 	if all && meta.Workspace != currentWorkspace {
 		title += " · " + stripEscapes(workspaceBase(meta.Workspace))
 	}
 	if meta.ScheduleName != "" {
-		title += " · " + scheduleTagGlyph + " " + stripEscapes(meta.ScheduleName)
+		title += " · " + th.glyphs.scheduleTag + " " + stripEscapes(meta.ScheduleName)
 	}
 	if meta.ParentID != "" {
 		parent := parentTitle
 		if parent == "" {
 			parent = meta.ParentID
 		}
-		title += " · " + forkTagGlyph + " " + stripEscapes(parent)
+		title += " · " + th.glyphs.forkTag + " " + stripEscapes(parent)
 	}
 	row := popupRow{
 		title,

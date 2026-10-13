@@ -51,6 +51,7 @@ type footerInput struct {
 	width   int
 	margin  int
 	measure widthAuthority
+	glyphs  glyphSet
 }
 
 // footerLayout is the composed row: the three plain runs the painter styles separately — info on
@@ -92,7 +93,7 @@ func footerFit(in footerInput) footerLayout {
 		{in.host, in.model},                                  // priority 2: the workdir
 		{in.model},                                           // priority 1: the host
 	} {
-		if layout, ok := in.seat(footerRun(segments...)); ok {
+		if layout, ok := in.seat(footerRun(in.glyphs, segments...)); ok {
 			return layout
 		}
 	}
@@ -149,7 +150,7 @@ func (in footerInput) offlineRun(info string) string {
 	case info == "":
 		return in.offline
 	default:
-		return " " + glyphAssistant + " " + in.offline
+		return " " + in.glyphs.assistant + " " + in.offline
 	}
 }
 
@@ -159,7 +160,7 @@ func (in footerInput) offlineRun(info string) string {
 // own styled run and its error tone rather than being folded into the info run to be truncated
 // with it.
 func (in footerInput) floor() footerLayout {
-	info := footerRun(in.host, in.model, in.effort, in.workdir, in.spend)
+	info := footerRun(in.glyphs, in.host, in.model, in.effort, in.workdir, in.spend)
 	offline := in.offlineRun(info)
 	budget := max(0, in.width-in.margin)
 	info = in.measure.Truncate(info, budget, "…")
@@ -169,6 +170,6 @@ func (in footerInput) floor() footerLayout {
 
 // footerRun joins the left run's segments the way the footer reads, ✦-separated, with every
 // segment nothing has named leaving WITH its separator ([nonEmpty]).
-func footerRun(segments ...string) string {
-	return strings.Join(nonEmpty(segments...), " "+glyphAssistant+" ")
+func footerRun(glyphs glyphSet, segments ...string) string {
+	return strings.Join(nonEmpty(segments...), " "+glyphs.assistant+" ")
 }

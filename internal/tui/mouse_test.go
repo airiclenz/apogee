@@ -887,7 +887,7 @@ func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 		t.Fatal("a transcript drag did not arm a selection")
 	}
 	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
-	if want := glyphUser + " hello world"; got != want {
+	if want := defaultGlyphs.user + " hello world"; got != want {
 		t.Fatalf("selected text = %q, want %q (the rendered user block, pad trimmed)", got, want)
 	}
 
@@ -1911,7 +1911,7 @@ func TestTranscriptSelectionWinsOverTheSkillAccent(t *testing.T) {
 	line := promptBlockLine(t, m, 0)
 	row := screenRow(t, m, line)
 	m = step(t, m, leftClick(0, row))
-	m = step(t, m, leftDrag(m.th.measure.Width(glyphUser+" "+text), row))
+	m = step(t, m, leftDrag(m.th.measure.Width(defaultGlyphs.user+" "+text), row))
 
 	frame := m.View().Content
 	if run := shadedRun(t, frame); !strings.Contains(run, "/review") {
@@ -2169,7 +2169,7 @@ func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
 		t.Fatal("release of the kept selection should return a copy Cmd, got nil")
 	}
 	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
-	if want := glyphUser + " hello world"; got != want {
+	if want := defaultGlyphs.user + " hello world"; got != want {
 		t.Fatalf("copied %q, want %q — a kept selection must copy what is on screen", got, want)
 	}
 }
@@ -2228,7 +2228,7 @@ func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
 		t.Fatal("release after a surviving drag should return a copy Cmd, got nil")
 	}
 	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
-	if want := glyphUser + " hello world"; got != want {
+	if want := defaultGlyphs.user + " hello world"; got != want {
 		t.Fatalf("copied %q, want %q", got, want)
 	}
 }
@@ -2485,7 +2485,7 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 				t.Fatal("a transcript drag armed no selection")
 			}
 			got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
-			if want := glyphUser + " hello world"; got != want {
+			if want := defaultGlyphs.user + " hello world"; got != want {
 				t.Fatalf("selected text = %q, want %q", got, want)
 			}
 
@@ -2614,11 +2614,11 @@ func TestTranscriptCopySkipsPromptPadRows(t *testing.T) {
 			tr.commitAssistant("answer", runRef{})
 			tr.addUser("prompt", nil)
 			tr.commitAssistant("answer", runRef{})
-		}, glyphAssistant + " answer\n\n" + glyphUser + " prompt\n\n" + glyphAssistant + " answer"},
+		}, defaultGlyphs.assistant + " answer\n\n" + defaultGlyphs.user + " prompt\n\n" + defaultGlyphs.assistant + " answer"},
 		{"two adjacent interjections", func(tr *transcript) {
 			tr.addInterjected("a", nil)
 			tr.addInterjected("b", nil)
-		}, glyphInterject + " a\n\n" + glyphInterject + " b"},
+		}, defaultGlyphs.interject + " a\n\n" + defaultGlyphs.interject + " b"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2658,9 +2658,9 @@ func TestTranscriptCopySkipsPadRowsAtTheSpanEnds(t *testing.T) {
 		a, b contentCell
 		want string
 	}{
-		{"starting on the ▀", contentCell{3, 5}, contentCell{4, 80}, glyphAssistant + " answer"},
-		{"ending on the ▄", contentCell{0, 0}, contentCell{1, 3}, glyphAssistant + " answer"},
-		{"from ▄ to ▀", contentCell{1, 40}, contentCell{3, 2}, glyphUser + " prompt"},
+		{"starting on the ▀", contentCell{3, 5}, contentCell{4, 80}, defaultGlyphs.assistant + " answer"},
+		{"ending on the ▄", contentCell{0, 0}, contentCell{1, 3}, defaultGlyphs.assistant + " answer"},
+		{"from ▄ to ▀", contentCell{1, 40}, contentCell{3, 2}, defaultGlyphs.user + " prompt"},
 		{"only half rows", contentCell{1, 0}, contentCell{1, 80}, ""},
 	}
 	for _, c := range cases {
@@ -2689,9 +2689,9 @@ func TestTranscriptCopyPadRowsKeepTheSeparatorsRail(t *testing.T) {
 		want       string
 	}{
 		{"depth-1 neighbours", 1, "answer",
-			"│ " + glyphAssistant + " answer\n│\n│ " + glyphUser + " deep prompt\n│\n│ " + glyphAssistant + " answer"},
+			"│ " + defaultGlyphs.assistant + " answer\n│\n│ " + defaultGlyphs.user + " deep prompt\n│\n│ " + defaultGlyphs.assistant + " answer"},
 		{"depth-0 neighbours opening with a bar", 0, "│ a quoted rail",
-			"│ a quoted rail\n\n│ " + glyphUser + " deep prompt\n\n│ a quoted rail"},
+			"│ a quoted rail\n\n│ " + defaultGlyphs.user + " deep prompt\n\n│ a quoted rail"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2756,7 +2756,7 @@ func TestTranscriptSelectionLeavesPadRowsUnshaded(t *testing.T) {
 			if shaded[r] != rows[r] {
 				t.Errorf("half row %d was shaded: %q", r, shaded[r])
 			}
-		case strings.Contains(strip(rows[r]), glyphUser+" prompt"):
+		case strings.Contains(strip(rows[r]), defaultGlyphs.user+" prompt"):
 			sawPrompt = true
 			if !strings.Contains(shaded[r], selectionBg) {
 				t.Errorf("the prompt row %d under the selection is unshaded: %q", r, shaded[r])
@@ -2797,7 +2797,7 @@ func TestTranscriptCopyFromStickyHeaderSkipsPadRows(t *testing.T) {
 
 			got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
 
-			if want := glyphUser + " HEADERPROMPT"; got != want {
+			if want := defaultGlyphs.user + " HEADERPROMPT"; got != want {
 				t.Fatalf("the copy from the sticky header = %q, want %q", got, want)
 			}
 		})
@@ -3799,7 +3799,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		copy(openState, m.transcript.entries)
 
 		m = clickLine(t, m, umbrellaHeaderLine(t, m))
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("after the header click the headers are %q, want the folded %q", got, want)
 		}
 		// The fold hides every row but the header: no type row and no member is left to click.
@@ -3836,7 +3836,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		if !m.transcript.umbrellaFolded(readRun) {
 			t.Fatal("a click on the shut umbrella's header did not fold it; every umbrella folds")
 		}
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("headers = %q, want the folded %q", got, want)
 		}
 		if len(m.lines) >= before {
@@ -3906,7 +3906,7 @@ func umbrellaHeaderLineOf(t *testing.T, m Model, head int) int {
 func TestLargeUmbrellasShareOneFold(t *testing.T) {
 	t.Parallel()
 	const firstHead, secondHead = 1, 6
-	folded := []string{"✦ Tools (4 calls) " + glyphCollapsed, "✦ Tools (4 calls) " + glyphCollapsed}
+	folded := []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed, "✦ Tools (4 calls) " + defaultGlyphs.collapsed}
 	open := []string{"✦ Tools (4 calls) " + glyphExpanded, "✦ Tools (4 calls) " + glyphExpanded}
 
 	t.Run("a gesture on any header flips them all and writes the key back", func(t *testing.T) {
@@ -4033,8 +4033,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		openCall(&m, "t2", "go test ./...") // still waiting for its result: the umbrella is live
 		m.refreshViewport()
 		const head = 1
-		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (4 calls) "+glyphCollapsed) {
-			t.Fatalf("setup: headers = %q, want one folded live header ending in %q", got, "Tools (4 calls) "+glyphCollapsed)
+		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (4 calls) "+defaultGlyphs.collapsed) {
+			t.Fatalf("setup: headers = %q, want one folded live header ending in %q", got, "Tools (4 calls) "+defaultGlyphs.collapsed)
 		}
 		if !m.transcript.umbrellaIsLarge(head) {
 			t.Fatal("setup: the live umbrella is not large; its size alone decides")
@@ -4071,7 +4071,7 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		if got := m.viewedRun().spawn; got != "s1" {
 			t.Fatalf("setup: ⏎ on the delegation opened run %q; want its view", got)
 		}
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("setup: the view paints headers %q, want the folded %q", got, want)
 		}
 
@@ -4101,7 +4101,7 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		}
 		m = step(t, m, keyEnter())
 
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("after ⏎ on the header the view paints %q, want the folded %q", got, want)
 		}
 		if want := []settingEdit{{path: "ui.tools-open", value: "true"}, {path: "ui.tools-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
@@ -4179,7 +4179,7 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 	start := []string{
 		"✦ Tools (2 calls) " + glyphExpanded,
 		"✦ Tools (2 calls) " + glyphExpanded,
-		"✦ Tools (4 calls) " + glyphCollapsed,
+		"✦ Tools (4 calls) " + defaultGlyphs.collapsed,
 	}
 	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, start) {
 		t.Fatalf("setup: headers = %q, want two open small ones over a folded large one %q", got, start)
@@ -4192,7 +4192,7 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 
 	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, runsHead)))
 
-	folded := []string{start[0], "✦ Tools (2 calls) " + glyphCollapsed, start[2]}
+	folded := []string{start[0], "✦ Tools (2 calls) " + defaultGlyphs.collapsed, start[2]}
 	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, folded) {
 		t.Errorf("after the click on the Runs header the headers are %q, want that one alone folded %q", got, folded)
 	}
@@ -6045,7 +6045,7 @@ func TestAskClickOutsideTheBoxReachesTheTranscriptAndThePrompt(t *testing.T) {
 		t.Fatal("a drag over the transcript armed no selection; the question must not swallow the rows above it")
 	}
 	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
-	if want := glyphUser + " hello world"; got != want {
+	if want := defaultGlyphs.user + " hello world"; got != want {
 		t.Errorf("selected text = %q, want %q", got, want)
 	}
 

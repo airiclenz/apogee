@@ -82,11 +82,11 @@ func renderToolBlock(th theme, view toolView, width int, state blockState) block
 	if state.elides || blockHidesWhenCollapsed(th, []toolView{view}, width) {
 		toggle = targetHeader
 		if view.Target == "" {
-			label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
+			label += " " + th.toolIndicator.Render(stateIndicator(th, state.expanded))
 		}
 	}
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), toggle)
+	out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), toggle)
 	out.join(renderToolBranch(th, view, state.branchMarkerIn(0, 1), width, state.expanded, toggle))
 	return out
 }
@@ -162,10 +162,10 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 		th.toolIndicator.Render("("+plural(calls, superCallNoun)+")")
 	// The glyph sits after the count, the header-folding card's idiom (renderToolBlock): the
 	// indicator stays the row's last word.
-	label += " " + th.toolIndicator.Render(stateIndicator(!fold.folded))
+	label += " " + th.toolIndicator.Render(stateIndicator(th, !fold.folded))
 	var out blockPaint
 	if fold.folded {
-		out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetUmbrella)
+		out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), targetUmbrella)
 		return out
 	}
 	room := toolRowCells(th, width)
@@ -176,7 +176,7 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 		views := guardPromotions(th, r.views, room, superMemberMarker(true))
 		row := leaderRowIn(th, typeRowText(views), typeRowPaint(th, views),
 			runAggregate(views), branchMarker(i == len(runs)-1), room, r.expanded, noRemainder)
-		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(r.expanded))}, targetType)
+		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(th, r.expanded))}, targetType)
 		if r.expanded {
 			for k, tv := range views {
 				lines, hides := renderGroupMember(th, tv, superMemberMarker(k == len(views)-1),
@@ -191,7 +191,7 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 		at += len(r.views)
 	}
 
-	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetUmbrella)
+	out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), targetUmbrella)
 	out.join(rows)
 	return out
 }
@@ -293,7 +293,7 @@ func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room
 	if expanded {
 		return renderExpandedMember(th, tv, marker, gutter, width, room), true
 	}
-	return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
+	return []string{indicatorRow(th, row, width, th.glyphs.collapsed)}, true
 }
 
 // renderExpandedMember paints an OPEN member of a grouped block — the sketch's "middle one

@@ -874,7 +874,7 @@ func TestInterjectedMsgMovesRowToTranscript(t *testing.T) {
 			len(m.userBlocks), before)
 	}
 	view := plain(m.View())
-	if !strings.Contains(view, glyphInterject+" also check the tests") {
+	if !strings.Contains(view, defaultGlyphs.interject+" also check the tests") {
 		t.Errorf("the delivered remark is not rendered with its ⧖ marker:\n%s", view)
 	}
 }
@@ -942,7 +942,7 @@ func TestQueuedStripRendersAsIndentedBand(t *testing.T) {
 		t.Errorf("frame rows = %q / %q; want a blank band row above and below the group", lines[0], lines[3])
 	}
 	for i, text := range []string{"one", "two"} {
-		want := bodyIndent + glyphInterject + " " + text
+		want := bodyIndent + defaultGlyphs.interject + " " + text
 		if !strings.HasPrefix(lines[i+1], want) {
 			t.Errorf("content line %d = %q; want it to start %q (indented, oldest first)", i, lines[i+1], want)
 		}
@@ -981,7 +981,7 @@ func TestQueuedRowUsesThemeBandStyle(t *testing.T) {
 	t.Parallel()
 	m := stageRow(t, runningModel(t), "one")
 
-	line := bodyIndent + glyphInterject + " one"
+	line := bodyIndent + defaultGlyphs.interject + " one"
 	line += strings.Repeat(" ", m.width-ansi.StringWidth(line))
 	got := strings.Split(m.renderPendingInterjections(), "\n")[1]
 	if want := m.th.queuedText.Render(line); got != want {
@@ -1234,11 +1234,11 @@ func TestHintRowIsNearestTheInputBox(t *testing.T) {
 		t.Errorf("the group does not open on its blank framing row: %q", rows[0])
 	}
 	for i, row := range rows[1 : len(rows)-1] {
-		if !strings.Contains(row, glyphInterject) {
+		if !strings.Contains(row, defaultGlyphs.interject) {
 			t.Errorf("row %d of the group is not a staged row: %q", i+1, row)
 		}
 	}
-	if last := rows[len(rows)-1]; !strings.Contains(last, glyphSkill) {
+	if last := rows[len(rows)-1]; !strings.Contains(last, defaultGlyphs.skill) {
 		t.Errorf("the row nearest the input box is not the hint: %q", last)
 	}
 }

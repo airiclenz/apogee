@@ -1191,16 +1191,16 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 	inner := railedWidth(width, in.depth)
 	switch in.kind {
 	case entryUser:
-		return renderUserBlock(th, glyphUser+" ", in, inner).railed(th, in.depth)
+		return renderUserBlock(th, th.glyphs.user+" ", in, inner).railed(th, in.depth)
 	case entryInterjected:
 		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
 		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
 		// Its skill tokens light up the sent block's way, for the same reason: a skill rides an
 		// interjection (ADR 0027), and the record of what the model was given must not depend on
 		// whether the remark was delivered mid-run or flushed into a new Exchange.
-		return renderUserBlock(th, glyphInterject+" ", in, inner).railed(th, in.depth)
+		return renderUserBlock(th, th.glyphs.interject+" ", in, inner).railed(th, in.depth)
 	case entryAssistant:
-		marker := glyphAssistant + " "
+		marker := th.glyphs.assistant + " "
 		body := renderMarkdownBody(th, in.text, inner-th.measure.Width(marker))
 		return plainPaint(railLines(th, withMarker(th, marker, body), in.depth))
 	case entryToolCall:
@@ -1228,12 +1228,12 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		// block's own static summary (schedule.go, scheduleRunningSummary).
 		return renderToolBlock(th, in.tool, inner, blockState{
 			expanded: in.expanded,
-			glyph:    scheduleTagGlyph,
+			glyph:    th.glyphs.scheduleTag,
 		}).railed(th, in.depth)
 	case entryToolResult:
 		return renderOrphanResult(th, in.text, inner, in.expanded).railed(th, in.depth)
 	case entryError:
-		return plainPaint(railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", in.text, inner), in.depth))
+		return plainPaint(railLines(th, hangingWrap(th, th.errorText, th.glyphs.assistant+" ", in.text, inner), in.depth))
 	case entryNote, entryCompacted:
 		// A fold's trace paints as the note it reads as; its kind is for the record, not the eye.
 		return plainPaint(railLines(th, hangingWrap(th, th.noteText, "· ", in.text, inner), in.depth))

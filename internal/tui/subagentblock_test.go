@@ -29,7 +29,7 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 
 	th := newTheme(scheme.Default())
 	const depth = 2
-	floor := depth*railWidth + th.measure.Width(glyphAssistant+" ") + 1
+	floor := depth*railWidth + th.measure.Width(defaultGlyphs.assistant+" ") + 1
 
 	for _, width := range []int{0, 1, 2, 3, 6, 12, 40} {
 		tr := feed(domain.MessageEvent{
@@ -707,7 +707,7 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 	}
 
 	painted := renderPlain(replayed, 80)
-	if strings.Contains(painted, glyphDone) {
+	if strings.Contains(painted, defaultGlyphs.done) {
 		t.Errorf("the interrupted run wears the done ✓:\n%s", painted)
 	}
 	if !strings.Contains(painted, interruptedSummary) {
@@ -790,10 +790,10 @@ func TestSubAgentCancelKeepsTheFinishedMembersReport(t *testing.T) {
 		if len(rows) < 3 {
 			t.Fatalf("%s: want an umbrella header and two member rows:\n%s", name, painted)
 		}
-		if !strings.Contains(rows[1], "survey") || !strings.Contains(rows[1], glyphDone) {
+		if !strings.Contains(rows[1], "survey") || !strings.Contains(rows[1], defaultGlyphs.done) {
 			t.Errorf("%s: the finished member row = %q; want its ✓", name, rows[1])
 		}
-		if !strings.Contains(rows[2], slot) || strings.Contains(rows[2], glyphDone) {
+		if !strings.Contains(rows[2], slot) || strings.Contains(rows[2], defaultGlyphs.done) {
 			t.Errorf("%s: the stopped member row = %q; want %q and no ✓", name, rows[2], slot)
 		}
 	}
@@ -848,7 +848,7 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 		if got := strings.Contains(row, th.errorText.Render(slot)); got != wantRed {
 			t.Errorf("slot %q painted in the failure tone = %v, want %v: %q", slot, got, wantRed, row)
 		}
-		if got := strings.Contains(strip(row), glyphDone); got != wantDone {
+		if got := strings.Contains(strip(row), defaultGlyphs.done); got != wantDone {
 			t.Errorf("row %q wears the done ✓ = %v, want %v", strip(row), got, wantDone)
 		}
 	}
@@ -1002,7 +1002,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 		// The row wears the ▶ that says the prompt above is behind it: the block hides the
 		// delegation's whole task, which no reading of its own lines can see (subAgentHidesPrompt).
 		want := "✦ Sub-Agent\n" +
-			leaderEdgeRow("  ┕ survey the tests ⋯ "+refusedResult, glyphCollapsed)
+			leaderEdgeRow("  ┕ survey the tests ⋯ "+refusedResult, defaultGlyphs.collapsed)
 		if got := renderPlain(tr, width); got != want {
 			t.Errorf("collapsed lone refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -1018,7 +1018,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 			t.Fatalf("setExpanded(0, true) = false; want the first member open")
 		}
 
-		sibling := leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusedResult, glyphCollapsed)
+		sibling := leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusedResult, defaultGlyphs.collapsed)
 		want := strings.Join([]string{
 			"✦ Sub-Agent (2)",
 			leaderEdgeRow("  ┝ survey the tests ✓ ⋯ done", glyphExpanded),
@@ -1080,7 +1080,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 		if !strings.Contains(last, refusedResult) {
 			t.Fatalf("last row = %q; want the promptless member's own row", last)
 		}
-		if strings.HasSuffix(last, glyphCollapsed) {
+		if strings.HasSuffix(last, defaultGlyphs.collapsed) {
 			t.Errorf("the promptless member row = %q; want no indicator over an empty body", last)
 		}
 	})
@@ -1159,7 +1159,7 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 			rows := strings.Split(renderPlain(tr, tc.width), "\n")
 			row := rows[len(rows)-1]
 
-			if !strings.HasSuffix(row, glyphCollapsed) {
+			if !strings.HasSuffix(row, defaultGlyphs.collapsed) {
 				t.Errorf("collapsed row = %q; want the ▶ that opens onto the prompt", row)
 			}
 			if !strings.Contains(row, floor) {
@@ -1203,8 +1203,8 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Sub-Agent (2)",
-			leaderEdgeRow("  ┝ "+target+" ✓ ⋯ "+refusal, glyphCollapsed),
-			leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusal, glyphCollapsed),
+			leaderEdgeRow("  ┝ "+target+" ✓ ⋯ "+refusal, defaultGlyphs.collapsed),
+			leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusal, defaultGlyphs.collapsed),
 		}, "\n")
 		if got := renderPlain(tr, 110); got != want {
 			t.Errorf("folded grouped refusals mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1705,7 +1705,7 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 		}
 		task := -1
 		for i, ln := range lines {
-			if strings.HasPrefix(ln, glyphUser) {
+			if strings.HasPrefix(ln, defaultGlyphs.user) {
 				task = i
 				break
 			}
@@ -1947,7 +1947,7 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 		if strings.Contains(row, th.toolMarker.Render(slot)) {
 			t.Errorf("slot %q still wears the ordinary marker tone: %q", slot, row)
 		}
-		if !strings.Contains(strip(row), glyphDone) {
+		if !strings.Contains(strip(row), defaultGlyphs.done) {
 			t.Errorf("the finished run wears no done ✓: %q", strip(row))
 		}
 	})
@@ -2010,7 +2010,7 @@ func TestSubAgentEndedWithoutReportWearsNoCheck(t *testing.T) {
 			if !strings.Contains(painted, tc.slot) {
 				t.Errorf("no row reads %q:\n%s", tc.slot, painted)
 			}
-			if got := strings.Contains(painted, glyphDone); got != tc.finished {
+			if got := strings.Contains(painted, defaultGlyphs.done); got != tc.finished {
 				t.Errorf("the row wears the done ✓ = %v, want %v:\n%s", got, tc.finished, painted)
 			}
 		})
@@ -2088,7 +2088,7 @@ func TestSubAgentStoppedByYouWearsNoCheck(t *testing.T) {
 			if !strings.Contains(painted, slot) {
 				t.Errorf("%s: no row reads %q:\n%s", name, slot, painted)
 			}
-			if strings.Contains(painted, glyphDone) {
+			if strings.Contains(painted, defaultGlyphs.done) {
 				t.Errorf("%s: the stopped run wears the done ✓:\n%s", name, painted)
 			}
 		}
@@ -2108,10 +2108,10 @@ func TestSubAgentStoppedByYouWearsNoCheck(t *testing.T) {
 			if len(rows) < 3 {
 				t.Fatalf("%s: want an umbrella header and two member rows:\n%s", name, strings.Join(rows, "\n"))
 			}
-			if !strings.Contains(rows[1], glyphDone) {
+			if !strings.Contains(rows[1], defaultGlyphs.done) {
 				t.Errorf("%s: the finished member lost its ✓: %q", name, rows[1])
 			}
-			if !strings.Contains(rows[2], slot) || strings.Contains(rows[2], glyphDone) {
+			if !strings.Contains(rows[2], slot) || strings.Contains(rows[2], defaultGlyphs.done) {
 				t.Errorf("%s: the stopped member row = %q; want %q and no ✓", name, rows[2], slot)
 			}
 		}
@@ -2142,7 +2142,7 @@ func TestSubAgentStoppedByYouWearsNoCheck(t *testing.T) {
 			rows := strings.Split(renderPlain(view, width), "\n")
 			row := rows[len(rows)-1]
 			if !strings.Contains(row, "build") || !strings.Contains(row, delegationStoppedVerdict) ||
-				strings.Contains(row, erroredSummary) || strings.Contains(row, glyphDone) {
+				strings.Contains(row, erroredSummary) || strings.Contains(row, defaultGlyphs.done) {
 				t.Errorf("%s: the queued stop's row = %q; want %q, no %q and no ✓", name, row, delegationStoppedVerdict, erroredSummary)
 			}
 		}
@@ -2182,7 +2182,7 @@ func TestSubAgentStoppedByYouWearsNoCheck(t *testing.T) {
 				rows := strings.Split(renderPlain(view, width), "\n")
 				row := rows[len(rows)-1]
 				if !strings.Contains(row, "build") || !strings.Contains(row, tc.verdict) ||
-					strings.Contains(row, erroredSummary) || strings.Contains(row, glyphDone) {
+					strings.Contains(row, erroredSummary) || strings.Contains(row, defaultGlyphs.done) {
 					t.Errorf("%s: the row = %q; want %q, no %q and no ✓", name, row, tc.verdict, erroredSummary)
 				}
 			}

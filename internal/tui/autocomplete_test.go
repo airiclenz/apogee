@@ -49,8 +49,8 @@ func TestAutocompleteSkillDropdownChrome(t *testing.T) {
 			t.Errorf("View is missing the popup border glyph %q:\n%s", glyph, view)
 		}
 	}
-	if !strings.Contains(view, glyphUser+" "+glyphSkill+" /clean-code") {
-		t.Errorf("the selected row does not lead with the %q marker:\n%s", glyphUser, view)
+	if !strings.Contains(view, defaultGlyphs.user+" "+defaultGlyphs.skill+" /clean-code") {
+		t.Errorf("the selected row does not lead with the %q marker:\n%s", defaultGlyphs.user, view)
 	}
 	// The dropdown sits above the input box: the title precedes the typed draft.
 	title, input := strings.Index(view, "commands and skills"), strings.Index(view, "zzz")
@@ -200,7 +200,7 @@ func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
 				// The marker is on the selected row and nowhere else, so finding the verb BESIDE it
 				// is the proof the highlighted row is the one drawn — not merely that the text is
 				// somewhere in the pane.
-				if want := glyphUser + " /" + it.value; !strings.Contains(flat, want) {
+				if want := defaultGlyphs.user + " /" + it.value; !strings.Contains(flat, want) {
 					t.Errorf("row %d (%q) selected but not on the screen at %d rows with %d staged; want a row leading %q:\n%s",
 						i, it.value, c.height, c.staged, want, flat)
 				}

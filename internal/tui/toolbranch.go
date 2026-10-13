@@ -84,7 +84,7 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	var out blockPaint
 	row := leaderRow(th, tv, marker, toolRowCells(th, width), expanded, collapsedRemainder(tv, expanded))
 	if toggle != targetNone {
-		row = indicatorRow(th, row, width, stateIndicator(expanded))
+		row = indicatorRow(th, row, width, stateIndicator(th, expanded))
 	}
 	out.add([]string{row}, toggle)
 	if expanded {

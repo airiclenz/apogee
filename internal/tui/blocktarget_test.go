@@ -208,7 +208,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				// one dot (design call 4). The hidden body is counted nowhere either: a row this
 				// narrow cannot seat the count without spending the target's own floor on it
 				// (affordableSlot).
-				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ a"+clipTail+" ⋯", glyphCollapsed)},
+				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ a"+clipTail+" ⋯", defaultGlyphs.collapsed)},
 			},
 		},
 		{
@@ -280,7 +280,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
 				{line: 1, kind: targetHeader, entry: 0,
-					text: leaderEdgeRow("│   ┕ go test ⋯ exit 0 · +3 more lines", glyphCollapsed)},
+					text: leaderEdgeRow("│   ┕ go test ⋯ exit 0 · +3 more lines", defaultGlyphs.collapsed)},
 			},
 		},
 	}
@@ -331,7 +331,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				return tr
 			},
 			wantHeader:    "✦ Terminal",
-			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
+			wantCollapsed: defaultGlyphs.collapsed, wantExpanded: glyphExpanded,
 		},
 		{
 			name: "a sub-agent run's elided span",
@@ -343,14 +343,14 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				return tr
 			},
 			wantHeader:    "✦ Sub-Agent",
-			wantCollapsed: glyphCollapsed, wantExpanded: glyphCollapsed,
+			wantCollapsed: defaultGlyphs.collapsed, wantExpanded: defaultGlyphs.collapsed,
 			refusesToggle: true,
 		},
 		{
 			name:          "a Firing under its own glyph",
 			build:         func() *transcript { return firingBlock("found 3 stale entries\nremoved them") },
 			wantHeader:    "⟳ Schedule",
-			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
+			wantCollapsed: defaultGlyphs.collapsed, wantExpanded: glyphExpanded,
 		},
 	}
 	for _, tc := range cases {
@@ -400,10 +400,10 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 
 	lines := tr.renderLines(th, 80)
 
-	if want := th.toolIndicator.Render(glyphCollapsed); !strings.Contains(lines[1], want) {
+	if want := th.toolIndicator.Render(defaultGlyphs.collapsed); !strings.Contains(lines[1], want) {
 		t.Errorf("branch row %q does not carry the detail-toned indicator %q", lines[1], want)
 	}
-	if styledIntoTheLabel := th.toolLabel.Render("Run " + glyphCollapsed); strings.Contains(lines[0], styledIntoTheLabel) {
+	if styledIntoTheLabel := th.toolLabel.Render("Run " + defaultGlyphs.collapsed); strings.Contains(lines[0], styledIntoTheLabel) {
 		t.Errorf("header %q paints the indicator inside the label's own run", lines[0])
 	}
 }
@@ -631,7 +631,7 @@ func branchIndicator(t *testing.T, tr *transcript) string {
 	if len(lines) < 2 {
 		t.Fatalf("the block painted %d rows; it has no branch row to check", len(lines))
 	}
-	for _, glyph := range []string{glyphCollapsed, glyphExpanded} {
+	for _, glyph := range []string{defaultGlyphs.collapsed, glyphExpanded} {
 		if strings.HasSuffix(lines[1], glyph) {
 			return glyph
 		}
@@ -819,7 +819,7 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: tc.rendered}})
 
 			collapsed := strings.Split(renderPlain(tr, tc.width), "\n")
-			if want := []string{"✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(collapsed, want) {
+			if want := []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(collapsed, want) {
 				t.Errorf("the collapsed block paints:\n%s\nwant exactly its header:\n%s",
 					strings.Join(collapsed, "\n"), strings.Join(want, "\n"))
 			}
@@ -994,7 +994,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 				t.Errorf("after the click on the second card, the card at entry %d is still open; the fold is shared", at)
 			}
 		}
-		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphCollapsed, "✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed, "✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("the next frame paints headers %q, want both folded %q — the cached paint did not move", got, want)
 		}
 		if m.opts.UI.TaskListOpen {
@@ -1072,7 +1072,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 		if len(cards) != 1 || m.transcript.entries[cards[0]].expanded {
 			t.Fatalf("under ui.task-list-open: false the live card starts open (cards %v)", cards)
 		}
-		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("first paint headers = %q, want %q", got, want)
 		}
 

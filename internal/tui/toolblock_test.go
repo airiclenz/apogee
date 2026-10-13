@@ -241,7 +241,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		if !tr.setUmbrellaFolded(readHead, true) {
 			t.Fatalf("setUmbrellaFolded(%d, true) = false; want the small umbrella folded on its own flag", readHead)
 		}
-		want := "✦ Tools (3 calls) " + glyphCollapsed
+		want := "✦ Tools (3 calls) " + defaultGlyphs.collapsed
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("folded small umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -261,7 +261,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		if !tr.setTypeExpanded(readHead, true) {
 			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open under the fold", readHead)
 		}
-		want := "✦ Tools (3 calls) " + glyphCollapsed
+		want := "✦ Tools (3 calls) " + defaultGlyphs.collapsed
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("folded umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -306,8 +306,8 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		tr.toolsFoldOver = 1
 		th := newTheme(scheme.Default())
 		for blink, want := range map[bool]string{
-			false: "✦ Tools (3 calls) " + glyphCollapsed,
-			true:  "  Tools (3 calls) " + glyphCollapsed,
+			false: "✦ Tools (3 calls) " + defaultGlyphs.collapsed,
+			true:  "  Tools (3 calls) " + defaultGlyphs.collapsed,
 		} {
 			view := tr.renderView(th, 80, blink, breadcrumbHint)
 			if got := strings.TrimRight(strip(strings.Join(view.lines, "\n")), " "); got != want {
@@ -474,7 +474,7 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 			t.Errorf("%s = %q; want its outcome %q printed whole and flush at the edge",
 				tc.name, tc.row, tc.summary)
 		}
-		if got := strings.Count(tc.row, glyphLeaderDot); got < leaderMinDots {
+		if got := strings.Count(tc.row, defaultGlyphs.leaderDot); got < leaderMinDots {
 			t.Errorf("%s carries %d leader dots, want at least the floor of %d: %q",
 				tc.name, got, leaderMinDots, tc.row)
 		}
@@ -723,7 +723,7 @@ func TestTargetlessBlockStillCapsAndToggles(t *testing.T) {
 		t.Errorf("the collapsed block stands %d rows tall, want the budget's %d:\n%s",
 			len(collapsed), want, strings.Join(collapsed, "\n"))
 	}
-	if want := "✦ Git Status " + glyphCollapsed; collapsed[0] != want {
+	if want := "✦ Git Status " + defaultGlyphs.collapsed; collapsed[0] != want {
 		t.Errorf("header = %q, want %q — a capped targetless block says there is more on its header", collapsed[0], want)
 	}
 	marks := blockMarks(t, tr, 80)

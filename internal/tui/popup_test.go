@@ -190,8 +190,8 @@ func TestRenderPopupSelectedRowHighlight(t *testing.T) {
 	}
 	out := renderPopup(th, spec, 50)
 
-	if !strings.Contains(strip(out), glyphUser+" three.go") {
-		t.Errorf("selected row missing the %q marker:\n%s", glyphUser, strip(out))
+	if !strings.Contains(strip(out), defaultGlyphs.user+" three.go") {
+		t.Errorf("selected row missing the %q marker:\n%s", defaultGlyphs.user, strip(out))
 	}
 	probe := th.userBlock.Render("x")
 	sgr := probe[:strings.IndexByte(probe, 'm')+1] // the userBlock fg+bg SGR, up to and including its 'm'
@@ -308,8 +308,8 @@ func TestRenderPopupNoSelection(t *testing.T) {
 	}
 	out := renderPopup(th, spec, 50)
 
-	if strings.Contains(strip(out), glyphUser) {
-		t.Errorf("selected = -1 still painted a %q marker:\n%s", glyphUser, strip(out))
+	if strings.Contains(strip(out), defaultGlyphs.user) {
+		t.Errorf("selected = -1 still painted a %q marker:\n%s", defaultGlyphs.user, strip(out))
 	}
 	probe := th.userBlock.Render("x")
 	sgr := probe[:strings.IndexByte(probe, 'm')+1]
@@ -825,7 +825,7 @@ func TestRenderPopupBodyComposition(t *testing.T) {
 	if !strings.Contains(strip(lines[2]), "one line of body") {
 		t.Errorf("body does not sit directly below the title: %q", strip(lines[2]))
 	}
-	if !strings.Contains(strip(lines[3]), glyphUser+" yes") {
+	if !strings.Contains(strip(lines[3]), defaultGlyphs.user+" yes") {
 		t.Errorf("selected row does not follow the body with its marker: %q", strip(lines[3]))
 	}
 	if !strings.Contains(strip(lines[4]), "…") { // the long row truncated (only two row lines exist ⇒ no wrap)
@@ -1475,8 +1475,8 @@ func TestRenderPopupMenuRowsHaveNoBar(t *testing.T) {
 	spec.menuRows = true
 	out := renderPopup(th, spec, 40)
 
-	if !strings.Contains(strip(out), glyphUser+" second row") {
-		t.Errorf("selected menu row missing the %q pointer:\n%s", glyphUser, strip(out))
+	if !strings.Contains(strip(out), defaultGlyphs.user+" second row") {
+		t.Errorf("selected menu row missing the %q pointer:\n%s", defaultGlyphs.user, strip(out))
 	}
 	if sgr := styleSGR(th.popupAccent); !strings.Contains(out, sgr) {
 		t.Errorf("selected menu row carries no accent SGR %q", sgr)
@@ -1618,13 +1618,13 @@ func TestRenderPopupWrappedRowsHangUnderTheirMarker(t *testing.T) {
 		if content == "" {
 			continue // a row-gap separator
 		}
-		if !strings.HasPrefix(content, glyphUser) && !strings.HasPrefix(content, glyphMenuUnselected) {
+		if !strings.HasPrefix(content, defaultGlyphs.user) && !strings.HasPrefix(content, glyphMenuUnselected) {
 			if !strings.HasPrefix(content, strings.Repeat(" ", popupRowIndent)) ||
 				strings.HasPrefix(content, strings.Repeat(" ", popupRowIndent+1)) {
 				t.Errorf("continuation line %q does not hang at %d cells, under the marker's own column", content, popupRowIndent)
 			}
 		}
-		flat = append(flat, strings.TrimLeft(content, glyphUser+glyphMenuUnselected+" "))
+		flat = append(flat, strings.TrimLeft(content, defaultGlyphs.user+glyphMenuUnselected+" "))
 	}
 
 	whole := strings.Join(strings.Fields(strings.Join(flat, " ")), " ")
@@ -1675,7 +1675,7 @@ func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 		switch {
 		case content == "":
 			continue // a row-gap separator
-		case strings.HasPrefix(content, glyphUser), strings.HasPrefix(content, glyphMenuUnselected):
+		case strings.HasPrefix(content, defaultGlyphs.user), strings.HasPrefix(content, glyphMenuUnselected):
 			// A row's FIRST line: the marker, then the checkbox at the one column.
 			if box := lipgloss.Width(content[:strings.Index(content, "[")]); box != popupRowIndent {
 				t.Errorf("checkbox column starts at cell %d, want %d: %q", box, popupRowIndent, content)
@@ -1935,7 +1935,7 @@ func TestRenderPopupWrappedSelectionCoversEveryLine(t *testing.T) {
 			}
 			var b strings.Builder
 			for _, ln := range lit {
-				b.WriteString(strings.TrimLeft(popupContent(ln), glyphUser+" ") + " ")
+				b.WriteString(strings.TrimLeft(popupContent(ln), defaultGlyphs.user+" ") + " ")
 			}
 			if whole := strings.Join(strings.Fields(b.String()), " "); whole != selected {
 				t.Errorf("the cue covers %q, want the whole selected option %q", whole, selected)
