@@ -3,6 +3,7 @@ title: e2e picker keys and resumed openLastRun typed after a quiet screen
 status: open
 type: bug
 priority: 3
+plan: 2026-10-13 - 01 - test-readiness-and-model-size-plan
 created: 2026-10-13T08:58:27Z
 ---
 

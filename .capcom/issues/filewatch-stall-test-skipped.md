@@ -3,6 +3,7 @@ title: filewatch stall and burst tests skip under load instead of being fixed
 status: open
 type: task
 priority: 3
+plan: 2026-10-13 - 01 - test-readiness-and-model-size-plan
 created: 2026-10-12T21:51:20Z
 ---
 
