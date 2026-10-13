@@ -3,6 +3,7 @@ title: Windows reap joins the ConPTY reader for only 5 s before CloseOutput
 status: open
 type: bug
 priority: 3
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-12T21:51:20Z
 ---
 

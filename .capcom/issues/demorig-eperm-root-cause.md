@@ -3,6 +3,7 @@ title: demorig second-take EPERM was closed with a retry; root cause unknown
 status: open
 type: bug
 priority: 3
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-12T21:51:16Z
 ---
 

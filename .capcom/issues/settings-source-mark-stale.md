@@ -3,6 +3,7 @@ title: /settings source mark stays at the boot resolution after a save
 status: open
 type: bug
 priority: 3
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 aliases: [apogee-settings-source-mark-stale]
 created: 2026-10-10T17:01:00Z
 ---

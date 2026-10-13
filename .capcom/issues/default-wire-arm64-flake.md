@@ -3,6 +3,7 @@ title: TestE2EDefaultWireStaysChatCompletions fails about 1 in 3 on windows/arm6
 status: open
 type: bug
 priority: 2
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-12T21:51:20Z
 ---
 

@@ -3,6 +3,7 @@ title: Two e2e tests read the session record after a quiet screen with no wait o
 status: open
 type: bug
 priority: 3
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-13T04:54:08Z
 ---
 

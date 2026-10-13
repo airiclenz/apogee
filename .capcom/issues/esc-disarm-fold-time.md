@@ -3,6 +3,7 @@ title: Esc×2 stop window is measured at fold time, not at the keypress
 status: open
 type: bug
 priority: 2
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-12T21:51:16Z
 ---
 

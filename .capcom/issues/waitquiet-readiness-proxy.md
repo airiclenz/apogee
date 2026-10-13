@@ -3,7 +3,7 @@ title: e2e tests use WaitQuiet(settled) as a readiness signal
 status: open
 type: bug
 priority: 2
-plan: 2026-10-12 - 02 - test-suite-stability-plan
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 created: 2026-10-12T18:10:59Z
 ---
 

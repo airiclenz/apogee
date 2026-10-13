@@ -3,6 +3,7 @@ title: TUI glyphs missing from common monospace fonts drift rows on DOM-rendered
 status: open
 type: bug
 priority: 3
+plan: 2026-10-13 - 00 - open-bugs-sweep-plan
 aliases: [apogee-glyphs-missing-from-fonts]
 created: 2026-10-10T08:30:46Z
 ---
