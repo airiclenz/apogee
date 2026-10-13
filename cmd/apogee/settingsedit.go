@@ -259,7 +259,7 @@ func (e *externalEdit) changed() (tui.ConfigReload, error) {
 
 	var applied []tui.AppliedSetting
 	for i, k := range config.KeyRegistry {
-		if k.Interlocked || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer {
+		if reloadNeverReports(k) {
 			continue
 		}
 		if i >= len(before.rows) || i >= len(after.rows) {
@@ -271,6 +271,14 @@ func (e *externalEdit) changed() (tui.ConfigReload, error) {
 		applied = append(applied, tui.AppliedSetting{Path: k.Path, Value: appliedValue(after.rows[i])})
 	}
 	return tui.ConfigReload{Applied: applied, Notices: newNotices(before.notices, after.notices)}, nil
+}
+
+// reloadNeverReports is the three kinds of key changed never reports: the Interlocked confinement
+// pair and the two picker-recorded servers. Their value stays the boot one across a re-read, so the
+// `/settings` rows keep their boot source mark too (settingsHost.layeredOpts) — one predicate, so the
+// mark and the value it marks cannot drift apart.
+func reloadNeverReports(k config.Key) bool {
+	return k.Interlocked || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer
 }
 
 // newNotices is the notices in after that before did not carry, in after's own order. A notice is

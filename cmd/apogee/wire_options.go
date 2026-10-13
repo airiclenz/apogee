@@ -471,32 +471,36 @@ func (h settingsHost) Rows() []tui.SettingRow {
 // the env and flag Overrides stay the boot resolution's: an override still ranks first in the mark,
 // and a value this session moved is shown from the pane's own journal.
 //
-// The two keys a re-read never reports, `server:` and `sub-agents-server:` (externalEdit.changed),
-// keep their boot entries: their value is the boot one until a picker moves it, and a mark read off
-// the file beside it would disagree with the value it marks. A host with no baseline marks its rows
-// off the boot resolution alone.
+// The keys a re-read never reports (reloadNeverReports: the confinement pair, `server:` and
+// `sub-agents-server:`) keep their boot entries: their value is the boot one until /confine or a
+// picker moves it, and a mark read off the file beside it would disagree with the value it marks. A
+// host with no baseline marks its rows off the boot resolution alone.
 func (h settingsHost) layeredOpts() config.Options {
 	if h.edits == nil {
 		return h.opts
 	}
 	opts := h.opts
 	global, project := h.edits.layers()
-	opts.GlobalKeys = withBootPickerKeys(global, h.opts.GlobalKeys)
-	opts.ProjectKeys = withBootPickerKeys(project, h.opts.ProjectKeys)
+	opts.GlobalKeys = withBootUnreportedKeys(global, h.opts.GlobalKeys)
+	opts.ProjectKeys = withBootUnreportedKeys(project, h.opts.ProjectKeys)
 	return opts
 }
 
-// withBootPickerKeys is a copy of current with the `server:` and `sub-agents-server:` entries taken
-// from boot instead — a copy, because current is the baseline's own map and boot the session's.
-func withBootPickerKeys(current, boot map[string]bool) map[string]bool {
-	keys := make(map[string]bool, len(current)+2)
+// withBootUnreportedKeys is a copy of current with every key a re-read never reports
+// (reloadNeverReports) taken from boot instead — a copy, because current is the baseline's own map
+// and boot the session's.
+func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
+	keys := make(map[string]bool, len(current))
 	for path, set := range current {
 		keys[path] = set
 	}
-	for _, path := range []string{settingKeyServer, settingKeySubAgentsServer} {
-		delete(keys, path)
-		if boot[path] {
-			keys[path] = true
+	for _, k := range config.KeyRegistry {
+		if !reloadNeverReports(k) {
+			continue
+		}
+		delete(keys, k.Path)
+		if boot[k.Path] {
+			keys[k.Path] = true
 		}
 	}
 	return keys

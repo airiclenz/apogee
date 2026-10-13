@@ -1070,3 +1070,36 @@ func TestSettingsHostRowsKeepTheServerMarkAfterAReload(t *testing.T) {
 		t.Errorf("server mark after the reload = %q, want the boot %q", got, tui.SettingFromGlobal)
 	}
 }
+
+// The confinement pair is the other pair a re-read never reports, so its value stays the boot one
+// until /confine moves it — and so does its mark: a file that gains both keys leaves each row marked
+// as it launched, agreeing with the value the row still shows.
+func TestSettingsHostRowsKeepTheConfinementMarksAfterAReload(t *testing.T) {
+	t.Parallel()
+	h, _ := layeredSettingsHost(t, "", "")
+	before := rowsByPath(t, h.Rows())
+	for _, path := range []string{settingKeyConfineToWorkspace, "unconfined-hosts"} {
+		if got := before[path].Source; got != tui.SettingFromDefault {
+			t.Fatalf("%s mark at launch = %q, want %q", path, got, tui.SettingFromDefault)
+		}
+	}
+	writeSettingsFixture(t, h.configPath, "confine-to-workspace: false\n"+
+		"unconfined-hosts:\n  - id: \"devbox-a1b2c3\"\n    acknowledged: \"2026-07-21\"\n"+
+		startupServerYAMLFor("http://127.0.0.1:1"))
+
+	if _, err := h.edits.changed(); err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+
+	after := rowsByPath(t, h.Rows())
+	for _, path := range []string{settingKeyConfineToWorkspace, "unconfined-hosts"} {
+		if after[path].Value != before[path].Value {
+			t.Fatalf("%s value moved on a reload: %q -> %q; the re-read never reports it", path,
+				before[path].Value, after[path].Value)
+		}
+		if got := after[path].Source; got != tui.SettingFromDefault {
+			t.Errorf("%s mark after the reload = %q, want the boot %q — the value shown is still the boot one",
+				path, got, tui.SettingFromDefault)
+		}
+	}
+}
