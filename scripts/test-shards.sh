@@ -47,11 +47,11 @@
 # allowed to have.
 #
 # Usage: scripts/test-shards.sh [extra go test flags ...]
-#   APOGEE_TEST_LANES=n    how many test processes run at once (default: sized off nproc; 3 in slow mode)
+#   APOGEE_TEST_LANES=n    how many test processes run at once (default: sized off nproc; 4 in slow mode, 3 under 7 GiB RAM)
 #   APOGEE_TEST_SHARDS=n   the older knob, read as APOGEE_TEST_LANES = n per heavy package + 1
 #                          (the process count the per-package shards it used to set came to)
 #   APOGEE_TEST_RACE=0     drop -race (announced on stderr and in the ==> line); any other value keeps it
-#   APOGEE_TEST_SLOW=1     slow box: 3 lanes (an explicit lane count still wins), every process -parallel 1,
+#   APOGEE_TEST_SLOW=1     slow box: 4 lanes, 3 under 7 GiB RAM (an explicit lane count still wins), every process -parallel 1,
 #                          and APOGEE_TEST_TIME_SCALE=2 unless the caller set a scale
 #   APOGEE_TEST_TIME_SCALE=x  scales every test budget by x (internal/testtime; default 1); a scale
 #                          other than 1 is named in the ==> line
@@ -186,9 +186,11 @@ done
 #
 # The slow-box plan. APOGEE_TEST_SLOW=1 is an explicit knob rather than a bound sized off nproc
 # because core count cannot tell the boxes apart: a Raspberry Pi and CI's 4-vCPU runner both
-# report 4 cores and differ 3–5x per core, and CI keeps the plan above. Slow mode is three lanes,
-# every process -parallel 1: three tests on the box at once, a core left for the builds and the
-# processes' startup, and three race-enabled processes' memory rather than four. A slow box also
+# report 4 cores and differ 3–5x per core, and CI keeps the plan above. Slow mode is four lanes
+# on a box with 7 GiB of RAM or more and three below it, every process -parallel 1. Memory is the
+# bound, not cores: on an 8 GB Raspberry Pi 5 four lanes ran the suite in 398s against three's
+# 475s, and free RAM never fell below 3.2 GB against three's 3.3 GB (2026-10-13), while a 4 GB
+# box has no room for a fourth race-enabled process's ~730 MB peak. A slow box also
 # needs longer waits, so slow mode doubles every test budget (APOGEE_TEST_TIME_SCALE=2, read by
 # internal/testtime) unless the caller already chose a scale.
 # ---------------------------------------------------------------------------------------------
@@ -199,13 +201,25 @@ budget=$((ncpu - 1))
 
 is_slow_box() { [ "${APOGEE_TEST_SLOW:-}" = 1 ]; }
 
+# slow_box_lanes is the slow-box plan's lane count: 4 with at least 7 GiB of RAM, else 3 — and 3
+# wherever /proc/meminfo cannot say.
+slow_box_lanes() {
+	local mem_kib
+	mem_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null)
+	if [ -n "$mem_kib" ] && [ "$mem_kib" -ge $((7 * 1024 * 1024)) ]; then
+		echo 4
+	else
+		echo 3
+	fi
+}
+
 if [ -n "${APOGEE_TEST_LANES:-}" ]; then
 	lanes=$APOGEE_TEST_LANES
 elif [ -n "${APOGEE_TEST_SHARDS:-}" ]; then
 	lanes=$((APOGEE_TEST_SHARDS * ${#HEAVY_PKGS[@]} + 1))
 	echo "test-shards: APOGEE_TEST_SHARDS=$APOGEE_TEST_SHARDS is read as APOGEE_TEST_LANES=$lanes (n per heavy package + 1)" >&2
 elif is_slow_box; then
-	lanes=3
+	lanes=$(slow_box_lanes)
 else
 	lanes=$budget
 fi

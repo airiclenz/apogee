@@ -175,8 +175,8 @@ install: build
 # load. scripts/test-shards.sh holds the reasoning and the plan; `go test -race -count=1 ./...`
 # remains the equivalent single-process run for a bisect or a one-off.
 # APOGEE_TEST_LANES=n sets the lane count; APOGEE_TEST_SLOW=1 is the slow-box plan (Raspberry-Pi
-# class: three lanes, every process -parallel 1, test budgets doubled); APOGEE_TEST_TIME_SCALE=x
-# scales the test budgets; APOGEE_TEST_RACE=0 drops -race for a kernel that cannot run it — all
+# class: four lanes, three under 7 GiB RAM, every process -parallel 1, test budgets doubled);
+# APOGEE_TEST_TIME_SCALE=x scales the test budgets; APOGEE_TEST_RACE=0 drops -race for a kernel that cannot run it — all
 # explained in the script's header.
 .PHONY: test
 test:

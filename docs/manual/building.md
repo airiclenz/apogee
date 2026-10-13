@@ -167,7 +167,7 @@ The knobs:
 | --- | --- |
 | `APOGEE_TEST_LANES=n` | How many test processes run at once. Default: the process budget above. |
 | `APOGEE_TEST_SHARDS=n` | The older knob, from when each heavy package ran as n long-lived shards. It is now read as `APOGEE_TEST_LANES` = n per heavy package + 1, the process count those shards came to. `APOGEE_TEST_LANES` wins. |
-| `APOGEE_TEST_SLOW=1` | The slow-box plan: three lanes (an explicit lane count still wins), every process `-parallel 1`. It scales the test budgets as well as the concurrency: unless `APOGEE_TEST_TIME_SCALE` is set, it sets it to 2. |
+| `APOGEE_TEST_SLOW=1` | The slow-box plan: four lanes on a box with 7 GiB of RAM or more, three below it (an explicit lane count still wins), every process `-parallel 1`. It scales the test budgets as well as the concurrency: unless `APOGEE_TEST_TIME_SCALE` is set, it sets it to 2. |
 | `APOGEE_TEST_RACE=0` | Drops the race detector (see below). |
 | `APOGEE_TEST_TIME_SCALE=x` | Multiplies every test budget — each deadline or wait that ends on a condition — by x, a number above 0 (default 1). Durations whose length is what a test claims are never scaled. The `==>` summary line names any scale other than 1. |
 | `APOGEE_TEST_E2E_BINARY=path` | The apogee binary `cmd/apogee`'s PTY tests drive. The script sets it, not you: it builds `./cmd/apogee` once per run, without `-race` and as it ships, and hands that file to every chunk, where each chunk would otherwise build its own. A plain `go test ./cmd/apogee/` with it unset builds the binary itself, as before. Set to a path that names no file, it fails the test run at startup with a message naming the variable and the path. |
