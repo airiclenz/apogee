@@ -109,7 +109,7 @@ cmd/apogee/e2e_popups_test.go — TestE2EPopupFramesLists; cmd/apogee/e2e_seat_t
 - `grep -n 'ends on a quiet screen' cmd/apogee/e2e_subagent_view_test.go` prints nothing
 **Commit:** `test(e2e): submit after the idle prompt, not after a quiet screen`
 
-## 4. Submits after an Esc or a resume wait on readiness, not quiet
+## 4. Submits after an Esc or a resume wait on readiness, not quiet — ✅ DONE (2026-10-13)
 
 Depends on items 1 and 2.
 

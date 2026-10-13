@@ -135,8 +135,10 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	if strings.Contains(skills, "panic:") || strings.Contains(skills, "goroutine ") {
 		t.Errorf("/skills crashed:\n%s", skills)
 	}
+	// The catalog is a transcript note, not a pane: its text stays in scrollback, so there is no
+	// marker to see go, and what /version needs next is the idle prompt ([waitIdle]).
 	drv.Press(tuitest.Esc)
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 
 	// Step 8 — /version prints the build version, from the same source --version reads.
 	typeSubmit(drv, "/version")

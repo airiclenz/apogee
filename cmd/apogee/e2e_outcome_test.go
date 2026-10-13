@@ -98,7 +98,8 @@ func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 	// Back up to the conversation: the rest of the session is about blocks of the parent's own, and a
 	// view left open would be showing the delegate's run while they landed (ADR 0063).
 	drv.Press(tuitest.Esc)
-	drv.WaitQuiet(settled)
+	drv.WaitGone(runViewCrumbHead) // the run view's crumb goes with the view
+	waitIdle(drv)
 
 	// Steps 6 and 7 — a command that EXITS 0 and quotes the word "error" on its way out. The slot
 	// carries the tool's own verdict, and the quoted text never colours it.

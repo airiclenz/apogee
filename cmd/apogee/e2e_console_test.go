@@ -202,7 +202,8 @@ func allowIfAsked(drv *tuitest.PTYDriver) {
 
 // restoreOtherSession opens the `/sessions` browser and resumes the row below the top one — the
 // session made before this run, since the browser lists the newest first and the newest is the
-// conversation the run is already in.
+// conversation the run is already in. It returns once the resumed conversation is back at the idle
+// prompt ([waitIdle]), so the caller's next submit lands on a prompt box that takes it.
 func restoreOtherSession(t *testing.T, drv *tuitest.PTYDriver) {
 	t.Helper()
 
@@ -211,7 +212,7 @@ func restoreOtherSession(t *testing.T, drv *tuitest.PTYDriver) {
 	pickerDown(drv)
 	drv.Press(tuitest.Enter)
 	drv.WaitText("resumed:")
-	drv.WaitQuiet(settled)
+	waitIdle(drv)
 }
 
 // ----------------------------------------------------------------------------
