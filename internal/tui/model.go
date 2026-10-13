@@ -352,8 +352,8 @@ type Model struct {
 	// rides the value-copied Model (ADR 0011).
 	askDraft  string
 	lastErr   error     // the error behind stateErrored, shown in the status line
-	lastCtrlC time.Time // when the last Ctrl+C landed; a second within the window quits
-	lastEsc   time.Time // when the last Esc landed while busy; a second within the window stops the worker
+	lastCtrlC time.Time // when the last Ctrl+C armed the quit gesture; zero = disarmed, and a second press while armed quits
+	lastEsc   time.Time // when the last Esc armed the stop gesture while busy; zero = disarmed, and a second press while armed stops the worker
 	quitting  bool      // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
 	// ctrlCGen and escGen number the arms of the two gestures: each arm bumps its counter and
 	// stamps the value on the reset tick it schedules, so a tick delivered late for an earlier arm
@@ -1245,18 +1245,20 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldClipboardImage(msg)
 
 	case ctrlCResetMsg:
-		// The Ctrl+C quit window elapsed without a second press: disarm the gesture so the
-		// "press ctrl+c again to quit" hint clears (handleKey's ctrl+c case). A tick scheduled
-		// by an earlier arm is stale — a fresher arm owns the gesture now — and changes nothing.
+		// The Ctrl+C quit window closed without a second press: this tick is the window's only
+		// end, so disarm the gesture here and the "press ctrl+c again to quit" hint clears
+		// (handleKey's ctrl+c case). A tick scheduled by an earlier arm is stale — a fresher arm
+		// owns the gesture now — and changes nothing.
 		if msg.gen == m.ctrlCGen {
 			m.lastCtrlC = time.Time{}
 		}
 		return m, nil
 
 	case escStopResetMsg:
-		// The Esc stop window elapsed without a second press: disarm the gesture so the
-		// "press esc again to cancel" hint clears (handleKey's esc case). A tick scheduled by an
-		// earlier arm is stale and changes nothing.
+		// The Esc stop window closed without a second press: this tick (or the worker unwinding,
+		// finishWorker) is the window's only end, so disarm the gesture here and the "press esc
+		// again to cancel" hint clears (handleKey's esc case). A tick scheduled by an earlier arm
+		// is stale and changes nothing.
 		if msg.gen == m.escGen {
 			m.lastEsc = time.Time{}
 		}
@@ -1603,20 +1605,27 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	}
 }
 
-// ctrlCQuitWindow is how long after one Ctrl+C a second press still quits. A lone Ctrl+C no
-// longer ends the program; only a second press inside this window confirms the exit.
+// ctrlCQuitWindow is the delay of the tick that disarms the Ctrl+C quit gesture. A lone Ctrl+C
+// no longer ends the program; only a second press folded while the gesture is armed confirms the
+// exit. The window runs from the first press's fold until its ctrlCResetMsg folds — never a
+// wall-clock compare at the second fold, because Bubble Tea delivers messages in order, so a second
+// press typed before the tick fired is folded ahead of it however backed up the fold queue is
+// (ADR 0099).
 const ctrlCQuitWindow = time.Second
 
-// ctrlCResetMsg disarms the Ctrl+C quit gesture once the window elapses, clearing the
+// ctrlCResetMsg disarms the Ctrl+C quit gesture when the window closes, clearing the
 // "press ctrl+c again to quit" hint when the human does not follow through. gen is the arm that
 // scheduled it (Model.ctrlCGen); a tick for an earlier arm is a no-op.
 type ctrlCResetMsg struct{ gen int }
 
-// escStopWindow is how long after one Esc a second press still stops the in-flight worker. A
-// lone Esc no longer kills a running turn; only a second press inside this window confirms it.
+// escStopWindow is the delay of the tick that disarms the Esc stop gesture. A lone Esc no longer
+// kills a running turn; only a second press folded while the gesture is armed confirms it. The
+// window runs from the first press's fold until its escStopResetMsg folds (or the worker unwinds)
+// — never a wall-clock compare at the second fold, which re-armed instead of stopping whenever a
+// loaded program folded the two presses a window apart (ADR 0099).
 const escStopWindow = time.Second
 
-// escStopResetMsg disarms the Esc stop gesture once the window elapses, clearing the
+// escStopResetMsg disarms the Esc stop gesture when the window closes, clearing the
 // "press esc again to cancel" hint when the human does not follow through. gen is the arm that
 // scheduled it (Model.escGen); a tick for an earlier arm is a no-op.
 type escStopResetMsg struct{ gen int }
@@ -1780,7 +1789,7 @@ func (m Model) claimKey(order []keyClaimant, msg tea.KeyPressMsg) (Model, tea.Cm
 }
 
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
-// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits; Ctrl+L forces a full repaint
+// is otherwise a no-op); Ctrl+C twice — the second folded before ctrlCResetMsg disarms the first — quits; Ctrl+L forces a full repaint
 // and changes nothing else. Enter submits at idle — the
 // box plus any interjections a stop or an error left held, even on an empty box — answers a
 // pending ask, dismisses an error, and while a worker runs STAGES what was typed as an
@@ -1837,14 +1846,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		// A lone Ctrl+C no longer quits — a stray hit must never drop the human out of a
-		// session. The first press arms the gesture (and shows the hint via statusRight); only
-		// a second press inside ctrlCQuitWindow confirms the quit. The tick disarms it if no
-		// second press follows (ctrlCResetMsg).
-		now := time.Now()
-		if !m.lastCtrlC.IsZero() && now.Sub(m.lastCtrlC) <= ctrlCQuitWindow {
+		// session. The first press arms the gesture (and shows the hint via statusRight); a
+		// second press folded while it is still armed confirms the quit, however long the fold
+		// queue held it. Only the tick disarms it (ctrlCResetMsg), and it is ordered behind any
+		// press typed before it fired (ADR 0099).
+		if !m.lastCtrlC.IsZero() {
 			return m.quit()
 		}
-		m.lastCtrlC = now
+		m.lastCtrlC = time.Now()
 		m.ctrlCGen++
 		gen := m.ctrlCGen
 		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{gen: gen} })
@@ -1885,14 +1894,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		// Everywhere else a worker runs — including under a live approval pane, which this case
 		// reaches before the approval routing below — a lone Esc no longer kills the turn. The
-		// first press arms the gesture (and shows the hint via statusRight); only a second press
-		// inside escStopWindow stops the worker. The tick disarms it if no second press follows
-		// (escStopResetMsg).
+		// first press arms the gesture (and shows the hint via statusRight); a second press
+		// folded while it is still armed stops the worker, however long the fold queue held it.
+		// Only the tick (escStopResetMsg) or the worker unwinding (finishWorker) disarms it, and
+		// the tick is ordered behind any press typed before it fired (ADR 0099).
 		if !m.busy() {
 			return m, nil
 		}
-		now := time.Now()
-		if !m.lastEsc.IsZero() && now.Sub(m.lastEsc) <= escStopWindow {
+		if !m.lastEsc.IsZero() {
 			// Disarm BEFORE stopping: statusRight's armed branch sits above every occupant, so a
 			// stamp left standing would keep "press esc again to cancel" on an idle status line for
 			// the rest of the window after the worker unwound.
@@ -1900,7 +1909,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.stopWorker()
 			return m, nil
 		}
-		m.lastEsc = now
+		m.lastEsc = time.Now()
 		m.escGen++
 		gen := m.escGen
 		return m, tea.Tick(escStopWindow, func(time.Time) tea.Msg { return escStopResetMsg{gen: gen} })
@@ -1947,8 +1956,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// so an ⏎ already in the buffer when the pane appeared would allow a call nobody read.
 			// Unarmed it is swallowed here rather than falling through to the states below
 			// (approval.go). Esc, the safe direction, is claimed above and stays live throughout —
-			// as the double-tap it is everywhere a worker runs: one press arms, a second inside
-			// escStopWindow stops. The ⏎-Cancel row below is the one-press spelling of it.
+			// as the double-tap it is everywhere a worker runs: one press arms, a second folded
+			// before escStopResetMsg disarms it stops. The ⏎-Cancel row below is the one-press spelling of it.
 			if !m.approvalArmed {
 				return m, nil
 			}
@@ -2458,7 +2467,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// that commits every in-flight record instead of losing it (thinking.go).
 	m.thinking.commitAll()
 	// The run is over however it ended, so a first Esc still waiting for its confirming press has
-	// nothing left to stop: disarm here instead of waiting out escStopWindow. statusRight's armed
+	// nothing left to stop: disarm here instead of waiting for escStopResetMsg. statusRight's armed
 	// branch sits above every occupant, so a stamp left standing would hold "press esc again to
 	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
 	m.lastEsc = time.Time{}
@@ -4358,8 +4367,8 @@ func (m Model) runningPhrase(view runRef, now time.Time, quiet bool) string {
 	}
 }
 
-// escStopHintPlain is the armed-esc hint as it always read: a second press inside escStopWindow
-// stops the run. It is the whole hint wherever no delegation group is in flight, and the fallback of the
+// escStopHintPlain is the armed-esc hint as it always read: a second press while the gesture is
+// armed stops the run. It is the whole hint wherever no delegation group is in flight, and the fallback of the
 // two longer forms below where the row has no room for them.
 const escStopHintPlain = "press esc again to cancel"
 
@@ -4428,11 +4437,11 @@ const quietQualifier = " · quiet"
 // (escStopHint, and the run view's hint through fitBreadcrumbHint); the others are composed as they
 // are and dropped whole by statusLine if they do not fit.
 func (m Model) statusRight(room int) string {
-	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
+	// A primed Ctrl+C takes the slot: tell the human a second press while it is armed quits.
 	if !m.lastCtrlC.IsZero() {
 		return m.th.statusBar.Render("press ctrl+c again to quit")
 	}
-	// A primed Esc takes it next: tell the human a second press inside the window stops the run.
+	// A primed Esc takes it next: tell the human a second press while it is armed stops the run.
 	if !m.lastEsc.IsZero() {
 		return m.th.statusBar.Render(m.escStopHint(room))
 	}

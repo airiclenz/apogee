@@ -93,8 +93,8 @@ func keyCtrlC() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'c', Mod: tea.Mod
 func keyCtrlG() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl} }
 
 // ctrlCQuit drives the two-press Ctrl+C quit gesture: the first press arms it (its disarm
-// tick is discarded by step), the second — landing microseconds later, well inside
-// ctrlCQuitWindow — confirms the quit. Returns the model and the confirming press's Cmd.
+// tick is discarded by step), the second — folded while the gesture is still armed — confirms
+// the quit. Returns the model and the confirming press's Cmd.
 func ctrlCQuit(t *testing.T, m Model) (Model, tea.Cmd) {
 	t.Helper()
 	m = step(t, m, keyCtrlC())
@@ -993,20 +993,41 @@ func TestModelStopKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("a second esc after the window only re-arms", func(t *testing.T) {
+	t.Run("a second esc after the reset tick only re-arms", func(t *testing.T) {
 		t.Parallel()
 		m := newTestModel(t)
 		cancelled := startStubWorker(t, &m)
 		m = step(t, m, keyEsc())
-		m.lastEsc = m.lastEsc.Add(-2 * escStopWindow) // pretend the window lapsed
-		// Re-arming refreshes lastEsc to ~now; the stop path zeroes it. A refreshed, non-zero
-		// stamp therefore proves the press took the arm branch, not the stop branch.
+		m = step(t, m, escStopResetMsg{gen: m.escGen}) // the window closes on its own tick
+		if !m.lastEsc.IsZero() {
+			t.Fatal("the arm's own reset tick did not disarm the stop gesture")
+		}
+		// Re-arming stamps lastEsc; the stop path zeroes it. A non-zero stamp therefore proves
+		// the press took the arm branch, not the stop branch.
 		next, _ := stepCmd(t, m, keyEsc())
 		if cancelled() {
-			t.Error("esc after the window cancelled the worker instead of only re-arming")
+			t.Error("esc after the reset tick cancelled the worker instead of only re-arming")
 		}
-		if next.lastEsc.IsZero() || !next.lastEsc.After(m.lastEsc) {
-			t.Error("esc after the window did not re-arm the stop gesture")
+		if next.lastEsc.IsZero() {
+			t.Error("esc after the reset tick did not re-arm the stop gesture")
+		}
+	})
+
+	// A loaded program can fold the second press long after the first, but Bubble Tea delivers
+	// messages in order, so a press typed before the reset tick fired is folded ahead of it: the
+	// gesture is still armed, and no wall-clock compare may turn that press into a re-arm.
+	t.Run("a late-folded second esc still stops", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		cancelled := startStubWorker(t, &m)
+		m = step(t, m, keyEsc())
+		m.lastEsc = m.lastEsc.Add(-2 * escStopWindow) // the second press folds a window later
+		next, _ := stepCmd(t, m, keyEsc())
+		if !cancelled() {
+			t.Error("a second esc folded before the reset tick re-armed instead of stopping the worker")
+		}
+		if !next.lastEsc.IsZero() {
+			t.Error("the late-folded confirming esc left the gesture armed")
 		}
 	})
 
@@ -1098,17 +1119,33 @@ func TestModelStopKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("a second ctrl+c after the window only re-arms", func(t *testing.T) {
+	t.Run("a second ctrl+c after the reset tick only re-arms", func(t *testing.T) {
 		t.Parallel()
 		m := newTestModel(t)
 		m = step(t, m, keyCtrlC())
-		m.lastCtrlC = m.lastCtrlC.Add(-2 * ctrlCQuitWindow) // pretend the window lapsed
-		// Re-arming refreshes lastCtrlC to ~now; the quit path leaves it untouched. A refreshed
-		// stamp therefore proves the press took the arm branch, not the quit branch — asserted
-		// on state so the disarm-tick Cmd need not run (it would block for the whole window).
+		m = step(t, m, ctrlCResetMsg{gen: m.ctrlCGen}) // the window closes on its own tick
+		if !m.lastCtrlC.IsZero() {
+			t.Fatal("the arm's own reset tick did not disarm the quit gesture")
+		}
+		// Re-arming stamps lastCtrlC and bumps the generation; the quit path does neither.
+		// Asserted on state so the disarm-tick Cmd need not run (it would block for the window).
 		next, _ := stepCmd(t, m, keyCtrlC())
-		if !next.lastCtrlC.After(m.lastCtrlC) {
-			t.Error("ctrl+c after the window quit instead of only re-arming")
+		if next.lastCtrlC.IsZero() || next.ctrlCGen != m.ctrlCGen+1 {
+			t.Error("ctrl+c after the reset tick quit instead of only re-arming")
+		}
+		if next.quitting {
+			t.Error("ctrl+c after the reset tick armed a quit instead of only re-arming")
+		}
+	})
+
+	t.Run("a late-folded second ctrl+c still quits", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		m = step(t, m, keyCtrlC())
+		m.lastCtrlC = m.lastCtrlC.Add(-2 * ctrlCQuitWindow) // the second press folds a window later
+		_, cmd := stepCmd(t, m, keyCtrlC())
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+			t.Error("a second ctrl+c folded before the reset tick re-armed instead of quitting")
 		}
 	})
 
@@ -1121,9 +1158,9 @@ func TestModelStopKeys(t *testing.T) {
 		cancelled := startStubWorker(t, &m)
 		m = step(t, m, keyEsc())
 		firstArm := escStopResetMsg{gen: m.escGen}
-		m.lastEsc = m.lastEsc.Add(-2 * escStopWindow) // pretend the window lapsed
-		m = step(t, m, keyEsc())                      // re-arms
-		m = step(t, m, firstArm)
+		m = step(t, m, firstArm) // the first arm's window closes
+		m = step(t, m, keyEsc()) // re-arms
+		m = step(t, m, firstArm) // the same tick, delivered again late
 		if m.lastEsc.IsZero() {
 			t.Fatal("the first arm's late reset tick disarmed the second arm")
 		}
@@ -1141,9 +1178,9 @@ func TestModelStopKeys(t *testing.T) {
 		m := newTestModel(t)
 		m = step(t, m, keyCtrlC())
 		firstArm := ctrlCResetMsg{gen: m.ctrlCGen}
-		m.lastCtrlC = m.lastCtrlC.Add(-2 * ctrlCQuitWindow) // pretend the window lapsed
-		m = step(t, m, keyCtrlC())                          // re-arms
-		m = step(t, m, firstArm)
+		m = step(t, m, firstArm)   // the first arm's window closes
+		m = step(t, m, keyCtrlC()) // re-arms
+		m = step(t, m, firstArm)   // the same tick, delivered again late
 		if m.lastCtrlC.IsZero() {
 			t.Fatal("the first arm's late reset tick disarmed the second arm")
 		}

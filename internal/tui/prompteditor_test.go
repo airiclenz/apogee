@@ -359,7 +359,7 @@ func TestPromptEditorIdleLegendFollowsKeyDisambiguation(t *testing.T) {
 }
 
 // The running legend is the one place an empty box announces the stop key, and it names the gesture
-// the key actually is: one esc arms, and only a second inside escStopWindow stops the run
+// the key actually is: one esc arms, and only a second folded while it is armed stops the run
 // (handleKey's `case "esc"`). The LITERAL is pinned here rather than the constant, because a
 // placeholder that still promised a one-press stop would be the chrome lying about the keyboard.
 func TestRunningPlaceholderAnnouncesTheDoubleEsc(t *testing.T) {

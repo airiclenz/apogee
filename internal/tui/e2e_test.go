@@ -430,8 +430,9 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	}
 
 	// A clean quit (idle, non-empty transcript) flushes the snapshot through the seam and exits.
-	// The quit gesture is Ctrl+C twice within the window; Esc no longer ends the program. The flush
-	// is a queued record write, so the exit fires once the queue drains (drainToQuit).
+	// The quit gesture is Ctrl+C twice, the second before the first's disarm tick; Esc no longer
+	// ends the program. The flush is a queued record write, so the exit fires once the queue
+	// drains (drainToQuit).
 	m1, quitCmd := ctrlCQuit(t, m1)
 	drainToQuit(t, m1, quitCmd)
 	calls := host.savedCalls()

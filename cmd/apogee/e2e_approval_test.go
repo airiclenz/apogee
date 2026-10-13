@@ -210,7 +210,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// never the one made harder to reach. It is pressed the instant the pane's own text appears,
 	// which is inside the window every decision letter is still dead in. Two presses: stopping a
 	// run is the double-tap gesture everywhere the worker is in flight, the pane included, and
-	// the driver's escapeGap sits well inside escStopWindow.
+	// the second press is folded ahead of the first one's disarm tick (ADR 0099).
 	typeSubmit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
 	stopRun(t, drv)

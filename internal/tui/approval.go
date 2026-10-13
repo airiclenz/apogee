@@ -18,7 +18,8 @@ import (
 // ApprovalDecision was added for it (the ratified design leaves the engine's Approver contract
 // untouched). The Cancel row IS the Esc gesture written down: the same stopWorker path, spelled out
 // for a human who has no legend left to learn it from — and taken in ONE press, where Esc itself is
-// the double-tap it is everywhere a worker runs (one press arms, a second inside escStopWindow stops).
+// the double-tap it is everywhere a worker runs (one press arms, a second folded while it is armed
+// stops).
 type approvalOption struct {
 	label string
 	key   string // the keypress that takes this row directly; also the text of its shortcut cell
@@ -426,7 +427,7 @@ func (m Model) promptWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // row replies like its letter would; the Cancel row takes the Esc path instead, cancelling the
 // in-flight worker and leaving the prompt standing until the worker reports back with its
 // cancelledMsg (finishWorker clears it) — in ONE press, where Esc itself is the double-tap it is
-// everywhere a worker runs (one press arms, a second inside escStopWindow stops).
+// everywhere a worker runs (one press arms, a second folded while it is armed stops).
 func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 	if m.pending == nil {
 		return m, nil

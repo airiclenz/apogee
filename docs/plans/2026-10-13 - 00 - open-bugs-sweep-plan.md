@@ -43,7 +43,11 @@
 - 10: recast (tasklist `✔` out of scope) + guards folded (task-list parse keys and the persisted ask record stay constants; tests read the default set; Acceptance grep corrected to the 14 declarations at base) — supersedes the one-shared-checkbox note at toolregistry.go and tasklist.go; round 2: guard folded (Goal keeps `askCheckedMarker`/`askUncheckedMarker` constants for the task-list markers and recorded exchange; comment rule widened to every shared-checkbox comment, with its grep)
 - 11: recast (gains the `ui.glyphs` registry row, live apply and manual entry; item 9's template and section guards land here) + guards folded (glyph set survives a scheme switch; width equals the unicode counterpart's); round 2: decision folded (task-list cards and recorded ask exchanges keep `[✔]` under `safe`; header **Glyphs:** call and "Safe glyph values" narrowed to the live ask pane) + guards folded (`newTheme(s)` keeps its signature, `newModel` sets the set; live apply clears the paint cache and the set joins `frameKey` — supersedes paintcache.go's "nothing else about a theme changes mid-session"; domain/config/cmd test pins join Files and Acceptance; safe spinner frames one cell; allow-edits `√` and live ask `[x]` checked)
 
-## 1. Double-press gestures disarm only on their reset tick
+## 1. Double-press gestures disarm only on their reset tick — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): consequential edit — internal/tui/e2e_test.go: made necessary by the new window rule (its "Ctrl+C twice within the window" comment restated)
+NOTES (2026-10-13): consequential edit — .capcom/knowledge/decisions.md: made necessary by ADR 0099 (the decisions index gains its line)
+NOTES (2026-10-13): cmd/apogee/e2e_smoke_test.go:562 (stopRun's doc comment, "escStopWindow, one second … measured when each press is FOLDED") is left for item 2, which rewrites that comment with stopRun
 
 **What:**
 **Goal:** in `internal/tui`, a second esc folded while the esc-stop gesture is armed stops the worker, and a second ctrl+c folded while the quit gesture is armed quits, however much wall-clock time passed between the two folds. Only the gesture's own reset message (matching generation) or the worker unwinding disarms it. A decision record states the new window definition.

@@ -124,9 +124,11 @@ queued it drops the newest attached image. Cancelling the run does
 not drop a queued command: it runs at that idle, while queued messages are held for your next
 `⏎` — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
 prompts you have already sent in this workspace, `esc` twice cancels a run, `⌃c` quits.
-Cancelling is a double-tap, like quitting: the first `esc` arms the gesture for one second —
+Cancelling is a double-tap, like quitting: the first `esc` arms the gesture for about a second —
 the status line says `press esc again to cancel` for as long as it is armed — and a second
-`esc` inside that window cancels the run. Let the window lapse and the gesture disarms
+`esc` while it is armed cancels the run. The window closes only when the gesture's own disarm
+timer is handled, after every key you pressed before it fired, so a second `esc` typed in time
+cancels even when a busy apogee gets to it late. Let the window lapse and the gesture disarms
 itself, so a stray `esc` never kills a turn that is under way; a run that ends on its
 own inside the window disarms it too, so the hint never outlives what it offered to
 cancel. A cancel stops and keeps finished work; undo file changes with git or `/undo`. It
@@ -170,7 +172,7 @@ call is awaiting approval or a question from the model is up — and `⇧⇥` st
 call, the approval prompt's decision keys — `a`, `s`, `d`, and the `⏎` that takes the
 highlighted row — take effect a moment after the prompt appears, so a keystroke already
 in flight cannot answer a call you have not read; `esc` is live from the instant the
-prompt is up, and cancels the run on the second press within the window, exactly as it does
+prompt is up, and cancels the run on the second press while the gesture is armed, exactly as it does
 anywhere else while the model works — the pane's own `[esc]` Cancel row is the one-press
 spelling of the same cancel. A question from the model is the one carve-out: there a single `esc`
 cancels — the pane's hint reads `esc cancel` — because backing out of a question is not

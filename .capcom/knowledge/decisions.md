@@ -100,3 +100,4 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0096` — Project config grants are live only by adoption
 - `adr-0097` — The TUI checks for a newer release and names the upgrade command
 - `adr-0098` — The repo owns its release pipeline: two committed skills write the notes, a Go maintainer program publishes
+- `adr-0099` — Double-press gestures disarm only on their reset tick
