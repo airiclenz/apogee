@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **CI's Linux jobs run on `ubuntu-24.04`, not `ubuntu-latest`.** Every Linux job in `ci.yml` and `tag-on-version-bump.yml` names its image, so GitHub's move of `ubuntu-latest` to Ubuntu 26.04 (by 2026-10-19) does not change the runner under the landlock steps without a commit; moving to 26.04 is its own tracked step (`ci-ubuntu-26-move`).
+
 - **e2e picker keys wait on the picker, not on a quiet screen.** In `cmd/apogee`'s e2e tests every `/fork` and `/sessions` picker key now follows the picker's painted title or hint with no `WaitQuiet` in between, and every `⏎` after a `↓` waits for the frame to show the highlight on the target row — the fork picker's second prompt, or for `/sessions` a highlight on a different row than before (`pickerDown`, with `paneCursor` moved to `e2e_support_test.go` and taking either driver).
 
 - **e2e run views open on the idle prompt and close their wait on the breadcrumb.** `openLastRun` in `cmd/apogee`'s e2e tests now takes its ⌥↑ byte mark only after `waitIdle`, so neither a turn's last frames nor a resume's start-up paint can pass its guard, and it returns once the run view's `← main ›` breadcrumb is painted instead of on a quiet screen; callers that read a frame next settle it first. The resumed tools-fold run, the Firing's `expandLastBlock` and `approveEdit` wait on `waitIdle` instead of `WaitQuiet`.
