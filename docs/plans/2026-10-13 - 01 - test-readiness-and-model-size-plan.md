@@ -228,7 +228,11 @@ internal/tui/settingsapply.go — the `m.settings.editor = lineEditor{}` reset; 
 - the new test and the existing settings editor tests, by name, single-package `-run`
 **Commit:** `perf(tui): hold the settings editor behind a copy-on-write field`
 
-## 10. Rename and name buffers behind the copy-on-write field
+## 10. Rename and name buffers behind the copy-on-write field — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the five direct `renameBuf.setValue(...)` test writes (three in autotitle_test.go, two in sessions_test.go) go through a new sessions_test.go helper `retypeRename(&m, title)`, which writes through `edit`; `renamedField` now returns `copyOnWriteField`, so the `renameBuf: renamedField(...)` literal compiles unchanged. workflows_test.go had no direct `nameBuf` writes; it only gains the copy-independence test.
+NOTES (2026-10-13): consequential edit — internal/tui/lineeditor.go: the lineEditor type comment listed the overlay fields behind a copyOnWriteField as "the list filters, the /settings field", which this conversion made incomplete; it now names the /sessions rename row and the /workflows name row too.
+NOTES (2026-10-13): gofmt re-aligned the trailing comments of the workflowsPane struct fields around the wider `copyOnWriteField` type (whitespace only).
 
 Depends on item 8.
 

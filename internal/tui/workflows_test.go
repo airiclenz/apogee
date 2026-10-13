@@ -656,6 +656,25 @@ func TestWorkflowsViewCtrlSSavesAFanOutAsARecipe(t *testing.T) {
 	}
 }
 
+// The name row's buffer sits behind a copyOnWriteField: a Model snapshot taken AFTER the first
+// keystroke into it — once the two copies point at one field — keeps its name while the other copy
+// types a second key.
+func TestWorkflowsNameCopyKeepsItsOwnText(t *testing.T) {
+	t.Parallel()
+	m, _, _ := savePaneModel(t, saveFanOutPlan(), "")
+	m = step(t, step(t, m, keyCtrlS()), keyRune('a'))
+	snapshot := m
+
+	typed := step(t, m, keyRune('b'))
+
+	if got := typed.workflowsPane.nameBuf.value(); got != "ab" {
+		t.Errorf("typed copy's name = %q, want %q", got, "ab")
+	}
+	if got := snapshot.workflowsPane.nameBuf.value(); got != "a" {
+		t.Errorf("snapshot's name = %q, want %q: typing on the other copy reached it", got, "a")
+	}
+}
+
 // A bare s in the detail is no verb: it opens no name row and writes nothing. esc closes an open
 // name row and saves nothing.
 func TestWorkflowsViewBareSOrEscSavesNothing(t *testing.T) {

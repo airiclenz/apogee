@@ -34,9 +34,10 @@ import (
 // The prompt holds it BY VALUE, as the Model has always held it (ADR 0011, doc.go): the widget
 // carries no self-referential no-copy type, and what it holds by pointer (its viewport, its wrap
 // cache) is shared across the Model's copies deliberately, which is the posture the chat box has run
-// in since it was built. The overlay fields — the list filters, the /settings field — hold it behind
-// a [copyOnWriteField] instead, which keeps a whole textarea out of every Model copy and gives each
-// copy a field of its own by replacing the field on every write.
+// in since it was built. The overlay fields — the list filters, the /settings field, the /sessions
+// rename row and the /workflows name row — hold it behind a [copyOnWriteField] instead, which keeps
+// a whole textarea out of every Model copy and gives each copy a field of its own by replacing the
+// field on every write.
 //
 // It knows nothing about what is being edited: what a value may hold, what commits it and what
 // abandons it all belong to the caller. That is the whole boundary — this type turns keystrokes into

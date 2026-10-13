@@ -147,11 +147,11 @@ type workflowsPane struct {
 	list    listCursor
 	detail  listCursor
 	item    listCursor
-	shown   string          // the workflow the detail and item levels show
-	ref     workflowItemRef // the item the item level shows
-	lines   []string        // that item's rows; nil until its load lands
-	naming  bool            // the detail's ^s name row is up and takes every key
-	nameBuf lineEditor      // the skill name typed so far; the zero field while not naming
+	shown   string           // the workflow the detail and item levels show
+	ref     workflowItemRef  // the item the item level shows
+	lines   []string         // that item's rows; nil until its load lands
+	naming  bool             // the detail's ^s name row is up and takes every key
+	nameBuf copyOnWriteField // the skill name typed so far; the zero field while not naming
 	listSeq uint64
 	itemSeq uint64
 }
@@ -418,7 +418,7 @@ func (m Model) openWorkflowSave() Model {
 		return m
 	}
 	m.workflowsPane.naming = true
-	m.workflowsPane.nameBuf = newPopupField(m.opts.CursorShape, m.th.surface, workflowSaveCaret, "")
+	m.workflowsPane.nameBuf = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, workflowSaveCaret, ""))
 	return m
 }
 
@@ -429,11 +429,11 @@ func (m Model) workflowsNameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	pane := &m.workflowsPane
 	switch msg.String() {
 	case "esc":
-		pane.naming, pane.nameBuf = false, lineEditor{}
+		pane.naming, pane.nameBuf = false, copyOnWriteField{}
 		return m, nil
 	case "enter":
 		name := strings.TrimSpace(pane.nameBuf.value())
-		pane.naming, pane.nameBuf = false, lineEditor{}
+		pane.naming, pane.nameBuf = false, copyOnWriteField{}
 		if name == "" {
 			return m, nil
 		}

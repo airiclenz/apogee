@@ -865,7 +865,7 @@ func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
 
 	m = openBrowser(t, m)
 	m = step(t, m, keyCtrl('r'))
-	m.sessionBrowser.renameBuf.setValue("an older task, renamed")
+	retypeRename(&m, "an older task, renamed")
 	m, cmd = stepCmd(t, m, keyEnter())
 	m = runWrites(t, m, cmd)
 
@@ -1381,11 +1381,45 @@ func TestSessionRowsConfirmIsItsOwnCell(t *testing.T) {
 	}
 }
 
-// renamedField is a rename buffer holding text, built as ^r builds it (newPopupField). The buffer is
-// a [lineEditor] rather than a string, so a test that seeds one on a bare sessionBrowser — with no
-// Model to read the cursor shape and the field tone off — still has to hand the pane a real field.
-func renamedField(text string) lineEditor {
-	return newPopupField(defaultCursorShape, lipgloss.Color(scheme.Default().Surface), sessionRenameCaret, text)
+// renamedField is a rename buffer holding text, built as ^r builds it (newPopupField behind a
+// copyOnWriteField). The buffer is a real field rather than a string, so a test that seeds one on a
+// bare sessionBrowser — with no Model to read the cursor shape and the field tone off — still has
+// to hand the pane a real field.
+func renamedField(text string) copyOnWriteField {
+	return newCopyOnWriteField(newPopupField(defaultCursorShape, lipgloss.Color(scheme.Default().Surface), sessionRenameCaret, text))
+}
+
+// retypeRename replaces the armed rename edit's whole text with title, caret at its end, as a human
+// clearing the seeded title and typing a new one would leave it. It writes through the field's own
+// edit, so the replace is copy-on-write like every keystroke.
+func retypeRename(m *Model, title string) {
+	m.sessionBrowser.renameBuf.edit(func(e *lineEditor) tea.Cmd {
+		e.setValue(title)
+		return nil
+	})
+}
+
+// The rename buffer sits behind a copyOnWriteField like the filter beside it
+// (TestSessionBrowserFilterCopyKeepsItsOwnText): a Model snapshot taken AFTER the first keystroke into
+// the edit — once the two copies point at one field — keeps its buffer while the other copy deletes
+// that key and types another.
+func TestSessionBrowserRenameCopyKeepsItsOwnText(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "old title", "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m)
+	m = step(t, step(t, m, keyCtrl('r')), keyRune('!'))
+	snapshot := m
+
+	typed := step(t, step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace}), keyRune('?'))
+
+	if got := typed.sessionBrowser.renameBuf.value(); got != "old title?" {
+		t.Errorf("typed copy's rename buffer = %q, want %q", got, "old title?")
+	}
+	if got := snapshot.sessionBrowser.renameBuf.value(); got != "old title!" {
+		t.Errorf("snapshot's rename buffer = %q, want %q: editing the other copy reached it", got, "old title!")
+	}
 }
 
 // An armed rename replaces the whole row with the single cell holding the edit buffer — the row
@@ -1530,7 +1564,7 @@ func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
 		if m.sessionBrowser.renameBuf.value() != "fix the parser" {
 			t.Fatalf("rename buffer = %q, want the filtered row's own title", m.sessionBrowser.renameBuf.value())
 		}
-		m.sessionBrowser.renameBuf.setValue("fix the parser, properly")
+		retypeRename(&m, "fix the parser, properly")
 		m, cmd := stepCmd(t, m, keyEnter())
 		m = runWrites(t, m, cmd)
 

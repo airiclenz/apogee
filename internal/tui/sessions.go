@@ -38,11 +38,12 @@ type sessionBrowser struct {
 	allWorkspaces bool
 	confirming    bool
 	renaming      bool
-	// renameBuf is the inline title edit in progress: a [lineEditor] like the filter beside it, built
-	// on the title the armed row holds (sessionRenameKey's ctrl+r) and zeroed again the moment the
-	// edit commits or is abandoned. It is the browser's OWN field and no part of the list surface
-	// below: a rename is a modal surface within the modal, and no filter is typed inside it.
-	renameBuf lineEditor
+	// renameBuf is the inline title edit in progress: a [lineEditor] behind a [copyOnWriteField] like
+	// the filter beside it, built on the title the armed row holds (sessionRenameKey's ctrl+r) and
+	// zeroed again the moment the edit commits or is abandoned. It is the browser's OWN field and no
+	// part of the list surface below: a rename is a modal surface within the modal, and no filter is
+	// typed inside it.
+	renameBuf copyOnWriteField
 	// listSurface is the highlight and the filter — the state a list overlay that FILTERS keeps, and
 	// the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than re-declared
 	// so `m.sessionBrowser.selected` and `.filter` still read as the pane's own while the picker and
@@ -381,8 +382,8 @@ func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Mod
 			// The seed is a stored title, so it is escape-stripped on the way INTO the buffer: the
 			// rename row paints the buffer verbatim, and the commit strips anyway — seeding it clean
 			// keeps what is being edited equal to what will be saved.
-			m.sessionBrowser.renameBuf = newPopupField(m.opts.CursorShape, m.th.surface,
-				sessionRenameCaret, stripEscapes(meta.Title))
+			m.sessionBrowser.renameBuf = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface,
+				sessionRenameCaret, stripEscapes(meta.Title)))
 		}
 	}
 	return m, nil
@@ -433,7 +434,7 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.sessionBrowser.renaming = false
-		m.sessionBrowser.renameBuf = lineEditor{}
+		m.sessionBrowser.renameBuf = copyOnWriteField{}
 		return m, nil
 	case "enter":
 		// The filtered view again (browserView): the edit was opened on a painted row, so the commit
@@ -441,7 +442,7 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		view := m.sessionBrowserView()
 		title := stripEscapes(strings.TrimSpace(m.sessionBrowser.renameBuf.value()))
 		m.sessionBrowser.renaming = false
-		m.sessionBrowser.renameBuf = lineEditor{}
+		m.sessionBrowser.renameBuf = copyOnWriteField{}
 		if len(view.metas) == 0 || title == "" {
 			return m, nil
 		}
