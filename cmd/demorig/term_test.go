@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
+
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
@@ -190,36 +192,110 @@ func TestStartRetryingEPERM(t *testing.T) {
 	t.Parallel()
 	refused := &os.PathError{Op: "fork/exec", Path: "/usr/bin/bash", Err: syscall.EPERM}
 	other := errors.New("no such pty")
+	const report = "probe on /dev/pts/9: true ok"
 	for _, tc := range []struct {
-		name      string
-		failures  []error // what the attempts return before one succeeds
-		wantCalls int
-		wantErr   error
+		name       string
+		failures   []error // what the attempts return before one succeeds
+		wantCalls  int
+		wantProbes int
+		wantErr    error
 	}{
 		{name: "first try starts", wantCalls: 1},
 		{name: "EPERM then a start", failures: []error{refused}, wantCalls: 2},
-		{name: "EPERM on every try", failures: []error{refused, refused, refused}, wantCalls: 3, wantErr: syscall.EPERM},
+		{name: "EPERM on every try", failures: []error{refused, refused, refused}, wantCalls: 3, wantProbes: 1, wantErr: syscall.EPERM},
 		{name: "another error is not retried", failures: []error{other}, wantCalls: 1, wantErr: other},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			calls := 0
-			start := func() (*exec.Cmd, *os.File, error) {
+			calls, probes := 0, 0
+			start := func() (*exec.Cmd, *os.File, *os.File, error) {
 				calls++
 				if calls <= len(tc.failures) {
-					return nil, nil, fmt.Errorf("start: %w", tc.failures[calls-1])
+					return nil, nil, nil, fmt.Errorf("start: %w", tc.failures[calls-1])
 				}
-				return &exec.Cmd{}, nil, nil
+				return &exec.Cmd{}, nil, nil, nil
 			}
-			cmd, _, err := startRetryingEPERM(start, 3, time.Millisecond)
+			probe := func(*os.File) string {
+				probes++
+				return report
+			}
+			cmd, _, err := startRetryingEPERM(start, probe, 3, time.Millisecond)
 			if calls != tc.wantCalls {
 				t.Errorf("start ran %d time(s), want %d", calls, tc.wantCalls)
+			}
+			if probes != tc.wantProbes {
+				t.Errorf("probe ran %d time(s), want %d", probes, tc.wantProbes)
 			}
 			if tc.wantErr == nil && (err != nil || cmd == nil) {
 				t.Errorf("got (%v, %v), want the started command", cmd, err)
 			}
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Errorf("err = %v, want %v", err, tc.wantErr)
+			}
+			if hasReport := err != nil && strings.Contains(err.Error(), report); hasReport != (tc.wantProbes > 0) {
+				t.Errorf("err = %v; carries the probe report: %v, want %v", err, hasReport, tc.wantProbes > 0)
+			}
+		})
+	}
+}
+
+// TestProbeLaunchesOnAHealthyPTY runs the EPERM probe on a fresh pty nothing else holds: every
+// launch starts and no process owns it as a controlling terminal.
+func TestProbeLaunchesOnAHealthyPTY(t *testing.T) {
+	t.Parallel()
+	master, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("open a pty: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = tty.Close()
+		_ = master.Close()
+	})
+
+	probe := probeLaunches(tty)
+
+	for step, err := range map[string]error{"plain": probe.plain, "setsid": probe.setsid, "setsid+setctty": probe.setctty} {
+		if err != nil {
+			t.Errorf("the %s launch failed: %v", step, err)
+		}
+	}
+	if len(probe.owners) != 0 {
+		t.Errorf("owners = %q, want none on a fresh pty", probe.owners)
+	}
+	if report := probe.String(); !strings.Contains(report, "true+setsid+setctty ok") {
+		t.Errorf("report = %q, want every launch ok", report)
+	}
+}
+
+// TestProbeReportNamesTheRefusedStep pins the report's wording: the refused step carries its
+// error, and the owners clause says who holds the pty or why that is unknown.
+func TestProbeReportNamesTheRefusedStep(t *testing.T) {
+	t.Parallel()
+	refused := &os.PathError{Op: "fork/exec", Path: "/usr/bin/true", Err: syscall.EPERM}
+	for _, tc := range []struct {
+		name  string
+		probe launchProbe
+		want  string
+	}{
+		{
+			name:  "setctty refused, pty owned",
+			probe: launchProbe{tty: "/dev/pts/3", setctty: refused, owners: []string{"pid 7 (bash) session 7"}},
+			want: "probe on /dev/pts/3: true ok, true+setsid ok, true+setsid+setctty refused " +
+				"(fork/exec /usr/bin/true: operation not permitted); controlling tty of: pid 7 (bash) session 7",
+		},
+		{
+			name:  "nothing starts, owner unknown",
+			probe: launchProbe{tty: "/dev/ttys004", plain: refused, setsid: refused, setctty: refused, ownersErr: errors.New("owner unknown off linux")},
+			want: "probe on /dev/ttys004: true refused (fork/exec /usr/bin/true: operation not permitted), " +
+				"true+setsid refused (fork/exec /usr/bin/true: operation not permitted), " +
+				"true+setsid+setctty refused (fork/exec /usr/bin/true: operation not permitted); " +
+				"controlling tty of: unknown (owner unknown off linux)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.probe.String(); got != tc.want {
+				t.Errorf("report =\n %q\nwant\n %q", got, tc.want)
 			}
 		})
 	}

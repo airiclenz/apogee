@@ -44,7 +44,11 @@
 //   - take.go — the Take a recording produces: every distinct screen snapshot with its time, and
 //     the event log of what the rig did.
 //   - term.go — the unix Terminal a take records in: a pty pair, the vt emulator reading it and
-//     the snapshots it emits.
+//     the snapshots it emits, and the probe that names which launch step the kernel refuses when
+//     a take's start hits EPERM.
+//   - ttyowner_linux.go — the processes holding a pty as their controlling terminal, read from
+//     /proc, for that probe's report.
+//   - ttyowner_other.go — the same lookup on the other unix systems, reporting the owner unknown.
 //   - term_windows.go — the Windows stand-in: TermOptions and Terminal as types only, every
 //     recording entry point answering errNoPTY.
 //   - engine.go — the Engine that drives a beat's actions into the terminal, paced, and locates

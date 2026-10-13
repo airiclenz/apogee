@@ -153,7 +153,10 @@ Fixes `conpty-reap-join-bound`: under load conhost's final flush arrived after t
 **Closes:** conpty-reap-join-bound
 **Commit:** `fix(console): reap drains the ConPTY reader to EOF before closing output`
 
-## 7. demorig names which launch step refuses on EPERM
+## 7. demorig names which launch step refuses on EPERM — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): startRetryingEPERM probes only the final EPERM attempt (the only error returned), and its start func hands back the open slave, which startRetryingEPERM closes (and the master on failure) — so the report is attached by the retry loop itself and TestStartRetryingEPERM asserts it rather than its fake. The non-linux stub is `//go:build !linux && !windows` because term.go is `!windows`.
+NOTES (2026-10-13): a throwaway check (not committed) confirmed the signature: on a pty another session holds as controlling terminal, the probe reports true and true+setsid ok, true+setsid+setctty refused with `operation not permitted`, and names the holder — the exact demorig EPERM text.
 
 **What:**
 **Goal:** when `StartTerminal`'s launch fails with EPERM, the error and log say which of three probe launches on the same pty also fail (`/bin/true` with no attrs, with `Setsid`, with `Setsid`+`Setctty`) and the controlling-terminal owner of that pty, so the next occurrence names the cause. The retry stays.

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -145,9 +146,9 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 	// The callback runs inside emu.Write, which only ever runs with mu held.
 	emu.SetCallbacks(vt.Callbacks{CursorVisibility: func(visible bool) { t.cursorVisible = visible }})
 
-	cmd, master, err := startRetryingEPERM(func() (*exec.Cmd, *os.File, error) {
+	cmd, master, err := startRetryingEPERM(func() (*exec.Cmd, *os.File, *os.File, error) {
 		return startUnderPTY(name, args, opts)
-	}, startAttempts, startRetryGap)
+	}, func(tty *os.File) string { return probeLaunches(tty).String() }, startAttempts, startRetryGap)
 	if err != nil {
 		return nil, fmt.Errorf("start %s under a pty: %w", name, err)
 	}
@@ -171,16 +172,28 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 }
 
 // startUnderPTY launches name under a fresh opts-sized pty, as a session leader with the pty as
-// its controlling terminal.
-func startUnderPTY(name string, args []string, opts TermOptions) (*exec.Cmd, *os.File, error) {
+// its controlling terminal. It opens the pair itself rather than through pty.StartWithAttrs, which
+// closes both ends when the launch fails: the slave is handed back open — on success and on
+// failure alike — so a refused launch can be probed on the very pty it was refused on. The
+// caller closes the slave, and on failure the master too.
+func startUnderPTY(name string, args []string, opts TermOptions) (*exec.Cmd, *os.File, *os.File, error) {
+	master, tty, err := pty.Open()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	size := &pty.Winsize{Rows: uint16(opts.Rows), Cols: uint16(opts.Cols)} //nolint:gosec // bounded by validate
+	if err := pty.Setsize(master, size); err != nil {
+		_ = tty.Close()
+		_ = master.Close()
+		return nil, nil, nil, err
+	}
 	cmd := exec.Command(name, args...) //nolint:gosec // the rig runs the program its operator named
 	// exec keeps the LAST definition of a duplicated variable, so appending is how these two win.
 	cmd.Env = append(append([]string{}, opts.Env...), "TERM=xterm-256color", "COLORTERM=truecolor")
 	cmd.Dir = opts.Dir
-	master, err := pty.StartWithAttrs(cmd,
-		&pty.Winsize{Rows: uint16(opts.Rows), Cols: uint16(opts.Cols)}, //nolint:gosec // bounded by validate
-		&syscall.SysProcAttr{Setsid: true, Setctty: true})
-	return cmd, master, err
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	return cmd, master, tty, cmd.Start()
 }
 
 // startRetryingEPERM runs start up to attempts times, pausing gap between tries, for as long as it
@@ -189,16 +202,101 @@ func startUnderPTY(name string, args []string, opts TermOptions) (*exec.Cmd, *os
 // (apogee-demorig-take-start-eperm) — and it never reproduced on demand, so the cause is not
 // pinned. What is certain is that a fork/exec error comes from the child before it runs the
 // program, so nothing has run twice, and start builds a fresh command on a fresh pty each time,
-// which is what a refusal of this launch's setsid-and-controlling-tty setup needs. Any other error,
-// and the last EPERM, are returned as they are.
-func startRetryingEPERM(start func() (*exec.Cmd, *os.File, error), attempts int, gap time.Duration) (*exec.Cmd, *os.File, error) {
+// which is what a refusal of this launch's setsid-and-controlling-tty setup needs. Any other error
+// is returned as it is. The last EPERM carries probe's report on the slave it was refused on — see
+// probeLaunches — so the next occurrence names the step the kernel refuses
+// (demorig-eperm-root-cause).
+//
+// start hands back the slave it launched on, open, and startRetryingEPERM closes it; on failure it
+// closes the master too and returns neither.
+func startRetryingEPERM(
+	start func() (*exec.Cmd, *os.File, *os.File, error),
+	probe func(tty *os.File) string,
+	attempts int,
+	gap time.Duration,
+) (*exec.Cmd, *os.File, error) {
 	for attempt := 1; ; attempt++ {
-		cmd, master, err := start()
-		if err == nil || !errors.Is(err, syscall.EPERM) || attempt >= attempts {
-			return cmd, master, err
+		cmd, master, tty, err := start()
+		isRefused := err != nil && errors.Is(err, syscall.EPERM)
+		if isRefused && attempt >= attempts {
+			err = fmt.Errorf("%w; %s", err, probe(tty))
+		}
+		closeIfOpen(tty)
+		if err == nil {
+			return cmd, master, nil
+		}
+		closeIfOpen(master)
+		if !isRefused || attempt >= attempts {
+			return nil, nil, err
 		}
 		time.Sleep(gap)
 	}
+}
+
+// closeIfOpen closes f unless it is nil. A close failure is dropped: f is either the parent's copy
+// of a slave the child holds on its own, or the end of a launch that already failed.
+func closeIfOpen(f *os.File) {
+	if f != nil {
+		_ = f.Close()
+	}
+}
+
+// launchProbe is what [probeLaunches] found on a pty a launch was refused on: whether `true` starts
+// on it at all, as a session leader, and as a session leader taking it as controlling terminal —
+// the three steps of a take's launch — and which processes already hold it as theirs. Plain failing
+// means the environment refuses clone or execve outright; only setctty failing means the pty
+// belongs to another session.
+type launchProbe struct {
+	tty     string
+	plain   error
+	setsid  error
+	setctty error
+	// owners are the processes whose controlling terminal the pty is; ownersErr says why they
+	// could not be listed.
+	owners    []string
+	ownersErr error
+}
+
+// probeLaunches runs `true` on tty three ways — with no attributes, with Setsid, with Setsid and
+// Setctty — after first listing the processes that hold tty as their controlling terminal, so the
+// list shows the pty as the refused launch found it.
+func probeLaunches(tty *os.File) launchProbe {
+	probe := launchProbe{tty: tty.Name()}
+	probe.owners, probe.ownersErr = ttyOwners(tty)
+	trueBinary, err := exec.LookPath("true")
+	if err != nil {
+		probe.plain, probe.setsid, probe.setctty = err, err, err
+		return probe
+	}
+	launch := func(attrs *syscall.SysProcAttr) error {
+		cmd := exec.Command(trueBinary) //nolint:gosec // a fixed probe binary
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+		cmd.SysProcAttr = attrs
+		return cmd.Run()
+	}
+	probe.plain = launch(nil)
+	probe.setsid = launch(&syscall.SysProcAttr{Setsid: true})
+	probe.setctty = launch(&syscall.SysProcAttr{Setsid: true, Setctty: true})
+	return probe
+}
+
+// String is the probe as one clause of a launch error.
+func (p launchProbe) String() string {
+	outcome := func(err error) string {
+		if err == nil {
+			return "ok"
+		}
+		return "refused (" + err.Error() + ")"
+	}
+	owners := "none"
+	switch {
+	case p.ownersErr != nil:
+		owners = "unknown (" + p.ownersErr.Error() + ")"
+	case len(p.owners) > 0:
+		owners = strings.Join(p.owners, ", ")
+	}
+	return fmt.Sprintf("probe on %s: true %s, true+setsid %s, true+setsid+setctty %s; controlling tty of: %s",
+		p.tty, outcome(p.plain), outcome(p.setsid), outcome(p.setctty), owners)
 }
 
 // Send writes p to the program as input: typed text, a key's escape sequence, a mouse report.
