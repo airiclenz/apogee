@@ -3,10 +3,16 @@ package tui
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"image/color"
 	"reflect"
 	"strings"
 	"testing"
+	"unsafe"
+
+	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -391,5 +397,191 @@ func TestUnicodeGlyphFrameIsTheDefaultLook(t *testing.T) {
 		if !strings.Contains(frame, want) {
 			t.Errorf("the unicode frame carries no %q:\n%s", want, frame)
 		}
+	}
+}
+
+// TestThemeHeaderFitsInAKilobyte pins the by-value half of [theme] small. The theme rides on the
+// value-copied Model (ADR 0011), so every byte of it is copied on every Update; the styles — some
+// fifty lipgloss.Styles, tens of kilobytes between them — sit behind the one shared [themeStyles]
+// pointer for exactly that reason. A Style added to theme itself instead of to themeStyles lands
+// here, as does any other large field the header should not be holding by value.
+func TestThemeHeaderFitsInAKilobyte(t *testing.T) {
+	t.Parallel()
+
+	if size := unsafe.Sizeof(theme{}); size >= 1<<10 {
+		t.Errorf("theme is %d bytes by value, at or over 1 KiB: a large field belongs behind the shared "+
+			"themeStyles pointer (styles) or a pointer of its own", size)
+	}
+	style := reflect.TypeOf(lipgloss.Style{})
+	header := reflect.TypeOf(theme{})
+	for i := 0; i < header.NumField(); i++ {
+		if f := header.Field(i); f.Type == style {
+			t.Errorf("theme.%s is a lipgloss.Style held by value; every style lives in themeStyles", f.Name)
+		}
+	}
+	styles := reflect.TypeOf(themeStyles{})
+	for i := 0; i < styles.NumField(); i++ {
+		if f := styles.Field(i); f.Type != style {
+			t.Errorf("themeStyles.%s is a %s; themeStyles holds lipgloss.Styles and nothing else — the "+
+				"facts that move at runtime belong on the by-value header", f.Name, f.Type)
+		}
+	}
+}
+
+// TestThemeStylesAreWrittenOnlyByNewTheme is the guard on the sharing [themeStyles] relies on. Every
+// copy of a theme — and of the Model holding one — shares ONE themeStyles, so a write through any
+// copy would repaint every other copy too: a discarded Update's Model, a test's "before" snapshot,
+// the run view's restored frame. So no non-test file may assign a style field, take a style's
+// address, overwrite the struct through its pointer, or build a themeStyles anywhere but in
+// [newTheme]; a scheme switch replaces the whole theme instead (applyColorScheme). The scan is by
+// field NAME, so a field of another type that comes to share a style's name and is assigned would
+// be reported too — rename one of the two.
+func TestThemeStylesAreWrittenOnlyByNewTheme(t *testing.T) {
+	t.Parallel()
+
+	fields := themeStyleFields()
+	if !fields["toolLabel"] {
+		t.Fatal("the style set lacks \"toolLabel\" — the reflection over themeStyles read nothing")
+	}
+	fset := token.NewFileSet()
+	for _, path := range packageGoFiles(t, false) {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, finding := range themeStyleWrites(fset, file, fields) {
+			t.Error(finding)
+		}
+	}
+}
+
+// ...and the detector proven on a fixture rather than assumed: an assignment, an address taken, an
+// overwrite through the pointer and a literal outside newTheme are each reported at their line, while
+// newTheme's own literal, a read, and a copy re-seated on a new pointer are not.
+func TestThemeStylesAreWrittenOnlyByNewThemeBites(t *testing.T) {
+	t.Parallel()
+
+	const fixture = `package tui
+
+func newTheme() theme {
+	return theme{themeStyles: &themeStyles{toolLabel: style()}}
+}
+
+func repaint(th theme, other theme) string {
+	th.toolLabel = th.toolLabel.Bold(true)
+	p := &th.toolLabel
+	*th.themeStyles = themeStyles{}
+	th.themeStyles = other.themeStyles
+	_ = p
+	return th.toolLabel.Render("x")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", fixture, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+
+	got := themeStyleWrites(fset, file, map[string]bool{"toolLabel": true})
+
+	want := []string{
+		"fixture.go:8: assigns the theme style toolLabel — the styles are shared by every copy of the theme and written only by newTheme",
+		"fixture.go:9: takes the address of the theme style toolLabel — the styles are shared by every copy of the theme and written only by newTheme",
+		"fixture.go:10: overwrites the shared themeStyles through its pointer — the styles are shared by every copy of the theme and written only by newTheme",
+		"fixture.go:10: builds a themeStyles outside newTheme — the styles are shared by every copy of the theme and written only by newTheme",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("detector findings differ\n got:\n  %s\nwant:\n  %s",
+			strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// themeStyleFields is the name of every field [themeStyles] declares — the set the guard above
+// scans for, derived from the type so a style added later is guarded without a list to keep.
+func themeStyleFields() map[string]bool {
+	fields := map[string]bool{}
+	styles := reflect.TypeOf(themeStyles{})
+	for i := 0; i < styles.NumField(); i++ {
+		fields[styles.Field(i).Name] = true
+	}
+	return fields
+}
+
+// themeStyleWrites reports every site in file, outside a top-level newTheme, that writes a theme
+// style: an assignment to a field named in fields, the address of one taken, an assignment through
+// the themeStyles pointer itself, or a themeStyles literal built. Re-seating a copy's pointer
+// (`th.themeStyles = …`) is not a write through it and is not reported.
+func themeStyleWrites(fset *token.FileSet, file *ast.File, fields map[string]bool) []string {
+	var found []string
+	report := func(n ast.Node, what string) {
+		found = append(found, fmt.Sprintf("%s:%d: %s — the styles are shared by every copy of the theme "+
+			"and written only by newTheme", fset.Position(n.Pos()).Filename, fset.Position(n.Pos()).Line, what))
+	}
+	styleField := func(e ast.Expr) (string, bool) {
+		sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+		if !ok || !fields[sel.Sel.Name] {
+			return "", false
+		}
+		return sel.Sel.Name, true
+	}
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == "newTheme" {
+			continue
+		}
+		ast.Inspect(decl, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range n.Lhs {
+					if name, ok := styleField(lhs); ok {
+						report(lhs, "assigns the theme style "+name)
+					}
+					if star, ok := ast.Unparen(lhs).(*ast.StarExpr); ok {
+						if sel, ok := ast.Unparen(star.X).(*ast.SelectorExpr); ok && sel.Sel.Name == "themeStyles" {
+							report(lhs, "overwrites the shared themeStyles through its pointer")
+						}
+					}
+				}
+			case *ast.UnaryExpr:
+				if name, ok := styleField(n.X); ok && n.Op == token.AND {
+					report(n, "takes the address of the theme style "+name)
+				}
+			case *ast.CompositeLit:
+				if id, ok := n.Type.(*ast.Ident); ok && id.Name == "themeStyles" {
+					report(n, "builds a themeStyles outside newTheme")
+				}
+			}
+			return true
+		})
+	}
+	return found
+}
+
+// TestSchemeSwitchLeavesAnEarlierCopysStylesAlone is the other half of the sharing contract: since
+// the styles are never written, a scheme switch has to arrive as a whole NEW themeStyles, so a copy
+// of the Model taken before the switch keeps painting in the scheme it was taken under. A switch
+// that wrote the new styles through the shared pointer would repaint the earlier copy as well.
+func TestSchemeSwitchLeavesAnEarlierCopysStylesAlone(t *testing.T) {
+	t.Parallel()
+
+	opts := colorSchemeOpts(&settingsWriteLog{}, []string{"dark", "light"}, func(string) (scheme.Scheme, []string) {
+		return stubScheme("#123456"), nil
+	}, nil)
+	before := newTestModelEng(t, &fakeEngine{}, opts)
+	was := hexOf(before.th.errorText.GetForeground())
+	if was == "#123456" {
+		t.Fatalf("the starting scheme's error tone is already %s; the switch below could not be told apart", was)
+	}
+
+	after, _ := runColorSchemeLine(t, before, "/color-scheme light")
+
+	if got := hexOf(after.th.errorText.GetForeground()); got != "#123456" {
+		t.Fatalf("the switched copy's error style = %s, want the new scheme's #123456 — the switch did not land", got)
+	}
+	if got := hexOf(before.th.errorText.GetForeground()); got != was {
+		t.Errorf("the copy taken before the switch now paints its error style %s, want %s — the switch wrote "+
+			"through the styles every copy shares", got, was)
+	}
+	if before.th.themeStyles == after.th.themeStyles {
+		t.Error("the switched copy still shares the earlier copy's themeStyles; a switch builds a new one")
 	}
 }

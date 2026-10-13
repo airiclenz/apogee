@@ -171,7 +171,10 @@ internal/filewatch/filewatch_unix_test.go — TestWatchSettlesOnTheClockNotTheTi
 **Closes:** filewatch-stall-test-skipped
 **Commit:** `test(filewatch): step-lock burst writes with the watcher's samples`
 
-## 7. Theme styles behind a shared immutable pointer
+## 7. Theme styles behind a shared immutable pointer — ✅ DONE (2026-10-13)
+
+NOTES (2026-10-13): the guard also refuses taking a style's address, overwriting `*th.themeStyles`, and a `themeStyles` literal outside `newTheme`, and is proven on a fixture (`TestThemeStylesAreWrittenOnlyByNewThemeBites`); `TestThemeHeaderFitsInAKilobyte` additionally fails on a `lipgloss.Style` field left on the header or a non-Style field on `themeStyles`. The guard reuses `packageGoFiles` from seams_guard_test.go.
+NOTES (2026-10-13): the literal-Model tests are seven, not six (TestSlashMenuShadowsASkillIDThatIsACommandLine, TestNoSkillIDCanOutParseABuiltinVerb, TestFanOutCardSeatsARunHeadPerItem, TestJoinedInterjectionsRebasesSkillSpans, TestAutocompleteRowsStripEscapes, TestSettingsDisplayRowsInterleaveSectionHeaders, TestSettingsRowCellsStripEscapes); all pass against the nil styles pointer, so none reads a style.
 
 **What:**
 **Goal:** `unsafe.Sizeof(theme{}) < 1 KiB`; the theme's `lipgloss.Style` fields live in one struct built only by `newTheme` and reached through an embedded pointer, so `th.<style>` reads compile unchanged; no non-test code assigns a style field after `newTheme`, and a guard test enforces it.

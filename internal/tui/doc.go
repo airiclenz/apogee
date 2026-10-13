@@ -1177,6 +1177,20 @@
 // strings.Builder case structurally — the behaviour is address-dependent and a behavioural
 // test cannot reliably reproduce the panic.
 //
+// Invariant — the theme's styles are shared and immutable. The same copy that makes a Builder
+// dangerous makes a large value expensive: every byte the Model holds by value is copied on every
+// Update. The [theme]'s lipgloss styles are most of what it would otherwise hold, so they live in
+// one [themeStyles] the theme reaches through an embedded pointer — `th.toolLabel` reads as it
+// always did — and every copy of the Model shares that one value. Sharing is safe only because
+// nothing writes it: [newTheme] builds it and no other code assigns a style field, takes a style's
+// address or builds a themeStyles, while a scheme switch replaces the whole theme
+// ([Model.applyColorScheme]) rather than editing the one the earlier copies still paint with. The
+// by-value header keeps what moves at runtime — the width authority, the glyph set, the prompt
+// padding — on each copy's own value. TestThemeStylesAreWrittenOnlyByNewTheme guards the writes,
+// TestSchemeSwitchLeavesAnEarlierCopysStylesAlone the switch, and TestThemeHeaderFitsInAKilobyte the
+// header's size. A zero theme (a Model{} literal in a test) holds a nil pointer and must reach no
+// style.
+//
 // Invariant — an arm mutates; Update's tail lays out and repaints. An Update arm writes the
 // transcript, opens or closes a pane, writes the input box, and returns: it never calls
 // [Model.layout] or [Model.refreshViewport] to make the frame agree with what it changed. That is
