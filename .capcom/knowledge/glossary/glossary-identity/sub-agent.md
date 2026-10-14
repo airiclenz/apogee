@@ -50,13 +50,15 @@ name, `tools` and `output_path` are inherited wherever the call leaves them unse
 The parent also reads the **delegate ledger** (2026-09-19, ADR 0076 addendum, `apogee-clb`): the
 engine's own row per delegation of the current Exchange — spawn order (the model's call order,
 reserved per pooled group), the delegation's name, its outcome (`completed | capped | faulted |
-cancelled | stopped | refused` — `stopped` the human's stop of that one delegation, ADR 0086 D4;
-`refused` a call no child was built or started for), the head line of a fault
+cancelled | stopped | refused | skipped` — `stopped` the human's stop of that one delegation, ADR
+0086 D4; `refused` a call no child was built or started for; `skipped` a delegation a queued
+message pre-empted before it started), the head line of a fault
 or refusal, and the RESOLVED `output_path` target — rendered onto every request tail as the engine
 note `[engine — delegations]` … `[end engine — delegations]` (`#<n> <name> — <outcome>[: <cause>] —
 output <present|missing|none>`, presence read from disk at render time) once the Exchange holds
-two or more delegations or any that did not complete, ahead of the wrap-up directive, with the
-same system-prompt fallback for a tail that is not a tool result. Facts, no imperatives; structural
+two or more delegations or any that did not complete — a `skipped` row counting toward neither, so
+a pre-emption adds no note of its own but is listed when one fires — ahead of the wrap-up
+directive, with the same system-prompt fallback for a tail that is not a tool result. Facts, no imperatives; structural
 (no key, on under Bypass); in memory only, cleared as the next Exchange opens — the retained
 delegations outlive it, the ledger does not — never in the conversation or the snapshot
 (`internal/agent/children.go`).

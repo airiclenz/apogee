@@ -464,7 +464,9 @@ func (a *Agent) prepareCall(
 // is answered at once and never skipped, ADR 0094 D6) and a message is waiting for this Agent's
 // boundary (interjectionPending), the slot takes the skip result and its finished phase at once
 // (skipDelegation), its run flag is cleared so commitCall books no audit record for a child that
-// never ran, and true is returned. A leaf tool is never pre-empted — it runs to its result
+// never ran, its delegate-ledger row is booked here — `skipped`, no cause, since the call never
+// reaches runSubAgent: the index its pooled group reserved for it, else the next fresh one at
+// width 1 — and true is returned. A leaf tool is never pre-empted — it runs to its result
 // whatever is waiting at the boundary — and the predicate is read ONCE per slot, here, and never
 // again: a child that has started is never affected, and a slot skipped stays skipped even if the
 // message is withdrawn.
@@ -474,6 +476,12 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 	}
 	slot.run = false
 	slot.result = a.skipDelegation(turn, slot, skippedDelegationResult(slot.call.ID))
+	a.delegations.record(delegationRecord{
+		spawnIndex: a.delegations.open(slot.call.ID),
+		callID:     slot.call.ID,
+		name:       delegationLabel("", slot.call),
+		outcome:    delegationSkipped,
+	})
 	return true
 }
 
@@ -509,9 +517,11 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 }
 
 // recordCeilingRefusal books the delegate-ledger row a ceiling-refused slot is owed (children.go)
-// and does nothing for any other slot. It is the ceiling's OWN write, and the ledger's second site
-// after runSubAgent's defer (subagent.go): opened and recorded on the dispatching goroutine, so a
-// pooled group's refused rows take their indices after every reserved slot. The row reads as any
+// and does nothing for any other slot. It is the ceiling's OWN write, one of the ledger's sites
+// besides runSubAgent's defer (subagent.go), beside the pre-emption's (preemptDelegation), the
+// human's stop's (stopQueuedDelegation) and the cancel's (settleCancelledDelegation): opened and
+// recorded on the dispatching goroutine, so a pooled group's refused rows take their indices
+// after every reserved slot. The row reads as any
 // refusal does — `refused`, the result's head line as its cause, the call's label as its name.
 func (a *Agent) recordCeilingRefusal(slot *dispatchSlot) {
 	if !slot.ceilingRefused {

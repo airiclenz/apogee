@@ -540,14 +540,15 @@ func (r *retainedDelegates) clear() {
 // them is what a later request is built on. The ledger is the host's record of the same facts —
 // one row per delegation the Exchange spawned, in spawn order — rendered onto every request tail
 // as an engine note (delegationsNoteTopic, Agent.buildRequest) once the Exchange holds two or more
-// delegations or any one that did not complete. It states facts and asks nothing: what to do about
+// delegations or any one that did not complete — a skipped row counting toward neither
+// (delegationLedger.note). It states facts and asks nothing: what to do about
 // a faulted delegate or a missing file is the coordinator's call, and a note that issued orders
 // would be a Reaction wearing the engine's header. It lives in memory only, is cleared as the next
 // Exchange opens (Agent.step) and never reaches the session snapshot (ADR 0022 D8): the note is a
 // per-request projection, never a conversation message.
 
 // delegationOutcome is how one delegation ended, as the engine classified it from the result and
-// dispatch outcome runSubAgent returned — the six words the ledger's rows spell.
+// dispatch outcome runSubAgent returned — the seven words the ledger's rows spell.
 type delegationOutcome string
 
 const (
@@ -572,6 +573,11 @@ const (
 	// bound, bad arguments, an unknown `continue`, a bad seat or roster, a construction or Submit
 	// failure — the parent read an error result and no delegation ran.
 	delegationRefused delegationOutcome = "refused"
+	// delegationSkipped is a delegation a queued user message pre-empted before its child started
+	// (preemptDelegation): nothing was built or run, and the parent read the skip result. It is the
+	// human's act, not a failure, so it never triggers the note on its own (delegationLedger.note);
+	// it keeps the spawn indices contiguous and is listed whenever a note fires for another row.
+	delegationSkipped delegationOutcome = "skipped"
 )
 
 // delegationRecord is ONE row of the ledger: the delegation's spawn order, the call it answered,
@@ -626,7 +632,9 @@ func (l *delegationLedger) reserve(callID string) {
 // itself (recordCeilingRefusal), after a pooled group's running slots have been reserved, so the
 // refused rows number behind them — and every pooled delegation the human stopped before it
 // started, which never enters runSubAgent either and takes the index its group reserved for it
-// (stopQueuedDelegation).
+// (stopQueuedDelegation), and every delegation a queued message pre-empted, which never enters it
+// either and takes its reserved index in a pooled group or the next fresh one at width 1
+// (preemptDelegation).
 func (l *delegationLedger) open(callID string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -680,19 +688,27 @@ const delegationCauseMaxRunes = 160
 // note renders the ledger as the engine note buildRequest stamps, and reports whether the ratified
 // trigger holds: two or more delegations this Exchange, or any one that did not complete. One
 // delegation that completed is the case the parent model gets right unaided, so no note rides
-// then. Each row reads `#<n> <name> — <outcome>[: <cause>] — output <present|missing|none>`;
+// then. A skipped row counts toward neither half (owner, 2026-10-14): a pre-emption is the
+// human's own act, already answered in the skip result, so it adds no model-facing note of its
+// own — but it is listed with every other row when a note fires, so the indices stay contiguous.
+// Each row reads `#<n> <name> — <outcome>[: <cause>] — output <present|missing|none>`;
 // presence is read here, at render time, by the same rule outputMissing applies to a capped
 // result: `missing` is a certainly-absent file (fs.ErrNotExist), anything else that resolved is
 // `present`, and a delegation with no resolved target reads `none`.
 func (l *delegationLedger) note() (string, bool) {
 	rows := l.rows()
-	notable := len(rows) >= 2
+	counted := 0
+	notable := false
 	for _, r := range rows {
+		if r.outcome == delegationSkipped {
+			continue
+		}
+		counted++
 		if r.outcome != delegationCompleted {
 			notable = true
 		}
 	}
-	if !notable {
+	if !notable && counted < 2 {
 		return "", false
 	}
 	var b strings.Builder

@@ -1414,6 +1414,119 @@ func TestDispatchSerially_PendingInterjectionSkipsTheNextDelegation(t *testing.T
 	}
 }
 
+// ledgerRow is the part of a delegate-ledger row the pre-emption tests pin: its spawn index, the
+// call it answered, how it ended and the cause it quotes.
+type ledgerRow struct {
+	spawnIndex int
+	callID     string
+	outcome    delegationOutcome
+	cause      string
+}
+
+// assertLedgerRows fails unless a's delegate ledger holds exactly want, in spawn order.
+func assertLedgerRows(t *testing.T, a *Agent, want []ledgerRow) {
+	t.Helper()
+	rows := a.delegations.rows()
+	got := make([]ledgerRow, 0, len(rows))
+	for _, r := range rows {
+		got = append(got, ledgerRow{spawnIndex: r.spawnIndex, callID: r.callID, outcome: r.outcome, cause: r.cause})
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("ledger rows = %+v, want %+v", got, want)
+	}
+}
+
+// TestFanOut_PreemptedDelegationBooksASkippedLedgerRow pins the pooled half of the skipped row:
+// under a cap of 2 the third delegation of a group is pre-empted at the dequeue, and it books a
+// `skipped` row, with no cause, at the index its group reserved for it — so a delegation the
+// coordinator issues after the skip, in the same Exchange, numbers on at 4 with no gap.
+func TestFanOut_PreemptedDelegationBooksASkippedLedgerRow(t *testing.T) {
+	sink := &recordingSink{}
+	var pending atomic.Bool
+	arrived := make(chan struct{}, 3)
+	release := make(chan struct{})
+	// The gate holds the two running children until the message is staged, so the third slot is
+	// dequeued with the seam already answering true.
+	gate := func(ctx context.Context) {
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	go func() {
+		for i := 0; i < 2; i++ {
+			<-arrived
+		}
+		pending.Store(true)
+		close(release)
+	}()
+	// The coordinator's next request finds the message gone, and delegates once more.
+	drained := func(context.Context) { pending.Store(false) }
+	up := newRoutedResponder().
+		route("delegate three things", nil, fanOutScript(
+			[2]string{"c1", "task one"}, [2]string{"c2", "task two"}, [2]string{"c3", "task three"})).
+		route("task one", gate, contentScript("child one done")).
+		route("task two", gate, contentScript("child two done")).
+		route("task three", nil, contentScript("child three done")).
+		route("delegate three things", drained, subAgentCallScript("c4", "task four")).
+		route("task four", nil, contentScript("child four done")).
+		route("delegate three things", nil, contentScript("parent done"))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 2
+	cfg.InterjectionPending = pending.Load
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate three things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	assertLedgerRows(t, a, []ledgerRow{
+		{spawnIndex: 1, callID: "c1", outcome: delegationCompleted},
+		{spawnIndex: 2, callID: "c2", outcome: delegationCompleted},
+		{spawnIndex: 3, callID: "c3", outcome: delegationSkipped},
+		{spawnIndex: 4, callID: "c4", outcome: delegationCompleted},
+	})
+}
+
+// TestDispatchSerially_PreemptedDelegationBooksASkippedLedgerRow pins the width-1 half: under a
+// cap of 1 the second delegation is pre-empted where prepareCall reaches it, with no reserved
+// index, and it still books its `skipped` row at the next fresh one.
+func TestDispatchSerially_PreemptedDelegationBooksASkippedLedgerRow(t *testing.T) {
+	sink := &recordingSink{}
+	var pending atomic.Bool
+	up := newRoutedResponder().
+		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
+		route("task one", func(context.Context) { pending.Store(true) }, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("delegate two things", nil, contentScript("parent done"))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 1
+	cfg.InterjectionPending = pending.Load
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	assertLedgerRows(t, a, []ledgerRow{
+		{spawnIndex: 1, callID: "c1", outcome: delegationCompleted},
+		{spawnIndex: 2, callID: "c2", outcome: delegationSkipped},
+	})
+}
+
 // ----------------------------------------------------------------------------
 // The delegation-width line (plan 2026-09-14 - 04 item 4)
 // ----------------------------------------------------------------------------

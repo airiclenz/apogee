@@ -240,7 +240,12 @@ internal/agent/workflowspawn_test.go — TestWorkflowSpawn_AHumanStopOfAnItemChi
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestWorkflowSpawn|TestUndeliveredWorkflowReason' ./internal/agent/`
 **Commit:** `fix(agent): report a human stop of a workflow item as stopped`
 
-## 12. A skipped delegation books a `skipped` ledger row
+## 12. A skipped delegation books a `skipped` ledger row — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): consequential edit — internal/agent/subagent.go: made necessary by the new ledger write site in preemptDelegation (runSubAgent's doc enumerated "three calls that never reach it"; now four, and "the ceiling's own second site" became "the ceiling's own site")
+NOTES (2026-10-14): the row is booked directly in preemptDelegation with outcome delegationSkipped and no cause (the regression guard's first option); classifyDelegation is untouched. undeliveredReason and subAgentEnding are left as they are: a skipped delegation never reaches runSubAgent's mailbox reaping or a workflow item, so neither switch can see the word
+NOTES (2026-10-14): delegationLedger.note() excludes skipped rows from both halves of the trigger (the count of two and the "did not complete" test), so one completed + one skipped renders no note; ADR records (0076 addendum, 0086) that enumerate older outcome lists are left as historical
+NOTES (2026-10-14): the pooled-row and contiguity claims are pinned by one test (TestFanOut_PreemptedDelegationBooksASkippedLedgerRow: rows 1–2 completed, 3 skipped, 4 completed after the skip); width-1 by TestDispatchSerially_PreemptedDelegationBooksASkippedLedgerRow; note behaviour by TestDelegationLedger_SkippedRowAddsNoNote and TestDelegationLedger_SkippedRowIsListedWhenANoteFires
 
 **What:**
 **Goal:** a delegation `preemptDelegation` skips books a ledger row with outcome `skipped`, so the delegations note's indices stay contiguous and every sub_agent call has a row.

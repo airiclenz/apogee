@@ -888,12 +888,13 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
 // results, so every way out of this frame — a refusal before any child exists, a cancel, a fault, a
 // cap, a completion, a recovered panic — is classified from the ToolResult and dispatchOutcome
-// actually returned (classifyDelegation) and lands as one row. Three calls that never reach it book
+// actually returned (classifyDelegation) and lands as one row. Four calls that never reach it book
 // their rows themselves: a delegation refused past the reply's fan-out ceiling, which dispatchGroup
-// books (recordCeilingRefusal, dispatch.go) — the ceiling's own second site — a pooled
+// books (recordCeilingRefusal, dispatch.go) — the ceiling's own site — a pooled
 // delegation the human stopped before a worker took it, which the pool books at the dequeue
-// (stopQueuedDelegation, dispatch.go), and one the user's cancel reached before it started
-// (settleCancelledDelegation, dispatch.go). The spawn index is taken FIRST, under the ledger's
+// (stopQueuedDelegation, dispatch.go), one the user's cancel reached before it started
+// (settleCancelledDelegation, dispatch.go), and one a queued message pre-empted, booked `skipped`
+// where the pre-emption is read (preemptDelegation, dispatch.go). The spawn index is taken FIRST, under the ledger's
 // lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
 // — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
 // completion order is the model's call order; the row records the child's RESOLVED output target,

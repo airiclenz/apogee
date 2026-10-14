@@ -1280,7 +1280,7 @@ sub-agent's single requests are what run large, the lever is `working-window:`, 
 Your agent is also **handed the engine's own record of its delegations**. A coordinator that
 delegates several times has been seen misremembering, turns later, which sub-agents faulted and
 which wrote the file they were asked for — so once an exchange holds two or more delegations, or
-any one that did not complete, every request your agent makes ends on one engine note
+any one that did not complete (a skipped one counts toward neither), every request your agent makes ends on one engine note
 (`[engine — delegations]`), one line per delegation in the order the calls were made:
 
 ```
@@ -1292,8 +1292,10 @@ delegations this exchange, as the engine recorded them (spawn order):
 
 The name is the delegation's (`name`, or the generated one), else the first line of its task, else
 its call id; the outcome is one of `completed`, `capped`, `faulted`, `stopped` (you stopped it
-with `^x`, whether it had started or was still waiting for a slot), `cancelled` or `refused` (a
-call no sub-agent was started for — an empty task, an unknown `continue`, a bad `tools` name);
+with `^x`, whether it had started or was still waiting for a slot), `cancelled`, `refused` (a
+call no sub-agent was started for — an empty task, an unknown `continue`, a bad `tools` name) or
+`skipped` (a message you sent with `ctrl+g` pre-empted it before it started — listed so the
+numbering has no gaps, but never a reason for the note on its own);
 a faulted or refused row quotes the first line of the result that said so; and `output` reads
 the `output_path` the call named, checked on disk each time the note is rendered — `present`,
 `missing`, or `none` when the call named no path (or the sub-agent ran in plan mode, where it

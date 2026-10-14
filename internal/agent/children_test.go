@@ -725,6 +725,47 @@ func TestDelegationLedger_OneFailureAloneIsNotable(t *testing.T) {
 	}
 }
 
+// TestDelegationLedger_SkippedRowAddsNoNote pins the owner's 2026-10-14 call: a `skipped` row —
+// a delegation a queued message pre-empted — counts toward neither half of the trigger, so a
+// ledger holding one completed delegation and a skip, or a skip alone, renders no note.
+func TestDelegationLedger_SkippedRowAddsNoNote(t *testing.T) {
+	t.Parallel()
+	cases := map[string][]delegationOutcome{
+		"completed then skipped": {delegationCompleted, delegationSkipped},
+		"skipped alone":          {delegationSkipped},
+	}
+	for name, outcomes := range cases {
+		var l delegationLedger
+		for _, outcome := range outcomes {
+			callID := "call-" + string(outcome)
+			l.record(delegationRecord{spawnIndex: l.open(callID), callID: callID, name: callID, outcome: outcome})
+		}
+
+		note, ok := l.note()
+
+		if ok {
+			t.Errorf("%s: note = %q; a skip must add no model-facing note of its own", name, note)
+		}
+	}
+}
+
+// TestDelegationLedger_SkippedRowIsListedWhenANoteFires pins the other half of the call: once a
+// note fires for another row, the `skipped` row is rendered in its spawn-order place like any
+// other, so the indices the coordinator reads have no gap.
+func TestDelegationLedger_SkippedRowIsListedWhenANoteFires(t *testing.T) {
+	t.Parallel()
+	var l delegationLedger
+	l.record(delegationRecord{spawnIndex: l.open("c1"), callID: "c1", name: "Alpha", outcome: delegationFaulted, cause: "the upstream died"})
+	l.record(delegationRecord{spawnIndex: l.open("c2"), callID: "c2", name: "Beta", outcome: delegationSkipped})
+
+	note, ok := l.note()
+
+	want := delegationsNoteHead + "\n#1 Alpha — faulted: the upstream died — output none\n#2 Beta — skipped — output none"
+	if !ok || note != want {
+		t.Errorf("note = %q, %v; want %q", note, ok, want)
+	}
+}
+
 // TestDelegationLedger_CauseIsTheHeadLineClamped pins what a row quotes of a failure: its first
 // line only, trimmed, and cut at delegationCauseMaxRunes with an ellipsis.
 func TestDelegationLedger_CauseIsTheHeadLineClamped(t *testing.T) {
