@@ -307,8 +307,9 @@ func (m *backgroundManager) storesElsewhere(root string) []keptRun {
 // StopWorkflow stops the background workflow id and keeps its finished items (ADR 0088): a running
 // one's children are cancelled and its Runner settles it stopped — StopWorkflow does not wait for
 // that, the WorkflowPhaseEvent that ends it reports it — and a queued one is dropped from the line
-// and its folder marked stopped — unless the folder is already done, a queued RerunFailed's, which
-// stays done. An id this Agent neither runs nor queues is an error.
+// and its folder marked stopped — unless the folder is already done or failed, a queued
+// RerunFailed's, which stays as it was (markStopped). An id this Agent neither runs nor queues is an
+// error.
 func (a *Agent) StopWorkflow(id string) error {
 	_, err := a.stopWorkflow(id)
 	return err

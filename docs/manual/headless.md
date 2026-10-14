@@ -205,9 +205,9 @@ thing happened:
 and is exactly the output described above, byte for byte. `--format json` replaces that stdout with
 the **Event lines** — the engine's own event stream rendered one JSON object per line, JSONL, no
 answer and no prose among them. stderr keeps every notice, warning and summary it prints under
-`text`, with one exception: the prune and reference-clip notices and the live narration go quiet,
-because the `prune`, `ref_clipped`, `tool_call`, `tool_result` and `sub_agent_phase` lines on
-stdout already carry the same facts. The
+`text`, with one exception: the prune, malformed-chunk and reference-clip notices and the live
+narration go quiet, because the `prune`, `malformed_chunks`, `ref_clipped`, `tool_call`,
+`tool_result` and `sub_agent_phase` lines on stdout already carry the same facts. The
 contract is
 [ADR 0075](../../.capcom/knowledge/decisions/adr-0075.md).
 
