@@ -64,7 +64,7 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │   unconfined-hosts      none         (default)  · use /confine                               │
 │                                                                                              │
 │   Model profiles                                                                             │
-│   model-profiles        native       (default)  · ⏎ opens $EDITOR                            │
+│   model-profiles        none         (default)  · ⏎ opens $EDITOR                            │
 │                                                                                              │
 │ type to filter · ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -139,7 +139,7 @@ rule's row reads `type to filter · ↑/↓ select · ⏎ adopt · ⌫ remove ·
 │   present.command-on-model-documents  false       (default)  · ⏎ opens $EDITOR               │
 │                                                                                              │
 │   Model profiles                                                                             │
-│   model-profiles                      native      (default)  · ⏎ opens $EDITOR               │
+│   model-profiles                      none        (default)  · ⏎ opens $EDITOR               │
 │                                                                                              │
 │ ↑/↓ select · ⏎ edit · ⌫ trim · ⌦ reset · esc close                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
