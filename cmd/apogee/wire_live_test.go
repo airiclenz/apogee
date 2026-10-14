@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -561,5 +562,44 @@ func TestWorkflowResumeReachesTheResumedSessionsSet(t *testing.T) {
 	}
 	if again := w.engine.ResumeWorkflows(); again != nil {
 		t.Errorf("a second ResumeWorkflows = %v, want nil: the set is taken whole", again)
+	}
+}
+
+// The scratch dir the session announces is readable from the very first Exchange. The tools copy
+// ReadMounts by value when they are built (tools.HostToolsOf), so a scratch root bound after the
+// boot build never reached the set the session starts on: until a heartbeat rebind rebuilt it, a
+// pinned model that wrote a probe where its orientation told it to was refused reading it back.
+// Driven on the registry the startup bind handed the Agent, before anything has rebuilt it.
+func TestWireSessionBootToolsReadTheAnnouncedScratchDir(t *testing.T) {
+	t.Parallel()
+
+	w := readFenceWiring(t, readFenceRealDir(t), readFenceRealDir(t))
+	if w.engine.bound() == nil {
+		t.Fatal("precondition: the determined startup did not bind")
+	}
+	announced := w.engine.ScratchDir()
+	if announced == "" || announced != w.cfg.ScratchDir {
+		t.Fatalf("precondition: the bound Agent announces scratch dir %q; want the boot session's %q",
+			announced, w.cfg.ScratchDir)
+	}
+	const probeBytes = "written where the orientation said"
+	probe := filepath.Join(announced, "probe.txt")
+	if err := os.WriteFile(probe, []byte(probeBytes), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if w.binder.cfg.Tools != w.cfg.Tools {
+		t.Fatal("precondition: the bound Agent was not handed the boot registry")
+	}
+
+	read := readFenceExecute(t, w, "read_file", `{"path":`+strconv.Quote(probe)+`}`)
+	listed := readFenceExecute(t, w, "list_dir", `{"path":`+strconv.Quote(announced)+`}`)
+
+	if read.IsError || !strings.Contains(read.Content, probeBytes) {
+		t.Errorf("read_file(%s) = %q (IsError %v); want the probe's bytes from the announced scratch dir",
+			probe, read.Content, read.IsError)
+	}
+	if listed.IsError || !strings.Contains(listed.Content, "probe.txt") {
+		t.Errorf("list_dir(%s) = %q (IsError %v); want the announced scratch dir listed",
+			announced, listed.Content, listed.IsError)
 	}
 }

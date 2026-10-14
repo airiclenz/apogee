@@ -180,6 +180,16 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// while one runs, and the session wakes the agent when it ends. So its set may carry fan_out's
 	// `background` and the workflow control tool, wherever the roster lifts `workflow`.
 	const offersBackground = true
+	// The session scratch dir as the read root the read tools reach it back through — read LIVE off
+	// the engine holder rather than copied, because the dir moves at every session boundary while the
+	// tools are built once: whatever the orientation announces as the scratch dir on a request is
+	// what read_file, grep, list_dir, find_files and present_document accept on that request. It is
+	// bound HERE, before the build below, because the tools copy ReadMounts by value
+	// (tools.HostToolsOf): bound after it, the set the session starts on carries no scratch root until
+	// a rebuild, and a pinned model's first Exchanges cannot read back what they were told to write
+	// there. A closure rather than the method value, because the engine holder is only constructed
+	// further down; nothing calls it before then, since no tool runs before the engine does.
+	w.cfg.ReadMounts.Scratch = func() string { return w.engine.ScratchDir() }
 	w.cfg.Tools = registryWithMCP(w.roots.workspace, w.cfg, seatChoice, offersBackground, w.mcpSet.tools())
 	// What the set the session runs was BUILT from — the values a later rebuild has to carry rather
 	// than take from this snapshot again. The url-safety host lists ride it beside the endpoint and
@@ -307,11 +317,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// record brought a priced label of its own (sessionHost.sessionLabel, ADR 0093).
 	w.host.currency = w.opts.Currency
 	w.cfg.ScratchDir = w.host.SessionScratchDir()
-	// And the same dir as the read root the read tools reach it back through — read LIVE off the
-	// engine holder rather than copied, because the dir moves at every session boundary while the
-	// tools are built once: whatever the orientation announces as the scratch dir on a request is
-	// what read_file, grep, list_dir, find_files and present_document accept on that request.
-	w.cfg.ReadMounts.Scratch = w.engine.ScratchDir
+	// The read tools reach this same dir back through ReadMounts.Scratch, bound above, ahead of the
+	// tool build.
 	// And the boot session's own journal, opened now that its id is known and pushed onto the
 	// engine holder, so the very first Exchange is imaged — a bind that has not happened yet
 	// applies it the moment it does (lateEngine.pendingJournal).

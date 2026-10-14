@@ -73,7 +73,7 @@ NOTES (2026-10-14): the denial label goes after the shell-hint and fail-fast sto
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestToolPresent|ExitCode' ./internal/tui/`
 **Commit:** `fix(tools): keep the exit-code line last under a confinement label`
 
-## 2. Bind the scratch mount before the TUI builds its boot tools
+## 2. Bind the scratch mount before the TUI builds its boot tools — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** the tools the TUI's startup Agent holds resolve the announced scratch directory from the first Exchange on, before any heartbeat rebind.
