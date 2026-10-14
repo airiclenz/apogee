@@ -3272,7 +3272,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// config is layered over the migrated global document (layer.go) and is never rewritten.
 	projectRoot := ""
 	if !opts.GlobalConfigOnly {
-		projectRoot = resolveProjectRoot(opts.Workspace, notify)
+		projectRoot = layerProjectRoot(opts, notify)
 	}
 	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify,
 		!opts.LiveReread)

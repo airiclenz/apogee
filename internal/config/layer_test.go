@@ -333,6 +333,47 @@ func TestResolveOptionsTakesNoProjectLayerWhenGlobalConfigOnly(t *testing.T) {
 	}
 }
 
+// A pinned Project root outranks the walk from the workspace: a running session's re-read takes the
+// layer from the root it booted on, even when the workspace now holds a `.apogee/` of its own, and a
+// pinned empty root — the home-folder workspace's answer — takes no layer at all.
+func TestResolveOptionsReadsThePinnedProjectRoot(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		pinBootRoot bool
+		wantRetries int
+		wantProject bool
+	}{
+		{name: "the boot root", pinBootRoot: true, wantRetries: 6, wantProject: true},
+		{name: "an empty root", pinBootRoot: false, wantRetries: 2, wantProject: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			globalPath, bootRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 6\n")
+			// The workspace a fresh walk would answer with: it holds a Project config of its own.
+			workspace := filepath.Join(t.TempDir(), "elsewhere")
+			if err := os.MkdirAll(filepath.Join(workspace, projectConfigDirName), 0o700); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			writeLayerFile(t, projectFilePath(workspace), "workflow-retries: 9\n")
+			opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: workspace, ProjectRootPinned: true}
+			if tt.pinBootRoot {
+				opts.ProjectRoot = bootRoot
+			}
+
+			if _, err := ResolveOptions(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, noNotify, testHostID); err != nil {
+				t.Fatalf("ResolveOptions: %v", err)
+			}
+			if opts.WorkflowRetries != tt.wantRetries || opts.ProjectKeys["workflow-retries"] != tt.wantProject {
+				t.Errorf("workflow-retries = %d, ProjectKeys = %v; want %d from the pinned root (project: %v)",
+					opts.WorkflowRetries, opts.ProjectKeys, tt.wantRetries, tt.wantProject)
+			}
+		})
+	}
+}
+
 // A workspace that does not exist yet never stops a start: the layer is skipped with a notice.
 func TestResolveOptionsSkipsTheLayerForAWorkspaceThatDoesNotExist(t *testing.T) {
 	t.Parallel()

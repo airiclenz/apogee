@@ -383,6 +383,85 @@ func TestExternalEditReloadRefusesARetiredShapeWithoutRewriting(t *testing.T) {
 	}
 }
 
+// pinnedRootFixture builds a repository whose Project config sets a project-param key and a
+// subfolder workspace below it, answering the global config home, the repository root and the
+// workspace. The `.git` entry is what lets the walk count an `.apogee/` above the workspace at all.
+func pinnedRootFixture(t *testing.T) (home, root, workspace string) {
+	t.Helper()
+	home, root = t.TempDir(), t.TempDir()
+	workspace = filepath.Join(root, "sub")
+	for _, dir := range []string{filepath.Join(root, ".git"), filepath.Join(root, ".apogee"), workspace} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "workflow-retries: 2\n")
+	writeSettingsFixture(t, filepath.Join(root, ".apogee", "config.yaml"), "workflow-retries: 6\n")
+	return home, root, workspace
+}
+
+// A `.apogee/` that appears in a subfolder workspace mid-session would make a fresh walk stop there
+// and take the empty folder's no-layer answer, so the re-read would report the project's key as
+// changed back to the global value. The re-read resolves against the Project root the session pinned
+// at boot instead: nothing changed, and the row still reads the project's value as the project's.
+func TestExternalEditReloadKeepsThePinnedProjectRoot(t *testing.T) {
+	t.Parallel()
+	home, root, workspace := pinnedRootFixture(t)
+	opts := config.Options{ConfigDir: home, Workspace: workspace, ProjectRoot: root, ProjectRootPinned: true}
+	e := newExternalEdit(opts, workspace, func(string) string { return "" })
+
+	if err := os.Mkdir(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
+		t.Fatalf("create the workspace's .apogee: %v", err)
+	}
+	reload, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(reload.Applied) != 0 {
+		t.Errorf("reload reported %+v; the session's Project root did not move", reload.Applied)
+	}
+	i := slices.IndexFunc(e.baseline.rows, func(r tui.SettingRow) bool { return r.Path == "workflow-retries" })
+	if i < 0 {
+		t.Fatal("the projection carries no workflow-retries row")
+	}
+	if row := e.baseline.rows[i]; row.Value != "6" || row.Source != tui.SettingFromProject {
+		t.Errorf("workflow-retries row = %q from %v; want the project's 6, marked project", row.Value, row.Source)
+	}
+}
+
+// The composition root pins the root it resolved at boot onto the re-read, so the TUI's own reload
+// keeps the layer when a `.apogee/` appears in the subfolder workspace.
+func TestRunRootPinsTheReReadToTheBootProjectRoot(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	home, _, workspace := pinnedRootFixture(t)
+	opts := config.Options{
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    workspace,
+		ConfigDir:    home,
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.Config == nil {
+		t.Fatal("the composition root left the config host unwired")
+	}
+
+	if err := os.Mkdir(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
+		t.Fatalf("create the workspace's .apogee: %v", err)
+	}
+	reload, err := rec.opts.Config.ReloadConfig()
+	if err != nil {
+		t.Fatalf("ReloadConfig: %v", err)
+	}
+	if len(reload.Applied) != 0 {
+		t.Errorf("ReloadConfig reported %+v; the session's Project root did not move", reload.Applied)
+	}
+}
+
 // A config that resolves but names no startup server is NOT a failure: it is the pre-bound start
 // ADR 0036 answers with a picker, and it is exactly the state a config is in halfway through having
 // its first `servers:` entry added by hand.

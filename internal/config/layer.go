@@ -196,6 +196,15 @@ func projectFilePath(projectRoot string) string {
 	return filepath.Join(projectRoot, projectConfigDirName, projectConfigFileName)
 }
 
+// layerProjectRoot is the Project root opts reads its project layer from: the pinned root when a
+// running session pinned one (Options.ProjectRootPinned), else the root walked from the workspace.
+func layerProjectRoot(opts *Options, notify func(string)) string {
+	if opts.ProjectRootPinned {
+		return opts.ProjectRoot
+	}
+	return resolveProjectRoot(opts.Workspace, notify)
+}
+
 // resolveProjectRoot is the Project root of workspace — the current directory when it is empty, as
 // resolveRoots resolves it — or "" when there is no project layer to read. A workspace that cannot
 // be read (a `--workspace` that does not exist yet) skips the layer with a notice rather than

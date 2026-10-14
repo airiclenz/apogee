@@ -161,7 +161,9 @@ type fileProjection struct {
 // where a missing baseline would report none at all and swallow the human's edit whole.
 // workspace is passed separately from opts because it is the resolved root, not the option: the
 // caller has already turned `--workspace` (or its absence) into an absolute path, and that is the
-// one the editor's program is fenced against.
+// one the editor's program is fenced against. The Project root travels ON opts, as a pin
+// (config.Options.ProjectRootPinned), because it is the session's boot answer every re-read must
+// reuse; an unpinned opts walks to it from the workspace on each read.
 func newExternalEdit(opts config.Options, workspace string, getenv func(string) string) *externalEdit {
 	e := &externalEdit{
 		opts:       opts,
@@ -387,12 +389,18 @@ func appliedValue(row tui.SettingRow) string {
 // file saved mid-session in a retired shape (`hooks:`, the top-level `endpoint:` keys) is refused
 // with config.ErrRetiredShape — bytes untouched, no `config.yaml.bak-*` — rather than rewritten out
 // from under the running session; the fold waits for the next startup.
+//
+// Nor does it walk to the Project root afresh: it carries the root the session pinned at boot, so a
+// `.apogee/` or `git init` that appears below that root mid-session never moves, drops or adds the
+// project layer a re-read applies — the layer stays the one every other reader of the root uses.
 func (e *externalEdit) projection() (fileProjection, error) {
 	next := config.Options{
-		ConfigDir:       e.opts.ConfigDir,
-		Workspace:       e.opts.Workspace,
-		ServerFlagBound: e.opts.ServerFlagBound,
-		LiveReread:      true,
+		ConfigDir:         e.opts.ConfigDir,
+		Workspace:         e.opts.Workspace,
+		ServerFlagBound:   e.opts.ServerFlagBound,
+		LiveReread:        true,
+		ProjectRoot:       e.opts.ProjectRoot,
+		ProjectRootPinned: e.opts.ProjectRootPinned,
 	}
 	var notices []string
 	collect := func(notice string) { notices = append(notices, notice) }

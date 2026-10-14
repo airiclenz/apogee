@@ -125,7 +125,10 @@ NOTES (2026-10-14): the config.go comments also named a non-existent `parseConfi
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'ExternalEdit|SettingsEdit' ./cmd/apogee/`
 **Commit:** `fix(config): never migrate the config file on a live re-read`
 
-## 5. Pin the live re-read to the session's Project root
+## 5. Pin the live re-read to the session's Project root — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): re-derived from `Options` being declared in internal/config/config.go — the struct lives in internal/config/options.go, where the `ProjectRoot` / `ProjectRootPinned` pair sits beside `GlobalConfigOnly` and `LiveReread`; config.go's ResolveOptions only switches its call to layer.go's new `layerProjectRoot`.
+NOTES (2026-10-14): the config-package test (`TestResolveOptionsReadsThePinnedProjectRoot`, pinned boot root and pinned empty root) went into internal/config/layer_test.go, beside the other ResolveOptions layer tests, which the plan's Files list did not name; cmd/apogee also gained `TestRunRootPinsTheReReadToTheBootProjectRoot`, which drives runRoot so wire_live.go's pin itself is covered. Both cmd/apogee tests fail with the pin dropped from `projection` (mutation-checked).
 
 **What:**
 **Goal:** the live re-read resolves the project layer against the Project root fixed at boot (`roots.project`), so a `.apogee/` or `git init` appearing in a subfolder workspace mid-session never moves, drops or adds the project layer the re-read applies.

@@ -461,6 +461,18 @@ type Options struct {
 	// wants.
 	GlobalConfigOnly bool
 
+	// ProjectRoot is the Project root a running session fixed at boot, read as the project layer's
+	// root in place of a fresh walk from the workspace when ProjectRootPinned is set — so a live
+	// re-read applies the layer the session runs under, and a `.apogee/` or `git init` that appears
+	// below that root mid-session cannot move, drop or add it (ADR 0096). An empty pinned root is
+	// the home-folder workspace's answer: no project layer. Not flag-bound: the /settings and
+	// file-watcher re-read pins it; unpinned ⇒ the root is resolved from the workspace, which is
+	// what the startup pass and every one-shot command want. GlobalConfigOnly outranks it.
+	ProjectRoot string
+	// ProjectRootPinned says ProjectRoot holds the pinned root; it is what splits a pinned empty
+	// root (no layer) from no pin at all.
+	ProjectRootPinned bool
+
 	// LiveReread says this resolution re-reads the config files under a running session rather
 	// than starting one: a file still written in a retired shape (`hooks:`, the top-level
 	// endpoint:/api-key:/host-alias:/model: keys) is refused with [ErrRetiredShape] instead of
