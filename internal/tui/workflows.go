@@ -673,10 +673,15 @@ func (m Model) workflowsHeight() int {
 
 // handleWorkflowsClick answers a left-click while the pane is up, by the browser's rule
 // (handleBrowserClick, mouse.go): outside the box the pane is dismissed and the click spent; a click
-// on a row seats the highlight, and a second click on that row is the ⏎.
+// on a row seats the highlight, and a second click on that row is the ⏎. While the ^s name row is
+// open every click is claimed and ignored, as the browser's rename is: the name row is a modal
+// surface within the modal, answered by ⏎ or esc, and a stray of the pointer never cancels it.
 func (m Model) handleWorkflowsClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if !m.workflowsPane.open || !pre.workflowsPane.open {
 		return m, nil, false
+	}
+	if m.workflowsPane.naming {
+		return m, nil, true // a modal surface within the modal: it owns the pane until it is answered
 	}
 	row, top, inRect, onRow := popupPaneHit(pre, paneWorkflows, pre.renderWorkflowsPlaced, msg.Y)
 	if !inRect {

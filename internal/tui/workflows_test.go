@@ -698,6 +698,58 @@ func TestWorkflowsViewPasteLandsInTheNameRow(t *testing.T) {
 	}
 }
 
+// The ^s name row is a modal surface within the modal, as the browser's rename is: while it is open
+// every click — outside the box or over it — is claimed and ignored, so the pane stays up, the row
+// stays open and the name typed so far is kept.
+func TestWorkflowsViewClickIsSwallowedByTheNameRow(t *testing.T) {
+	t.Parallel()
+	base, _, _ := savePaneModel(t, saveFanOutPlan(), "")
+	base = step(t, base, keyCtrlS())
+	for _, r := range "sca" {
+		base = step(t, base, keyRune(r))
+	}
+	if !base.workflowsPane.naming {
+		t.Fatal("precondition: ^s did not open the name row")
+	}
+	paneTop, _, ok := base.frameSpans().pane(paneWorkflows)
+	if !ok {
+		t.Fatal("precondition: the /workflows pane is not on the frame")
+	}
+
+	for _, tc := range []struct {
+		name string
+		x, y int
+	}{
+		{"outside the box", 0, 0},
+		{"over the pane", 2, paneTop + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			after, cmd := stepCmd(t, base, leftClick(tc.x, tc.y))
+
+			if cmd != nil {
+				t.Errorf("the swallowed click dispatched a Cmd")
+			}
+			if !after.workflowsPane.open {
+				t.Fatal("the click closed /workflows out from under the name being typed")
+			}
+			if !after.workflowsPane.naming {
+				t.Error("the click cancelled the name row")
+			}
+			if got, want := after.workflowsPane.nameBuf.value(), "sca"; got != want {
+				t.Errorf("name buffer = %q, want %q kept", got, want)
+			}
+			if after.transcriptSel.active {
+				t.Error("the swallowed click armed a transcript selection; the modal owns it")
+			}
+			if after.clickArmed.ok {
+				t.Errorf("the swallowed click armed a row: %+v", after.clickArmed)
+			}
+		})
+	}
+}
+
 // The name row's buffer sits behind a copyOnWriteField: a Model snapshot taken AFTER the first
 // keystroke into it — once the two copies point at one field — keeps its name while the other copy
 // types a second key.

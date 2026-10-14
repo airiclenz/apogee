@@ -288,7 +288,7 @@ NOTES (2026-10-14): consequential edit — internal/tui/prompteditor.go: made ne
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'Paste|Autocomplete' ./internal/tui/`
 **Commit:** `fix(tui): recompute autocomplete after a ctrl+v text paste`
 
-## 15. A click on `/workflows` never cancels the recipe-name field
+## 15. A click on `/workflows` never cancels the recipe-name field — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** while the `/workflows` recipe-name field is open, every click is claimed and ignored (pane stays open, name kept); `layout.md`'s outside-click table gains its `/workflows` row.

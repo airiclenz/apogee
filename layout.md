@@ -164,6 +164,7 @@ and whether the click is spent on closing it:
 | --- | --- |
 | `/usage`, `/inspect`, `/thinking`, `/advice` | dismisses the pane, and the click still lands where it was aimed |
 | `/sessions` browser, `/model` \| `/server` picker | dismisses the pane, and the click is spent on that — these two are modal |
+| `/workflows` view | dismisses the pane, and the click is spent on that — it is modal; while a recipe is being named (the `^s` name row is up) every click, inside the box or out, is claimed and ignored, and the pane and the name typed so far stay |
 | `/` \| `@` dropdown | dismisses the menu, and the click still lands where it was aimed — the menu decides nothing, and the next keystroke re-derives it |
 | approval prompt, ask prompt | leaves the question standing and is not the pane's at all: it seats the caret, starts a transcript drag, opens the mode picker, exactly as it would with no prompt up |
 
