@@ -640,7 +640,13 @@ The `❯` stays on its row while that row still matches, else it jumps to the fi
 walk only the matches. `backspace` trims the filter, `esc` closes the pane — filter and all — and a
 filter that matches nothing says so (`no setting matches "zzz"`) with the legend down to
 `⌫ trim · esc close`. The filter outlasts an edit: `⏎` on a filtered row opens its step, the keys
-inside that step are the step's, and you come back to the same filtered list.
+inside that step are the step's, and you come back to the same filtered list. It is the one filter
+every pop-up that lists things keeps: the `/model`, `/server`, `/sub-agents-server`, `/effort`,
+`/fork`, `/schedule` and mode pickers and the [`/sessions` browser](sessions.md) filter the same
+way, each matching what its rows name — a model's id, a server's name, a fork point's prompt — and
+never a mark or a measured figure beside it. A pane that asks a question with fixed answers
+(`stop running workflows? (y/n)`, the start-up offers, the offer to adopt a proposed rule) does not
+filter.
 
 **Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
 with a fixed set of values — such as `mode:`, `server:`, `ui.spinner:` or `cursor-shape:` — opens that list to pick from, `⏎` on a

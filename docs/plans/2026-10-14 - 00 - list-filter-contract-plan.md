@@ -275,7 +275,11 @@ cmd/apogee/docs_settings_test.go — TestManualDocumentsEverySettingsKey
 **Commit:** `docs(settings): document the /settings filter and fix the layout spec's drift`
 Depends on item 8.
 
-## 11. Docs: the list filter in layout.md and the manual
+## 11. Docs: the list filter in layout.md and the manual — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the workflow-boundary confirm has no passage of its own in layout.md, so its "does not filter" is stated in the picker's typing paragraph beside the offers and the adoption pane; the key offer and adoption pane passages drop "the filter" from their live-at-once keys and the adoption round's "on a cleared filter".
+NOTES (2026-10-14): commands.md gains two sentences after the /settings "Type to filter" paragraph pointing at the shared contract (pickers, /sessions, question panes); the paragraph itself (item 10's) is unchanged.
+NOTES (2026-10-14): pre-existing, outside this item's files — docs/layout/settings-screen-layout.md's key-list mockup shows model-profiles as `native` while the code renders a count summary (`none` in the t16b golden); left untouched.
 
 **What:**
 **Goal:** `layout.md`'s pop-up list sections (the typed-filter blank exemption, the "every cell counts" match rule, the `⌫` wording, the filter line with its blanks and budget trade, the zero-match statement, "nothing is typed into the prompt box", the `/sessions` section) and `docs/manual/sessions.md` state the List filter contract of ADR 0053's 2026-10-14 amendment, including that the four question pickers do not filter. Rule for finding every site: every passage describing the `filter:` line, filter matching, or a filtered list's legend — `grep -n "filter" layout.md docs/manual/*.md`.

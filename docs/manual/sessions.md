@@ -28,7 +28,20 @@ still remembers.
 - `/sessions` opens the in-TUI browser (newest first): typing filters the list,
   `⏎` resumes, `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
   between this workspace and all workspaces. The verbs are chords precisely so
-  the letters are free to type with — every selector pop-up filters as you type.
+  the letters are free to type with — every pop-up that lists things to search
+  (`/sessions`, `/settings`, and the `/model`, `/server`, `/sub-agents-server`,
+  `/effort`, `/fork`, `/schedule` and mode pickers) filters as you type. A paste
+  is typing too, folded onto one line. The filter shows on the pane's title row
+  (`saved sessions  (this workspace) · filter: mo▌`) and matches the session's
+  title with its qualifiers — the workspace name in the all-workspaces view, a
+  schedule's `⟳` tag — never its age, message count or spend; `backspace` trims
+  it, `esc` closes the browser, filter and all, and `^a` keeps it while it
+  switches scope. A filter that matches nothing says so
+  (`no session matches "zzz"`). While you rename, your keys and a paste go to the
+  name, and the filter waits, unchanged, on the title row. The panes that ask a
+  question with fixed answers — `stop running workflows? (y/n)`, the start-up
+  offers about a plaintext key or a retired flag, and the offer to adopt a rule
+  the project proposes — do not filter.
 - A session is **held** by the apogee that has it open, from the moment its record
   first reaches disk until that apogee exits, so two instances can never write one
   record. Opening a held session anywhere else — `--resume`, `--continue`, the

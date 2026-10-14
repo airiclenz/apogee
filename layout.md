@@ -324,8 +324,8 @@ rows answer — so a blank sets the block off from whatever stands over it and a
 from the key legend beneath. Both are house rules rather than one pane's taste, and both are the
 BUILDER's to state: the painter draws the pads it is asked for and defaults neither, exactly as it
 already does for the body's own pads (ADR 0053). Every boxed pane asks for the opening blank unless
-the line above its block is already one — `/settings`, whose body closes on a blank, and any list
-showing a typed `filter:` line — and asks for the closing blank whenever it has a hint, which is why
+the line above its block is already one — `/settings`, whose body closes on a blank — and asks for
+the closing blank whenever it has a hint, which is why
 the hintless approval prompt opens on a blank and closes on its border, and why a pane with no rows
 at all still keeps the blank above its legend: a legend flush under prose reads as that prose's last
 line rather than as the pane's footer. **The pair is booked out of the row window before the rows
@@ -335,9 +335,10 @@ and a window that overflowed leaves none, so the pane with the most rows to read
 one pane without the blanks that make them readable. **And they give way first, together.** Where
 what remains cannot seat the anchor row, both pads are handed back to the rows at once — never one,
 because half a pad moves the block instead of setting it off — and the pane is down to the floor
-shape above. That is the order the `filter:` line already obeys further down (the rows go first,
-then its two blanks together, and the line itself last), and it is why the at-the-floor sketches in
-this document show no blanks at all.
+shape above. That is why the at-the-floor sketches in this document show no blanks at all. A list's
+typed filter takes no part in the trade: it rides the pane's title row, so it costs no line of its
+own and the blanks around the rows are the same with a filter as without one (ADR 0053, 2026-10-14
+amendment rule 5).
 
 **One pane may claim the whole budget: the full-height class.** Every pane above spends what the
 window can *spare* — the session area keeps a three-row reserve, and only the surplus past it makes a
@@ -2544,27 +2545,53 @@ pick — no monitor, an unreachable server, nothing advertised yet, nothing but 
 bound, no `servers:` block, no launcher config where one was named, no profiles in it, only the
 profile already loaded — the answer is one honest line in the transcript and no empty pane.
 
-**Typing into that pane narrows it, and never reorders it.** Every printable key — letters, digits,
-punctuation, the space bar — appends to the overlay's own filter, and there is no activation key to
-press first: the pane is modal, so no letter is a verb inside it and all of them can be the
-filter's. Nothing is typed into the prompt box while a pop-up is up, and the filter never touches
-the draft standing in it. A row survives when the filter, lowercased, appears anywhere in that row's
-cells joined by a single space — every cell counts, marker cells included, so `run` finds the live
-profile by its `· running` mark as readily as by its name, and case never matters. The survivors
-keep the offering's own order: the filter prunes and does nothing else, so no row is ever ranked up
-out from under the highlight while the text grows. `⌫` takes back a character, and `esc` closes the
-pane outright even mid-filter — one key, one meaning, so the legend's `esc close` is never
-conditionally wrong. The filter dies with the overlay, so the next `/model` opens on the whole list
-again. What has been typed shows under the title as `filter: qwen▌`, on a line of its own with a
-blank line above and below it, and that line exists only while there is something in it — its
-presence *is* the fact that the pane is filtered. A filter matching nothing leaves the pane open,
-titled, with its filter line, no rows and no highlight for `⏎` to take: a visible filter over an
-empty list has already said why it is empty, and `⌫` is the way back to a wider one. All three lines
-are budgeted with the rest of the pane, and on a window too short for everything the **rows** are
-what gives way — a list you cannot see all of is still being narrowed, while a filter you cannot see
-is a pane that has stopped explaining itself. Only past that do the two blanks go, together (half a
-pad moves the line instead of setting it off), and the `filter:` line itself is the last thing
-standing before the pane is down to the chrome the four-row floor leaves it.
+**Typing into that pane narrows it, and never reorders it.** It keeps the one filter contract every
+*searchable* list keeps — this picker, the `/sessions` browser below and the `/settings` key list
+([`docs/layout/settings-screen-layout.md`](docs/layout/settings-screen-layout.md)) — stated once
+here (ADR 0053, 2026-10-14 amendment). **A list you search filters; a question you answer does
+not.** Every kind that lists things — models, Launch profiles, servers, delegation targets, effort
+levels, modes, cycles, schedules, fork points — filters; the panes that ask a question with two or
+three fixed answers — the workflow-boundary confirm (`stop running workflows? (y/n)`), the two
+start-up offers and the adoption pane below — do not, like the approval and ask_user menus: every
+answer is already on screen, so a typed letter could only hide one. Their legends carry no `type
+to filter`; a key that is not one of the pane's own (the confirm's `y`/`n`) does nothing, and a
+paste over them is dropped.
+
+In a pane that filters, every printable key — letters, digits, punctuation, the space bar — appends
+to the overlay's own filter, and there is no activation key to press first: the pane is modal, so no
+letter is a verb inside it and all of them can be the filter's. **A paste is typing**: it lands in
+the filter folded onto one line. Nothing is typed or pasted into the prompt box while a pop-up is up,
+and the filter never touches the draft standing in it. **A row survives when the filter,
+lowercased, appears in what the row *says it is*** — never in its live state. Each kind names its
+matched text: a model by its id; a Launch profile by its name and backend; a server or a delegation
+target by its name (`auto` included); an effort level, a mode, a cycle or a schedule by its label and
+the `—` gloss after it, where it has one; a fork point by its prompt's text, never its ordinal. The marks and measured cells
+painted beside them — the context window, the port, `· running`, `· current`, `· unavailable`,
+`· plan`, the endpoint and the `ttft … tok/s` summary — are never matched: a filter that found rows
+by their live state would find different rows from one moment to the next, so `run` no longer finds
+a profile by its `· running` mark. Case never matters, nothing is ranked and no matched character is
+highlighted: the survivors keep the offering's own order, so no row is ever ranked up out from under
+the highlight while the text grows. **The highlight stays on its row** while that row still
+matches, else it moves to the first match, and it stays where it is when the filter empties; `↑`/`↓`
+walk and wrap over the matches only. `⌫` trims a character, and `esc` closes the pane outright even
+mid-filter — one key, one meaning, so the legend's `esc close` is never conditionally wrong; `⌫` is
+the filter's only undo. The filter dies with the overlay, so the next `/model` opens on the whole
+list again.
+
+**What has been typed rides the title row**, as `switch server · filter: qwen▌`, and only while
+there is something in it — never on a line of its own, so no row is taken from the list, the blanks
+around the rows stay where they were and nothing moves on the first key. Its presence *is* the fact
+that the pane is filtered. The caret shows only where typing reaches the filter. When the title row
+is too narrow, the title's tail gives way first, behind a `…`, then the hidden-rows count; the
+filter itself stays whole, or — wider than the whole row — shows its caret end behind a leading `…`,
+because that end is where the next keystroke lands. **The legend follows the filter's state.**
+Empty, it leads with `type to filter`; once text is typed, `type to filter` drops and `⌫ trim`
+stands just before `esc close`, every other entry in its place (`↑/↓ select · ⏎ switch · ⌫ trim ·
+esc close`). **A filter matching nothing** leaves the pane open, titled, with one faint row that
+cannot be selected — `no model matches "zzz"`, in the kind's own noun (`server`, `profile`, `level`,
+`mode`, `cycle`, `schedule`, `prompt`) with control characters stripped — no highlight for `⏎` to
+take, and the legend down to `⌫ trim · esc close`: a verb with no row to act on is a promise the
+pane cannot keep, and `⌫` is the way back to a wider list.
 
 **The same overlay asks `/schedule`'s questions.** `/schedule <prompt>` with no cycle in the line
 opens the cycle pane — two columns, `1m`, `— every minute` through `4h`, `— every 4 hours` — and,
@@ -2591,8 +2618,9 @@ reads `⏎ choose`, because nothing here switches anything. The pane is **armed 
 on the one latch the approval and ask prompts share: its `⏎`, and the second click that takes a
 row, do nothing until the terminal has answered the drain marker asked from behind the pane's frame
 (or the two-second backstop lands), so a `⏎` already in flight when the pane rose — the one that
-answered the entry before it, above all — moves no key. `↑`/`↓`, the filter and `esc` are live at
-once. Every answer prints one line saying what
+answered the entry before it, above all — moves no key. `↑`/`↓` and `esc` are live at once. The
+pane does not filter — it is a question with three fixed answers, not a list to search, so a typed
+letter does nothing and its legend carries no `type to filter`. Every answer prints one line saying what
 was done and which file says so — a failed move included, since a key that did not move must never
 look like one that did — and the next entry's pane opens where the last one closed. `esc` ends the
 round outright: whatever is left is a `not now`, and nothing is written. On a machine with no such
@@ -2639,13 +2667,13 @@ above do, on the approval prompt's latch: its `⏎` and the second click that ta
 nothing until the terminal has answered the drain marker asked from behind the pane's frame (or the
 two-second backstop lands), so a `⏎` already in flight when the pane rose — the one that answered
 the rule before it, above all — adopts, defers and rejects nothing, and the deliberate `⏎` that
-follows takes `not now` unless the highlight was moved. `↑`/`↓`, the filter and `esc` are live at
-once. Every answer
+follows takes `not now` unless the highlight was moved. `↑`/`↓` and `esc` are live at once; like
+the two offers, the pane does not filter. Every answer
 prints one line — `adopted <rule> — it runs without asking in this project`, `<rule> stays
 proposed — the offer comes back at the next start-up`, `rejected <rule> — it is not offered again
 until the entry changes` — and a failed adopt or reject says so with the reason, `could not adopt
 <rule>: <why>`, leaving the rule proposed, which is exactly where `not now` leaves it. The next rule's
-pane then opens where the last one closed, on a cleared filter. `esc` ends the round outright, and so
+pane then opens where the last one closed. `esc` ends the round outright, and so
 does a click outside the pane, which is modal like every picker: whatever is left is a `not now`, no
 line is printed and nothing is written. A rule a pane has raised is not raised again in the same
 session, answered or not — a watched save of some unrelated key, or apogee's own write of an `Always
@@ -2657,21 +2685,30 @@ state, and can be adopted later, in `/settings`' `Allow rules` section
 ([`docs/layout/settings-screen-layout.md`](docs/layout/settings-screen-layout.md)).
 
 **The `/sessions` browser types too, which is why its verbs are chords.** The browser filters
-exactly as those panes do — any printable key builds the same case-insensitive filter over the row's
-cells, the same `filter: …▌` line stands under the title with a blank line at each end, `⌫` undoes
-and `esc` closes — and its filter is composed *after* the workspace view, so it narrows whichever
-scope the pane is showing. That is what moved the three letter verbs onto control chords: the hint
-reads
+exactly as those panes do — any printable key, and any paste folded onto one line, builds the same
+case-insensitive filter, shown on the same title row
+(`saved sessions  (this workspace) · filter: mo▌`), with the same selection rule, the same `⌫` trim
+and the same `esc` close — and its filter is composed *after* the workspace view, so it narrows
+whichever scope the pane is showing. Its matched text is the **title
+cell with its qualifiers** — the title, the workspace base the all-workspaces view puts there, a
+firing's `· ⟳ <schedule>` tag — and never the age, the message count or the spend beside it. That is
+what moved the three letter verbs onto control chords: the hint reads
 `type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · esc close`, where
 `^r` arms the rename buffer, `^d` arms the delete confirm and `^a` toggles this workspace against
 all of them. A list in which `d` might delete is a list no name can be typed into, and the store of
-saved sessions is exactly the place a human wants to type a name. The delete confirm's `y`/`n` and
-the whole rename edit are untouched by any of it: they are modal surfaces inside the modal, and
-nothing is filtered while one of them is up. Toggling the scope leaves the filter standing — it is
-what the human is looking for, and the toggle only changes where they are looking — and re-derives
-the rows under it. An empty *workspace* still states itself on its one unselectable note row,
-`no sessions in this workspace — press ^a to see all`; a filter that matched nothing gets no such
-row, for the reason the picker's zero-match pane gets none.
+saved sessions is exactly the place a human wants to type a name. With a filter set, `type to
+filter` drops and `⌫ trim` stands before `esc close`. The delete confirm's `y`/`n` and the whole
+rename edit are untouched by any of it: they are modal surfaces inside the modal, and none of their
+keys reaches the filter. The filter text stays on the title row while one of them is up — the list
+it narrowed is still the list — but without its caret, because the next keystroke lands in the
+rename field or answers the confirm; a paste goes into the rename field, and a paste over the
+confirm is dropped. Toggling the scope leaves the filter standing — it is what the human is looking
+for, and the toggle only changes where they are looking — and re-derives the rows under it. An empty
+*workspace* still states itself on its one unselectable note row,
+`no sessions in this workspace — press ^a to see all`, and that note wins over a filter; a filter
+that matched nothing in a workspace that has sessions gets the picker's zero-match row instead,
+`no session matches "zzz"`, with the legend down to `^a this/all · ⌫ trim · esc close` — the scope
+toggle stays because widening the scope is the other way such a filter can come to match.
 
 **A firing browses like any other session, and says whose it is.** Each run of a schedule saves a
 record of its own, so it appears in the `/sessions` browser among the sessions the human held

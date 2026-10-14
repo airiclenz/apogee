@@ -51,6 +51,12 @@ The rules both menus follow on screen — height, pointer, chrome — are `layou
 > same second drain answer (or the backstop), while `↑↓`, the filter and `esc` are live at once. The
 > adoption pane also opens on `not now`, the answer that changes nothing, rather than on `adopt`.
 
+> Amended 2026-10-14 by `docs/plans/2026-10-14 - 00 - list-filter-contract-plan.md` item 3 (ADR 0053,
+> 2026-10-14 amendment rule 1): the adoption pane and the two start-up offers no longer filter — they
+> are questions with fixed answers, not lists to search — so of the keys the 2026-10-11 amendment
+> above calls live at once only `↑↓` and `esc` remain; a typed letter does nothing, a paste over them
+> is dropped, and their legends carry no `type to filter`.
+
 
 # User Approval:
 
