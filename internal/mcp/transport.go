@@ -523,6 +523,7 @@ func newOAuthHandler(
 		Store:          host.OAuthStore,
 		EndpointClient: endpointClient,
 		AuthClient:     newClient(guard, host.Proxy),
+		ClientID:       cfg.ClientID,
 		ClientSecret:   secret,
 	})
 }

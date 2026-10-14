@@ -340,6 +340,85 @@ func TestNewHandlerWithoutARecordNeedsALogin(t *testing.T) {
 	assertLoginRequired(t, err)
 }
 
+func TestNewHandlerLoadsOnlyARecordOfTheConfiguredClient(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		configuredID string
+		wantLogin    bool
+	}{
+		{name: "a changed client-id needs a login", configuredID: "b", wantLogin: true},
+		{name: "the same client-id loads", configuredID: "a"},
+		{name: "no configured client-id loads", configuredID: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tokens := newFakeTokenServer(t, staleRefresh)
+			store := NewStore(t.TempDir())
+			record := tokens.storedRecord(time.Now().Add(-time.Minute))
+			record.Client.ID = "a"
+			saveRecord(t, store, testServer, handlerEndpoint, record)
+
+			h, err := NewHandler(HandlerConfig{
+				Name:           testServer,
+				Endpoint:       handlerEndpoint,
+				Store:          store,
+				EndpointClient: loopbackClient(),
+				AuthClient:     loopbackClient(),
+				ClientID:       tt.configuredID,
+			})
+
+			if tt.wantLogin {
+				assertLoginRequired(t, err)
+				if got := len(tokens.refreshes()); got != 0 {
+					t.Errorf("token endpoint saw %d requests; want none", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewHandler error = %v", err)
+			}
+			if _, err := currentToken(t, context.Background(), h); err != nil {
+				t.Fatalf("Token error = %v", err)
+			}
+			if got := len(tokens.refreshes()); got != 1 {
+				t.Errorf("token endpoint saw %d requests; want the one refresh of the loaded record", got)
+			}
+		})
+	}
+}
+
+func TestHandlerRefreshRefusesARecordOfAnotherClient(t *testing.T) {
+	t.Parallel()
+	tokens := newFakeTokenServer(t, staleRefresh)
+	store := NewStore(t.TempDir())
+	record := tokens.storedRecord(time.Now().Add(-time.Minute))
+	record.Client.ID = "a"
+	saveRecord(t, store, testServer, handlerEndpoint, record)
+	h, err := NewHandler(HandlerConfig{
+		Name:           testServer,
+		Endpoint:       handlerEndpoint,
+		Store:          store,
+		EndpointClient: loopbackClient(),
+		AuthClient:     loopbackClient(),
+		ClientID:       "a",
+	})
+	if err != nil {
+		t.Fatalf("NewHandler error = %v", err)
+	}
+	// Another apogee, configured with a new client-id, logged in and saved over the record.
+	record.Client.ID = "b"
+	saveRecord(t, store, testServer, handlerEndpoint, record)
+
+	_, err = currentToken(t, context.Background(), h)
+
+	assertLoginRequired(t, err)
+	if got := len(tokens.refreshes()); got != 0 {
+		t.Errorf("token endpoint saw %d requests; want none", got)
+	}
+}
+
 // assertLoginRequired fails the test unless err is ErrLoginRequired naming the login command.
 func assertLoginRequired(t *testing.T, err error) {
 	t.Helper()

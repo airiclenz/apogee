@@ -47,12 +47,17 @@ type HandlerConfig struct {
 	Name string
 	// Endpoint is the server's vetted endpoint string, the one Login was given.
 	Endpoint string
-	// Store holds the server's record; refreshed tokens are saved back to it.
+	// Store holds the server's record; refreshed tokens are saved back to it. A record issued to
+	// another client than ClientID names is no record at all (clientMatches): the handler never
+	// sends a token, or spends a refresh token, minted for a client the configuration dropped.
 	Store *Store
 	// EndpointClient carries a refresh to a token endpoint on the endpoint's own origin, and
 	// AuthClient one to any other origin (NewAuthClient) — the routing Login uses.
 	EndpointClient *http.Client
 	AuthClient     *http.Client
+	// ClientID is the server's configured `client-id:`, the preregistered client a login
+	// authorizes as; empty when apogee registers its own client (Dynamic Client Registration).
+	ClientID string
 	// ClientSecret is a preregistered client's secret (its `client-secret-env:` value), sent on a
 	// refresh when the record's registration carries none. It is never saved.
 	ClientSecret string
@@ -72,8 +77,9 @@ type Handler struct {
 }
 
 // NewHandler loads cfg's record and returns the handler over it. A missing record — never logged
-// in, logged out, or minted for another endpoint — is ErrLoginRequired; an unsafe name, a missing
-// store or client, and an unreadable record are plain errors.
+// in, logged out, minted for another endpoint, or issued to another client than cfg.ClientID — is
+// ErrLoginRequired; an unsafe name, a missing store or client, and an unreadable record are plain
+// errors.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if err := ValidateServerName(cfg.Name); err != nil {
 		return nil, err
@@ -88,7 +94,20 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if !ok || record.AccessToken == "" {
 		return nil, loginRequired(cfg.Name, "no stored token for this endpoint", nil)
 	}
+	if !clientMatches(cfg, record) {
+		return nil, loginRequired(cfg.Name, clientChangedReason, nil)
+	}
 	return &Handler{cfg: cfg, record: record}, nil
+}
+
+// clientChangedReason is the login-required reason for a record issued to another client.
+const clientChangedReason = "the stored token was issued to another client than the configured client-id"
+
+// clientMatches reports whether record may be used under cfg: always for a dynamically registered
+// client (no configured id), else only when the record was issued to the configured client — a
+// changed `client-id:` needs a new login, as a changed endpoint does.
+func clientMatches(cfg HandlerConfig, record Record) bool {
+	return cfg.ClientID == "" || record.Client.ID == cfg.ClientID
 }
 
 // TokenSource returns the source the transport draws each request's bearer token from. ctx is
@@ -156,7 +175,8 @@ func (h *Handler) token(ctx context.Context) (*oauth2.Token, error) {
 // re-reads the record from disk first: a valid token there that is not the rejected one was saved
 // by another handler and is adopted as is. Otherwise the disk record's refresh token — the newest
 // one, never a copy this handler may hold after another spent it — is exchanged, and the result is
-// saved before it is used.
+// saved before it is used. A disk record issued to another client than the configured one is
+// ErrLoginRequired, as it is to NewHandler.
 func (h *Handler) refreshLocked(ctx context.Context, rejected string) error {
 	release, err := h.lockRecord()
 	if err != nil {
@@ -170,6 +190,9 @@ func (h *Handler) refreshLocked(ctx context.Context, rejected string) error {
 	}
 	if !ok {
 		return loginRequired(h.cfg.Name, "the stored token is gone", nil)
+	}
+	if !clientMatches(h.cfg, disk) {
+		return loginRequired(h.cfg.Name, clientChangedReason, nil)
 	}
 	if tokenValid(disk) && disk.AccessToken != rejected {
 		h.record = disk

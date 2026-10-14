@@ -143,7 +143,11 @@ NOTES (2026-10-14): the config-package test (`TestResolveOptionsReadsThePinnedPr
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'ExternalEdit|SettingsEdit' ./cmd/apogee/`
 **Commit:** `fix(config): pin the live re-read to the session's Project root`
 
-## 6. Treat an MCP client-id change as a missing login
+## 6. Treat an MCP client-id change as a missing login — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the same client check also guards the handler's refresh path (`refreshLocked` re-reads the record from disk under its lock), so a record another apogee saved for a different client is never adopted or refreshed; one shared `clientMatches` rule serves both, covered by `TestHandlerRefreshRefusesARecordOfAnotherClient`.
+NOTES (2026-10-14): "the store's doc comment" placed on `HandlerConfig.Store` (and the new `ClientID` field and `NewHandler`'s doc) in `internal/mcpauth/handler.go`, the listed file — the rule lives in the handler, not in `Store.Load`.
+NOTES (2026-10-14): consequential edit — docs/manual/configuration.md: made necessary by the handler now refusing a token issued to another client; the startup-offer paragraph names that case beside the unrefreshable token.
 
 **What:**
 **Goal:** when a server's configured `client-id:` differs from the stored token record's client id, the OAuth handler returns `ErrLoginRequired` and sends no request; a matching id, or no configured id (dynamic registration), loads the record as before.

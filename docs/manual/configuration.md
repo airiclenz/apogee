@@ -731,7 +731,7 @@ configured and a server without `auth: oauth`.
 You rarely need `login` by hand. At startup, every `auth: oauth` server with no saved token is
 offered the login on the terminal before the TUI opens (`MCP server "tracker" needs an OAuth
 login. Log in now? [y/N]`), and so is one whose saved token the authorization server will no
-longer refresh. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
+longer refresh or was issued to another client than its `client-id:` now names. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
 stops with an error naming `apogee mcp login <name>` — connecting is all-or-nothing, so one server
 that cannot log in holds back the rest. Mid-session nothing ever prompts: a reconnect that needs a
 login fails, and the `mcp-servers:` row in `/settings` names the same command.
